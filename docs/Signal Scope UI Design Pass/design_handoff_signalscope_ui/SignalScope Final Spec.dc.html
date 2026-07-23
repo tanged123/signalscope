@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="ds/colors_and_type.css">
+<style>
+body{margin:0;background:var(--surface-void);font-family:var(--font-ui)}
+a{color:var(--amber-7);text-decoration:none}a:hover{color:var(--amber-9)}
+.dv-turn{padding:40px 44px 32px;scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}
+.dv-tid{font:600 10px var(--font-mono);padding:3px 7px;background:var(--amber-7);color:#0E1116;border-radius:2px;text-decoration:none}
+.dv-tname{font:600 13px/1.2 var(--font-ui);color:var(--fg-1)}
+.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start;margin-bottom:28px}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px var(--font-mono);padding:3px 7px;background:var(--surface-3);color:var(--fg-1);border-radius:2px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 var(--font-ui);color:var(--fg-2)}
+.dv-card{max-width:none;background:var(--surface-void);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden}
+.dv-opt:target .dv-oid{background:var(--amber-7);color:#0E1116}
+</style>
+</helmet>
+<svg width="0" height="0" style="position:absolute"><defs>
+<pattern id="fgrid" width="44" height="26" patternUnits="userSpaceOnUse"><path d="M44 0H0V26" fill="none" stroke="var(--grid)" stroke-width="1"></path></pattern>
+<pattern id="fgridL" width="44" height="26" patternUnits="userSpaceOnUse"><path d="M44 0H0V26" fill="none" stroke="#E4E7EC" stroke-width="1"></path></pattern>
+</defs></svg>
+<section class="dv-turn" id="tl">
+<div class="dv-thd"><a class="dv-tid" href="#tl">LIGHT</a><span class="dv-tname">Light theme — token remap of the final system</span></div>
+<div class="dv-opts"><div class="dv-opt" id="l0" style="width:1440px">
+<div class="dv-card" style="padding:16px 22px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:26px;font-size:12px;line-height:1.55;color:var(--fg-2)">
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="eyebrow" style="color:var(--amber-7)">Mapping rules</div>
+    <div><b style="color:var(--fg-1)">Same roles, inverted ground.</b> Cold-neutral light grays: void <span style="font-family:var(--font-mono)">#E3E6EB</span> app ground, <span style="font-family:var(--font-mono)">#F7F8FA</span> panels/tree, <span style="font-family:var(--font-mono)">#EFF1F4/#E7EAEE</span> bars. Chrome stays fully achromatic; active state = <span style="font-family:var(--font-mono)">#C9CFD8</span> fill + ink text. Structure, spacing, and every rule from F0 are unchanged.</div>
+    <div><b style="color:var(--fg-1)">Ink:</b> fg-1 <span style="font-family:var(--font-mono)">#1A1E26</span> · fg-2 <span style="font-family:var(--font-mono)">#4A5160</span> · fg-3 <span style="font-family:var(--font-mono)">#7A8290</span> · fg-4 <span style="font-family:var(--font-mono)">#A7AEBB</span>. Grid <span style="font-family:var(--font-mono)">#E4E7EC</span>; borders <span style="font-family:var(--font-mono)">#C9CFD8/#AEB6C2</span>.</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="eyebrow" style="color:var(--amber-7)">Accent + series</div>
+    <div><b style="color:var(--fg-1)">Amber darkens to <span style="font-family:var(--font-mono)">#C17500</span></b> (interaction-only role unchanged: cursor, focus inset at <span style="font-family:var(--font-mono)">rgba(193,117,0,.55)</span>, Δ readouts, pinned run, ƒx, drop targets) — ≥3:1 on the light ground where the dark theme's #FFA226 fails.</div>
+    <div><b style="color:var(--fg-1)">Series = the prototype's validated light palette</b> <span style="font-family:var(--font-mono)">#2A78D6 #EB6834 #1BAF7A #EDA100 #E87BA4 #008300 #4A3AA7 #E34948</span> — darker, saturated hues that hold on white. Slot colors differ per theme by design; identity still never color alone.</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="eyebrow" style="color:var(--amber-7)">Behavior</div>
+    <div><b style="color:var(--fg-1)">T toggles theme</b>; the flag lives in the session and both palettes ship inside every HTML snapshot, so a recipient can flip themes offline.</div>
+    <div><b style="color:var(--fg-1)">Shadows soften</b> to blue-gray (<span style="font-family:var(--font-mono)">rgba(30,40,60,.15–.22)</span>); overlay scrim <span style="font-family:var(--font-mono)">rgba(240,242,245,.88)</span>. Status: connected <span style="font-family:var(--font-mono)">#007A3D</span>, error <span style="font-family:var(--font-mono)">#C42B2B</span>. Everything else inherits by token — implement light as a token swap, never per-component styles.</div>
+  </div>
+</div>
+</div></div>
+<div class="dv-opts"><div class="dv-opt" id="l1"><div class="dv-olabel"><a class="dv-oid" href="#l1">L1</a>Canonical workspace — light theme (token-for-token remap of <a class="dv-oid" href="#f2">F2</a>)</div>
+<div class="dv-card" style="--surface-void:#E3E6EB;--surface-0:#F7F8FA;--surface-1:#EFF1F4;--surface-2:#E7EAEE;--surface-3:#DCE0E6;--surface-4:#C9CFD8;--fg-1:#1A1E26;--fg-2:#4A5160;--fg-3:#7A8290;--fg-4:#A7AEBB;--border:#C9CFD8;--border-strong:#AEB6C2;--border-faint:#DCE0E6;--grid:#E4E7EC;--amber-7:#C17500;--amber-9:#9E5F00;--amber-3:rgba(193,117,0,.12);--series-1:#2A78D6;--series-2:#EB6834;--series-3:#1BAF7A;--series-4:#EDA100;--series-5:#E87BA4;--series-6:#008300;--series-7:#4A3AA7;--series-8:#E34948;--status-connected:#007A3D;--status-disconnected:#8A9099;--err-red:#C42B2B;--surface-overlay:rgba(240,242,245,.88);--elev-1:0 0 0 1px #C9CFD8,0 1px 2px rgba(30,40,60,.15);--elev-2:0 0 0 1px #AEB6C2,0 4px 16px rgba(30,40,60,.18);--elev-3:0 0 0 1px #AEB6C2,0 8px 32px rgba(30,40,60,.22);width:1440px;height:880px;background:var(--surface-void);display:grid;grid-template-rows:28px 34px 1fr 30px 24px;grid-template-columns:262px 1fr;grid-template-areas:'menu menu' 'tool tool' 'tree main' 'tree formula' 'status status';font-family:var(--font-mono)">
+  <div style="grid-area:menu;display:flex;align-items:center;gap:2px;background:var(--surface-2);border-bottom:1px solid var(--border);padding:0 10px;font-size:11px;color:var(--fg-2)">
+    <svg width="14" height="14" viewBox="0 0 16 16" style="margin-right:6px"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <span style="color:var(--fg-1);font-weight:600;letter-spacing:.08em;font-size:10px;margin-right:10px">SIGNALSCOPE</span>
+    <span style="padding:2px 7px">File</span><span style="padding:2px 7px">Edit</span><span style="padding:2px 7px;background:var(--surface-3);color:var(--fg-1)">View</span><span style="padding:2px 7px">Panel</span><span style="padding:2px 7px">Signals</span><span style="padding:2px 7px">Export</span><span style="padding:2px 7px">Help</span>
+    <span style="margin-left:auto;color:var(--fg-3);font-size:10px">commands</span><span style="border:1px solid var(--border-strong);border-radius:2px;padding:1px 5px;font-size:10px;color:var(--fg-2);margin-left:4px">⌘K</span>
+  </div>
+  <div style="grid-area:tool;display:flex;align-items:center;gap:4px;background:var(--surface-1);border-bottom:1px solid var(--border);padding:0 10px;font-size:11px;color:var(--fg-2)">
+    <span style="padding:4px 9px;background:var(--surface-3);border-radius:2px;color:var(--fg-1)">Open Files</span>
+    <span style="padding:4px 9px;border-radius:2px">Demo Data</span>
+    <span style="width:1px;height:16px;background:var(--border-strong);margin:0 5px"></span>
+    <span style="padding:4px 9px;border-radius:2px">+ Panel</span>
+    <span style="padding:4px 9px;border-radius:2px;display:flex;gap:6px;align-items:center">Layout <span style="color:var(--fg-1)">flight review 2×2</span> ▾</span>
+    <span style="width:1px;height:16px;background:var(--border-strong);margin:0 5px"></span>
+    <span style="padding:4px 9px;border-radius:2px;background:var(--surface-4);color:var(--fg-1)">⛓ Linked t</span>
+    <span style="padding:4px 9px;border-radius:2px;background:var(--surface-4);color:var(--fg-1)">Σ Stats</span>
+    <span style="padding:4px 9px;border-radius:2px">ƒx Derived</span>
+    <span style="flex:1"></span>
+    <span style="font-size:11px;color:var(--fg-3)">window</span>
+    <span style="font-size:11px;color:var(--fg-1);font-variant-numeric:tabular-nums">t: 12.400 → 68.220 s</span>
+    <span style="padding:4px 9px;border-radius:2px;color:var(--fg-4)" title="reserved: streaming">⏸ FOLLOW</span>
+  </div>
+  <div style="grid-area:tree;background:var(--surface-0);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;font-size:11.5px">
+    <div style="padding:8px;border-bottom:1px solid var(--border-faint)">
+      <div style="display:flex;align-items:center;gap:6px;background:var(--surface-void);border:1px solid var(--border-strong);border-radius:2px;padding:5px 8px;color:var(--fg-3)">/ <span style="color:var(--fg-2)">filter 10,412 signals…</span></div>
+    </div>
+    <div style="padding:8px 6px 4px;color:var(--fg-3);font-size:10px;letter-spacing:.08em">★ FAVORITES</div>
+    <div style="padding:0 6px 6px;border-bottom:1px solid var(--border-faint)">
+      <div style="display:flex;gap:5px;padding:2px 8px;color:var(--fg-1)"><span style="color:var(--series-3)">—</span>gnc/alt_agl<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">412.0781</span></div>
+      <div style="display:flex;gap:5px;padding:2px 8px;color:var(--fg-1)"><span style="color:var(--fg-4)">·</span>inputs/throttle<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">0.6420</span></div>
+    </div>
+    <div style="padding:8px 6px 4px;color:var(--fg-3);font-size:10px;letter-spacing:.08em">SIGNALS</div>
+    <div style="flex:1;overflow:hidden;padding:0 6px">
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>rocket</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>velocity_body</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1);background:var(--surface-3)"><span style="width:24px"></span><span style="color:var(--series-1)">—</span>x<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">-149.2810</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-2)">—</span>y<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">8.1062</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-3)">—</span>z<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">0.0214</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>attitude</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>omega_body</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>imu</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>gnc</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-4)">—</span>pos_east<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">240.1900</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-5)">—</span>pos_north<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">293.6300</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>mc <span style="color:var(--fg-4)">(24 runs)</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>inputs</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--amber-7)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>derived</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--amber-7);font-size:10px">ƒx</span>speed_mag<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">149.5031</span></div>
+    </div>
+    <div style="padding:7px 10px;border-top:1px solid var(--border-faint);font-size:10px;color:var(--fg-3);display:flex;flex-direction:column;gap:3px">
+      <div style="display:flex;gap:6px;align-items:center"><span class="status-dot status-dot--connected" style="width:6px;height:6px"></span>flight_042.csv <span style="margin-left:auto;color:var(--fg-2)">812,400 pts</span></div>
+      <div style="display:flex;gap:6px;align-items:center"><span class="status-dot status-dot--disconnected" style="width:6px;height:6px"></span>mc_batch.parquet <span style="margin-left:auto;color:var(--fg-2)">2.1M pts</span></div>
+    </div>
+  </div>
+  <div style="grid-area:main;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:var(--border);min-height:0;position:relative">
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0;box-shadow:inset 0 0 0 1px rgba(193,117,0,.55)">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Body velocity</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-1)"></span>vel_body/x</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-2)"></span>vel_body/y</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-4);font-size:10.5px;text-decoration:line-through"><span style="width:10px;height:2px;background:var(--series-3);opacity:.4"></span>vel_body/z</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 330" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="52" y="8" width="524" height="288" fill="url(#fgridL)"></rect>
+          <path d="M52 8V296H576" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 296v4M157 296v4M262 296v4M367 296v4M472 296v4M576 296v4M52 296h-4M52 224h-4M52 152h-4M52 80h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <line x1="52" y1="152" x2="576" y2="152" stroke="var(--border-strong)" stroke-width="1"></line>
+          <g transform="translate(52,8) scale(0.894,0.873)">
+            <polyline fill="none" stroke="var(--series-1)" stroke-width="1.5" points="0,240 30,232 60,210 90,196 120,150 150,96 180,60 210,42 240,50 270,84 300,120 330,148 360,132 390,110 420,96 450,104 480,130 510,158 540,180 586,196"></polyline>
+            <polyline fill="none" stroke="var(--series-2)" stroke-width="1.5" points="0,180 30,184 60,176 90,188 120,196 150,210 180,222 210,214 240,196 270,178 300,170 330,180 360,192 390,200 420,192 450,180 480,174 510,180 540,188 586,184"></polyline>
+            <line x1="368" y1="0" x2="368" y2="330" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".7"></line>
+            <circle cx="210" cy="42" r="3" fill="none" stroke="var(--series-1)" stroke-width="1.5"></circle>
+            <circle cx="480" cy="130" r="3" fill="none" stroke="var(--series-1)" stroke-width="1.5"></circle>
+            <line x1="210" y1="42" x2="480" y2="130" stroke="var(--fg-3)" stroke-width="1" stroke-dasharray="3 3" opacity=".6"></line>
+          </g>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">300</div>
+        <div style="position:absolute;left:46px;top:75px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">150</div>
+        <div style="position:absolute;left:46px;top:148px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:46px;top:220px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−150</div>
+        <div style="position:absolute;left:46px;top:290px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−300</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">velocity (m/s)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:157px;transform:translateX(-50%)">20</span><span style="position:absolute;left:262px;transform:translateX(-50%)">30</span><span style="position:absolute;left:367px;transform:translateX(-50%)">40</span><span style="position:absolute;left:472px;transform:translateX(-50%)">50</span><span style="position:absolute;left:576px;transform:translateX(-50%)">60</span></div>
+        <div style="position:absolute;bottom:1px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">time (s)</div>
+        <div style="position:absolute;left:190px;top:12px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums">① t 27.876 <span style="color:var(--fg-1)">v 223.46</span></div>
+        <div style="position:absolute;left:440px;top:130px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums">② t 50.875 <span style="color:var(--fg-1)">v 63.55</span></div>
+        <div style="position:absolute;right:8px;top:8px;background:var(--surface-2);box-shadow:0 0 0 1px rgba(193,117,0,.45);border-radius:2px;padding:4px 8px;font-size:10px;color:var(--amber-7);font-variant-numeric:tabular-nums">Δt 22.999 s · Δv −159.91 · slope −6.953/s</div>
+      </div>
+      <div style="display:flex;gap:14px;padding:3px 10px;border-top:1px solid var(--border-faint);font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums;background:var(--surface-0)">
+        <span style="color:var(--fg-3)">vel_body/x</span><span>min <b style="color:var(--fg-1);font-weight:500">−136.4600</b></span><span>max <b style="color:var(--fg-1);font-weight:500">223.4600</b></span><span>μ <b style="color:var(--fg-1);font-weight:500">48.2100</b></span><span>rms <b style="color:var(--fg-1);font-weight:500">121.3800</b></span><span style="margin-left:auto;color:var(--fg-4)">visible region · S toggles</span>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Trajectory E–N</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;color:var(--fg-3)">T</span><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px;border:1px dashed var(--border-strong);border-radius:2px;padding:0 5px"><span style="color:var(--fg-4)">x:</span>gnc/pos_east</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-5)"></span>gnc/pos_north</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px;border:1px dashed var(--border-strong);border-radius:2px;padding:0 5px"><span style="color:var(--fg-4)">c:</span>time</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 356" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <defs><linearGradient id="ftgradL" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="var(--series-2)"></stop><stop offset=".5" stop-color="var(--series-5)"></stop><stop offset="1" stop-color="var(--series-4)"></stop></linearGradient></defs>
+          <rect x="52" y="8" width="470" height="314" fill="url(#fgridL)"></rect>
+          <path d="M52 8V322H522" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 322v4M169 322v4M287 322v4M404 322v4M522 322v4M52 322h-4M52 243h-4M52 165h-4M52 86h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <g transform="translate(52,8) scale(0.802,0.882)">
+            <path d="M60 320 C 140 300, 180 220, 230 170 S 330 90, 420 76 S 540 90, 550 130" fill="none" stroke="var(--fg-4)" stroke-width="1.2" opacity=".5"></path>
+            <path d="M230 170 C 258 146, 288 126, 316 108" fill="none" stroke="var(--series-2)" stroke-width="1.8"></path>
+            <path d="M316 108 C 344 92, 366 82, 392 77" fill="none" stroke="var(--series-5)" stroke-width="1.8"></path>
+            <path d="M392 77 C 402 76, 412 76, 420 76" fill="none" stroke="var(--series-4)" stroke-width="1.8"></path>
+            <circle cx="352" cy="94" r="4" fill="var(--surface-0)" stroke="var(--amber-7)" stroke-width="1.6"></circle>
+          </g>
+          <rect x="546" y="8" width="12" height="314" fill="url(#ftgradL)"></rect>
+          <path d="M558 8h3M558 165h3M558 322h3" stroke="var(--fg-3)" stroke-width="1"></path>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">400</div>
+        <div style="position:absolute;left:46px;top:81px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">300</div>
+        <div style="position:absolute;left:46px;top:160px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">200</div>
+        <div style="position:absolute;left:46px;top:238px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">100</div>
+        <div style="position:absolute;left:46px;top:316px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">pos_north (m)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:52px;transform:translateX(-50%)">0</span><span style="position:absolute;left:169px;transform:translateX(-50%)">100</span><span style="position:absolute;left:287px;transform:translateX(-50%)">200</span><span style="position:absolute;left:404px;transform:translateX(-50%)">300</span><span style="position:absolute;left:522px;transform:translateX(-50%)">400</span></div>
+        <div style="position:absolute;bottom:1px;left:46%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">pos_east (m)</div>
+        <div style="position:absolute;right:2px;top:6px;font-size:8.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">68.2</div>
+        <div style="position:absolute;right:2px;top:158px;font-size:8.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">40.3</div>
+        <div style="position:absolute;right:2px;top:312px;font-size:8.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">12.4</div>
+        <div style="position:absolute;right:2px;bottom:1px;font-size:9px;color:var(--fg-2)">t (s)</div>
+        <div style="position:absolute;left:290px;top:96px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums">t 41.238 · E 240.19 · N 293.63</div>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Spectrum — imu/accel_z</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;color:var(--fg-3)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-7)"></span>imu/accel_z</span>
+        <span style="color:var(--fg-4);font-size:10px">window: visible t</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 356" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="52" y="8" width="524" height="314" fill="url(#fgridL)"></rect>
+          <path d="M52 8V322H576" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 322v4M227 322v4M401 322v4M576 322v4M52 322h-4M52 243h-4M52 165h-4M52 86h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <g transform="translate(52,8) scale(0.894,0.882)">
+            <polyline fill="none" stroke="var(--series-7)" stroke-width="1.4" points="10,330 40,300 60,180 70,90 80,160 100,240 130,270 150,200 165,120 180,210 220,280 260,296 300,250 320,286 360,306 420,316 480,322 560,328"></polyline>
+          </g>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:46px;top:81px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−20</div>
+        <div style="position:absolute;left:46px;top:160px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−40</div>
+        <div style="position:absolute;left:46px;top:238px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−60</div>
+        <div style="position:absolute;left:46px;top:316px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−80</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">amplitude (dB)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:52px;transform:translateX(-50%)">1</span><span style="position:absolute;left:227px;transform:translateX(-50%)">10</span><span style="position:absolute;left:401px;transform:translateX(-50%)">100</span><span style="position:absolute;left:576px;transform:translateX(-50%)">1000</span></div>
+        <div style="position:absolute;bottom:1px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">frequency (Hz), log</div>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">MC dispersion — alt_agl</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:8px;background:var(--series-2);opacity:.25"></span>gnc/mc/* <span style="color:var(--fg-4)">24 runs</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--amber-7);font-size:10.5px"><span style="width:10px;height:2px;background:var(--amber-7)"></span>run_17 pinned</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 356" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="52" y="8" width="524" height="314" fill="url(#fgridL)"></rect>
+          <path d="M52 8V322H576" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 322v4M157 322v4M262 322v4M367 322v4M472 322v4M576 322v4M52 322h-4M52 243h-4M52 165h-4M52 86h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <g transform="translate(52,8) scale(0.894,0.882)">
+            <path d="M0 330 C 120 300, 200 160, 300 110 S 480 60, 586 80 L 586 150 C 480 120, 380 160, 300 190 S 120 330, 0 350 Z" fill="var(--series-2)" opacity=".10"></path>
+            <path d="M0 340 C 120 315, 210 200, 300 150 S 470 90, 586 112" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".7"></path>
+            <path d="M0 336 C 130 312, 205 190, 302 144 S 468 86, 586 104" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".45"></path>
+            <path d="M0 344 C 118 320, 214 208, 298 158 S 474 96, 586 122" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".45"></path>
+            <path d="M0 348 C 126 322, 208 214, 305 162 S 470 102, 586 128" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".3"></path>
+            <path d="M0 332 C 122 306, 200 182, 296 138 S 466 80, 586 98" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".3"></path>
+            <path d="M0 338 C 124 310, 206 196, 300 148 S 472 90, 586 108" fill="none" stroke="var(--amber-7)" stroke-width="1.6"></path>
+            <line x1="368" y1="0" x2="368" y2="356" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".7"></line>
+          </g>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">500</div>
+        <div style="position:absolute;left:46px;top:81px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">375</div>
+        <div style="position:absolute;left:46px;top:160px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">250</div>
+        <div style="position:absolute;left:46px;top:238px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">125</div>
+        <div style="position:absolute;left:46px;top:316px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">alt_agl (m)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:157px;transform:translateX(-50%)">20</span><span style="position:absolute;left:262px;transform:translateX(-50%)">30</span><span style="position:absolute;left:367px;transform:translateX(-50%)">40</span><span style="position:absolute;left:472px;transform:translateX(-50%)">50</span><span style="position:absolute;left:576px;transform:translateX(-50%)">60</span></div>
+        <div style="position:absolute;bottom:1px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">time (s)</div>
+        <div style="position:absolute;right:8px;top:8px;font-size:10px;color:var(--fg-3);text-align:right;line-height:1.5">band = min–max envelope<br>hover a line → isolate · click → pin</div>
+      </div>
+    </div>
+  </div>
+  <div style="grid-area:formula;display:flex;align-items:center;gap:8px;background:var(--surface-2);border-top:1px solid var(--border);padding:0 10px;font-size:11.5px">
+    <span style="color:var(--amber-7);font-weight:600">ƒx</span>
+    <span style="color:var(--fg-1);font-variant-numeric:tabular-nums">derived/speed_mag = hypot($("rocket/velocity_body/x"), $("rocket/velocity_body/y"))<span style="border-left:1px solid var(--amber-7);margin-left:1px"></span><span style="color:var(--fg-4)"> · smooth(·, 25) deriv(·) integ(·)</span></span>
+    <span style="margin-left:auto;color:var(--fg-4);font-size:10px">↵ create · ↑ history · esc collapse</span>
+  </div>
+  <div style="grid-area:status;display:flex;align-items:center;gap:16px;background:var(--surface-2);border-top:1px solid var(--border);padding:0 12px;font-size:10.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">
+    <span style="display:flex;align-items:center;gap:6px"><span class="status-dot status-dot--connected" style="width:7px;height:7px"></span><span style="color:var(--fg-2)">2 sources</span></span>
+    <span><b style="color:var(--fg-1);font-weight:500">2,912,400</b> pts</span>
+    <span>render <b style="color:var(--fg-1);font-weight:500">31 ms</b></span>
+    <span>cursor <b style="color:var(--fg-1);font-weight:500">t = 41.238 s</b></span>
+    <span style="flex:1"></span>
+    <span>drag box-zoom · wheel t · ⇧wheel y · right-drag pan · dbl-click fit · click datatip</span>
+    <span style="border:1px solid var(--border-strong);border-radius:2px;padding:0 5px;color:var(--fg-2)">⌘K</span>
+  </div>
+</div>
+<div style="width:1440px;font:11px/1.5 var(--font-ui);color:var(--fg-3)">Identical markup to <a class="dv-oid" href="#f2">F2</a> — only the token values differ, proving the theme is a pure token swap. Same axes, same annotations, same achromatic chrome; amber-role elements render in the darkened #C17500.</div>
+</div></div>
+</section>
+<section class="dv-turn" id="tf">
+<div class="dv-thd"><a class="dv-tid" href="#tf">FINAL</a><span class="dv-tname">SignalScope — final design package for implementation</span></div>
+
+<div class="dv-opts"><div class="dv-opt" id="f0" style="width:1440px">
+<div class="dv-card" style="padding:18px 22px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:26px;font-size:12px;line-height:1.55;color:var(--fg-2)">
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="eyebrow" style="color:var(--amber-7)">Visual system</div>
+    <div><b style="color:var(--fg-1)">Ground:</b> near-black. App on <span style="font-family:var(--font-mono)">--surface-void</span>, panels + tree on <span style="font-family:var(--font-mono)">--surface-0</span>, bars on <span style="font-family:var(--font-mono)">--surface-1/2</span>. Flat, 1px seams, radii ≤4px, no glows.</div>
+    <div><b style="color:var(--fg-1)">Chrome is achromatic</b> — grays only, including active/toggle states (<span style="font-family:var(--font-mono)">surface-4 + fg-1</span>). Amber is interaction only: cursor, focus inset, Δ readouts, pinned emphasis, ƒx/derived, drop targets.</div>
+    <div><b style="color:var(--fg-1)">Type:</b> Inter for UI; JetBrains Mono + tabular-nums for every number, signal path, readout. Values %.4f; units as separate dimmed tokens.</div>
+    <div><b style="color:var(--fg-1)">Series:</b> 8 categorical slots (<span style="font-family:var(--font-mono)">--series-1…8</span>), dash classes beyond 8; identity never color alone. Colorblind validation pending — fallback: prototype palette. Status colors reserved.</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="eyebrow" style="color:var(--amber-7)">Structure</div>
+    <div><b style="color:var(--fg-1)">One workspace</b> — panel grid + named layout presets, no tabs. Tree left (search-first, favorites, live values, sources). Formula bar docked under grid. Status bar carries perf truth + hint strip + reserved FOLLOW slot.</div>
+    <div><b style="color:var(--fg-1)">Panels</b> — always-visible mode pills T·XY·FFT·H; drag header to rearrange, seam handles to resize; focused = 1px amber inset.</div>
+    <div><b style="color:var(--fg-1)">Legend</b> — split chips: click = toggle, ▾ = inspector popover (color slot, line style, quick transforms, use-as-X, remove). Hover chip = emphasize series.</div>
+    <div><b style="color:var(--fg-1)">Many series</b> — folder → color family or envelope band; hover isolates, click pins (pinned run renders amber).</div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="eyebrow" style="color:var(--amber-7)">Axes + data display</div>
+    <div><b style="color:var(--fg-1)">Every plot owns complete axes</b> — spine, outward ticks, numeric labels, full name + unit on x AND y. No naked plots, no shared/implied axes. Anatomy is invariant: 3D = three labeled spines; colorbar = an axis (assigned via <span style="font-family:var(--font-mono)">c:</span> chip) with full anatomy; colormap perceptually uniform + colorblind-safe.</div>
+    <div><b style="color:var(--fg-1)">Axis style is a per-panel option</b> — <span style="font-family:var(--font-mono)">axes: gutter · inline</span>. Gutter (default) = <a class="dv-oid" href="#f2">F2</a>; inline = labels on gridlines with translucent backing + full corner tags = <a class="dv-oid" href="#f3">F3</a>. Identical information either way; flag serializes into sessions/snapshots.</div>
+    <div><b style="color:var(--fg-1)">Everything inspectable/exportable</b> — datatips are numbered annotations with optional text, listed per panel, embedded in every export. Export dialog shows size budget before writing.</div>
+  </div>
+</div>
+</div></div>
+
+<!-- F1 IA wireframe -->
+<div class="dv-opts">
+<div class="dv-opt" id="f1"><div class="dv-olabel"><a class="dv-oid" href="#f1">F1</a>IA — annotated wireframe</div>
+<div class="dv-card" style="width:560px;height:400px;position:relative;font-family:var(--font-mono);font-size:10px;color:var(--fg-3);padding:10px">
+  <div style="display:grid;grid-template-rows:22px 26px 1fr 24px 18px;grid-template-columns:120px 1fr;gap:4px;height:100%">
+    <div style="grid-column:1/3;border:1px dashed var(--fg-4);display:flex;align-items:center;padding:0 8px;gap:12px"><span style="color:var(--fg-2)">menu bar</span><span>File · View · Panel · Signals · Export</span><span style="margin-left:auto">⌘K</span></div>
+    <div style="grid-column:1/3;border:1px dashed var(--fg-4);display:flex;align-items:center;padding:0 8px;gap:10px"><span style="color:var(--fg-2)">toolbar</span><span>open · +panel · link-t · stats · ƒx</span><span style="margin-left:auto;color:var(--amber-7)">layout: "flight review" ▾ ①</span></div>
+    <div style="border:1px dashed var(--fg-4);padding:6px;display:flex;flex-direction:column;gap:4px"><span style="color:var(--fg-2)">signal tree</span><span>search-first ②</span><span>★ favorites</span><span>▸ rocket/</span><span>▸ imu/</span><span>▸ derived/ ƒx</span><span style="margin-top:auto">sources ③</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:4px">
+      <div style="border:1px dashed var(--fg-4);padding:5px">panel · mode T</div>
+      <div style="border:1px dashed var(--fg-4);padding:5px">panel · mode XY + colorbar</div>
+      <div style="border:1px dashed var(--fg-4);padding:5px;grid-column:1/3;position:relative">panel · mode T<div style="position:absolute;right:-2px;top:20%;bottom:20%;width:4px;background:var(--amber-3)"></div><div style="position:absolute;left:30%;right:30%;top:-3px;height:5px;background:var(--amber-3)"></div><span style="position:absolute;right:6px;bottom:4px;color:var(--amber-7)">seam resize handles ④</span></div>
+    </div>
+    <div style="grid-column:2/3;border:1px dashed var(--amber-7);display:flex;align-items:center;padding:0 8px;color:var(--amber-7)">ƒx formula bar (docked, collapsible) ⑤</div>
+    <div style="grid-column:1/3;border:1px dashed var(--fg-4);display:flex;align-items:center;padding:0 8px;gap:10px"><span>status: pts · render ms · cursor t · hint strip</span><span style="margin-left:auto;color:var(--amber-7)">[reserved: follow ⏸ live] ⑥</span></div>
+  </div>
+</div>
+<div style="width:560px;font:11px/1.5 var(--font-ui);color:var(--fg-3)">① named layout presets (grid + modes + signals), recalled from toolbar, serialized in exports · ② search is primary nav at 10k+ signals; tree virtualized · ③ loaded files/streams with status dot + pt counts · ④ hairline seam handles + drag-header rearrange · ⑤ formula bar collapsed by default, E or ƒx opens · ⑥ streaming lands here later; space reserved now</div>
+</div>
+<div class="dv-opt" id="f5"><div class="dv-olabel"><a class="dv-oid" href="#f5">F5</a>Legend — split chips + inspector popover (final)</div>
+<div class="dv-card" style="width:440px">
+  <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:11px">
+    <span style="color:var(--fg-1);font-weight:500">Body velocity</span>
+    <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px;background:var(--surface-3);border-radius:2px;padding:1px 6px"><span style="width:10px;height:2px;background:var(--series-1)"></span>vel_body/x <span style="color:var(--fg-4)">▾</span></span>
+    <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px;padding:1px 6px"><span style="width:10px;height:2px;background:var(--series-2)"></span>vel_body/y</span>
+    <span style="display:flex;align-items:center;gap:4px;color:var(--fg-4);font-size:10.5px;padding:1px 6px;text-decoration:line-through"><span style="width:10px;height:2px;background:var(--series-3);opacity:.4"></span>vel_body/z</span>
+  </div>
+  <div style="position:relative;height:200px;font-family:var(--font-mono);background:var(--surface-0)">
+    <svg viewBox="0 0 440 200" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"><rect width="440" height="200" fill="url(#fgrid)"></rect><polyline fill="none" stroke="var(--series-1)" stroke-width="1.3" points="0,150 60,115 120,62 180,42 240,84 300,115 360,94 440,125" opacity=".35"></polyline><polyline fill="none" stroke="var(--series-2)" stroke-width="1.3" points="0,105 60,113 120,126 180,117 240,105 300,100 360,109 440,105" opacity=".35"></polyline><polyline fill="none" stroke="var(--series-1)" stroke-width="1.8" points="0,150 60,115 120,62 180,42 240,84 300,115 360,94 440,125"></polyline></svg>
+    <div style="position:absolute;left:14px;top:10px;width:196px;background:var(--surface-2);box-shadow:var(--elev-2);border-radius:2px;padding:8px;font-size:10.5px;color:var(--fg-2)">
+      <div style="color:var(--fg-1);margin-bottom:6px">vel_body/x</div>
+      <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin-bottom:7px">
+        <span style="height:12px;background:var(--series-1);box-shadow:0 0 0 1px var(--fg-1)"></span><span style="height:12px;background:var(--series-2)"></span><span style="height:12px;background:var(--series-3)"></span><span style="height:12px;background:var(--series-4)"></span><span style="height:12px;background:var(--series-5)"></span><span style="height:12px;background:var(--series-6)"></span><span style="height:12px;background:var(--series-7)"></span><span style="height:12px;background:var(--series-8)"></span>
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:7px"><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1);border-radius:2px">solid</span><span style="padding:1px 6px;border-radius:2px">dash</span><span style="padding:1px 6px;border-radius:2px">dot</span><span style="padding:1px 6px;border-radius:2px;margin-left:auto">w 1.4</span></div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap"><span style="padding:1px 6px;background:var(--surface-3);border-radius:2px">smooth</span><span style="padding:1px 6px;background:var(--surface-3);border-radius:2px">deriv</span><span style="padding:1px 6px;background:var(--surface-3);border-radius:2px">use as X</span><span style="padding:1px 6px;color:var(--err-red)">remove</span></div>
+    </div>
+  </div>
+</div>
+<div style="width:440px;font:11px/1.5 var(--font-ui);color:var(--fg-3)">Click chip = visibility toggle (hidden = struck through, dim swatch). Hover chip = emphasize that series, others dim to 35% (shown). ▾ or right-click = the one inspector popover: color slot, line style + width, quick transforms, use-as-X, remove. Right-click stays as expert shortcut, never the only path.</div>
+</div>
+</div>
+
+<!-- F2 canonical workspace, gutter axes -->
+<div class="dv-opts"><div class="dv-opt" id="f2"><div class="dv-olabel"><a class="dv-oid" href="#f2">F2</a>Canonical workspace — flight review 2×2 · gutter axes (default) · PIXEL REFERENCE</div>
+<div class="dv-card" style="width:1440px;height:880px;background:var(--surface-void);display:grid;grid-template-rows:28px 34px 1fr 30px 24px;grid-template-columns:262px 1fr;grid-template-areas:'menu menu' 'tool tool' 'tree main' 'tree formula' 'status status';font-family:var(--font-mono)">
+  <div style="grid-area:menu;display:flex;align-items:center;gap:2px;background:var(--surface-2);border-bottom:1px solid var(--border);padding:0 10px;font-size:11px;color:var(--fg-2)">
+    <svg width="14" height="14" viewBox="0 0 16 16" style="margin-right:6px"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <span style="color:var(--fg-1);font-weight:600;letter-spacing:.08em;font-size:10px;margin-right:10px">SIGNALSCOPE</span>
+    <span style="padding:2px 7px">File</span><span style="padding:2px 7px">Edit</span><span style="padding:2px 7px;background:var(--surface-3);color:var(--fg-1)">View</span><span style="padding:2px 7px">Panel</span><span style="padding:2px 7px">Signals</span><span style="padding:2px 7px">Export</span><span style="padding:2px 7px">Help</span>
+    <span style="margin-left:auto;color:var(--fg-3);font-size:10px">commands</span><span style="border:1px solid var(--border-strong);border-radius:2px;padding:1px 5px;font-size:10px;color:var(--fg-2);margin-left:4px">⌘K</span>
+  </div>
+  <div style="grid-area:tool;display:flex;align-items:center;gap:4px;background:var(--surface-1);border-bottom:1px solid var(--border);padding:0 10px;font-size:11px;color:var(--fg-2)">
+    <span style="padding:4px 9px;background:var(--surface-3);border-radius:2px;color:var(--fg-1)">Open Files</span>
+    <span style="padding:4px 9px;border-radius:2px">Demo Data</span>
+    <span style="width:1px;height:16px;background:var(--border-strong);margin:0 5px"></span>
+    <span style="padding:4px 9px;border-radius:2px">+ Panel</span>
+    <span style="padding:4px 9px;border-radius:2px;display:flex;gap:6px;align-items:center">Layout <span style="color:var(--fg-1)">flight review 2×2</span> ▾</span>
+    <span style="width:1px;height:16px;background:var(--border-strong);margin:0 5px"></span>
+    <span style="padding:4px 9px;border-radius:2px;background:var(--surface-4);color:var(--fg-1)">⛓ Linked t</span>
+    <span style="padding:4px 9px;border-radius:2px;background:var(--surface-4);color:var(--fg-1)">Σ Stats</span>
+    <span style="padding:4px 9px;border-radius:2px">ƒx Derived</span>
+    <span style="flex:1"></span>
+    <span style="font-size:11px;color:var(--fg-3)">window</span>
+    <span style="font-size:11px;color:var(--fg-1);font-variant-numeric:tabular-nums">t: 12.400 → 68.220 s</span>
+    <span style="padding:4px 9px;border-radius:2px;color:var(--fg-4)" title="reserved: streaming">⏸ FOLLOW</span>
+  </div>
+  <div style="grid-area:tree;background:var(--surface-0);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;font-size:11.5px">
+    <div style="padding:8px;border-bottom:1px solid var(--border-faint)">
+      <div style="display:flex;align-items:center;gap:6px;background:var(--surface-void);border:1px solid var(--border-strong);border-radius:2px;padding:5px 8px;color:var(--fg-3)">/ <span style="color:var(--fg-2)">filter 10,412 signals…</span></div>
+    </div>
+    <div style="padding:8px 6px 4px;color:var(--fg-3);font-size:10px;letter-spacing:.08em">★ FAVORITES</div>
+    <div style="padding:0 6px 6px;border-bottom:1px solid var(--border-faint)">
+      <div style="display:flex;gap:5px;padding:2px 8px;color:var(--fg-1)"><span style="color:var(--series-3)">—</span>gnc/alt_agl<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">412.0781</span></div>
+      <div style="display:flex;gap:5px;padding:2px 8px;color:var(--fg-1)"><span style="color:var(--fg-4)">·</span>inputs/throttle<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">0.6420</span></div>
+    </div>
+    <div style="padding:8px 6px 4px;color:var(--fg-3);font-size:10px;letter-spacing:.08em">SIGNALS</div>
+    <div style="flex:1;overflow:hidden;padding:0 6px">
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>rocket</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>velocity_body</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1);background:var(--surface-3)"><span style="width:24px"></span><span style="color:var(--series-1)">—</span>x<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">-149.2810</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-2)">—</span>y<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">8.1062</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-3)">—</span>z<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">0.0214</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>attitude</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>omega_body</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>imu</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>gnc</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-4)">—</span>pos_east<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">240.1900</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-5)">—</span>pos_north<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">293.6300</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>mc <span style="color:var(--fg-4)">(24 runs)</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>inputs</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--amber-7)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>derived</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--amber-7);font-size:10px">ƒx</span>speed_mag<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">149.5031</span></div>
+    </div>
+    <div style="padding:7px 10px;border-top:1px solid var(--border-faint);font-size:10px;color:var(--fg-3);display:flex;flex-direction:column;gap:3px">
+      <div style="display:flex;gap:6px;align-items:center"><span class="status-dot status-dot--connected" style="width:6px;height:6px"></span>flight_042.csv <span style="margin-left:auto;color:var(--fg-2)">812,400 pts</span></div>
+      <div style="display:flex;gap:6px;align-items:center"><span class="status-dot status-dot--disconnected" style="width:6px;height:6px"></span>mc_batch.parquet <span style="margin-left:auto;color:var(--fg-2)">2.1M pts</span></div>
+    </div>
+  </div>
+  <div style="grid-area:main;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:var(--border);min-height:0;position:relative">
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0;box-shadow:inset 0 0 0 1px rgba(255,162,38,.5)">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Body velocity</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-1)"></span>vel_body/x</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-2)"></span>vel_body/y</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-4);font-size:10.5px;text-decoration:line-through"><span style="width:10px;height:2px;background:var(--series-3);opacity:.4"></span>vel_body/z</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 330" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="52" y="8" width="524" height="288" fill="url(#fgrid)"></rect>
+          <path d="M52 8V296H576" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 296v4M157 296v4M262 296v4M367 296v4M472 296v4M576 296v4M52 296h-4M52 224h-4M52 152h-4M52 80h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <line x1="52" y1="152" x2="576" y2="152" stroke="var(--border-strong)" stroke-width="1"></line>
+          <g transform="translate(52,8) scale(0.894,0.873)">
+            <polyline fill="none" stroke="var(--series-1)" stroke-width="1.5" points="0,240 30,232 60,210 90,196 120,150 150,96 180,60 210,42 240,50 270,84 300,120 330,148 360,132 390,110 420,96 450,104 480,130 510,158 540,180 586,196"></polyline>
+            <polyline fill="none" stroke="var(--series-2)" stroke-width="1.5" points="0,180 30,184 60,176 90,188 120,196 150,210 180,222 210,214 240,196 270,178 300,170 330,180 360,192 390,200 420,192 450,180 480,174 510,180 540,188 586,184"></polyline>
+            <line x1="368" y1="0" x2="368" y2="330" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".7"></line>
+            <circle cx="210" cy="42" r="3" fill="none" stroke="var(--series-1)" stroke-width="1.5"></circle>
+            <circle cx="480" cy="130" r="3" fill="none" stroke="var(--series-1)" stroke-width="1.5"></circle>
+            <line x1="210" y1="42" x2="480" y2="130" stroke="var(--fg-3)" stroke-width="1" stroke-dasharray="3 3" opacity=".6"></line>
+          </g>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">300</div>
+        <div style="position:absolute;left:46px;top:75px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">150</div>
+        <div style="position:absolute;left:46px;top:148px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:46px;top:220px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−150</div>
+        <div style="position:absolute;left:46px;top:290px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−300</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">velocity (m/s)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:157px;transform:translateX(-50%)">20</span><span style="position:absolute;left:262px;transform:translateX(-50%)">30</span><span style="position:absolute;left:367px;transform:translateX(-50%)">40</span><span style="position:absolute;left:472px;transform:translateX(-50%)">50</span><span style="position:absolute;left:576px;transform:translateX(-50%)">60</span></div>
+        <div style="position:absolute;bottom:1px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">time (s)</div>
+        <div style="position:absolute;left:190px;top:12px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums">① t 27.876 <span style="color:var(--fg-1)">v 223.46</span></div>
+        <div style="position:absolute;left:440px;top:130px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums">② t 50.875 <span style="color:var(--fg-1)">v 63.55</span></div>
+        <div style="position:absolute;right:8px;top:8px;background:var(--surface-2);box-shadow:0 0 0 1px rgba(255,162,38,.4);border-radius:2px;padding:4px 8px;font-size:10px;color:var(--amber-7);font-variant-numeric:tabular-nums">Δt 22.999 s · Δv −159.91 · slope −6.953/s</div>
+      </div>
+      <div style="display:flex;gap:14px;padding:3px 10px;border-top:1px solid var(--border-faint);font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums;background:var(--surface-0)">
+        <span style="color:var(--fg-3)">vel_body/x</span><span>min <b style="color:var(--fg-1);font-weight:500">−136.4600</b></span><span>max <b style="color:var(--fg-1);font-weight:500">223.4600</b></span><span>μ <b style="color:var(--fg-1);font-weight:500">48.2100</b></span><span>rms <b style="color:var(--fg-1);font-weight:500">121.3800</b></span><span style="margin-left:auto;color:var(--fg-4)">visible region · S toggles</span>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Trajectory E–N</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;color:var(--fg-3)">T</span><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px;border:1px dashed var(--border-strong);border-radius:2px;padding:0 5px"><span style="color:var(--fg-4)">x:</span>gnc/pos_east</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-5)"></span>gnc/pos_north</span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px;border:1px dashed var(--border-strong);border-radius:2px;padding:0 5px"><span style="color:var(--fg-4)">c:</span>time</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 356" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <defs><linearGradient id="ftgrad" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="var(--series-2)"></stop><stop offset=".5" stop-color="var(--series-5)"></stop><stop offset="1" stop-color="var(--series-4)"></stop></linearGradient></defs>
+          <rect x="52" y="8" width="470" height="314" fill="url(#fgrid)"></rect>
+          <path d="M52 8V322H522" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 322v4M169 322v4M287 322v4M404 322v4M522 322v4M52 322h-4M52 243h-4M52 165h-4M52 86h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <g transform="translate(52,8) scale(0.802,0.882)">
+            <path d="M60 320 C 140 300, 180 220, 230 170 S 330 90, 420 76 S 540 90, 550 130" fill="none" stroke="var(--fg-4)" stroke-width="1.2" opacity=".5"></path>
+            <path d="M230 170 C 258 146, 288 126, 316 108" fill="none" stroke="var(--series-2)" stroke-width="1.8"></path>
+            <path d="M316 108 C 344 92, 366 82, 392 77" fill="none" stroke="var(--series-5)" stroke-width="1.8"></path>
+            <path d="M392 77 C 402 76, 412 76, 420 76" fill="none" stroke="var(--series-4)" stroke-width="1.8"></path>
+            <circle cx="352" cy="94" r="4" fill="var(--surface-0)" stroke="var(--amber-7)" stroke-width="1.6"></circle>
+          </g>
+          <rect x="546" y="8" width="12" height="314" fill="url(#ftgrad)"></rect>
+          <path d="M558 8h3M558 165h3M558 322h3" stroke="var(--fg-3)" stroke-width="1"></path>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">400</div>
+        <div style="position:absolute;left:46px;top:81px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">300</div>
+        <div style="position:absolute;left:46px;top:160px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">200</div>
+        <div style="position:absolute;left:46px;top:238px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">100</div>
+        <div style="position:absolute;left:46px;top:316px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">pos_north (m)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:52px;transform:translateX(-50%)">0</span><span style="position:absolute;left:169px;transform:translateX(-50%)">100</span><span style="position:absolute;left:287px;transform:translateX(-50%)">200</span><span style="position:absolute;left:404px;transform:translateX(-50%)">300</span><span style="position:absolute;left:522px;transform:translateX(-50%)">400</span></div>
+        <div style="position:absolute;bottom:1px;left:46%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">pos_east (m)</div>
+        <div style="position:absolute;right:2px;top:6px;font-size:8.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">68.2</div>
+        <div style="position:absolute;right:2px;top:158px;font-size:8.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">40.3</div>
+        <div style="position:absolute;right:2px;top:312px;font-size:8.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">12.4</div>
+        <div style="position:absolute;right:2px;bottom:1px;font-size:9px;color:var(--fg-2)">t (s)</div>
+        <div style="position:absolute;left:290px;top:96px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums">t 41.238 · E 240.19 · N 293.63</div>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Spectrum — imu/accel_z</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;color:var(--fg-3)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-7)"></span>imu/accel_z</span>
+        <span style="color:var(--fg-4);font-size:10px">window: visible t</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 356" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="52" y="8" width="524" height="314" fill="url(#fgrid)"></rect>
+          <path d="M52 8V322H576" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 322v4M227 322v4M401 322v4M576 322v4M52 322h-4M52 243h-4M52 165h-4M52 86h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <g transform="translate(52,8) scale(0.894,0.882)">
+            <polyline fill="none" stroke="var(--series-7)" stroke-width="1.4" points="10,330 40,300 60,180 70,90 80,160 100,240 130,270 150,200 165,120 180,210 220,280 260,296 300,250 320,286 360,306 420,316 480,322 560,328"></polyline>
+          </g>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:46px;top:81px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−20</div>
+        <div style="position:absolute;left:46px;top:160px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−40</div>
+        <div style="position:absolute;left:46px;top:238px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−60</div>
+        <div style="position:absolute;left:46px;top:316px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−80</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">amplitude (dB)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:52px;transform:translateX(-50%)">1</span><span style="position:absolute;left:227px;transform:translateX(-50%)">10</span><span style="position:absolute;left:401px;transform:translateX(-50%)">100</span><span style="position:absolute;left:576px;transform:translateX(-50%)">1000</span></div>
+        <div style="position:absolute;bottom:1px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">frequency (Hz), log</div>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">MC dispersion — alt_agl</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:8px;background:var(--series-2);opacity:.25"></span>gnc/mc/* <span style="color:var(--fg-4)">24 runs</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--amber-7);font-size:10.5px"><span style="width:10px;height:2px;background:var(--amber-7)"></span>run_17 pinned</span>
+        <span style="margin-left:auto;display:flex;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 586 356" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="52" y="8" width="524" height="314" fill="url(#fgrid)"></rect>
+          <path d="M52 8V322H576" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M52 322v4M157 322v4M262 322v4M367 322v4M472 322v4M576 322v4M52 322h-4M52 243h-4M52 165h-4M52 86h-4M52 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <g transform="translate(52,8) scale(0.894,0.882)">
+            <path d="M0 330 C 120 300, 200 160, 300 110 S 480 60, 586 80 L 586 150 C 480 120, 380 160, 300 190 S 120 330, 0 350 Z" fill="var(--series-2)" opacity=".10"></path>
+            <path d="M0 340 C 120 315, 210 200, 300 150 S 470 90, 586 112" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".7"></path>
+            <path d="M0 336 C 130 312, 205 190, 302 144 S 468 86, 586 104" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".45"></path>
+            <path d="M0 344 C 118 320, 214 208, 298 158 S 474 96, 586 122" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".45"></path>
+            <path d="M0 348 C 126 322, 208 214, 305 162 S 470 102, 586 128" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".3"></path>
+            <path d="M0 332 C 122 306, 200 182, 296 138 S 466 80, 586 98" fill="none" stroke="var(--fg-4)" stroke-width="1" opacity=".3"></path>
+            <path d="M0 338 C 124 310, 206 196, 300 148 S 472 90, 586 108" fill="none" stroke="var(--amber-7)" stroke-width="1.6"></path>
+            <line x1="368" y1="0" x2="368" y2="356" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".7"></line>
+          </g>
+        </svg>
+        <div style="position:absolute;left:46px;top:2px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">500</div>
+        <div style="position:absolute;left:46px;top:81px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">375</div>
+        <div style="position:absolute;left:46px;top:160px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">250</div>
+        <div style="position:absolute;left:46px;top:238px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">125</div>
+        <div style="position:absolute;left:46px;top:316px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">alt_agl (m)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:157px;transform:translateX(-50%)">20</span><span style="position:absolute;left:262px;transform:translateX(-50%)">30</span><span style="position:absolute;left:367px;transform:translateX(-50%)">40</span><span style="position:absolute;left:472px;transform:translateX(-50%)">50</span><span style="position:absolute;left:576px;transform:translateX(-50%)">60</span></div>
+        <div style="position:absolute;bottom:1px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">time (s)</div>
+        <div style="position:absolute;right:8px;top:8px;font-size:10px;color:var(--fg-3);text-align:right;line-height:1.5">band = min–max envelope<br>hover a line → isolate · click → pin</div>
+      </div>
+    </div>
+  </div>
+  <div style="grid-area:formula;display:flex;align-items:center;gap:8px;background:var(--surface-2);border-top:1px solid var(--border);padding:0 10px;font-size:11.5px">
+    <span style="color:var(--amber-7);font-weight:600">ƒx</span>
+    <span style="color:var(--fg-1);font-variant-numeric:tabular-nums">derived/speed_mag = hypot($("rocket/velocity_body/x"), $("rocket/velocity_body/y"))<span style="border-left:1px solid var(--amber-7);margin-left:1px"></span><span style="color:var(--fg-4)"> · smooth(·, 25) deriv(·) integ(·)</span></span>
+    <span style="margin-left:auto;color:var(--fg-4);font-size:10px">↵ create · ↑ history · esc collapse</span>
+  </div>
+  <div style="grid-area:status;display:flex;align-items:center;gap:16px;background:var(--surface-2);border-top:1px solid var(--border);padding:0 12px;font-size:10.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">
+    <span style="display:flex;align-items:center;gap:6px"><span class="status-dot status-dot--connected" style="width:7px;height:7px"></span><span style="color:var(--fg-2)">2 sources</span></span>
+    <span><b style="color:var(--fg-1);font-weight:500">2,912,400</b> pts</span>
+    <span>render <b style="color:var(--fg-1);font-weight:500">31 ms</b></span>
+    <span>cursor <b style="color:var(--fg-1);font-weight:500">t = 41.238 s</b></span>
+    <span style="flex:1"></span>
+    <span>drag box-zoom · wheel t · ⇧wheel y · right-drag pan · dbl-click fit · click datatip</span>
+    <span style="border:1px solid var(--border-strong);border-radius:2px;padding:0 5px;color:var(--fg-2)">⌘K</span>
+  </div>
+</div>
+<div style="width:1440px;font:11px/1.5 var(--font-ui);color:var(--fg-3)">Pixel reference. Near-black ground (surface-void app, surface-0 panels/tree); ALL chrome achromatic — active toggles and mode pills are surface-4 + fg-1, never amber. Amber appears only as: focused-panel inset, synced cursor, Δ readout, pinned MC run, ƒx/derived, XY marker. Full gutter axes on every panel; XY panel carries the c: time colorbar with its own ticks and unit.</div>
+</div></div>
+
+<!-- F3 workspace, inline axes + palette -->
+<div class="dv-opts"><div class="dv-opt" id="f3"><div class="dv-olabel"><a class="dv-oid" href="#f3">F3</a>All-up example 2 — stacked review layout · inline axes · ⌘K palette open</div>
+<div class="dv-card" style="width:1440px;height:760px;background:var(--surface-void);display:grid;grid-template-rows:28px 34px 1fr 24px;grid-template-columns:262px 1fr;grid-template-areas:'menu menu' 'tool tool' 'tree main' 'status status';font-family:var(--font-mono)">
+  <div style="grid-area:menu;display:flex;align-items:center;gap:2px;background:var(--surface-2);border-bottom:1px solid var(--border);padding:0 10px;font-size:11px;color:var(--fg-2)">
+    <svg width="14" height="14" viewBox="0 0 16 16" style="margin-right:6px"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <span style="color:var(--fg-1);font-weight:600;letter-spacing:.08em;font-size:10px;margin-right:10px">SIGNALSCOPE</span>
+    <span style="padding:2px 7px">File</span><span style="padding:2px 7px">Edit</span><span style="padding:2px 7px">View</span><span style="padding:2px 7px">Panel</span><span style="padding:2px 7px">Signals</span><span style="padding:2px 7px">Export</span><span style="padding:2px 7px">Help</span>
+    <span style="margin-left:auto;color:var(--fg-3);font-size:10px">commands</span><span style="border:1px solid var(--border-strong);border-radius:2px;padding:1px 5px;font-size:10px;color:var(--fg-1);background:var(--surface-4);margin-left:4px">⌘K</span>
+  </div>
+  <div style="grid-area:tool;display:flex;align-items:center;gap:4px;background:var(--surface-1);border-bottom:1px solid var(--border);padding:0 10px;font-size:11px;color:var(--fg-2)">
+    <span style="padding:4px 9px;border-radius:2px">Open Files</span>
+    <span style="padding:4px 9px;border-radius:2px">Demo Data</span>
+    <span style="width:1px;height:16px;background:var(--border-strong);margin:0 5px"></span>
+    <span style="padding:4px 9px;border-radius:2px">+ Panel</span>
+    <span style="padding:4px 9px;border-radius:2px;display:flex;gap:6px;align-items:center">Layout <span style="color:var(--fg-1)">stacked timeline</span> ▾</span>
+    <span style="width:1px;height:16px;background:var(--border-strong);margin:0 5px"></span>
+    <span style="padding:4px 9px;border-radius:2px;background:var(--surface-4);color:var(--fg-1)">⛓ Linked t</span>
+    <span style="padding:4px 9px;border-radius:2px">Σ Stats</span>
+    <span style="padding:4px 9px;border-radius:2px">ƒx Derived</span>
+    <span style="flex:1"></span>
+    <span style="font-size:11px;color:var(--fg-3)">window</span>
+    <span style="font-size:11px;color:var(--fg-1);font-variant-numeric:tabular-nums">t: 12.400 → 68.220 s</span>
+    <span style="padding:4px 9px;border-radius:2px;color:var(--fg-4)">⏸ FOLLOW</span>
+  </div>
+  <div style="grid-area:tree;background:var(--surface-0);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;font-size:11.5px">
+    <div style="padding:8px;border-bottom:1px solid var(--border-faint)">
+      <div style="display:flex;align-items:center;gap:6px;background:var(--surface-void);border:1px solid var(--border-strong);border-radius:2px;padding:5px 8px;color:var(--fg-3)">/ <span style="color:var(--fg-2)">filter 10,412 signals…</span></div>
+    </div>
+    <div style="flex:1;overflow:hidden;padding:6px">
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>rocket</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-1)">—</span>velocity_body/x<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">-149.2810</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>inputs</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-6)">—</span>throttle<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">0.6420</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>gnc</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-3)">—</span>alt_agl<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">412.0781</span></div>
+    </div>
+  </div>
+  <div style="grid-area:main;display:grid;grid-template-rows:1fr 1fr 1fr;gap:1px;background:var(--border);min-height:0;position:relative">
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span><span style="color:var(--fg-1);font-weight:500">Body velocity</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px"><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-1)"></span>vel_body/x</span>
+        <span style="margin-left:auto;color:var(--fg-4);font-size:10px">axes: inline</span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 1177 190" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect width="1177" height="190" fill="url(#fgrid)"></rect>
+          <polyline fill="none" stroke="var(--series-1)" stroke-width="1.4" points="0,150 60,144 120,128 180,116 240,84 300,52 360,32 420,22 480,28 540,48 600,70 660,86 720,78 780,64 840,56 900,60 960,76 1020,92 1080,106 1177,116"></polyline>
+          <line x1="610" y1="0" x2="610" y2="190" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".7"></line>
+        </svg>
+        <span style="position:absolute;left:4px;top:30px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">200</span>
+        <span style="position:absolute;left:4px;top:88px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">100</span>
+        <span style="position:absolute;left:4px;top:146px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">0</span>
+        <span style="position:absolute;left:4px;top:4px;font-size:9px;color:var(--fg-2);background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">velocity (m/s)</span>
+        <span style="position:absolute;left:161px;bottom:2px;transform:translateX(-50%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">20</span>
+        <span style="position:absolute;left:372px;bottom:2px;transform:translateX(-50%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">30</span>
+        <span style="position:absolute;left:583px;bottom:2px;transform:translateX(-50%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">40</span>
+        <span style="position:absolute;left:794px;bottom:2px;transform:translateX(-50%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">50</span>
+        <span style="position:absolute;left:1006px;bottom:2px;transform:translateX(-50%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">60</span>
+        <span style="position:absolute;right:4px;bottom:2px;font-size:9px;color:var(--fg-2);background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">time (s)</span>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span><span style="color:var(--fg-1);font-weight:500">Throttle command</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px"><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-6)"></span>inputs/throttle</span>
+        <span style="margin-left:auto;color:var(--fg-4);font-size:10px">axes: inline</span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 1177 190" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect width="1177" height="190" fill="url(#fgrid)"></rect>
+          <polyline fill="none" stroke="var(--series-6)" stroke-width="1.4" points="0,160 200,160 200,60 480,60 480,110 760,110 760,36 1000,36 1000,80 1177,80"></polyline>
+          <line x1="610" y1="0" x2="610" y2="190" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".7"></line>
+        </svg>
+        <span style="position:absolute;left:4px;top:20px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">1.0</span>
+        <span style="position:absolute;left:4px;top:85px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">0.5</span>
+        <span style="position:absolute;left:4px;top:150px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">0.0</span>
+        <span style="position:absolute;left:4px;top:4px;font-size:9px;color:var(--fg-2);background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">throttle (–)</span>
+        <span style="position:absolute;right:4px;bottom:2px;font-size:9px;color:var(--fg-2);background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">time (s)</span>
+      </div>
+    </div>
+    <div style="background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span><span style="color:var(--fg-1);font-weight:500">Altitude AGL</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px"><span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-3)"></span>gnc/alt_agl</span>
+        <span style="margin-left:auto;color:var(--fg-4);font-size:10px">axes: inline</span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 1177 190" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect width="1177" height="190" fill="url(#fgrid)"></rect>
+          <polyline fill="none" stroke="var(--series-3)" stroke-width="1.4" points="0,172 120,164 240,140 360,110 480,80 600,56 720,40 840,30 960,24 1080,20 1177,18"></polyline>
+          <line x1="610" y1="0" x2="610" y2="190" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".7"></line>
+        </svg>
+        <span style="position:absolute;left:4px;top:20px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">500</span>
+        <span style="position:absolute;left:4px;top:85px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">250</span>
+        <span style="position:absolute;left:4px;top:150px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">0</span>
+        <span style="position:absolute;left:4px;top:4px;font-size:9px;color:var(--fg-2);background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">alt_agl (m)</span>
+        <span style="position:absolute;right:4px;bottom:2px;font-size:9px;color:var(--fg-2);background:color-mix(in srgb, var(--surface-0) 80%, transparent);padding:0 3px">time (s)</span>
+      </div>
+    </div>
+    <div style="position:absolute;inset:0;background:var(--surface-overlay)"></div>
+    <div style="position:absolute;left:50%;top:48px;transform:translateX(-50%);width:520px;background:var(--surface-1);box-shadow:var(--elev-3);border-radius:3px;font-size:11.5px;overflow:hidden">
+      <div style="padding:9px 12px;border-bottom:1px solid var(--border);color:var(--fg-1)">xy<span style="border-left:1px solid var(--amber-7)"></span></div>
+      <div style="padding:6px 12px;display:flex;background:var(--amber-3);color:var(--fg-1)">Panel: switch to XY mode<span style="margin-left:auto;color:var(--fg-3)">focused panel</span></div>
+      <div style="padding:6px 12px;display:flex;color:var(--fg-2)">Panel: set X signal…<span style="margin-left:auto;color:var(--fg-4)">then pick from tree</span></div>
+      <div style="padding:6px 12px;display:flex;color:var(--fg-2)">Panel: set color signal (c:)…</div>
+      <div style="padding:6px 12px;display:flex;color:var(--fg-2)">Help: XY mode gestures</div>
+      <div style="padding:5px 12px;border-top:1px solid var(--border);color:var(--fg-4);font-size:10px">commands · signals · panels · ↵ run · esc</div>
+    </div>
+  </div>
+  <div style="grid-area:status;display:flex;align-items:center;gap:16px;background:var(--surface-2);border-top:1px solid var(--border);padding:0 12px;font-size:10.5px;color:var(--fg-3);font-variant-numeric:tabular-nums">
+    <span style="display:flex;align-items:center;gap:6px"><span class="status-dot status-dot--connected" style="width:7px;height:7px"></span><span style="color:var(--fg-2)">2 sources</span></span>
+    <span><b style="color:var(--fg-1);font-weight:500">2,912,400</b> pts</span>
+    <span>render <b style="color:var(--fg-1);font-weight:500">24 ms</b></span>
+    <span>cursor <b style="color:var(--fg-1);font-weight:500">t = 41.238 s</b></span>
+    <span style="flex:1"></span>
+    <span>↵ run · esc close</span>
+  </div>
+</div>
+<div style="width:1440px;font:11px/1.5 var(--font-ui);color:var(--fg-3)">Second all-up state: the "stacked timeline" layout preset, all three panels in <b style="color:var(--fg-2)">inline</b> axis style (labels ride gridlines with translucent backing; full axis-name corner tags), one synced cursor at t = 41.238 s across every panel, and the ⌘K command palette open over the modal scrim — the only blur/overlay surface in the app.</div>
+</div></div>
+
+<!-- F6 key moments -->
+<div class="dv-opts">
+<div class="dv-opt" id="f6a"><div class="dv-olabel"><a class="dv-oid" href="#f6a">F6·1</a>Empty states</div>
+<div class="dv-card" style="width:400px;font-family:var(--font-mono)">
+  <div style="height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-bottom:1px solid var(--border)">
+    <div style="color:var(--fg-2);font-size:12px">No data loaded.</div>
+    <div style="color:var(--fg-3);font-size:10.5px;text-align:center;line-height:1.7">Drop CSV / MCAP / session files anywhere<br><span style="color:var(--amber-7)">Open Files</span> (O) · <span style="color:var(--amber-7)">Demo Data</span> · <span style="color:var(--amber-7)">⌘K</span> commands</div>
+  </div>
+  <div style="height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--surface-0)">
+    <div style="color:var(--fg-3);font-size:10.5px">Empty panel — drag a signal here.</div>
+    <div style="color:var(--fg-4);font-size:10px">mode <span style="border:1px solid var(--border-strong);border-radius:2px;padding:0 5px">T</span> <span style="border:1px solid var(--border-strong);border-radius:2px;padding:0 5px">XY</span> <span style="border:1px solid var(--border-strong);border-radius:2px;padding:0 5px">FFT</span> <span style="border:1px solid var(--border-strong);border-radius:2px;padding:0 5px">H</span> pickable before data arrives</div>
+  </div>
+</div>
+</div>
+<div class="dv-opt" id="f6b"><div class="dv-olabel"><a class="dv-oid" href="#f6b">F6·2</a>Export dialog — size budget</div>
+<div class="dv-card" style="width:400px;font-family:var(--font-mono);font-size:11px">
+  <div style="padding:8px 12px;border-bottom:1px solid var(--border);color:var(--fg-1)">Export</div>
+  <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;color:var(--fg-2)">
+    <div style="display:flex;gap:8px;align-items:center;background:var(--surface-2);box-shadow:0 0 0 1px var(--border-strong);border-radius:2px;padding:6px 8px"><span style="color:var(--amber-7)">◉</span>Standalone HTML snapshot<span style="margin-left:auto;color:var(--fg-1)">4.8 MB</span></div>
+    <div style="display:flex;gap:8px;align-items:center;padding:0 8px"><span style="color:var(--fg-4)">○</span>Session (.json — layout only)<span style="margin-left:auto">96 kB</span></div>
+    <div style="display:flex;gap:8px;align-items:center;padding:0 8px"><span style="color:var(--fg-4)">○</span>PNG — focused panel<span style="margin-left:auto">~400 kB</span></div>
+    <div style="display:flex;gap:8px;align-items:center;padding:0 8px"><span style="color:var(--fg-4)">○</span>CSV — visible region<span style="margin-left:auto">1.2 MB</span></div>
+    <div style="border-top:1px solid var(--border-faint);padding-top:8px;font-size:10px;color:var(--fg-3);letter-spacing:.08em">EMBED DATA</div>
+    <div style="display:flex;gap:8px;font-size:10px"><span style="padding:2px 7px;background:var(--surface-4);border-radius:2px;color:var(--fg-1)">visible window · 4.8 MB</span><span style="padding:2px 7px;border:1px solid var(--border-strong);border-radius:2px">all loaded · 41.2 MB</span></div>
+    <div style="height:4px;background:var(--surface-3);border-radius:2px;overflow:hidden"><span style="display:block;height:100%;width:12%;background:var(--amber-7)"></span></div>
+    <div style="font-size:9.5px;color:var(--fg-4)">decimated to ≤2k pts/px/series · annotations + zoom state included</div>
+  </div>
+</div>
+</div>
+<div class="dv-opt" id="f6c"><div class="dv-olabel"><a class="dv-oid" href="#f6c">F6·3</a>Datatips → annotations</div>
+<div class="dv-card" style="width:400px;font-family:var(--font-mono)">
+  <div style="position:relative;height:170px;background:var(--surface-0)">
+    <svg viewBox="0 0 400 170" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"><rect width="400" height="170" fill="url(#fgrid)"></rect><polyline fill="none" stroke="var(--series-1)" stroke-width="1.4" points="0,140 50,120 100,60 150,34 200,52 250,90 300,116 350,100 400,110"></polyline><circle cx="150" cy="34" r="3.5" fill="none" stroke="var(--series-1)" stroke-width="1.6"></circle><circle cx="300" cy="116" r="3.5" fill="none" stroke="var(--series-1)" stroke-width="1.6"></circle><line x1="150" y1="34" x2="300" y2="116" stroke="var(--fg-3)" stroke-width="1" stroke-dasharray="3 3"></line></svg>
+    <div style="position:absolute;left:96px;top:6px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2)">① peak <span style="color:var(--fg-1)">223.46 @ 27.876</span></div>
+    <div style="position:absolute;left:250px;top:128px;background:var(--surface-2);box-shadow:var(--elev-1);border-radius:2px;padding:3px 7px;font-size:10px;color:var(--fg-2)">② <span style="color:var(--fg-1)">63.55 @ 50.875</span></div>
+  </div>
+  <div style="border-top:1px solid var(--border);font-size:10px;color:var(--fg-2);padding:6px 10px;display:flex;flex-direction:column;gap:3px">
+    <div style="color:var(--fg-4);font-size:9px;letter-spacing:.08em">ANNOTATIONS — PANEL A</div>
+    <div style="display:flex;gap:8px">① t 27.876 · v 223.46 <span style="color:var(--fg-3)">"peak"</span><span style="margin-left:auto;color:var(--fg-4)">✎ ✕</span></div>
+    <div style="display:flex;gap:8px">② t 50.875 · v 63.55<span style="margin-left:auto;color:var(--fg-4)">✎ ✕</span></div>
+    <div style="display:flex;gap:8px;color:var(--amber-7)">Δ① → ② t 22.999 s · v −159.91<span style="margin-left:auto;color:var(--fg-4)">shown</span></div>
+  </div>
+</div>
+</div>
+<div class="dv-opt" id="f6d"><div class="dv-olabel"><a class="dv-oid" href="#f6d">F6·4</a>XY entry — drop strip</div>
+<div class="dv-card" style="width:400px;font-family:var(--font-mono)">
+  <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px"><span style="color:var(--fg-1);font-weight:500">Trajectory</span><span style="color:var(--fg-3);font-size:9px;border:1px solid var(--border-strong);border-radius:2px;padding:1px 6px">T</span></div>
+  <div style="position:relative;height:170px;background:var(--surface-0)">
+    <svg viewBox="0 0 400 170" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"><rect width="400" height="170" fill="url(#fgrid)"></rect><polyline fill="none" stroke="var(--series-5)" stroke-width="1.3" points="0,120 60,100 120,70 180,60 240,80 300,100 360,90 400,96"></polyline></svg>
+    <div style="position:absolute;left:120px;top:40px;padding:2px 8px;background:var(--surface-2);box-shadow:var(--elev-2);border-radius:2px;font-size:10px;color:var(--fg-1);transform:rotate(-2deg)">⠿ gnc/pos_east</div>
+    <div style="position:absolute;inset:auto 0 0 0;height:36px;background:var(--amber-3);border-top:1px dashed var(--amber-7);display:flex;align-items:center;justify-content:center;gap:8px;font-size:10.5px;color:var(--amber-7)">⇄ drop here — use as X axis (switches panel to XY)</div>
+  </div>
+</div>
+</div>
+<div class="dv-opt" id="f6e"><div class="dv-olabel"><a class="dv-oid" href="#f6e">F6·5</a>Build order (v1 → v2)</div>
+<div class="dv-card" style="width:300px;padding:14px 16px;font-size:11.5px;line-height:1.55;color:var(--fg-2);display:flex;flex-direction:column;gap:8px">
+  <div><b style="color:var(--ack-green)">KEEP from prototype</b> — linked-time model, canvas min/max decimation, drag-to-plot + drop-creates-panel, gesture set, single-file export, derived-in-tree.</div>
+  <div><b style="color:var(--fg-1)">v1</b> — final skin + tokens · axis system (gutter + inline option) · mode pills · legend chips + inspector · formula bar · panel resize/rearrange · export dialog w/ budget · empty states · ⌘K · XY drop strip · annotations list · c: colorbar.</div>
+  <div><b style="color:var(--fg-1)">v2</b> — layout presets UI · MC envelope + emphasis · 3D panels (same axis anatomy) · live streaming (FOLLOW slot) · context-sensitive hints.</div>
+  <div><b style="color:var(--err-red)">DROP</b> — right-click-only paths, equal-flex splitting, one-chip legend, flat export menu.</div>
+</div>
+</div>
+</div>
+</section>
+</x-dc>
+</body>
+</html>

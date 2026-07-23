@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignalScope</title>
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0d0d0d; --surface:#1a1a19; --surface2:#222220;
+  --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+  --accent:#3987e5; --accent-dim:rgba(57,135,229,.14);
+  --sel:rgba(57,135,229,.28);
+  --good:#0ca30c; --crit:#d03b3b;
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#f9f9f7; --surface:#fcfcfb; --surface2:#f0efec;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+  --accent:#2a78d6; --accent-dim:rgba(42,120,214,.10);
+  --sel:rgba(42,120,214,.22);
+  --good:#006300; --crit:#d03b3b;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%; overflow:hidden}
+body{
+  font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:var(--bg); color:var(--ink);
+  display:grid; grid-template-rows:40px 1fr 24px; grid-template-columns:272px 1fr;
+  grid-template-areas:"toolbar toolbar" "sidebar main" "status status";
+}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+input,select,textarea{font:inherit; color:var(--ink); background:var(--surface2);
+  border:1px solid var(--border); border-radius:6px; padding:4px 8px; outline:none}
+input:focus,textarea:focus{border-color:var(--accent)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--axis); border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- toolbar ---------- */
+#toolbar{grid-area:toolbar; display:flex; align-items:center; gap:4px;
+  background:var(--surface); border-bottom:1px solid var(--border); padding:0 10px}
+#toolbar .logo{font-weight:700; font-size:14px; letter-spacing:.2px; margin-right:6px;
+  display:flex; align-items:center; gap:7px}
+#toolbar .logo svg{display:block}
+.tbtn{padding:5px 10px; border-radius:7px; color:var(--ink2); white-space:nowrap}
+.tbtn:hover{background:var(--surface2); color:var(--ink)}
+.tbtn.on{background:var(--accent-dim); color:var(--accent)}
+.tsep{width:1px; height:20px; background:var(--border); margin:0 4px}
+#toolbar .spacer{flex:1}
+.menu-wrap{position:relative}
+.menu{position:absolute; top:calc(100% + 4px); right:0; min-width:190px; z-index:50;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  box-shadow:0 8px 28px rgba(0,0,0,.45); padding:5px; display:none}
+.menu.open{display:block}
+.menu button{display:block; width:100%; text-align:left; padding:7px 10px;
+  border-radius:6px; color:var(--ink2)}
+.menu button:hover{background:var(--surface2); color:var(--ink)}
+.menu .mhead{font-size:11px; color:var(--muted); padding:5px 10px 3px}
+
+/* ---------- sidebar ---------- */
+#sidebar{grid-area:sidebar; background:var(--surface); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; min-height:0}
+#search-wrap{padding:8px; border-bottom:1px solid var(--border)}
+#search{width:100%}
+#tree{flex:1; overflow:auto; padding:6px 4px 20px}
+.tgroup>.tlabel{display:flex; align-items:center; gap:4px; padding:3px 6px; border-radius:6px;
+  color:var(--ink2); cursor:pointer; user-select:none; font-weight:600}
+.tgroup>.tlabel:hover{background:var(--surface2)}
+.tgroup>.tlabel .tw{width:12px; text-align:center; font-size:9px; color:var(--muted);
+  transition:transform .12s; display:inline-block}
+.tgroup.closed>.tlabel .tw{transform:rotate(-90deg)}
+.tgroup>.tkids{margin-left:14px; border-left:1px solid var(--grid); padding-left:4px}
+.tgroup.closed>.tkids{display:none}
+.tleaf{display:flex; align-items:center; gap:6px; padding:3px 6px; border-radius:6px;
+  cursor:grab; color:var(--ink2); user-select:none}
+.tleaf:hover{background:var(--surface2); color:var(--ink)}
+.tleaf.plotted{color:var(--ink)}
+.tleaf .dot{width:8px; height:8px; border-radius:50%; background:var(--axis); flex:none}
+.tleaf.plotted .dot{background:var(--dotc,var(--accent))}
+.tleaf .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+#tree .empty{color:var(--muted); padding:18px 14px; line-height:1.6}
+#sidebar .foot{padding:7px 10px; border-top:1px solid var(--border); font-size:11px; color:var(--muted);
+  display:flex; justify-content:space-between; align-items:center}
+#sidebar .foot button{color:var(--accent); font-size:11px; padding:2px 4px}
+
+/* ---------- main / panels ---------- */
+#main{grid-area:main; position:relative; min-width:0; min-height:0; display:flex; flex-direction:column}
+#panels{flex:1; display:flex; flex-direction:column; gap:6px; padding:6px; min-height:0}
+.prow{flex:1; display:flex; gap:6px; min-height:0}
+.panel{flex:1; position:relative; min-width:0; min-height:0; background:var(--surface);
+  border:1px solid var(--border); border-radius:10px; overflow:hidden;
+  display:flex; flex-direction:column}
+.panel.droptarget{outline:2px dashed var(--accent); outline-offset:-2px}
+.panel.focused{border-color:color-mix(in srgb, var(--accent) 55%, var(--border))}
+.phead{display:flex; align-items:center; gap:6px; padding:4px 8px 0; min-height:24px}
+.ptitle{flex:none; font-weight:600; font-size:12.5px; color:var(--ink2); padding:1px 6px;
+  border-radius:5px; outline:none; white-space:nowrap; overflow:hidden; max-width:40%}
+.ptitle:focus{background:var(--surface2); color:var(--ink)}
+.ptitle:empty{min-width:56px}
+.ptitle:empty::before{content:'untitled'; color:var(--muted); font-weight:400}
+.plegend{flex:1; display:flex; align-items:center; gap:4px; flex-wrap:wrap; min-width:0}
+.chip{display:flex; align-items:center; gap:5px; padding:1px 7px; border-radius:99px;
+  border:1px solid var(--border); font-size:11.5px; color:var(--ink2); cursor:pointer;
+  user-select:none; max-width:220px}
+.chip .sw{width:9px; height:9px; border-radius:3px; flex:none}
+.chip .cn{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.chip.off{opacity:.38}
+.chip:hover{background:var(--surface2); color:var(--ink)}
+.chip.xchip{border-style:dashed}
+.chip.xchip .cn::before{content:'x: '; color:var(--muted)}
+.panel:not([data-mode="xy"]) .xy-only{display:none}
+.panel.droptarget-x{box-shadow:inset 0 -44px 0 var(--accent-dim)}
+.pbtn.on{color:var(--accent)}
+.pbtns{display:flex; gap:1px; opacity:0; transition:opacity .12s}
+.panel:hover .pbtns{opacity:1}
+.pbtn{padding:2px 6px; border-radius:5px; color:var(--muted); font-size:12px; line-height:1.2}
+.pbtn:hover{background:var(--surface2); color:var(--ink)}
+.pbody{flex:1; position:relative; min-height:0}
+.pbody canvas{position:absolute; inset:0; width:100%; height:100%}
+.pbody .ov{cursor:crosshair; touch-action:none}
+.pstats{display:none; gap:14px; padding:2px 10px 4px; font-size:11px; color:var(--ink2);
+  overflow-x:auto; white-space:nowrap; font-variant-numeric:tabular-nums}
+.panel.show-stats .pstats{display:flex}
+.pstats b{color:var(--ink); font-weight:600}
+.pstats .sname{color:var(--muted)}
+#drop-hint{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+  z-index:5; pointer-events:none; color:var(--accent); font-weight:600; font-size:15px;
+  background:var(--accent-dim); border:2px dashed var(--accent); border-radius:12px; margin:8px}
+#main.dragover #drop-hint{display:flex}
+#empty-state{position:absolute; inset:0; display:flex; flex-direction:column; gap:10px;
+  align-items:center; justify-content:center; color:var(--muted); pointer-events:none}
+#empty-state .big{font-size:17px; color:var(--ink2)}
+#empty-state button{pointer-events:auto; color:var(--accent); font-weight:600}
+
+/* ---------- tooltip / cursor readout ---------- */
+#tip{position:fixed; z-index:60; pointer-events:none; display:none; min-width:150px;
+  background:color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter:blur(4px); border:1px solid var(--border); border-radius:9px;
+  padding:6px 9px; font-size:11.5px; box-shadow:0 6px 20px rgba(0,0,0,.4)}
+#tip .tt{color:var(--muted); margin-bottom:3px; font-variant-numeric:tabular-nums}
+#tip .tr{display:flex; align-items:center; gap:6px; font-variant-numeric:tabular-nums}
+#tip .tr .sw{width:8px; height:8px; border-radius:2px; flex:none}
+#tip .tr .v{margin-left:auto; color:var(--ink); font-weight:600; padding-left:12px}
+#tip .delta{margin-top:4px; padding-top:4px; border-top:1px solid var(--border); color:var(--accent)}
+
+/* ---------- style popover ---------- */
+#pop{position:fixed; z-index:70; display:none; background:var(--surface);
+  border:1px solid var(--border); border-radius:10px; padding:10px; width:230px;
+  box-shadow:0 10px 30px rgba(0,0,0,.5)}
+#pop h4{font-size:12px; color:var(--ink2); margin-bottom:8px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+#pop .swatches{display:grid; grid-template-columns:repeat(8,1fr); gap:5px; margin-bottom:9px}
+#pop .swatches button{height:20px; border-radius:5px; border:2px solid transparent}
+#pop .swatches button.on{border-color:var(--ink)}
+#pop .row{display:flex; align-items:center; gap:8px; margin-bottom:8px; color:var(--ink2); font-size:12px}
+#pop .row input[type=range]{flex:1; padding:0; background:none; border:none}
+#pop .acts{display:flex; gap:6px; flex-wrap:wrap}
+#pop .acts button{padding:4px 8px; border-radius:6px; background:var(--surface2);
+  color:var(--ink2); font-size:11.5px}
+#pop .acts button:hover{color:var(--ink)}
+#pop .acts button.danger{color:var(--crit)}
+
+/* ---------- modal ---------- */
+.modal-bg{position:fixed; inset:0; z-index:80; background:rgba(0,0,0,.45); display:none;
+  align-items:center; justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  padding:18px; width:min(560px, 92vw); max-height:86vh; overflow:auto;
+  box-shadow:0 20px 60px rgba(0,0,0,.55)}
+.modal h3{font-size:15px; margin-bottom:10px}
+.modal p{color:var(--ink2); margin-bottom:10px}
+.modal code{background:var(--surface2); padding:1px 5px; border-radius:4px; font-size:12px}
+.modal .mrow{display:flex; gap:8px; margin-bottom:10px; align-items:center}
+.modal .mrow label{width:90px; color:var(--ink2); flex:none}
+.modal .mrow input,.modal .mrow textarea{flex:1}
+.modal textarea{min-height:74px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px}
+.modal .macts{display:flex; justify-content:flex-end; gap:8px; margin-top:14px}
+.modal .macts button{padding:6px 14px; border-radius:8px; background:var(--surface2); color:var(--ink2)}
+.modal .macts button.primary{background:var(--accent); color:#fff}
+.modal table{width:100%; border-collapse:collapse; font-size:12.5px}
+.modal td{padding:4px 6px; color:var(--ink2); border-bottom:1px solid var(--grid)}
+.modal td:first-child{color:var(--ink); white-space:nowrap; font-variant-numeric:tabular-nums}
+.modal .err{color:var(--crit); font-size:12px; margin-top:6px; white-space:pre-wrap}
+
+/* ---------- mobile / touch ---------- */
+#b-menu{display:none}
+#drawer-bg{position:fixed; inset:40px 0 0 0; z-index:88; background:rgba(0,0,0,.45); display:none}
+@media (max-width:820px){
+  body{grid-template-columns:1fr; grid-template-areas:"toolbar" "main" "status"}
+  #b-menu{display:block; font-size:16px}
+  #sidebar{position:fixed; z-index:90; top:40px; bottom:0; left:0; width:min(85vw,320px);
+    transform:translateX(-105%); transition:transform .18s ease; box-shadow:8px 0 30px rgba(0,0,0,.4)}
+  body.drawer-open #sidebar{transform:none}
+  body.drawer-open #drawer-bg{display:block}
+  #toolbar{overflow-x:auto; scrollbar-width:none}
+  #toolbar::-webkit-scrollbar{display:none}
+  #st-hint{display:none}
+  .ptitle{max-width:34%}
+  /* stack panels full-width and scroll; grab a header to scroll past a plot */
+  #panels{overflow-y:auto}
+  .prow{flex-direction:column; flex:none}
+  .panel{min-height:min(46vh,340px); flex:none}
+  /* header: title + buttons on row 1, legend chips on their own row */
+  .phead{flex-wrap:wrap; row-gap:2px}
+  .ptitle{max-width:55%; margin-right:auto}
+  .plegend{order:5; flex-basis:100%; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; padding-bottom:2px}
+  .plegend::-webkit-scrollbar{display:none}
+  .chip{flex:none}
+}
+@media (hover:none){
+  .pbtns{opacity:1}
+  .pbtn{padding:6px 9px; font-size:14px}
+  .chip{padding:4px 10px}
+  .tbtn{padding:8px 11px}
+  .tleaf{padding:8px 6px}
+  .tgroup>.tlabel{padding:7px 6px}
+  #search{padding:8px 10px}
+}
+
+/* ---------- status bar ---------- */
+#status{grid-area:status; display:flex; align-items:center; gap:16px; padding:0 12px;
+  background:var(--surface); border-top:1px solid var(--border); font-size:11.5px;
+  color:var(--muted); font-variant-numeric:tabular-nums}
+#status .grow{flex:1}
+#status b{color:var(--ink2); font-weight:600}
+</style>
+</head>
+<body>
+
+<div id="nojs" style="position:fixed;inset:auto 0 0 0;z-index:999;background:#d03b3b;color:#fff;
+  padding:12px 16px;font:13px/1.5 system-ui,sans-serif;text-align:center">
+  This viewer is not running JavaScript, so SignalScope can't work here.
+  Open this file in a real browser — on Android: share/open with Chrome; on iPhone: open with Safari
+  or any browser app (the Files quick-preview blocks scripts).
+</div>
+
+<div id="toolbar">
+  <button class="tbtn" id="b-menu" title="Signals">☰</button>
+  <div class="logo">
+    <svg width="16" height="16" viewBox="0 0 16 16"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    SignalScope
+  </div>
+  <button class="tbtn" id="b-open" title="Open CSV / session / snapshot files (O)">⌥ Open files</button>
+  <button class="tbtn" id="b-demo" title="Load synthetic demo telemetry">Demo data</button>
+  <div class="tsep"></div>
+  <button class="tbtn" id="b-addrow" title="Add a panel row (N)">+ Row</button>
+  <button class="tbtn on" id="b-link" title="Link time axes across panels (L)">⛓ Linked time</button>
+  <button class="tbtn" id="b-stats" title="Show visible-region statistics (S)">Σ Stats</button>
+  <div class="tsep"></div>
+  <button class="tbtn" id="b-expr" title="New derived signal from an expression (E)">ƒx Derived</button>
+  <div class="spacer"></div>
+  <button class="tbtn" id="b-theme" title="Toggle light/dark (T)">◐</button>
+  <div class="menu-wrap">
+    <button class="tbtn" id="b-export">Export ▾</button>
+    <div class="menu" id="m-export">
+      <div class="mhead">Portable</div>
+      <button id="x-snap">Standalone HTML snapshot</button>
+      <button id="x-session">Session (.json)</button>
+      <div class="mhead">Image</div>
+      <button id="x-png">PNG of focused panel</button>
+      <div class="mhead">Data</div>
+      <button id="x-csv">Visible region → CSV</button>
+    </div>
+  </div>
+  <button class="tbtn" id="b-help" title="Shortcuts & help (?)">?</button>
+  <input type="file" id="file-in" multiple accept=".csv,.tsv,.txt,.json,.html" style="display:none">
+</div>
+
+<div id="sidebar">
+  <div id="search-wrap"><input id="search" placeholder="Filter signals…  ( / )" spellcheck="false"></div>
+  <div id="tree"><div class="empty">No data loaded.<br><br>Drop CSV files anywhere, click <b>Open files</b>, or try <b>Demo data</b>.</div></div>
+  <div class="foot"><span id="sig-count">0 signals</span><button id="b-clear">clear all</button></div>
+</div>
+
+<div id="main">
+  <div id="panels"></div>
+  <div id="drop-hint">Drop CSV / session files to load</div>
+  <div id="empty-state">
+    <div class="big">No panels yet</div>
+    <div>Drag a signal from the left, or</div>
+    <button id="b-first-panel">create an empty panel</button>
+  </div>
+</div>
+
+<div id="status">
+  <span id="st-pts"><b>0</b> pts</span>
+  <span id="st-render"></span>
+  <span id="st-cursor"></span>
+  <span class="grow"></span>
+  <span id="st-hint">drag = box zoom · wheel = zoom t · ⇧wheel = zoom y · right-drag = pan · dbl-click = fit · click = datatip</span>
+</div>
+
+<div id="drawer-bg"></div>
+<div id="tip"></div>
+<div id="pop"></div>
+
+<div class="modal-bg" id="mb-expr">
+  <div class="modal">
+    <h3>New derived signal</h3>
+    <p>Per-sample expression. Reference signals with <code>$("name")</code> — click a signal in the tree to insert it. Whole-signal ops: <code>deriv("name")</code>, <code>integ("name")</code>, <code>smooth("name", 25)</code>. All of <code>Math.*</code> is available.</p>
+    <div class="mrow"><label>Name</label><input id="expr-name" placeholder="derived/my_signal" spellcheck="false"></div>
+    <div class="mrow"><label>Expression</label><textarea id="expr-src" placeholder='Math.hypot($("imu/accel_x"), $("imu/accel_y"))' spellcheck="false"></textarea></div>
+    <div class="err" id="expr-err"></div>
+    <div class="macts">
+      <button id="expr-cancel">Cancel</button>
+      <button class="primary" id="expr-ok">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="mb-help">
+  <div class="modal">
+    <h3>SignalScope — shortcuts</h3>
+    <table>
+      <tr><td>drag on plot</td><td>rubber-band box zoom (t and y)</td></tr>
+      <tr><td>wheel</td><td>zoom time around cursor</td></tr>
+      <tr><td>shift + wheel</td><td>zoom y around cursor</td></tr>
+      <tr><td>right-drag / middle-drag</td><td>pan</td></tr>
+      <tr><td>double-click</td><td>fit visible data (autoscale)</td></tr>
+      <tr><td>click near a line</td><td>pin a datatip · click a datatip to remove · two datatips show Δ</td></tr>
+      <tr><td>drag signal → panel</td><td>plot it there · drop on empty space = new panel</td></tr>
+      <tr><td>⇄ button / "use as X axis"</td><td>XY mode — plot signals against another signal, paired by time; drop on the panel's lower strip to change X; right-click the dashed x-chip to return to time mode</td></tr>
+      <tr><td>double-click signal</td><td>plot in focused panel</td></tr>
+      <tr><td>click legend chip</td><td>toggle series · right-click chip = style, transforms, remove</td></tr>
+      <tr><td>double-click title / labels</td><td>edit text (MATLAB-style)</td></tr>
+      <tr><td>touch: drag / pinch</td><td>pan · zoom (horizontal pinch = time, vertical pinch = y, diagonal = both)</td></tr>
+      <tr><td>touch: tap / long-press</td><td>read values at a point · pin a datatip (tap a datatip to remove)</td></tr>
+      <tr><td>touch: double-tap</td><td>fit visible data</td></tr>
+      <tr><td>L</td><td>link / unlink time axes</td></tr>
+      <tr><td>S</td><td>toggle stats strip</td></tr>
+      <tr><td>E</td><td>new derived signal</td></tr>
+      <tr><td>N</td><td>new panel row</td></tr>
+      <tr><td>T</td><td>light / dark</td></tr>
+      <tr><td>O</td><td>open files</td></tr>
+      <tr><td>/</td><td>focus signal filter</td></tr>
+    </table>
+    <div class="macts"><button class="primary" id="help-ok">Close</button></div>
+  </div>
+</div>
+
+<script id="session-data" type="application/json">null</script>
+<script>
+'use strict';
+/* ============================================================
+ * SignalScope — internal fast time-series workbench
+ * PlotJuggler centralization · MATLAB manipulation ·
+ * uPlot-class canvas speed · Plotly-style portable snapshots
+ * ============================================================ */
+
+/* ---------- palette (validated; see dataviz reference palette) ---------- */
+const PAL = {
+  dark : ['#3987e5','#d95926','#199e70','#c98500','#d55181','#008300','#9085e9','#e66767'],
+  light: ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#4a3aa7','#e34948'],
+};
+const DASHES = [null, [7,4], [2,3]];          // slots 0-7 solid, 8-15 dashed, 16-23 dotted
+function seriesColor(ci){ const th = document.documentElement.dataset.theme==='light'?'light':'dark';
+  return PAL[th][ci % 8]; }
+function seriesDash(ci){ return DASHES[Math.floor(ci/8) % DASHES.length]; }
+
+/* ---------- utils ---------- */
+const $  = s => document.querySelector(s);
+const IS_TOUCH = matchMedia('(hover: none), (pointer: coarse)').matches;
+document.getElementById('nojs')?.remove();        /* scripts are running — drop the warning */
+/* older mobile Safari compatibility */
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+    r=Math.min(r,Math.abs(w)/2,Math.abs(h)/2);
+    this.moveTo(x+r,y); this.arcTo(x+w,y,x+w,y+h,r); this.arcTo(x+w,y+h,x,y+h,r);
+    this.arcTo(x,y+h,x,y,r); this.arcTo(x,y,x+w,y,r); this.closePath();
+  };
+}
+const el = (tag, cls, txt) => { const e=document.createElement(tag); if(cls)e.className=cls; if(txt!=null)e.textContent=txt; return e; };
+function bisect(a, x){ let lo=0, hi=a.length; while(lo<hi){ const m=(lo+hi)>>1; if(a[m]<x) lo=m+1; else hi=m; } return lo; }
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function niceTicks(min, max, n=5){
+  const span = max-min; if(!(span>0)) return {ticks:[min], step:1};
+  const step0 = span/n, mag = 10**Math.floor(Math.log10(step0)), norm = step0/mag;
+  const step = (norm<1.5?1:norm<3.5?2:norm<7.5?5:10)*mag;
+  const k0=Math.ceil(min/step-1e-9), out=[];
+  for(let k=k0; k*step<=max+step*1e-9; k++){ const v=k*step; out.push(Math.abs(v)<step*1e-6?0:v); }
+  return {ticks:out, step};
+}
+const TSTEPS=[.001,.002,.005,.01,.02,.05,.1,.2,.5,1,2,5,10,15,30,60,120,300,600,900,1800,3600,7200,10800,21600,43200,86400];
+function timeTicks(min, max){
+  const span=max-min; let step=TSTEPS[TSTEPS.length-1];
+  for(const s of TSTEPS){ if(span/s<=8){ step=s; break; } }
+  if(span/step>20) step*=Math.ceil(span/step/8);
+  const out=[]; for(let v=Math.ceil(min/step)*step; v<=max+step*1e-9; v+=step) out.push(v);
+  return {ticks:out, step};
+}
+function fmtNum(v, step){
+  if(v===0) return '0';
+  const av=Math.abs(v);
+  if(av>=1e6||av<1e-4) return v.toExponential(2);
+  const dec = clamp(Math.ceil(-Math.log10(step||1e-6))+0, 0, 6);
+  return v.toFixed(Math.max(0,dec));
+}
+function isEpoch(t){ return t.length>0 && t[0]>1e9 && t[0]<4e10; }
+function fmtTime(v, step, epoch){
+  if(!epoch) return fmtNum(v, step);
+  const d=new Date(v*1000), hh=String(d.getHours()).padStart(2,'0'),
+        mm=String(d.getMinutes()).padStart(2,'0'), ss=String(d.getSeconds()).padStart(2,'0');
+  if(step>=60) return `${hh}:${mm}`;
+  if(step>=1) return `${hh}:${mm}:${ss}`;
+  return `${hh}:${mm}:${ss}.${String(d.getMilliseconds()).padStart(3,'0')}`;
+}
+function fmtCursorT(v, epoch){
+  if(!epoch) return v.toFixed(4)+' s';
+  const d=new Date(v*1000);
+  return d.toLocaleTimeString(undefined,{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0');
+}
+function fmtVal(v){
+  if(v==null||Number.isNaN(v)) return '—';
+  const av=Math.abs(v);
+  if(av!==0&&(av>=1e6||av<1e-3)) return v.toExponential(3);
+  return (Math.round(v*1e4)/1e4).toString();
+}
+function round6(v){ return Number.isFinite(v)? Number(v.toPrecision(7)) : null; }
+function download(name, blob){
+  const a=el('a'); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},400);
+}
+function lerpAt(t, v, x){                 // linear interp sample of signal at time x
+  const n=t.length; if(!n) return NaN;
+  if(x<=t[0]) return v[0]; if(x>=t[n-1]) return v[n-1];
+  const i=bisect(t,x); const a=i-1;
+  const f=(x-t[a])/(t[i]-t[a]||1);
+  return v[a]+(v[i]-v[a])*f;
+}
+
+/* ---------- signal store ---------- */
+const store = {
+  signals: new Map(),      // name -> {name,t,v,ci,width,expr}
+  nextCI: 0,
+  add(name, t, v, extra={}){
+    let base=name, k=2;
+    while(this.signals.has(name)) name = base+'_'+(k++);
+    const sig = { name, t, v, ci:this.nextCI++, width:1.5, ...extra };
+    this.signals.set(name, sig);
+    return sig;
+  },
+  remove(name){ this.signals.delete(name); },
+  clear(){ this.signals.clear(); this.nextCI=0; },
+  totalPts(){ let n=0; for(const s of this.signals.values()) n+=s.t.length; return n; }
+};
+
+/* ---------- CSV parsing ---------- */
+function parseCSV(text, baseName){
+  const lines = text.split(/\r?\n/).filter(l => l.length && !/^\s*[#%;]/.test(l));
+  if(lines.length<2) throw new Error('not enough rows');
+  const probe = lines[0];
+  const delim = [['\t',(probe.match(/\t/g)||[]).length], [',',(probe.match(/,/g)||[]).length],
+                 [';',(probe.match(/;/g)||[]).length]].sort((a,b)=>b[1]-a[1])[0][0];
+  const split = l => l.split(delim).map(c=>c.trim().replace(/^"(.*)"$/,'$1'));
+  const first = split(lines[0]);
+  const hasHeader = first.some(c => c!=='' && Number.isNaN(Number(c)));
+  const headers = hasHeader ? first : first.map((_,i)=>'col'+(i+1));
+  const rows = lines.slice(hasHeader?1:0);
+  const ncol = headers.length;
+  const cols = Array.from({length:ncol}, ()=>new Float64Array(rows.length));
+  let nr=0;
+  for(const line of rows){
+    const cells = split(line); if(cells.length<2) continue;
+    for(let c=0;c<ncol;c++){ const x=Number(cells[c]); cols[c][nr]= cells[c]===''||Number.isNaN(x)? NaN : x; }
+    nr++;
+  }
+  // pick time column: named like time, else first strictly-increasing column, else sample index
+  let tIdx = headers.findIndex(h=>/^(t|time|timestamp|time_s|stamp|ts|sec|secs|seconds)$/i.test(h));
+  const increasing = c => { for(let i=1;i<nr;i++){ if(!(cols[c][i]>=cols[c][i-1])) return false; } return nr>1; };
+  if(tIdx<0){ tIdx = increasing(0) ? 0 : -1; }
+  const t = new Float64Array(nr);
+  if(tIdx>=0) for(let i=0;i<nr;i++) t[i]=cols[tIdx][i];
+  else        for(let i=0;i<nr;i++) t[i]=i;
+  const added=[];
+  for(let c=0;c<ncol;c++){
+    if(c===tIdx) continue;
+    let any=false; for(let i=0;i<nr;i++){ if(Number.isFinite(cols[c][i])){any=true;break;} }
+    if(!any) continue;
+    added.push(store.add(`${baseName}/${headers[c]}`, t, cols[c].slice(0,nr)));
+  }
+  if(!added.length) throw new Error('no numeric columns found');
+  return added;
+}
+
+/* ---------- demo data ---------- */
+function loadDemo(){
+  const HZ=400, T=120, N=HZ*T;
+  const t=new Float64Array(N); for(let i=0;i<N;i++) t[i]=i/HZ;
+  const mk=f=>{ const v=new Float64Array(N); for(let i=0;i<N;i++) v[i]=f(t[i],i); return v; };
+  const rnd=(()=>{ let s=42; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/2**32-0.5; };})();
+  const step=(x,a,b)=> x>a&&x<b?1:0;
+  const cmdL = mk(x=> 1.2*step(x,5,40)+2.0*step(x,40,70)-1.5*step(x,75,100)+0.8*Math.sin(x*0.21)*step(x,100,118));
+  const cmdR = mk(x=> 1.2*step(x,5,40)+1.4*step(x,40,70)-1.5*step(x,75,100)+0.8*Math.sin(x*0.21+0.6)*step(x,100,118));
+  const lag=(cmd,tau)=>{ const v=new Float64Array(N); let y=0; for(let i=0;i<N;i++){ y+=(cmd[i]-y)*(1/HZ)/tau; v[i]=y+0.02*rnd(); } return v; };
+  const velL=lag(cmdL,0.6), velR=lag(cmdR,0.6);
+  const curL=mk((x,i)=> 3+7*Math.abs(cmdL[i]-velL[i])+1.5*Math.abs(velL[i])+0.35*rnd());
+  const curR=mk((x,i)=> 3+7*Math.abs(cmdR[i]-velR[i])+1.5*Math.abs(velR[i])+0.35*rnd());
+  const tmp=(cur)=>{ const v=new Float64Array(N); let y=31; for(let i=0;i<N;i++){ y+=((28+cur[i]*2.1)-y)*(1/HZ)/28; v[i]=y+0.05*rnd(); } return v; };
+  const spd=mk((x,i)=> Math.abs(velL[i]+velR[i])/2 + 0.01*rnd());
+  const hRad=new Float64Array(N); { let h=0; for(let i=0;i<N;i++){ h+=((velR[i]-velL[i])/0.5)/HZ; hRad[i]=h; } }
+  const posX=new Float64Array(N), posY=new Float64Array(N);
+  { let X=0,Y=0; for(let i=0;i<N;i++){ X+=spd[i]*Math.cos(hRad[i])/HZ; Y+=spd[i]*Math.sin(hRad[i])/HZ; posX[i]=X; posY[i]=Y; } }
+  const S={
+    'motor/left/cmd_velocity':cmdL, 'motor/left/velocity':velL, 'motor/left/current':curL, 'motor/left/temp_c':tmp(curL),
+    'motor/right/cmd_velocity':cmdR,'motor/right/velocity':velR,'motor/right/current':curR,'motor/right/temp_c':tmp(curR),
+    'imu/accel_x':mk((x,i)=> (i? (velL[i]+velR[i]-velL[i-1]-velR[i-1])*HZ/2 :0)+0.25*rnd()+0.15*Math.sin(x*37)),
+    'imu/accel_y':mk((x,i)=> 0.5*(velR[i]-velL[i])*(velL[i]+velR[i])/2 + 0.25*rnd()),
+    'imu/accel_z':mk(x=> 9.81+0.3*rnd()+0.1*Math.sin(x*24)),
+    'imu/gyro_z':mk((x,i)=> (velR[i]-velL[i])/0.5 + 0.03*rnd()),
+    'nav/speed':spd,
+    'nav/heading':mk((x,i)=> (hRad[i]*57.2958)%360),
+    'nav/pos_x':posX, 'nav/pos_y':posY,
+    'battery/voltage':mk((x,i)=> 50.4 - x*0.012 - 0.09*(curL[i]+curR[i]) + 0.03*rnd()),
+    'battery/current':mk((x,i)=> curL[i]+curR[i]+1.2+0.2*rnd()),
+  };
+  const added=[]; for(const [k,v] of Object.entries(S)) added.push(store.add(k,t,v));
+  rebuildTree();
+  // a sensible default layout
+  if(app.rows.length===0){
+    const p1=app.newPanel(app.newRow()); p1.addSeries('motor/left/cmd_velocity'); p1.addSeries('motor/left/velocity'); p1.addSeries('motor/right/velocity'); p1.title='Velocity tracking'; p1.ylabel='m/s';
+    const p2=app.newPanel(app.newRow()); p2.addSeries('motor/left/current'); p2.addSeries('motor/right/current'); p2.title='Motor current'; p2.ylabel='A';
+    const p3=app.newPanel(app.rows[1]);  p3.addSeries('battery/voltage'); p3.title='Battery'; p3.ylabel='V';
+    const p4=app.newPanel(app.rows[1]);  p4.setX('nav/pos_x'); p4.addSeries('nav/pos_y');
+    p4.equal=true; p4.eqBtn.classList.add('on'); p4.title='Trajectory (XY)';
+    app.fitAll();
+  }
+  app.refresh();
+  return added;
+}
+
+/* ---------- signal tree ---------- */
+function rebuildTree(){
+  const tree=$('#tree'); tree.textContent='';
+  const filter=($('#search').value||'').toLowerCase();
+  const names=[...store.signals.keys()].sort();
+  $('#sig-count').textContent = names.length+' signal'+(names.length===1?'':'s');
+  if(!names.length){ tree.append(el('div','empty','No data loaded.')); updateStatus(); return; }
+  const root={};
+  for(const n of names){
+    if(filter && !n.toLowerCase().includes(filter)) continue;
+    const parts=n.split('/'); let node=root;
+    for(let i=0;i<parts.length-1;i++){ node = node[parts[i]] ??= {}; }
+    (node.__leaves ??= []).push(n);
+  }
+  const plottedColors = app.plottedColorMap();
+  const build=(node, parent)=>{
+    for(const key of Object.keys(node).filter(k=>k!=='__leaves').sort()){
+      const g=el('div','tgroup'); const lab=el('div','tlabel');
+      lab.append(el('span','tw','▾'), el('span',null,key));
+      lab.onclick=()=>g.classList.toggle('closed');
+      const kids=el('div','tkids');
+      g.append(lab,kids); parent.append(g);
+      build(node[key], kids);
+    }
+    for(const name of node.__leaves||[]){
+      const leaf=el('div','tleaf'); leaf.draggable=true; leaf.dataset.name=name;
+      const dot=el('span','dot'); const ci=plottedColors.get(name);
+      if(ci!=null){ leaf.classList.add('plotted'); dot.style.setProperty('--dotc',seriesColor(ci)); }
+      leaf.append(dot, el('span','nm', name.split('/').pop()));
+      leaf.title=name;
+      leaf.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/x-signal',name); e.dataTransfer.effectAllowed='copy'; });
+      leaf.addEventListener('dblclick', ()=>app.addToFocused(name));
+      leaf.addEventListener('click', ()=>{
+        if($('#mb-expr').classList.contains('open')){
+          const ta=$('#expr-src'); const ins=`$("${name}")`;
+          const p=ta.selectionStart??ta.value.length;
+          ta.setRangeText(ins,p,p,'end'); ta.focus();
+        }else if(IS_TOUCH){
+          app.addToFocused(name);                 /* tap-to-plot on touch (drag is drawer-hostile) */
+          leaf.style.background='var(--accent-dim)';
+          setTimeout(()=>leaf.style.background='',350);
+        }
+      });
+      parent.append(leaf);
+    }
+  };
+  build(root, tree);
+  updateStatus();
+}
+</script>
+<script>
+'use strict';
+/* ============================================================
+ * Panel — one plot: fast canvas renderer + interactions
+ * ============================================================ */
+const MARGIN = {L:56, R:12, T:8, B:22};
+
+/* pair a y-signal with an x-signal on the x-signal's timebase (linear resample) */
+const XY_CACHE=new Map();
+function xyPairs(xName,yName){
+  const gx=store.signals.get(xName), gy=store.signals.get(yName);
+  if(!gx||!gy||!gx.t.length||!gy.t.length) return null;
+  const key=xName+'|'+yName, c=XY_CACHE.get(key);
+  if(c && c.gx===gx && c.gy===gy) return c;
+  let yv;
+  if(gy.t===gx.t) yv=gy.v;
+  else{ yv=new Float64Array(gx.t.length);
+        for(let i=0;i<gx.t.length;i++) yv[i]=lerpAt(gy.t,gy.v,gx.t[i]); }
+  const P={t:gx.t, xv:gx.v, yv, gx, gy};
+  if(XY_CACHE.size>64) XY_CACHE.clear();
+  XY_CACHE.set(key,P);
+  return P;
+}
+
+class Panel{
+  constructor(app){
+    this.app=app;
+    this.series=[];                       // {name, hidden}
+    this.x={min:0,max:1,auto:true};
+    this.y={min:-1,max:1,auto:true};
+    this.title=''; this.ylabel='';
+    this.mode='time';                     // 'time' | 'xy'
+    this.xName=null;                      // x-axis signal in xy mode
+    this.equal=false;                     // equal axis scaling (xy)
+    this.datatips=[];                     // {name, i}
+    this.hoverPx=null;
+    this.buildDOM();
+  }
+
+  buildDOM(){
+    const root=this.root=el('div','panel');
+    root.dataset.mode='time';
+    root.addEventListener('pointerdown', ()=>this.app.focus(this), true);
+
+    const head=el('div','phead');
+    this.titleEl=el('div','ptitle');
+    try{ this.titleEl.contentEditable='plaintext-only'; }
+    catch{ this.titleEl.contentEditable='true'; }
+    this.titleEl.spellcheck=false; this.titleEl.dataset.ph='untitled';
+    this.titleEl.addEventListener('blur', ()=>{ this.title=this.titleEl.textContent.trim(); });
+    this.titleEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){e.preventDefault(); this.titleEl.blur();} });
+    this.legendEl=el('div','plegend');
+    const btns=el('div','pbtns');
+    const mkBtn=(txt,tip,fn)=>{ const b=el('button','pbtn',txt); b.title=tip; b.onclick=fn; btns.append(b); return b; };
+    mkBtn('Σ','Toggle stats strip', ()=>{ root.classList.toggle('show-stats'); this.updateStats(); });
+    mkBtn('⤢','Fit data (double-click plot)', ()=>this.fit());
+    mkBtn('⇄','XY mode — plot series against a signal instead of time', ()=>{
+      if(this.mode==='xy') this.toTime();
+      else if(this.series.length) this.setX(this.series[0].name);
+      else { this.mode='xy'; this.root.dataset.mode='xy'; this.rebuildLegend(); }
+    });
+    const eqb=this.eqBtn=mkBtn('1:1','Equal axis scaling (XY)', ()=>{
+      this.equal=!this.equal; eqb.classList.toggle('on',this.equal); this.requestDraw(); });
+    eqb.classList.add('xy-only');
+    mkBtn('◫','Split right', ()=>this.app.splitRight(this));
+    mkBtn('⬒','Split down', ()=>this.app.splitDown(this));
+    mkBtn('⿻','Export PNG', ()=>this.app.exportPNG(this));
+    mkBtn('✕','Close panel', ()=>this.app.closePanel(this));
+    head.append(this.titleEl,this.legendEl,btns);
+
+    const body=this.body=el('div','pbody');
+    this.cv=el('canvas'); this.ov=el('canvas'); this.ov.className='ov';
+    body.append(this.cv,this.ov);
+    this.statsEl=el('div','pstats');
+    root.append(head,body,this.statsEl);
+
+    new ResizeObserver(()=>this.requestDraw()).observe(body);
+    this.bindInteractions();
+    this.bindDrop();
+  }
+
+  /* ---------- series management ---------- */
+  addSeries(name){
+    if(!store.signals.has(name)) return;
+    if(this.mode==='xy' && !this.xName){ this.setX(name); return; }
+    if(this.series.some(s=>s.name===name) || name===this.xName) return;
+    this.series.push({name, hidden:false});
+    if(this.series.length===1 && this.x.auto) this.fit(false);
+    this.rebuildLegend(); this.requestDraw(); rebuildTree();
+  }
+  removeSeries(name){
+    this.series=this.series.filter(s=>s.name!==name);
+    this.datatips=this.datatips.filter(d=>d.name!==name);
+    this.rebuildLegend(); this.requestDraw(); rebuildTree();
+  }
+  rebuildLegend(){
+    this.legendEl.textContent='';
+    if(this.mode==='xy'){
+      const chip=el('div','chip xchip');
+      const gx=this.xName&&store.signals.get(this.xName);
+      if(gx){ const sw=el('span','sw'); sw.style.background=seriesColor(gx.ci); chip.append(sw); }
+      chip.append(el('span','cn', this.xName||'drop a signal for X'));
+      chip.title='X axis: '+(this.xName||'unset')+' — right-click to return to time mode';
+      chip.oncontextmenu=e=>{ e.preventDefault(); this.toTime(); };
+      this.legendEl.append(chip);
+    }
+    for(const s of this.series){
+      const sig=store.signals.get(s.name); if(!sig) continue;
+      const chip=el('div','chip'+(s.hidden?' off':''));
+      const sw=el('span','sw'); sw.style.background=seriesColor(sig.ci);
+      chip.append(sw, el('span','cn', s.name));
+      chip.title=s.name;
+      chip.onclick=()=>{ s.hidden=!s.hidden; this.rebuildLegend(); this.requestDraw(); };
+      chip.oncontextmenu=e=>{ e.preventDefault(); openStylePop(e, this, s); };
+      this.legendEl.append(chip);
+    }
+  }
+
+  /* ---------- ranges ---------- */
+  xr(){ return this.mode==='xy' ? this.x : (this.app.linked ? this.app.tx : this.x); }
+  /* time filter window: xy panels follow the linked window; time panels use their x range */
+  tw(){
+    if(this.mode!=='xy'){ const {min,max}=this.xr(); return [min,max]; }
+    return this.app.linked ? [this.app.tx.min,this.app.tx.max] : [-Infinity,Infinity];
+  }
+  dataXRange(){
+    let mn=Infinity, mx=-Infinity;
+    for(const s of this.series){ const g=store.signals.get(s.name); if(!g||!g.t.length) continue;
+      mn=Math.min(mn,g.t[0]); mx=Math.max(mx,g.t[g.t.length-1]); }
+    return mn<mx ? [mn,mx] : (mn===mx? [mn-1,mx+1] : [0,1]);
+  }
+  visibleYRange(){
+    if(this.mode==='xy') return this.xyRange('y');
+    const {min:x0,max:x1}=this.xr();
+    let mn=Infinity, mx=-Infinity;
+    for(const s of this.series){
+      if(s.hidden) continue;
+      const g=store.signals.get(s.name); if(!g) continue;
+      let i0=clamp(bisect(g.t,x0)-1,0,g.t.length-1), i1=clamp(bisect(g.t,x1)+1,0,g.t.length);
+      for(let i=i0;i<i1;i++){ const v=g.v[i]; if(Number.isFinite(v)){ if(v<mn)mn=v; if(v>mx)mx=v; } }
+    }
+    if(!(mn<=mx)) return [-1,1];
+    if(mn===mx){ mn-=1; mx+=1; }
+    const pad=(mx-mn)*0.06; return [mn-pad, mx+pad];
+  }
+  xyRange(which){
+    let mn=Infinity, mx=-Infinity;
+    const [t0,t1]=this.tw();
+    for(const s of this.series){
+      if(s.hidden) continue;
+      const P=xyPairs(this.xName,s.name); if(!P) continue;
+      const i0=clamp(bisect(P.t,t0),0,P.t.length), i1=clamp(bisect(P.t,t1)+1,0,P.t.length);
+      const arr=which==='x'?P.xv:P.yv;
+      for(let i=i0;i<i1;i++){ const v=arr[i]; if(Number.isFinite(v)){ if(v<mn)mn=v; if(v>mx)mx=v; } }
+      if(which==='x') break;              /* all series share the same x signal */
+    }
+    if(!(mn<=mx)) return [-1,1];
+    if(mn===mx){ mn-=1; mx+=1; }
+    const pad=(mx-mn)*0.06; return [mn-pad, mx+pad];
+  }
+  nearestXY(ex,ey,maxD){
+    const [t0,t1]=this.tw(); let best=null;
+    for(const s of this.series){
+      if(s.hidden) continue;
+      const P=xyPairs(this.xName,s.name); if(!P) continue;
+      const i0=clamp(bisect(P.t,t0),0,P.t.length), i1=clamp(bisect(P.t,t1)+1,0,P.t.length);
+      const stride=Math.max(1,Math.ceil((i1-i0)/60000));
+      for(let i=i0;i<i1;i+=stride){
+        const xv=P.xv[i], yv=P.yv[i];
+        if(!Number.isFinite(xv)||!Number.isFinite(yv)) continue;
+        const d=Math.hypot(this.tToPx(xv)-ex, this.vToPx(yv)-ey);
+        if(!best||d<best.d) best={name:s.name, i, d, t:P.t[i]};
+      }
+    }
+    return best && best.d<=maxD ? best : null;
+  }
+  setX(name){
+    if(!store.signals.has(name)) return;
+    if(this.xName && this.xName!==name) this.series.unshift({name:this.xName, hidden:false});
+    this.series=this.series.filter(s=>s.name!==name);
+    this.xName=name; this.mode='xy'; this.root.dataset.mode='xy';
+    this.datatips=[];
+    this.x={min:0,max:1,auto:true}; this.y={min:-1,max:1,auto:true};
+    this.rebuildLegend(); this.requestDraw(); rebuildTree();
+  }
+  toTime(){
+    if(this.xName){ this.series.unshift({name:this.xName, hidden:false}); this.xName=null; }
+    this.mode='time'; this.root.dataset.mode='time'; this.datatips=[];
+    this.fit(false); this.rebuildLegend(); this.app.drawAll(); rebuildTree();
+  }
+  fit(redraw=true){
+    if(this.mode==='xy'){
+      this.x={min:0,max:1,auto:true}; this.y={min:-1,max:1,auto:true};
+      if(redraw) this.requestDraw();
+      return;
+    }
+    const [a,b]=this.dataXRange();
+    if(this.app.linked) this.app.setTX(a,b,true);
+    else { this.x={min:a,max:b,auto:true}; }
+    this.y.auto=true;
+    if(redraw) this.app.drawAll();
+  }
+
+  /* ---------- coordinate transforms ---------- */
+  plotRect(){
+    const w=this.body.clientWidth, h=this.body.clientHeight;
+    return {x:MARGIN.L, y:MARGIN.T, w:Math.max(10,w-MARGIN.L-MARGIN.R), h:Math.max(10,h-MARGIN.T-MARGIN.B)};
+  }
+  tToPx(t){ const r=this.plotRect(), {min,max}=this.xr(); return r.x+(t-min)/(max-min)*r.w; }
+  pxToT(px){ const r=this.plotRect(), {min,max}=this.xr(); return min+(px-r.x)/r.w*(max-min); }
+  vToPx(v){ const r=this.plotRect(); const [y0,y1]=this.yNow||[0,1]; return r.y+r.h-(v-y0)/(y1-y0)*r.h; }
+  pxToV(px){ const r=this.plotRect(); const [y0,y1]=this.yNow||[0,1]; return y0+(r.y+r.h-px)/r.h*(y1-y0); }
+
+  /* ---------- draw ---------- */
+  requestDraw(){ this.app.requestDraw(this); }
+
+  draw(){
+    const dpr=devicePixelRatio||1;
+    const w=this.body.clientWidth, h=this.body.clientHeight;
+    if(w<20||h<20) return;
+    if(this.cv.width!==w*dpr||this.cv.height!==h*dpr){
+      this.cv.width=w*dpr; this.cv.height=h*dpr;
+      this.ov.width=w*dpr; this.ov.height=h*dpr;
+    }
+    const css=getComputedStyle(document.documentElement);
+    const C={surface:css.getPropertyValue('--surface').trim(), grid:css.getPropertyValue('--grid').trim(),
+             axis:css.getPropertyValue('--axis').trim(), muted:css.getPropertyValue('--muted').trim(),
+             ink2:css.getPropertyValue('--ink2').trim()};
+    const ctx=this.cv.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle=C.surface; ctx.fillRect(0,0,w,h);
+
+    const r=this.plotRect();
+    if(this.mode==='xy' && this.x.auto){ const [a,b]=this.xyRange('x'); this.x={min:a,max:b,auto:true}; }
+    this.yNow = this.y.auto ? this.visibleYRange() : [this.y.min,this.y.max];
+    if(this.mode==='xy' && this.equal){
+      const ux=(this.x.max-this.x.min)/r.w, uy=(this.yNow[1]-this.yNow[0])/r.h, u=Math.max(ux,uy);
+      const xc=(this.x.max+this.x.min)/2, yc=(this.yNow[1]+this.yNow[0])/2;
+      this.x={min:xc-u*r.w/2, max:xc+u*r.w/2, auto:this.x.auto};
+      this.yNow=[yc-u*r.h/2, yc+u*r.h/2];
+    }
+    const {min:x0,max:x1}=this.xr();
+    const epoch=this.epoch = this.mode==='xy' ? false :
+      (this.series.length ? isEpoch(store.signals.get(this.series[0].name)?.t||[]) : false);
+
+    /* grid + ticks */
+    ctx.font='10.5px system-ui,-apple-system,sans-serif';
+    const xt = epoch ? timeTicks(x0,x1) : niceTicks(x0,x1,Math.max(3,Math.round(r.w/90)));
+    const yt = niceTicks(this.yNow[0],this.yNow[1],Math.max(3,Math.round(r.h/44)));
+    ctx.strokeStyle=C.grid; ctx.lineWidth=1; ctx.beginPath();
+    for(const tv of xt.ticks){ const px=Math.round(this.tToPx(tv))+.5; if(px<r.x-1||px>r.x+r.w+1) continue; ctx.moveTo(px,r.y); ctx.lineTo(px,r.y+r.h); }
+    for(const tv of yt.ticks){ const py=Math.round(this.vToPx(tv))+.5; if(py<r.y-1||py>r.y+r.h+1) continue; ctx.moveTo(r.x,py); ctx.lineTo(r.x+r.w,py); }
+    ctx.stroke();
+    ctx.strokeStyle=C.axis; ctx.beginPath();
+    ctx.moveTo(r.x+.5,r.y); ctx.lineTo(r.x+.5,r.y+r.h+.5); ctx.lineTo(r.x+r.w,r.y+r.h+.5); ctx.stroke();
+    ctx.fillStyle=C.muted; ctx.textAlign='center'; ctx.textBaseline='top';
+    for(const tv of xt.ticks){ const px=this.tToPx(tv); if(px<r.x-2||px>r.x+r.w+2) continue; ctx.fillText(fmtTime(tv,xt.step,epoch), px, r.y+r.h+5); }
+    ctx.textAlign='right'; ctx.textBaseline='middle';
+    for(const tv of yt.ticks){ const py=this.vToPx(tv); if(py<r.y-2||py>r.y+r.h+2) continue; ctx.fillText(fmtNum(tv,yt.step), r.x-7, py); }
+    if(this.ylabel){
+      ctx.save(); ctx.translate(12, r.y+r.h/2); ctx.rotate(-Math.PI/2);
+      ctx.fillStyle=C.ink2; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.font='11px system-ui,-apple-system,sans-serif'; ctx.fillText(this.ylabel,0,0); ctx.restore();
+    }
+
+    /* series */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(r.x,r.y,r.w,r.h); ctx.clip();
+    ctx.lineJoin='round'; ctx.lineCap='round';
+    if(this.mode==='xy'){ this.drawXYSeries(ctx,r,C); ctx.restore(); }
+    else{ this.drawTimeSeries(ctx,r,x0,x1); ctx.restore(); }
+    if(document.activeElement!==this.titleEl && this.titleEl.textContent!==this.title)
+      this.titleEl.textContent=this.title;
+    this.drawOverlay();
+    if(this.root.classList.contains('show-stats')) this.updateStats();
+  }
+
+  drawTimeSeries(ctx,r,x0,x1){
+    for(const s of this.series){
+      if(s.hidden) continue;
+      const g=store.signals.get(s.name); if(!g||g.t.length<1) continue;
+      ctx.strokeStyle=seriesColor(g.ci); ctx.lineWidth=g.width;
+      const dash=seriesDash(g.ci); ctx.setLineDash(dash||[]);
+      const i0=clamp(bisect(g.t,x0)-1,0,g.t.length-1), i1=clamp(bisect(g.t,x1)+1,0,g.t.length);
+      const n=i1-i0;
+      ctx.beginPath();
+      if(n > r.w*2.5){
+        /* min/max decimation per pixel column — uPlot-class throughput */
+        const colW=(x1-x0)/r.w;
+        let i=i0, pen=false;
+        for(let col=0; col<r.w; col++){
+          const cx1=x0+(col+1)*colW;
+          let mn=Infinity, mx=-Infinity, vFirst=NaN, vLast=NaN;
+          while(i<i1 && g.t[i]<cx1){
+            const v=g.v[i];
+            if(Number.isFinite(v)){ if(v<mn)mn=v; if(v>mx)mx=v; if(Number.isNaN(vFirst))vFirst=v; vLast=v; }
+            i++;
+          }
+          if(mn>mx){ continue; }
+          const px=r.x+col+.5;
+          const pyF=this.vToPx(vFirst), pyMn=this.vToPx(mn), pyMx=this.vToPx(mx), pyL=this.vToPx(vLast);
+          if(!pen){ ctx.moveTo(px,pyF); pen=true; } else ctx.lineTo(px,pyF);
+          ctx.lineTo(px,pyMn); ctx.lineTo(px,pyMx); ctx.lineTo(px,pyL);
+        }
+      }else{
+        let pen=false;
+        for(let i=i0;i<i1;i++){
+          const v=g.v[i];
+          if(!Number.isFinite(v)){ pen=false; continue; }
+          const px=this.tToPx(g.t[i]), py=this.vToPx(v);
+          if(!pen){ ctx.moveTo(px,py); pen=true; } else ctx.lineTo(px,py);
+        }
+        if(n < r.w/7){                       /* sparse: show sample markers */
+          ctx.stroke(); ctx.setLineDash([]);
+          ctx.fillStyle=ctx.strokeStyle; ctx.beginPath();
+          for(let i=i0;i<i1;i++){ const v=g.v[i]; if(!Number.isFinite(v)) continue;
+            ctx.moveTo(this.tToPx(g.t[i])+2.4,this.vToPx(v));
+            ctx.arc(this.tToPx(g.t[i]),this.vToPx(v),2.4,0,7); }
+          ctx.fill(); ctx.beginPath();
+        }
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+
+  drawXYSeries(ctx,r,C){
+    const [t0,t1]=this.tw();
+    for(const s of this.series){
+      if(s.hidden) continue;
+      const g=store.signals.get(s.name); if(!g) continue;
+      const P=xyPairs(this.xName,s.name); if(!P) continue;
+      const i0=clamp(bisect(P.t,t0),0,P.t.length), i1=clamp(bisect(P.t,t1)+1,0,P.t.length);
+      const n=i1-i0; if(n<1) continue;
+      const stride=Math.max(1, Math.ceil(n/60000));
+      ctx.strokeStyle=seriesColor(g.ci); ctx.lineWidth=g.width;
+      const dash=seriesDash(g.ci); ctx.setLineDash(dash||[]);
+      ctx.beginPath(); let pen=false;
+      for(let i=i0;i<i1;i+=stride){
+        const xv=P.xv[i], yv=P.yv[i];
+        if(!Number.isFinite(xv)||!Number.isFinite(yv)){ pen=false; continue; }
+        const px=this.tToPx(xv), py=this.vToPx(yv);
+        if(!pen){ ctx.moveTo(px,py); pen=true; } else ctx.lineTo(px,py);
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+      if(n<r.w/7){
+        ctx.fillStyle=ctx.strokeStyle; ctx.beginPath();
+        for(let i=i0;i<i1;i++){
+          const xv=P.xv[i], yv=P.yv[i];
+          if(!Number.isFinite(xv)||!Number.isFinite(yv)) continue;
+          ctx.moveTo(this.tToPx(xv)+2.4,this.vToPx(yv));
+          ctx.arc(this.tToPx(xv),this.vToPx(yv),2.4,0,7);
+        }
+        ctx.fill();
+      }
+    }
+    ctx.fillStyle=C.muted;
+    ctx.font='10.5px system-ui,-apple-system,sans-serif';
+    ctx.textAlign='right'; ctx.textBaseline='bottom';
+    ctx.fillText('x: '+(this.xName||'—'), r.x+r.w-6, r.y+r.h-5);
+  }
+
+  /* ---------- overlay: crosshair, box, datatips ---------- */
+  drawOverlay(){
+    const dpr=devicePixelRatio||1;
+    const w=this.body.clientWidth, h=this.body.clientHeight;
+    const ctx=this.ov.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    const r=this.plotRect();
+    const css=getComputedStyle(document.documentElement);
+    const muted=css.getPropertyValue('--muted').trim(), accent=css.getPropertyValue('--accent').trim();
+    const surface=css.getPropertyValue('--surface').trim(), ink=css.getPropertyValue('--ink').trim();
+
+    /* synced time cursor: vertical line on time panels, marker on xy trajectories */
+    if(this.app.cursorT!=null && this.series.length){
+      if(this.mode==='xy'){
+        const [t0,t1]=this.tw(); const ct=this.app.cursorT;
+        if(ct>=t0&&ct<=t1){
+          for(const s of this.series){
+            if(s.hidden) continue;
+            const P=xyPairs(this.xName,s.name); if(!P) continue;
+            if(ct<P.t[0]||ct>P.t[P.t.length-1]) continue;
+            const xv=lerpAt(P.t,P.xv,ct), yv=lerpAt(P.t,P.yv,ct);
+            const px=this.tToPx(xv), py=this.vToPx(yv);
+            if(px<r.x-4||px>r.x+r.w+4||py<r.y-4||py>r.y+r.h+4) continue;
+            const g=store.signals.get(s.name);
+            ctx.fillStyle=seriesColor(g.ci); ctx.strokeStyle=surface; ctx.lineWidth=2;
+            ctx.beginPath(); ctx.arc(px,py,5,0,7); ctx.fill(); ctx.stroke();
+          }
+        }
+      }else{
+        const px=this.tToPx(this.app.cursorT);
+        if(px>=r.x&&px<=r.x+r.w){
+          ctx.strokeStyle=muted; ctx.globalAlpha=.55; ctx.setLineDash([3,3]);
+          ctx.beginPath(); ctx.moveTo(px+.5,r.y); ctx.lineTo(px+.5,r.y+r.h); ctx.stroke();
+          ctx.setLineDash([]); ctx.globalAlpha=1;
+        }
+      }
+    }
+    /* box-zoom rubber band */
+    if(this.box){
+      ctx.strokeStyle=accent; ctx.setLineDash([5,4]);
+      ctx.fillStyle=css.getPropertyValue('--sel').trim();
+      const b=this.box;
+      ctx.fillRect(b.x0,b.y0,b.x1-b.x0,b.y1-b.y0);
+      ctx.strokeRect(b.x0+.5,b.y0+.5,b.x1-b.x0,b.y1-b.y0);
+      ctx.setLineDash([]);
+    }
+    /* datatips */
+    ctx.font='10.5px system-ui,-apple-system,sans-serif';
+    const placed=[];
+    const tipPoint=d=>{
+      const g=store.signals.get(d.name); if(!g) return null;
+      if(this.mode==='xy'){
+        const P=xyPairs(this.xName,d.name); if(!P||d.i>=P.t.length) return null;
+        return {t:P.t[d.i], X:P.xv[d.i], v:P.yv[d.i],
+                px:this.tToPx(P.xv[d.i]), py:this.vToPx(P.yv[d.i]), ci:g.ci};
+      }
+      if(d.i>=g.t.length) return null;
+      return {t:g.t[d.i], v:g.v[d.i], px:this.tToPx(g.t[d.i]), py:this.vToPx(g.v[d.i]), ci:g.ci};
+    };
+    for(const d of this.datatips){
+      const q=tipPoint(d); if(!q) continue;
+      if(q.px<r.x-4||q.px>r.x+r.w+4) continue;
+      const col=seriesColor(q.ci);
+      ctx.fillStyle=col; ctx.strokeStyle=surface; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(q.px,q.py,4.5,0,7); ctx.fill(); ctx.stroke();
+      const lines= this.mode==='xy'
+        ? [d.name.split('/').pop(), fmtCursorT(q.t,this.epoch), `x ${fmtVal(q.X)} · y ${fmtVal(q.v)}`]
+        : [d.name.split('/').pop(), fmtCursorT(q.t,this.epoch), fmtVal(q.v)];
+      const tw=Math.max(...lines.map(s=>ctx.measureText(s).width))+14;
+      const th=lines.length*13+8;
+      let bx=q.px+9, by=q.py-th-6;
+      if(bx+tw>r.x+r.w) bx=q.px-tw-9;
+      if(by<r.y) by=q.py+8;
+      for(const p of placed){ if(Math.abs(p.x-bx)<tw&&Math.abs(p.y-by)<th) by=p.y+th+3; }
+      placed.push({x:bx,y:by});
+      ctx.fillStyle=surface; ctx.globalAlpha=.94;
+      ctx.beginPath(); ctx.roundRect(bx,by,tw,th,5); ctx.fill(); ctx.globalAlpha=1;
+      ctx.strokeStyle=col; ctx.lineWidth=1; ctx.stroke();
+      ctx.textAlign='left'; ctx.textBaseline='top';
+      lines.forEach((s,li)=>{ ctx.fillStyle= li===0?ink:muted; if(li===2)ctx.fillStyle=col; ctx.fillText(s,bx+7,by+5+li*13); });
+    }
+    /* delta between last two datatips */
+    if(this.datatips.length>=2){
+      const pts=this.datatips.slice(-2).map(tipPoint);
+      if(pts[0]&&pts[1]){
+        const [a,b]=pts;
+        ctx.strokeStyle=accent; ctx.setLineDash([4,3]);
+        ctx.beginPath(); ctx.moveTo(a.px,a.py); ctx.lineTo(b.px,b.py); ctx.stroke(); ctx.setLineDash([]);
+        const dt=b.t-a.t, dv=b.v-a.v;
+        const label= this.mode==='xy'
+          ? `Δt ${fmtVal(dt)}s   Δx ${fmtVal(b.X-a.X)}   Δy ${fmtVal(dv)}`
+          : `Δt ${fmtVal(dt)}s   Δy ${fmtVal(dv)}${dt?`   Δy/Δt ${fmtVal(dv/dt)}`:''}`;
+        const tw=ctx.measureText(label).width+14;
+        const mx=clamp((a.px+b.px)/2-tw/2, r.x+2, r.x+r.w-tw-2), my=clamp((a.py+b.py)/2-20, r.y+2, r.y+r.h-18);
+        ctx.fillStyle=surface; ctx.globalAlpha=.94;
+        ctx.beginPath(); ctx.roundRect(mx,my,tw,17,5); ctx.fill(); ctx.globalAlpha=1;
+        ctx.strokeStyle=accent; ctx.stroke();
+        ctx.fillStyle=accent; ctx.textAlign='left'; ctx.textBaseline='middle';
+        ctx.fillText(label,mx+7,my+9);
+      }
+    }
+  }
+
+  /* ---------- stats strip ---------- */
+  updateStats(){
+    const [x0,x1]=this.tw();
+    this.statsEl.textContent='';
+    for(const s of this.series){
+      if(s.hidden) continue;
+      const g=store.signals.get(s.name); if(!g) continue;
+      const i0=clamp(bisect(g.t,x0),0,g.t.length), i1=clamp(bisect(g.t,x1)+1,0,g.t.length);
+      let mn=Infinity,mx=-Infinity,sum=0,sq=0,n=0;
+      for(let i=i0;i<i1;i++){ const v=g.v[i]; if(!Number.isFinite(v)) continue;
+        if(v<mn)mn=v; if(v>mx)mx=v; sum+=v; sq+=v*v; n++; }
+      const d=el('span');
+      const sw=el('span','sw'); sw.style.cssText=`display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;background:${seriesColor(g.ci)}`;
+      d.append(sw, el('span','sname', s.name.split('/').pop()+'  '));
+      if(n){ const mean=sum/n, rms=Math.sqrt(sq/n);
+        d.insertAdjacentHTML('beforeend', ` min <b>${fmtVal(mn)}</b> · max <b>${fmtVal(mx)}</b> · mean <b>${fmtVal(mean)}</b> · rms <b>${fmtVal(rms)}</b> · n <b>${n}</b>`);
+      } else d.insertAdjacentHTML('beforeend',' <b>no samples in view</b>');
+      this.statsEl.append(d);
+    }
+  }
+
+  /* ---------- interactions ---------- */
+  bindInteractions(){
+    const ov=this.ov;
+    ov.addEventListener('contextmenu', e=>e.preventDefault());
+
+    ov.addEventListener('wheel', e=>{
+      e.preventDefault();
+      const r=this.plotRect();
+      const f=Math.exp(e.deltaY*0.0016);
+      if(e.shiftKey||e.altKey){                             /* zoom y */
+        const pivot=this.pxToV(clamp(e.offsetY,r.y,r.y+r.h));
+        const [y0,y1]=this.yNow;
+        this.y={min:pivot+(y0-pivot)*f, max:pivot+(y1-pivot)*f, auto:false};
+        this.requestDraw();
+      }else{                                                /* zoom t */
+        const pivot=this.pxToT(clamp(e.offsetX,r.x,r.x+r.w));
+        const {min,max}=this.xr();
+        const nx0=pivot+(min-pivot)*f, nx1=pivot+(max-pivot)*f;
+        if(this.app.linked && this.mode!=='xy') this.app.setTX(nx0,nx1); else this.x={min:nx0,max:nx1,auto:false};
+        this.app.drawAll();
+      }
+    }, {passive:false});
+
+    /* unified pointer state — mouse: box zoom / pan / hover; touch: pan / pinch / tap / long-press */
+    const pts=new Map();
+    let mode=null, sx=0, sy=0, startX=null, startY=null, pinch=null, lpTimer=0;
+    let lastTap={t:0,x:0,y:0};
+    const clearLP=()=>{ if(lpTimer){ clearTimeout(lpTimer); lpTimer=0; } };
+    const setXLocal=(a,b)=>{ if(this.app.linked && this.mode!=='xy') this.app.setTX(a,b);
+                             else this.x={min:a,max:b,auto:false}; };
+
+    ov.addEventListener('pointerdown', e=>{
+      ov.setPointerCapture(e.pointerId);
+      $('#tip').style.display='none';
+      pts.set(e.pointerId,{x:e.offsetX,y:e.offsetY});
+      if(pts.size===2){                                     /* second finger → pinch */
+        clearLP(); this.box=null; this.drawOverlay();
+        const [a,b]=[...pts.values()];
+        pinch={ta:this.pxToT(a.x), tb:this.pxToT(b.x), va:this.pxToV(a.y), vb:this.pxToV(b.y)};
+        mode='pinch'; return;
+      }
+      if(pts.size>2){ mode='dead'; return; }
+      sx=e.offsetX; sy=e.offsetY;
+      const {min,max}=this.xr(); startX=[min,max]; startY=this.yNow?.slice()||[0,1];
+      if(e.pointerType==='touch'){
+        mode='tap'; clearLP();
+        lpTimer=setTimeout(()=>{ lpTimer=0;
+          if(mode==='tap'){ mode='longpress'; this.pinDatatipAt(sx,sy,28); navigator.vibrate?.(8); }
+        }, 430);
+      }else{
+        mode=(e.button===0 && !e.ctrlKey && !e.metaKey) ? 'maybe-box' : 'pan';
+      }
+    });
+
+    ov.addEventListener('pointermove', e=>{
+      const r=this.plotRect();
+      if(pts.has(e.pointerId)) pts.set(e.pointerId,{x:e.offsetX,y:e.offsetY});
+
+      if(mode==='pinch' && pts.size===2 && pinch){
+        const [a,b]=[...pts.values()];
+        /* time axis: keep both anchor times pinned under the fingers (zoom+pan combined) */
+        if(Math.abs(a.x-b.x)>40 && pinch.tb!==pinch.ta){
+          const m=(pinch.tb-pinch.ta)/(b.x-a.x), c=pinch.ta-m*a.x;
+          const nx0=m*r.x+c, nx1=m*(r.x+r.w)+c;
+          if(nx1>nx0) setXLocal(nx0,nx1);
+        }else{                                              /* fingers stacked vertically: pan only */
+          const tmid=(pinch.ta+pinch.tb)/2, pxmid=(a.x+b.x)/2;
+          const {min,max}=this.xr(), span=max-min;
+          const nx0=tmid-(pxmid-r.x)/r.w*span;
+          setXLocal(nx0,nx0+span);
+        }
+        /* value axis: same, vertically */
+        if(Math.abs(a.y-b.y)>40 && pinch.vb!==pinch.va){
+          const m=(pinch.vb-pinch.va)/(b.y-a.y), c=pinch.va-m*a.y;
+          const vt=m*r.y+c, vb2=m*(r.y+r.h)+c;
+          const y0=Math.min(vt,vb2), y1=Math.max(vt,vb2);
+          if(y1>y0) this.y={min:y0,max:y1,auto:false};
+        }else{
+          const vmid=(pinch.va+pinch.vb)/2, pymid=(a.y+b.y)/2;
+          const [y0,y1]=this.yNow||[0,1], span=y1-y0;
+          const nyTop=vmid+(pymid-r.y)/r.h*span;
+          this.y={min:nyTop-span, max:nyTop, auto:false};
+        }
+        this.app.drawAll(); return;
+      }
+      if(mode==='dead'||mode==='longpress') return;
+      if(mode==='tap'){
+        if(Math.hypot(e.offsetX-sx,e.offsetY-sy)>9){ clearLP(); mode='touch-pan'; }
+        else return;
+      }
+      if(mode==='touch-pan'||mode==='pan'){
+        const dt=(sx-e.offsetX)/r.w*(startX[1]-startX[0]);
+        const dv=(e.offsetY-sy)/r.h*(startY[1]-startY[0]);
+        setXLocal(startX[0]+dt,startX[1]+dt);
+        this.y={min:startY[0]+dv,max:startY[1]+dv,auto:false};
+        this.app.drawAll(); return;
+      }
+      if(mode==='maybe-box' && Math.hypot(e.offsetX-sx,e.offsetY-sy)>4) mode='box';
+      if(mode==='box'){
+        this.box={x0:clamp(sx,r.x,r.x+r.w), y0:clamp(sy,r.y,r.y+r.h),
+                  x1:clamp(e.offsetX,r.x,r.x+r.w), y1:clamp(e.offsetY,r.y,r.y+r.h)};
+        this.drawOverlay(); return;
+      }
+      /* hover: synced cursor + tooltip (mouse/pen only) */
+      if(e.pointerType==='touch') return;
+      const inPlot = e.offsetX>=r.x&&e.offsetX<=r.x+r.w&&e.offsetY>=r.y&&e.offsetY<=r.y+r.h;
+      if(this.mode==='xy'){
+        const b=inPlot? this.nearestXY(e.offsetX,e.offsetY,40):null;
+        this.app.setCursor(b?b.t:null, this, e);
+      }else this.app.setCursor(inPlot? this.pxToT(e.offsetX):null, this, e);
+    });
+
+    const endPointer=e=>{
+      pts.delete(e.pointerId);
+      if(mode==='pinch'){ if(pts.size<2){ pinch=null; mode=pts.size?'dead':null; } return; }
+      if(mode==='dead'){ if(!pts.size) mode=null; return; }
+      if(mode==='box' && this.box){
+        const b=this.box; this.box=null; mode=null;
+        if(Math.abs(b.x1-b.x0)>6 && Math.abs(b.y1-b.y0)>6){
+          const t0=this.pxToT(Math.min(b.x0,b.x1)), t1=this.pxToT(Math.max(b.x0,b.x1));
+          const v0=this.pxToV(Math.max(b.y0,b.y1)), v1=this.pxToV(Math.min(b.y0,b.y1));
+          setXLocal(t0,t1);
+          this.y={min:v0,max:v1,auto:false};
+          this.app.drawAll();
+        } else this.drawOverlay();
+        return;
+      }
+      if(mode==='maybe-box'){ mode=null; this.clickDatatip(e); return; }
+      if(mode==='tap'){
+        clearLP(); mode=null;
+        const now=performance.now();
+        if(now-lastTap.t<320 && Math.hypot(e.offsetX-lastTap.x,e.offsetY-lastTap.y)<26){
+          lastTap.t=0; this.fit(); return;                  /* double-tap = fit */
+        }
+        lastTap={t:now, x:e.offsetX, y:e.offsetY};
+        if(this.removeDatatipAt(e.offsetX,e.offsetY,16)) return;
+        const r=this.plotRect();
+        const inPlot = e.offsetX>=r.x&&e.offsetX<=r.x+r.w&&e.offsetY>=r.y&&e.offsetY<=r.y+r.h;
+        if(this.mode==='xy'){
+          const b=inPlot? this.nearestXY(e.offsetX,e.offsetY,48):null;
+          this.app.setCursor(b?b.t:null, this, e);
+        }else this.app.setCursor(inPlot? this.pxToT(e.offsetX):null, this, e);
+        return;
+      }
+      mode=null;
+    };
+    ov.addEventListener('pointerup', endPointer);
+    ov.addEventListener('pointercancel', e=>{
+      pts.delete(e.pointerId); clearLP();
+      if(!pts.size){ mode=null; pinch=null; this.box=null; this.drawOverlay(); }
+    });
+    /* touch pointers "leave" right after lifting — keep their reading pinned */
+    ov.addEventListener('pointerleave', e=>{
+      if(e.pointerType!=='touch' && !pts.size) this.app.setCursor(null,this);
+    });
+    /* double-click: left margin edits the y-label (MATLAB-style); plot area fits */
+    ov.addEventListener('dblclick', e=>{
+      if(e.offsetX<MARGIN.L-24){
+        const v=prompt('Y-axis label:', this.ylabel);
+        if(v!=null){ this.ylabel=v.trim(); this.requestDraw(); }
+      } else this.fit();
+    });
+  }
+
+  clickDatatip(e){
+    if(this.removeDatatipAt(e.offsetX,e.offsetY,9)) return;
+    this.pinDatatipAt(e.offsetX,e.offsetY,14);
+  }
+  removeDatatipAt(ex,ey,th){
+    for(let k=this.datatips.length-1;k>=0;k--){
+      const d=this.datatips[k]; let px,py;
+      if(this.mode==='xy'){
+        const P=xyPairs(this.xName,d.name); if(!P) continue;
+        px=this.tToPx(P.xv[d.i]); py=this.vToPx(P.yv[d.i]);
+      }else{
+        const g=store.signals.get(d.name); if(!g) continue;
+        px=this.tToPx(g.t[d.i]); py=this.vToPx(g.v[d.i]);
+      }
+      if(Math.hypot(ex-px,ey-py)<th){ this.datatips.splice(k,1); this.drawOverlay(); return true; }
+    }
+    return false;
+  }
+  nearestTime(ex,ey,maxD){
+    let best=null;
+    const tAt=this.pxToT(ex);
+    for(const s of this.series){
+      if(s.hidden) continue;
+      const g=store.signals.get(s.name); if(!g||!g.t.length) continue;
+      let i=clamp(bisect(g.t,tAt),1,g.t.length-1);
+      if(Math.abs(g.t[i-1]-tAt)<Math.abs(g.t[i]-tAt)) i=i-1;
+      for(let j=Math.max(0,i-3); j<Math.min(g.t.length,i+4); j++){
+        if(!Number.isFinite(g.v[j])) continue;
+        const dpx=Math.hypot(this.tToPx(g.t[j])-ex, this.vToPx(g.v[j])-ey);
+        if(!best||dpx<best.dpx) best={name:s.name, i:j, dpx};
+      }
+    }
+    return best && best.dpx<=maxD ? best : null;
+  }
+  pinDatatipAt(ex,ey,th){
+    const b=this.mode==='xy' ? this.nearestXY(ex,ey,th) : this.nearestTime(ex,ey,th);
+    if(b){ this.datatips.push({name:b.name, i:b.i}); this.drawOverlay(); }
+  }
+
+  bindDrop(){
+    this.root.addEventListener('dragover', e=>{
+      if(e.dataTransfer.types.includes('text/x-signal')){
+        e.preventDefault(); this.root.classList.add('droptarget');
+        if(this.mode==='xy'){
+          const rr=this.root.getBoundingClientRect();
+          this.root.classList.toggle('droptarget-x', e.clientY > rr.top+rr.height*0.72);
+        }
+      }
+    });
+    this.root.addEventListener('dragleave', ()=>this.root.classList.remove('droptarget','droptarget-x'));
+    this.root.addEventListener('drop', e=>{
+      const name=e.dataTransfer.getData('text/x-signal');
+      if(name){
+        e.preventDefault(); e.stopPropagation();
+        const asX=this.root.classList.contains('droptarget-x');
+        this.root.classList.remove('droptarget','droptarget-x');
+        if(this.mode==='xy'&&(asX||!this.xName)) this.setX(name); else this.addSeries(name);
+      }
+    });
+  }
+
+  serialize(){
+    return {title:this.title, ylabel:this.ylabel, showStats:this.root.classList.contains('show-stats'),
+            mode:this.mode, xName:this.xName, equal:this.equal,
+            series:this.series.map(s=>({name:s.name,hidden:!!s.hidden})),
+            x:this.x, y:this.y, datatips:this.datatips};
+  }
+}
+</script>
+<script>
+'use strict';
+/* ============================================================
+ * App — layout, linking, tooltip, expressions, export
+ * ============================================================ */
+const app = {
+  rows: [],                 // {el, panels:[]}
+  linked: true,
+  tx: {min:0, max:1, auto:true},
+  focused: null,
+  cursorT: null,
+  _dq: new Set(), _raf: 0,
+
+  /* ----- layout ----- */
+  newRow(afterRow){
+    const rEl=el('div','prow');
+    const row={el:rEl, panels:[]};
+    if(afterRow){ afterRow.el.after(rEl); this.rows.splice(this.rows.indexOf(afterRow)+1,0,row); }
+    else { $('#panels').append(rEl); this.rows.push(row); }
+    this.updateEmpty();
+    return row;
+  },
+  newPanel(row, afterPanel){
+    const p=new Panel(this);
+    if(afterPanel){ afterPanel.root.after(p.root); row.panels.splice(row.panels.indexOf(afterPanel)+1,0,p); }
+    else { row.el.append(p.root); row.panels.push(p); }
+    this.focus(p); this.updateEmpty();
+    return p;
+  },
+  rowOf(p){ return this.rows.find(r=>r.panels.includes(p)); },
+  splitRight(p){ this.newPanel(this.rowOf(p), p); },
+  splitDown(p){ this.newPanel(this.newRow(this.rowOf(p))); },
+  closePanel(p){
+    const row=this.rowOf(p); if(!row) return;
+    row.panels=row.panels.filter(x=>x!==p); p.root.remove();
+    if(!row.panels.length){ row.el.remove(); this.rows=this.rows.filter(r=>r!==row); }
+    if(this.focused===p) this.focused=this.allPanels()[0]||null;
+    this.updateEmpty(); rebuildTree(); this.drawAll();
+  },
+  allPanels(){ return this.rows.flatMap(r=>r.panels); },
+  updateEmpty(){ $('#empty-state').style.display=this.rows.length?'none':'flex'; },
+  focus(p){
+    if(this.focused===p) return;
+    this.focused?.root.classList.remove('focused');
+    this.focused=p; p?.root.classList.add('focused');
+  },
+  addToFocused(name){
+    if(!this.focused){ this.newPanel(this.rows[0]||this.newRow()); }
+    this.focused.addSeries(name);
+  },
+  plottedColorMap(){
+    const m=new Map();
+    for(const p of this.allPanels()){
+      if(p.xName){ const g=store.signals.get(p.xName); if(g) m.set(p.xName,g.ci); }
+      for(const s of p.series){ const g=store.signals.get(s.name); if(g) m.set(s.name,g.ci); }
+    }
+    return m;
+  },
+
+  /* ----- linked time ----- */
+  setTX(a,b,auto=false){ if(!(b>a)){ b=a+1e-9; } this.tx={min:a,max:b,auto}; },
+  fitAll(){
+    if(this.linked){
+      let mn=Infinity,mx=-Infinity;
+      for(const p of this.allPanels()){
+        if(p.mode==='xy'){
+          p.fit(false);
+          const gx=p.xName&&store.signals.get(p.xName);
+          if(gx&&gx.t.length){ mn=Math.min(mn,gx.t[0]); mx=Math.max(mx,gx.t[gx.t.length-1]); }
+          continue;
+        }
+        if(p.series.length){ const [a,b]=p.dataXRange(); mn=Math.min(mn,a); mx=Math.max(mx,b); }
+      }
+      if(mn<mx) this.setTX(mn,mx,true);
+      for(const p of this.allPanels()) if(p.mode!=='xy') p.y.auto=true;
+    }else for(const p of this.allPanels()) p.fit(false);
+    this.drawAll();
+  },
+
+  /* ----- draw scheduling ----- */
+  requestDraw(p){ this._dq.add(p); this._schedule(); },
+  drawAll(){ for(const p of this.allPanels()) this._dq.add(p); this._schedule(); },
+  _schedule(){
+    if(this._raf) return;
+    this._raf=requestAnimationFrame(()=>{
+      const t0=performance.now();
+      for(const p of this._dq) p.draw();
+      this._dq.clear(); this._raf=0;
+      const ms=performance.now()-t0;
+      $('#st-render').innerHTML=`render <b>${ms.toFixed(1)} ms</b>`;
+    });
+  },
+
+  /* ----- synced cursor + tooltip ----- */
+  setCursor(t, srcPanel, evt){
+    this.cursorT=t;
+    for(const p of this.allPanels()) p.drawOverlay();
+    const tip=$('#tip');
+    if(t==null || !srcPanel.series.length){ tip.style.display='none'; $('#st-cursor').textContent=''; return; }
+    $('#st-cursor').innerHTML=`t = <b>${fmtCursorT(t, srcPanel.epoch)}</b>`;
+    let hdr=fmtCursorT(t, srcPanel.epoch);
+    if(srcPanel.mode==='xy'&&srcPanel.xName){
+      const gx=store.signals.get(srcPanel.xName);
+      if(gx) hdr+=` · ${srcPanel.xName.split('/').pop()} ${fmtVal(lerpAt(gx.t,gx.v,t))}`;
+    }
+    let html=`<div class="tt">${hdr}</div>`;
+    for(const s of srcPanel.series){
+      if(s.hidden) continue;
+      const g=store.signals.get(s.name); if(!g) continue;
+      const v=lerpAt(g.t,g.v,t);
+      html+=`<div class="tr"><span class="sw" style="background:${seriesColor(g.ci)}"></span>
+             <span class="cn">${s.name.split('/').pop()}</span><span class="v">${fmtVal(v)}</span></div>`;
+    }
+    tip.innerHTML=html; tip.style.display='block';
+    const tw=tip.offsetWidth, thh=tip.offsetHeight;
+    if(evt && evt.pointerType==='touch'){
+      /* dock at the top of the panel so the finger doesn't cover it */
+      const r=srcPanel.body.getBoundingClientRect();
+      tip.style.left=clamp(r.left+r.width/2-tw/2, 8, innerWidth-tw-8)+'px';
+      tip.style.top=Math.max(8, r.top+4)+'px';
+    }else{
+      let x=evt.clientX+16, y=evt.clientY+14;
+      if(x+tw>innerWidth-8) x=evt.clientX-tw-14;
+      if(y+thh>innerHeight-8) y=evt.clientY-thh-12;
+      tip.style.left=x+'px'; tip.style.top=y+'px';
+    }
+  },
+
+  refresh(){ for(const p of this.allPanels()) p.rebuildLegend(); rebuildTree(); this.drawAll(); },
+};
+
+function updateStatus(){
+  const n=store.totalPts();
+  $('#st-pts').innerHTML=`<b>${n.toLocaleString()}</b> pts · <b>${store.signals.size}</b> signals`;
+}
+
+/* ============================================================
+ * derived signals — expression engine
+ * ============================================================ */
+function evalExpr(src){
+  const refs=[];
+  const code=src.replace(/(deriv|integ|smooth|\$)\(\s*"([^"]+)"\s*(?:,\s*(\d+)\s*)?\)/g,
+    (m,fn,name,num)=>{ refs.push({kind:fn==='$'?'raw':fn, name, n:num?+num:25}); return `A[${refs.length-1}][i]`; });
+  if(!refs.length) throw new Error('Reference at least one signal, e.g. $("motor/left/velocity")');
+  for(const r of refs) if(!store.signals.has(r.name)) throw new Error('Unknown signal: '+r.name);
+  const base=store.signals.get(refs[0].name), t=base.t;
+  const A=refs.map(r=>{
+    const g=store.signals.get(r.name);
+    let val=g.v;
+    if(r.kind==='deriv'){
+      val=new Float64Array(g.t.length);
+      for(let i=0;i<g.t.length;i++){
+        const a=Math.max(0,i-1), b=Math.min(g.t.length-1,i+1);
+        val[i]=(g.v[b]-g.v[a])/((g.t[b]-g.t[a])||1e-12);
+      }
+    }else if(r.kind==='integ'){
+      val=new Float64Array(g.t.length); let acc=0;
+      for(let i=1;i<g.t.length;i++){ const va=g.v[i-1],vb=g.v[i];
+        if(Number.isFinite(va)&&Number.isFinite(vb)) acc+=(va+vb)/2*(g.t[i]-g.t[i-1]);
+        val[i]=acc; }
+    }else if(r.kind==='smooth'){
+      const n=Math.max(1,r.n|0), half=n>>1; val=new Float64Array(g.t.length);
+      for(let i=0;i<g.t.length;i++){ let s=0,c=0;
+        for(let j=Math.max(0,i-half);j<=Math.min(g.t.length-1,i+half);j++){ const v=g.v[j]; if(Number.isFinite(v)){s+=v;c++;} }
+        val[i]=c?s/c:NaN; }
+    }
+    if(g.t!==t){                      /* resample onto base timebase */
+      const rs=new Float64Array(t.length);
+      for(let i=0;i<t.length;i++) rs[i]=lerpAt(g.t,val,t[i]);
+      val=rs;
+    }
+    return val;
+  });
+  const f=new Function('i','A','t',`return (${code});`);
+  f(0,A,t[0]);                        /* syntax/eval smoke test */
+  const v=new Float64Array(t.length);
+  for(let i=0;i<t.length;i++) v[i]=f(i,A,t[i]);
+  return {t:t.slice(), v};
+}
+function createDerived(name, src, targetPanel){
+  const {t,v}=evalExpr(src);
+  const sig=store.add(name, t, v, {expr:src});
+  rebuildTree();
+  (targetPanel||app.focused||app.newPanel(app.rows[0]||app.newRow())).addSeries(sig.name);
+  return sig;
+}
+
+/* ============================================================
+ * style popover
+ * ============================================================ */
+function openStylePop(evt, panel, s){
+  const pop=$('#pop'); const sig=store.signals.get(s.name); if(!sig) return;
+  pop.innerHTML='';
+  pop.append(el('h4',null,s.name));
+  const sw=el('div','swatches');
+  const th=document.documentElement.dataset.theme==='light'?'light':'dark';
+  PAL[th].forEach((hex,i)=>{
+    const b=el('button'); b.style.background=hex;
+    if(sig.ci%8===i) b.classList.add('on');
+    b.onclick=()=>{ sig.ci=Math.floor(sig.ci/8)*8+i; app.refresh(); openStylePop(evt,panel,s); };
+    sw.append(b);
+  });
+  pop.append(sw);
+  const row=el('div','row'); row.append(el('span',null,'Width'));
+  const rng=el('input'); rng.type='range'; rng.min='0.5'; rng.max='4'; rng.step='0.25'; rng.value=sig.width;
+  rng.oninput=()=>{ sig.width=+rng.value; panel.requestDraw(); };
+  row.append(rng); pop.append(row);
+  const acts=el('div','acts');
+  const short=s.name.split('/').pop();
+  const mk=(txt,fn,cls)=>{ const b=el('button',cls,txt); b.onclick=fn; acts.append(b); };
+  mk('d/dt', ()=>{ try{ createDerived(`derived/${short}_dot`, `deriv("${s.name}")`, panel); closePop(); }catch(err){ alert(err.message); } });
+  mk('∫dt', ()=>{ try{ createDerived(`derived/${short}_int`, `integ("${s.name}")`, panel); closePop(); }catch(err){ alert(err.message); } });
+  mk('smooth', ()=>{ try{ createDerived(`derived/${short}_avg`, `smooth("${s.name}", 51)`, panel); closePop(); }catch(err){ alert(err.message); } });
+  mk('|x|', ()=>{ try{ createDerived(`derived/${short}_abs`, `Math.abs($("${s.name}"))`, panel); closePop(); }catch(err){ alert(err.message); } });
+  mk('isolate', ()=>{ for(const o of panel.series) o.hidden=o!==s; panel.rebuildLegend(); panel.requestDraw(); closePop(); });
+  mk('use as X axis', ()=>{ panel.setX(s.name); closePop(); });
+  mk('remove from panel', ()=>{ panel.removeSeries(s.name); closePop(); }, 'danger');
+  pop.append(acts);
+  pop.style.display='block';
+  const pw=pop.offsetWidth, ph=pop.offsetHeight;
+  pop.style.left=clamp(evt.clientX-8, 8, innerWidth-pw-8)+'px';
+  pop.style.top =clamp(evt.clientY+8, 8, innerHeight-ph-8)+'px';
+}
+function closePop(){ $('#pop').style.display='none'; }
+window.addEventListener('pointerdown', e=>{ if(!$('#pop').contains(e.target)) closePop(); }, true);
+
+/* ============================================================
+ * session / export
+ * ============================================================ */
+function serializeSession(){
+  return {
+    app:'signalscope', v:1,
+    theme:document.documentElement.dataset.theme,
+    linked:app.linked, tx:app.tx,
+    signals:[...store.signals.values()].map(g=>({
+      name:g.name, ci:g.ci, width:g.width, expr:g.expr||null,
+      t:Array.from(g.t, x=>Math.round(x*1e6)/1e6),
+      v:Array.from(g.v, round6),
+    })),
+    rows:app.rows.map(r=>r.panels.map(p=>p.serialize())),
+  };
+}
+function restoreSession(S){
+  store.clear();
+  for(const r of app.rows) r.el.remove();
+  app.rows=[]; app.focused=null;
+  document.documentElement.dataset.theme = S.theme==='light'?'light':'dark';
+  for(const g of S.signals||[]){
+    const sig=store.add(g.name, Float64Array.from(g.t), Float64Array.from(g.v, x=>x==null?NaN:x),
+      {expr:g.expr||undefined});
+    sig.ci=g.ci??sig.ci; sig.width=g.width||1.5;
+  }
+  store.nextCI=Math.max(0,...[...store.signals.values()].map(g=>g.ci+1));
+  app.linked=S.linked!==false; $('#b-link').classList.toggle('on',app.linked);
+  if(S.tx) app.tx=S.tx;
+  for(const rowSpec of S.rows||[]){
+    const row=app.newRow();
+    for(const ps of rowSpec){
+      const p=app.newPanel(row);
+      p.title=ps.title||''; p.ylabel=ps.ylabel||'';
+      p.x=ps.x||p.x; p.y=ps.y||p.y;
+      if(ps.mode==='xy'&&ps.xName&&store.signals.has(ps.xName)){
+        p.mode='xy'; p.xName=ps.xName; p.root.dataset.mode='xy';
+        p.equal=!!ps.equal; if(p.equal) p.eqBtn.classList.add('on');
+      }
+      p.datatips=(ps.datatips||[]).filter(d=>store.signals.has(d.name));
+      for(const s of ps.series||[]) if(store.signals.has(s.name)){ p.series.push({name:s.name,hidden:!!s.hidden}); }
+      if(ps.showStats) p.root.classList.add('show-stats');
+      p.rebuildLegend();
+    }
+  }
+  app.refresh(); updateStatus();
+}
+function exportSnapshot(){
+  const json=JSON.stringify(serializeSession()).replace(/<\//g,'<\\/');
+  const html=window.__SRC.replace(/(<script id="session-data"[^>]*>)[\s\S]*?(<\/script>)/,
+    (m,p1,p2)=>p1+json+p2);
+  download('signalscope-snapshot.html', new Blob([html],{type:'text/html'}));
+}
+function exportSessionJSON(){
+  download('signalscope-session.json',
+    new Blob([JSON.stringify(serializeSession())],{type:'application/json'}));
+}
+function exportCSV(){
+  const p=app.focused; if(!p||!p.series.length){ alert('Focus a panel with series first.'); return; }
+  const isXY=p.mode==='xy'&&p.xName;
+  const [x0,x1]= isXY? p.tw() : [p.xr().min,p.xr().max];
+  const base= isXY? store.signals.get(p.xName) : store.signals.get(p.series[0].name);
+  const i0=clamp(bisect(base.t,x0),0,base.t.length), i1=clamp(bisect(base.t,x1)+1,0,base.t.length);
+  const names=(isXY?[p.xName]:[]).concat(p.series.map(s=>s.name));
+  let out='time,'+names.map(n=>'"'+n+'"').join(',')+'\n';
+  for(let i=i0;i<i1;i++){
+    const tv=base.t[i]; const cells=[tv];
+    for(const n of names){ const g=store.signals.get(n);
+      cells.push(g===base? g.v[i] : lerpAt(g.t,g.v,tv)); }
+    out+=cells.join(',')+'\n';
+  }
+  download('signalscope-region.csv', new Blob([out],{type:'text/csv'}));
+}
+function exportPNGof(p){
+  const dpr=2;
+  const w=p.body.clientWidth, h=p.body.clientHeight, head=28;
+  const c=el('canvas'); c.width=w*dpr; c.height=(h+head)*dpr;
+  const ctx=c.getContext('2d'); ctx.scale(dpr,dpr);
+  const css=getComputedStyle(document.documentElement);
+  ctx.fillStyle=css.getPropertyValue('--surface').trim(); ctx.fillRect(0,0,w,h+head);
+  ctx.fillStyle=css.getPropertyValue('--ink').trim();
+  ctx.font='600 13px system-ui,-apple-system,sans-serif';
+  ctx.fillText(p.title||'SignalScope', 12, 18);
+  ctx.drawImage(p.cv,0,head,w,h); ctx.drawImage(p.ov,0,head,w,h);
+  c.toBlob(b=>download((p.title||'panel').replace(/\W+/g,'_')+'.png', b));
+}
+app.exportPNG=exportPNGof;
+
+/* ============================================================
+ * file loading
+ * ============================================================ */
+async function loadFiles(files){
+  for(const f of files){
+    const text=await f.text();
+    const base=f.name.replace(/\.(csv|tsv|txt|json|html)$/i,'');
+    try{
+      if(/\.json$/i.test(f.name)){
+        const S=JSON.parse(text);
+        if(S&&S.app==='signalscope'){ restoreSession(S); continue; }
+        throw new Error('not a SignalScope session');
+      }
+      if(/\.html?$/i.test(f.name)){
+        const m=text.match(/<script id="session-data"[^>]*>([\s\S]*?)<\/script>/);
+        const S=m&&JSON.parse(m[1]);
+        if(S&&S.app==='signalscope'){ restoreSession(S); continue; }
+        throw new Error('no embedded session found');
+      }
+      parseCSV(text, base);
+      rebuildTree();
+    }catch(err){ alert(`${f.name}: ${err.message}`); }
+  }
+  updateStatus();
+}
+
+/* ============================================================
+ * wiring
+ * ============================================================ */
+function initUI(){
+  $('#b-menu').onclick=()=>document.body.classList.toggle('drawer-open');
+  $('#drawer-bg').onclick=()=>document.body.classList.remove('drawer-open');
+  $('#b-open').onclick=()=>$('#file-in').click();
+  $('#file-in').onchange=e=>{ loadFiles([...e.target.files]); e.target.value=''; };
+  $('#b-demo').onclick=()=>loadDemo();
+  $('#b-clear').onclick=()=>{ if(confirm('Remove all signals and panels?')){ restoreSession({app:'signalscope',signals:[],rows:[]}); } };
+  $('#b-addrow').onclick=()=>app.newPanel(app.newRow());
+  $('#b-first-panel').onclick=()=>app.newPanel(app.newRow());
+  $('#b-link').onclick=()=>{ app.linked=!app.linked; $('#b-link').classList.toggle('on',app.linked);
+    if(app.linked) app.fitAll(); else { for(const p of app.allPanels()){ p.x={...app.tx}; } app.drawAll(); } };
+  $('#b-stats').onclick=()=>{ const any=app.allPanels().some(p=>p.root.classList.contains('show-stats'));
+    for(const p of app.allPanels()){ p.root.classList.toggle('show-stats',!any); p.updateStats(); }
+    $('#b-stats').classList.toggle('on',!any); };
+  $('#b-theme').onclick=()=>{ const de=document.documentElement;
+    de.dataset.theme=de.dataset.theme==='light'?'dark':'light'; app.refresh(); };
+  $('#b-export').onclick=e=>{ e.stopPropagation(); $('#m-export').classList.toggle('open'); };
+  window.addEventListener('click', ()=>$('#m-export').classList.remove('open'));
+  $('#x-snap').onclick=exportSnapshot;
+  $('#x-session').onclick=exportSessionJSON;
+  $('#x-png').onclick=()=>{ if(app.focused) exportPNGof(app.focused); else alert('Focus a panel first.'); };
+  $('#x-csv').onclick=exportCSV;
+  $('#b-help').onclick=()=>$('#mb-help').classList.add('open');
+  $('#help-ok').onclick=()=>$('#mb-help').classList.remove('open');
+
+  /* expression modal */
+  const openExpr=()=>{ $('#expr-err').textContent=''; $('#mb-expr').classList.add('open'); $('#expr-src').focus(); };
+  $('#b-expr').onclick=openExpr;
+  $('#expr-cancel').onclick=()=>$('#mb-expr').classList.remove('open');
+  $('#expr-ok').onclick=()=>{
+    const name=($('#expr-name').value.trim()||'derived/expr_'+(store.signals.size+1));
+    try{ createDerived(name, $('#expr-src').value, app.focused); $('#mb-expr').classList.remove('open');
+         $('#expr-name').value=''; $('#expr-src').value=''; }
+    catch(err){ $('#expr-err').textContent=err.message; }
+  };
+  for(const mb of document.querySelectorAll('.modal-bg'))
+    mb.addEventListener('click', e=>{ if(e.target===mb) mb.classList.remove('open'); });
+
+  /* search */
+  $('#search').addEventListener('input', rebuildTree);
+
+  /* file + signal drag-and-drop on main area */
+  const main=$('#main');
+  window.addEventListener('dragover', e=>{
+    if([...e.dataTransfer.types].includes('Files')){ e.preventDefault(); main.classList.add('dragover'); }
+  });
+  window.addEventListener('dragleave', e=>{ if(e.target===document.documentElement||!e.relatedTarget) main.classList.remove('dragover'); });
+  window.addEventListener('drop', e=>{
+    main.classList.remove('dragover');
+    if(e.dataTransfer.files.length){ e.preventDefault(); loadFiles([...e.dataTransfer.files]); }
+  });
+  main.addEventListener('dragover', e=>{
+    if(e.dataTransfer.types.includes('text/x-signal')) e.preventDefault();
+  });
+  main.addEventListener('drop', e=>{
+    const name=e.dataTransfer.getData('text/x-signal');
+    if(name){ e.preventDefault(); const p=app.newPanel(app.newRow()); p.addSeries(name); }
+  });
+
+  /* keyboard */
+  window.addEventListener('keydown', e=>{
+    const t=e.target;
+    if(t.matches('input,textarea')||t.isContentEditable) return;
+    const k=e.key.toLowerCase();
+    if(k==='l') $('#b-link').click();
+    else if(k==='s') $('#b-stats').click();
+    else if(k==='e') openExpr();
+    else if(k==='n') app.newPanel(app.newRow());
+    else if(k==='t') $('#b-theme').click();
+    else if(k==='o') $('#file-in').click();
+    else if(k==='/'){ e.preventDefault(); $('#search').focus(); }
+    else if(k==='?'){ $('#mb-help').classList.toggle('open'); }
+    else if(k==='escape'){ closePop(); for(const m of document.querySelectorAll('.modal-bg')) m.classList.remove('open'); }
+  });
+  app.updateEmpty();
+}
+</script>
+<script>
+/* capture pristine source for standalone snapshot export (must be the last script) */
+window.__SRC='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+document.addEventListener('DOMContentLoaded', ()=>{
+  initUI();
+  try{
+    const raw=document.getElementById('session-data').textContent.trim();
+    const S=raw&&raw!=='null'?JSON.parse(raw):null;
+    if(S&&S.app==='signalscope') restoreSession(S);
+  }catch(err){ console.warn('embedded session restore failed:', err); }
+  updateStatus();
+});
+</script>
+</body>
+</html>
