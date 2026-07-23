@@ -40,7 +40,12 @@ pub struct Signal {
 }
 
 impl Signal {
-    #[must_use]
+    /// Creates a signal whose time and value columns share one length.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::ColumnLengthMismatch`] when the columns have
+    /// different lengths.
     pub fn new(
         id: SignalId,
         source_id: SourceId,
@@ -120,6 +125,14 @@ impl SignalStore {
         id
     }
 
+    /// Registers a signal under an existing source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::UnknownSource`] when `source_id` is not
+    /// registered, [`StoreError::DuplicateSignal`] when `path` already exists,
+    /// or [`StoreError::ColumnLengthMismatch`] when the columns differ in
+    /// length.
     pub fn insert_signal(
         &mut self,
         source_id: SourceId,
@@ -128,9 +141,10 @@ impl SignalStore {
         time: Vec<f64>,
         values: Vec<f64>,
     ) -> Result<SignalId, StoreError> {
-        if !self.sources.contains_key(&source_id) {
-            return Err(StoreError::UnknownSource(source_id));
-        }
+        let source = self
+            .sources
+            .get_mut(&source_id)
+            .ok_or(StoreError::UnknownSource(source_id))?;
 
         let path = path.into();
         if self.signal_paths.contains_key(&path) {
@@ -150,10 +164,7 @@ impl SignalStore {
         self.next_signal_id += 1;
         self.signals.insert(id, signal);
         self.signal_paths.insert(path, id);
-        self.sources
-            .get_mut(&source_id)
-            .expect("source existence checked")
-            .point_count += point_count;
+        source.point_count += point_count;
         Ok(id)
     }
 

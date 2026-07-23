@@ -65,6 +65,11 @@ impl Pyramid {
     }
 
     #[must_use]
+    /// Builds an envelope pyramid from equal-length time and value columns.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `time` and `values` have different lengths.
     pub fn from_samples(time: &[f64], values: &[f64]) -> Self {
         assert_eq!(time.len(), values.len(), "time/value lengths differ");
         let level_zero = time
@@ -119,7 +124,7 @@ impl Pyramid {
         let start = level.partition_point(|bin| bin.t1 < t0);
         let end = level.partition_point(|bin| bin.t0 <= t1);
         PyramidQuery {
-            level: level_index as u32,
+            level: u32::try_from(level_index).unwrap_or(u32::MAX),
             bins: &level[start..end],
         }
     }
@@ -156,6 +161,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn every_level_preserves_global_envelope() {
         let values = [2.0, -8.0, 4.0, 21.0, -3.0];
         let time = [0.0, 1.0, 2.0, 3.0, 4.0];

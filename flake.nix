@@ -31,7 +31,10 @@
           projectRootFile = "flake.nix";
           programs.nixfmt.enable = true;
           programs.prettier.enable = true;
-          programs.rustfmt.enable = true;
+          programs.rustfmt = {
+            enable = true;
+            edition = "2021";
+          };
           programs.taplo.enable = true;
         };
 
@@ -58,8 +61,10 @@
             with pkgs;
             [
               cargo
+              cargo-llvm-cov
               cargo-tauri
               clippy
+              llvmPackages.llvm
               nodejs_22
               pnpm
               pkg-config

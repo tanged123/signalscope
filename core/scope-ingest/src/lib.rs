@@ -31,6 +31,12 @@ pub struct IngestSummary {
 
 /// Common boundary for file and future live decoders.
 pub trait Decoder {
+    /// Decodes `path` and registers its signals in `store`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IngestError`] when the source cannot be read, decoded, or
+    /// registered.
     fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError>;
 }
 
@@ -92,7 +98,11 @@ impl Decoder for CsvDecoder {
 
         let time_index = select_time_column(&headers, &columns);
         let time = time_index.map_or_else(
-            || (0..row_count).map(|index| index as f64).collect(),
+            || {
+                std::iter::successors(Some(0.0), |value| Some(value + 1.0))
+                    .take(row_count)
+                    .collect()
+            },
             |index| columns[index].clone(),
         );
 
@@ -119,6 +129,12 @@ impl Decoder for CsvDecoder {
     }
 }
 
+/// Ingests a CSV-like source using delimiter and time-column detection.
+///
+/// # Errors
+///
+/// Returns [`IngestError`] when the source cannot be read, decoded, or
+/// registered.
 pub fn ingest_csv_path(
     path: impl AsRef<Path>,
     store: &mut SignalStore,
@@ -144,13 +160,7 @@ fn probe_first_data_line(file: &mut File) -> Result<String, IngestError> {
 fn detect_delimiter(probe: &str) -> u8 {
     [b'\t', b',', b';', b'|']
         .into_iter()
-        .max_by_key(|delimiter| {
-            probe
-                .as_bytes()
-                .iter()
-                .filter(|byte| *byte == delimiter)
-                .count()
-        })
+        .max_by_key(|delimiter| probe.matches(char::from(*delimiter)).count())
         .filter(|delimiter| probe.as_bytes().contains(delimiter))
         .unwrap_or(b',')
 }

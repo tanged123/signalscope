@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use scope_ingest::ingest_csv_path;
 use scope_protocol::{
-    EnvelopeBin, IngestResponse, PROTOCOL_VERSION, SignalSummary, SignalTile, SourceSummary,
-    TileRequest, TileResponse,
+    EnvelopeBin, IngestResponse, SignalSummary, SignalTile, SourceSummary, TileRequest,
+    TileResponse, PROTOCOL_VERSION,
 };
 use scope_pyramid::Pyramid;
 use scope_store::{SignalId, SignalStore};
@@ -16,6 +16,7 @@ struct DataState {
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn ingest_csv(path: String, state: State<'_, Mutex<DataState>>) -> Result<IngestResponse, String> {
     let mut data = state.lock().map_err(|error| error.to_string())?;
     let summary = {
@@ -61,6 +62,7 @@ fn ingest_csv(path: String, state: State<'_, Mutex<DataState>>) -> Result<Ingest
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn list_signals(state: State<'_, Mutex<DataState>>) -> Result<Vec<SignalSummary>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(data
@@ -76,6 +78,7 @@ fn list_signals(state: State<'_, Mutex<DataState>>) -> Result<Vec<SignalSummary>
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn query_tiles(
     request: TileRequest,
     state: State<'_, Mutex<DataState>>,
@@ -130,6 +133,11 @@ fn query_tiles(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Starts the native `SignalScope` application.
+///
+/// # Panics
+///
+/// Panics when Tauri cannot initialize or run the application.
 pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(DataState {

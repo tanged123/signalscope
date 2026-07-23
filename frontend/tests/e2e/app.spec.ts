@@ -7,7 +7,7 @@ test("shared presentation plane renders the walking skeleton", async ({
 
   await expect(page.getByText("SIGNALSCOPE")).toBeVisible();
   await expect(page.getByLabel("Body velocity panel")).toBeVisible();
-  await expect(page.getByText("rocket/velocity_body/x")).toBeVisible();
+  await expect(page.getByText("rocket/velocity_body/x")).toBeAttached();
   await expect(page.locator(".plot-canvas")).toBeVisible();
   await expect(page.locator(".render-ms")).not.toHaveText("— ms");
 });

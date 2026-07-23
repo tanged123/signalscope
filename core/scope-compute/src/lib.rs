@@ -1,5 +1,10 @@
 //! Host-independent signal transforms.
 
+/// Calculates the sample-wise derivative.
+///
+/// # Panics
+///
+/// Panics when `time` and `values` have different lengths.
 #[must_use]
 pub fn derivative(time: &[f64], values: &[f64]) -> Vec<f64> {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
@@ -21,6 +26,11 @@ pub fn derivative(time: &[f64], values: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+/// Calculates the cumulative trapezoidal integral.
+///
+/// # Panics
+///
+/// Panics when `time` and `values` have different lengths.
 #[must_use]
 pub fn integrate(time: &[f64], values: &[f64]) -> Vec<f64> {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
@@ -57,6 +67,11 @@ pub fn smooth(values: &[f64], window: usize) -> Vec<f64> {
         .collect()
 }
 
+/// Linearly interpolates a value at `query`.
+///
+/// # Panics
+///
+/// Panics when `time` and `values` have different lengths.
 #[must_use]
 pub fn lerp_at(time: &[f64], values: &[f64], query: f64) -> f64 {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
@@ -80,6 +95,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn transforms_match_prototype_semantics() {
         let time = [0.0, 1.0, 2.0];
         let values = [0.0, 2.0, 4.0];

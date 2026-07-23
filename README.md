@@ -2,6 +2,7 @@
 
 [![SignalScope CI](https://github.com/tanged123/signalscope/actions/workflows/ci.yml/badge.svg)](https://github.com/tanged123/signalscope/actions/workflows/ci.yml)
 [![Format Check](https://github.com/tanged123/signalscope/actions/workflows/format.yml/badge.svg)](https://github.com/tanged123/signalscope/actions/workflows/format.yml)
+[![codecov](https://codecov.io/gh/tanged123/signalscope/graph/badge.svg?token=ypwd3hmX9u)](https://codecov.io/gh/tanged123/signalscope)
 
 **A native, high-performance time-series analysis workbench with portable interactive HTML snapshots.**
 
@@ -76,7 +77,9 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/test.sh full      # Tauri compile + Playwright checks too
 ./scripts/build.sh web      # frontend + snapshot-template.html
 ./scripts/build.sh native   # native bundle + shared frontend
+./scripts/coverage.sh       # Rust + frontend LCOV reports
 ./scripts/ci.sh             # complete CI-oriented quality gate
+./scripts/ci.sh clippy      # reproduce one named GitHub Actions job
 nix fmt                     # format the workspace
 ```
 

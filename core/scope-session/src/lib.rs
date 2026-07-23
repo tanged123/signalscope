@@ -121,6 +121,12 @@ pub struct Annotation {
     pub label: String,
 }
 
+/// Deserializes and validates a `SignalScope` session.
+///
+/// # Errors
+///
+/// Returns [`SessionError`] when the JSON is malformed, belongs to another
+/// application, or uses an unsupported schema version.
 pub fn from_json(json: &str) -> Result<Session, SessionError> {
     #[derive(Deserialize)]
     struct Envelope {
