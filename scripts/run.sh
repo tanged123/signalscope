@@ -9,10 +9,13 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/build.sh [native|web] [additional arguments]
+Usage: ./scripts/run.sh [native|web]
 
-  native  Build the Tauri bundle and shared snapshot frontend (default).
-  web     Build only the browser frontend and snapshot-template.html.
+  native  Launch the Tauri workbench (default).
+  web     Launch the shared frontend in a browser at http://127.0.0.1:4173.
+
+Native compilation is capped at two jobs by default. Override with:
+  CARGO_BUILD_JOBS=4 ./scripts/run.sh native
 EOF
 }
 
@@ -21,17 +24,17 @@ case "$mode" in
   native)
     shift || true
     cd shell/src-tauri
-    exec cargo tauri build "$@"
+    exec cargo tauri dev "$@"
     ;;
   web)
     shift || true
-    exec pnpm build "$@"
+    exec pnpm dev "$@"
     ;;
   -h | --help | help)
     show_help
     ;;
   *)
-    echo "Unknown build mode: $mode" >&2
+    echo "Unknown run mode: $mode" >&2
     show_help >&2
     exit 2
     ;;

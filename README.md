@@ -15,21 +15,20 @@ The repository is currently at the Phase 0 walking-skeleton stage. CSV ingestion
 ## Quick start
 
 ```bash
-nix develop
-pnpm install
-pnpm dev
+./scripts/setup.sh
+./scripts/run.sh web
 ```
 
-Run the complete local quality gate:
+Run the lightweight local quality gate:
 
 ```bash
-./scripts/ci.sh
+./scripts/test.sh
 ```
 
 Run the native shell:
 
 ```bash
-./scripts/dev.sh bash -lc 'cd shell/src-tauri && cargo tauri dev'
+./scripts/run.sh
 ```
 
 Build the workbench and the portable snapshot template:
@@ -69,11 +68,16 @@ See [the ADR index](docs/adr/README.md) for the decisions behind the two-host pr
 All CI tools are provided by the pinned Nix flake.
 
 ```bash
+./scripts/setup.sh          # install locked frontend dependencies
 ./scripts/dev.sh            # enter the development shell
-./scripts/test.sh           # Rust and TypeScript unit tests
-./scripts/ci.sh             # format, lint, codegen, tests, builds, artifact checks
+./scripts/run.sh web        # launch browser frontend
+./scripts/run.sh native     # launch native Tauri workbench
+./scripts/test.sh           # lightweight core + frontend checks
+./scripts/test.sh full      # Tauri compile + Playwright checks too
+./scripts/build.sh web      # frontend + snapshot-template.html
+./scripts/build.sh native   # native bundle + shared frontend
+./scripts/ci.sh             # complete CI-oriented quality gate
 nix fmt                     # format the workspace
-pnpm e2e                    # Playwright browser smoke test
 ```
 
 The UI design authority is in `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/`. Production code recreates that design; it does not import the reference prototype.
