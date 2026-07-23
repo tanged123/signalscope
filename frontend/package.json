@@ -1,0 +1,24 @@
+{
+  "name": "@signalscope/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build && node scripts/build-snapshot.mjs",
+    "check:artifacts": "node scripts/check-snapshot.mjs",
+    "dev": "vite --host 127.0.0.1 --port 4173",
+    "e2e": "playwright test",
+    "lint": "eslint src tests",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@playwright/test": "1.57.0",
+    "eslint": "9.39.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.3",
+    "vite": "7.2.4",
+    "vitest": "4.0.16"
+  }
+}

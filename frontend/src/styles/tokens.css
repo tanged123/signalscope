@@ -1,0 +1,91 @@
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../../../docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/ds/fonts/Inter-VariableFont_wght.woff2")
+    format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("../../../docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/ds/fonts/JetBrainsMono-VariableFont_wght.woff2")
+    format("woff2");
+}
+
+:root {
+  color-scheme: dark;
+  --surface-void: #07090c;
+  --surface-0: #0e1116;
+  --surface-1: #151920;
+  --surface-2: #1c2029;
+  --surface-3: #232832;
+  --surface-4: #2e3340;
+  --surface-overlay: rgba(14, 17, 22, 0.88);
+  --fg-1: #e6e8ec;
+  --fg-2: #a9b0bc;
+  --fg-3: #737985;
+  --fg-4: #4a4f5a;
+  --border-strong: #2e3340;
+  --border: #232832;
+  --border-faint: #1c2029;
+  --grid: #1a1d24;
+  --amber-7: #ffa226;
+  --amber-9: #ffb648;
+  --amber-3: rgba(255, 162, 38, 0.16);
+  --focus-ring: rgba(255, 162, 38, 0.5);
+  --series-1: #ffb648;
+  --series-2: #59d9ff;
+  --series-3: #66ff66;
+  --series-4: #ff6b8a;
+  --series-5: #b794ff;
+  --series-6: #ffe559;
+  --series-7: #4de3c4;
+  --series-8: #ff9e4d;
+  --status-connected: #00cc66;
+  --status-disconnected: #999999;
+  --status-error: #ff3333;
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --dur-quick: 80ms;
+  --dur-normal: 140ms;
+  --dur-slow: 240ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --surface-void: #e3e6eb;
+  --surface-0: #f7f8fa;
+  --surface-1: #eff1f4;
+  --surface-2: #e7eaee;
+  --surface-3: #dce0e6;
+  --surface-4: #c9cfd8;
+  --surface-overlay: rgba(240, 242, 245, 0.88);
+  --fg-1: #1a1e26;
+  --fg-2: #4a5160;
+  --fg-3: #7a8290;
+  --fg-4: #a7aebb;
+  --border: #c9cfd8;
+  --border-strong: #aeb6c2;
+  --border-faint: #dce0e6;
+  --grid: #e4e7ec;
+  --amber-7: #c17500;
+  --amber-9: #9e5f00;
+  --amber-3: rgba(193, 117, 0, 0.12);
+  --focus-ring: rgba(193, 117, 0, 0.55);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --status-connected: #007a3d;
+  --status-disconnected: #8a9099;
+  --status-error: #c42b2b;
+}

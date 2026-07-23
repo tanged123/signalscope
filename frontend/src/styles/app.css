@@ -1,0 +1,517 @@
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body,
+button,
+input {
+  font-family: var(--font-ui);
+}
+
+body {
+  background: var(--surface-void);
+  color: var(--fg-1);
+  font-size: 13px;
+  line-height: 1.3;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  color: inherit;
+}
+
+button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workbench {
+  display: grid;
+  grid-template-areas:
+    "menu menu"
+    "toolbar toolbar"
+    "tree main"
+    "tree formula"
+    "status status";
+  grid-template-rows: 28px 34px minmax(0, 1fr) 30px 24px;
+  grid-template-columns: 262px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  background: var(--surface-void);
+}
+
+.menu-bar,
+.tool-bar,
+.status-bar,
+.panel-header,
+.formula-bar,
+.signal-tree {
+  border-color: var(--border);
+  border-style: solid;
+}
+
+.menu-bar {
+  grid-area: menu;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  background: var(--surface-2);
+  border-width: 0 0 1px;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 10px;
+  color: var(--fg-1);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.brand svg {
+  width: 14px;
+  height: 14px;
+}
+
+.menu-item,
+.tool-button,
+.panel-action {
+  border-radius: 2px;
+  color: var(--fg-2);
+  transition:
+    background var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out);
+}
+
+.menu-item {
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.menu-item:hover,
+.tool-button:hover,
+.panel-action:hover {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.command-hint {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: 10px;
+}
+
+kbd {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+  font: 10px var(--font-mono);
+}
+
+.tool-bar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  background: var(--surface-1);
+  border-width: 0 0 1px;
+}
+
+.tool-button {
+  padding: 4px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tool-button.active {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.tool-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 5px;
+  background: var(--border-strong);
+}
+
+.tool-spacer {
+  flex: 1;
+}
+
+.window-readout,
+.status-value,
+.signal-path,
+.signal-value,
+.source-points,
+.legend-chip,
+.formula-input {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.window-label {
+  color: var(--fg-3);
+  font-size: 10px;
+}
+
+.window-readout {
+  color: var(--fg-1);
+  font-size: 10.5px;
+}
+
+.follow-slot {
+  color: var(--fg-4);
+  cursor: not-allowed;
+}
+
+.signal-tree {
+  grid-area: tree;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--surface-0);
+  border-width: 0 1px 0 0;
+}
+
+.search-wrap {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.search-wrap label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-void);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.signal-search {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg-1);
+  font: 11px var(--font-mono);
+}
+
+.tree-heading {
+  padding: 8px 12px 4px;
+  color: var(--fg-3);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.tree-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 0 6px 8px;
+}
+
+.signal-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 6px;
+  border-radius: 2px;
+  color: var(--fg-2);
+  font-size: 11px;
+  text-align: left;
+}
+
+.signal-row:hover,
+.signal-row.selected {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.series-mark {
+  width: 12px;
+  height: 2px;
+  flex: none;
+  background: var(--series-1);
+}
+
+.signal-path {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signal-value {
+  color: var(--fg-3);
+  font-size: 10px;
+}
+
+.source-footer {
+  padding: 7px 10px;
+  border-top: 1px solid var(--border-faint);
+  color: var(--fg-3);
+  font-size: 10px;
+}
+
+.source-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--status-connected);
+}
+
+.source-points {
+  margin-left: auto;
+  color: var(--fg-2);
+}
+
+.workspace {
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+  padding: 1px;
+  background: var(--border);
+}
+
+.panel {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--focus-ring);
+}
+
+.panel-header {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  background: var(--surface-2);
+  border-width: 0 0 1px;
+  font-family: var(--font-mono);
+}
+
+.drag-handle {
+  color: var(--fg-4);
+  letter-spacing: -2px;
+  cursor: grab;
+}
+
+.panel-title {
+  color: var(--fg-1);
+  font: 500 11px var(--font-ui);
+  white-space: nowrap;
+}
+
+.mode-pills {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.mode-pill {
+  padding: 1px 6px;
+  color: var(--fg-3);
+  font: 9px var(--font-mono);
+}
+
+.mode-pill.active {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.panel-legend {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.legend-chip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--fg-2);
+  font-size: 10px;
+}
+
+.legend-chip:hover {
+  background: var(--surface-3);
+}
+
+.legend-line {
+  width: 10px;
+  height: 2px;
+  flex: none;
+}
+
+.legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legend-menu {
+  color: var(--fg-4);
+}
+
+.panel-actions {
+  display: flex;
+  margin-left: auto;
+}
+
+.panel-action {
+  padding: 2px 5px;
+  color: var(--fg-3);
+  font: 10px var(--font-mono);
+}
+
+.plot-wrap {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+}
+
+.plot-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.empty-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-3);
+  font: 10.5px var(--font-mono);
+}
+
+.formula-bar {
+  grid-area: formula;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--surface-1);
+  border-width: 1px 0 0;
+}
+
+.formula-mark {
+  color: var(--amber-7);
+  font: 11px var(--font-mono);
+}
+
+.formula-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 10.5px;
+}
+
+.formula-input::placeholder {
+  color: var(--fg-4);
+}
+
+.status-bar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 10px;
+  background: var(--surface-1);
+  border-width: 1px 0 0;
+  color: var(--fg-3);
+  font-size: 10px;
+}
+
+.status-value {
+  color: var(--fg-2);
+}
+
+.gesture-hint {
+  overflow: hidden;
+  flex: 1;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-command {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 820px) {
+  .workbench {
+    grid-template-areas:
+      "menu"
+      "toolbar"
+      "main"
+      "formula"
+      "status";
+    grid-template-columns: 1fr;
+  }
+
+  .signal-tree {
+    display: none;
+  }
+
+  .menu-item,
+  .window-label,
+  .window-readout,
+  .gesture-hint {
+    display: none;
+  }
+
+  .tool-bar {
+    overflow-x: auto;
+  }
+}

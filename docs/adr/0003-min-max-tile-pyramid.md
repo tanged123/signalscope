@@ -1,0 +1,26 @@
+# ADR 0003: Multi-resolution min/max tile pyramid
+
+- Status: Accepted
+- Date: 2026-07-23
+
+## Context
+
+Rendering and analysis cannot scan raw arrays on every pan. A returned envelope must preserve visible extrema and gaps at every resolution.
+
+## Decision
+
+Each signal has a binary pyramid. Level 0 contains one envelope bin per raw sample. Level `n + 1` merges adjacent level `n` bins, preserving first, last, finite minimum, finite maximum, sample count, and an explicit gap bit. Tiles contain 256 consecutive bins. Queries choose the finest level whose bin count is no greater than twice the requested pixel width; density remains bounded while peaks survive.
+
+A non-finite sample produces a gap bin. Merging never bridges that gap invisibly: the parent gap bit is the OR of its children. Renderers break strokes when a queried bin carries a gap. All-NaN bins carry no finite extrema.
+
+The production cache is a versioned sidecar beside the source:
+
+```text
+magic | cache_version | source fingerprint | signal directory | level directories | tile payloads
+```
+
+Payloads are little-endian, independently checksummed, and aligned for mmap reads. The Phase 0 implementation builds the same logical structure in memory; persistent encoding is added before cache reuse ships.
+
+## Consequences
+
+Serve work is proportional to viewport width rather than source size. The cache format and tile width are versioned implementation details; protocol consumers see only envelope bins. Streaming can append level-0 bins and carry merges upward without changing queries.

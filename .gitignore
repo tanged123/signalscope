@@ -1,0 +1,10 @@
+/.direnv/
+/target/
+/result
+**/node_modules/
+/frontend/dist/
+/frontend/playwright-report/
+/frontend/test-results/
+/shell/src-tauri/gen/
+*.log
+.DS_Store
