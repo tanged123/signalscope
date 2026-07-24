@@ -1,0 +1,90 @@
+name: SignalScope Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signalscope-release-main
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: release-tag
+        run: echo "tag=$(./scripts/release.sh tag)" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: cachix/install-nix-action@v31
+      - run: ./scripts/setup.sh
+      - run: ./scripts/ci.sh build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-packages
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
+
+  appimage:
+    needs: tag
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - run: ./scripts/setup-appimage.sh
+      - run: ./scripts/ci.sh appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-appimage
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  macos:
+    needs: tag
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: cachix/install-nix-action@v31
+      - run: ./scripts/setup.sh
+      - run: ./scripts/ci.sh build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: [tag, linux, appimage, macos]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - run: ./scripts/release.sh publish "${{ needs.tag.outputs.tag }}" release-assets

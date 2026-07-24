@@ -48,6 +48,9 @@ Canonical commands:
 ./scripts/version.sh get|check        release manifest inspection
 ./scripts/version.sh set 0.1.1        synchronize a release version
 ./scripts/version.sh bump patch        increment and synchronize a version
+./scripts/release.sh version            validate release metadata
+./scripts/release.sh tag                create and push an annotated release tag
+./scripts/release.sh publish <tag> <dir> publish staged release assets
 ./scripts/ci.sh format|lint|typecheck|clippy|unit|e2e|build|artifacts
 ./scripts/ci.sh all                   complete local quality gate
 ./scripts/ci.sh flake                 flake check

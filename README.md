@@ -81,6 +81,8 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/build.sh appimage # portable Linux AppImage (Ubuntu/FHS only)
 ./scripts/coverage.sh       # Rust + frontend LCOV reports
 ./scripts/version.sh check  # verify synchronized release manifests
+./scripts/release.sh version # validate release metadata
+./scripts/release.sh tag     # create/push the annotated release tag
 ./scripts/ci.sh             # complete CI-oriented quality gate
 ./scripts/ci.sh clippy      # reproduce one named GitHub Actions job
 nix fmt                     # format the workspace
