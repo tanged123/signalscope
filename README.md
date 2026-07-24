@@ -77,6 +77,8 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/test.sh full      # Tauri compile + Playwright checks too
 ./scripts/build.sh web      # frontend + snapshot-template.html
 ./scripts/build.sh native   # native bundle + shared frontend
+./scripts/setup-appimage.sh # install AppImage dependencies on Ubuntu
+./scripts/build.sh appimage # portable Linux AppImage (Ubuntu/FHS only)
 ./scripts/coverage.sh       # Rust + frontend LCOV reports
 ./scripts/ci.sh             # complete CI-oriented quality gate
 ./scripts/ci.sh clippy      # reproduce one named GitHub Actions job

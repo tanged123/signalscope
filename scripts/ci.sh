@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
 mode="${1:-all}"
 
 if [ "$mode" = "flake" ]; then
   exec nix flake check
+fi
+
+if [ "$mode" = "appimage" ]; then
+  exec "$project_root/scripts/build.sh" appimage
 fi
 
 if [ -z "${IN_NIX_SHELL:-}" ]; then
@@ -15,10 +21,11 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/ci.sh [all|flake|format|lint|typecheck|clippy|unit|e2e|build|artifacts]
+Usage: ./scripts/ci.sh [all|flake|format|lint|typecheck|clippy|unit|e2e|build|appimage|artifacts]
 
 Each mode matches the GitHub Actions job with the same name. `all` runs every
 local quality gate sequentially, with Cargo capped at two jobs by default.
+The Ubuntu-only `appimage` mode runs outside the Nix development shell.
 EOF
 }
 
@@ -58,8 +65,6 @@ check_artifacts() {
   pnpm check:artifacts
 }
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-project_root="$(cd "$script_dir/.." && pwd)"
 cd "$project_root"
 
 case "$mode" in

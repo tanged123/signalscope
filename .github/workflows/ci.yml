@@ -60,6 +60,18 @@ jobs:
       - run: ./scripts/setup.sh
       - run: ./scripts/ci.sh build
 
+  appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/setup-appimage.sh
+      - run: ./scripts/ci.sh appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signalscope-linux-appimage
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
   artifact-checks:
     runs-on: ubuntu-latest
     steps:
