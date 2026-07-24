@@ -47,6 +47,7 @@
             chromium
             gdk-pixbuf
             glib
+            gsettings-desktop-schemas
             gtk3
             libsoup_3
             librsvg
@@ -80,6 +81,7 @@
             ${lib.optionalString pkgs.stdenv.isLinux ''
               export PLAYWRIGHT_BROWSERS_PATH=0
               export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"
+              export XDG_DATA_DIRS="${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-}"
             ''}
 
             echo "SignalScope dev environment loaded"
