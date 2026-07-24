@@ -19,9 +19,9 @@
 ## Decisions embedded in this plan (flagged for maintainer review)
 
 1. **`layout` and `favorites` enter the session schema now (v2)** even though autosave is Phase 3 — the workspace model mutates a `Session` directly, so Phase 3 serialization becomes trivial, and the ADR 0005 migration ladder gets its first real rung while stakes are low.
-2. **Drag-signal-to-plot and drop-creates-panel are included** (they are how panels get content); *plot-canvas* gestures (zoom/pan/cursor/datatips) remain Phase 2 per the roadmap.
+2. **Drag-signal-to-plot and drop-creates-panel are included** (they are how panels get content); _plot-canvas_ gestures (zoom/pan/cursor/datatips) remain Phase 2 per the roadmap.
 3. **Tree live values stay `—`** until the synced cursor lands (Phase 2); the value column and its layout are in place.
-4. **Legend chip click toggles series visibility**; series *removal* arrives with the legend inspector (Phase 2). Panel titles are not yet editable (Phase 2 "editable labels").
+4. **Legend chip click toggles series visibility**; series _removal_ arrives with the legend inspector (Phase 2). Panel titles are not yet editable (Phase 2 "editable labels").
 5. **The dead "Demo Data" toolbar button is removed** — demo data loads automatically on the baked plane; a real demo story for the native shell is future work.
 6. **Favorites star active color is `--fg-1`** (achromatic), not amber — amber is reserved for interaction per the design system.
 7. Default boot: if the plane reports signals and the session has no panels, one panel is created plotting the first two signals (keeps the walking-skeleton demo and e2e meaningful); with no signals the workspace shows the spec's F6·1 empty state.
@@ -309,7 +309,10 @@ describe("WorkspaceModel", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
     const second = model.addPanelRow();
-    expect(model.panels().map((panel) => panel.id)).toEqual([first.id, second.id]);
+    expect(model.panels().map((panel) => panel.id)).toEqual([
+      first.id,
+      second.id,
+    ]);
     expect(heights(model)).toEqual([0.5, 0.5]);
     expect(model.focusedPanelId()).toBe(second.id);
   });
@@ -346,7 +349,9 @@ describe("WorkspaceModel", () => {
     expect(model.addSeries(panel.id, "a/one")).toBe(true);
     expect(model.addSeries(panel.id, "a/two")).toBe(true);
     expect(model.addSeries(panel.id, "a/one")).toBe(false);
-    const slots = model.panel(panel.id)?.series.map((series) => series.color_slot);
+    const slots = model
+      .panel(panel.id)
+      ?.series.map((series) => series.color_slot);
     expect(slots).toEqual([1, 2]);
   });
 
@@ -417,7 +422,10 @@ describe("WorkspaceModel", () => {
       annotations: [],
       show_stats: false,
     });
-    session.layout.push({ height: 1, panels: [{ panel_id: "panel-1", width: 1 }] });
+    session.layout.push({
+      height: 1,
+      panels: [{ panel_id: "panel-1", width: 1 }],
+    });
     const model = new WorkspaceModel(session);
     const fresh = model.addPanelRow();
     expect(fresh.id).not.toBe("panel-1");
@@ -535,7 +543,9 @@ export class WorkspaceModel {
     const location = this.locate(id);
     if (location === null) return;
     this.detachCell(location);
-    this.session.panels = this.session.panels.filter((panel) => panel.id !== id);
+    this.session.panels = this.session.panels.filter(
+      (panel) => panel.id !== id,
+    );
     if (this.maximized === id) this.maximized = null;
     if (this.session.focused_panel_id === id) {
       this.session.focused_panel_id = this.session.panels[0]?.id ?? null;
@@ -561,19 +571,30 @@ export class WorkspaceModel {
 
   addSeries(panelId: string, path: string): boolean {
     const panel = this.panel(panelId);
-    if (panel === undefined || panel.series.some((series) => series.path === path)) {
+    if (
+      panel === undefined ||
+      panel.series.some((series) => series.path === path)
+    ) {
       return false;
     }
     const used = new Set(panel.series.map((series) => series.color_slot));
     let slot = 1;
     while (used.has(slot) && slot < MAX_COLOR_SLOTS) slot += 1;
     if (used.has(slot)) slot = (panel.series.length % MAX_COLOR_SLOTS) + 1;
-    panel.series.push({ path, color_slot: slot, dash: "solid", width: 1.5, visible: true });
+    panel.series.push({
+      path,
+      color_slot: slot,
+      dash: "solid",
+      width: 1.5,
+      visible: true,
+    });
     return true;
   }
 
   toggleSeriesVisible(panelId: string, path: string): void {
-    const series = this.panel(panelId)?.series.find((entry) => entry.path === path);
+    const series = this.panel(panelId)?.series.find(
+      (entry) => entry.path === path,
+    );
     if (series !== undefined) series.visible = !series.visible;
   }
 
@@ -626,22 +647,34 @@ export class WorkspaceModel {
   }
 
   /** Removes a cell; returns true when its row was removed too. */
-  private detachCell(location: { rowIndex: number; cellIndex: number }): boolean {
+  private detachCell(location: {
+    rowIndex: number;
+    cellIndex: number;
+  }): boolean {
     const row = this.session.layout[location.rowIndex];
     if (row === undefined) return false;
     row.panels.splice(location.cellIndex, 1);
     if (row.panels.length === 0) {
       this.session.layout.splice(location.rowIndex, 1);
-      normalize(this.session.layout, (item) => item.height, (item, v) => (item.height = v));
+      normalize(
+        this.session.layout,
+        (item) => item.height,
+        (item, v) => (item.height = v),
+      );
       return true;
     }
-    normalize(row.panels, (item) => item.width, (item, v) => (item.width = v));
+    normalize(
+      row.panels,
+      (item) => item.width,
+      (item, v) => (item.width = v),
+    );
     return false;
   }
 
   private appendRow(panelId: string): void {
     const previous = this.session.layout.length;
-    for (const row of this.session.layout) row.height *= previous / (previous + 1);
+    for (const row of this.session.layout)
+      row.height *= previous / (previous + 1);
     this.session.layout.push({
       height: previous === 0 ? 1 : 1 / (previous + 1),
       panels: [{ panel_id: panelId, width: 1 }],
@@ -686,7 +719,6 @@ function normalize<T>(
   for (const item of items) set(item, get(item) / total);
 }
 ```
-
 
 - [ ] **Step 4: Add `setWindow` to `frontend/src/app/linked-time.ts`** — inside `LinkedTimeModel`:
 
@@ -780,12 +812,18 @@ describe("buildTreeRows", () => {
       "leaf:rocket/velocity_body/y",
     ]);
     expect(rows[0]?.depth).toBe(0);
-    expect(rows.find((row) => row.path === "rocket/velocity_body/x")?.depth).toBe(2);
+    expect(
+      rows.find((row) => row.path === "rocket/velocity_body/x")?.depth,
+    ).toBe(2);
   });
 
   it("hides everything under a collapsed group", () => {
     const rows = buildTreeRows(PATHS, new Set(["rocket"]), "");
-    expect(rows.map((row) => row.path)).toEqual(["gnc", "gnc/pos_east", "rocket"]);
+    expect(rows.map((row) => row.path)).toEqual([
+      "gnc",
+      "gnc/pos_east",
+      "rocket",
+    ]);
     const rocket = rows.find((row) => row.path === "rocket");
     expect(rocket?.kind === "group" && rocket.expanded).toBe(false);
   });
@@ -793,7 +831,12 @@ describe("buildTreeRows", () => {
   it("a filter returns flat matching leaves", () => {
     const rows = buildTreeRows(PATHS, new Set(["rocket"]), "body/y");
     expect(rows).toEqual([
-      { kind: "leaf", path: "rocket/velocity_body/y", label: "rocket/velocity_body/y", depth: 0 },
+      {
+        kind: "leaf",
+        path: "rocket/velocity_body/y",
+        label: "rocket/velocity_body/y",
+        depth: 0,
+      },
     ]);
   });
 });
@@ -830,7 +873,8 @@ describe("fuzzyScore", () => {
   it("prefers prefix and consecutive matches", () => {
     const prefix = fuzzyScore("new", "new panel row");
     const scattered = fuzzyScore("new", "n e w idget");
-    if (prefix === null || scattered === null) throw new Error("expected matches");
+    if (prefix === null || scattered === null)
+      throw new Error("expected matches");
     expect(prefix).toBeGreaterThan(scattered);
   });
 
@@ -978,12 +1022,18 @@ git commit -m "add tree grouping, virtualization, and fuzzy matching"
 - Produces (consumed by Tasks 5–6):
 
 ```ts
-interface Command { id: string; title: string; keys?: string; enabled?: () => boolean; run: () => void }
+interface Command {
+  id: string;
+  title: string;
+  keys?: string;
+  enabled?: () => boolean;
+  run: () => void;
+}
 class CommandRegistry {
-  register(command: Command): void
-  list(): Command[]                       // enabled commands only
-  run(id: string): boolean
-  handleKey(event: KeyboardEvent): boolean // matches "o", "/", "?", "mod+k", …
+  register(command: Command): void;
+  list(): Command[]; // enabled commands only
+  run(id: string): boolean;
+  handleKey(event: KeyboardEvent): boolean; // matches "o", "/", "?", "mod+k", …
 }
 ```
 
@@ -1000,7 +1050,9 @@ import { CommandRegistry, type Command } from "./commands";
 // Vitest's node environment, which has no DOM event constructors.
 function key(
   k: string,
-  modifiers: Partial<Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey">> = {},
+  modifiers: Partial<
+    Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey">
+  > = {},
 ): KeyboardEvent {
   return {
     key: k,
@@ -1028,12 +1080,19 @@ describe("CommandRegistry", () => {
   it("dispatches plain keys and mod combos, skipping disabled commands", () => {
     const registry = new CommandRegistry();
     const ran: string[] = [];
-    registry.register(command({ id: "open", keys: "o", run: () => ran.push("open") }));
+    registry.register(
+      command({ id: "open", keys: "o", run: () => ran.push("open") }),
+    );
     registry.register(
       command({ id: "palette", keys: "mod+k", run: () => ran.push("palette") }),
     );
     registry.register(
-      command({ id: "off", keys: "x", enabled: () => false, run: () => ran.push("off") }),
+      command({
+        id: "off",
+        keys: "x",
+        enabled: () => false,
+        run: () => ran.push("off"),
+      }),
     );
     expect(registry.handleKey(key("o"))).toBe(true);
     expect(registry.handleKey(key("k", { ctrlKey: true }))).toBe(true);
@@ -1073,7 +1132,9 @@ export class CommandRegistry {
   }
 
   list(): Command[] {
-    return [...this.commands.values()].filter((command) => command.enabled?.() ?? true);
+    return [...this.commands.values()].filter(
+      (command) => command.enabled?.() ?? true,
+    );
   }
 
   run(id: string): boolean {
@@ -1132,7 +1193,10 @@ The single DOM-integration task: panel/workspace/tree/palette components, the re
 - [ ] **Step 1: Create `frontend/src/ui/dom.ts`:**
 
 ```ts
-export function required<T extends Element>(root: ParentNode, selector: string): T {
+export function required<T extends Element>(
+  root: ParentNode,
+  selector: string,
+): T {
   const element = root.querySelector<T>(selector);
   if (element === null) {
     throw new Error(`Missing application element: ${selector}`);
@@ -1162,27 +1226,27 @@ Change `render` to accept and use them:
 …pass `options` through to `drawAxes(context, plot, xRange, yRange, colors, options)`, and replace the series loop with:
 
 ```ts
-    response.series.forEach((series, index) => {
-      const slot = options.colorSlots[index] ?? index + 1;
-      this.drawSeries(
-        context,
-        plot,
-        series,
-        xRange,
-        yRange,
-        colors.series[(slot - 1) % colors.series.length] ?? colors.fg2,
-      );
-    });
+response.series.forEach((series, index) => {
+  const slot = options.colorSlots[index] ?? index + 1;
+  this.drawSeries(
+    context,
+    plot,
+    series,
+    xRange,
+    yRange,
+    colors.series[(slot - 1) % colors.series.length] ?? colors.fg2,
+  );
+});
 ```
 
 `drawAxes` gains a final `options: RenderOptions` parameter, and its two hardcoded label calls become:
 
 ```ts
-    context.fillText(
-      options.xLabel,
-      plot.x + plot.width / 2,
-      plot.y + plot.height + 27,
-    );
+context.fillText(
+  options.xLabel,
+  plot.x + plot.width / 2,
+  plot.y + plot.height + 27,
+);
 ```
 
 and (inside the save/rotate block) `context.fillText(options.yLabel, 0, 0);`.
@@ -1261,7 +1325,9 @@ export class PanelView {
     required(this.element, ".panel-maximize").addEventListener("click", () => {
       this.callbacks.onMaximize(this.id);
     });
-    for (const button of this.element.querySelectorAll<HTMLButtonElement>(".mode-pill")) {
+    for (const button of this.element.querySelectorAll<HTMLButtonElement>(
+      ".mode-pill",
+    )) {
       button.addEventListener("click", () => {
         this.callbacks.onSelectMode(this.id, button.dataset.mode as PanelMode);
       });
@@ -1296,7 +1362,9 @@ export class PanelView {
     this.element.classList.toggle("maximized", maximized);
     this.element.setAttribute("aria-label", `${state.title} panel`);
     required(this.element, ".panel-title").textContent = state.title;
-    for (const button of this.element.querySelectorAll<HTMLButtonElement>(".mode-pill")) {
+    for (const button of this.element.querySelectorAll<HTMLButtonElement>(
+      ".mode-pill",
+    )) {
       button.classList.toggle("active", button.dataset.mode === state.mode);
     }
     this.updateLegend(state);
@@ -1320,7 +1388,9 @@ export class PanelView {
     if (tiles === null || state.mode !== "time" || state.series.length === 0) {
       return 0;
     }
-    const bySeries = new Map(state.series.map((series) => [series.path, series]));
+    const bySeries = new Map(
+      state.series.map((series) => [series.path, series]),
+    );
     const shown = tiles.series.filter(
       (tile) => bySeries.get(tile.signal_path)?.visible ?? true,
     );
@@ -1328,9 +1398,15 @@ export class PanelView {
     const options: RenderOptions = {
       xLabel: "time (s)",
       yLabel: yLabel(response.series.map((tile) => tile.unit)),
-      colorSlots: shown.map((tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1),
+      colorSlots: shown.map(
+        (tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1,
+      ),
     };
-    return this.renderer.render(response, { min: window.t0, max: window.t1 }, options);
+    return this.renderer.render(
+      response,
+      { min: window.t0, max: window.t1 },
+      options,
+    );
   }
 
   invalidateTheme(): void {
@@ -1361,9 +1437,13 @@ export class PanelView {
 }
 
 function yLabel(units: readonly (string | null)[]): string {
-  const distinct = new Set(units.filter((unit): unit is string => unit !== null));
+  const distinct = new Set(
+    units.filter((unit): unit is string => unit !== null),
+  );
   const [only] = distinct;
-  return distinct.size === 1 && only !== undefined ? `value (${only})` : "value";
+  return distinct.size === 1 && only !== undefined
+    ? `value (${only})`
+    : "value";
 }
 
 function panelMarkup(): string {
@@ -1371,7 +1451,8 @@ function panelMarkup(): string {
       <span class="drag-handle" aria-hidden="true">⠿</span>
       <span class="panel-title"></span>
       <span class="mode-pills" aria-label="Panel mode">${MODES.map(
-        ({ mode, label }) => `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
+        ({ mode, label }) =>
+          `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
       ).join("")}</span>
       <span class="panel-legend"></span>
       <span class="panel-actions">
@@ -1403,7 +1484,11 @@ import {
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
   onDropSignalNewPanel(path: string): void;
-  onMovePanel(id: string, targetRowIndex: number, targetCellIndex: number): void;
+  onMovePanel(
+    id: string,
+    targetRowIndex: number,
+    targetCellIndex: number,
+  ): void;
 }
 
 export class WorkspaceView {
@@ -1511,7 +1596,11 @@ export class WorkspaceView {
       event.stopPropagation();
       const location = this.model.locate(id);
       if (location !== null) {
-        this.callbacks.onMovePanel(dragged, location.rowIndex, location.cellIndex);
+        this.callbacks.onMovePanel(
+          dragged,
+          location.rowIndex,
+          location.cellIndex,
+        );
       }
     });
   }
@@ -1531,7 +1620,8 @@ export class WorkspaceView {
       const target = event.target;
       const onBackground =
         target === this.root ||
-        (target instanceof HTMLElement && target.classList.contains("workspace-empty"));
+        (target instanceof HTMLElement &&
+          target.classList.contains("workspace-empty"));
       if (!onBackground) return;
       const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
       if (path !== undefined && path !== "") {
@@ -1566,7 +1656,11 @@ export class WorkspaceView {
       seamElement.setPointerCapture(event.pointerId);
       let last = { x: event.clientX, y: event.clientY };
       const move = (moveEvent: PointerEvent): void => {
-        apply(moveEvent.clientX - last.x, moveEvent.clientY - last.y, seamElement);
+        apply(
+          moveEvent.clientX - last.x,
+          moveEvent.clientY - last.y,
+          seamElement,
+        );
         last = { x: moveEvent.clientX, y: moveEvent.clientY };
         this.applySizes();
       };
@@ -1843,7 +1937,10 @@ export class CommandPalette {
     const query = this.input.value;
     this.matches = this.entries
       .map((entry) => ({ entry, score: fuzzyScore(query, entry.title) }))
-      .filter((item): item is { entry: PaletteEntry; score: number } => item.score !== null)
+      .filter(
+        (item): item is { entry: PaletteEntry; score: number } =>
+          item.score !== null,
+      )
       .sort((left, right) => right.score - left.score)
       .slice(0, 12)
       .map((item) => item.entry);
@@ -2111,7 +2208,10 @@ export class AppShell {
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
       const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
         return;
       }
       if (this.commands.handleKey(event)) event.preventDefault();
@@ -2157,7 +2257,9 @@ export class AppShell {
 
   private async reloadSignals(): Promise<void> {
     this.signals = await this.plane.listSignals();
-    this.signalsByPath = new Map(this.signals.map((summary) => [summary.path, summary]));
+    this.signalsByPath = new Map(
+      this.signals.map((summary) => [summary.path, summary]),
+    );
     this.tree?.setSignals(this.signals.map((summary) => summary.path));
     this.tree?.setFavorites(this.workspace.favorites());
     this.updateStatus();
@@ -2589,25 +2691,25 @@ import { runIngest } from "../app/ingest";
 In `registerCommands()`, add first:
 
 ```ts
-    this.commands.register({
-      id: "open-files",
-      title: "Open files…",
-      keys: "o",
-      enabled: () => this.plane.ingest !== null,
-      run: () => {
-        void this.openFiles();
-      },
-    });
+this.commands.register({
+  id: "open-files",
+  title: "Open files…",
+  keys: "o",
+  enabled: () => this.plane.ingest !== null,
+  run: () => {
+    void this.openFiles();
+  },
+});
 ```
 
 In `bindControls()`, add:
 
 ```ts
-    const openButton = required<HTMLButtonElement>(this.root, ".open-files");
-    openButton.hidden = this.plane.ingest === null;
-    openButton.addEventListener("click", () => {
-      this.commands.run("open-files");
-    });
+const openButton = required<HTMLButtonElement>(this.root, ".open-files");
+openButton.hidden = this.plane.ingest === null;
+openButton.addEventListener("click", () => {
+  this.commands.run("open-files");
+});
 ```
 
 - [ ] **Step 2: Add the ingest flow method** to `AppShell`:
@@ -2690,7 +2792,9 @@ git commit -m "wire ingest through the open files command"
 ```ts
 import { expect, test } from "@playwright/test";
 
-test("shared presentation plane renders the demo workspace", async ({ page }) => {
+test("shared presentation plane renders the demo workspace", async ({
+  page,
+}) => {
   await page.goto("/");
 
   await expect(page.getByText("SIGNALSCOPE")).toBeVisible();
@@ -2741,7 +2845,10 @@ test("command palette reaches every command", async ({ page }) => {
   await expect(page.locator(".palette-overlay")).toBeHidden();
 });
 
-test("tree filters, favorites, and drag-to-plot", async ({ page, isMobile }) => {
+test("tree filters, favorites, and drag-to-plot", async ({
+  page,
+  isMobile,
+}) => {
   test.skip(isMobile, "the signal tree is hidden on the mobile breakpoint");
   await page.goto("/");
 
@@ -2807,5 +2914,3 @@ git commit -m "cover the workbench fundamentals end to end"
 - [ ] `./scripts/ci.sh all` green.
 - [ ] Manual pass of the Step-9 checklist from Task 5 in both themes.
 - [ ] PR description lists the decision log at the top of this plan for maintainer review, and notes that Task 6 requires the data-plane plan's Task 7.
-
-

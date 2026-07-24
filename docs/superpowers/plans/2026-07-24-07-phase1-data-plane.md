@@ -4,7 +4,7 @@
 
 **Goal:** Native file dialogs, MCAP ingest, background ingest jobs with progress reporting, and persisted pyramid sidecars — the data-plane half of Phase 1 ("workbench fundamentals" in `docs/implementation-roadmap.md`).
 
-**Architecture:** Ingest becomes format-dispatched (`ingest_path` sniffs magic bytes → `CsvDecoder` / `McapDecoder`) with a decode-progress callback threaded through the `Decoder` trait. The shell runs ingest on a worker thread as a *job*: `ingest_source` returns a job id immediately, the frontend polls `ingest_status` (no Tauri events/channels — the frontend keeps zero runtime dependencies and speaks only request/response `Envelope`s). Pyramids persist as a versioned binary sidecar beside the source (ADR 0003's format, made concrete); a fingerprint-valid sidecar skips decode + build entirely on reopen. The `DataPlane` interface grows a *capability port* (`ingest: IngestPort | null`) — UI may branch on capability presence, never on host identity.
+**Architecture:** Ingest becomes format-dispatched (`ingest_path` sniffs magic bytes → `CsvDecoder` / `McapDecoder`) with a decode-progress callback threaded through the `Decoder` trait. The shell runs ingest on a worker thread as a _job_: `ingest_source` returns a job id immediately, the frontend polls `ingest_status` (no Tauri events/channels — the frontend keeps zero runtime dependencies and speaks only request/response `Envelope`s). Pyramids persist as a versioned binary sidecar beside the source (ADR 0003's format, made concrete); a fingerprint-valid sidecar skips decode + build entirely on reopen. The `DataPlane` interface grows a _capability port_ (`ingest: IngestPort | null`) — UI may branch on capability presence, never on host identity.
 
 **Tech Stack:** Rust (edition 2024, clippy all+pedantic at `-D warnings`, `unsafe_code = "forbid"`), `mcap` 0.25, `crc32fast` 1.5, `tauri-plugin-dialog` 2, TypeScript strict frontend with zero runtime deps.
 
@@ -23,7 +23,7 @@
 2. **Progress = polled jobs, not Tauri channels/events.** Channel IPC would require `@tauri-apps/api` (or fragile raw-internals code) in a frontend that has zero runtime deps. Polling every 150 ms over the existing envelope protocol is boring and testable. Recorded in ADR 0009 with the upgrade path.
 3. **The store mutex is held for the duration of an ingest job.** Tile queries for already-loaded signals block while a new file ingests. Acceptable for Phase 1 (first load is the common case); revisit with out-of-core store work. Recorded in ADR 0009.
 4. **MCAP reads the whole file into memory for now.** The store itself is in-memory in Phase 1, so mmap streaming buys nothing yet; the `Decoder` seam hides the change when the mmap-backed store lands. Recorded in ADR 0009.
-5. **Sidecar caches raw columns + merged levels** (not just levels), so a cache hit skips CSV/MCAP parse entirely. Write failures (read-only dirs) are non-fatal: log and continue. Cache corruption is a *miss*, never an error.
+5. **Sidecar caches raw columns + merged levels** (not just levels), so a cache hit skips CSV/MCAP parse entirely. Write failures (read-only dirs) are non-fatal: log and continue. Cache corruption is a _miss_, never an error.
 6. **`protocol_version` bumps 1 → 2**: `SignalSummary` gains `t_min`/`t_max` (the UI needs data extents to fit the time window) and the ingest command surface is replaced. Nothing persisted uses v1.
 
 ## Sequencing
@@ -183,24 +183,24 @@ fn signal_summary(signal: &Signal) -> SignalSummary {
 In `frontend/src/app/data-plane.ts` (`createDemoManifest`), replace the two summary literals with:
 
 ```ts
-  const summaries: SignalSummary[] = [
-    {
-      signal_id: "1",
-      path: "rocket/velocity_body/x",
-      unit: "m/s",
-      point_count: String(pointCount),
-      t_min: 0,
-      t_max: (pointCount - 1) / 30,
-    },
-    {
-      signal_id: "2",
-      path: "rocket/velocity_body/y",
-      unit: "m/s",
-      point_count: String(pointCount),
-      t_min: 0,
-      t_max: (pointCount - 1) / 30,
-    },
-  ];
+const summaries: SignalSummary[] = [
+  {
+    signal_id: "1",
+    path: "rocket/velocity_body/x",
+    unit: "m/s",
+    point_count: String(pointCount),
+    t_min: 0,
+    t_max: (pointCount - 1) / 30,
+  },
+  {
+    signal_id: "2",
+    path: "rocket/velocity_body/y",
+    unit: "m/s",
+    point_count: String(pointCount),
+    t_min: 0,
+    t_max: (pointCount - 1) / 30,
+  },
+];
 ```
 
 - [ ] **Step 4: Verify**
@@ -955,7 +955,7 @@ In `core/scope-core/src/lib.rs`, add `pub mod cache;` above `pub mod compute;` (
 
 - [ ] **Step 3: Create `core/scope-core/src/cache.rs`:**
 
-```rust
+````rust
 //! Versioned pyramid sidecar cache (ADR 0003).
 //!
 //! Layout, all integers little-endian:
@@ -1476,7 +1476,7 @@ mod tests {
         assert!(try_load(&source, &mut fresh, &mut |_| {}).unwrap().is_none());
     }
 }
-```
+````
 
 Note: `checked_next_multiple_of` and `div_ceil` are stable well below the workspace's `rust-version = 1.85`.
 
@@ -1500,7 +1500,7 @@ per-signal sections, and 8-byte-aligned little-endian payload sections
 optional envelope fields encode `None` as NaN — sound because stored
 envelope values are finite by construction). Every section carries its own
 crc32. Raw columns are cached alongside levels so a hit skips decode
-entirely. Corrupt or stale sidecars are cache *misses* that trigger rebuild
+entirely. Corrupt or stale sidecars are cache _misses_ that trigger rebuild
 and rewrite; write failures (e.g. read-only directories) are non-fatal.
 ```
 
@@ -2058,7 +2058,10 @@ function fakePort(statuses: IngestStatus[]): IngestPort {
   };
 }
 
-const running = (stage: IngestStatus["stage"], fraction: number): IngestStatus => ({
+const running = (
+  stage: IngestStatus["stage"],
+  fraction: number,
+): IngestStatus => ({
   state: "running",
   stage,
   fraction,
@@ -2074,14 +2077,25 @@ describe("runIngest", () => {
       running("pyramid", 1),
       { state: "done", stage: "cache", fraction: 1, response, error: null },
     ]);
-    const result = await runIngest(port, "/tmp/flight.csv", (s) => seen.push(s), 0);
+    const result = await runIngest(
+      port,
+      "/tmp/flight.csv",
+      (s) => seen.push(s),
+      0,
+    );
     expect(result).toEqual(response);
     expect(seen.map((s) => s.stage)).toEqual(["decode", "pyramid", "cache"]);
   });
 
   it("throws the job error on failure", async () => {
     const port = fakePort([
-      { state: "failed", stage: "decode", fraction: 0, response: null, error: "boom" },
+      {
+        state: "failed",
+        stage: "decode",
+        fraction: 0,
+        response: null,
+        error: "boom",
+      },
     ]);
     await expect(
       runIngest(port, "/tmp/flight.csv", () => undefined, 0),
