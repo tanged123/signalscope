@@ -1,16 +1,20 @@
 import { expect, test } from "@playwright/test";
 
-test("panel lifecycle has keyboard and pointer paths", async ({ page }) => {
+test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".panel")).toHaveCount(1);
 
   await page.keyboard.press("n");
   await expect(page.locator(".panel")).toHaveCount(2);
+  await expect(page.locator(".workspace-row")).toHaveCount(2);
   await expect(page.locator(".panel-empty").last()).toBeVisible();
   await expect(page.locator(".panel").last()).toHaveClass(/focused/);
 
-  await page.locator(".panel").last().locator(".panel-split").click();
+  const bottomRow = page.locator(".workspace-row").last();
+  await bottomRow.locator(".panel-split-right").click();
   await expect(page.locator(".panel")).toHaveCount(3);
+  await expect(page.locator(".workspace-row")).toHaveCount(2);
+  await expect(bottomRow.locator(".panel")).toHaveCount(2);
 
   await page.locator(".panel").last().locator(".panel-close").click();
   await page.locator(".panel").last().locator(".panel-close").click();
@@ -61,7 +65,7 @@ test("maximize fills the workspace and split restores the layout", async ({
     "panel-2",
   );
 
-  await page.locator(".panel.maximized .panel-split").click();
+  await page.locator(".panel.maximized .panel-split-right").click();
   await expect(page.locator(".panel")).toHaveCount(3);
   await expect(page.locator(".panel.maximized")).toHaveCount(0);
   await expect(page.locator(".panel").last()).toBeVisible();
@@ -109,11 +113,13 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
   await expect(page.locator(".legend-chip")).toHaveCount(0);
 });
 
-test("command palette reaches every command", async ({ page }) => {
+test("command palette runs workspace-scoped panel commands", async ({
+  page,
+}) => {
   await page.goto("/");
   await page.keyboard.press("ControlOrMeta+k");
   await expect(page.locator(".palette-input")).toBeFocused();
-  await page.locator(".palette-input").fill("new panel");
+  await page.locator(".palette-input").fill("split focused panel right");
   await page.keyboard.press("Enter");
   await expect(page.locator(".panel")).toHaveCount(2);
   await expect(page.locator(".palette-overlay")).toBeHidden();

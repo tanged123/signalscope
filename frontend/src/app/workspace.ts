@@ -153,7 +153,7 @@ export class WorkspaceModel {
     return panel;
   }
 
-  splitPanel(id: string): PanelState | null {
+  splitPanelRight(id: string): PanelState | null {
     const location = this.locate(id);
     if (location === null) return null;
     const row = this.activeTab().layout[location.rowIndex];
@@ -166,6 +166,23 @@ export class WorkspaceModel {
     row.panels.splice(location.cellIndex + 1, 0, {
       panel_id: panel.id,
       width,
+    });
+    this.activeTab().focused_panel_id = panel.id;
+    return panel;
+  }
+
+  splitPanelDown(id: string): PanelState | null {
+    const location = this.locate(id);
+    if (location === null) return null;
+    const row = this.activeTab().layout[location.rowIndex];
+    if (row === undefined) return null;
+    this.maximized = null;
+    const panel = this.createPanel();
+    const height = row.height / 2;
+    row.height = height;
+    this.activeTab().layout.splice(location.rowIndex + 1, 0, {
+      height,
+      panels: [{ panel_id: panel.id, width: 1 }],
     });
     this.activeTab().focused_panel_id = panel.id;
     return panel;

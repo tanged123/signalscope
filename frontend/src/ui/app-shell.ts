@@ -59,8 +59,12 @@ export class AppShell {
           this.workspace.closePanel(id);
           this.afterLayoutChange();
         },
-        onSplit: (id) => {
-          this.workspace.splitPanel(id);
+        onSplitRight: (id) => {
+          this.workspace.splitPanelRight(id);
+          this.afterLayoutChange();
+        },
+        onSplitDown: (id) => {
+          this.workspace.splitPanelDown(id);
           this.afterLayoutChange();
         },
         onMaximize: (id) => {
@@ -159,11 +163,26 @@ export class AppShell {
       },
     });
     this.commands.register({
-      id: "new-panel-row",
-      title: "New panel row",
+      id: "split-panel-down",
+      title: "Split focused panel down",
       keys: "n",
       run: () => {
-        this.workspace.addPanelRow();
+        const id = this.workspace.focusedPanelId();
+        if (id === null) {
+          this.workspace.addPanelRow();
+        } else {
+          this.workspace.splitPanelDown(id);
+        }
+        this.afterLayoutChange();
+      },
+    });
+    this.commands.register({
+      id: "split-panel-right",
+      title: "Split focused panel right",
+      enabled: () => this.workspace.focusedPanelId() !== null,
+      run: () => {
+        const id = this.workspace.focusedPanelId();
+        if (id !== null) this.workspace.splitPanelRight(id);
         this.afterLayoutChange();
       },
     });
@@ -298,9 +317,6 @@ export class AppShell {
     });
     required(this.root, ".linked-toggle").addEventListener("click", () => {
       this.toggleLinked();
-    });
-    required(this.root, ".new-panel").addEventListener("click", () => {
-      this.commands.run("new-panel-row");
     });
     required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
       "input",
@@ -509,8 +525,6 @@ function shellMarkup(): string {
       </span>
       <span class="tool-divider"></span>
       <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
-      <button class="tool-button new-panel">+ Panel</button>
-      <span class="tool-divider"></span>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
       <span class="tool-spacer"></span>
@@ -548,7 +562,7 @@ function shellMarkup(): string {
       <span class="point-count status-value">0 pts</span>
       <span>render <span class="render-ms status-value">— ms</span></span>
       <span>cursor <span class="status-value">t = —</span></span>
-      <span class="gesture-hint">drag signal → panel · N = new row · / = filter · ⌘K = commands</span>
+      <span class="gesture-hint">drag signal → panel · N = split down · / = filter · ⌘K = commands</span>
       <span class="status-command">⌘K</span>
     </footer>
   </main>`;

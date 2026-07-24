@@ -270,7 +270,7 @@ function emptyState(hasSignals: boolean): HTMLElement {
   hint.className = "empty-hint";
   if (hasSignals) {
     headline.textContent = "No panels open.";
-    hint.textContent = "New panel row (N) · drag a signal here · ⌘K commands";
+    hint.textContent = "New panel (N) · drag a signal here · ⌘K commands";
   } else {
     headline.textContent = "No data loaded.";
     hint.textContent = "Open CSV / MCAP (O) · ⌘K commands";

@@ -9,6 +9,9 @@ test("shared presentation plane renders the demo workspace", async ({
   await expect(page.locator(".menu-bar")).toHaveCount(0);
   await expect(page.locator(".tool-bar")).toBeVisible();
   await expect(page.locator(".workspace-tabs")).toBeVisible();
+  await expect(page.locator(".new-panel")).toHaveCount(0);
+  await expect(page.locator(".panel-split-right")).toBeVisible();
+  await expect(page.locator(".panel-split-down")).toBeVisible();
   await expect(page.getByLabel("Panel 1 panel")).toBeVisible();
   await expect(page.locator(".legend-chip")).toHaveCount(2);
   await expect(page.locator(".plot-canvas").first()).toBeVisible();

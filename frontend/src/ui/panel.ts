@@ -23,7 +23,8 @@ const MODE_NAMES: Record<PanelMode, string> = {
 export interface PanelCallbacks {
   onFocus(id: string): void;
   onClose(id: string): void;
-  onSplit(id: string): void;
+  onSplitRight(id: string): void;
+  onSplitDown(id: string): void;
   onMaximize(id: string): void;
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignal(id: string, path: string): void;
@@ -63,9 +64,18 @@ export class PanelView {
     required(this.element, ".panel-close").addEventListener("click", () => {
       this.callbacks.onClose(this.id);
     });
-    required(this.element, ".panel-split").addEventListener("click", () => {
-      this.callbacks.onSplit(this.id);
-    });
+    required(this.element, ".panel-split-right").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onSplitRight(this.id);
+      },
+    );
+    required(this.element, ".panel-split-down").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onSplitDown(this.id);
+      },
+    );
     required(this.element, ".panel-maximize").addEventListener("click", () => {
       this.callbacks.onMaximize(this.id);
     });
@@ -203,7 +213,11 @@ function panelMarkup(): string {
       ).join("")}</span>
       <span class="panel-legend"></span>
       <span class="panel-actions">
-        <button class="panel-action panel-split" title="Split panel">⊞</button>
+        <span class="panel-split-actions" aria-label="Split panel" role="group">
+          <span class="panel-split-label" aria-hidden="true">split</span>
+          <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right">→</button>
+          <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down (N)">↓</button>
+        </span>
         <button class="panel-action panel-maximize" title="Maximize panel">⤢</button>
         <button class="panel-action panel-close" title="Close panel">✕</button>
       </span>

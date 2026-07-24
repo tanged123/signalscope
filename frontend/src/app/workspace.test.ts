@@ -53,11 +53,25 @@ describe("WorkspaceModel", () => {
     expect(model.focusedPanelId()).toBe(second.id);
   });
 
-  it("splits a panel into equal halves of its cell", () => {
+  it("splits a panel right into equal halves of its cell", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
-    model.splitPanel(first.id);
+    model.splitPanelRight(first.id);
     expect(widths(model, 0)).toEqual([0.5, 0.5]);
+  });
+
+  it("splits a panel down immediately below its row", () => {
+    const model = new WorkspaceModel();
+    const first = model.addPanelRow();
+    const last = model.addPanelRow();
+    const split = model.splitPanelDown(first.id);
+    if (split === null) throw new Error("split failed");
+
+    expect(model.layout()).toHaveLength(3);
+    expect(heights(model)).toEqual([0.25, 0.25, 0.5]);
+    expect(model.layout()[1]?.panels[0]?.panel_id).toBe(split.id);
+    expect(model.layout()[2]?.panels[0]?.panel_id).toBe(last.id);
+    expect(model.focusedPanelId()).toBe(split.id);
   });
 
   it("closing the last panel of a row removes the row and renormalizes", () => {
@@ -73,7 +87,7 @@ describe("WorkspaceModel", () => {
   it("closing a panel in a shared row gives its width to the survivors", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
-    const second = model.splitPanel(first.id);
+    const second = model.splitPanelRight(first.id);
     if (second === null) throw new Error("split failed");
     model.closePanel(first.id);
     expect(widths(model, 0)).toEqual([1]);
@@ -122,7 +136,7 @@ describe("WorkspaceModel", () => {
   it("moves a panel to a new bottom row when the target row does not exist", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
-    model.splitPanel(first.id);
+    model.splitPanelRight(first.id);
     model.movePanel(first.id, 5, 0);
     expect(model.layout()).toHaveLength(2);
     expect(model.layout()[1]?.panels[0]?.panel_id).toBe(first.id);
@@ -141,11 +155,11 @@ describe("WorkspaceModel", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
     model.toggleMaximize(first.id);
-    model.splitPanel(first.id);
+    model.splitPanelRight(first.id);
     expect(model.maximizedPanelId()).toBeNull();
 
     model.toggleMaximize(first.id);
-    model.addPanelRow();
+    model.splitPanelDown(first.id);
     expect(model.maximizedPanelId()).toBeNull();
   });
 

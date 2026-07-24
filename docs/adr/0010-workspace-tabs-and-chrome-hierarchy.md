@@ -39,8 +39,14 @@ The application uses one global toolbar containing only implemented global
 actions and global state. Empty conventional menu headings are not rendered;
 future menus may return only when they contain real commands. A workspace-tab
 strip sits above the panel grid and remains visible during panel maximize.
-While maximized, a separate contextual panel rail lists sibling panels and
-offers an explicit `Restore grid` action.
+The visible ownership hierarchy is global application chrome, then the active
+workspace tab, then panel-local controls.
+Panel creation is contextual to that active workspace: `Split right` and
+`Split down` are adjacent actions in each panel header rather than a separate
+global `+ Panel` action. `N` is the keyboard path for `Split down`, creating
+the first panel when the workspace is empty. While maximized, a separate
+contextual panel rail lists sibling panels and offers an explicit `Restore
+grid` action.
 
 ## Consequences
 
