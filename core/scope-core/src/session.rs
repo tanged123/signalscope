@@ -14,9 +14,14 @@ impl Default for Session {
             schema_version: SESSION_SCHEMA_VERSION,
             theme: Theme::Dark,
             linked_time: LinkedTime::default(),
-            focused_panel_id: None,
-            panels: Vec::new(),
-            layout: Vec::new(),
+            active_tab_id: "workspace-1".into(),
+            tabs: vec![WorkspaceTab {
+                id: "workspace-1".into(),
+                title: "Workspace 1".into(),
+                focused_panel_id: None,
+                panels: Vec::new(),
+                layout: Vec::new(),
+            }],
             favorites: Vec::new(),
         }
     }
@@ -95,6 +100,33 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(2);
             migrate(2, value)
         }
+        2 => {
+            let object = value.as_object_mut().ok_or_else(|| {
+                serde_json::Error::io(std::io::Error::other("session is not an object"))
+            })?;
+            let focused_panel_id = object
+                .remove("focused_panel_id")
+                .unwrap_or(serde_json::Value::Null);
+            let panels = object
+                .remove("panels")
+                .unwrap_or_else(|| serde_json::json!([]));
+            let layout = object
+                .remove("layout")
+                .unwrap_or_else(|| serde_json::json!([]));
+            object.insert("active_tab_id".into(), serde_json::json!("workspace-1"));
+            object.insert(
+                "tabs".into(),
+                serde_json::json!([{
+                    "id": "workspace-1",
+                    "title": "Workspace 1",
+                    "focused_panel_id": focused_panel_id,
+                    "panels": panels,
+                    "layout": layout
+                }]),
+            );
+            object.insert("schema_version".into(), serde_json::json!(3));
+            migrate(3, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -117,24 +149,35 @@ mod tests {
     #[test]
     fn current_session_round_trips() {
         let session = Session {
-            focused_panel_id: Some("panel-a".into()),
-            panels: vec![PanelState {
-                id: "panel-a".into(),
-                title: "Body velocity".into(),
-                mode: PanelMode::Time,
-                axis_style: AxisStyle::Gutter,
-                x_signal: None,
-                color_signal: None,
-                series: vec![SeriesState {
-                    path: "rocket/velocity_body/x".into(),
-                    color_slot: 1,
-                    dash: DashStyle::Solid,
-                    width: 1.5,
-                    visible: true,
+            tabs: vec![WorkspaceTab {
+                id: "workspace-1".into(),
+                title: "Flight review".into(),
+                focused_panel_id: Some("panel-a".into()),
+                panels: vec![PanelState {
+                    id: "panel-a".into(),
+                    title: "Body velocity".into(),
+                    mode: PanelMode::Time,
+                    axis_style: AxisStyle::Gutter,
+                    x_signal: None,
+                    color_signal: None,
+                    series: vec![SeriesState {
+                        path: "rocket/velocity_body/x".into(),
+                        color_slot: 1,
+                        dash: DashStyle::Solid,
+                        width: 1.5,
+                        visible: true,
+                    }],
+                    y_range: None,
+                    annotations: Vec::new(),
+                    show_stats: false,
                 }],
-                y_range: None,
-                annotations: Vec::new(),
-                show_stats: false,
+                layout: vec![LayoutRow {
+                    height: 1.0,
+                    panels: vec![LayoutCell {
+                        panel_id: "panel-a".into(),
+                        width: 1.0,
+                    }],
+                }],
             }],
             ..Session::default()
         };
@@ -150,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn v1_sessions_migrate_to_v2() {
+    fn v1_sessions_migrate_to_current() {
         let json = r#"{
             "app": "signalscope",
             "schema_version": 1,
@@ -161,10 +204,32 @@ mod tests {
         }"#;
         let session = from_json(json).unwrap();
         assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
-        assert_eq!(session.layout.len(), 1);
-        assert_eq!(session.layout[0].panels[0].panel_id, "panel-a");
-        assert!((session.layout[0].panels[0].width - 1.0).abs() < f64::EPSILON);
+        assert_eq!(session.tabs.len(), 1);
+        assert_eq!(session.tabs[0].layout.len(), 1);
+        assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
+        assert!((session.tabs[0].layout[0].panels[0].width - 1.0).abs() < f64::EPSILON);
         assert!(session.favorites.is_empty());
+    }
+
+    #[test]
+    fn v2_sessions_migrate_panels_into_the_first_workspace_tab() {
+        let json = r#"{
+            "app": "signalscope",
+            "schema_version": 2,
+            "theme": "dark",
+            "linked_time": {"t0":0.0,"t1":1.0,"linked":true,"paused":false,"cursorT":null,"mode":"fixed"},
+            "focused_panel_id": "panel-a",
+            "panels": [{"id":"panel-a","title":"A","mode":"time","axis_style":"gutter","x_signal":null,"color_signal":null,"series":[],"y_range":null,"annotations":[],"show_stats":false}],
+            "layout": [{"height":1.0,"panels":[{"panel_id":"panel-a","width":1.0}]}],
+            "favorites": ["rocket/velocity"]
+        }"#;
+        let session = from_json(json).unwrap();
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(session.active_tab_id, "workspace-1");
+        assert_eq!(session.tabs[0].focused_panel_id.as_deref(), Some("panel-a"));
+        assert_eq!(session.tabs[0].panels[0].id, "panel-a");
+        assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
+        assert_eq!(session.favorites, ["rocket/velocity"]);
     }
 
     #[test]

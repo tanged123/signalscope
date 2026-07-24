@@ -3,6 +3,7 @@ import type {
   PanelMode,
   PanelState,
   Session,
+  WorkspaceTab,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 
@@ -22,9 +23,16 @@ export function emptySession(): Session {
       cursorT: null,
       mode: "fixed",
     },
-    focused_panel_id: null,
-    panels: [],
-    layout: [],
+    active_tab_id: "workspace-1",
+    tabs: [
+      {
+        id: "workspace-1",
+        title: "Workspace 1",
+        focused_panel_id: null,
+        panels: [],
+        layout: [],
+      },
+    ],
     favorites: [],
   };
 }
@@ -33,10 +41,19 @@ export class WorkspaceModel {
   private readonly session: Session;
   private maximized: string | null = null;
   private nextPanelNumber: number;
+  private nextTabNumber: number;
 
   constructor(session: Session = emptySession()) {
     this.session = session;
-    this.nextPanelNumber = session.panels.length + 1;
+    if (session.tabs.length === 0) {
+      session.tabs.push(createWorkspaceTab(1));
+    }
+    if (!session.tabs.some((tab) => tab.id === session.active_tab_id)) {
+      session.active_tab_id = session.tabs[0]?.id ?? "workspace-1";
+    }
+    this.nextPanelNumber =
+      session.tabs.reduce((total, tab) => total + tab.panels.length, 0) + 1;
+    this.nextTabNumber = session.tabs.length + 1;
   }
 
   snapshot(): Readonly<Session> {
@@ -44,11 +61,64 @@ export class WorkspaceModel {
   }
 
   panels(): readonly PanelState[] {
-    return this.session.panels;
+    return this.activeTab().panels;
   }
 
   layout(): readonly LayoutRow[] {
-    return this.session.layout;
+    return this.activeTab().layout;
+  }
+
+  tabs(): readonly WorkspaceTab[] {
+    return this.session.tabs;
+  }
+
+  activeTabId(): string {
+    return this.session.active_tab_id;
+  }
+
+  activeTab(): WorkspaceTab {
+    const tab = this.session.tabs.find(
+      (entry) => entry.id === this.session.active_tab_id,
+    );
+    if (tab === undefined) {
+      throw new Error("Active workspace tab is unavailable");
+    }
+    return tab;
+  }
+
+  addTab(): WorkspaceTab {
+    let tab = createWorkspaceTab(this.nextTabNumber);
+    while (this.session.tabs.some((entry) => entry.id === tab.id)) {
+      this.nextTabNumber += 1;
+      tab = createWorkspaceTab(this.nextTabNumber);
+    }
+    this.nextTabNumber += 1;
+    this.session.tabs.push(tab);
+    this.session.active_tab_id = tab.id;
+    this.maximized = null;
+    return tab;
+  }
+
+  selectTab(id: string): boolean {
+    if (!this.session.tabs.some((tab) => tab.id === id)) return false;
+    this.session.active_tab_id = id;
+    this.maximized = null;
+    return true;
+  }
+
+  closeTab(id: string): void {
+    if (this.session.tabs.length <= 1) return;
+    const index = this.session.tabs.findIndex((tab) => tab.id === id);
+    if (index === -1) return;
+    this.session.tabs.splice(index, 1);
+    if (this.session.active_tab_id === id) {
+      const replacement =
+        this.session.tabs[Math.min(index, this.session.tabs.length - 1)];
+      if (replacement !== undefined) {
+        this.session.active_tab_id = replacement.id;
+      }
+    }
+    this.maximized = null;
   }
 
   favorites(): readonly string[] {
@@ -56,7 +126,7 @@ export class WorkspaceModel {
   }
 
   focusedPanelId(): string | null {
-    return this.session.focused_panel_id;
+    return this.activeTab().focused_panel_id;
   }
 
   maximizedPanelId(): string | null {
@@ -64,11 +134,11 @@ export class WorkspaceModel {
   }
 
   panel(id: string): PanelState | undefined {
-    return this.session.panels.find((panel) => panel.id === id);
+    return this.activeTab().panels.find((panel) => panel.id === id);
   }
 
   locate(id: string): { rowIndex: number; cellIndex: number } | null {
-    for (const [rowIndex, row] of this.session.layout.entries()) {
+    for (const [rowIndex, row] of this.activeTab().layout.entries()) {
       const cellIndex = row.panels.findIndex((cell) => cell.panel_id === id);
       if (cellIndex !== -1) return { rowIndex, cellIndex };
     }
@@ -79,14 +149,14 @@ export class WorkspaceModel {
     this.maximized = null;
     const panel = this.createPanel();
     this.appendRow(panel.id);
-    this.session.focused_panel_id = panel.id;
+    this.activeTab().focused_panel_id = panel.id;
     return panel;
   }
 
   splitPanel(id: string): PanelState | null {
     const location = this.locate(id);
     if (location === null) return null;
-    const row = this.session.layout[location.rowIndex];
+    const row = this.activeTab().layout[location.rowIndex];
     const cell = row?.panels[location.cellIndex];
     if (row === undefined || cell === undefined) return null;
     this.maximized = null;
@@ -97,7 +167,7 @@ export class WorkspaceModel {
       panel_id: panel.id,
       width,
     });
-    this.session.focused_panel_id = panel.id;
+    this.activeTab().focused_panel_id = panel.id;
     return panel;
   }
 
@@ -105,25 +175,34 @@ export class WorkspaceModel {
     const location = this.locate(id);
     if (location === null) return;
     this.detachCell(location);
-    this.session.panels = this.session.panels.filter(
-      (panel) => panel.id !== id,
-    );
+    const tab = this.activeTab();
+    tab.panels = tab.panels.filter((panel) => panel.id !== id);
     if (this.maximized === id) this.maximized = null;
-    if (this.session.focused_panel_id === id) {
-      this.session.focused_panel_id = this.session.panels[0]?.id ?? null;
+    if (tab.focused_panel_id === id) {
+      tab.focused_panel_id = tab.panels[0]?.id ?? null;
     }
   }
 
   focusPanel(id: string): void {
-    if (this.panel(id) !== undefined) this.session.focused_panel_id = id;
+    if (this.panel(id) !== undefined) this.activeTab().focused_panel_id = id;
   }
 
   toggleMaximize(id: string): void {
     if (this.maximized === id) {
       this.maximized = null;
-    } else if (this.panel(id) !== undefined) {
-      this.maximized = id;
+    } else {
+      this.maximizePanel(id);
     }
+  }
+
+  maximizePanel(id: string): void {
+    if (this.panel(id) === undefined) return;
+    this.maximized = id;
+    this.activeTab().focused_panel_id = id;
+  }
+
+  restoreGrid(): void {
+    this.maximized = null;
   }
 
   setMode(id: string, mode: PanelMode): void {
@@ -161,8 +240,8 @@ export class WorkspaceModel {
   }
 
   resizeRows(seamIndex: number, delta: number): void {
-    const above = this.session.layout[seamIndex];
-    const below = this.session.layout[seamIndex + 1];
+    const above = this.activeTab().layout[seamIndex];
+    const below = this.activeTab().layout[seamIndex + 1];
     if (above === undefined || below === undefined) return;
     const shift = clampShift(above.height, below.height, delta);
     above.height += shift;
@@ -170,7 +249,7 @@ export class WorkspaceModel {
   }
 
   resizeColumns(rowIndex: number, seamIndex: number, delta: number): void {
-    const row = this.session.layout[rowIndex];
+    const row = this.activeTab().layout[rowIndex];
     const left = row?.panels[seamIndex];
     const right = row?.panels[seamIndex + 1];
     if (left === undefined || right === undefined) return;
@@ -186,7 +265,7 @@ export class WorkspaceModel {
     const removedRow = this.detachCell(location);
     let rowIndex = targetRowIndex;
     if (removedRow && location.rowIndex < rowIndex) rowIndex -= 1;
-    const row = this.session.layout[rowIndex];
+    const row = this.activeTab().layout[rowIndex];
     if (row === undefined) {
       this.appendRow(id);
     } else {
@@ -197,7 +276,7 @@ export class WorkspaceModel {
         width: share,
       });
     }
-    this.session.focused_panel_id = id;
+    this.activeTab().focused_panel_id = id;
   }
 
   toggleFavorite(path: string): void {
@@ -214,13 +293,14 @@ export class WorkspaceModel {
     rowIndex: number;
     cellIndex: number;
   }): boolean {
-    const row = this.session.layout[location.rowIndex];
+    const layout = this.activeTab().layout;
+    const row = layout[location.rowIndex];
     if (row === undefined) return false;
     row.panels.splice(location.cellIndex, 1);
     if (row.panels.length === 0) {
-      this.session.layout.splice(location.rowIndex, 1);
+      layout.splice(location.rowIndex, 1);
       normalize(
-        this.session.layout,
+        layout,
         (item) => item.height,
         (item, value) => (item.height = value),
       );
@@ -235,11 +315,12 @@ export class WorkspaceModel {
   }
 
   private appendRow(panelId: string): void {
-    const previous = this.session.layout.length;
-    for (const row of this.session.layout) {
+    const layout = this.activeTab().layout;
+    const previous = layout.length;
+    for (const row of layout) {
       row.height *= previous / (previous + 1);
     }
-    this.session.layout.push({
+    layout.push({
       height: previous === 0 ? 1 : 1 / (previous + 1),
       panels: [{ panel_id: panelId, width: 1 }],
     });
@@ -247,7 +328,7 @@ export class WorkspaceModel {
 
   private createPanel(): PanelState {
     let id = `panel-${String(this.nextPanelNumber)}`;
-    while (this.panel(id) !== undefined) {
+    while (this.panelIdExists(id)) {
       this.nextPanelNumber += 1;
       id = `panel-${String(this.nextPanelNumber)}`;
     }
@@ -264,9 +345,25 @@ export class WorkspaceModel {
       show_stats: false,
     };
     this.nextPanelNumber += 1;
-    this.session.panels.push(panel);
+    this.activeTab().panels.push(panel);
     return panel;
   }
+
+  private panelIdExists(id: string): boolean {
+    return this.session.tabs.some((tab) =>
+      tab.panels.some((panel) => panel.id === id),
+    );
+  }
+}
+
+function createWorkspaceTab(number: number): WorkspaceTab {
+  return {
+    id: `workspace-${String(number)}`,
+    title: `Workspace ${String(number)}`,
+    focused_panel_id: null,
+    panels: [],
+    layout: [],
+  };
 }
 
 function clampShift(first: number, second: number, delta: number): number {

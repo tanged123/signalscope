@@ -11,6 +11,36 @@ function widths(model: WorkspaceModel, rowIndex: number): number[] {
 }
 
 describe("WorkspaceModel", () => {
+  it("keeps panel grids independent across workspace tabs", () => {
+    const model = new WorkspaceModel();
+    const firstPanel = model.addPanelRow();
+    const firstTab = model.activeTabId();
+    const secondTab = model.addTab();
+    const secondPanel = model.addPanelRow();
+
+    expect(model.tabs().map((tab) => tab.title)).toEqual([
+      "Workspace 1",
+      "Workspace 2",
+    ]);
+    expect(model.panels().map((panel) => panel.id)).toEqual([secondPanel.id]);
+    expect(model.selectTab(firstTab)).toBe(true);
+    expect(model.panels().map((panel) => panel.id)).toEqual([firstPanel.id]);
+    expect(model.selectTab(secondTab.id)).toBe(true);
+    expect(model.focusedPanelId()).toBe(secondPanel.id);
+  });
+
+  it("closes tabs without ever removing the last workspace", () => {
+    const model = new WorkspaceModel();
+    const firstTab = model.activeTabId();
+    const secondTab = model.addTab();
+    model.closeTab(secondTab.id);
+    expect(model.activeTabId()).toBe(firstTab);
+    expect(model.tabs()).toHaveLength(1);
+
+    model.closeTab(firstTab);
+    expect(model.tabs()).toHaveLength(1);
+  });
+
   it("adds panel rows with rebalanced heights", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
@@ -129,7 +159,9 @@ describe("WorkspaceModel", () => {
 
   it("never reuses an id already present in a loaded session", () => {
     const session = emptySession();
-    session.panels.push({
+    const tab = session.tabs[0];
+    if (tab === undefined) throw new Error("default workspace is missing");
+    tab.panels.push({
       id: "panel-1",
       title: "Panel 1",
       mode: "time",
@@ -141,11 +173,12 @@ describe("WorkspaceModel", () => {
       annotations: [],
       show_stats: false,
     });
-    session.layout.push({
+    tab.layout.push({
       height: 1,
       panels: [{ panel_id: "panel-1", width: 1 }],
     });
     const model = new WorkspaceModel(session);
+    model.addTab();
     const fresh = model.addPanelRow();
     expect(fresh.id).not.toBe("panel-1");
   });
