@@ -108,7 +108,7 @@ export class AppShell {
   private registerCommands(): void {
     this.commands.register({
       id: "open-files",
-      title: "Open files…",
+      title: "Open CSV or MCAP…",
       keys: "o",
       enabled: () => this.plane.ingest !== null,
       run: () => {
@@ -439,7 +439,7 @@ function shellMarkup(): string {
     </nav>
 
     <div class="tool-bar">
-      <button class="tool-button open-files" hidden>Open Files</button>
+      <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button new-panel">+ Panel</button>
       <span class="tool-divider"></span>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>

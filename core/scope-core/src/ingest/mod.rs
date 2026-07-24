@@ -145,6 +145,16 @@ mod tests {
     }
 
     #[test]
+    fn bundled_demo_csv_stays_ingestible() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/demo_flight.csv");
+        let mut store = SignalStore::new();
+        let summary = ingest_path(path, &mut store, &mut |_| {}).unwrap();
+
+        assert_eq!(summary.row_count, 41);
+        assert_eq!(summary.signals.len(), 5);
+    }
+
+    #[test]
     fn csv_decode_reports_monotonic_progress_ending_at_one() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "time,value").unwrap();

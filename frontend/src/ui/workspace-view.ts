@@ -228,7 +228,7 @@ function emptyState(hasSignals: boolean): HTMLElement {
     hint.textContent = "New panel row (N) · drag a signal here · ⌘K commands";
   } else {
     headline.textContent = "No data loaded.";
-    hint.textContent = "Open Files (O) · ⌘K commands";
+    hint.textContent = "Open CSV / MCAP (O) · ⌘K commands";
   }
   empty.append(headline, hint);
   return empty;

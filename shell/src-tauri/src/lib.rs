@@ -152,7 +152,15 @@ async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
-            .add_filter("Signal sources", &["csv", "tsv", "txt", "dat", "mcap"])
+            .add_filter(
+                "Supported telemetry (CSV, TSV, TXT, DAT, MCAP)",
+                &["csv", "tsv", "txt", "dat", "mcap"],
+            )
+            .add_filter(
+                "Delimited text (CSV, TSV, TXT, DAT)",
+                &["csv", "tsv", "txt", "dat"],
+            )
+            .add_filter("MCAP recordings (MCAP)", &["mcap"])
             .blocking_pick_files()
     })
     .await
