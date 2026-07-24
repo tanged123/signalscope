@@ -1,48 +1,34 @@
 //! Multi-resolution min/max envelopes for bounded-cost viewport queries.
 
 use crate::store::Signal;
-use serde::{Deserialize, Serialize};
+use scope_protocol::EnvelopeBin;
 
 pub const TILE_BINS: usize = 256;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct EnvelopeBin {
-    pub t0: f64,
-    pub t1: f64,
-    pub first: Option<f64>,
-    pub last: Option<f64>,
-    pub min: Option<f64>,
-    pub max: Option<f64>,
-    pub sample_count: u64,
-    pub has_gap: bool,
+fn sample_bin(time: f64, value: f64) -> EnvelopeBin {
+    let finite = value.is_finite().then_some(value);
+    EnvelopeBin {
+        t0: time,
+        t1: time,
+        first: finite,
+        last: finite,
+        min: finite,
+        max: finite,
+        sample_count: 1,
+        has_gap: !value.is_finite(),
+    }
 }
 
-impl EnvelopeBin {
-    fn sample(time: f64, value: f64) -> Self {
-        let finite = value.is_finite().then_some(value);
-        Self {
-            t0: time,
-            t1: time,
-            first: finite,
-            last: finite,
-            min: finite,
-            max: finite,
-            sample_count: 1,
-            has_gap: !value.is_finite(),
-        }
-    }
-
-    fn merge(left: Self, right: Self) -> Self {
-        Self {
-            t0: left.t0,
-            t1: right.t1,
-            first: left.first.or(right.first),
-            last: right.last.or(left.last),
-            min: min_option(left.min, right.min),
-            max: max_option(left.max, right.max),
-            sample_count: left.sample_count + right.sample_count,
-            has_gap: left.has_gap || right.has_gap,
-        }
+fn merge_bins(left: &EnvelopeBin, right: &EnvelopeBin) -> EnvelopeBin {
+    EnvelopeBin {
+        t0: left.t0,
+        t1: right.t1,
+        first: left.first.or(right.first),
+        last: right.last.or(left.last),
+        min: min_option(left.min, right.min),
+        max: max_option(left.max, right.max),
+        sample_count: left.sample_count + right.sample_count,
+        has_gap: left.has_gap || right.has_gap,
     }
 }
 
@@ -69,7 +55,7 @@ impl Pyramid {
             .iter()
             .copied()
             .zip(values.iter().copied())
-            .map(|(time, value)| EnvelopeBin::sample(time, value))
+            .map(|(time, value)| sample_bin(time, value))
             .collect();
         Self::from_level_zero(level_zero)
     }
@@ -82,9 +68,9 @@ impl Pyramid {
                 .chunks(2)
                 .map(|chunk| {
                     if chunk.len() == 2 {
-                        EnvelopeBin::merge(chunk[0], chunk[1])
+                        merge_bins(&chunk[0], &chunk[1])
                     } else {
-                        chunk[0]
+                        chunk[0].clone()
                     }
                 })
                 .collect();
@@ -123,7 +109,7 @@ impl Pyramid {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct PyramidQuery<'a> {
     pub level: u32,
     pub bins: &'a [EnvelopeBin],

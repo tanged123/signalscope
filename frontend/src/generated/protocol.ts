@@ -7,8 +7,11 @@ export interface TimeWindow {
   t1: number;
 }
 
+export interface IngestRequest {
+  path: string;
+}
+
 export interface TileRequest {
-  protocol_version: number;
   request_id: string;
   signal_ids: string[];
   window: TimeWindow;
@@ -35,7 +38,6 @@ export interface SignalTile {
 }
 
 export interface TileResponse {
-  protocol_version: number;
   request_id: string;
   series: SignalTile[];
 }
@@ -54,7 +56,6 @@ export interface SourceSummary {
 }
 
 export interface IngestResponse {
-  protocol_version: number;
   source: SourceSummary;
   signals: SignalSummary[];
 }

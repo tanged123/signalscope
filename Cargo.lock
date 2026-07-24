@@ -2538,6 +2538,7 @@ name = "scope-core"
 version = "0.1.0"
 dependencies = [
  "csv",
+ "scope-protocol",
  "serde",
  "serde_json",
  "tempfile",
@@ -2549,6 +2550,7 @@ name = "scope-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

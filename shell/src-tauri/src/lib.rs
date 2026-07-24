@@ -6,8 +6,8 @@ use scope_core::{
     store::{Signal, SignalId, SignalStore},
 };
 use scope_protocol::{
-    EnvelopeBin, IngestResponse, PROTOCOL_VERSION, SignalSummary, SignalTile, SourceSummary,
-    TileRequest, TileResponse,
+    Envelope, IngestRequest, IngestResponse, SignalSummary, SignalTile, SourceSummary, TileRequest,
+    TileResponse,
 };
 use tauri::State;
 
@@ -28,7 +28,12 @@ fn signal_summary(signal: &Signal) -> SignalSummary {
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn ingest_csv(path: String, state: State<'_, Mutex<DataState>>) -> Result<IngestResponse, String> {
+fn ingest_csv(
+    request: Envelope<IngestRequest>,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<IngestResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let path = request.path;
     let mut data = state.lock().map_err(|error| error.to_string())?;
     let summary = {
         let DataState { store, .. } = &mut *data;
@@ -56,37 +61,34 @@ fn ingest_csv(path: String, state: State<'_, Mutex<DataState>>) -> Result<Ingest
         .map(signal_summary)
         .collect();
 
-    Ok(IngestResponse {
-        protocol_version: PROTOCOL_VERSION,
+    Ok(Envelope::new(IngestResponse {
         source: SourceSummary {
             source_id: source.id.0,
             path: source.path.display().to_string(),
             point_count: source.point_count as u64,
         },
         signals,
-    })
+    }))
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn list_signals(state: State<'_, Mutex<DataState>>) -> Result<Vec<SignalSummary>, String> {
+fn list_signals(
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<Vec<SignalSummary>>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
-    Ok(data.store.signals().map(signal_summary).collect())
+    Ok(Envelope::new(
+        data.store.signals().map(signal_summary).collect(),
+    ))
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn query_tiles(
-    request: TileRequest,
+    request: Envelope<TileRequest>,
     state: State<'_, Mutex<DataState>>,
-) -> Result<TileResponse, String> {
-    if request.protocol_version != PROTOCOL_VERSION {
-        return Err(format!(
-            "protocol version {} is unsupported; expected {PROTOCOL_VERSION}",
-            request.protocol_version
-        ));
-    }
-
+) -> Result<Envelope<TileResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
     let data = state.lock().map_err(|error| error.to_string())?;
     let mut series = Vec::new();
     for raw_id in request.signal_ids {
@@ -105,28 +107,14 @@ fn query_tiles(
             signal_path: signal.path.clone(),
             unit: signal.unit.clone(),
             level: query.level,
-            bins: query
-                .bins
-                .iter()
-                .map(|bin| EnvelopeBin {
-                    t0: bin.t0,
-                    t1: bin.t1,
-                    first: bin.first,
-                    last: bin.last,
-                    min: bin.min,
-                    max: bin.max,
-                    sample_count: bin.sample_count,
-                    has_gap: bin.has_gap,
-                })
-                .collect(),
+            bins: query.bins.to_vec(),
         });
     }
 
-    Ok(TileResponse {
-        protocol_version: PROTOCOL_VERSION,
+    Ok(Envelope::new(TileResponse {
         request_id: request.request_id,
         series,
-    })
+    }))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

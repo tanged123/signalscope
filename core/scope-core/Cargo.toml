@@ -10,6 +10,7 @@ rust-version.workspace = true
 csv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+scope-protocol.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

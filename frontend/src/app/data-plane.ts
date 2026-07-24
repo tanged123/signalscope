@@ -1,10 +1,10 @@
 import {
-  PROTOCOL_VERSION,
   type EnvelopeBin,
   type SignalSummary,
   type TileRequest,
   type TileResponse,
 } from "../generated/protocol";
+import { open, seal, type Envelope } from "./envelope";
 
 export interface DataPlane {
   readonly host: "native" | "snapshot";
@@ -12,11 +12,10 @@ export interface DataPlane {
   queryTiles(request: TileRequest): Promise<TileResponse>;
 }
 
-interface BakedManifest {
-  protocol_version: number;
+type BakedManifest = Envelope<{
   signals: SignalSummary[];
   tiles: TileResponse;
-}
+}>;
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -33,24 +32,26 @@ export class TauriPlane implements DataPlane {
 
   constructor(private readonly invoke: TauriInternals["invoke"]) {}
 
-  listSignals(): Promise<SignalSummary[]> {
-    return this.invoke<SignalSummary[]>("list_signals");
+  async listSignals(): Promise<SignalSummary[]> {
+    return open(await this.invoke<Envelope<SignalSummary[]>>("list_signals"));
   }
 
-  queryTiles(request: TileRequest): Promise<TileResponse> {
-    return this.invoke<TileResponse>("query_tiles", { request });
+  async queryTiles(request: TileRequest): Promise<TileResponse> {
+    return open(
+      await this.invoke<Envelope<TileResponse>>("query_tiles", {
+        request: seal(request),
+      }),
+    );
   }
 }
 
 export class BakedPlane implements DataPlane {
   readonly host = "snapshot" as const;
 
-  constructor(private readonly manifest: BakedManifest) {
-    if (manifest.protocol_version !== PROTOCOL_VERSION) {
-      throw new Error(
-        `Snapshot protocol ${String(manifest.protocol_version)} is unsupported; expected ${String(PROTOCOL_VERSION)}`,
-      );
-    }
+  private readonly payload: BakedManifest["payload"];
+
+  constructor(manifest: BakedManifest) {
+    this.payload = open(manifest);
   }
 
   static fromDocument(documentRoot: Document = document): BakedPlane {
@@ -65,15 +66,14 @@ export class BakedPlane implements DataPlane {
   }
 
   listSignals(): Promise<SignalSummary[]> {
-    return Promise.resolve(this.manifest.signals);
+    return Promise.resolve(this.payload.signals);
   }
 
   queryTiles(request: TileRequest): Promise<TileResponse> {
     const requested = new Set(request.signal_ids);
     return Promise.resolve({
-      protocol_version: PROTOCOL_VERSION,
       request_id: request.request_id,
-      series: this.manifest.tiles.series
+      series: this.payload.tiles.series
         .filter((series) => requested.has(series.signal_id))
         .map((series) => ({
           ...series,
@@ -126,11 +126,9 @@ function createDemoManifest(): BakedManifest {
       point_count: String(pointCount),
     },
   ];
-  return {
-    protocol_version: PROTOCOL_VERSION,
+  return seal({
     signals,
     tiles: {
-      protocol_version: PROTOCOL_VERSION,
       request_id: "baked-demo",
       series: [
         {
@@ -156,5 +154,5 @@ function createDemoManifest(): BakedManifest {
         },
       ],
     },
-  };
+  });
 }

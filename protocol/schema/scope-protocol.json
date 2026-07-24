@@ -8,10 +8,15 @@
         "t1": "f64"
       }
     },
+    "IngestRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string"
+      }
+    },
     "TileRequest": {
       "kind": "object",
       "fields": {
-        "protocol_version": "u32",
         "request_id": "string",
         "signal_ids": "u64[]",
         "window": "TimeWindow",
@@ -44,7 +49,6 @@
     "TileResponse": {
       "kind": "object",
       "fields": {
-        "protocol_version": "u32",
         "request_id": "string",
         "series": "SignalTile[]"
       }
@@ -69,7 +73,6 @@
     "IngestResponse": {
       "kind": "object",
       "fields": {
-        "protocol_version": "u32",
         "source": "SourceSummary",
         "signals": "SignalSummary[]"
       }

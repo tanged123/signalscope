@@ -57,8 +57,12 @@ pub struct TimeWindow {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IngestRequest {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TileRequest {
-    pub protocol_version: u32,
     pub request_id: String,
     #[serde(with = "u64_vec_string")]
     pub signal_ids: Vec<u64>,
@@ -96,7 +100,6 @@ pub struct SignalTile {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TileResponse {
-    pub protocol_version: u32,
     pub request_id: String,
     pub series: Vec<SignalTile>,
 }
@@ -123,7 +126,6 @@ pub struct SourceSummary {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct IngestResponse {
-    pub protocol_version: u32,
     pub source: SourceSummary,
     pub signals: Vec<SignalSummary>,
 }

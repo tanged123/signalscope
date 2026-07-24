@@ -1,8 +1,4 @@
-import {
-  PROTOCOL_VERSION,
-  type SignalSummary,
-  type TileResponse,
-} from "../generated/protocol";
+import { type SignalSummary, type TileResponse } from "../generated/protocol";
 import type { DataPlane } from "../app/data-plane";
 import { LinkedTimeModel } from "../app/linked-time";
 import { CanvasRenderer, SERIES_TOKENS } from "../render/canvas-renderer";
@@ -71,7 +67,6 @@ export class AppShell {
   private async refreshTiles(): Promise<void> {
     const state = this.time.snapshot();
     this.latestTiles = await this.plane.queryTiles({
-      protocol_version: PROTOCOL_VERSION,
       request_id: crypto.randomUUID(),
       signal_ids: this.selectedIds,
       window: { t0: state.t0, t1: state.t1 },
