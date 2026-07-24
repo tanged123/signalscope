@@ -41,6 +41,32 @@ describe("WorkspaceModel", () => {
     expect(model.tabs()).toHaveLength(1);
   });
 
+  it("preserves maximization when closing a background workspace", () => {
+    const model = new WorkspaceModel();
+    const firstTab = model.activeTabId();
+    const panel = model.addPanelRow();
+    const backgroundTab = model.addTab();
+    model.selectTab(firstTab);
+    model.maximizePanel(panel.id);
+
+    model.closeTab(backgroundTab.id);
+
+    expect(model.activeTabId()).toBe(firstTab);
+    expect(model.maximizedPanelId()).toBe(panel.id);
+  });
+
+  it("clears maximization when closing the active workspace", () => {
+    const model = new WorkspaceModel();
+    model.addPanelRow();
+    model.addTab();
+    const panel = model.addPanelRow();
+    model.maximizePanel(panel.id);
+
+    model.closeTab(model.activeTabId());
+
+    expect(model.maximizedPanelId()).toBeNull();
+  });
+
   it("adds panel rows with rebalanced heights", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
@@ -98,6 +124,22 @@ describe("WorkspaceModel", () => {
     expect(model.layout()[1]?.panels[0]?.panel_id).toBe(split.id);
     expect(model.layout()[2]?.panels[0]?.panel_id).toBe(last.id);
     expect(model.focusedPanelId()).toBe(split.id);
+  });
+
+  it("does not split a row below the minimum panel height", () => {
+    const model = new WorkspaceModel();
+    let panel = model.addPanelRow();
+    for (let split = 0; split < 3; split += 1) {
+      const sibling = model.splitPanelDown(panel.id);
+      if (sibling === null) throw new Error("split failed");
+      panel = sibling;
+    }
+    model.maximizePanel(panel.id);
+
+    expect(model.splitPanelDown(panel.id)).toBeNull();
+    expect(heights(model).every((height) => height >= 0.1)).toBe(true);
+    expect(model.maximizedPanelId()).toBe(panel.id);
+    expect(model.focusedPanelId()).toBe(panel.id);
   });
 
   it("closing the last panel of a row removes the row and renormalizes", () => {

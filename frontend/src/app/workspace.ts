@@ -117,8 +117,8 @@ export class WorkspaceModel {
       if (replacement !== undefined) {
         this.session.active_tab_id = replacement.id;
       }
+      this.maximized = null;
     }
-    this.maximized = null;
   }
 
   favorites(): readonly string[] {
@@ -177,6 +177,7 @@ export class WorkspaceModel {
     if (location === null) return null;
     const row = this.activeTab().layout[location.rowIndex];
     if (row === undefined) return null;
+    if (row.height < MIN_FRACTION * 2) return null;
     this.maximized = null;
     const panel = this.createPanel();
     const height = row.height / 2;

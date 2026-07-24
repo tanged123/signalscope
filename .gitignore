@@ -9,4 +9,4 @@
 /shell/src-tauri/gen/
 *.log
 .DS_Store
-*.csv.sspyr
+*.sspyr
