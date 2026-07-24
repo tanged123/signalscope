@@ -11,7 +11,8 @@ show_help() {
   cat <<'EOF'
 Usage: ./scripts/build.sh [native|web] [additional arguments]
 
-  native  Build the Tauri bundle and shared snapshot frontend (default).
+  native  Build supported Tauri bundles and shared snapshot frontend (default).
+          Linux builds .deb and .rpm packages; other platforms use their defaults.
   web     Build only the browser frontend and snapshot-template.html.
 EOF
 }
@@ -21,6 +22,9 @@ case "$mode" in
   native)
     shift || true
     cd shell/src-tauri
+    if [ "$(uname -s)" = "Linux" ]; then
+      exec cargo tauri build --bundles deb,rpm "$@"
+    fi
     exec cargo tauri build "$@"
     ;;
   web)
