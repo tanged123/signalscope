@@ -67,8 +67,7 @@ export class SignalTreeView {
     spacer.style.height = `${String(slice.totalHeight)}px`;
     const windowElement = document.createElement("div");
     windowElement.className = "tree-window";
-    windowElement.style.transform =
-      `translateY(${String(slice.topPadding)}px)`;
+    windowElement.style.transform = `translateY(${String(slice.topPadding)}px)`;
     for (const row of this.rows.slice(slice.start, slice.end)) {
       windowElement.appendChild(this.rowElement(row));
     }

@@ -273,7 +273,9 @@ export class AppShell {
         progress.hidden = false;
         await runIngest(port, path, (status) => {
           const percent =
-            status.fraction > 0 ? `${String(Math.round(status.fraction * 100))}%` : "…";
+            status.fraction > 0
+              ? `${String(Math.round(status.fraction * 100))}%`
+              : "…";
           progress.textContent = `${name} · ${status.stage} ${percent}`;
         });
       }
@@ -391,8 +393,7 @@ export class AppShell {
         name.title = source.path;
         const points = document.createElement("span");
         points.className = "source-points";
-        points.textContent =
-          `${Number(source.point_count).toLocaleString()} pts`;
+        points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
         row.append(dot, name, points);
         return row;
       }),

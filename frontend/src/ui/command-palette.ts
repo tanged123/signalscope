@@ -89,8 +89,7 @@ export class CommandPalette {
     this.list.replaceChildren(
       ...this.matches.map((entry, index) => {
         const row = document.createElement("button");
-        row.className =
-          `palette-row ${index === this.selected ? "selected" : ""}`;
+        row.className = `palette-row ${index === this.selected ? "selected" : ""}`;
         const title = document.createElement("span");
         title.textContent = entry.title;
         const hint = document.createElement("span");
