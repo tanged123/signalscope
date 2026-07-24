@@ -90,6 +90,9 @@ impl CsvDecoder {
         }
 
         let time_index = select_time_column(&headers, &columns);
+        if let Some(index) = time_index {
+            sort_columns_by_time(&mut columns, index);
+        }
         let time = time_index.map_or_else(
             || {
                 std::iter::successors(Some(0.0), |value| Some(value + 1.0))
@@ -192,13 +195,31 @@ fn select_time_column(headers: &[String], columns: &[Vec<f64>]) -> Option<usize>
             let matches_name = TIME_NAMES
                 .iter()
                 .any(|name| header.trim().eq_ignore_ascii_case(name));
-            (matches_name && is_monotonic_finite(&columns[index])).then_some(index)
+            (matches_name && columns[index].iter().all(|value| value.is_finite())).then_some(index)
         })
         .or_else(|| {
             columns
                 .iter()
                 .position(|column| is_monotonic_finite(column))
         })
+}
+
+fn sort_columns_by_time(columns: &mut [Vec<f64>], time_index: usize) {
+    let Some(time) = columns.get(time_index) else {
+        return;
+    };
+    let mut order: Vec<usize> = (0..time.len()).collect();
+    order.sort_by(|&left, &right| time[left].total_cmp(&time[right]));
+    if order
+        .iter()
+        .enumerate()
+        .all(|(position, index)| position == *index)
+    {
+        return;
+    }
+    for column in columns {
+        *column = order.iter().map(|&index| column[index]).collect();
+    }
 }
 
 fn is_monotonic_finite(column: &[f64]) -> bool {
@@ -248,6 +269,30 @@ mod tests {
         ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(store.signals().next().unwrap().time(), &[0.0, 1.0]);
+    }
+
+    #[test]
+    fn sorts_named_time_with_all_value_columns_aligned() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "time,value,other").unwrap();
+        writeln!(file, "2,20,200").unwrap();
+        writeln!(file, "0,0,100").unwrap();
+        writeln!(file, "1,10,150").unwrap();
+
+        let mut store = SignalStore::new();
+        ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+
+        let value = store
+            .signals()
+            .find(|signal| signal.path.ends_with("/value"))
+            .unwrap();
+        let other = store
+            .signals()
+            .find(|signal| signal.path.ends_with("/other"))
+            .unwrap();
+        assert_eq!(value.time(), &[0.0, 1.0, 2.0]);
+        assert_eq!(value.values(), &[0.0, 10.0, 20.0]);
+        assert_eq!(other.values(), &[100.0, 150.0, 200.0]);
     }
 
     #[test]

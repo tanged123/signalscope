@@ -72,6 +72,20 @@ describe("WorkspaceModel", () => {
     expect(widths(model, 0)).toEqual([0.5, 0.5]);
   });
 
+  it("does not split a cell below the minimum panel width", () => {
+    const model = new WorkspaceModel();
+    let panel = model.addPanelRow();
+    for (let split = 0; split < 3; split += 1) {
+      const sibling = model.splitPanelRight(panel.id);
+      if (sibling === null) throw new Error("split failed");
+      panel = sibling;
+    }
+
+    expect(model.splitPanelRight(panel.id)).toBeNull();
+    expect(widths(model, 0).every((width) => width >= 0.1)).toBe(true);
+    expect(model.focusedPanelId()).toBe(panel.id);
+  });
+
   it("splits a panel down immediately below its row", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();

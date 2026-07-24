@@ -22,6 +22,7 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
   private signalTreeWidth = 262;
+  private refreshToken = 0;
 
   constructor(
     private readonly root: HTMLElement,
@@ -442,6 +443,7 @@ export class AppShell {
   }
 
   private async refreshTiles(): Promise<void> {
+    const refreshToken = ++this.refreshToken;
     const state = this.time.snapshot();
     const width = Math.max(
       1,
@@ -470,6 +472,7 @@ export class AppShell {
         }
       }),
     );
+    if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = next;
     this.renderTiles();
   }

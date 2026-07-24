@@ -218,10 +218,26 @@ test("tree filters, favorites, and drag-to-plot", async ({
   await page.locator(".signal-search").fill("");
   await expect(page.locator(".tree-scroll .tree-leaf")).toHaveCount(2);
 
-  await page.locator(".tree-scroll .tree-star").first().click();
+  const firstLeaf = page.locator(".tree-scroll .tree-leaf").first();
+  await expect(firstLeaf).toHaveAttribute("role", "button");
+  await expect(firstLeaf).toHaveAccessibleName(/^Plot /);
+
+  await firstLeaf.locator(".tree-star").click();
   await expect(page.locator(".tree-favorites .tree-leaf")).toHaveCount(1);
 
   await page.keyboard.press("n");
+  const enterTarget = page.locator(".panel").last();
+  await firstLeaf.focus();
+  await page.keyboard.press("Enter");
+  await expect(enterTarget.locator(".legend-chip")).toHaveCount(1);
+
+  await page.keyboard.press("n");
+  const spaceTarget = page.locator(".panel").last();
+  const secondLeaf = page.locator(".tree-scroll .tree-leaf").nth(1);
+  await secondLeaf.focus();
+  await page.keyboard.press("Space");
+  await expect(spaceTarget.locator(".legend-chip")).toHaveCount(1);
+
   const leaf = page.locator(".tree-scroll .tree-leaf").first();
   const target = page.locator(".panel").last();
   const workspace = page.locator(".workspace");
@@ -237,7 +253,7 @@ test("tree filters, favorites, and drag-to-plot", async ({
 
   await target.dispatchEvent("drop", { dataTransfer });
   await leaf.dispatchEvent("dragend", { dataTransfer });
-  await expect(target.locator(".legend-chip")).toHaveCount(1);
+  await expect(target.locator(".legend-chip")).toHaveCount(2);
   await expect(target).toHaveClass(/focused/);
   await expect(target).not.toHaveClass(/drop-target/);
   const focusColors = await target.evaluate((element) => ({

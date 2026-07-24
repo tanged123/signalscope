@@ -42,14 +42,25 @@ fn running(stage: IngestStage, fraction: f64) -> IngestStatus {
 
 fn signal_summary(signal: &Signal) -> SignalSummary {
     let time = signal.time();
+    let (t_min, t_max) = finite_time_bounds(time);
     SignalSummary {
         signal_id: signal.id.0,
         path: signal.path.clone(),
         unit: signal.unit.clone(),
         point_count: signal.len() as u64,
-        t_min: time.first().copied().unwrap_or(0.0),
-        t_max: time.last().copied().unwrap_or(1.0),
+        t_min,
+        t_max,
     }
+}
+
+fn finite_time_bounds(time: &[f64]) -> (f64, f64) {
+    let mut finite = time.iter().copied().filter(|value| value.is_finite());
+    let Some(first) = finite.next() else {
+        return (0.0, 1.0);
+    };
+    finite.fold((first, first), |(min, max), value| {
+        (min.min(value), max.max(value))
+    })
 }
 
 fn source_summary(source: &Source) -> SourceSummary {
@@ -288,4 +299,35 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use scope_core::store::SourceId;
+
+    use super::*;
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn signal_summary_uses_finite_time_extrema_and_safe_fallbacks() {
+        let signal = Signal::new(
+            SignalId(1),
+            SourceId(1),
+            "source/value",
+            None,
+            Arc::from(vec![f64::NAN, 5.0, -2.0, f64::INFINITY]),
+            Arc::from(vec![0.0; 4]),
+        )
+        .unwrap();
+
+        let summary = signal_summary(&signal);
+        assert_eq!((summary.t_min, summary.t_max), (-2.0, 5.0));
+        assert_eq!(finite_time_bounds(&[]), (0.0, 1.0));
+        assert_eq!(
+            finite_time_bounds(&[f64::NAN, f64::NEG_INFINITY]),
+            (0.0, 1.0)
+        );
+    }
 }

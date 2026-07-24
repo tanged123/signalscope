@@ -102,6 +102,8 @@ export class SignalTreeView {
     rowElement.dataset.signalPath = path;
     rowElement.draggable = true;
     rowElement.tabIndex = 0;
+    rowElement.setAttribute("role", "button");
+    rowElement.setAttribute("aria-label", `Plot ${path}`);
     rowElement.addEventListener("dragstart", (event) => {
       event.dataTransfer?.setData(SIGNAL_DRAG_TYPE, path);
     });
@@ -109,7 +111,13 @@ export class SignalTreeView {
       this.callbacks.onPlotSignal(path);
     });
     rowElement.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") this.callbacks.onPlotSignal(path);
+      if (
+        event.target === rowElement &&
+        (event.key === "Enter" || event.key === " ")
+      ) {
+        event.preventDefault();
+        this.callbacks.onPlotSignal(path);
+      }
     });
     const star = document.createElement("button");
     star.className = `tree-star ${this.favorites.includes(path) ? "active" : ""}`;

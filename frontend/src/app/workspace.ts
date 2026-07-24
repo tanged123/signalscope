@@ -159,6 +159,7 @@ export class WorkspaceModel {
     const row = this.activeTab().layout[location.rowIndex];
     const cell = row?.panels[location.cellIndex];
     if (row === undefined || cell === undefined) return null;
+    if (cell.width < MIN_FRACTION * 2) return null;
     this.maximized = null;
     const panel = this.createPanel();
     const width = cell.width / 2;
