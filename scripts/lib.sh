@@ -10,7 +10,10 @@ ensure_dev_shell() {
   if [ -z "${IN_NIX_SHELL:-}" ]; then
     exec "$signalscope_scripts_dir/dev.sh" "$0" "$@"
   fi
-  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+  # Keep local machines responsive; let CI runners use every core.
+  if [ -z "${CI:-}" ]; then
+    export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+  fi
   cd "$signalscope_root" || exit 1
 }
 
