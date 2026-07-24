@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -63,6 +63,20 @@
         "show_stats": "bool"
       }
     },
+    "LayoutCell": {
+      "kind": "object",
+      "fields": {
+        "panel_id": "string",
+        "width": "f64"
+      }
+    },
+    "LayoutRow": {
+      "kind": "object",
+      "fields": {
+        "height": "f64",
+        "panels": "LayoutCell[]"
+      }
+    },
     "Session": {
       "kind": "object",
       "fields": {
@@ -71,7 +85,9 @@
         "theme": "Theme",
         "linked_time": "LinkedTime",
         "focused_panel_id": "string?",
-        "panels": "PanelState[]"
+        "panels": "PanelState[]",
+        "layout": "LayoutRow[]",
+        "favorites": "string[]"
       }
     }
   }

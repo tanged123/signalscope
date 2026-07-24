@@ -16,6 +16,8 @@ impl Default for Session {
             linked_time: LinkedTime::default(),
             focused_panel_id: None,
             panels: Vec::new(),
+            layout: Vec::new(),
+            favorites: Vec::new(),
         }
     }
 }
@@ -59,8 +61,40 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
 /// directly. To add v(N+1): bump `schema_version` in
 /// `protocol/schema/scope-session.json`, regenerate, then add an arm here
 /// that rewrites a vN `value` into vN+1 shape and recurses.
-fn migrate(version: u32, value: serde_json::Value) -> Result<Session, SessionError> {
+fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, SessionError> {
     match version {
+        1 => {
+            let panel_ids: Vec<String> = value
+                .get("panels")
+                .and_then(serde_json::Value::as_array)
+                .map(|panels| {
+                    panels
+                        .iter()
+                        .filter_map(|panel| {
+                            panel
+                                .get("id")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            #[allow(clippy::cast_precision_loss)]
+            let width = 1.0 / panel_ids.len().max(1) as f64;
+            let layout = if panel_ids.is_empty() {
+                serde_json::json!([])
+            } else {
+                let cells: Vec<serde_json::Value> = panel_ids
+                    .iter()
+                    .map(|id| serde_json::json!({ "panel_id": id, "width": width }))
+                    .collect();
+                serde_json::json!([{ "height": 1.0, "panels": cells }])
+            };
+            value["layout"] = layout;
+            value["favorites"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(2);
+            migrate(2, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -113,6 +147,24 @@ mod tests {
     fn future_version_is_rejected() {
         let error = from_json(r#"{"app":"signalscope","schema_version":99}"#).unwrap_err();
         assert!(matches!(error, SessionError::UnsupportedVersion(99)));
+    }
+
+    #[test]
+    fn v1_sessions_migrate_to_v2() {
+        let json = r#"{
+            "app": "signalscope",
+            "schema_version": 1,
+            "theme": "dark",
+            "linked_time": {"t0":0.0,"t1":1.0,"linked":true,"paused":false,"cursorT":null,"mode":"fixed"},
+            "focused_panel_id": "panel-a",
+            "panels": [{"id":"panel-a","title":"A","mode":"time","axis_style":"gutter","x_signal":null,"color_signal":null,"series":[],"y_range":null,"annotations":[],"show_stats":false}]
+        }"#;
+        let session = from_json(json).unwrap();
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(session.layout.len(), 1);
+        assert_eq!(session.layout[0].panels[0].panel_id, "panel-a");
+        assert!((session.layout[0].panels[0].width - 1.0).abs() < f64::EPSILON);
+        assert!(session.favorites.is_empty());
     }
 
     #[test]
