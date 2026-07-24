@@ -1,0 +1,28 @@
+name: Cargo caches
+description: >-
+  Restore the crate registry cache shared by every job and, when target-key
+  is set, a per-profile target-directory cache.
+
+inputs:
+  target-key:
+    description: Per-profile target cache key. Empty skips the target cache.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: cargo-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          cargo-registry-${{ runner.os }}-
+    - if: inputs.target-key != ''
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: cargo-target-${{ inputs.target-key }}-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+        restore-keys: |
+          cargo-target-${{ inputs.target-key }}-${{ runner.os }}-

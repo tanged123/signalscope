@@ -1,0 +1,81 @@
+{
+  "protocol_version": 1,
+  "types": {
+    "TimeWindow": {
+      "kind": "object",
+      "fields": {
+        "t0": "f64",
+        "t1": "f64"
+      }
+    },
+    "IngestRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string"
+      }
+    },
+    "TileRequest": {
+      "kind": "object",
+      "fields": {
+        "request_id": "string",
+        "signal_ids": "u64[]",
+        "window": "TimeWindow",
+        "pixel_width": "u32"
+      }
+    },
+    "EnvelopeBin": {
+      "kind": "object",
+      "fields": {
+        "t0": "f64",
+        "t1": "f64",
+        "first": "f64?",
+        "last": "f64?",
+        "min": "f64?",
+        "max": "f64?",
+        "sample_count": "u64",
+        "has_gap": "bool"
+      }
+    },
+    "SignalTile": {
+      "kind": "object",
+      "fields": {
+        "signal_id": "u64",
+        "signal_path": "string",
+        "unit": "string?",
+        "level": "u32",
+        "bins": "EnvelopeBin[]"
+      }
+    },
+    "TileResponse": {
+      "kind": "object",
+      "fields": {
+        "request_id": "string",
+        "series": "SignalTile[]"
+      }
+    },
+    "SignalSummary": {
+      "kind": "object",
+      "fields": {
+        "signal_id": "u64",
+        "path": "string",
+        "unit": "string?",
+        "point_count": "u64"
+      }
+    },
+    "SourceSummary": {
+      "kind": "object",
+      "fields": {
+        "source_id": "u64",
+        "path": "string",
+        "point_count": "u64"
+      }
+    },
+    "IngestResponse": {
+      "kind": "object",
+      "fields": {
+        "source": "SourceSummary",
+        "signals": "SignalSummary[]"
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+name: SignalScope environment
+description: Install Nix, connect the Cachix cache, and prepare the workspace.
+
+inputs:
+  cachix-auth-token:
+    description: >-
+      Cachix auth token. When empty (for example on fork pull requests), the
+      cache is used read-only and pushes are skipped.
+    default: ""
+  install-frontend:
+    description: Run ./scripts/setup.sh to install locked frontend dependencies.
+    default: "true"
+  cargo-cache-key:
+    description: >-
+      Per-profile key for the target-directory cache. Empty disables Cargo
+      caching.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@v31
+    - uses: cachix/cachix-action@v16
+      with:
+        name: tanged123
+        authToken: ${{ inputs.cachix-auth-token }}
+        skipPush: ${{ inputs.cachix-auth-token == '' }}
+    - if: inputs.cargo-cache-key != ''
+      uses: ./.github/actions/cargo-cache
+      with:
+        target-key: ${{ inputs.cargo-cache-key }}
+    - if: inputs.install-frontend == 'true'
+      run: ./scripts/setup.sh
+      shell: bash

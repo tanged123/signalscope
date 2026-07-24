@@ -1,0 +1,16 @@
+{
+  "name": "signalscope-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "build": "pnpm --filter @signalscope/frontend build",
+    "check:artifacts": "pnpm --filter @signalscope/frontend check:artifacts",
+    "codegen": "node protocol/scripts/generate-types.mjs",
+    "codegen:check": "pnpm codegen && rustfmt --edition 2024 protocol/src/generated.rs core/scope-core/src/session/generated.rs && git diff --exit-code -- protocol/src/generated.rs core/scope-core/src/session/generated.rs frontend/src/generated/protocol.ts frontend/src/generated/session.ts",
+    "dev": "pnpm --filter @signalscope/frontend dev",
+    "e2e": "pnpm --filter @signalscope/frontend e2e",
+    "lint": "pnpm --filter @signalscope/frontend lint",
+    "test": "pnpm --filter @signalscope/frontend test",
+    "typecheck": "pnpm --filter @signalscope/frontend typecheck"
+  }
+}

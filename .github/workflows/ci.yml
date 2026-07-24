@@ -1,0 +1,158 @@
+name: SignalScope CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: ./scripts/version.sh check
+      - if: github.event_name == 'pull_request'
+        run: ./scripts/version.sh check-pr "${{ github.event.pull_request.base.sha }}"
+
+  flake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          install-frontend: "false"
+      - run: ./scripts/ci.sh flake
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: rust
+      - run: ./scripts/ci.sh rust
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: ./scripts/ci.sh frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-template
+          path: frontend/dist/snapshot-template.html
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: ./scripts/ci.sh e2e
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: coverage
+      - run: ./scripts/coverage.sh
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./build/coverage/rust.lcov,./build/coverage/frontend/lcov.info
+          version: v11.2.7
+          fail_ci_if_error: true
+
+  build:
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: release-linux-packages
+            bundles: |
+              target/release/bundle/deb/*.deb
+              target/release/bundle/rpm/*.rpm
+          - os: macos-latest
+            artifact: release-macos
+            bundles: target/release/bundle/dmg/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: build
+      - run: ./scripts/ci.sh build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.bundles }}
+          if-no-files-found: error
+
+  appimage:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/cargo-cache
+        with:
+          target-key: appimage
+      - run: ./scripts/setup-appimage.sh
+      - run: ./scripts/ci.sh appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-appimage
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  tag:
+    if: github.ref == 'refs/heads/main'
+    needs: [version, flake, rust, frontend, e2e, build, appimage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: release-tag
+        run: echo "tag=$(./scripts/release.sh tag)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [tag, build, appimage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - run: ./scripts/release.sh publish "${{ needs.tag.outputs.tag }}" release-assets

@@ -1,0 +1,276 @@
+/* ============================================================
+   Daedalus Design System — colors_and_type.css
+   Mission control visualization suite for Hermes simulations.
+   Density-first. Dark by default. Telemetry-colored.
+   ============================================================ */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/JetBrainsMono-VariableFont_wght.woff2") format("woff2-variations"),
+       url("fonts/JetBrainsMono-VariableFont_wght.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/Inter-VariableFont_wght.woff2") format("woff2-variations"),
+       url("fonts/Inter-VariableFont_wght.woff2") format("woff2");
+}
+
+:root {
+  /* -------------------------------------------------------- */
+  /*  COLOR TOKENS — primitives                               */
+  /* -------------------------------------------------------- */
+
+  /* Surfaces (ImGui-derived dark) */
+  --surface-void:    #07090C; /* outside-app void */
+  --surface-0:       #0E1116; /* app bg             */
+  --surface-1:       #151920; /* window bg / panels */
+  --surface-2:       #1C2029; /* titlebar / header  */
+  --surface-3:       #232832; /* tab / hover        */
+  --surface-4:       #2E3340; /* raised control     */
+  --surface-overlay: rgba(14, 17, 22, 0.88);
+
+  /* Foreground text */
+  --fg-1: #E6E8EC; /* primary text             */
+  --fg-2: #A9B0BC; /* secondary / disabled-ish */
+  --fg-3: #737985; /* tertiary / axis labels   */
+  --fg-4: #4A4F5A; /* faint / grid             */
+
+  /* Borders & separators */
+  --border-strong: #2E3340;
+  --border:        #232832;
+  --border-faint:  #1C2029;
+  --grid:          #1A1D24;
+
+  /* Brand accent — Daedalus amber (from screenshot: gain labels, flow traces) */
+  --amber-9:  #FFB648;
+  --amber-7:  #FFA226;
+  --amber-5:  #F2A64D; /* the "resolve" link color */
+  --amber-3:  rgba(255, 162, 38, 0.16);
+  --amber-1:  rgba(255, 162, 38, 0.06);
+
+  /* Telemetry / semantic */
+  --telemetry-stream:  #80CC80; /* telemetry-carrying wires */
+  --telemetry-resolve: #F2A64D; /* resolve wires            */
+  --telemetry-gain:    #FFCC4D; /* gain/offset labels       */
+
+  --pin-input:   #66B2FF; /* input pins       */
+  --pin-output:  #66FF66; /* output pins      */
+
+  --event-cyan:    #59D9FF; /* [EVT] */
+  --ack-green:     #66FF66; /* [ACK] */
+  --err-red:       #FF5959; /* [ERR] */
+  --cmd-yellow:    #FFE559; /* [CMD] */
+  --sys-gray:      #B3B3B3; /* [SYS] */
+
+  --status-connected:    #00CC66;
+  --status-connecting:   #FFCC33;
+  --status-disconnected: #999999;
+  --status-error:        #FF3333;
+
+  /* Plot palette — 8 distinguishable series on dark */
+  --series-1: #FFB648; /* amber  */
+  --series-2: #59D9FF; /* cyan   */
+  --series-3: #66FF66; /* green  */
+  --series-4: #FF6B8A; /* pink   */
+  --series-5: #B794FF; /* violet */
+  --series-6: #FFE559; /* yellow */
+  --series-7: #4DE3C4; /* teal   */
+  --series-8: #FF9E4D; /* orange */
+
+  /* -------------------------------------------------------- */
+  /*  SEMANTIC COLOR MAPPING                                  */
+  /* -------------------------------------------------------- */
+  --bg:        var(--surface-0);
+  --bg-panel:  var(--surface-1);
+  --bg-header: var(--surface-2);
+  --bg-hover:  var(--surface-3);
+  --bg-active: var(--surface-4);
+
+  --fg:          var(--fg-1);
+  --fg-muted:    var(--fg-2);
+  --fg-subtle:   var(--fg-3);
+  --fg-faint:    var(--fg-4);
+
+  --accent:     var(--amber-7);
+  --accent-hi:  var(--amber-9);
+  --accent-bg:  var(--amber-3);
+
+  --success: var(--ack-green);
+  --warning: var(--cmd-yellow);
+  --danger:  var(--err-red);
+  --info:    var(--event-cyan);
+
+  /* -------------------------------------------------------- */
+  /*  TYPE TOKENS                                             */
+  /* -------------------------------------------------------- */
+  --font-ui:     "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:   "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "JetBrains Mono", ui-monospace, Menlo, monospace; /* monospace display — mission-control vibe */
+
+  /* Sizes — mission-control-tight. Base 13px is ImGui-native. */
+  --fs-micro: 10px;
+  --fs-xs:    11px;
+  --fs-sm:    12px;
+  --fs-md:    13px; /* base — matches ImGui default */
+  --fs-lg:    15px;
+  --fs-xl:    18px;
+  --fs-h3:    22px;
+  --fs-h2:    28px;
+  --fs-h1:    38px;
+  --fs-display: 56px;
+
+  --lh-tight:  1.1;
+  --lh-ui:     1.3;
+  --lh-body:   1.5;
+
+  --ls-wide:   0.08em;  /* for eyebrows / labels */
+  --ls-tight:  -0.01em; /* for big display type */
+
+  /* -------------------------------------------------------- */
+  /*  SPACING & SHAPE                                         */
+  /* -------------------------------------------------------- */
+  --space-0:  0px;
+  --space-1:  2px;  /* ImGui inner spacing    */
+  --space-2:  4px;  /* hairline gap            */
+  --space-3:  6px;
+  --space-4:  8px;  /* ImGui frame padding     */
+  --space-5:  12px;
+  --space-6:  16px;
+  --space-7:  20px;
+  --space-8:  24px;
+  --space-9:  32px;
+  --space-10: 48px;
+
+  --radius-0:  0px;  /* default for the dense ImGui-style */
+  --radius-1:  2px;  /* subtle softening for web surfaces */
+  --radius-2:  3px;
+  --radius-3:  4px;  /* cards */
+  --radius-pill: 999px;
+
+  --border-w-hair:   1px;
+  --border-w-strong: 2px;
+
+  /* Elevation — tight, minimal. Mission control is flat. */
+  --elev-0: none;
+  --elev-1: 0 0 0 1px var(--border), 0 1px 2px rgba(0,0,0,0.4);
+  --elev-2: 0 0 0 1px var(--border-strong), 0 4px 16px rgba(0,0,0,0.5);
+  --elev-3: 0 0 0 1px var(--border-strong), 0 8px 32px rgba(0,0,0,0.6);
+
+  /* Glow — signature mission-control accent */
+  --glow-amber: 0 0 0 1px rgba(255,162,38,0.5), 0 0 16px rgba(255,162,38,0.25);
+  --glow-cyan:  0 0 0 1px rgba(89,217,255,0.5), 0 0 12px rgba(89,217,255,0.25);
+  --glow-green: 0 0 0 1px rgba(102,255,102,0.5), 0 0 12px rgba(102,255,102,0.22);
+
+  /* Motion — frame-rate-independent (delta-time). Snappy, not bouncy. */
+  --dur-quick:   80ms;
+  --dur-normal:  140ms;
+  --dur-slow:    240ms;
+  --ease-out:    cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in:     cubic-bezier(0.6, 0, 0.6, 0.2);
+  --ease-linear: linear;
+}
+
+/* -------------------------------------------------------- */
+/*  SEMANTIC ELEMENTS                                       */
+/* -------------------------------------------------------- */
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  line-height: var(--lh-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, .h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-tight);
+  margin: 0;
+  color: var(--fg-1);
+}
+
+h2, .h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-tight);
+  margin: 0;
+  color: var(--fg-1);
+}
+
+h3, .h3 {
+  font-family: var(--font-ui);
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  margin: 0;
+  color: var(--fg-1);
+}
+
+p, .p {
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  color: var(--fg-1);
+  margin: 0 0 var(--space-5) 0;
+}
+
+small, .small {
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+code, .code, .mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-1);
+  background: var(--surface-2);
+  padding: 1px 4px;
+  border-radius: var(--radius-1);
+}
+
+.readout {
+  /* tabular numeric display — telemetry values */
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-md);
+  color: var(--fg-1);
+}
+
+.readout--muted  { color: var(--fg-2); }
+.readout--accent { color: var(--accent); }
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-disconnected);
+  vertical-align: baseline;
+  box-shadow: 0 0 6px currentColor;
+}
+.status-dot--connected    { background: var(--status-connected);    color: var(--status-connected); }
+.status-dot--connecting   { background: var(--status-connecting);   color: var(--status-connecting); }
+.status-dot--disconnected { background: var(--status-disconnected); color: var(--status-disconnected); box-shadow: none; }
+.status-dot--error        { background: var(--status-error);        color: var(--status-error); }

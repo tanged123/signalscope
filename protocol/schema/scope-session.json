@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "types": {
+    "Theme": {
+      "kind": "enum",
+      "variants": ["dark", "light"],
+      "default": "dark"
+    },
+    "TimeMode": {
+      "kind": "enum",
+      "variants": ["fixed", "follow"],
+      "default": "fixed"
+    },
+    "PanelMode": {
+      "kind": "enum",
+      "variants": ["time", "xy", "fft", "histogram"]
+    },
+    "AxisStyle": { "kind": "enum", "variants": ["gutter", "inline"] },
+    "DashStyle": { "kind": "enum", "variants": ["solid", "dash", "dot"] },
+    "LinkedTime": {
+      "kind": "object",
+      "fields": {
+        "t0": "f64",
+        "t1": "f64",
+        "linked": "bool",
+        "paused": "bool",
+        "cursorT": "f64?",
+        "mode": "TimeMode"
+      }
+    },
+    "SeriesState": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "color_slot": "u8",
+        "dash": "DashStyle",
+        "width": "f32",
+        "visible": "bool"
+      }
+    },
+    "Annotation": {
+      "kind": "object",
+      "fields": {
+        "id": "string",
+        "series_path": "string",
+        "time": "f64",
+        "value": "f64",
+        "label": "string"
+      }
+    },
+    "PanelState": {
+      "kind": "object",
+      "fields": {
+        "id": "string",
+        "title": "string",
+        "mode": "PanelMode",
+        "axis_style": "AxisStyle",
+        "x_signal": "string?",
+        "color_signal": "string?",
+        "series": "SeriesState[]",
+        "y_range": "f64[2]?",
+        "annotations": "Annotation[]",
+        "show_stats": "bool"
+      }
+    },
+    "Session": {
+      "kind": "object",
+      "fields": {
+        "app": "string",
+        "schema_version": "u32",
+        "theme": "Theme",
+        "linked_time": "LinkedTime",
+        "focused_panel_id": "string?",
+        "panels": "PanelState[]"
+      }
+    }
+  }
+}

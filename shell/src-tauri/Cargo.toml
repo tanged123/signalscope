@@ -1,0 +1,23 @@
+[package]
+name = "signalscope-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "signalscope_shell"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+scope-core.workspace = true
+scope-protocol.workspace = true
+serde.workspace = true
+tauri = { version = "2", features = [] }
+
+[lints]
+workspace = true

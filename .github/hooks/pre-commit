@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mapfile -d '' staged_files < <(git diff --cached --name-only --diff-filter=ACMR -z)
+if (( ${#staged_files[@]} )); then
+  nix fmt -- "${staged_files[@]}"
+fi
