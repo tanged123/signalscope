@@ -5,18 +5,31 @@ import { fileURLToPath } from "node:url";
 
 const scriptDirectory = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repositoryRoot = resolve(scriptDirectory, "..");
-const workspacePackageNames = new Set([
-  "scope-core",
-  "scope-protocol",
-  "signalscope-shell",
-]);
-
 const releaseFiles = {
   cargo: resolve(repositoryRoot, "Cargo.toml"),
   lock: resolve(repositoryRoot, "Cargo.lock"),
   frontend: resolve(repositoryRoot, "frontend/package.json"),
   tauri: resolve(repositoryRoot, "shell/src-tauri/tauri.conf.json"),
 };
+
+async function workspacePackageNames() {
+  const cargo = await readFile(releaseFiles.cargo, "utf8");
+  const members = /\[workspace\][\s\S]*?members\s*=\s*\[([\s\S]*?)\]/.exec(
+    cargo,
+  );
+  if (!members) throw new Error("Cargo.toml has no [workspace] members list");
+  const names = new Set();
+  for (const [, member] of members[1].matchAll(/"([^"]+)"/g)) {
+    const manifest = await readFile(
+      resolve(repositoryRoot, member, "Cargo.toml"),
+      "utf8",
+    );
+    const name = /^name\s*=\s*"([^"]+)"\s*$/m.exec(manifest);
+    if (!name) throw new Error(`${member}/Cargo.toml has no package name`);
+    names.add(name[1]);
+  }
+  return names;
+}
 
 function usage() {
   console.log(`Usage: ./scripts/version.sh <command>
@@ -62,14 +75,14 @@ function cargoWorkspaceVersion(text) {
   return match[1];
 }
 
-function lockVersions(text) {
+function lockVersions(text, packageNames) {
   const versions = new Map();
   let packageName = null;
   for (const line of text.split("\n")) {
     const packageMatch = /^name = "([^"]+)"$/.exec(line);
     if (packageMatch) packageName = packageMatch[1];
     const versionMatch = /^version = "([^"]+)"$/.exec(line);
-    if (packageName && versionMatch && workspacePackageNames.has(packageName)) {
+    if (packageName && versionMatch && packageNames.has(packageName)) {
       versions.set(packageName, versionMatch[1]);
       packageName = null;
     }
@@ -78,7 +91,7 @@ function lockVersions(text) {
   return versions;
 }
 
-async function readReleaseState() {
+async function readReleaseState(packageNames) {
   const [cargoText, lockText, frontendText, tauriText] = await Promise.all(
     Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
   );
@@ -87,7 +100,7 @@ async function readReleaseState() {
     ["frontend/package.json", JSON.parse(frontendText).version],
     ["shell/src-tauri/tauri.conf.json", JSON.parse(tauriText).version],
   ]);
-  for (const [name, version] of lockVersions(lockText)) {
+  for (const [name, version] of lockVersions(lockText, packageNames)) {
     versions.set(`Cargo.lock ${name}`, version);
   }
   return versions;
@@ -136,7 +149,7 @@ function setJsonVersion(text, version, file) {
   return updated;
 }
 
-function setLockVersions(text, version) {
+function setLockVersions(text, version, packageNames) {
   const lines = text.split("\n");
   let packageName = null;
   let replacements = 0;
@@ -146,7 +159,7 @@ function setLockVersions(text, version) {
     if (
       packageName &&
       /^version = "/.test(lines[index]) &&
-      workspacePackageNames.has(packageName)
+      packageNames.has(packageName)
     ) {
       lines[index] = `version = "${version}"`;
       replacements += 1;
@@ -154,22 +167,25 @@ function setLockVersions(text, version) {
     }
     if (lines[index] === "[[package]]") packageName = null;
   }
-  if (replacements !== workspacePackageNames.size) {
+  if (replacements !== packageNames.size) {
     throw new Error(
-      `Cargo.lock updated ${replacements} workspace packages; expected ${workspacePackageNames.size}`,
+      `Cargo.lock updated ${replacements} workspace packages; expected ${packageNames.size}`,
     );
   }
   return lines.join("\n");
 }
 
-async function setVersion(version) {
+async function setVersion(version, packageNames) {
   parseVersion(version);
   const [cargoText, lockText, frontendText, tauriText] = await Promise.all(
     Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
   );
   await Promise.all([
     writeFile(releaseFiles.cargo, await setCargoVersion(cargoText, version)),
-    writeFile(releaseFiles.lock, setLockVersions(lockText, version)),
+    writeFile(
+      releaseFiles.lock,
+      setLockVersions(lockText, version, packageNames),
+    ),
     writeFile(
       releaseFiles.frontend,
       setJsonVersion(frontendText, version, "frontend/package.json"),
@@ -200,15 +216,18 @@ try {
   if (!command || command === "help" || command === "--help") {
     usage();
   } else if (command === "get") {
-    console.log(assertConsistent(await readReleaseState()));
+    const packageNames = await workspacePackageNames();
+    console.log(assertConsistent(await readReleaseState(packageNames)));
   } else if (command === "check") {
+    const packageNames = await workspacePackageNames();
     console.log(
-      `Release manifests are synchronized at ${assertConsistent(await readReleaseState())}.`,
+      `Release manifests are synchronized at ${assertConsistent(await readReleaseState(packageNames))}.`,
     );
   } else if (command === "check-pr") {
     if (!argument) throw new Error("check-pr requires a base git ref or SHA");
+    const packageNames = await workspacePackageNames();
     const current = parseVersion(
-      assertConsistent(await readReleaseState()),
+      assertConsistent(await readReleaseState(packageNames)),
       "current version",
     );
     const base = baseVersion(argument);
@@ -229,12 +248,15 @@ try {
     }
   } else if (command === "set") {
     if (!argument) throw new Error("set requires major.minor.patch");
-    await setVersion(argument);
+    await setVersion(argument, await workspacePackageNames());
   } else if (command === "bump") {
     if (!["major", "minor", "patch"].includes(argument)) {
       throw new Error("bump requires major, minor, or patch");
     }
-    const current = parseVersion(assertConsistent(await readReleaseState()));
+    const packageNames = await workspacePackageNames();
+    const current = parseVersion(
+      assertConsistent(await readReleaseState(packageNames)),
+    );
     const next = [...current];
     if (argument === "major") {
       next[0] += 1;
@@ -246,7 +268,7 @@ try {
     } else {
       next[2] += 1;
     }
-    await setVersion(formatVersion(next));
+    await setVersion(formatVersion(next), packageNames);
   } else {
     throw new Error(`unknown version command: ${command}`);
   }
