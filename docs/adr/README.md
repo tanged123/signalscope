@@ -9,5 +9,6 @@ Accepted Phase 0 decisions:
 5. [Session schema versioning](0005-session-schema-versioning.md)
 6. [Linked-time model](0006-linked-time-model.md)
 7. [Snapshot injection](0007-snapshot-injection.md)
+8. [Expression evaluation layer](0008-expression-evaluation-layer.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

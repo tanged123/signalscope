@@ -26,6 +26,7 @@ case "$mode" in
     ;;
   web)
     shift || true
+    # Port 4173 is also used by Playwright against the shared frontend host.
     exec pnpm dev "$@"
     ;;
   -h | --help | help)

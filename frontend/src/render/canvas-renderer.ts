@@ -12,6 +12,15 @@ interface Range {
   max: number;
 }
 
+interface Palette {
+  background: string;
+  border: string;
+  fg2: string;
+  fg3: string;
+  grid: string;
+  series: string[];
+}
+
 export const SERIES_TOKENS = [
   "--series-1",
   "--series-2",
@@ -24,22 +33,20 @@ export const SERIES_TOKENS = [
 ] as const;
 
 export class CanvasRenderer {
+  private palette: Palette | null = null;
+  private renderedWidth = 0;
+  private renderedHeight = 0;
+
   constructor(private readonly canvas: HTMLCanvasElement) {}
+
+  invalidateTheme(): void {
+    this.palette = null;
+  }
 
   render(response: TileResponse, xRange: Range): number {
     const started = performance.now();
     const { context, width, height } = this.prepareCanvas();
-    const styles = getComputedStyle(document.documentElement);
-    const colors = {
-      background: styles.getPropertyValue("--surface-0").trim(),
-      border: styles.getPropertyValue("--border-strong").trim(),
-      fg2: styles.getPropertyValue("--fg-2").trim(),
-      fg3: styles.getPropertyValue("--fg-3").trim(),
-      grid: styles.getPropertyValue("--grid").trim(),
-      series: SERIES_TOKENS.map((token) =>
-        styles.getPropertyValue(token).trim(),
-      ),
-    };
+    const colors = this.resolvePalette();
     context.fillStyle = colors.background;
     context.fillRect(0, 0, width, height);
 
@@ -72,8 +79,17 @@ export class CanvasRenderer {
     const ratio = window.devicePixelRatio || 1;
     const width = Math.max(1, this.canvas.clientWidth);
     const height = Math.max(1, this.canvas.clientHeight);
-    this.canvas.width = Math.round(width * ratio);
-    this.canvas.height = Math.round(height * ratio);
+    const backingWidth = Math.round(width * ratio);
+    const backingHeight = Math.round(height * ratio);
+    if (
+      backingWidth !== this.renderedWidth ||
+      backingHeight !== this.renderedHeight
+    ) {
+      this.canvas.width = backingWidth;
+      this.canvas.height = backingHeight;
+      this.renderedWidth = backingWidth;
+      this.renderedHeight = backingHeight;
+    }
     const context = this.canvas.getContext("2d");
     if (context === null) {
       throw new Error("Canvas 2D context is unavailable");
@@ -82,18 +98,28 @@ export class CanvasRenderer {
     return { context, width, height };
   }
 
+  private resolvePalette(): Palette {
+    if (this.palette !== null) return this.palette;
+    const styles = getComputedStyle(document.documentElement);
+    this.palette = {
+      background: styles.getPropertyValue("--surface-0").trim(),
+      border: styles.getPropertyValue("--border-strong").trim(),
+      fg2: styles.getPropertyValue("--fg-2").trim(),
+      fg3: styles.getPropertyValue("--fg-3").trim(),
+      grid: styles.getPropertyValue("--grid").trim(),
+      series: SERIES_TOKENS.map((token) =>
+        styles.getPropertyValue(token).trim(),
+      ),
+    };
+    return this.palette;
+  }
+
   private drawAxes(
     context: CanvasRenderingContext2D,
     plot: PlotRect,
     xRange: Range,
     yRange: Range,
-    colors: {
-      background: string;
-      border: string;
-      fg2: string;
-      fg3: string;
-      grid: string;
-    },
+    colors: Palette,
   ): void {
     context.lineWidth = 1;
     context.font = '9px "JetBrains Mono", monospace';

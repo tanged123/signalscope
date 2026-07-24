@@ -17,7 +17,7 @@ export class AppShell {
   ) {}
 
   async mount(): Promise<void> {
-    this.root.innerHTML = shellMarkup(this.plane.host);
+    this.root.innerHTML = shellMarkup(this.plane.sourceLabel);
     this.bindControls();
     const canvas = this.requireElement<HTMLCanvasElement>(".plot-canvas");
     this.renderer = new CanvasRenderer(canvas);
@@ -42,7 +42,7 @@ export class AppShell {
     this.requireElement(".linked-toggle").addEventListener("click", (event) => {
       const button = event.currentTarget as HTMLButtonElement;
       const linked = !this.time.snapshot().linked;
-      this.time.setLinked(linked, "toolbar");
+      this.time.setLinked(linked);
       button.classList.toggle("active", linked);
     });
     this.requireElement<HTMLInputElement>(".signal-search").addEventListener(
@@ -184,6 +184,7 @@ export class AppShell {
   private toggleTheme(): void {
     const root = document.documentElement;
     root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
+    this.renderer?.invalidateTheme();
     this.renderCanvas();
   }
 
@@ -202,7 +203,7 @@ export class AppShell {
   }
 }
 
-function shellMarkup(host: DataPlane["host"]): string {
+function shellMarkup(sourceLabel: string): string {
   return `<main class="workbench">
     <nav class="menu-bar" aria-label="Application menu">
       <span class="brand">
@@ -242,7 +243,7 @@ function shellMarkup(host: DataPlane["host"]): string {
       <div class="source-footer">
         <div class="source-row">
           <span class="status-dot"></span>
-          <span>${host === "native" ? "native data plane" : "baked demo source"}</span>
+          <span>${sourceLabel}</span>
           <span class="source-points">0 pts</span>
         </div>
       </div>

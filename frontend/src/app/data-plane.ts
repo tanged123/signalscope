@@ -8,7 +8,7 @@ import { open, seal, type Envelope } from "./envelope";
 import { queryPyramid } from "./pyramid-query";
 
 export interface DataPlane {
-  readonly host: "native" | "snapshot";
+  readonly sourceLabel: string;
   listSignals(): Promise<SignalSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
 }
@@ -31,7 +31,7 @@ declare global {
 }
 
 export class TauriPlane implements DataPlane {
-  readonly host = "native" as const;
+  readonly sourceLabel = "native data plane";
 
   constructor(private readonly invoke: TauriInternals["invoke"]) {}
 
@@ -49,7 +49,7 @@ export class TauriPlane implements DataPlane {
 }
 
 export class BakedPlane implements DataPlane {
-  readonly host = "snapshot" as const;
+  readonly sourceLabel = "baked demo source";
 
   private readonly payload: BakedManifest["payload"];
 

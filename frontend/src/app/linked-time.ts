@@ -4,11 +4,7 @@ import type { LinkedTime, TimeMode } from "../generated/session";
 export type { TimeMode, TimeWindow };
 export type LinkedTimeState = LinkedTime;
 
-type Listener = (state: Readonly<LinkedTimeState>, origin: string) => void;
-
 export class LinkedTimeModel {
-  private readonly listeners = new Set<Listener>();
-
   constructor(
     private state: LinkedTimeState = {
       t0: 0,
@@ -26,32 +22,8 @@ export class LinkedTimeModel {
     return { ...this.state };
   }
 
-  subscribe(listener: Listener): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  setWindow(window: TimeWindow, origin: string): void {
-    this.validateWindow(window);
-    this.state = { ...this.state, ...window, mode: "fixed" };
-    this.publish(origin);
-  }
-
-  setCursor(cursorT: number | null, origin: string): void {
-    this.state = { ...this.state, cursorT };
-    this.publish(origin);
-  }
-
-  setLinked(linked: boolean, origin: string): void {
+  setLinked(linked: boolean): void {
     this.state = { ...this.state, linked };
-    this.publish(origin);
-  }
-
-  private publish(origin: string): void {
-    const snapshot = this.snapshot();
-    for (const listener of this.listeners) {
-      listener(snapshot, origin);
-    }
   }
 
   private validateWindow(window: TimeWindow): void {
