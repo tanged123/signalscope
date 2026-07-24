@@ -12,10 +12,10 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 repository = "https://github.com/tanged123/signalscope"
-rust-version = "1.82"
+rust-version = "1.85"
 
 [workspace.dependencies]
 csv = "1.3"

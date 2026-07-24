@@ -33,7 +33,7 @@
           programs.prettier.enable = true;
           programs.rustfmt = {
             enable = true;
-            edition = "2021";
+            edition = "2024";
           };
           programs.taplo.enable = true;
         };
