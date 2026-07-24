@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 mode="${1:-native}"
-if [ "$mode" = "appimage" ]; then
-  shift || true
-  exec "$(dirname "$0")/build-appimage.sh" "$@"
-fi
-
-if [ -z "${IN_NIX_SHELL:-}" ]; then
-  exec "$(dirname "$0")/dev.sh" "$0" "$@"
-fi
-
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 show_help() {
   cat <<'EOF'
@@ -25,6 +18,13 @@ Usage: ./scripts/build.sh [native|appimage|web] [additional arguments]
   web     Build only the browser frontend and snapshot-template.html.
 EOF
 }
+
+if [ "$mode" = "appimage" ]; then
+  shift || true
+  exec "$signalscope_scripts_dir/build-appimage.sh" "$@"
+fi
+
+ensure_dev_shell "$@"
 
 case "$mode" in
   native)

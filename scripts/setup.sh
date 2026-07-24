@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -z "${IN_NIX_SHELL:-}" ]; then
-  exec "$(dirname "$0")/dev.sh" "$0" "$@"
-fi
+# shellcheck source=scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+ensure_dev_shell "$@"
 
 pnpm install --frozen-lockfile
 

@@ -1,11 +1,17 @@
 name: SignalScope CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   version:
@@ -18,83 +24,138 @@ jobs:
       - if: github.event_name == 'pull_request'
         run: ./scripts/version.sh check-pr "${{ github.event.pull_request.base.sha }}"
 
-  nix-flake-check:
+  flake:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          install-frontend: "false"
       - run: ./scripts/ci.sh flake
 
-  lint:
+  rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - run: ./scripts/setup.sh
-      - run: ./scripts/ci.sh lint
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: rust
+      - run: ./scripts/ci.sh rust
 
-  typecheck:
+  frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - run: ./scripts/setup.sh
-      - run: ./scripts/ci.sh typecheck
-
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - run: ./scripts/ci.sh clippy
-
-  unit-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - run: ./scripts/setup.sh
-      - run: ./scripts/ci.sh unit
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: ./scripts/ci.sh frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-template
+          path: frontend/dist/snapshot-template.html
 
   e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - run: ./scripts/setup.sh
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: ./scripts/ci.sh e2e
 
-  builds:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: coverage
+      - run: ./scripts/coverage.sh
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./build/coverage/rust.lcov,./build/coverage/frontend/lcov.info
+          version: v11.2.7
+          fail_ci_if_error: true
+
+  build:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact: release-linux-packages
+            bundles: |
+              target/release/bundle/deb/*.deb
+              target/release/bundle/rpm/*.rpm
+          - os: macos-latest
+            artifact: release-macos
+            bundles: target/release/bundle/dmg/*.dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - run: ./scripts/setup.sh
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: build
       - run: ./scripts/ci.sh build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.bundles }}
+          if-no-files-found: error
 
   appimage:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-appimage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-appimage-${{ runner.os }}-
       - run: ./scripts/setup-appimage.sh
       - run: ./scripts/ci.sh appimage
       - uses: actions/upload-artifact@v4
         with:
-          name: signalscope-linux-appimage
+          name: release-linux-appimage
           path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
-  artifact-checks:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    needs: [version, flake, rust, frontend, e2e, build, appimage]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - run: ./scripts/setup.sh
-      - run: ./scripts/ci.sh artifacts
-      - uses: actions/upload-artifact@v4
         with:
-          name: snapshot-template
-          path: frontend/dist/snapshot-template.html
+          fetch-depth: 0
+      - id: release-tag
+        run: echo "tag=$(./scripts/release.sh tag)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [tag, build, appimage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - run: ./scripts/release.sh publish "${{ needs.tag.outputs.tag }}" release-assets

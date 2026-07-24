@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -z "${IN_NIX_SHELL:-}" ]; then
-  exec "$(dirname "$0")/dev.sh" "$0" "$@"
-fi
-
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+# shellcheck source=scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
 Usage: ./scripts/test.sh [quick|core|frontend|e2e|full]
 
-  quick     Core Rust tests plus frontend lint, types, tests, and snapshot
-            artifact checks (default).
+  quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates without compiling the Tauri shell.
-  frontend  Run frontend lint, typecheck, unit tests, and artifact checks.
+  frontend  Run frontend lint, typecheck, codegen check, unit tests, and
+            snapshot artifact checks.
   e2e       Run Playwright desktop and mobile-review smoke tests.
   full      Run quick checks, compile/test the Tauri shell, then run e2e.
 EOF
@@ -25,11 +23,8 @@ test_core() {
 }
 
 test_frontend() {
-  pnpm lint
-  pnpm typecheck
-  pnpm test
-  pnpm build
-  pnpm check:artifacts
+  frontend_checks
+  artifact_checks
 }
 
 mode="${1:-quick}"

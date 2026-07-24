@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -z "${IN_NIX_SHELL:-}" ]; then
-  exec "$(dirname "$0")/dev.sh" "$0" "$@"
-fi
+# shellcheck source=scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+ensure_dev_shell "$@"
 
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
-
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-project_root="$(cd "$script_dir/.." && pwd)"
-coverage_dir="$project_root/build/coverage"
+coverage_dir="$signalscope_root/build/coverage"
 
 show_help() {
   cat <<'EOF'
@@ -38,7 +34,6 @@ coverage_frontend() {
 }
 
 mkdir -p "$coverage_dir"
-cd "$project_root"
 
 mode="${1:-all}"
 case "$mode" in

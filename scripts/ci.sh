@@ -1,108 +1,77 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-project_root="$(cd "$script_dir/.." && pwd)"
+# shellcheck source=scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 mode="${1:-all}"
-
-if [ "$mode" = "flake" ]; then
-  exec nix flake check
-fi
-
-if [ "$mode" = "appimage" ]; then
-  exec "$project_root/scripts/build.sh" appimage
-fi
-
-if [ -z "${IN_NIX_SHELL:-}" ]; then
-  exec "$(dirname "$0")/dev.sh" "$0" "$@"
-fi
-
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/ci.sh [all|flake|format|lint|typecheck|clippy|unit|e2e|build|appimage|artifacts]
+Usage: ./scripts/ci.sh [all|flake|format|rust|frontend|e2e|build|appimage]
 
-Each mode matches the GitHub Actions job with the same name. `all` runs every
-local quality gate sequentially, with Cargo capped at two jobs by default.
-The Ubuntu-only `appimage` mode runs outside the Nix development shell.
+Each named mode matches the GitHub Actions job with the same name:
+
+  flake     nix flake check; includes the treefmt formatting gate.
+  format    treefmt --fail-on-change (fast local shortcut for the flake gate).
+  rust      cargo clippy plus the full cargo test suite.
+  frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
+            snapshot artifact checks.
+  e2e       Playwright desktop and mobile-review smoke tests.
+  build     Native Tauri bundles via ./scripts/build.sh native.
+  appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
+
+`all` runs format, rust, frontend, and e2e sequentially with Cargo capped at
+two jobs by default — the complete local quality gate.
 EOF
 }
 
+case "$mode" in
+  -h | --help | help)
+    show_help
+    exit 0
+    ;;
+  flake)
+    exec nix flake check
+    ;;
+  appimage)
+    exec "$signalscope_scripts_dir/build-appimage.sh"
+    ;;
+esac
+
+ensure_dev_shell "$@"
+
 check_format() {
   treefmt --fail-on-change
-}
-
-check_lint() {
-  cargo fmt --all --check
-  pnpm lint
-}
-
-check_typecheck() {
-  pnpm typecheck
-  pnpm codegen:check
-}
-
-check_clippy() {
-  cargo clippy --workspace --all-targets -- -D warnings
-}
-
-check_unit() {
-  cargo test --workspace
-  pnpm test
 }
 
 check_e2e() {
   pnpm e2e
 }
 
-check_build() {
-  "$project_root/scripts/build.sh" native
-}
-
-check_artifacts() {
-  "$project_root/scripts/build.sh" web
-  pnpm check:artifacts
-}
-
-cd "$project_root"
-
 case "$mode" in
   all)
     check_format
-    check_lint
-    check_typecheck
-    check_clippy
-    check_unit
+    rust_checks
+    frontend_checks
+    artifact_checks
     check_e2e
-    check_artifacts
     ;;
   format)
     check_format
     ;;
-  lint)
-    check_lint
+  rust)
+    rust_checks
     ;;
-  typecheck)
-    check_typecheck
-    ;;
-  clippy)
-    check_clippy
-    ;;
-  unit)
-    check_unit
+  frontend)
+    frontend_checks
+    artifact_checks
     ;;
   e2e)
     check_e2e
     ;;
   build)
-    check_build
-    ;;
-  artifacts)
-    check_artifacts
-    ;;
-  -h | --help | help)
-    show_help
+    exec "$signalscope_scripts_dir/build.sh" native
     ;;
   *)
     echo "Unknown CI mode: $mode" >&2

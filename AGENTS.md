@@ -51,9 +51,9 @@ Canonical commands:
 ./scripts/release.sh version            validate release metadata
 ./scripts/release.sh tag                create and push an annotated release tag
 ./scripts/release.sh publish <tag> <dir> publish staged release assets
-./scripts/ci.sh format|lint|typecheck|clippy|unit|e2e|build|artifacts
+./scripts/ci.sh format|rust|frontend|e2e|build|appimage
 ./scripts/ci.sh all                   complete local quality gate
-./scripts/ci.sh flake                 flake check
+./scripts/ci.sh flake                 flake check (includes formatting)
 ```
 
 Run `./scripts/setup.sh` before frontend work when dependencies are absent.
