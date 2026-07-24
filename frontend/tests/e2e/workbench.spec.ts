@@ -35,22 +35,78 @@ test("maximize fills the workspace and split restores the layout", async ({
   await expect(page.locator(".panel")).toHaveCount(1);
   await expect(page.locator(".panel.maximized")).toHaveCount(1);
 
+  const panelBar = page.locator(".maximized-panel-bar");
+  await expect(panelBar).toBeVisible();
+  await expect(panelBar.locator(".maximized-panel-tab")).toHaveCount(2);
   const maximized = page.locator(".panel.maximized");
   const after = await maximized.boundingBox();
+  const panelBarBox = await panelBar.boundingBox();
   if (after === null)
     throw new Error("maximized panel geometry is unavailable");
+  if (panelBarBox === null)
+    throw new Error("maximized panel bar geometry is unavailable");
   expect(after.height).toBeGreaterThan(before.height + 100);
-  expect(Math.abs(after.height - workspaceBox.height)).toBeLessThan(4);
+  expect(
+    Math.abs(after.height + panelBarBox.height - workspaceBox.height),
+  ).toBeLessThan(4);
   expect(Math.abs(after.width - workspaceBox.width)).toBeLessThan(4);
   await expect(maximized.locator(".panel-maximize")).toHaveAttribute(
     "title",
     "Restore panel",
   );
 
-  await maximized.locator(".panel-split").click();
+  await panelBar.locator(".maximized-panel-tab").last().click();
+  await expect(page.locator(".panel.maximized")).toHaveAttribute(
+    "data-panel-id",
+    "panel-2",
+  );
+
+  await page.locator(".panel.maximized .panel-split").click();
   await expect(page.locator(".panel")).toHaveCount(3);
   await expect(page.locator(".panel.maximized")).toHaveCount(0);
   await expect(page.locator(".panel").last()).toBeVisible();
+});
+
+test("workspace tabs keep independent panel layouts", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".workspace-tab")).toHaveCount(1);
+  await expect(page.locator(".panel")).toHaveCount(1);
+
+  await page.locator(".workspace-tab-add").click();
+  await expect(page.locator(".workspace-tab")).toHaveCount(2);
+  await expect(page.locator(".workspace-tab.active")).toContainText(
+    "Workspace 2",
+  );
+  await expect(page.locator(".workspace-empty")).toBeVisible();
+
+  await page.keyboard.press("n");
+  await expect(page.locator(".panel")).toHaveCount(1);
+  await expect(page.locator(".panel")).toHaveAttribute(
+    "data-panel-id",
+    "panel-2",
+  );
+
+  await page
+    .locator(".workspace-tab")
+    .first()
+    .locator("button")
+    .first()
+    .click();
+  await expect(page.locator(".workspace-tab.active")).toContainText(
+    "Workspace 1",
+  );
+  await expect(page.locator(".panel")).toHaveAttribute(
+    "data-panel-id",
+    "panel-1",
+  );
+  await expect(page.locator(".legend-chip")).toHaveCount(2);
+
+  await page.locator(".workspace-tab").last().locator("button").first().click();
+  await expect(page.locator(".panel")).toHaveAttribute(
+    "data-panel-id",
+    "panel-2",
+  );
+  await expect(page.locator(".legend-chip")).toHaveCount(0);
 });
 
 test("command palette reaches every command", async ({ page }) => {

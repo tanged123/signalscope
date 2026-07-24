@@ -13,7 +13,8 @@ SignalScope combines a Rust data plane for logs larger than memory with one Type
 The repository currently includes the Phase 1 data plane and workbench fundamentals:
 CSV and JSON-channel MCAP ingestion, persistent min/max pyramid caches, native
 progress reporting, multi-panel layouts, a virtualized signal tree, and the
-shared snapshot presentation plane.
+shared snapshot presentation plane. Workspace tabs retain multiple independent
+panel grids over the same loaded sources and linked time window.
 
 ## Quick start
 

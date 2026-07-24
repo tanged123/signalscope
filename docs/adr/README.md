@@ -11,5 +11,6 @@ Accepted Phase 0 decisions:
 7. [Snapshot injection](0007-snapshot-injection.md)
 8. [Expression evaluation layer](0008-expression-evaluation-layer.md)
 9. [Ingest jobs, progress reporting, and MCAP scope](0009-ingest-jobs-and-progress.md)
+10. [Workspace tabs and chrome hierarchy](0010-workspace-tabs-and-chrome-hierarchy.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

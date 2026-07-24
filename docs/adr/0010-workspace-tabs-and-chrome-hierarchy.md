@@ -1,0 +1,55 @@
+# ADR 0010: Workspace tabs and chrome hierarchy
+
+- Status: Accepted
+- Date: 2026-07-24
+
+## Context
+
+The original design specification called for one workspace with no tabs and
+reserved named layout presets for recalling panel arrangements. In use, one
+analysis often needs several simultaneously available panel grids: for
+example, overview, guidance, and power views over the same loaded sources and
+linked time window. Replacing one grid with a preset would discard that useful
+working context.
+
+The Phase 1 shell also exposed a conventional File/Edit/View-style menu row
+whose entries had no behavior. It duplicated the functional toolbar, consumed
+vertical plot space, and implied unavailable commands. Maximizing a panel then
+hid its siblings without leaving a visible way to discover or switch among
+them.
+
+## Decision
+
+SignalScope supports persistent workspace tabs in both the native workbench and
+HTML snapshots. Each tab owns a title, focused panel, panels, and fractional
+layout. The active tab identifier is session state. Loaded sources, favorite
+signals, theme, and linked time remain global so switching tabs changes the
+view of one analysis rather than creating an isolated document.
+
+Session schema version 3 replaces the single top-level panel grid with
+`WorkspaceTab[]`. The v2-to-v3 migration wraps the existing grid in
+`Workspace 1`; v1 sessions continue through the existing migration ladder.
+Panel identifiers remain unique across the session.
+
+Workspace tabs and layout presets have different roles. A tab is a durable
+working instance that retains plotted signals and panel state. A future layout
+preset is a reusable template applied within a tab.
+
+The application uses one global toolbar containing only implemented global
+actions and global state. Empty conventional menu headings are not rendered;
+future menus may return only when they contain real commands. A workspace-tab
+strip sits above the panel grid and remains visible during panel maximize.
+While maximized, a separate contextual panel rail lists sibling panels and
+offers an explicit `Restore grid` action.
+
+## Consequences
+
+Users can keep several analysis views available without duplicating loaded data
+or losing linked-time context. Native and snapshot hosts retain identical
+navigation because the behavior lives entirely in the shared presentation
+plane.
+
+The session schema gains another required migration rung before durable
+autosave ships. The tab strip costs 28 pixels of vertical space, offset by
+removing the inert 28-pixel menu row. Maximized mode costs a temporary
+26-pixel contextual rail in exchange for keeping hidden panels discoverable.

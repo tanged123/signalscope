@@ -7,6 +7,7 @@ import { type SignalSummary, type TileResponse } from "../generated/protocol";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
 import { required } from "./dom";
 import { SignalTreeView } from "./signal-tree";
+import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 
 export class AppShell {
@@ -16,6 +17,7 @@ export class AppShell {
   private signals: SignalSummary[] = [];
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
+  private workspaceTabs: WorkspaceTabsView | null = null;
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
@@ -27,6 +29,22 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    this.workspaceTabs = new WorkspaceTabsView(
+      required(this.root, ".workspace-tabs"),
+      {
+        onSelect: (id) => {
+          if (this.workspace.selectTab(id)) this.afterLayoutChange();
+        },
+        onAdd: () => {
+          this.workspace.addTab();
+          this.afterLayoutChange();
+        },
+        onClose: (id) => {
+          this.workspace.closeTab(id);
+          this.afterLayoutChange();
+        },
+      },
+    );
     this.workspaceView = new WorkspaceView(
       required(this.root, ".workspace"),
       this.workspace,
@@ -76,6 +94,14 @@ export class AppShell {
           this.workspace.movePanel(id, rowIndex, cellIndex);
           this.afterLayoutChange();
         },
+        onShowPanel: (id) => {
+          this.workspace.maximizePanel(id);
+          this.afterLayoutChange();
+        },
+        onRestoreGrid: () => {
+          this.workspace.restoreGrid();
+          this.afterLayoutChange();
+        },
       },
     );
     this.tree = new SignalTreeView(
@@ -116,6 +142,23 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "new-workspace-tab",
+      title: "New workspace tab",
+      run: () => {
+        this.workspace.addTab();
+        this.afterLayoutChange();
+      },
+    });
+    this.commands.register({
+      id: "close-workspace-tab",
+      title: "Close active workspace tab",
+      enabled: () => this.workspace.tabs().length > 1,
+      run: () => {
+        this.workspace.closeTab(this.workspace.activeTabId());
+        this.afterLayoutChange();
+      },
+    });
+    this.commands.register({
       id: "new-panel-row",
       title: "New panel row",
       keys: "n",
@@ -146,6 +189,15 @@ export class AppShell {
           this.workspace.toggleMaximize(id);
           this.afterLayoutChange();
         }
+      },
+    });
+    this.commands.register({
+      id: "restore-panel-grid",
+      title: "Restore panel grid",
+      enabled: () => this.workspace.maximizedPanelId() !== null,
+      run: () => {
+        this.workspace.restoreGrid();
+        this.afterLayoutChange();
       },
     });
     this.commands.register({
@@ -213,7 +265,26 @@ export class AppShell {
         this.plotSignal(summary.path);
       },
     }));
-    return [...commands, ...signals];
+    const tabs = this.workspace.tabs().map((tab) => ({
+      title: `switch to ${tab.title}`,
+      hint: "workspace",
+      run: () => {
+        this.workspace.selectTab(tab.id);
+        this.afterLayoutChange();
+      },
+    }));
+    const panels = this.workspace.panels().map((panel) => ({
+      title: `focus ${panel.title}`,
+      hint: "panel",
+      run: () => {
+        this.workspace.focusPanel(panel.id);
+        if (this.workspace.maximizedPanelId() !== null) {
+          this.workspace.maximizePanel(panel.id);
+        }
+        this.afterLayoutChange();
+      },
+    }));
+    return [...commands, ...tabs, ...panels, ...signals];
   }
 
   private bindControls(): void {
@@ -309,6 +380,10 @@ export class AppShell {
   }
 
   private afterLayoutChange(): void {
+    this.workspaceTabs?.sync(
+      this.workspace.tabs(),
+      this.workspace.activeTabId(),
+    );
     this.workspaceView?.sync(this.signals.length > 0);
     void this.refreshTiles();
   }
@@ -427,18 +502,12 @@ function keyHint(keys: string): string {
 
 function shellMarkup(): string {
   return `<main class="workbench">
-    <nav class="menu-bar" aria-label="Application menu">
+    <div class="tool-bar">
       <span class="brand">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         SIGNALSCOPE
       </span>
-      ${["File", "Edit", "View", "Panel", "Signals", "Export", "Help"]
-        .map((item) => `<button class="menu-item">${item}</button>`)
-        .join("")}
-      <span class="command-hint">commands <kbd>⌘K</kbd></span>
-    </nav>
-
-    <div class="tool-bar">
+      <span class="tool-divider"></span>
       <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button new-panel">+ Panel</button>
       <span class="tool-divider"></span>
@@ -448,7 +517,10 @@ function shellMarkup(): string {
       <span class="window-label">window</span>
       <span class="window-readout">t: 0.000 → 60.000 s</span>
       <button class="tool-button follow-slot" disabled>⏸ FOLLOW</button>
+      <span class="command-hint">commands <kbd>⌘K</kbd></span>
     </div>
+
+    <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
 
     <aside class="signal-tree" aria-label="Signals">
       <div class="search-wrap">

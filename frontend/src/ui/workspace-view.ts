@@ -16,6 +16,8 @@ export interface WorkspaceCallbacks extends PanelCallbacks {
     targetRowIndex: number,
     targetCellIndex: number,
   ): void;
+  onShowPanel(id: string): void;
+  onRestoreGrid(): void;
 }
 
 export class WorkspaceView {
@@ -54,7 +56,7 @@ export class WorkspaceView {
       view.element.style.width = "100%";
       view.element.style.height = "100%";
       rowElement.appendChild(view.element);
-      this.root.appendChild(rowElement);
+      this.root.append(this.maximizedPanelBar(maximized), rowElement);
       this.refreshPanelStates();
       return;
     }
@@ -116,6 +118,41 @@ export class WorkspaceView {
       this.views.set(id, view);
     }
     return view;
+  }
+
+  private maximizedPanelBar(maximizedId: string): HTMLElement {
+    const bar = document.createElement("nav");
+    bar.className = "maximized-panel-bar";
+    bar.ariaLabel = "Panels in this workspace";
+
+    const label = document.createElement("span");
+    label.className = "maximized-panel-label";
+    label.textContent = "MAXIMIZED";
+    bar.appendChild(label);
+
+    for (const panel of this.model.panels()) {
+      const button = document.createElement("button");
+      button.className = `maximized-panel-tab ${panel.id === maximizedId ? "active" : ""}`;
+      button.textContent = panel.title;
+      button.title =
+        panel.id === maximizedId
+          ? `${panel.title} is maximized`
+          : `Show ${panel.title}`;
+      button.addEventListener("click", () => {
+        this.callbacks.onShowPanel(panel.id);
+      });
+      bar.appendChild(button);
+    }
+
+    const restore = document.createElement("button");
+    restore.className = "restore-grid";
+    restore.textContent = "Restore grid";
+    restore.title = "Show every panel in this workspace";
+    restore.addEventListener("click", () => {
+      this.callbacks.onRestoreGrid();
+    });
+    bar.appendChild(restore);
+    return bar;
   }
 
   private bindPanelRearrange(element: HTMLElement, id: string): void {
