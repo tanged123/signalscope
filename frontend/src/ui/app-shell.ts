@@ -1,11 +1,9 @@
 import { CommandRegistry } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
+import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
 import { WorkspaceModel } from "../app/workspace";
-import {
-  type SignalSummary,
-  type TileResponse,
-} from "../generated/protocol";
+import { type SignalSummary, type TileResponse } from "../generated/protocol";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
 import { required } from "./dom";
 import { SignalTreeView } from "./signal-tree";
@@ -109,6 +107,15 @@ export class AppShell {
 
   private registerCommands(): void {
     this.commands.register({
+      id: "open-files",
+      title: "Open files…",
+      keys: "o",
+      enabled: () => this.plane.ingest !== null,
+      run: () => {
+        void this.openFiles();
+      },
+    });
+    this.commands.register({
       id: "new-panel-row",
       title: "New panel row",
       keys: "n",
@@ -170,9 +177,7 @@ export class AppShell {
       title: "Toggle formula bar",
       keys: "e",
       run: () => {
-        required(this.root, ".workbench").classList.toggle(
-          "formula-collapsed",
-        );
+        required(this.root, ".workbench").classList.toggle("formula-collapsed");
       },
     });
     this.commands.register({
@@ -212,6 +217,11 @@ export class AppShell {
   }
 
   private bindControls(): void {
+    const openButton = required<HTMLButtonElement>(this.root, ".open-files");
+    openButton.hidden = this.plane.ingest === null;
+    openButton.addEventListener("click", () => {
+      this.commands.run("open-files");
+    });
     required(this.root, ".theme-toggle").addEventListener("click", () => {
       this.toggleTheme();
     });
@@ -249,6 +259,30 @@ export class AppShell {
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
+    }
+  }
+
+  private async openFiles(): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null) return;
+    const progress = required<HTMLElement>(this.root, ".ingest-progress");
+    try {
+      const paths = await port.pickSources();
+      for (const path of paths) {
+        const name = path.split(/[\\/]/).at(-1) ?? path;
+        progress.hidden = false;
+        await runIngest(port, path, (status) => {
+          const percent =
+            status.fraction > 0 ? `${String(Math.round(status.fraction * 100))}%` : "…";
+          progress.textContent = `${name} · ${status.stage} ${percent}`;
+        });
+      }
+      await this.reloadSignals();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    } finally {
+      progress.hidden = true;
     }
   }
 
@@ -339,18 +373,30 @@ export class AppShell {
       `${this.signals.length.toLocaleString()} signals`;
     required(this.root, ".point-count").textContent =
       `${pointCount.toLocaleString()} pts`;
+    void this.updateSources();
+  }
+
+  private async updateSources(): Promise<void> {
+    const sources = await this.plane.listSources();
     const rows = required(this.root, ".source-rows");
-    const row = document.createElement("div");
-    row.className = "source-row";
-    const dot = document.createElement("span");
-    dot.className = "status-dot";
-    const name = document.createElement("span");
-    name.textContent = this.plane.sourceLabel;
-    const points = document.createElement("span");
-    points.className = "source-points";
-    points.textContent = `${pointCount.toLocaleString()} pts`;
-    row.append(dot, name, points);
-    rows.replaceChildren(row);
+    rows.replaceChildren(
+      ...sources.map((source) => {
+        const row = document.createElement("div");
+        row.className = "source-row";
+        const dot = document.createElement("span");
+        dot.className = "status-dot";
+        const name = document.createElement("span");
+        name.className = "signal-path";
+        name.textContent = source.path.split(/[\\/]/).at(-1) ?? source.path;
+        name.title = source.path;
+        const points = document.createElement("span");
+        points.className = "source-points";
+        points.textContent =
+          `${Number(source.point_count).toLocaleString()} pts`;
+        row.append(dot, name, points);
+        return row;
+      }),
+    );
   }
 
   private toggleLinked(): void {
