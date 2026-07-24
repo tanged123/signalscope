@@ -6,7 +6,7 @@
     "build": "pnpm --filter @signalscope/frontend build",
     "check:artifacts": "pnpm --filter @signalscope/frontend check:artifacts",
     "codegen": "node protocol/scripts/generate-types.mjs",
-    "codegen:check": "pnpm codegen && git diff --exit-code -- protocol/src/generated.rs frontend/src/generated/protocol.ts",
+    "codegen:check": "pnpm codegen && rustfmt --edition 2021 protocol/src/generated.rs && git diff --exit-code -- protocol/src/generated.rs frontend/src/generated/protocol.ts",
     "dev": "pnpm --filter @signalscope/frontend dev",
     "e2e": "pnpm --filter @signalscope/frontend e2e",
     "lint": "pnpm --filter @signalscope/frontend lint",

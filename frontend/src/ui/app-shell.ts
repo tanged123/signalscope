@@ -141,7 +141,9 @@ export class AppShell {
           : [...this.selectedIds, id];
         this.renderSignalTree();
         this.renderLegend();
-        void this.refreshTiles().catch((error: unknown) => this.reportError(error));
+        void this.refreshTiles().catch((error: unknown) =>
+          this.reportError(error),
+        );
       });
     }
   }
