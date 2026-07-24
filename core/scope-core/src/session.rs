@@ -1,50 +1,23 @@
 //! Versioned session schema and migration entry point.
 
-use serde::{Deserialize, Serialize};
+mod generated;
+
+pub use generated::*;
+
+use serde::Deserialize;
 use thiserror::Error;
-
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Session {
-    pub app: String,
-    pub schema_version: u32,
-    pub theme: Theme,
-    pub linked_time: LinkedTime,
-    pub focused_panel_id: Option<String>,
-    pub panels: Vec<PanelState>,
-}
 
 impl Default for Session {
     fn default() -> Self {
         Self {
             app: "signalscope".into(),
-            schema_version: CURRENT_SCHEMA_VERSION,
+            schema_version: SESSION_SCHEMA_VERSION,
             theme: Theme::Dark,
             linked_time: LinkedTime::default(),
             focused_panel_id: None,
             panels: Vec::new(),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Theme {
-    #[default]
-    Dark,
-    Light,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LinkedTime {
-    pub t0: f64,
-    pub t1: f64,
-    pub linked: bool,
-    pub paused: bool,
-    #[serde(rename = "cursorT")]
-    pub cursor_t: Option<f64>,
-    pub mode: TimeMode,
 }
 
 impl Default for LinkedTime {
@@ -60,70 +33,6 @@ impl Default for LinkedTime {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TimeMode {
-    #[default]
-    Fixed,
-    Follow,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PanelState {
-    pub id: String,
-    pub title: String,
-    pub mode: PanelMode,
-    pub axis_style: AxisStyle,
-    pub x_signal: Option<String>,
-    pub color_signal: Option<String>,
-    pub series: Vec<SeriesState>,
-    pub y_range: Option<[f64; 2]>,
-    pub annotations: Vec<Annotation>,
-    pub show_stats: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PanelMode {
-    Time,
-    Xy,
-    Fft,
-    Histogram,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AxisStyle {
-    Gutter,
-    Inline,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SeriesState {
-    pub path: String,
-    pub color_slot: u8,
-    pub dash: DashStyle,
-    pub width: f32,
-    pub visible: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DashStyle {
-    Solid,
-    Dash,
-    Dot,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Annotation {
-    pub id: String,
-    pub series_path: String,
-    pub time: f64,
-    pub value: f64,
-    pub label: String,
-}
-
 /// Deserializes and validates a `SignalScope` session.
 ///
 /// # Errors
@@ -132,17 +41,27 @@ pub struct Annotation {
 /// application, or uses an unsupported schema version.
 pub fn from_json(json: &str) -> Result<Session, SessionError> {
     #[derive(Deserialize)]
-    struct Envelope {
+    struct Head {
         app: String,
         schema_version: u32,
     }
 
-    let envelope: Envelope = serde_json::from_str(json)?;
-    if envelope.app != "signalscope" {
-        return Err(SessionError::WrongApplication(envelope.app));
+    let value: serde_json::Value = serde_json::from_str(json)?;
+    let head: Head = Head::deserialize(&value)?;
+    if head.app != "signalscope" {
+        return Err(SessionError::WrongApplication(head.app));
     }
-    match envelope.schema_version {
-        CURRENT_SCHEMA_VERSION => Ok(serde_json::from_str(json)?),
+    migrate(head.schema_version, value)
+}
+
+/// Migration ladder (ADR 0005): each arm upgrades `value` one schema
+/// version and falls through to the next; the current version deserializes
+/// directly. To add v(N+1): bump `schema_version` in
+/// `protocol/schema/scope-session.json`, regenerate, then add an arm here
+/// that rewrites a vN `value` into vN+1 shape and recurses.
+fn migrate(version: u32, value: serde_json::Value) -> Result<Session, SessionError> {
+    match version {
+        SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
 }
@@ -194,5 +113,13 @@ mod tests {
     fn future_version_is_rejected() {
         let error = from_json(r#"{"app":"signalscope","schema_version":99}"#).unwrap_err();
         assert!(matches!(error, SessionError::UnsupportedVersion(99)));
+    }
+
+    #[test]
+    fn migrate_is_the_single_dispatch_point() {
+        let json = serde_json::to_string(&Session::default()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let session = migrate(SESSION_SCHEMA_VERSION, value).unwrap();
+        assert_eq!(session, Session::default());
     }
 }

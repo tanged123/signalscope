@@ -1,16 +1,8 @@
-export type TimeMode = "fixed" | "follow";
+import type { TimeWindow } from "../generated/protocol";
+import type { LinkedTime, TimeMode } from "../generated/session";
 
-export interface TimeWindow {
-  t0: number;
-  t1: number;
-}
-
-export interface LinkedTimeState extends TimeWindow {
-  linked: boolean;
-  cursorT: number | null;
-  mode: TimeMode;
-  paused: boolean;
-}
+export type { TimeMode, TimeWindow };
+export type LinkedTimeState = LinkedTime;
 
 type Listener = (state: Readonly<LinkedTimeState>, origin: string) => void;
 
