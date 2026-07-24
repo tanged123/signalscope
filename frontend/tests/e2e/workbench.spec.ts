@@ -219,8 +219,29 @@ test("tree filters, favorites, and drag-to-plot", async ({
   await page.keyboard.press("n");
   const leaf = page.locator(".tree-scroll .tree-leaf").first();
   const target = page.locator(".panel").last();
-  await leaf.dragTo(target);
+  const workspace = page.locator(".workspace");
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await leaf.dispatchEvent("dragstart", { dataTransfer });
+
+  await workspace.dispatchEvent("dragover", { dataTransfer });
+  await expect(workspace).toHaveClass(/drop-target/);
+
+  await target.dispatchEvent("dragover", { dataTransfer });
+  await expect(target).toHaveClass(/drop-target/);
+  await expect(workspace).not.toHaveClass(/drop-target/);
+
+  await target.dispatchEvent("drop", { dataTransfer });
+  await leaf.dispatchEvent("dragend", { dataTransfer });
   await expect(target.locator(".legend-chip")).toHaveCount(1);
+  await expect(target).toHaveClass(/focused/);
+  await expect(target).not.toHaveClass(/drop-target/);
+  const focusColors = await target.evaluate((element) => ({
+    actual: getComputedStyle(element, "::after").borderTopColor,
+    expected: getComputedStyle(document.documentElement)
+      .getPropertyValue("--focus-ring")
+      .trim(),
+  }));
+  expect(focusColors.actual).toBe(focusColors.expected);
 });
 
 test("seam drag resizes panel rows", async ({ page, isMobile }) => {

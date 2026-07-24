@@ -177,9 +177,14 @@ export class WorkspaceView {
 
   private bindWorkspaceDrop(): void {
     this.root.addEventListener("dragover", (event) => {
-      if (hasDragType(event, SIGNAL_DRAG_TYPE)) {
+      if (
+        hasDragType(event, SIGNAL_DRAG_TYPE) &&
+        this.isWorkspaceBackground(event.target)
+      ) {
         event.preventDefault();
         this.root.classList.add("drop-target");
+      } else {
+        this.root.classList.remove("drop-target");
       }
     });
     this.root.addEventListener("dragleave", () => {
@@ -187,18 +192,20 @@ export class WorkspaceView {
     });
     this.root.addEventListener("drop", (event) => {
       this.root.classList.remove("drop-target");
-      const target = event.target;
-      const onBackground =
-        target === this.root ||
-        (target instanceof HTMLElement &&
-          target.classList.contains("workspace-empty"));
-      if (!onBackground) return;
+      if (!this.isWorkspaceBackground(event.target)) return;
       const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
       if (path !== undefined && path !== "") {
         event.preventDefault();
         this.callbacks.onDropSignalNewPanel(path);
       }
     });
+  }
+
+  private isWorkspaceBackground(target: EventTarget | null): boolean {
+    return (
+      target === this.root ||
+      (target instanceof Element && target.closest(".workspace-empty") !== null)
+    );
   }
 
   private rowSeam(seamIndex: number): HTMLElement {

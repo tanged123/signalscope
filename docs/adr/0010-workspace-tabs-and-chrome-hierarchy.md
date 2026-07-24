@@ -61,6 +61,12 @@ toggle and command palette restore or hide it without requiring precise
 pointer input. A five-pixel resize edge remains when collapsed, allowing a
 rightward drag to restore the tree without consuming meaningful plot width.
 
+Amber panel focus and signal-drop targeting use a pointer-transparent overlay
+painted above the canvas, so loading or rendering a series cannot hide the
+active-panel boundary. A panel drag does not activate the workspace background
+target; the workspace boundary appears only when the actual empty background
+will create a new panel.
+
 ## Consequences
 
 Users can keep several analysis views available without duplicating loaded data
