@@ -90,6 +90,16 @@ impl Signal {
     pub fn values(&self) -> &[f64] {
         &self.values
     }
+
+    #[must_use]
+    pub fn time_shared(&self) -> Arc<[f64]> {
+        Arc::clone(&self.time)
+    }
+
+    #[must_use]
+    pub fn values_shared(&self) -> Arc<[f64]> {
+        Arc::clone(&self.values)
+    }
 }
 
 #[derive(Clone, Debug)]

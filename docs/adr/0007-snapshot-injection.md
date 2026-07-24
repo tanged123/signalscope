@@ -12,3 +12,11 @@ At startup, absence of Tauri selects `BakedPlane`, which reads the slot. The wor
 ## Consequences
 
 Snapshots are one portable file and use the production presentation plane. Data budgeting occurs before injection. Schema and protocol versions remain visible in the artifact and can be migrated or rejected intentionally.
+
+## Amendment (2026-07-24)
+
+The baked manifest carries per-signal pyramid levels (not a single
+pre-baked tile response), and `BakedPlane` answers `queryTiles` with the
+same conformance-tested level-selection algorithm as the native host — pan
+and zoom inside a snapshot return the same envelopes the workbench would.
+Data budgeting now happens by choosing which levels and window to bake.
