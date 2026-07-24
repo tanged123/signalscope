@@ -1,15 +1,26 @@
-import { type SignalSummary, type TileResponse } from "../generated/protocol";
+import { CommandRegistry } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { LinkedTimeModel } from "../app/linked-time";
-import { CanvasRenderer, SERIES_TOKENS } from "../render/canvas-renderer";
+import { WorkspaceModel } from "../app/workspace";
+import {
+  type SignalSummary,
+  type TileResponse,
+} from "../generated/protocol";
+import { CommandPalette, type PaletteEntry } from "./command-palette";
+import { required } from "./dom";
+import { SignalTreeView } from "./signal-tree";
+import { WorkspaceView } from "./workspace-view";
 
-const MODE_LABELS = ["T", "XY", "FFT", "H"] as const;
 export class AppShell {
   private readonly time = new LinkedTimeModel();
+  private readonly workspace = new WorkspaceModel();
+  private readonly commands = new CommandRegistry();
   private signals: SignalSummary[] = [];
-  private selectedIds: string[] = [];
-  private renderer: CanvasRenderer | null = null;
-  private latestTiles: TileResponse | null = null;
+  private signalsByPath = new Map<string, SignalSummary>();
+  private workspaceView: WorkspaceView | null = null;
+  private tree: SignalTreeView | null = null;
+  private palette: CommandPalette | null = null;
+  private tilesByPanel = new Map<string, TileResponse>();
 
   constructor(
     private readonly root: HTMLElement,
@@ -17,155 +28,306 @@ export class AppShell {
   ) {}
 
   async mount(): Promise<void> {
-    this.root.innerHTML = shellMarkup(this.plane.sourceLabel);
+    this.root.innerHTML = shellMarkup();
+    this.workspaceView = new WorkspaceView(
+      required(this.root, ".workspace"),
+      this.workspace,
+      {
+        onFocus: (id) => {
+          if (this.workspace.focusedPanelId() !== id) {
+            this.workspace.focusPanel(id);
+            this.workspaceView?.refreshPanelStates();
+          }
+        },
+        onClose: (id) => {
+          this.workspace.closePanel(id);
+          this.afterLayoutChange();
+        },
+        onSplit: (id) => {
+          this.workspace.splitPanel(id);
+          this.afterLayoutChange();
+        },
+        onMaximize: (id) => {
+          this.workspace.toggleMaximize(id);
+          this.afterLayoutChange();
+        },
+        onSelectMode: (id, mode) => {
+          this.workspace.setMode(id, mode);
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        onDropSignal: (id, path) => {
+          this.plotSignal(path, id);
+        },
+        onToggleSeries: (id, path) => {
+          this.workspace.toggleSeriesVisible(id, path);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onResized: () => {
+          this.renderTiles();
+        },
+        onLayoutChanged: () => {
+          void this.refreshTiles();
+        },
+        onDropSignalNewPanel: (path) => {
+          const panel = this.workspace.addPanelRow();
+          this.plotSignal(path, panel.id);
+        },
+        onMovePanel: (id, rowIndex, cellIndex) => {
+          this.workspace.movePanel(id, rowIndex, cellIndex);
+          this.afterLayoutChange();
+        },
+      },
+    );
+    this.tree = new SignalTreeView(
+      required(this.root, ".tree-scroll"),
+      required(this.root, ".tree-favorites"),
+      {
+        onPlotSignal: (path) => {
+          this.plotSignal(path);
+        },
+        onToggleFavorite: (path) => {
+          this.workspace.toggleFavorite(path);
+          this.tree?.setFavorites(this.workspace.favorites());
+        },
+      },
+    );
+    this.palette = new CommandPalette(this.root, () => this.paletteEntries());
+    this.registerCommands();
     this.bindControls();
-    const canvas = this.requireElement<HTMLCanvasElement>(".plot-canvas");
-    this.renderer = new CanvasRenderer(canvas);
+    await this.reloadSignals();
+    if (this.signals.length > 0 && this.workspace.panels().length === 0) {
+      const panel = this.workspace.addPanelRow();
+      for (const summary of this.signals.slice(0, 2)) {
+        this.workspace.addSeries(panel.id, summary.path);
+      }
+      this.fitWindowToPlotted();
+    }
+    this.afterLayoutChange();
+  }
 
-    this.signals = await this.plane.listSignals();
-    this.selectedIds = this.signals
-      .slice(0, 3)
-      .map((signal) => signal.signal_id);
-    this.renderSignalTree();
-    this.renderLegend();
-    this.updateStatus();
-    await this.refreshTiles();
+  private registerCommands(): void {
+    this.commands.register({
+      id: "new-panel-row",
+      title: "New panel row",
+      keys: "n",
+      run: () => {
+        this.workspace.addPanelRow();
+        this.afterLayoutChange();
+      },
+    });
+    this.commands.register({
+      id: "close-panel",
+      title: "Close focused panel",
+      enabled: () => this.workspace.focusedPanelId() !== null,
+      run: () => {
+        const id = this.workspace.focusedPanelId();
+        if (id !== null) {
+          this.workspace.closePanel(id);
+          this.afterLayoutChange();
+        }
+      },
+    });
+    this.commands.register({
+      id: "maximize-panel",
+      title: "Maximize focused panel",
+      enabled: () => this.workspace.focusedPanelId() !== null,
+      run: () => {
+        const id = this.workspace.focusedPanelId();
+        if (id !== null) {
+          this.workspace.toggleMaximize(id);
+          this.afterLayoutChange();
+        }
+      },
+    });
+    this.commands.register({
+      id: "focus-filter",
+      title: "Filter signals",
+      keys: "/",
+      run: () => {
+        required<HTMLInputElement>(this.root, ".signal-search").focus();
+      },
+    });
+    this.commands.register({
+      id: "toggle-linked",
+      title: "Toggle linked time",
+      keys: "l",
+      run: () => {
+        this.toggleLinked();
+      },
+    });
+    this.commands.register({
+      id: "toggle-theme",
+      title: "Toggle theme",
+      keys: "t",
+      run: () => {
+        this.toggleTheme();
+      },
+    });
+    this.commands.register({
+      id: "toggle-formula",
+      title: "Toggle formula bar",
+      keys: "e",
+      run: () => {
+        required(this.root, ".workbench").classList.toggle(
+          "formula-collapsed",
+        );
+      },
+    });
+    this.commands.register({
+      id: "command-palette",
+      title: "Command palette",
+      keys: "mod+k",
+      run: () => {
+        this.palette?.open();
+      },
+    });
+    this.commands.register({
+      id: "help",
+      title: "Keyboard help",
+      keys: "?",
+      run: () => {
+        this.palette?.open();
+      },
+    });
+  }
 
-    const observer = new ResizeObserver(() => this.renderCanvas());
-    observer.observe(canvas);
+  private paletteEntries(): PaletteEntry[] {
+    const commands = this.commands.list().map((command) => ({
+      title: command.title,
+      hint: command.keys === undefined ? "" : keyHint(command.keys),
+      run: () => {
+        this.commands.run(command.id);
+      },
+    }));
+    const signals = this.signals.map((summary) => ({
+      title: `plot ${summary.path}`,
+      hint: "signal",
+      run: () => {
+        this.plotSignal(summary.path);
+      },
+    }));
+    return [...commands, ...signals];
   }
 
   private bindControls(): void {
-    this.requireElement(".theme-toggle").addEventListener("click", () =>
-      this.toggleTheme(),
-    );
-    this.requireElement(".linked-toggle").addEventListener("click", (event) => {
-      const button = event.currentTarget as HTMLButtonElement;
-      const linked = !this.time.snapshot().linked;
-      this.time.setLinked(linked);
-      button.classList.toggle("active", linked);
+    required(this.root, ".theme-toggle").addEventListener("click", () => {
+      this.toggleTheme();
     });
-    this.requireElement<HTMLInputElement>(".signal-search").addEventListener(
+    required(this.root, ".linked-toggle").addEventListener("click", () => {
+      this.toggleLinked();
+    });
+    required(this.root, ".new-panel").addEventListener("click", () => {
+      this.commands.run("new-panel-row");
+    });
+    required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
       "input",
-      () => this.renderSignalTree(),
+      (event) => {
+        this.tree?.setFilter((event.target as HTMLInputElement).value);
+      },
     );
     window.addEventListener("keydown", (event) => {
+      if (this.palette?.isOpen() === true) return;
+      const target = event.target;
       if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
       ) {
         return;
       }
-      if (event.key.toLowerCase() === "t") this.toggleTheme();
-      if (event.key === "/") {
-        event.preventDefault();
-        this.requireElement<HTMLInputElement>(".signal-search").focus();
-      }
+      if (this.commands.handleKey(event)) event.preventDefault();
     });
+  }
+
+  private plotSignal(path: string, panelId?: string): void {
+    let target = panelId ?? this.workspace.focusedPanelId();
+    if (target === null) {
+      target = this.workspace.addPanelRow().id;
+    }
+    if (this.workspace.addSeries(target, path)) {
+      this.workspace.focusPanel(target);
+      this.fitWindowToPlotted();
+      this.afterLayoutChange();
+    }
+  }
+
+  private fitWindowToPlotted(): void {
+    let t0 = Number.POSITIVE_INFINITY;
+    let t1 = Number.NEGATIVE_INFINITY;
+    for (const panel of this.workspace.panels()) {
+      for (const series of panel.series) {
+        const summary = this.signalsByPath.get(series.path);
+        if (summary !== undefined) {
+          t0 = Math.min(t0, summary.t_min);
+          t1 = Math.max(t1, summary.t_max);
+        }
+      }
+    }
+    if (Number.isFinite(t0) && Number.isFinite(t1)) {
+      this.time.setWindow(t0, t1 > t0 ? t1 : t0 + 1);
+      const state = this.time.snapshot();
+      required(this.root, ".window-readout").textContent =
+        `t: ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
+    }
+  }
+
+  private afterLayoutChange(): void {
+    this.workspaceView?.sync(this.signals.length > 0);
+    void this.refreshTiles();
+  }
+
+  private async reloadSignals(): Promise<void> {
+    this.signals = await this.plane.listSignals();
+    this.signalsByPath = new Map(
+      this.signals.map((summary) => [summary.path, summary]),
+    );
+    this.tree?.setSignals(this.signals.map((summary) => summary.path));
+    this.tree?.setFavorites(this.workspace.favorites());
+    this.updateStatus();
   }
 
   private async refreshTiles(): Promise<void> {
     const state = this.time.snapshot();
-    this.latestTiles = await this.plane.queryTiles({
-      request_id: crypto.randomUUID(),
-      signal_ids: this.selectedIds,
-      window: { t0: state.t0, t1: state.t1 },
-      pixel_width: Math.max(
-        1,
-        Math.round(
-          this.requireElement<HTMLCanvasElement>(".plot-canvas").clientWidth,
-        ),
-      ),
-    });
-    this.renderCanvas();
-  }
-
-  private renderCanvas(): void {
-    if (this.renderer === null || this.latestTiles === null) return;
-    const state = this.time.snapshot();
-    const elapsed = this.renderer.render(this.latestTiles, {
-      min: state.t0,
-      max: state.t1,
-    });
-    this.requireElement(".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
-  }
-
-  private renderSignalTree(): void {
-    const filter = this.requireElement<HTMLInputElement>(".signal-search")
-      .value.toLowerCase()
-      .trim();
-    const list = this.requireElement(".tree-list");
-    const visible = this.signals.filter((signal) =>
-      signal.path.toLowerCase().includes(filter),
+    const width = Math.max(
+      1,
+      Math.round(required(this.root, ".workspace").clientWidth),
     );
-    if (visible.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "signal-row";
-      empty.textContent = "No matching signals.";
-      list.replaceChildren(empty);
-    } else {
-      list.replaceChildren(
-        ...visible.map((signal, index) => {
-          const selected = this.selectedIds.includes(signal.signal_id);
-          const row = document.createElement("button");
-          row.className = `signal-row ${selected ? "selected" : ""}`;
-          row.dataset.signalId = signal.signal_id;
-          const mark = document.createElement("span");
-          mark.className = "series-mark";
-          mark.style.background = `var(${SERIES_TOKENS[index % SERIES_TOKENS.length] ?? "--series-1"})`;
-          const path = document.createElement("span");
-          path.className = "signal-path";
-          path.textContent = signal.path;
-          const value = document.createElement("span");
-          value.className = "signal-value";
-          value.textContent = "—";
-          row.append(mark, path, value);
-          return row;
-        }),
-      );
-    }
-
-    for (const row of list.querySelectorAll<HTMLButtonElement>(
-      "[data-signal-id]",
-    )) {
-      row.addEventListener("dblclick", () => {
-        const id = row.dataset.signalId;
-        if (id === undefined) return;
-        this.selectedIds = this.selectedIds.includes(id)
-          ? this.selectedIds.filter((selected) => selected !== id)
-          : [...this.selectedIds, id];
-        this.renderSignalTree();
-        this.renderLegend();
-        void this.refreshTiles().catch((error: unknown) =>
-          this.reportError(error),
-        );
-      });
-    }
-  }
-
-  private renderLegend(): void {
-    const legend = this.requireElement(".panel-legend");
-    const selected = this.signals.filter((signal) =>
-      this.selectedIds.includes(signal.signal_id),
-    );
-    legend.replaceChildren(
-      ...selected.map((signal, index) => {
-        const chip = document.createElement("button");
-        chip.className = "legend-chip";
-        chip.title = signal.path;
-        const line = document.createElement("span");
-        line.className = "legend-line";
-        line.style.background = `var(${SERIES_TOKENS[index % SERIES_TOKENS.length] ?? "--series-1"})`;
-        const name = document.createElement("span");
-        name.className = "legend-name";
-        name.textContent = shortName(signal.path);
-        const menu = document.createElement("span");
-        menu.className = "legend-menu";
-        menu.textContent = "▾";
-        chip.append(line, name, menu);
-        return chip;
+    const next = new Map<string, TileResponse>();
+    await Promise.all(
+      this.workspace.panels().map(async (panel) => {
+        if (panel.mode !== "time") return;
+        const ids = panel.series
+          .map((series) => this.signalsByPath.get(series.path)?.signal_id)
+          .filter((id): id is string => id !== undefined);
+        if (ids.length === 0) return;
+        try {
+          next.set(
+            panel.id,
+            await this.plane.queryTiles({
+              request_id: crypto.randomUUID(),
+              signal_ids: ids,
+              window: { t0: state.t0, t1: state.t1 },
+              pixel_width: width,
+            }),
+          );
+        } catch (error: unknown) {
+          this.reportError(error);
+        }
       }),
     );
+    this.tilesByPanel = next;
+    this.renderTiles();
+  }
+
+  private renderTiles(): void {
+    const state = this.time.snapshot();
+    const elapsed =
+      this.workspaceView?.renderTiles(this.tilesByPanel, {
+        t0: state.t0,
+        t1: state.t1,
+      }) ?? 0;
+    required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
 
   private updateStatus(): void {
@@ -173,37 +335,50 @@ export class AppShell {
       (total, signal) => total + Number(signal.point_count),
       0,
     );
-    this.requireElement(".signal-count").textContent =
+    required(this.root, ".signal-count").textContent =
       `${this.signals.length.toLocaleString()} signals`;
-    this.requireElement(".point-count").textContent =
+    required(this.root, ".point-count").textContent =
       `${pointCount.toLocaleString()} pts`;
-    this.requireElement(".source-points").textContent =
-      `${pointCount.toLocaleString()} pts`;
+    const rows = required(this.root, ".source-rows");
+    const row = document.createElement("div");
+    row.className = "source-row";
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    const name = document.createElement("span");
+    name.textContent = this.plane.sourceLabel;
+    const points = document.createElement("span");
+    points.className = "source-points";
+    points.textContent = `${pointCount.toLocaleString()} pts`;
+    row.append(dot, name, points);
+    rows.replaceChildren(row);
+  }
+
+  private toggleLinked(): void {
+    const linked = !this.time.snapshot().linked;
+    this.time.setLinked(linked);
+    required(this.root, ".linked-toggle").classList.toggle("active", linked);
   }
 
   private toggleTheme(): void {
-    const root = document.documentElement;
-    root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
-    this.renderer?.invalidateTheme();
-    this.renderCanvas();
+    const documentRoot = document.documentElement;
+    documentRoot.dataset.theme =
+      documentRoot.dataset.theme === "light" ? "dark" : "light";
+    this.workspaceView?.invalidateTheme();
+    this.renderTiles();
   }
 
   private reportError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
-    this.requireElement(".render-ms").textContent = `error: ${message}`;
+    required(this.root, ".render-ms").textContent = `error: ${message}`;
     console.error(error);
-  }
-
-  private requireElement<T extends Element = HTMLElement>(selector: string): T {
-    const element = this.root.querySelector<T>(selector);
-    if (element === null) {
-      throw new Error(`Missing application element: ${selector}`);
-    }
-    return element;
   }
 }
 
-function shellMarkup(sourceLabel: string): string {
+function keyHint(keys: string): string {
+  return keys === "mod+k" ? "⌘K" : keys.toUpperCase();
+}
+
+function shellMarkup(): string {
   return `<main class="workbench">
     <nav class="menu-bar" aria-label="Application menu">
       <span class="brand">
@@ -217,17 +392,12 @@ function shellMarkup(sourceLabel: string): string {
     </nav>
 
     <div class="tool-bar">
-      <button class="tool-button">Open Files</button>
-      <button class="tool-button">Demo Data</button>
-      <span class="tool-divider"></span>
-      <button class="tool-button">+ Panel</button>
-      <button class="tool-button">Layout <span class="status-value">walking skeleton</span> ▾</button>
+      <button class="tool-button open-files" hidden>Open Files</button>
+      <button class="tool-button new-panel">+ Panel</button>
       <span class="tool-divider"></span>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
-      <button class="tool-button">Σ Stats</button>
-      <button class="tool-button">ƒx Derived</button>
-      <span class="tool-spacer"></span>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
+      <span class="tool-spacer"></span>
       <span class="window-label">window</span>
       <span class="window-readout">t: 0.000 → 60.000 s</span>
       <button class="tool-button follow-slot" disabled>⏸ FOLLOW</button>
@@ -238,40 +408,16 @@ function shellMarkup(sourceLabel: string): string {
         <label>/ <input class="signal-search" placeholder="filter signals…" spellcheck="false" /></label>
       </div>
       <div class="tree-heading">★ FAVORITES</div>
+      <div class="tree-favorites"></div>
       <div class="tree-heading">SIGNALS</div>
-      <div class="tree-list"></div>
+      <div class="tree-scroll"></div>
       <div class="source-footer">
-        <div class="source-row">
-          <span class="status-dot"></span>
-          <span>${sourceLabel}</span>
-          <span class="source-points">0 pts</span>
-        </div>
+        <div class="ingest-progress" hidden></div>
+        <div class="source-rows"></div>
       </div>
     </aside>
 
-    <section class="workspace" aria-label="Panel workspace">
-      <article class="panel" aria-label="Body velocity panel">
-        <header class="panel-header">
-          <span class="drag-handle" aria-hidden="true">⠿</span>
-          <span class="panel-title">Body velocity</span>
-          <span class="mode-pills" aria-label="Panel mode">
-            ${MODE_LABELS.map(
-              (label, index) =>
-                `<button class="mode-pill ${index === 0 ? "active" : ""}">${label}</button>`,
-            ).join("")}
-          </span>
-          <span class="panel-legend"></span>
-          <span class="panel-actions">
-            <button class="panel-action" title="Split panel">⊞</button>
-            <button class="panel-action" title="Maximize panel">⤢</button>
-            <button class="panel-action" title="Close panel">✕</button>
-          </span>
-        </header>
-        <div class="plot-wrap">
-          <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
-        </div>
-      </article>
-    </section>
+    <section class="workspace" aria-label="Panel workspace"></section>
 
     <form class="formula-bar">
       <span class="formula-mark">ƒx</span>
@@ -283,12 +429,8 @@ function shellMarkup(sourceLabel: string): string {
       <span class="point-count status-value">0 pts</span>
       <span>render <span class="render-ms status-value">— ms</span></span>
       <span>cursor <span class="status-value">t = —</span></span>
-      <span class="gesture-hint">drag = box zoom · wheel = zoom t · ⇧wheel = zoom y · right-drag = pan · dbl-click = fit · click = datatip</span>
+      <span class="gesture-hint">drag signal → panel · N = new row · / = filter · ⌘K = commands</span>
       <span class="status-command">⌘K</span>
     </footer>
   </main>`;
-}
-
-function shortName(path: string): string {
-  return path.split("/").slice(-2).join("/");
 }

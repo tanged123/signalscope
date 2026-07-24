@@ -243,14 +243,14 @@ export class WorkspaceModel {
   }
 
   private createPanel(): PanelState {
-    let id = `panel-${this.nextPanelNumber}`;
+    let id = `panel-${String(this.nextPanelNumber)}`;
     while (this.panel(id) !== undefined) {
       this.nextPanelNumber += 1;
-      id = `panel-${this.nextPanelNumber}`;
+      id = `panel-${String(this.nextPanelNumber)}`;
     }
     const panel: PanelState = {
       id,
-      title: `Panel ${this.nextPanelNumber}`,
+      title: `Panel ${String(this.nextPanelNumber)}`,
       mode: "time",
       axis_style: "gutter",
       x_signal: null,

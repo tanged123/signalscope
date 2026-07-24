@@ -21,6 +21,12 @@ interface Palette {
   series: string[];
 }
 
+export interface RenderOptions {
+  xLabel: string;
+  yLabel: string;
+  colorSlots: readonly number[];
+}
+
 export const SERIES_TOKENS = [
   "--series-1",
   "--series-2",
@@ -43,7 +49,11 @@ export class CanvasRenderer {
     this.palette = null;
   }
 
-  render(response: TileResponse, xRange: Range): number {
+  render(
+    response: TileResponse,
+    xRange: Range,
+    options: RenderOptions,
+  ): number {
     const started = performance.now();
     const { context, width, height } = this.prepareCanvas();
     const colors = this.resolvePalette();
@@ -57,15 +67,16 @@ export class CanvasRenderer {
       height: Math.max(1, height - 42),
     };
     const yRange = visibleYRange(response.series);
-    this.drawAxes(context, plot, xRange, yRange, colors);
+    this.drawAxes(context, plot, xRange, yRange, colors, options);
     response.series.forEach((series, index) => {
+      const slot = options.colorSlots[index] ?? index + 1;
       this.drawSeries(
         context,
         plot,
         series,
         xRange,
         yRange,
-        colors.series[index % colors.series.length] ?? colors.fg2,
+        colors.series[(slot - 1) % colors.series.length] ?? colors.fg2,
       );
     });
     return performance.now() - started;
@@ -120,6 +131,7 @@ export class CanvasRenderer {
     xRange: Range,
     yRange: Range,
     colors: Palette,
+    options: RenderOptions,
   ): void {
     context.lineWidth = 1;
     context.font = '9px "JetBrains Mono", monospace';
@@ -163,14 +175,14 @@ export class CanvasRenderer {
     context.font = '9.5px "JetBrains Mono", monospace';
     context.textAlign = "center";
     context.fillText(
-      "time (s)",
+      options.xLabel,
       plot.x + plot.width / 2,
       plot.y + plot.height + 27,
     );
     context.save();
     context.translate(10, plot.y + plot.height / 2);
     context.rotate(-Math.PI / 2);
-    context.fillText("velocity (m/s)", 0, 0);
+    context.fillText(options.yLabel, 0, 0);
     context.restore();
   }
 
