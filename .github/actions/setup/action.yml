@@ -12,8 +12,8 @@ inputs:
     default: "true"
   cargo-cache-key:
     description: >-
-      Job-specific key enabling Cargo registry and target-directory caching.
-      Empty disables the cache.
+      Per-profile key for the target-directory cache. Empty disables Cargo
+      caching.
     default: ""
 
 runs:
@@ -26,15 +26,9 @@ runs:
         authToken: ${{ inputs.cachix-auth-token }}
         skipPush: ${{ inputs.cachix-auth-token == '' }}
     - if: inputs.cargo-cache-key != ''
-      uses: actions/cache@v4
+      uses: ./.github/actions/cargo-cache
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: cargo-${{ inputs.cargo-cache-key }}-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
-        restore-keys: |
-          cargo-${{ inputs.cargo-cache-key }}-${{ runner.os }}-
+        target-key: ${{ inputs.cargo-cache-key }}
     - if: inputs.install-frontend == 'true'
       run: ./scripts/setup.sh
       shell: bash

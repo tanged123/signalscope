@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -83,6 +84,7 @@ jobs:
           fail_ci_if_error: true
 
   build:
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
@@ -109,18 +111,13 @@ jobs:
           if-no-files-found: error
 
   appimage:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: ./.github/actions/cargo-cache
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-appimage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            cargo-appimage-${{ runner.os }}-
+          target-key: appimage
       - run: ./scripts/setup-appimage.sh
       - run: ./scripts/ci.sh appimage
       - uses: actions/upload-artifact@v4
