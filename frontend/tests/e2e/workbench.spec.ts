@@ -150,6 +150,55 @@ test("formula editor is transient with pointer and keyboard paths", async ({
   await expect(input).toBeFocused();
 });
 
+test("signal tree toggles and collapses through its resize edge", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "the signal tree is hidden at the mobile breakpoint");
+  await page.goto("/");
+  const tree = page.locator(".signal-tree");
+  const workspace = page.locator(".workspace");
+  const toggle = page.locator(".tree-toggle");
+  const seam = page.locator(".tree-resize-handle");
+  const initialWorkspaceWidth = (await workspace.boundingBox())?.width ?? 0;
+
+  await expect(tree).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await toggle.click();
+  await expect(tree).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect((await workspace.boundingBox())?.width ?? 0).toBeGreaterThan(
+    initialWorkspaceWidth + 200,
+  );
+
+  await toggle.click();
+  await expect(tree).toBeVisible();
+
+  const expandedSeam = await seam.boundingBox();
+  if (expandedSeam === null) throw new Error("tree resize edge is unavailable");
+  await page.mouse.move(
+    expandedSeam.x + expandedSeam.width / 2,
+    expandedSeam.y + 40,
+  );
+  await page.mouse.down();
+  await page.mouse.move(20, expandedSeam.y + 40, { steps: 5 });
+  await page.mouse.up();
+  await expect(tree).toBeHidden();
+
+  const collapsedSeam = await seam.boundingBox();
+  if (collapsedSeam === null)
+    throw new Error("collapsed tree resize edge is unavailable");
+  await page.mouse.move(
+    collapsedSeam.x + collapsedSeam.width / 2,
+    collapsedSeam.y + 40,
+  );
+  await page.mouse.down();
+  await page.mouse.move(240, collapsedSeam.y + 40, { steps: 5 });
+  await page.mouse.up();
+  await expect(tree).toBeVisible();
+  expect(Number(await seam.getAttribute("aria-valuenow"))).toBeGreaterThan(220);
+});
+
 test("tree filters, favorites, and drag-to-plot", async ({
   page,
   isMobile,

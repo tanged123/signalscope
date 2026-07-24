@@ -54,6 +54,13 @@ palette open the same temporarily docked editor; opening focuses its input and
 Escape collapses it. A future signal context action may duplicate this entry
 point, but cannot be its only access path.
 
+The signal tree is primary navigation, so its toolbar toggle is the leftmost
+application action. It is expanded at startup, resizable from its right edge,
+and collapses when that edge is dragged below the minimum useful width. The
+toggle and command palette restore or hide it without requiring precise
+pointer input. A five-pixel resize edge remains when collapsed, allowing a
+rightward drag to restore the tree without consuming meaningful plot width.
+
 ## Consequences
 
 Users can keep several analysis views available without duplicating loaded data
@@ -66,3 +73,5 @@ autosave ships. The tab strip costs 28 pixels of vertical space, offset by
 removing the inert 28-pixel menu row. Maximized mode costs a temporary
 26-pixel contextual rail in exchange for keeping hidden panels discoverable.
 The formula editor costs 30 pixels only while it is open.
+Collapsing the signal tree returns all but its five-pixel resize edge to the
+active workspace.

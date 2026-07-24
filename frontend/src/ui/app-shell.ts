@@ -21,6 +21,7 @@ export class AppShell {
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
+  private signalTreeWidth = 262;
 
   constructor(
     private readonly root: HTMLElement,
@@ -228,6 +229,14 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "toggle-signal-tree",
+      title: "Toggle signal tree",
+      enabled: () => window.innerWidth > 820,
+      run: () => {
+        this.toggleSignalTree();
+      },
+    });
+    this.commands.register({
       id: "toggle-linked",
       title: "Toggle linked time",
       keys: "l",
@@ -312,6 +321,10 @@ export class AppShell {
     openButton.addEventListener("click", () => {
       this.commands.run("open-files");
     });
+    required(this.root, ".tree-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-signal-tree");
+    });
+    this.bindSignalTreeResize();
     required(this.root, ".theme-toggle").addEventListener("click", () => {
       this.toggleTheme();
     });
@@ -521,6 +534,85 @@ export class AppShell {
     this.renderTiles();
   }
 
+  private toggleSignalTree(): void {
+    const workbench = required(this.root, ".workbench");
+    this.setSignalTreeOpen(workbench.classList.contains("tree-collapsed"));
+  }
+
+  private setSignalTreeOpen(open: boolean): void {
+    const workbench = required<HTMLElement>(this.root, ".workbench");
+    const button = required<HTMLButtonElement>(this.root, ".tree-toggle");
+    const seam = required<HTMLElement>(this.root, ".tree-resize-handle");
+    workbench.classList.toggle("tree-collapsed", !open);
+    if (open) {
+      workbench.style.setProperty(
+        "--tree-width",
+        `${String(this.signalTreeWidth)}px`,
+      );
+    }
+    button.classList.toggle("active", open);
+    button.ariaExpanded = String(open);
+    button.title = open ? "Hide signal tree" : "Show signal tree";
+    seam.setAttribute(
+      "aria-valuenow",
+      open ? String(this.signalTreeWidth) : "0",
+    );
+  }
+
+  private bindSignalTreeResize(): void {
+    const seam = required<HTMLElement>(this.root, ".tree-resize-handle");
+    const workbench = required<HTMLElement>(this.root, ".workbench");
+    const updateWidth = (width: number): void => {
+      workbench.style.setProperty("--tree-width", `${String(width)}px`);
+      seam.setAttribute("aria-valuenow", String(Math.round(width)));
+    };
+    const commitWidth = (width: number): void => {
+      if (width < 120) {
+        this.setSignalTreeOpen(false);
+        return;
+      }
+      this.signalTreeWidth = Math.max(180, Math.min(480, width));
+      this.setSignalTreeOpen(true);
+    };
+
+    seam.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      seam.setPointerCapture(event.pointerId);
+      const collapsed = workbench.classList.contains("tree-collapsed");
+      const startWidth = collapsed ? 0 : this.signalTreeWidth;
+      let width = startWidth;
+      updateWidth(startWidth);
+      workbench.classList.remove("tree-collapsed");
+      const move = (moveEvent: PointerEvent): void => {
+        width = Math.max(
+          0,
+          Math.min(480, startWidth + moveEvent.clientX - event.clientX),
+        );
+        updateWidth(width);
+      };
+      const finish = (): void => {
+        seam.removeEventListener("pointermove", move);
+        seam.removeEventListener("pointerup", finish);
+        seam.removeEventListener("pointercancel", finish);
+        commitWidth(width);
+      };
+      seam.addEventListener("pointermove", move);
+      seam.addEventListener("pointerup", finish);
+      seam.addEventListener("pointercancel", finish);
+    });
+    seam.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const collapsed = workbench.classList.contains("tree-collapsed");
+      const width = collapsed
+        ? event.key === "ArrowRight"
+          ? this.signalTreeWidth
+          : 0
+        : this.signalTreeWidth + (event.key === "ArrowRight" ? 20 : -20);
+      commitWidth(width);
+    });
+  }
+
   private toggleFormula(): void {
     const workbench = required(this.root, ".workbench");
     this.setFormulaOpen(workbench.classList.contains("formula-collapsed"));
@@ -559,6 +651,7 @@ function shellMarkup(): string {
         SIGNALSCOPE
       </span>
       <span class="tool-divider"></span>
+      <button class="tool-button active tree-toggle" title="Hide signal tree" aria-controls="signal-tree" aria-expanded="true">☰ Signals</button>
       <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
       <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
@@ -572,7 +665,7 @@ function shellMarkup(): string {
 
     <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
 
-    <aside class="signal-tree" aria-label="Signals">
+    <aside class="signal-tree" id="signal-tree" aria-label="Signals">
       <div class="search-wrap">
         <label>/ <input class="signal-search" placeholder="filter signals…" spellcheck="false" /></label>
       </div>
@@ -585,6 +678,8 @@ function shellMarkup(): string {
         <div class="source-rows"></div>
       </div>
     </aside>
+
+    <div class="tree-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="480" aria-valuenow="262" tabindex="0"></div>
 
     <section class="workspace" aria-label="Panel workspace"></section>
 

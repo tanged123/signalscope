@@ -8,6 +8,9 @@ test("shared presentation plane renders the demo workspace", async ({
   await expect(page.getByText("SIGNALSCOPE")).toBeVisible();
   await expect(page.locator(".menu-bar")).toHaveCount(0);
   await expect(page.locator(".tool-bar")).toBeVisible();
+  await expect(page.locator(".tool-bar > button").first()).toHaveClass(
+    /tree-toggle/,
+  );
   await expect(page.locator(".workspace-tabs")).toBeVisible();
   await expect(page.locator(".new-panel")).toHaveCount(0);
   await expect(page.locator(".formula-bar")).toBeHidden();
