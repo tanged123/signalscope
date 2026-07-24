@@ -46,7 +46,6 @@ pub struct CsvDecoder;
 
 impl CsvDecoder {
     fn ingest_unchecked(
-        &self,
         path: &Path,
         store: &mut SignalStore,
     ) -> Result<IngestSummary, IngestError> {
@@ -136,7 +135,7 @@ impl CsvDecoder {
 impl Decoder for CsvDecoder {
     fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
         let snapshot = store.clone();
-        let result = self.ingest_unchecked(path, store);
+        let result = Self::ingest_unchecked(path, store);
         if result.is_err() {
             *store = snapshot;
         }
