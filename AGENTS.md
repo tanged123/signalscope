@@ -45,6 +45,9 @@ Canonical commands:
 ./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
 ./scripts/build.sh appimage           Ubuntu/FHS AppImage build
 ./scripts/coverage.sh                 Rust + frontend LCOV
+./scripts/version.sh get|check        release manifest inspection
+./scripts/version.sh set 0.1.1        synchronize a release version
+./scripts/version.sh bump patch        increment and synchronize a version
 ./scripts/ci.sh format|lint|typecheck|clippy|unit|e2e|build|artifacts
 ./scripts/ci.sh all                   complete local quality gate
 ./scripts/ci.sh flake                 flake check

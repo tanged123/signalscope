@@ -1,11 +1,23 @@
 name: SignalScope CI
 
-on: push
+on:
+  push:
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: ./scripts/version.sh check
+      - if: github.event_name == 'pull_request'
+        run: ./scripts/version.sh check-pr "${{ github.event.pull_request.base.sha }}"
+
   nix-flake-check:
     runs-on: ubuntu-latest
     steps:
