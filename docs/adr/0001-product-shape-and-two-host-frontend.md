@@ -16,3 +16,10 @@ The native Rust plane owns ingest, out-of-core storage, pyramid construction, co
 ## Consequences
 
 Native memory and filesystem capabilities remain available for multi-GB logs. Snapshot fidelity is architectural rather than a second implementation. The frontend must keep zero network and zero runtime-package assumptions so it can be inlined.
+
+## Amendment (2026-07-24, Phase 1)
+
+Host-only abilities are expressed as capability ports on `DataPlane`
+(first: `ingest: IngestPort | null`). UI behavior may branch on a port's
+presence — never on host identity — so snapshot builds simply present no
+entry points for capabilities their plane lacks.

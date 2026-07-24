@@ -10,7 +10,9 @@ repository = "https://github.com/tanged123/signalscope"
 rust-version = "1.85"
 
 [workspace.dependencies]
+crc32fast = "1.5"
 csv = "1.3"
+mcap = "0.25"
 scope-core = { path = "core/scope-core" }
 scope-protocol = { path = "protocol" }
 serde = { version = "1", features = ["derive"] }

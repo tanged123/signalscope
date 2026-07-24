@@ -1,15 +1,22 @@
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    thread,
+};
 
 use scope_core::{
-    ingest::ingest_csv_path,
+    cache,
+    ingest::ingest_path,
     pyramid::Pyramid,
-    store::{Signal, SignalId, SignalStore},
+    store::{Signal, SignalId, SignalStore, Source},
 };
 use scope_protocol::{
-    Envelope, IngestRequest, IngestResponse, SignalSummary, SignalTile, SourceSummary, TileRequest,
-    TileResponse,
+    Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState, IngestStatus,
+    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
 };
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 #[derive(Default)]
 struct DataState {
@@ -17,58 +24,193 @@ struct DataState {
     pyramids: BTreeMap<SignalId, Pyramid>,
 }
 
+#[derive(Default)]
+struct IngestJobs {
+    next_job_id: u64,
+    jobs: BTreeMap<u64, IngestStatus>,
+}
+
+fn running(stage: IngestStage, fraction: f64) -> IngestStatus {
+    IngestStatus {
+        state: IngestState::Running,
+        stage,
+        fraction,
+        response: None,
+        error: None,
+    }
+}
+
 fn signal_summary(signal: &Signal) -> SignalSummary {
+    let time = signal.time();
     SignalSummary {
         signal_id: signal.id.0,
         path: signal.path.clone(),
         unit: signal.unit.clone(),
         point_count: signal.len() as u64,
+        t_min: time.first().copied().unwrap_or(0.0),
+        t_max: time.last().copied().unwrap_or(1.0),
     }
 }
 
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn ingest_csv(
-    request: Envelope<IngestRequest>,
-    state: State<'_, Mutex<DataState>>,
-) -> Result<Envelope<IngestResponse>, String> {
-    let request = request.open().map_err(|error| error.to_string())?;
-    let path = request.path;
+fn source_summary(source: &Source) -> SourceSummary {
+    SourceSummary {
+        source_id: source.id.0,
+        path: source.path.display().to_string(),
+        point_count: source.point_count as u64,
+    }
+}
+
+fn set_job(app: &AppHandle, job_id: u64, status: IngestStatus) {
+    if let Ok(mut jobs) = app.state::<Mutex<IngestJobs>>().inner().lock() {
+        jobs.jobs.insert(job_id, status);
+    }
+}
+
+fn run_ingest_job(app: &AppHandle, job_id: u64, path: &Path) {
+    let status = match ingest_with_cache(app, job_id, path) {
+        Ok(response) => IngestStatus {
+            state: IngestState::Done,
+            stage: IngestStage::Cache,
+            fraction: 1.0,
+            response: Some(response),
+            error: None,
+        },
+        Err(error) => IngestStatus {
+            state: IngestState::Failed,
+            stage: IngestStage::Decode,
+            fraction: 0.0,
+            response: None,
+            error: Some(error),
+        },
+    };
+    set_job(app, job_id, status);
+}
+
+#[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding
+fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<IngestResponse, String> {
+    let state = app.state::<Mutex<DataState>>();
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    let summary = {
-        let DataState { store, .. } = &mut *data;
-        ingest_csv_path(&path, store).map_err(|error| error.to_string())?
+    let DataState { store, pyramids } = &mut *data;
+
+    let mut on_cache = |fraction| set_job(app, job_id, running(IngestStage::Cache, fraction));
+    let summary = if let Some(loaded) =
+        cache::try_load(path, store, &mut on_cache).map_err(|error| error.to_string())?
+    {
+        for (id, pyramid) in loaded.pyramids {
+            pyramids.insert(id, pyramid);
+        }
+        loaded.summary
+    } else {
+        let mut on_decode = |fraction| set_job(app, job_id, running(IngestStage::Decode, fraction));
+        let summary =
+            ingest_path(path, store, &mut on_decode).map_err(|error| error.to_string())?;
+        let total = summary.signals.len().max(1);
+        for (index, id) in summary.signals.iter().enumerate() {
+            let signal = store
+                .signal(*id)
+                .ok_or_else(|| format!("ingested signal {id:?} is missing"))?;
+            pyramids.insert(*id, Pyramid::from_signal(signal));
+            set_job(
+                app,
+                job_id,
+                running(IngestStage::Pyramid, (index + 1) as f64 / total as f64),
+            );
+        }
+        let entries: Vec<(&Signal, &Pyramid)> = summary
+            .signals
+            .iter()
+            .filter_map(|id| Some((store.signal(*id)?, pyramids.get(id)?)))
+            .collect();
+        let mut on_write = |fraction| set_job(app, job_id, running(IngestStage::Cache, fraction));
+        if let Err(error) = cache::write(path, summary.row_count as u64, &entries, &mut on_write) {
+            eprintln!(
+                "pyramid sidecar not written for {}: {error}",
+                path.display()
+            );
+        }
+        summary
     };
 
-    for id in &summary.signals {
-        let pyramid = Pyramid::from_signal(
-            data.store
-                .signal(*id)
-                .ok_or_else(|| format!("ingested signal {id:?} is missing"))?,
-        );
-        data.pyramids.insert(*id, pyramid);
-    }
-
-    let source = data
-        .store
+    let source = store
         .sources()
         .find(|source| source.id == summary.source_id)
         .ok_or_else(|| "ingested source is missing".to_owned())?;
     let signals = summary
         .signals
         .iter()
-        .filter_map(|id| data.store.signal(*id))
+        .filter_map(|id| store.signal(*id))
         .map(signal_summary)
         .collect();
-
-    Ok(Envelope::new(IngestResponse {
-        source: SourceSummary {
-            source_id: source.id.0,
-            path: source.path.display().to_string(),
-            point_count: source.point_count as u64,
-        },
+    Ok(IngestResponse {
+        source: source_summary(source),
         signals,
-    }))
+    })
+}
+
+#[tauri::command]
+async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Signal sources", &["csv", "tsv", "txt", "dat", "mcap"])
+            .blocking_pick_files()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        picked
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|file| file.into_path().ok())
+            .map(|path| path.display().to_string())
+            .collect(),
+    ))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn ingest_source(
+    request: Envelope<IngestRequest>,
+    app: AppHandle,
+    jobs: State<'_, Mutex<IngestJobs>>,
+) -> Result<Envelope<IngestJob>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let job_id = {
+        let mut jobs = jobs.lock().map_err(|error| error.to_string())?;
+        jobs.next_job_id += 1;
+        let id = jobs.next_job_id;
+        jobs.jobs.insert(id, running(IngestStage::Decode, 0.0));
+        id
+    };
+    let path = PathBuf::from(request.path);
+    thread::spawn(move || run_ingest_job(&app, job_id, &path));
+    Ok(Envelope::new(IngestJob { job_id }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn ingest_status(
+    request: Envelope<IngestJob>,
+    jobs: State<'_, Mutex<IngestJobs>>,
+) -> Result<Envelope<IngestStatus>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let jobs = jobs.lock().map_err(|error| error.to_string())?;
+    let status = jobs
+        .jobs
+        .get(&request.job_id)
+        .ok_or_else(|| format!("unknown ingest job: {}", request.job_id))?;
+    Ok(Envelope::new(status.clone()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn list_sources(
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<Vec<SourceSummary>>, String> {
+    let data = state.lock().map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        data.store.sources().map(source_summary).collect(),
+    ))
 }
 
 #[tauri::command]
@@ -125,9 +267,14 @@ fn query_tiles(
 /// Panics when Tauri cannot initialize or run the application.
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(DataState::default()))
+        .manage(Mutex::new(IngestJobs::default()))
         .invoke_handler(tauri::generate_handler![
-            ingest_csv,
+            pick_sources,
+            ingest_source,
+            ingest_status,
+            list_sources,
             list_signals,
             query_tiles
         ])

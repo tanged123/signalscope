@@ -151,7 +151,7 @@ impl SignalStore {
         path: impl Into<String>,
         unit: Option<String>,
         time: Arc<[f64]>,
-        values: Vec<f64>,
+        values: impl Into<Arc<[f64]>>,
     ) -> Result<SignalId, StoreError> {
         let source = self
             .sources
@@ -163,9 +163,10 @@ impl SignalStore {
             return Err(StoreError::DuplicateSignal(path));
         }
 
+        let values: Arc<[f64]> = values.into();
         let id = SignalId(self.next_signal_id);
         let point_count = values.len();
-        let signal = Signal::new(id, source_id, path.clone(), unit, time, values.into())?;
+        let signal = Signal::new(id, source_id, path.clone(), unit, time, values)?;
         self.next_signal_id += 1;
         self.signals.insert(id, signal);
         self.signal_paths.insert(path, id);

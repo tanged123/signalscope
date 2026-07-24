@@ -1,14 +1,14 @@
-//! Streaming source decoders.
+//! CSV decoding with delimiter, header, and time-column autodetection.
 
 use std::{
     fs::File,
     io::{BufRead, BufReader, Cursor},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
-use crate::store::{SignalId, SignalStore, SourceId, StoreError};
-use thiserror::Error;
+use super::{Decoder, IngestError, IngestSummary, normalize_segment};
+use crate::store::SignalStore;
 
 const TIME_NAMES: &[&str] = &[
     "t",
@@ -22,56 +22,26 @@ const TIME_NAMES: &[&str] = &[
     "seconds",
 ];
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IngestSummary {
-    pub source_id: SourceId,
-    pub source_path: PathBuf,
-    pub row_count: usize,
-    pub signals: Vec<SignalId>,
-}
-
-/// Common boundary for file and future live decoders.
-pub trait Decoder {
-    /// Decodes `path` and registers its signals in `store`.
-    ///
-    /// Implementations may leave partial registrations behind on error;
-    /// callers get atomicity from [`Decoder::ingest`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IngestError`] when the source cannot be read, decoded, or
-    /// registered.
-    fn decode(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError>;
-
-    /// Decodes `path` atomically: on error the store is unchanged.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IngestError`] when the source cannot be read, decoded, or
-    /// registered.
-    fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
-        store.transaction(|store| self.decode(path, store))
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CsvDecoder;
 
 impl CsvDecoder {
+    #[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding
     fn ingest_unchecked(
         path: &Path,
         store: &mut SignalStore,
+        progress: &mut dyn FnMut(f64),
     ) -> Result<IngestSummary, IngestError> {
         let input = filter_comment_lines(File::open(path)?)?;
         let probe = probe_first_data_line(&input)?;
 
         let delimiter = detect_delimiter(&probe);
         let has_headers = detect_header(&probe, delimiter);
-        let mut reader = csv::ReaderBuilder::new()
+        let mut reader = ::csv::ReaderBuilder::new()
             .delimiter(delimiter)
             .has_headers(has_headers)
             .flexible(true)
-            .trim(csv::Trim::All)
+            .trim(::csv::Trim::All)
             .from_reader(Cursor::new(input));
 
         let headers = if has_headers {
@@ -89,9 +59,16 @@ impl CsvDecoder {
             return Err(IngestError::TooFewColumns);
         }
 
+        let total = reader.get_ref().get_ref().len().max(1) as f64;
         let mut columns = vec![Vec::<f64>::new(); headers.len()];
+        let mut records_seen = 0_usize;
         for record in reader.records() {
             let record = record?;
+            records_seen += 1;
+            if records_seen % 4096 == 0 {
+                let byte = record.position().map_or(0, ::csv::Position::byte);
+                progress((byte as f64 / total).min(1.0));
+            }
             if record.len() < 2 {
                 continue;
             }
@@ -105,6 +82,7 @@ impl CsvDecoder {
                 column.push(value);
             }
         }
+        progress(1.0);
 
         let row_count = columns.first().map_or(0, Vec::len);
         if row_count == 0 {
@@ -146,22 +124,14 @@ impl CsvDecoder {
 }
 
 impl Decoder for CsvDecoder {
-    fn decode(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
-        Self::ingest_unchecked(path, store)
+    fn decode(
+        &self,
+        path: &Path,
+        store: &mut SignalStore,
+        progress: &mut dyn FnMut(f64),
+    ) -> Result<IngestSummary, IngestError> {
+        Self::ingest_unchecked(path, store, progress)
     }
-}
-
-/// Ingests a CSV-like source using delimiter and time-column detection.
-///
-/// # Errors
-///
-/// Returns [`IngestError`] when the source cannot be read, decoded, or
-/// registered.
-pub fn ingest_csv_path(
-    path: impl AsRef<Path>,
-    store: &mut SignalStore,
-) -> Result<IngestSummary, IngestError> {
-    CsvDecoder.ingest(path.as_ref(), store)
 }
 
 fn filter_comment_lines(file: File) -> Result<Vec<u8>, IngestError> {
@@ -236,26 +206,7 @@ fn is_monotonic_finite(column: &[f64]) -> bool {
 }
 
 fn normalize_signal_path(base: &str, header: &str) -> String {
-    let clean = header
-        .trim()
-        .trim_matches('"')
-        .replace([' ', '.'], "_")
-        .to_lowercase();
-    format!("{base}/{clean}")
-}
-
-#[derive(Debug, Error)]
-pub enum IngestError {
-    #[error("source has fewer than two columns")]
-    TooFewColumns,
-    #[error("source has no data rows")]
-    NoDataRows,
-    #[error(transparent)]
-    Csv(#[from] csv::Error),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Store(#[from] StoreError),
+    format!("{base}/{}", normalize_segment(header))
 }
 
 #[cfg(test)]
@@ -263,6 +214,7 @@ mod tests {
     use std::io::Write;
 
     use super::*;
+    use crate::ingest::ingest_path;
 
     #[test]
     fn detects_header_delimiter_and_time_column() {
@@ -273,7 +225,7 @@ mod tests {
         writeln!(file, "0.1;11;").unwrap();
 
         let mut store = SignalStore::new();
-        let summary = ingest_csv_path(file.path(), &mut store).unwrap();
+        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
         let paths = store
             .signals()
             .map(|signal| signal.path.as_str())
@@ -293,7 +245,7 @@ mod tests {
         writeln!(file, "2,7").unwrap();
 
         let mut store = SignalStore::new();
-        ingest_csv_path(file.path(), &mut store).unwrap();
+        ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(store.signals().next().unwrap().time(), &[0.0, 1.0]);
     }
@@ -307,7 +259,7 @@ mod tests {
         writeln!(file, "0,4").unwrap();
 
         let mut store = SignalStore::new();
-        let summary = ingest_csv_path(file.path(), &mut store).unwrap();
+        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 1);
         assert_eq!(summary.signals.len(), 1);
@@ -321,7 +273,7 @@ mod tests {
         writeln!(file, "0,4,5").unwrap();
 
         let mut store = SignalStore::new();
-        assert!(ingest_csv_path(file.path(), &mut store).is_err());
+        assert!(ingest_path(file.path(), &mut store, &mut |_| {}).is_err());
 
         assert_eq!(store.sources().count(), 0);
         assert_eq!(store.signals().count(), 0);

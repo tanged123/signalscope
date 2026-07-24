@@ -100,6 +100,34 @@ impl Pyramid {
         }
     }
 
+    /// Reassembles a pyramid from previously built parts (the sidecar cache).
+    ///
+    /// # Panics
+    ///
+    /// Panics when the columns differ in length or the first merged level
+    /// does not pair the raw samples. Callers deserializing untrusted bytes
+    /// must validate shapes first and treat mismatches as cache misses.
+    #[must_use]
+    pub fn from_parts(time: Arc<[f64]>, values: Arc<[f64]>, merged: Vec<Vec<EnvelopeBin>>) -> Self {
+        assert_eq!(time.len(), values.len(), "time/value lengths differ");
+        assert_eq!(
+            merged.first().map_or(0, Vec::len),
+            time.len().div_ceil(2),
+            "first merged level must pair raw samples"
+        );
+        Self {
+            time,
+            values,
+            merged,
+        }
+    }
+
+    /// Stored merged levels; `merged_levels()[0]` is logical level 1.
+    #[must_use]
+    pub fn merged_levels(&self) -> &[Vec<EnvelopeBin>] {
+        &self.merged
+    }
+
     #[must_use]
     pub fn level_count(&self) -> usize {
         self.merged.len() + 1
@@ -243,6 +271,24 @@ mod tests {
         assert_eq!(query.level, 0);
         assert_eq!(query.bins.len(), 1_000);
         assert_eq!(query.bins[3].min, Some(3.0_f64.cos()));
+    }
+
+    #[test]
+    fn from_parts_reproduces_the_original_queries() {
+        let time = (0..1_000).map(f64::from).collect::<Vec<_>>();
+        let values = time.iter().map(|value| value.sin()).collect::<Vec<_>>();
+        let original = Pyramid::from_samples(&time, &values);
+        let rebuilt = Pyramid::from_parts(
+            Arc::from(time.clone()),
+            Arc::from(values),
+            original.merged_levels().to_vec(),
+        );
+        for &(t0, t1, width) in &[(0.0, 999.0, 100_u32), (10.0, 40.0, 600)] {
+            let expected = original.query(t0, t1, width);
+            let actual = rebuilt.query(t0, t1, width);
+            assert_eq!(expected.level, actual.level);
+            assert_eq!(expected.bins, actual.bins);
+        }
     }
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]

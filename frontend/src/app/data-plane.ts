@@ -1,15 +1,27 @@
 import {
   type EnvelopeBin,
+  type IngestJob,
+  type IngestRequest,
+  type IngestStatus,
   type SignalSummary,
+  type SourceSummary,
   type TileRequest,
   type TileResponse,
 } from "../generated/protocol";
 import { open, seal, type Envelope } from "./envelope";
 import { queryPyramid } from "./pyramid-query";
 
+export interface IngestPort {
+  pickSources(): Promise<string[]>;
+  start(path: string): Promise<string>;
+  status(jobId: string): Promise<IngestStatus>;
+}
+
 export interface DataPlane {
   readonly sourceLabel: string;
+  readonly ingest: IngestPort | null;
   listSignals(): Promise<SignalSummary[]>;
+  listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
 }
 
@@ -33,10 +45,33 @@ declare global {
 export class TauriPlane implements DataPlane {
   readonly sourceLabel = "native data plane";
 
-  constructor(private readonly invoke: TauriInternals["invoke"]) {}
+  readonly ingest: IngestPort;
+
+  constructor(private readonly invoke: TauriInternals["invoke"]) {
+    this.ingest = {
+      pickSources: async () =>
+        open(await this.invoke<Envelope<string[]>>("pick_sources")),
+      start: async (path: string) =>
+        open(
+          await this.invoke<Envelope<IngestJob>>("ingest_source", {
+            request: seal<IngestRequest>({ path }),
+          }),
+        ).job_id,
+      status: async (jobId: string) =>
+        open(
+          await this.invoke<Envelope<IngestStatus>>("ingest_status", {
+            request: seal<IngestJob>({ job_id: jobId }),
+          }),
+        ),
+    };
+  }
 
   async listSignals(): Promise<SignalSummary[]> {
     return open(await this.invoke<Envelope<SignalSummary[]>>("list_signals"));
+  }
+
+  async listSources(): Promise<SourceSummary[]> {
+    return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
   }
 
   async queryTiles(request: TileRequest): Promise<TileResponse> {
@@ -50,6 +85,8 @@ export class TauriPlane implements DataPlane {
 
 export class BakedPlane implements DataPlane {
   readonly sourceLabel = "baked demo source";
+
+  readonly ingest = null;
 
   private readonly payload: BakedManifest["payload"];
 
@@ -72,6 +109,16 @@ export class BakedPlane implements DataPlane {
     return Promise.resolve(
       this.payload.signals.map((signal) => signal.summary),
     );
+  }
+
+  listSources(): Promise<SourceSummary[]> {
+    const points = this.payload.signals.reduce(
+      (total, signal) => total + Number(signal.summary.point_count),
+      0,
+    );
+    return Promise.resolve([
+      { source_id: "0", path: this.sourceLabel, point_count: String(points) },
+    ]);
   }
 
   queryTiles(request: TileRequest): Promise<TileResponse> {
@@ -132,12 +179,16 @@ function createDemoManifest(): BakedManifest {
       path: "rocket/velocity_body/x",
       unit: "m/s",
       point_count: String(pointCount),
+      t_min: 0,
+      t_max: (pointCount - 1) / 30,
     },
     {
       signal_id: "2",
       path: "rocket/velocity_body/y",
       unit: "m/s",
       point_count: String(pointCount),
+      t_min: 0,
+      t_max: (pointCount - 1) / 30,
     },
   ];
   const generators = [
