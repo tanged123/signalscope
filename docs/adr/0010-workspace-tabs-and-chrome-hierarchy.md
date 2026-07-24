@@ -48,6 +48,12 @@ the first panel when the workspace is empty. While maximized, a separate
 contextual panel rail lists sibling panels and offers an explicit `Restore
 grid` action.
 
+The derived formula editor is collapsed by default and therefore consumes no
+permanent plot height. `ƒx Derived` in the global toolbar, `E`, and the command
+palette open the same temporarily docked editor; opening focuses its input and
+Escape collapses it. A future signal context action may duplicate this entry
+point, but cannot be its only access path.
+
 ## Consequences
 
 Users can keep several analysis views available without duplicating loaded data
@@ -59,3 +65,4 @@ The session schema gains another required migration rung before durable
 autosave ships. The tab strip costs 28 pixels of vertical space, offset by
 removing the inert 28-pixel menu row. Maximized mode costs a temporary
 26-pixel contextual rail in exchange for keeping hidden panels discoverable.
+The formula editor costs 30 pixels only while it is open.

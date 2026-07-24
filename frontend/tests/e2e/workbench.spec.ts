@@ -125,6 +125,31 @@ test("command palette runs workspace-scoped panel commands", async ({
   await expect(page.locator(".palette-overlay")).toBeHidden();
 });
 
+test("formula editor is transient with pointer and keyboard paths", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const editor = page.locator(".formula-bar");
+  const input = page.locator(".formula-input");
+  const toggle = page.locator(".formula-toggle");
+
+  await expect(editor).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+  await toggle.click();
+  await expect(editor).toBeVisible();
+  await expect(input).toBeFocused();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+  await page.keyboard.press("e");
+  await expect(editor).toBeVisible();
+  await expect(input).toBeFocused();
+});
+
 test("tree filters, favorites, and drag-to-plot", async ({
   page,
   isMobile,

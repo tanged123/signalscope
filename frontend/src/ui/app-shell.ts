@@ -245,10 +245,10 @@ export class AppShell {
     });
     this.commands.register({
       id: "toggle-formula",
-      title: "Toggle formula bar",
+      title: "Toggle derived formula editor",
       keys: "e",
       run: () => {
-        required(this.root, ".workbench").classList.toggle("formula-collapsed");
+        this.toggleFormula();
       },
     });
     this.commands.register({
@@ -318,6 +318,22 @@ export class AppShell {
     required(this.root, ".linked-toggle").addEventListener("click", () => {
       this.toggleLinked();
     });
+    required(this.root, ".formula-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-formula");
+    });
+    const formula = required<HTMLFormElement>(this.root, ".formula-bar");
+    formula.addEventListener("submit", (event) => {
+      event.preventDefault();
+    });
+    required<HTMLInputElement>(formula, ".formula-input").addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          this.setFormulaOpen(false);
+        }
+      },
+    );
     required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
       "input",
       (event) => {
@@ -505,6 +521,25 @@ export class AppShell {
     this.renderTiles();
   }
 
+  private toggleFormula(): void {
+    const workbench = required(this.root, ".workbench");
+    this.setFormulaOpen(workbench.classList.contains("formula-collapsed"));
+  }
+
+  private setFormulaOpen(open: boolean): void {
+    const workbench = required(this.root, ".workbench");
+    const button = required<HTMLButtonElement>(this.root, ".formula-toggle");
+    const input = required<HTMLInputElement>(this.root, ".formula-input");
+    workbench.classList.toggle("formula-collapsed", !open);
+    button.classList.toggle("active", open);
+    button.ariaExpanded = String(open);
+    if (open) {
+      input.focus();
+    } else {
+      input.blur();
+    }
+  }
+
   private reportError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     required(this.root, ".render-ms").textContent = `error: ${message}`;
@@ -517,7 +552,7 @@ function keyHint(keys: string): string {
 }
 
 function shellMarkup(): string {
-  return `<main class="workbench">
+  return `<main class="workbench formula-collapsed">
     <div class="tool-bar">
       <span class="brand">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -526,6 +561,7 @@ function shellMarkup(): string {
       <span class="tool-divider"></span>
       <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
+      <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
       <span class="tool-spacer"></span>
       <span class="window-label">window</span>
@@ -552,7 +588,7 @@ function shellMarkup(): string {
 
     <section class="workspace" aria-label="Panel workspace"></section>
 
-    <form class="formula-bar">
+    <form class="formula-bar" id="formula-editor">
       <span class="formula-mark">ƒx</span>
       <input class="formula-input" aria-label="Derived signal formula" placeholder='derived/name = Math.hypot($("signal/x"), $("signal/y"))' spellcheck="false" />
     </form>

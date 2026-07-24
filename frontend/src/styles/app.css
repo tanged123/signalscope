@@ -486,6 +486,11 @@ kbd {
   font: 11px var(--font-mono);
 }
 
+.formula-symbol {
+  color: var(--amber-7);
+  font-family: var(--font-mono);
+}
+
 .formula-input {
   min-width: 0;
   flex: 1;
