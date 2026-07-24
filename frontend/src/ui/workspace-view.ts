@@ -45,9 +45,15 @@ export class WorkspaceView {
     const maximized = this.model.maximizedPanelId();
     if (maximized !== null) {
       const rowElement = document.createElement("div");
-      rowElement.className = "workspace-row";
-      rowElement.style.flex = "1 1 0";
-      rowElement.appendChild(this.view(maximized).element);
+      rowElement.className = "workspace-row maximized-row";
+      rowElement.style.flex = "1 1 100%";
+      rowElement.style.width = "100%";
+      rowElement.style.height = "100%";
+      const view = this.view(maximized);
+      view.element.style.flex = "1 1 100%";
+      view.element.style.width = "100%";
+      view.element.style.height = "100%";
+      rowElement.appendChild(view.element);
       this.root.appendChild(rowElement);
       this.refreshPanelStates();
       return;
@@ -63,6 +69,8 @@ export class WorkspaceView {
         }
         const view = this.view(cell.panel_id);
         view.element.style.flex = `${String(cell.width)} 1 0`;
+        view.element.style.removeProperty("width");
+        view.element.style.removeProperty("height");
         rowElement.appendChild(view.element);
       });
       this.root.appendChild(rowElement);

@@ -111,6 +111,8 @@ export class PanelView {
     )) {
       button.classList.toggle("active", button.dataset.mode === state.mode);
     }
+    required<HTMLButtonElement>(this.element, ".panel-maximize").title =
+      maximized ? "Restore panel" : "Maximize panel";
     this.updateLegend(state);
     const empty = required<HTMLElement>(this.element, ".panel-empty");
     if (state.mode !== "time") {

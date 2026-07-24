@@ -17,6 +17,42 @@ test("panel lifecycle has keyboard and pointer paths", async ({ page }) => {
   await expect(page.locator(".panel")).toHaveCount(1);
 });
 
+test("maximize fills the workspace and split restores the layout", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.keyboard.press("n");
+
+  const workspace = page.locator(".workspace");
+  const first = page.locator(".panel").first();
+  const before = await first.boundingBox();
+  const workspaceBox = await workspace.boundingBox();
+  if (before === null || workspaceBox === null) {
+    throw new Error("workspace geometry is unavailable");
+  }
+
+  await first.locator(".panel-maximize").click();
+  await expect(page.locator(".panel")).toHaveCount(1);
+  await expect(page.locator(".panel.maximized")).toHaveCount(1);
+
+  const maximized = page.locator(".panel.maximized");
+  const after = await maximized.boundingBox();
+  if (after === null)
+    throw new Error("maximized panel geometry is unavailable");
+  expect(after.height).toBeGreaterThan(before.height + 100);
+  expect(Math.abs(after.height - workspaceBox.height)).toBeLessThan(4);
+  expect(Math.abs(after.width - workspaceBox.width)).toBeLessThan(4);
+  await expect(maximized.locator(".panel-maximize")).toHaveAttribute(
+    "title",
+    "Restore panel",
+  );
+
+  await maximized.locator(".panel-split").click();
+  await expect(page.locator(".panel")).toHaveCount(3);
+  await expect(page.locator(".panel.maximized")).toHaveCount(0);
+  await expect(page.locator(".panel").last()).toBeVisible();
+});
+
 test("command palette reaches every command", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("ControlOrMeta+k");

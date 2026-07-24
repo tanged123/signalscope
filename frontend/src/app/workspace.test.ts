@@ -107,6 +107,18 @@ describe("WorkspaceModel", () => {
     expect(model.maximizedPanelId()).toBeNull();
   });
 
+  it("restores the layout before adding or splitting panels", () => {
+    const model = new WorkspaceModel();
+    const first = model.addPanelRow();
+    model.toggleMaximize(first.id);
+    model.splitPanel(first.id);
+    expect(model.maximizedPanelId()).toBeNull();
+
+    model.toggleMaximize(first.id);
+    model.addPanelRow();
+    expect(model.maximizedPanelId()).toBeNull();
+  });
+
   it("toggles favorites", () => {
     const model = new WorkspaceModel();
     model.toggleFavorite("a/one");

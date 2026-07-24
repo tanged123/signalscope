@@ -76,6 +76,7 @@ export class WorkspaceModel {
   }
 
   addPanelRow(): PanelState {
+    this.maximized = null;
     const panel = this.createPanel();
     this.appendRow(panel.id);
     this.session.focused_panel_id = panel.id;
@@ -88,6 +89,7 @@ export class WorkspaceModel {
     const row = this.session.layout[location.rowIndex];
     const cell = row?.panels[location.cellIndex];
     if (row === undefined || cell === undefined) return null;
+    this.maximized = null;
     const panel = this.createPanel();
     const width = cell.width / 2;
     cell.width = width;
@@ -180,6 +182,7 @@ export class WorkspaceModel {
   movePanel(id: string, targetRowIndex: number, targetCellIndex: number): void {
     const location = this.locate(id);
     if (location === null) return;
+    this.maximized = null;
     const removedRow = this.detachCell(location);
     let rowIndex = targetRowIndex;
     if (removedRow && location.rowIndex < rowIndex) rowIndex -= 1;
