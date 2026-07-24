@@ -12,7 +12,7 @@ interface Range {
   max: number;
 }
 
-const SERIES_TOKENS = [
+export const SERIES_TOKENS = [
   "--series-1",
   "--series-2",
   "--series-3",
@@ -26,7 +26,7 @@ const SERIES_TOKENS = [
 export class CanvasRenderer {
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
-  render(response: TileResponse, window: Range): number {
+  render(response: TileResponse, xRange: Range): number {
     const started = performance.now();
     const { context, width, height } = this.prepareCanvas();
     const styles = getComputedStyle(document.documentElement);
@@ -50,13 +50,13 @@ export class CanvasRenderer {
       height: Math.max(1, height - 42),
     };
     const yRange = visibleYRange(response.series);
-    this.drawAxes(context, plot, window, yRange, colors);
+    this.drawAxes(context, plot, xRange, yRange, colors);
     response.series.forEach((series, index) => {
       this.drawSeries(
         context,
         plot,
         series,
-        window,
+        xRange,
         yRange,
         colors.series[index % colors.series.length] ?? colors.fg2,
       );
@@ -169,7 +169,6 @@ export class CanvasRenderer {
     let penDown = false;
     for (const bin of series.bins) {
       if (
-        bin.has_gap ||
         bin.first === null ||
         bin.last === null ||
         bin.min === null ||
@@ -180,15 +179,15 @@ export class CanvasRenderer {
       }
       const x = toX((bin.t0 + bin.t1) * 0.5);
       const firstY = toY(bin.first);
-      if (!penDown) {
+      if (!penDown || bin.has_gap) {
         context.moveTo(x, firstY);
-        penDown = true;
       } else {
         context.lineTo(x, firstY);
       }
       context.lineTo(x, toY(bin.min));
       context.lineTo(x, toY(bin.max));
       context.lineTo(x, toY(bin.last));
+      penDown = !bin.has_gap;
     }
     context.stroke();
   }

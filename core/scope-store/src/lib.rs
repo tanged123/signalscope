@@ -92,7 +92,7 @@ impl Signal {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SignalStore {
     next_source_id: u64,
     next_signal_id: u64,
@@ -138,7 +138,7 @@ impl SignalStore {
         source_id: SourceId,
         path: impl Into<String>,
         unit: Option<String>,
-        time: Vec<f64>,
+        time: Arc<[f64]>,
         values: Vec<f64>,
     ) -> Result<SignalId, StoreError> {
         let source = self
@@ -153,14 +153,7 @@ impl SignalStore {
 
         let id = SignalId(self.next_signal_id);
         let point_count = values.len();
-        let signal = Signal::new(
-            id,
-            source_id,
-            path.clone(),
-            unit,
-            time.into(),
-            values.into(),
-        )?;
+        let signal = Signal::new(id, source_id, path.clone(), unit, time, values.into())?;
         self.next_signal_id += 1;
         self.signals.insert(id, signal);
         self.signal_paths.insert(path, id);
@@ -212,7 +205,7 @@ mod tests {
                 source,
                 "imu/ax",
                 Some("m/s²".into()),
-                vec![0.0, 1.0],
+                Arc::from(vec![0.0, 1.0]),
                 vec![2.0, 3.0],
             )
             .unwrap();

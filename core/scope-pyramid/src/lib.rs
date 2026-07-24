@@ -54,14 +54,7 @@ pub struct Pyramid {
 impl Pyramid {
     #[must_use]
     pub fn from_signal(signal: &Signal) -> Self {
-        let level_zero = signal
-            .time()
-            .iter()
-            .copied()
-            .zip(signal.values().iter().copied())
-            .map(|(time, value)| EnvelopeBin::sample(time, value))
-            .collect();
-        Self::from_level_zero(level_zero)
+        Self::from_samples(signal.time(), signal.values())
     }
 
     #[must_use]

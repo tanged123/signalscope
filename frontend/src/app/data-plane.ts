@@ -107,23 +107,23 @@ function createDemoManifest(): BakedManifest {
         last: value,
         min: value,
         max: value,
-        sample_count: 1,
+        sample_count: "1",
         has_gap: false,
       };
     });
 
   const signals: SignalSummary[] = [
     {
-      signal_id: 1,
+      signal_id: "1",
       path: "rocket/velocity_body/x",
       unit: "m/s",
-      point_count: pointCount,
+      point_count: String(pointCount),
     },
     {
-      signal_id: 2,
+      signal_id: "2",
       path: "rocket/velocity_body/y",
       unit: "m/s",
-      point_count: pointCount,
+      point_count: String(pointCount),
     },
   ];
   return {
@@ -134,7 +134,7 @@ function createDemoManifest(): BakedManifest {
       request_id: "baked-demo",
       series: [
         {
-          signal_id: 1,
+          signal_id: "1",
           signal_path: signals[0]?.path ?? "signal/x",
           unit: "m/s",
           level: 0,
@@ -146,7 +146,7 @@ function createDemoManifest(): BakedManifest {
           ),
         },
         {
-          signal_id: 2,
+          signal_id: "2",
           signal_path: signals[1]?.path ?? "signal/y",
           unit: "m/s",
           level: 0,

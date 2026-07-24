@@ -23,7 +23,7 @@ const primitiveTypeScript = {
   f64: "number",
   string: "string",
   u32: "number",
-  u64: "number",
+  u64: "string",
 };
 
 function convertType(type, primitives, arrayFormat, optionalFormat) {
@@ -47,6 +47,42 @@ const rust = [
   "",
   `pub const PROTOCOL_VERSION: u32 = ${schema.protocol_version};`,
   "",
+  "mod u64_string {",
+  "    use serde::{de::Error, Deserialize, Deserializer, Serializer};",
+  "",
+  "    pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>",
+  "    where",
+  "        S: Serializer,",
+  "    {",
+  "        serializer.serialize_str(&value.to_string())",
+  "    }",
+  "",
+  "    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>",
+  "    where",
+  "        D: Deserializer<'de>,",
+  "    {",
+  "        String::deserialize(deserializer)?.parse().map_err(D::Error::custom)",
+  "    }",
+  "}",
+  "",
+  "mod u64_vec_string {",
+  "    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};",
+  "",
+  "    pub fn serialize<S>(values: &Vec<u64>, serializer: S) -> Result<S::Ok, S::Error>",
+  "    where",
+  "        S: Serializer,",
+  "    {",
+  "        values.iter().map(ToString::to_string).collect::<Vec<_>>().serialize(serializer)",
+  "    }",
+  "",
+  "    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u64>, D::Error>",
+  "    where",
+  "        D: Deserializer<'de>,",
+  "    {",
+  "        Vec::<String>::deserialize(deserializer)?.into_iter().map(|value| value.parse().map_err(D::Error::custom)).collect()",
+  "    }",
+  "}",
+  "",
 ];
 
 const typeScript = [
@@ -67,6 +103,11 @@ for (const [name, definition] of Object.entries(schema.types)) {
   for (const [field, type] of Object.entries(definition.fields)) {
     if (type.endsWith("?")) {
       rust.push("    #[serde(default)]");
+    }
+    if (type === "u64") {
+      rust.push('    #[serde(with = "u64_string")]');
+    } else if (type === "u64[]") {
+      rust.push('    #[serde(with = "u64_vec_string")]');
     }
     rust.push(
       `    pub ${field}: ${convertType(

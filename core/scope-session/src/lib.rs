@@ -41,6 +41,8 @@ pub struct LinkedTime {
     pub t0: f64,
     pub t1: f64,
     pub linked: bool,
+    pub paused: bool,
+    #[serde(rename = "cursorT")]
     pub cursor_t: Option<f64>,
     pub mode: TimeMode,
 }
@@ -51,6 +53,7 @@ impl Default for LinkedTime {
             t0: 0.0,
             t1: 1.0,
             linked: true,
+            paused: false,
             cursor_t: None,
             mode: TimeMode::Fixed,
         }

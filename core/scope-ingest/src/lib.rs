@@ -2,8 +2,9 @@
 
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Seek},
+    io::{BufRead, BufReader, Cursor},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use scope_store::{SignalId, SignalStore, SourceId, StoreError};
@@ -43,21 +44,23 @@ pub trait Decoder {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CsvDecoder;
 
-impl Decoder for CsvDecoder {
-    fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
-        let mut file = File::open(path)?;
-        let probe = probe_first_data_line(&mut file)?;
-        file.rewind()?;
+impl CsvDecoder {
+    fn ingest_unchecked(
+        &self,
+        path: &Path,
+        store: &mut SignalStore,
+    ) -> Result<IngestSummary, IngestError> {
+        let input = filter_comment_lines(File::open(path)?)?;
+        let probe = probe_first_data_line(&input)?;
 
         let delimiter = detect_delimiter(&probe);
         let has_headers = detect_header(&probe, delimiter);
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(delimiter)
             .has_headers(has_headers)
-            .comment(Some(b'#'))
             .flexible(true)
             .trim(csv::Trim::All)
-            .from_reader(file);
+            .from_reader(Cursor::new(input));
 
         let headers = if has_headers {
             reader
@@ -107,6 +110,7 @@ impl Decoder for CsvDecoder {
         );
 
         let source_id = store.register_source(path);
+        let time: Arc<[f64]> = time.into();
         let base = path
             .file_stem()
             .and_then(|value| value.to_str())
@@ -117,7 +121,7 @@ impl Decoder for CsvDecoder {
                 continue;
             }
             let path = normalize_signal_path(base, &header);
-            signals.push(store.insert_signal(source_id, path, None, time.clone(), values)?);
+            signals.push(store.insert_signal(source_id, path, None, Arc::clone(&time), values)?);
         }
 
         Ok(IngestSummary {
@@ -126,6 +130,17 @@ impl Decoder for CsvDecoder {
             row_count,
             signals,
         })
+    }
+}
+
+impl Decoder for CsvDecoder {
+    fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
+        let snapshot = store.clone();
+        let result = self.ingest_unchecked(path, store);
+        if result.is_err() {
+            *store = snapshot;
+        }
+        result
     }
 }
 
@@ -142,8 +157,25 @@ pub fn ingest_csv_path(
     CsvDecoder.ingest(path.as_ref(), store)
 }
 
-fn probe_first_data_line(file: &mut File) -> Result<String, IngestError> {
-    let mut reader = BufReader::new(file);
+fn filter_comment_lines(file: File) -> Result<Vec<u8>, IngestError> {
+    let mut filtered = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || matches!(trimmed.as_bytes().first(), Some(b'#' | b'%' | b';')) {
+            continue;
+        }
+        filtered.extend_from_slice(line.as_bytes());
+        filtered.push(b'\n');
+    }
+    if filtered.is_empty() {
+        return Err(IngestError::NoDataRows);
+    }
+    Ok(filtered)
+}
+
+fn probe_first_data_line(input: &[u8]) -> Result<String, IngestError> {
+    let mut reader = BufReader::new(input);
     let mut line = String::new();
     loop {
         line.clear();
@@ -151,7 +183,7 @@ fn probe_first_data_line(file: &mut File) -> Result<String, IngestError> {
             return Err(IngestError::NoDataRows);
         }
         let trimmed = line.trim();
-        if !trimmed.is_empty() && !matches!(trimmed.as_bytes().first(), Some(b'#' | b'%' | b';')) {
+        if !trimmed.is_empty() {
             return Ok(trimmed.to_owned());
         }
     }
@@ -178,16 +210,22 @@ fn detect_header(probe: &str, delimiter: u8) -> bool {
 fn select_time_column(headers: &[String], columns: &[Vec<f64>]) -> Option<usize> {
     headers
         .iter()
-        .position(|header| {
-            TIME_NAMES
+        .enumerate()
+        .find_map(|(index, header)| {
+            let matches_name = TIME_NAMES
                 .iter()
-                .any(|name| header.trim().eq_ignore_ascii_case(name))
+                .any(|name| header.trim().eq_ignore_ascii_case(name));
+            (matches_name && is_monotonic_finite(&columns[index])).then_some(index)
         })
         .or_else(|| {
             columns
                 .iter()
-                .position(|column| column.windows(2).all(|pair| pair[1] >= pair[0]))
+                .position(|column| is_monotonic_finite(column))
         })
+}
+
+fn is_monotonic_finite(column: &[f64]) -> bool {
+    column.iter().all(|value| value.is_finite()) && column.windows(2).all(|pair| pair[1] >= pair[0])
 }
 
 fn normalize_signal_path(base: &str, header: &str) -> String {
@@ -251,5 +289,34 @@ mod tests {
         ingest_csv_path(file.path(), &mut store).unwrap();
 
         assert_eq!(store.signals().next().unwrap().time(), &[0.0, 1.0]);
+    }
+
+    #[test]
+    fn filters_all_probe_comment_markers_before_parsing() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "% exported by matlab").unwrap();
+        writeln!(file, "; another comment").unwrap();
+        writeln!(file, "time,value").unwrap();
+        writeln!(file, "0,4").unwrap();
+
+        let mut store = SignalStore::new();
+        let summary = ingest_csv_path(file.path(), &mut store).unwrap();
+
+        assert_eq!(summary.row_count, 1);
+        assert_eq!(summary.signals.len(), 1);
+        assert_eq!(store.signals().next().unwrap().values(), &[4.0]);
+    }
+
+    #[test]
+    fn rolls_back_source_and_signals_when_registration_fails() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "time,value,value").unwrap();
+        writeln!(file, "0,4,5").unwrap();
+
+        let mut store = SignalStore::new();
+        assert!(ingest_csv_path(file.path(), &mut store).is_err());
+
+        assert_eq!(store.sources().count(), 0);
+        assert_eq!(store.signals().count(), 0);
     }
 }

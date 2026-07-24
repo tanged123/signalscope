@@ -2,6 +2,9 @@ name: SignalScope CI
 
 on: push
 
+permissions:
+  contents: read
+
 jobs:
   nix-flake-check:
     runs-on: ubuntu-latest

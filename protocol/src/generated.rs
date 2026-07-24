@@ -4,6 +4,51 @@ use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
+mod u64_string {
+    use serde::{de::Error, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(D::Error::custom)
+    }
+}
+
+mod u64_vec_string {
+    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(values: &Vec<u64>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Vec::<String>::deserialize(deserializer)?
+            .into_iter()
+            .map(|value| value.parse().map_err(D::Error::custom))
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TimeWindow {
     pub t0: f64,
@@ -14,6 +59,7 @@ pub struct TimeWindow {
 pub struct TileRequest {
     pub protocol_version: u32,
     pub request_id: String,
+    #[serde(with = "u64_vec_string")]
     pub signal_ids: Vec<u64>,
     pub window: TimeWindow,
     pub pixel_width: u32,
@@ -31,12 +77,14 @@ pub struct EnvelopeBin {
     pub min: Option<f64>,
     #[serde(default)]
     pub max: Option<f64>,
+    #[serde(with = "u64_string")]
     pub sample_count: u64,
     pub has_gap: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SignalTile {
+    #[serde(with = "u64_string")]
     pub signal_id: u64,
     pub signal_path: String,
     #[serde(default)]
@@ -54,17 +102,21 @@ pub struct TileResponse {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SignalSummary {
+    #[serde(with = "u64_string")]
     pub signal_id: u64,
     pub path: String,
     #[serde(default)]
     pub unit: Option<String>,
+    #[serde(with = "u64_string")]
     pub point_count: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SourceSummary {
+    #[serde(with = "u64_string")]
     pub source_id: u64,
     pub path: String,
+    #[serde(with = "u64_string")]
     pub point_count: u64,
 }
 

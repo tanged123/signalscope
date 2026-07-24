@@ -10,7 +10,7 @@ export interface TimeWindow {
 export interface TileRequest {
   protocol_version: number;
   request_id: string;
-  signal_ids: number[];
+  signal_ids: string[];
   window: TimeWindow;
   pixel_width: number;
 }
@@ -22,12 +22,12 @@ export interface EnvelopeBin {
   last: number | null;
   min: number | null;
   max: number | null;
-  sample_count: number;
+  sample_count: string;
   has_gap: boolean;
 }
 
 export interface SignalTile {
-  signal_id: number;
+  signal_id: string;
   signal_path: string;
   unit: string | null;
   level: number;
@@ -41,16 +41,16 @@ export interface TileResponse {
 }
 
 export interface SignalSummary {
-  signal_id: number;
+  signal_id: string;
   path: string;
   unit: string | null;
-  point_count: number;
+  point_count: string;
 }
 
 export interface SourceSummary {
-  source_id: number;
+  source_id: string;
   path: string;
-  point_count: number;
+  point_count: string;
 }
 
 export interface IngestResponse {

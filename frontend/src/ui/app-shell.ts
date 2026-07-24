@@ -5,20 +5,13 @@ import {
 } from "../generated/protocol";
 import type { DataPlane } from "../app/data-plane";
 import { LinkedTimeModel } from "../app/linked-time";
-import { CanvasRenderer } from "../render/canvas-renderer";
+import { CanvasRenderer, SERIES_TOKENS } from "../render/canvas-renderer";
 
 const MODE_LABELS = ["T", "XY", "FFT", "H"] as const;
-const SERIES_COLORS = [
-  "var(--series-1)",
-  "var(--series-2)",
-  "var(--series-3)",
-  "var(--series-4)",
-] as const;
-
 export class AppShell {
   private readonly time = new LinkedTimeModel();
   private signals: SignalSummary[] = [];
-  private selectedIds: number[] = [];
+  private selectedIds: string[] = [];
   private renderer: CanvasRenderer | null = null;
   private latestTiles: TileResponse | null = null;
 
@@ -110,34 +103,45 @@ export class AppShell {
     const visible = this.signals.filter((signal) =>
       signal.path.toLowerCase().includes(filter),
     );
-    list.innerHTML =
-      visible.length === 0
-        ? '<div class="signal-row">No matching signals.</div>'
-        : visible
-            .map((signal, index) => {
-              const selected = this.selectedIds.includes(signal.signal_id);
-              const color =
-                SERIES_COLORS[index % SERIES_COLORS.length] ??
-                "var(--series-1)";
-              return `<button class="signal-row ${selected ? "selected" : ""}" data-signal-id="${String(signal.signal_id)}">
-                <span class="series-mark" style="background:${color}"></span>
-                <span class="signal-path">${escapeHtml(signal.path)}</span>
-                <span class="signal-value">—</span>
-              </button>`;
-            })
-            .join("");
+    if (visible.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "signal-row";
+      empty.textContent = "No matching signals.";
+      list.replaceChildren(empty);
+    } else {
+      list.replaceChildren(
+        ...visible.map((signal, index) => {
+          const selected = this.selectedIds.includes(signal.signal_id);
+          const row = document.createElement("button");
+          row.className = `signal-row ${selected ? "selected" : ""}`;
+          row.dataset.signalId = signal.signal_id;
+          const mark = document.createElement("span");
+          mark.className = "series-mark";
+          mark.style.background = `var(${SERIES_TOKENS[index % SERIES_TOKENS.length] ?? "--series-1"})`;
+          const path = document.createElement("span");
+          path.className = "signal-path";
+          path.textContent = signal.path;
+          const value = document.createElement("span");
+          value.className = "signal-value";
+          value.textContent = "—";
+          row.append(mark, path, value);
+          return row;
+        }),
+      );
+    }
 
     for (const row of list.querySelectorAll<HTMLButtonElement>(
       "[data-signal-id]",
     )) {
       row.addEventListener("dblclick", () => {
-        const id = Number(row.dataset.signalId);
+        const id = row.dataset.signalId;
+        if (id === undefined) return;
         this.selectedIds = this.selectedIds.includes(id)
           ? this.selectedIds.filter((selected) => selected !== id)
           : [...this.selectedIds, id];
         this.renderSignalTree();
         this.renderLegend();
-        void this.refreshTiles();
+        void this.refreshTiles().catch((error: unknown) => this.reportError(error));
       });
     }
   }
@@ -147,22 +151,29 @@ export class AppShell {
     const selected = this.signals.filter((signal) =>
       this.selectedIds.includes(signal.signal_id),
     );
-    legend.innerHTML = selected
-      .map((signal, index) => {
-        const color =
-          SERIES_COLORS[index % SERIES_COLORS.length] ?? "var(--series-1)";
-        return `<button class="legend-chip" title="${escapeHtml(signal.path)}">
-          <span class="legend-line" style="background:${color}"></span>
-          <span class="legend-name">${escapeHtml(shortName(signal.path))}</span>
-          <span class="legend-menu">▾</span>
-        </button>`;
-      })
-      .join("");
+    legend.replaceChildren(
+      ...selected.map((signal, index) => {
+        const chip = document.createElement("button");
+        chip.className = "legend-chip";
+        chip.title = signal.path;
+        const line = document.createElement("span");
+        line.className = "legend-line";
+        line.style.background = `var(${SERIES_TOKENS[index % SERIES_TOKENS.length] ?? "--series-1"})`;
+        const name = document.createElement("span");
+        name.className = "legend-name";
+        name.textContent = shortName(signal.path);
+        const menu = document.createElement("span");
+        menu.className = "legend-menu";
+        menu.textContent = "▾";
+        chip.append(line, name, menu);
+        return chip;
+      }),
+    );
   }
 
   private updateStatus(): void {
     const pointCount = this.signals.reduce(
-      (total, signal) => total + signal.point_count,
+      (total, signal) => total + Number(signal.point_count),
       0,
     );
     this.requireElement(".signal-count").textContent =
@@ -177,6 +188,12 @@ export class AppShell {
     const root = document.documentElement;
     root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
     this.renderCanvas();
+  }
+
+  private reportError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.requireElement(".render-ms").textContent = `error: ${message}`;
+    console.error(error);
   }
 
   private requireElement<T extends Element = HTMLElement>(selector: string): T {
@@ -276,12 +293,4 @@ function shellMarkup(host: DataPlane["host"]): string {
 
 function shortName(path: string): string {
   return path.split("/").slice(-2).join("/");
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
