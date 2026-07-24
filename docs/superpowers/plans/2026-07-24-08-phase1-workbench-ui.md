@@ -26,6 +26,7 @@
 6. **Favorites star active color is `--fg-1`** (achromatic), not amber — amber is reserved for interaction per the design system.
 7. Default boot: if the plane reports signals and the session has no panels, one panel is created plotting the first two signals (keeps the walking-skeleton demo and e2e meaningful); with no signals the workspace shows the spec's F6·1 empty state.
 8. **`S` (stats) is not bound yet** — the stats strip is Phase 2; binding a key to nothing would break the "keyboard path" invariant's honesty.
+9. **Panel pointer focus toggles** — selecting an already focused panel clears the amber inset. Programmatic actions such as plotting a signal, maximizing, or running a panel command still focus their target explicitly.
 
 ## Sequencing
 
@@ -2656,7 +2657,7 @@ Append at the end of the file (before the `@media` block):
 Run: `./scripts/test.sh frontend`
 Expected: PASS (lint, typecheck, unit tests, snapshot build + artifact checks — the snapshot budget check should still pass; the new UI adds a few kB of JS).
 
-Then run `./scripts/run.sh web` and check by hand at `http://127.0.0.1:4173`: demo boots with one panel plotting two series; `N` adds a row; ⊞ splits; ⤢ maximizes; ✕ closes; clicking a panel moves the amber focus inset; dragging a tree leaf onto a panel adds a legend chip; dragging onto empty workspace background creates a panel; dragging a panel header onto another panel moves it; seams resize; `/` focuses the filter; `⌘K`/`Ctrl+K` opens the palette; `T` swaps theme with no chrome color leaks. **Playwright e2e is temporarily red** (old selectors) — Task 7 fixes it; do not run `./scripts/ci.sh all` yet.
+Then run `./scripts/run.sh web` and check by hand at `http://127.0.0.1:4173`: demo boots with one panel plotting two series; `N` adds a row; ⊞ splits; ⤢ maximizes; ✕ closes; clicking a panel moves the amber focus inset and clicking it again clears the inset; dragging a tree leaf onto a panel adds a legend chip; dragging onto empty workspace background creates a panel; dragging a panel header onto another panel moves it; seams resize; `/` focuses the filter; `⌘K`/`Ctrl+K` opens the palette; `T` swaps theme with no chrome color leaks. **Playwright e2e is temporarily red** (old selectors) — Task 7 fixes it; do not run `./scripts/ci.sh all` yet.
 
 - [ ] **Step 10: Commit**
 

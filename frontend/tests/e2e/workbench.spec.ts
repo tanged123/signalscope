@@ -10,6 +10,11 @@ test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await expect(page.locator(".panel-empty").last()).toBeVisible();
   await expect(page.locator(".panel").last()).toHaveClass(/focused/);
 
+  await page.locator(".panel").last().click();
+  await expect(page.locator(".panel.focused")).toHaveCount(0);
+  await page.locator(".panel").last().click();
+  await expect(page.locator(".panel").last()).toHaveClass(/focused/);
+
   const bottomRow = page.locator(".workspace-row").last();
   await bottomRow.locator(".panel-split-right").click();
   await expect(page.locator(".panel")).toHaveCount(3);

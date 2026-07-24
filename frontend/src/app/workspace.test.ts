@@ -53,6 +53,18 @@ describe("WorkspaceModel", () => {
     expect(model.focusedPanelId()).toBe(second.id);
   });
 
+  it("toggles pointer focus off when the focused panel is selected again", () => {
+    const model = new WorkspaceModel();
+    const first = model.addPanelRow();
+    const second = model.addPanelRow();
+
+    model.togglePanelFocus(second.id);
+    expect(model.focusedPanelId()).toBeNull();
+
+    model.togglePanelFocus(first.id);
+    expect(model.focusedPanelId()).toBe(first.id);
+  });
+
   it("splits a panel right into equal halves of its cell", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();

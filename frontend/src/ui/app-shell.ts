@@ -51,10 +51,8 @@ export class AppShell {
       this.workspace,
       {
         onFocus: (id) => {
-          if (this.workspace.focusedPanelId() !== id) {
-            this.workspace.focusPanel(id);
-            this.workspaceView?.refreshPanelStates();
-          }
+          this.workspace.togglePanelFocus(id);
+          this.workspaceView?.refreshPanelStates();
         },
         onClose: (id) => {
           this.workspace.closePanel(id);
