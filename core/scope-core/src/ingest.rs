@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use scope_store::{SignalId, SignalStore, SourceId, StoreError};
+use crate::store::{SignalId, SignalStore, SourceId, StoreError};
 use thiserror::Error;
 
 const TIME_NAMES: &[&str] = &[
@@ -34,11 +34,24 @@ pub struct IngestSummary {
 pub trait Decoder {
     /// Decodes `path` and registers its signals in `store`.
     ///
+    /// Implementations may leave partial registrations behind on error;
+    /// callers get atomicity from [`Decoder::ingest`].
+    ///
     /// # Errors
     ///
     /// Returns [`IngestError`] when the source cannot be read, decoded, or
     /// registered.
-    fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError>;
+    fn decode(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError>;
+
+    /// Decodes `path` atomically: on error the store is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IngestError`] when the source cannot be read, decoded, or
+    /// registered.
+    fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
+        store.transaction(|store| self.decode(path, store))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -133,13 +146,8 @@ impl CsvDecoder {
 }
 
 impl Decoder for CsvDecoder {
-    fn ingest(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
-        let snapshot = store.clone();
-        let result = Self::ingest_unchecked(path, store);
-        if result.is_err() {
-            *store = snapshot;
-        }
-        result
+    fn decode(&self, path: &Path, store: &mut SignalStore) -> Result<IngestSummary, IngestError> {
+        Self::ingest_unchecked(path, store)
     }
 }
 

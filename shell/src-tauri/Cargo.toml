@@ -14,10 +14,8 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-scope-ingest.workspace = true
+scope-core.workspace = true
 scope-protocol.workspace = true
-scope-pyramid.workspace = true
-scope-store.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }
 

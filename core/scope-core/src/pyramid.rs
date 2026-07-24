@@ -1,6 +1,6 @@
 //! Multi-resolution min/max envelopes for bounded-cost viewport queries.
 
-use scope_store::Signal;
+use crate::store::Signal;
 use serde::{Deserialize, Serialize};
 
 pub const TILE_BINS: usize = 256;

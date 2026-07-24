@@ -6,11 +6,7 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repositoryRoot = resolve(scriptDirectory, "..");
 const workspacePackageNames = new Set([
-  "scope-compute",
-  "scope-ingest",
-  "scope-pyramid",
-  "scope-session",
-  "scope-store",
+  "scope-core",
   "scope-protocol",
   "signalscope-shell",
 ]);

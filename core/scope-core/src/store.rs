@@ -92,7 +92,7 @@ impl Signal {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SignalStore {
     next_source_id: u64,
     next_signal_id: u64,
@@ -107,7 +107,9 @@ impl SignalStore {
         Self {
             next_source_id: 1,
             next_signal_id: 1,
-            ..Self::default()
+            sources: BTreeMap::new(),
+            signals: BTreeMap::new(),
+            signal_paths: BTreeMap::new(),
         }
     }
 
@@ -161,6 +163,42 @@ impl SignalStore {
         Ok(id)
     }
 
+    /// Runs `f` atomically with respect to registrations: when `f` returns
+    /// `Err`, every source and signal it inserted is removed and the id
+    /// counters are restored.
+    ///
+    /// The store's mutating surface is insert-only (`register_source`,
+    /// `insert_signal`), so rolling back insertions restores the exact prior
+    /// state, including point counts on pre-existing sources. Any future
+    /// in-place mutation must extend this rollback.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever error `f` returns, after rolling back.
+    pub fn transaction<T, E>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, E>) -> Result<T, E> {
+        let source_watermark = self.next_source_id;
+        let signal_watermark = self.next_signal_id;
+        let source_point_counts = self
+            .sources
+            .iter()
+            .map(|(id, source)| (*id, source.point_count))
+            .collect::<BTreeMap<_, _>>();
+        let result = f(self);
+        if result.is_err() {
+            self.sources.retain(|id, _| id.0 < source_watermark);
+            self.signals.retain(|id, _| id.0 < signal_watermark);
+            self.signal_paths.retain(|_, id| id.0 < signal_watermark);
+            for (id, point_count) in source_point_counts {
+                if let Some(source) = self.sources.get_mut(&id) {
+                    source.point_count = point_count;
+                }
+            }
+            self.next_source_id = source_watermark;
+            self.next_signal_id = signal_watermark;
+        }
+        result
+    }
+
     #[must_use]
     pub fn signal(&self, id: SignalId) -> Option<&Signal> {
         self.signals.get(&id)
@@ -179,6 +217,12 @@ impl SignalStore {
 
     pub fn sources(&self) -> impl Iterator<Item = &Source> {
         self.sources.values()
+    }
+}
+
+impl Default for SignalStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -212,5 +256,61 @@ mod tests {
 
         assert_eq!(store.signal(signal).unwrap().values(), &[2.0, 3.0]);
         assert_eq!(store.sources().next().unwrap().point_count, 2);
+    }
+
+    #[test]
+    fn transaction_rolls_back_insertions_on_error() {
+        let mut store = SignalStore::new();
+        let keep = store.register_source("keep.csv");
+        store
+            .insert_signal(keep, "keep/a", None, Arc::from(vec![0.0]), vec![1.0])
+            .unwrap();
+
+        let result: Result<(), &str> = store.transaction(|store| {
+            let source = store.register_source("rollback.csv");
+            store
+                .insert_signal(source, "rollback/a", None, Arc::from(vec![0.0]), vec![1.0])
+                .unwrap();
+            Err("decode failed")
+        });
+
+        assert!(result.is_err());
+        assert_eq!(store.sources().count(), 1);
+        assert_eq!(store.signals().count(), 1);
+        assert!(store.signal_by_path("rollback/a").is_none());
+        assert_eq!(store.register_source("next.csv"), SourceId(2));
+    }
+
+    #[test]
+    fn transaction_restores_existing_source_metadata_on_error() {
+        let mut store = SignalStore::new();
+        let source = store.register_source("keep.csv");
+        store
+            .insert_signal(source, "keep/a", None, Arc::from(vec![0.0]), vec![1.0])
+            .unwrap();
+
+        let result: Result<(), &str> = store.transaction(|store| {
+            store
+                .insert_signal(
+                    source,
+                    "rollback/a",
+                    None,
+                    Arc::from(vec![0.0, 1.0]),
+                    vec![1.0, 2.0],
+                )
+                .unwrap();
+            Err("decode failed")
+        });
+
+        assert!(result.is_err());
+        assert_eq!(store.sources().next().unwrap().point_count, 1);
+        assert_eq!(store.signals().count(), 1);
+        assert!(store.signal_by_path("rollback/a").is_none());
+    }
+
+    #[test]
+    fn default_store_matches_new() {
+        let mut store = SignalStore::default();
+        assert_eq!(store.register_source("a.csv"), SourceId(1));
     }
 }

@@ -1,18 +1,29 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
-use scope_ingest::ingest_csv_path;
-use scope_protocol::{
-    EnvelopeBin, IngestResponse, SignalSummary, SignalTile, SourceSummary, TileRequest,
-    TileResponse, PROTOCOL_VERSION,
+use scope_core::{
+    ingest::ingest_csv_path,
+    pyramid::Pyramid,
+    store::{Signal, SignalId, SignalStore},
 };
-use scope_pyramid::Pyramid;
-use scope_store::{SignalId, SignalStore};
+use scope_protocol::{
+    EnvelopeBin, IngestResponse, PROTOCOL_VERSION, SignalSummary, SignalTile, SourceSummary,
+    TileRequest, TileResponse,
+};
 use tauri::State;
 
 #[derive(Default)]
 struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
+}
+
+fn signal_summary(signal: &Signal) -> SignalSummary {
+    SignalSummary {
+        signal_id: signal.id.0,
+        path: signal.path.clone(),
+        unit: signal.unit.clone(),
+        point_count: signal.len() as u64,
+    }
 }
 
 #[tauri::command]
@@ -42,12 +53,7 @@ fn ingest_csv(path: String, state: State<'_, Mutex<DataState>>) -> Result<Ingest
         .signals
         .iter()
         .filter_map(|id| data.store.signal(*id))
-        .map(|signal| SignalSummary {
-            signal_id: signal.id.0,
-            path: signal.path.clone(),
-            unit: signal.unit.clone(),
-            point_count: signal.len() as u64,
-        })
+        .map(signal_summary)
         .collect();
 
     Ok(IngestResponse {
@@ -65,16 +71,7 @@ fn ingest_csv(path: String, state: State<'_, Mutex<DataState>>) -> Result<Ingest
 #[allow(clippy::needless_pass_by_value)]
 fn list_signals(state: State<'_, Mutex<DataState>>) -> Result<Vec<SignalSummary>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
-    Ok(data
-        .store
-        .signals()
-        .map(|signal| SignalSummary {
-            signal_id: signal.id.0,
-            path: signal.path.clone(),
-            unit: signal.unit.clone(),
-            point_count: signal.len() as u64,
-        })
-        .collect())
+    Ok(data.store.signals().map(signal_summary).collect())
 }
 
 #[tauri::command]
@@ -140,10 +137,7 @@ fn query_tiles(
 /// Panics when Tauri cannot initialize or run the application.
 pub fn run() {
     tauri::Builder::default()
-        .manage(Mutex::new(DataState {
-            store: SignalStore::new(),
-            ..DataState::default()
-        }))
+        .manage(Mutex::new(DataState::default()))
         .invoke_handler(tauri::generate_handler![
             ingest_csv,
             list_signals,

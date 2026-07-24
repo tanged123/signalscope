@@ -43,11 +43,12 @@ The snapshot is written to `frontend/dist/snapshot-template.html`.
 
 ```text
 core/
-  scope-store/       signal/source registry and backing-store boundary
-  scope-ingest/      streaming decoders behind one trait
-  scope-pyramid/     multi-resolution min/max envelope tiles
-  scope-compute/     transforms and XY resampling primitives
-  scope-session/     versioned session schema and migrations
+  scope-core/        native data plane with separable layers:
+    store/            signal/source registry and backing-store boundary
+    ingest/           streaming decoders behind one trait
+    pyramid/          multi-resolution min/max envelope tiles
+    compute/          transforms and XY resampling primitives
+    session/          versioned session schema and migrations
 protocol/            single schema source plus generated Rust and TypeScript
 frontend/
   src/app/           host-neutral application and DataPlane implementations

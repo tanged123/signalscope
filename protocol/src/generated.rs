@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u32 = 1;
 
 mod u64_string {
-    use serde::{de::Error, Deserialize, Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
 
     #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
@@ -26,7 +26,7 @@ mod u64_string {
 }
 
 mod u64_vec_string {
-    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 
     pub fn serialize<S>(values: &[u64], serializer: S) -> Result<S::Ok, S::Error>
     where

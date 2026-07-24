@@ -89,9 +89,8 @@ SignalScope is native software with a portable export, not a web app:
   on host identity.
 - Rust owns ingest, storage, pyramids, compute, persistence, and IPC-facing
   data. The Tauri shell stays thin: windows, dialogs, and protocol wiring.
-- `core/scope-store`, `scope-ingest`, `scope-pyramid`, `scope-compute`, and
-  `scope-session` remain separable. Do not make core crates depend on shell or
-  frontend state.
+- `scope-core::{store, ingest, pyramid, compute, session}` remain separable
+  modules. Do not make core modules depend on shell or frontend state.
 - Frontend code consumes protocol tiles/views, never raw native arrays or
   source-format details. Keep a future local HTTP/WebSocket plane possible.
 
