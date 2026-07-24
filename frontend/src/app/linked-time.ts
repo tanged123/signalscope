@@ -26,6 +26,12 @@ export class LinkedTimeModel {
     this.state = { ...this.state, linked };
   }
 
+  setWindow(t0: number, t1: number): void {
+    const next = { ...this.state, t0, t1 };
+    this.validateWindow(next);
+    this.state = next;
+  }
+
   private validateWindow(window: TimeWindow): void {
     if (
       !Number.isFinite(window.t0) ||
