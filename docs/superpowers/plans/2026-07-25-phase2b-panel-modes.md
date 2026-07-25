@@ -4,7 +4,7 @@
 
 **Goal:** Close Phase 2 by giving panels the three non-time modes the Final Spec draws — XY (with the amber drop strip and the `c:` colour channel plus its colorbar), FFT, and histogram — and by restoring the prototype's full touch gesture set on top of 2A's desktop interactions.
 
-**Architecture:** One new protocol request (`query_samples`) returns a *decimated, capped window slice* of raw samples; everything else is presentation-plane maths over that bounded slice. XY pairing, spectra, and histograms therefore live in pure TypeScript modules that both hosts run identically — the same arrangement ADR 0014 already established for the visible-statistics strip, and the reason no UI code branches on host identity. `CanvasRenderer` grows a second entry point (`renderPaths`) that draws vertex arrays against arbitrary x ranges with optional log scaling and optional per-vertex colour, which is what XY, FFT, and histogram all need and what the bin-oriented `render()` cannot express. Session state gains a panel-local `x_range` because in every non-time mode the x axis is a value axis, never the linked time window.
+**Architecture:** One new protocol request (`query_samples`) returns a _decimated, capped window slice_ of raw samples; everything else is presentation-plane maths over that bounded slice. XY pairing, spectra, and histograms therefore live in pure TypeScript modules that both hosts run identically — the same arrangement ADR 0014 already established for the visible-statistics strip, and the reason no UI code branches on host identity. `CanvasRenderer` grows a second entry point (`renderPaths`) that draws vertex arrays against arbitrary x ranges with optional log scaling and optional per-vertex colour, which is what XY, FFT, and histogram all need and what the bin-oriented `render()` cannot express. Session state gains a panel-local `x_range` because in every non-time mode the x axis is a value axis, never the linked time window.
 
 **Tech Stack:** TypeScript (vanilla, Vite, Canvas 2D), Vitest, Playwright; Rust (`scope-core`, `scope-protocol`, `signalscope-shell`). No new dependencies on either side — the FFT is a dependency-free radix-2 transform in the frontend.
 
@@ -43,8 +43,8 @@ Verified against the tree at commit `091b8cf`; if any turn out false, stop and e
 
 The roadmap's Phase 2 line is: _"Finish linked desktop and touch gestures, gutter/inline axes, editable labels, split legend inspector, visible statistics, annotations and delta readouts, XY drop strip, color channel and colorbar, FFT, and histogram modes."_ Phase 2A shipped everything before "XY drop strip". **This plan is the remainder**, exactly as 2A's deferral table promised:
 
-| In scope (2B)                                        | Tasks  |
-| ---------------------------------------------------- | ------ |
+| In scope (2B)                                         | Tasks  |
+| ----------------------------------------------------- | ------ |
 | Windowed raw-sample protocol request (the data floor) | 1, 2   |
 | XY mode, drop strip, cursor coupling, datatips        | 3–6    |
 | `c:` colour channel + colorbar + `batlow` tokens      | 7, 8   |
@@ -55,26 +55,26 @@ The roadmap's Phase 2 line is: _"Finish linked desktop and touch gestures, gutte
 
 Still out of scope, and a reviewer should reject a diff that adds them:
 
-| Deferred                                                       | Why                                                                                                       |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Legend-inspector `smooth` / `deriv` transforms                 | ADR 0008: expression evaluation is a native protocol request that does not exist until Phase 3. No dead buttons. |
-| Derived signals in the tree, formula-bar execution              | Phase 3.                                                                                                  |
-| `follow` time mode, session save/load, autosave, snapshot export | Phase 3/4. The `⏸ FOLLOW` toolbar slot stays `disabled`.                                                  |
-| PNG/CSV export, screenshot matrices                             | Phase 4.                                                                                                  |
-| 3D / geo panels, layout-preset UI, Monte-Carlo envelopes        | v2 per the spec's build order.                                                                            |
-| The prototype's `1:1` equal-axis flag                           | See decision 9 — it has no home in the final chrome and no spec line. Not carried over.                    |
+| Deferred                                                         | Why                                                                                                              |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Legend-inspector `smooth` / `deriv` transforms                   | ADR 0008: expression evaluation is a native protocol request that does not exist until Phase 3. No dead buttons. |
+| Derived signals in the tree, formula-bar execution               | Phase 3.                                                                                                         |
+| `follow` time mode, session save/load, autosave, snapshot export | Phase 3/4. The `⏸ FOLLOW` toolbar slot stays `disabled`.                                                         |
+| PNG/CSV export, screenshot matrices                              | Phase 4.                                                                                                         |
+| 3D / geo panels, layout-preset UI, Monte-Carlo envelopes         | v2 per the spec's build order.                                                                                   |
+| The prototype's `1:1` equal-axis flag                            | See decision 9 — it has no home in the final chrome and no spec line. Not carried over.                          |
 
 ## Decisions requiring maintainer awareness
 
 These are judgement calls the design package does not make. Each is applied in a task and recorded in an ADR; review them before execution.
 
-1. **Compute lives in the presentation plane, not `scope-core`.** ADR 0008 puts *expression evaluation* natively (it is user-authored code — an eval-surface question). XY pairing, spectra, and histograms are bounded derived views of what is already on screen, which is the class ADR 0014 already settled by computing the stats strip in TypeScript from displayed bins. One protocol request (`query_samples`) supplies the bounded input; the three maths modules are pure TS run identically by both hosts. This buys: no Rust↔TS algorithm duplication, no conformance fixture per mode, and no possibility of a snapshot behaving differently from the workbench. Recorded as **ADR 0015** (Task 1).
-2. **`query_samples` is capped, decimated, and edge-inclusive** — `max_points` with an integer stride, plus one neighbouring sample beyond each window edge so strokes reach the border. The stride rule is the one thing both hosts must agree on, so it *is* fixture-locked (`protocol/testdata/sample-conformance.json`), exactly like pyramid level selection.
+1. **Compute lives in the presentation plane, not `scope-core`.** ADR 0008 puts _expression evaluation_ natively (it is user-authored code — an eval-surface question). XY pairing, spectra, and histograms are bounded derived views of what is already on screen, which is the class ADR 0014 already settled by computing the stats strip in TypeScript from displayed bins. One protocol request (`query_samples`) supplies the bounded input; the three maths modules are pure TS run identically by both hosts. This buys: no Rust↔TS algorithm duplication, no conformance fixture per mode, and no possibility of a snapshot behaving differently from the workbench. Recorded as **ADR 0015** (Task 1).
+2. **`query_samples` is capped, decimated, and edge-inclusive** — `max_points` with an integer stride, plus one neighbouring sample beyond each window edge so strokes reach the border. The stride rule is the one thing both hosts must agree on, so it _is_ fixture-locked (`protocol/testdata/sample-conformance.json`), exactly like pyramid level selection.
 3. **`BakedPlane` answers `query_samples` from `levels[0]`.** In the demo manifest level 0 is one degenerate bin per raw sample, so this is exact. ADR 0007 names level selection as the snapshot budgeting lever, so a future exporter that drops level 0 degrades XY/FFT/histogram to bin resolution. ADR 0015 states that requirement for the Phase 4 exporter rather than silently depending on it.
 4. **Session schema v5 adds `x_range: f64[2]?`.** In XY, FFT, and histogram modes the x axis is a value axis, so it cannot borrow the linked time window and cannot reuse `time_window`. One field serves all three modes.
 5. **FFT semantics** (nothing in the design package specifies any of this): input is the visible time window, resampled onto a uniform grid of the largest power of two ≤ the returned sample count, clamped to [64, 4096]; mean removed; Hann taper; one-sided magnitude from bin 1 (DC is dropped because a log axis cannot show f = 0); amplitude normalized to the peak bin so 0 dB is the peak, floored at −120 dB. Multi-series panels draw one spectrum per visible series. Recorded as **ADR 0017** (Task 9).
 6. **Histogram semantics** (zero spec coverage — this is a design decision, not an extraction): counts of the visible window's samples, Freedman–Diaconis bin width with a Sturges fallback for degenerate IQR, bin count clamped to [8, 128], shared edges across series computed from the union of their ranges, drawn as step outlines in series colour rather than filled bars so overlap stays readable. Recorded as **ADR 0018** (Task 11).
-7. **The colormap ramp is theme-invariant.** Categorical slots re-step per theme (ADR 0011) because their job is identity; a sequential ramp's job *is* its monotone lightness, so re-stepping it per surface would destroy the property that makes it admissible. One 16-stop `batlow` ramp serves both themes, separated from the surface by the colorbar's 1px border. Recorded as **ADR 0016** (Task 7).
+7. **The colormap ramp is theme-invariant.** Categorical slots re-step per theme (ADR 0011) because their job is identity; a sequential ramp's job _is_ its monotone lightness, so re-stepping it per surface would destroy the property that makes it admissible. One 16-stop `batlow` ramp serves both themes, separated from the surface by the colorbar's 1px border. Recorded as **ADR 0016** (Task 7).
 8. **The `c:` channel has no pointer affordance in the spec** — only the ⌘K row `Panel: set color signal (c:)…`. This plan ships that command plus a `c:` chip whose caret opens the same picker, and does **not** invent a second drop zone. Removing the colour signal collapses the colorbar gutter and returns every trajectory to its categorical series colour.
 9. **The prototype's `1:1` equal-axis control is dropped.** It exists in no part of the final chrome (not the header, not the inspector, not the palette rows the spec enumerates) and no spec sentence mentions it. Reintroducing it would mean designing a home for it. Flagged here so the omission is a decision rather than an oversight.
 10. **FFT and histogram are built even though the spec's own build order omits them from v1 and v2.** The FFT panel is one of the four panels in F2, the pixel reference, so it is clearly intended; histogram appears in no mock at all and is built to the minimum that makes the `H` pill honest. If the maintainer would rather leave `H` inert, cut Tasks 11–12 — nothing else depends on them.
@@ -660,9 +660,9 @@ bins. A bin is a min/max extent over an interval; pairing two signals,
 transforming to the frequency domain, or counting a value distribution all
 need the samples themselves. Nothing in the protocol returned samples.
 
-Two placements were available for the maths. ADR 0008 puts *expression
-evaluation* in `scope-core` because user-authored expressions are an
-eval-surface question. ADR 0014 put *visible-region statistics* in the
+Two placements were available for the maths. ADR 0008 puts _expression
+evaluation_ in `scope-core` because user-authored expressions are an
+eval-surface question. ADR 0014 put _visible-region statistics_ in the
 presentation plane because they are a bounded derived view of what is
 already drawn, and because both hosts then run one implementation.
 
@@ -1044,14 +1044,14 @@ In `frontend/src/ui/panel.ts`: add `type SampleResponse` to the protocol type im
 Update the one internal caller in `setEmphasis`:
 
 ```typescript
-    if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderData(
-        this.lastState,
-        this.lastTiles,
-        this.lastSamples,
-        this.lastWindow,
-      );
-    }
+if (this.lastState !== null && this.lastWindow !== null) {
+  this.renderData(
+    this.lastState,
+    this.lastTiles,
+    this.lastSamples,
+    this.lastWindow,
+  );
+}
 ```
 
 - [ ] **Step 11: Run the frontend gate**
@@ -1199,11 +1199,7 @@ import { describe, expect, it } from "vitest";
 import type { SampleSeries } from "../generated/protocol";
 import { pairSamples, traceExtent } from "./xy";
 
-function series(
-  path: string,
-  time: number[],
-  values: number[],
-): SampleSeries {
+function series(path: string, time: number[], values: number[]): SampleSeries {
   return {
     signal_id: "1",
     signal_path: path,
@@ -1672,23 +1668,26 @@ In `frontend/src/ui/panel.ts`, import the new helpers:
 
 ```typescript
 import { pairSamples, traceExtent, type XyTrace } from "../app/xy";
-import { type PlotPath, type PathRenderOptions } from "../render/canvas-renderer";
+import {
+  type PlotPath,
+  type PathRenderOptions,
+} from "../render/canvas-renderer";
 ```
 
 Replace the `if (state.mode !== "time")` branch of `renderData` with a dispatch:
 
 ```typescript
-    if (state.mode === "xy") {
-      const elapsed = this.renderXy(state, samples, window);
-      this.renderStats();
-      this.drawOverlay();
-      return elapsed;
-    }
-    if (state.mode !== "time") {
-      this.renderStats();
-      this.drawOverlay();
-      return 0;
-    }
+if (state.mode === "xy") {
+  const elapsed = this.renderXy(state, samples, window);
+  this.renderStats();
+  this.drawOverlay();
+  return elapsed;
+}
+if (state.mode !== "time") {
+  this.renderStats();
+  this.drawOverlay();
+  return 0;
+}
 ```
 
 and add these members:
@@ -1789,8 +1788,7 @@ function flattenTrace(
   const points: number[] = [];
   for (let index = 0; index < trace.time.length; index += 1) {
     const time = trace.time[index] ?? Number.NaN;
-    const inside =
-      window === null || (time >= window.t0 && time <= window.t1);
+    const inside = window === null || (time >= window.t0 && time <= window.t1);
     points.push(
       inside ? (trace.x[index] ?? Number.NaN) : Number.NaN,
       inside ? (trace.y[index] ?? Number.NaN) : Number.NaN,
@@ -1803,19 +1801,19 @@ function flattenTrace(
 Finally update the empty-state branch of `update()` so an XY panel without an x signal says something actionable rather than "not implemented":
 
 ```typescript
-    const empty = required<HTMLElement>(this.element, ".panel-empty");
-    if (state.series.length === 0) {
-      empty.hidden = false;
-      empty.textContent = "Empty panel — drag a signal here.";
-    } else if (state.mode === "xy" && state.x_signal === null) {
-      empty.hidden = false;
-      empty.textContent = "Drop a signal on the strip below to set the X axis.";
-    } else if (state.mode === "fft" || state.mode === "histogram") {
-      empty.hidden = false;
-      empty.textContent = `${MODE_NAMES[state.mode]} mode is not implemented yet.`;
-    } else {
-      empty.hidden = true;
-    }
+const empty = required<HTMLElement>(this.element, ".panel-empty");
+if (state.series.length === 0) {
+  empty.hidden = false;
+  empty.textContent = "Empty panel — drag a signal here.";
+} else if (state.mode === "xy" && state.x_signal === null) {
+  empty.hidden = false;
+  empty.textContent = "Drop a signal on the strip below to set the X axis.";
+} else if (state.mode === "fft" || state.mode === "histogram") {
+  empty.hidden = false;
+  empty.textContent = `${MODE_NAMES[state.mode]} mode is not implemented yet.`;
+} else {
+  empty.hidden = true;
+}
 ```
 
 - [ ] **Step 15: Add the XY e2e scenario**
@@ -1883,13 +1881,15 @@ git commit -m "feat(xy): pair signals and render trajectories with vertex paths"
 In `panelMarkup()` in `frontend/src/ui/panel.ts`, add the strip as the last child of `.plot-wrap`, after `.panel-empty`:
 
 ```html
-      <div class="xy-drop-strip" hidden>⇄ <span>drop here — use as X axis (switches panel to XY)</span></div>
+<div class="xy-drop-strip" hidden>
+  ⇄ <span>drop here — use as X axis (switches panel to XY)</span>
+</div>
 ```
 
 and add an `x:` chip immediately before `.panel-legend` in the header:
 
 ```html
-      <button class="axis-chip x-chip" hidden></button>
+<button class="axis-chip x-chip" hidden></button>
 ```
 
 Add to `frontend/src/styles/app.css`:
@@ -1948,28 +1948,28 @@ Add to `frontend/src/styles/app.css`:
 In `PanelView.bind()`, replace the three drag listeners on `this.element` with strip-aware versions:
 
 ```typescript
-    this.element.addEventListener("dragover", (event) => {
-      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
-      event.preventDefault();
-      this.element.classList.add("drop-target");
-      this.setDropStripVisible(true);
-      this.element.classList.toggle("drop-x", this.overStrip(event));
-    });
-    this.element.addEventListener("dragleave", () => {
-      this.element.classList.remove("drop-target", "drop-x");
-      this.setDropStripVisible(false);
-    });
-    this.element.addEventListener("drop", (event) => {
-      const asX = this.overStrip(event);
-      this.element.classList.remove("drop-target", "drop-x");
-      this.setDropStripVisible(false);
-      const path = dragData(event, SIGNAL_DRAG_TYPE);
-      if (path === null) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (asX) this.callbacks.onSetXSignal(this.id, path);
-      else this.callbacks.onDropSignal(this.id, path);
-    });
+this.element.addEventListener("dragover", (event) => {
+  if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+  event.preventDefault();
+  this.element.classList.add("drop-target");
+  this.setDropStripVisible(true);
+  this.element.classList.toggle("drop-x", this.overStrip(event));
+});
+this.element.addEventListener("dragleave", () => {
+  this.element.classList.remove("drop-target", "drop-x");
+  this.setDropStripVisible(false);
+});
+this.element.addEventListener("drop", (event) => {
+  const asX = this.overStrip(event);
+  this.element.classList.remove("drop-target", "drop-x");
+  this.setDropStripVisible(false);
+  const path = dragData(event, SIGNAL_DRAG_TYPE);
+  if (path === null) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (asX) this.callbacks.onSetXSignal(this.id, path);
+  else this.callbacks.onDropSignal(this.id, path);
+});
 ```
 
 and add the two helpers:
@@ -2005,23 +2005,23 @@ Add to `PanelCallbacks`:
 In `PanelView.update()`, after the mode-pill loop, add:
 
 ```typescript
-    const xChip = required<HTMLButtonElement>(this.element, ".x-chip");
-    xChip.hidden = !(state.mode === "xy" && state.x_signal !== null);
-    if (!xChip.hidden && state.x_signal !== null) {
-      xChip.replaceChildren(
-        chipPrefix("x:"),
-        document.createTextNode(state.x_signal.split("/").slice(-2).join("/")),
-      );
-      xChip.title = `X axis: ${state.x_signal} — click to return to time mode`;
-    }
+const xChip = required<HTMLButtonElement>(this.element, ".x-chip");
+xChip.hidden = !(state.mode === "xy" && state.x_signal !== null);
+if (!xChip.hidden && state.x_signal !== null) {
+  xChip.replaceChildren(
+    chipPrefix("x:"),
+    document.createTextNode(state.x_signal.split("/").slice(-2).join("/")),
+  );
+  xChip.title = `X axis: ${state.x_signal} — click to return to time mode`;
+}
 ```
 
 Bind it once in `bind()`:
 
 ```typescript
-    required(this.element, ".x-chip").addEventListener("click", () => {
-      this.callbacks.onExitXy(this.id);
-    });
+required(this.element, ".x-chip").addEventListener("click", () => {
+  this.callbacks.onExitXy(this.id);
+});
 ```
 
 and add the module-level helper beside `axisName`:
@@ -2067,39 +2067,39 @@ and this method beside `fitPanelView`:
 Register the commands, next to the other focused-panel commands in `registerCommands()`:
 
 ```typescript
-    this.registerFocusedPanelCommand(
-      "panel-switch-xy",
-      "Panel: switch to XY mode",
-      (id) => {
-        this.workspace.setMode(id, "xy");
-        this.workspace.promoteSeriesToX(id);
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-clear-x-signal",
-      "Panel: return to time mode",
-      (id) => {
-        this.exitXy(id);
-      },
-    );
+this.registerFocusedPanelCommand(
+  "panel-switch-xy",
+  "Panel: switch to XY mode",
+  (id) => {
+    this.workspace.setMode(id, "xy");
+    this.workspace.promoteSeriesToX(id);
+  },
+);
+this.registerFocusedPanelCommand(
+  "panel-clear-x-signal",
+  "Panel: return to time mode",
+  (id) => {
+    this.exitXy(id);
+  },
+);
 ```
 
 The `Panel: set X signal…` row needs a signal argument, so it is generated per signal in `paletteEntries()` — this is also the only path a touch user has, since drag-and-drop is mouse-only. Add before the `return` there:
 
 ```typescript
-    const focused = this.workspace.focusedPanelId();
-    const xSignals =
-      focused === null
-        ? []
-        : this.signals.map((summary) => ({
-            title: `Panel: set X signal… ${summary.path}`,
-            hint: "then pick from tree",
-            run: () => {
-              this.workspace.setMode(focused, "xy");
-              this.workspace.setXSignal(focused, summary.path);
-              this.afterLayoutChange();
-            },
-          }));
+const focused = this.workspace.focusedPanelId();
+const xSignals =
+  focused === null
+    ? []
+    : this.signals.map((summary) => ({
+        title: `Panel: set X signal… ${summary.path}`,
+        hint: "then pick from tree",
+        run: () => {
+          this.workspace.setMode(focused, "xy");
+          this.workspace.setXSignal(focused, summary.path);
+          this.afterLayoutChange();
+        },
+      }));
 ```
 
 and include `...xSignals` in the returned array, after `...panels`.
@@ -2109,13 +2109,13 @@ and include `...xSignals` in the returned array, after `...panels`.
 In `PanelView.openInspector`, insert before the `remove` button:
 
 ```typescript
-    const useAsX = document.createElement("button");
-    useAsX.className = "inspector-action";
-    useAsX.textContent = "use as X";
-    useAsX.addEventListener("click", () => {
-      this.closeInspector();
-      this.callbacks.onSetXSignal(this.id, path);
-    });
+const useAsX = document.createElement("button");
+useAsX.className = "inspector-action";
+useAsX.textContent = "use as X";
+useAsX.addEventListener("click", () => {
+  this.closeInspector();
+  this.callbacks.onSetXSignal(this.id, path);
+});
 ```
 
 and change the append to `popover.append(pathRow, slots, dashes, useAsX, remove);`. Add to `app.css`:
@@ -2141,27 +2141,27 @@ and change the append to `popover.append(pathRow, slots, dashes, useAsX, remove)
 Add to `frontend/tests/e2e/modes.spec.ts` inside the `panel modes` describe:
 
 ```typescript
-  test("the x chip and the palette both reach XY mode", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await panel.locator(".legend-chip-caret").first().click();
-    await panel.locator(".inspector-action", { hasText: "use as X" }).click();
-    const chip = panel.locator(".x-chip");
-    await expect(chip).toBeVisible();
-    await expect(chip).toContainText("x:");
+test("the x chip and the palette both reach XY mode", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await panel.locator(".legend-chip-caret").first().click();
+  await panel.locator(".inspector-action", { hasText: "use as X" }).click();
+  const chip = panel.locator(".x-chip");
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText("x:");
 
-    await chip.click();
-    await expect(panel.locator(".mode-pill.active")).toHaveText("T");
-    await expect(chip).toBeHidden();
+  await chip.click();
+  await expect(panel.locator(".mode-pill.active")).toHaveText("T");
+  await expect(chip).toBeHidden();
 
-    await page.keyboard.press("ControlOrMeta+p");
-    await page.keyboard.type("switch to XY");
-    await page.keyboard.press("Enter");
-    await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
-  });
+  await page.keyboard.press("ControlOrMeta+p");
+  await page.keyboard.type("switch to XY");
+  await page.keyboard.press("Enter");
+  await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
+});
 ```
 
 - [ ] **Step 7: Run the full gate and commit**
@@ -2355,7 +2355,7 @@ export interface XyMarker {
 and call a new painter from `draw()`, after `drawCursor`:
 
 ```typescript
-    this.drawXyMarkers(context, layout, state.xyMarkers, palette);
+this.drawXyMarkers(context, layout, state.xyMarkers, palette);
 ```
 
 ```typescript
@@ -2402,13 +2402,13 @@ In `frontend/src/ui/panel.ts`:
 Add `import { nearestXyPoint } from "../app/xy-hit";` and, in `drawOverlay`, compute the markers by interpolating each trace at the cursor time:
 
 ```typescript
-    const xyMarkers =
-      state?.mode === "xy" && cursorT !== null
-        ? this.xyTraces.flatMap((entry) => {
-            const point = markerAt(entry.trace, cursorT);
-            return point === null ? [] : [point];
-          })
-        : [];
+const xyMarkers =
+  state?.mode === "xy" && cursorT !== null
+    ? this.xyTraces.flatMap((entry) => {
+        const point = markerAt(entry.trace, cursorT);
+        return point === null ? [] : [point];
+      })
+    : [];
 ```
 
 pass `xyMarkers` in the `draw({...})` literal, set `cursorT: state?.mode === "time" ? this.cursorT : null` unchanged (the vertical line stays a time-mode affordance), and add the helper beside `flattenTrace`:
@@ -2421,7 +2421,10 @@ function markerAt(
 ): { x: number; y: number } | null {
   const count = trace.time.length;
   if (count === 0) return null;
-  if (cursorT < (trace.time[0] ?? 0) || cursorT > (trace.time[count - 1] ?? 0)) {
+  if (
+    cursorT < (trace.time[0] ?? 0) ||
+    cursorT > (trace.time[count - 1] ?? 0)
+  ) {
     return null;
   }
   let low = 0;
@@ -2448,30 +2451,30 @@ function markerAt(
 In the `pointermove` listener, publish the nearest-vertex timestamp in XY instead of the pixel's time:
 
 ```typescript
-    this.overlay.addEventListener("pointermove", (event) => {
-      if (event.pointerType === "touch" || this.dragging) return;
-      const layout = this.renderer.lastLayout();
-      const inside =
-        layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
-      let cursorT: number | null = null;
-      if (layout !== null && inside) {
-        cursorT =
-          this.lastState?.mode === "xy"
-            ? (nearestXyPoint(
-                this.xyTraces,
-                layout,
-                event.offsetX,
-                event.offsetY,
-                XY_HOVER_RADIUS,
-              )?.time ?? null)
-            : invertX(layout, event.offsetX);
-      }
-      this.callbacks.onCursor(
-        this.id,
-        cursorT,
-        cursorT === null ? null : { x: event.clientX, y: event.clientY },
-      );
-    });
+this.overlay.addEventListener("pointermove", (event) => {
+  if (event.pointerType === "touch" || this.dragging) return;
+  const layout = this.renderer.lastLayout();
+  const inside =
+    layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
+  let cursorT: number | null = null;
+  if (layout !== null && inside) {
+    cursorT =
+      this.lastState?.mode === "xy"
+        ? (nearestXyPoint(
+            this.xyTraces,
+            layout,
+            event.offsetX,
+            event.offsetY,
+            XY_HOVER_RADIUS,
+          )?.time ?? null)
+        : invertX(layout, event.offsetX);
+  }
+  this.callbacks.onCursor(
+    this.id,
+    cursorT,
+    cursorT === null ? null : { x: event.clientX, y: event.clientY },
+  );
+});
 ```
 
 with `const XY_HOVER_RADIUS = 40;` beside `MODES` (the prototype's mouse-hover radius).
@@ -2518,15 +2521,15 @@ is unchanged; the mode-specific behaviour lives in `AppShell.fitPanelView` (next
 In `frontend/src/ui/app-shell.ts`, at the top of `fitPanelView`, add:
 
 ```typescript
-    if (panel.mode !== "time") {
-      // Non-time panels have no time axis to fit: clearing both ranges
-      // returns them to autoscale, which the renderer recomputes.
-      this.workspace.clearPanelXRange(panelId);
-      this.workspace.clearPanelYRange(panelId);
-      this.workspaceView?.resetYAxis(panelId);
-      this.renderTiles();
-      return;
-    }
+if (panel.mode !== "time") {
+  // Non-time panels have no time axis to fit: clearing both ranges
+  // returns them to autoscale, which the renderer recomputes.
+  this.workspace.clearPanelXRange(panelId);
+  this.workspace.clearPanelYRange(panelId);
+  this.workspaceView?.resetYAxis(panelId);
+  this.renderTiles();
+  return;
+}
 ```
 
 - [ ] **Step 10: Extend the e2e scenario**
@@ -2534,26 +2537,26 @@ In `frontend/src/ui/app-shell.ts`, at the top of `fitPanelView`, add:
 Add to `frontend/tests/e2e/modes.spec.ts`:
 
 ```typescript
-  test("XY zoom stays panel-local and the cursor rings the trajectory", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await panel.locator(".mode-pill", { hasText: "XY" }).click();
-    const readout = page.locator(".window-readout");
-    const before = await readout.textContent();
+test("XY zoom stays panel-local and the cursor rings the trajectory", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await panel.locator(".mode-pill", { hasText: "XY" }).click();
+  const readout = page.locator(".window-readout");
+  const before = await readout.textContent();
 
-    const overlay = panel.locator(".overlay-canvas");
-    await overlay.hover({ position: { x: 200, y: 120 } });
-    await page.mouse.wheel(0, -240);
-    // ADR 0006: an XY panel never writes the linked time window.
-    await expect(readout).toHaveText(before ?? "");
+  const overlay = panel.locator(".overlay-canvas");
+  await overlay.hover({ position: { x: 200, y: 120 } });
+  await page.mouse.wheel(0, -240);
+  // ADR 0006: an XY panel never writes the linked time window.
+  await expect(readout).toHaveText(before ?? "");
 
-    await page.locator(".cursor-style-toggle").click();
-    await overlay.hover({ position: { x: 200, y: 120 } });
-    await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
-  });
+  await page.locator(".cursor-style-toggle").click();
+  await overlay.hover({ position: { x: 200, y: 120 } });
+  await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+});
 ```
 
 - [ ] **Step 11: Run the full gate and commit**
@@ -2586,7 +2589,7 @@ git commit -m "feat(xy): add value-axis gestures and the amber trajectory cursor
 - Consumes: `nearestXyPoint` (Task 5), `Annotation` (session), `PanelCallbacks.onPinAnnotation`/`onRemoveAnnotation` (2A).
 - Produces: `OverlayState.mode: PanelMode` and `OverlayState.annotationPoints: readonly (XyMarker | null)[]`, which place time-mode annotations at `(time, value)` and XY annotations at their trajectory coordinates.
 
-**Why the extra array:** an `Annotation` stores `time` and `value`. In time mode those *are* the plot coordinates. In XY the x coordinate is the x signal's value at that time, which only the panel knows, so the panel resolves each annotation to a plot point and the overlay draws points rather than re-deriving them.
+**Why the extra array:** an `Annotation` stores `time` and `value`. In time mode those _are_ the plot coordinates. In XY the x coordinate is the x signal's value at that time, which only the panel knows, so the panel resolves each annotation to a plot point and the overlay draws points rather than re-deriving them.
 
 - [ ] **Step 1: Write the failing overlay test**
 
@@ -2794,8 +2797,8 @@ Add the resolver and use it in `drawOverlay`:
 In `drawOverlay`, change the annotations source so XY annotations survive, and pass the points:
 
 ```typescript
-    const annotations =
-      state?.mode === "time" || state?.mode === "xy" ? state.annotations : [];
+const annotations =
+  state?.mode === "time" || state?.mode === "xy" ? state.annotations : [];
 ```
 
 ```typescript
@@ -2809,22 +2812,19 @@ Also widen `renderAnnotationList` the same way: change `const annotations = stat
 Add to `frontend/tests/e2e/modes.spec.ts`:
 
 ```typescript
-  test("XY datatips pin, list, and show a delta", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await panel.locator(".mode-pill", { hasText: "XY" }).click();
-    const overlay = panel.locator(".overlay-canvas");
-    const box = await overlay.boundingBox();
-    if (box === null) throw new Error("overlay not laid out");
-    await page.mouse.click(box.x + 160, box.y + 100);
-    await page.mouse.click(box.x + 260, box.y + 140);
-    const list = panel.locator(".panel-annotations");
-    await expect(list).toBeVisible();
-    await expect(list.locator(".annotation-row")).toHaveCount(2);
-  });
+test("XY datatips pin, list, and show a delta", async ({ page, isMobile }) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await panel.locator(".mode-pill", { hasText: "XY" }).click();
+  const overlay = panel.locator(".overlay-canvas");
+  const box = await overlay.boundingBox();
+  if (box === null) throw new Error("overlay not laid out");
+  await page.mouse.click(box.x + 160, box.y + 100);
+  await page.mouse.click(box.x + 260, box.y + 140);
+  const list = panel.locator(".panel-annotations");
+  await expect(list).toBeVisible();
+  await expect(list.locator(".annotation-row")).toHaveCount(2);
+});
 ```
 
 (If a click lands on no vertex the row count will be lower; the demo trajectory is dense, but if this proves flaky, click along the drawn path found via `boundingBox()` centre offsets rather than widening the radii.)
@@ -2864,22 +2864,22 @@ git commit -m "feat(xy): pin trajectory datatips with delta readouts"
 Append to the `:root` block in `frontend/src/styles/tokens.css` (and **only** there — per ADR 0016 the ramp is theme-invariant, so it is not repeated in `:root[data-theme="light"]`):
 
 ```css
-  --seq-01: #011959;
-  --seq-02: #0d3260;
-  --seq-03: #114560;
-  --seq-04: #185562;
-  --seq-05: #26635f;
-  --seq-06: #3c6d56;
-  --seq-07: #577647;
-  --seq-08: #737e38;
-  --seq-09: #91862d;
-  --seq-10: #b38e2f;
-  --seq-11: #d29343;
-  --seq-12: #ed9a62;
-  --seq-13: #fba689;
-  --seq-14: #fdb2af;
-  --seq-15: #fcbfd4;
-  --seq-16: #fbccfa;
+--seq-01: #011959;
+--seq-02: #0d3260;
+--seq-03: #114560;
+--seq-04: #185562;
+--seq-05: #26635f;
+--seq-06: #3c6d56;
+--seq-07: #577647;
+--seq-08: #737e38;
+--seq-09: #91862d;
+--seq-10: #b38e2f;
+--seq-11: #d29343;
+--seq-12: #ed9a62;
+--seq-13: #fba689;
+--seq-14: #fdb2af;
+--seq-15: #fcbfd4;
+--seq-16: #fbccfa;
 ```
 
 - [ ] **Step 2: Write the failing colormap tests**
@@ -2966,10 +2966,7 @@ function hex(value: number): string {
 }
 
 /** Samples a hex ramp at `t ∈ [0, 1]`, clamping outside and on NaN. */
-export function sampleColormap(
-  stops: readonly string[],
-  t: number,
-): string {
+export function sampleColormap(stops: readonly string[], t: number): string {
   const first = stops[0] ?? "#000000";
   if (stops.length === 0) return first;
   if (!Number.isFinite(t)) return first;
@@ -3055,7 +3052,7 @@ Status: Accepted
 The Final Spec requires a labelled colorbar whenever a `c:` colour channel is
 assigned, and states only that the colormap is "perceptually uniform +
 colorblind-safe (viridis-class)". It supplies no stops. Its own F2 mock fills
-the colorbar with a gradient built from three *categorical* series tokens,
+the colorbar with a gradient built from three _categorical_ series tokens,
 which the same handoff forbids ("separate from the categorical series
 palette") and which is non-monotonic in lightness in the light theme.
 
@@ -3070,7 +3067,7 @@ It deliberately shipped no tokens, because nothing read them yet.
 
 Unlike the categorical slots, the ramp is **theme-invariant**. A categorical
 slot's job is identity, so ADR 0011 re-steps its lightness per surface. A
-sequential ramp's job *is* its monotone lightness: re-stepping it per surface
+sequential ramp's job _is_ its monotone lightness: re-stepping it per surface
 would collapse the property that makes it admissible, and the colorbar's 1px
 border already separates its dark end from a near-black surface.
 
@@ -3149,7 +3146,9 @@ it("reserves a colorbar gutter and strokes per-segment colours", () => {
   );
   const layout = renderer.lastLayout();
   // Spec F2: 64px right gutter holds the 12px bar, its ticks, and labels.
-  expect((layout?.plot.x ?? 0) + (layout?.plot.width ?? 0)).toBeLessThan(600 - 60);
+  expect((layout?.plot.x ?? 0) + (layout?.plot.width ?? 0)).toBeLessThan(
+    600 - 60,
+  );
   // One stroke per segment rather than one stroke for the path.
   expect(calls.filter((call) => call === "stroke").length).toBeGreaterThan(2);
 });
@@ -3198,34 +3197,34 @@ const COLORBAR_GUTTER = 64;
 In `renderPaths`, subtract the gutter from the plot width when a colorbar is requested, and paint it after the paths:
 
 ```typescript
-    const colorbarGutter =
-      options.colorbar === undefined || inline ? 0 : COLORBAR_GUTTER;
-    const plot: PlotRect = inline
-      ? { x: 0, y: 0, width, height }
-      : {
-          x: gutter,
-          y: 8,
-          width: Math.max(1, width - gutter - 12 - colorbarGutter),
-          height: Math.max(1, height - 42),
-        };
+const colorbarGutter =
+  options.colorbar === undefined || inline ? 0 : COLORBAR_GUTTER;
+const plot: PlotRect = inline
+  ? { x: 0, y: 0, width, height }
+  : {
+      x: gutter,
+      y: 8,
+      width: Math.max(1, width - gutter - 12 - colorbarGutter),
+      height: Math.max(1, height - 42),
+    };
 ```
 
 ```typescript
-    for (const path of paths) this.drawPath(context, plot, project, path, colors);
-    if (options.colorbar !== undefined && colorbarGutter > 0) {
-      this.drawColorbar(context, plot, width, options.colorbar, colors);
-    }
-    return performance.now() - started;
+for (const path of paths) this.drawPath(context, plot, project, path, colors);
+if (options.colorbar !== undefined && colorbarGutter > 0) {
+  this.drawColorbar(context, plot, width, options.colorbar, colors);
+}
+return performance.now() - started;
 ```
 
 In `drawPath`, take the colour-mapped branch when `colorValues` is present. Insert directly after the clip is applied and before the single-colour stroke setup:
 
 ```typescript
-    if (path.colorValues !== undefined && path.dimmed !== true) {
-      this.drawColorMappedPath(context, project, path, colors);
-      context.restore();
-      return;
-    }
+if (path.colorValues !== undefined && path.dimmed !== true) {
+  this.drawColorMappedPath(context, project, path, colors);
+  context.restore();
+  return;
+}
 ```
 
 and add the two painters:
@@ -3332,19 +3331,19 @@ Expected: PASS.
 In `PanelView.renderXy`, resolve the colour scalars. The channel is either the literal string `time` (the spec's own example) or a signal path:
 
 ```typescript
-    const colorSeries =
-      state.color_signal === null
-        ? null
-        : state.color_signal === "time"
-          ? "time"
-          : (byPath.get(state.color_signal) ?? null);
-    const colorFor = (trace: XyTrace): number[] | null => {
-      if (colorSeries === null) return null;
-      if (colorSeries === "time") return [...trace.time];
-      return trace.time.map((time) =>
-        lerpSample(colorSeries.time, colorSeries.values, time),
-      );
-    };
+const colorSeries =
+  state.color_signal === null
+    ? null
+    : state.color_signal === "time"
+      ? "time"
+      : (byPath.get(state.color_signal) ?? null);
+const colorFor = (trace: XyTrace): number[] | null => {
+  if (colorSeries === null) return null;
+  if (colorSeries === "time") return [...trace.time];
+  return trace.time.map((time) =>
+    lerpSample(colorSeries.time, colorSeries.values, time),
+  );
+};
 ```
 
 with `lerpSample` imported from `../app/xy` (Task 3 exports it).
@@ -3352,20 +3351,18 @@ with `lerpSample` imported from `../app/xy` (Task 3 exports it).
 Compute the domain across every lit trace, normalize, and pass both through:
 
 ```typescript
-    const colorColumns = this.xyTraces.map((entry) => colorFor(entry.trace));
-    let colorMin = Number.POSITIVE_INFINITY;
-    let colorMax = Number.NEGATIVE_INFINITY;
-    for (const column of colorColumns) {
-      for (const value of column ?? []) {
-        if (!Number.isFinite(value)) continue;
-        colorMin = Math.min(colorMin, value);
-        colorMax = Math.max(colorMax, value);
-      }
-    }
-    const hasColor =
-      colorSeries !== null &&
-      Number.isFinite(colorMin) &&
-      colorMax > colorMin;
+const colorColumns = this.xyTraces.map((entry) => colorFor(entry.trace));
+let colorMin = Number.POSITIVE_INFINITY;
+let colorMax = Number.NEGATIVE_INFINITY;
+for (const column of colorColumns) {
+  for (const value of column ?? []) {
+    if (!Number.isFinite(value)) continue;
+    colorMin = Math.min(colorMin, value);
+    colorMax = Math.max(colorMax, value);
+  }
+}
+const hasColor =
+  colorSeries !== null && Number.isFinite(colorMin) && colorMax > colorMin;
 ```
 
 In the lit-path loop, add when `hasColor`:
@@ -3407,38 +3404,38 @@ In the lit-path loop, add when `hasColor`:
 In `panelMarkup()`, add after the legend overflow button:
 
 ```html
-      <button class="axis-chip c-chip" hidden></button>
+<button class="axis-chip c-chip" hidden></button>
 ```
 
 In `update()`, beside the `x:` chip block:
 
 ```typescript
-    const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
-    cChip.hidden = state.mode !== "xy";
-    if (!cChip.hidden) {
-      cChip.replaceChildren(
-        chipPrefix("c:"),
-        document.createTextNode(
-          state.color_signal === null
-            ? "none"
-            : state.color_signal === "time"
-              ? "time"
-              : state.color_signal.split("/").slice(-2).join("/"),
-        ),
-      );
-      cChip.title =
-        state.color_signal === null
-          ? "Assign a colour channel (⌘P → set color signal)"
-          : `Colour channel: ${state.color_signal} — click to clear`;
-    }
+const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
+cChip.hidden = state.mode !== "xy";
+if (!cChip.hidden) {
+  cChip.replaceChildren(
+    chipPrefix("c:"),
+    document.createTextNode(
+      state.color_signal === null
+        ? "none"
+        : state.color_signal === "time"
+          ? "time"
+          : state.color_signal.split("/").slice(-2).join("/"),
+    ),
+  );
+  cChip.title =
+    state.color_signal === null
+      ? "Assign a colour channel (⌘P → set color signal)"
+      : `Colour channel: ${state.color_signal} — click to clear`;
+}
 ```
 
 and bind it in `bind()` to clear the channel, which is the reversible half of the pair:
 
 ```typescript
-    required(this.element, ".c-chip").addEventListener("click", () => {
-      this.callbacks.onSetColorSignal(this.id, null);
-    });
+required(this.element, ".c-chip").addEventListener("click", () => {
+  this.callbacks.onSetColorSignal(this.id, null);
+});
 ```
 
 Add `onSetColorSignal(id: string, path: string | null): void;` to `PanelCallbacks`, and in `app-shell.ts`:
@@ -3454,27 +3451,27 @@ Add `onSetColorSignal(id: string, path: string | null): void;` to `PanelCallback
 Assignment goes through the palette, per the spec's only affordance. In `paletteEntries()`, beside `xSignals`:
 
 ```typescript
-    const colorSignals =
-      focused === null
-        ? []
-        : [
-            {
-              title: "Panel: set color signal (c:)… time",
-              hint: "colour by time",
-              run: () => {
-                this.workspace.setColorSignal(focused, "time");
-                this.afterLayoutChange();
-              },
-            },
-            ...this.signals.map((summary) => ({
-              title: `Panel: set color signal (c:)… ${summary.path}`,
-              hint: "signal",
-              run: () => {
-                this.workspace.setColorSignal(focused, summary.path);
-                this.afterLayoutChange();
-              },
-            })),
-          ];
+const colorSignals =
+  focused === null
+    ? []
+    : [
+        {
+          title: "Panel: set color signal (c:)… time",
+          hint: "colour by time",
+          run: () => {
+            this.workspace.setColorSignal(focused, "time");
+            this.afterLayoutChange();
+          },
+        },
+        ...this.signals.map((summary) => ({
+          title: `Panel: set color signal (c:)… ${summary.path}`,
+          hint: "signal",
+          run: () => {
+            this.workspace.setColorSignal(focused, summary.path);
+            this.afterLayoutChange();
+          },
+        })),
+      ];
 ```
 
 and include `...colorSignals` in the returned array.
@@ -3484,24 +3481,24 @@ and include `...colorSignals` in the returned array.
 Add to `frontend/tests/e2e/modes.spec.ts`:
 
 ```typescript
-  test("the colour channel is assignable and clearable", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await panel.locator(".mode-pill", { hasText: "XY" }).click();
-    const chip = panel.locator(".c-chip");
-    await expect(chip).toContainText("none");
+test("the colour channel is assignable and clearable", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await panel.locator(".mode-pill", { hasText: "XY" }).click();
+  const chip = panel.locator(".c-chip");
+  await expect(chip).toContainText("none");
 
-    await page.keyboard.press("ControlOrMeta+p");
-    await page.keyboard.type("set color signal");
-    await page.keyboard.press("Enter");
-    await expect(chip).toContainText("time");
+  await page.keyboard.press("ControlOrMeta+p");
+  await page.keyboard.type("set color signal");
+  await page.keyboard.press("Enter");
+  await expect(chip).toContainText("time");
 
-    await chip.click();
-    await expect(chip).toContainText("none");
-  });
+  await chip.click();
+  await expect(chip).toContainText("none");
+});
 ```
 
 - [ ] **Step 8: Run the full gate and commit**
@@ -3533,17 +3530,17 @@ git commit -m "feat(xy): colour trajectories by a c channel with a labelled colo
 
 **Semantics being implemented** (none of this is specified by the design package; ADR 0017 records it):
 
-| Question              | Answer                                                                             |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| Input span            | The visible time window, `[t0, t1]`                                                |
-| Uniform grid          | `N` = largest power of two ≤ the sample count in the window, clamped to `[64, 4096]` |
-| Sample rate           | `(N − 1) / (t1 − t0)` — derived from the grid, so irregular timestamps are fine    |
-| Resampling            | Linear (`lerpSample`); NaN anywhere in the grid aborts and returns null            |
-| Detrend               | Subtract the mean, so DC leakage does not swamp the first bins                     |
-| Taper                 | Hann, `0.5 · (1 − cos(2πn / (N − 1)))`                                             |
-| Output bins           | One-sided, `k = 1 … N/2`; DC is dropped because a log axis cannot show `f = 0`     |
-| Amplitude             | `20 · log10(magnitude / peak)`, so the peak is 0 dB; floored at −120 dB            |
-| Multi-series          | One spectrum per visible series                                                    |
+| Question     | Answer                                                                               |
+| ------------ | ------------------------------------------------------------------------------------ |
+| Input span   | The visible time window, `[t0, t1]`                                                  |
+| Uniform grid | `N` = largest power of two ≤ the sample count in the window, clamped to `[64, 4096]` |
+| Sample rate  | `(N − 1) / (t1 − t0)` — derived from the grid, so irregular timestamps are fine      |
+| Resampling   | Linear (`lerpSample`); NaN anywhere in the grid aborts and returns null              |
+| Detrend      | Subtract the mean, so DC leakage does not swamp the first bins                       |
+| Taper        | Hann, `0.5 · (1 − cos(2πn / (N − 1)))`                                               |
+| Output bins  | One-sided, `k = 1 … N/2`; DC is dropped because a log axis cannot show `f = 0`       |
+| Amplitude    | `20 · log10(magnitude / peak)`, so the peak is 0 dB; floored at −120 dB              |
+| Multi-series | One spectrum per visible series                                                      |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3851,7 +3848,7 @@ git commit -m "feat(spectrum): compute windowed one-sided spectra"
 In `panelMarkup()` in `frontend/src/ui/panel.ts`, add immediately before `<span class="panel-actions">`:
 
 ```html
-      <span class="panel-mode-note" hidden></span>
+<span class="panel-mode-note" hidden></span>
 ```
 
 and in `frontend/src/styles/app.css`:
@@ -3871,9 +3868,9 @@ and in `frontend/src/styles/app.css`:
 In `update()`, populate it:
 
 ```typescript
-    const note = required<HTMLElement>(this.element, ".panel-mode-note");
-    note.hidden = state.mode !== "fft" && state.mode !== "histogram";
-    if (!note.hidden) note.textContent = "window: visible t";
+const note = required<HTMLElement>(this.element, ".panel-mode-note");
+note.hidden = state.mode !== "fft" && state.mode !== "histogram";
+if (!note.hidden) note.textContent = "window: visible t";
 ```
 
 - [ ] **Step 2: Render spectra**
@@ -3881,12 +3878,12 @@ In `update()`, populate it:
 Add the dispatch branch in `renderData`, beside the XY branch:
 
 ```typescript
-    if (state.mode === "fft") {
-      const elapsed = this.renderSpectra(state, samples, window);
-      this.renderStats();
-      this.drawOverlay();
-      return elapsed;
-    }
+if (state.mode === "fft") {
+  const elapsed = this.renderSpectra(state, samples, window);
+  this.renderStats();
+  this.drawOverlay();
+  return elapsed;
+}
 ```
 
 and the method, with `import { spectrum } from "../app/spectrum";`:
@@ -3988,24 +3985,26 @@ Add a note to the file where `interactiveMode` is defined:
 Add to `frontend/tests/e2e/modes.spec.ts`:
 
 ```typescript
-  test("FFT mode announces its window and zooms locally", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await panel.locator(".mode-pill", { hasText: "FFT" }).click();
-    await expect(panel.locator(".panel-mode-note")).toHaveText(
-      "window: visible t",
-    );
-    await expect(panel.locator(".panel-empty")).toBeHidden();
+test("FFT mode announces its window and zooms locally", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await panel.locator(".mode-pill", { hasText: "FFT" }).click();
+  await expect(panel.locator(".panel-mode-note")).toHaveText(
+    "window: visible t",
+  );
+  await expect(panel.locator(".panel-empty")).toBeHidden();
 
-    const readout = page.locator(".window-readout");
-    const before = await readout.textContent();
-    await panel.locator(".overlay-canvas").hover({ position: { x: 250, y: 120 } });
-    await page.mouse.wheel(0, -240);
-    await expect(readout).toHaveText(before ?? "");
-  });
+  const readout = page.locator(".window-readout");
+  const before = await readout.textContent();
+  await panel
+    .locator(".overlay-canvas")
+    .hover({ position: { x: 250, y: 120 } });
+  await page.mouse.wheel(0, -240);
+  await expect(readout).toHaveText(before ?? "");
+});
 ```
 
 - [ ] **Step 5: Run the full gate and commit**
@@ -4079,9 +4078,7 @@ describe("histogram", () => {
     expect(histogram([[Number.NaN, Number.POSITIVE_INFINITY]])).toBeNull();
     const mixed = histogram([[1, Number.NaN, 3]]);
     expect(mixed).not.toBeNull();
-    expect(
-      (mixed?.counts[0] ?? []).reduce((sum, n) => sum + n, 0),
-    ).toBe(2);
+    expect((mixed?.counts[0] ?? []).reduce((sum, n) => sum + n, 0)).toBe(2);
   });
 });
 ```
@@ -4112,7 +4109,9 @@ function quantile(sorted: readonly number[], fraction: number): number {
   const low = Math.floor(position);
   const high = Math.min(sorted.length - 1, low + 1);
   const alpha = position - low;
-  return (sorted[low] ?? 0) + ((sorted[high] ?? 0) - (sorted[low] ?? 0)) * alpha;
+  return (
+    (sorted[low] ?? 0) + ((sorted[high] ?? 0) - (sorted[low] ?? 0)) * alpha
+  );
 }
 
 /**
@@ -4151,7 +4150,10 @@ export function histogram(
   }
   const bins = binCount(pooled, min, max);
   const step = (max - min) / bins;
-  const edges = Array.from({ length: bins + 1 }, (_, index) => min + step * index);
+  const edges = Array.from(
+    { length: bins + 1 },
+    (_, index) => min + step * index,
+  );
   const counts = finite.map((column) => {
     const row = new Array<number>(bins).fill(0);
     for (const value of column) {
@@ -4255,12 +4257,12 @@ git commit -m "feat(histogram): bin visible-window values with shared edges"
 In `frontend/src/ui/panel.ts`, add `import { histogram } from "../app/histogram";` and the dispatch branch beside the FFT one:
 
 ```typescript
-    if (state.mode === "histogram") {
-      const elapsed = this.renderHistogram(state, samples, window);
-      this.renderStats();
-      this.drawOverlay();
-      return elapsed;
-    }
+if (state.mode === "histogram") {
+  const elapsed = this.renderHistogram(state, samples, window);
+  this.renderStats();
+  this.drawOverlay();
+  return elapsed;
+}
 ```
 
 and the method:
@@ -4343,20 +4345,20 @@ Remove the histogram arm from the "not implemented yet" branch in `update()`:
 Add to `frontend/tests/e2e/modes.spec.ts`:
 
 ```typescript
-  test("histogram mode draws a distribution of the visible window", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await panel.locator(".mode-pill", { hasText: "H" }).click();
-    await expect(panel.locator(".mode-pill.active")).toHaveText("H");
-    await expect(panel.locator(".panel-empty")).toBeHidden();
-    await expect(panel.locator(".panel-mode-note")).toHaveText(
-      "window: visible t",
-    );
-    await expect(page.locator(".render-ms")).not.toHaveText("— ms");
-  });
+test("histogram mode draws a distribution of the visible window", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await panel.locator(".mode-pill", { hasText: "H" }).click();
+  await expect(panel.locator(".mode-pill.active")).toHaveText("H");
+  await expect(panel.locator(".panel-empty")).toBeHidden();
+  await expect(panel.locator(".panel-mode-note")).toHaveText(
+    "window: visible t",
+  );
+  await expect(page.locator(".render-ms")).not.toHaveText("— ms");
+});
 ```
 
 - [ ] **Step 3: Run the full gate and commit**
@@ -4389,15 +4391,15 @@ git commit -m "feat(histogram): draw distribution outlines in histogram panels"
 
 **The gesture set, from the prototype's help table and its `bindInteractions`:**
 
-| Gesture              | Behaviour                                                                       | Constants                     |
-| -------------------- | ------------------------------------------------------------------------------- | ----------------------------- |
-| One-finger drag      | Pan both axes                                                                   | promotes past 9px of movement |
-| Two-finger pinch     | Zoom+pan, per axis independently; each axis zooms only if its fingers are apart | 40px separation per axis      |
-| Three or more        | Ignored                                                                          | —                             |
-| Tap                  | Read values at a point (publishes the cursor)                                    | XY search radius 48px         |
-| Tap on a datatip     | Remove it                                                                        | 16px                          |
-| Long press           | Pin a datatip                                                                    | 430ms, 28px, `vibrate(8)`     |
-| Double tap           | Fit the panel                                                                    | within 320ms and 26px         |
+| Gesture          | Behaviour                                                                       | Constants                     |
+| ---------------- | ------------------------------------------------------------------------------- | ----------------------------- |
+| One-finger drag  | Pan both axes                                                                   | promotes past 9px of movement |
+| Two-finger pinch | Zoom+pan, per axis independently; each axis zooms only if its fingers are apart | 40px separation per axis      |
+| Three or more    | Ignored                                                                         | —                             |
+| Tap              | Read values at a point (publishes the cursor)                                   | XY search radius 48px         |
+| Tap on a datatip | Remove it                                                                       | 16px                          |
+| Long press       | Pin a datatip                                                                   | 430ms, 28px, `vibrate(8)`     |
+| Double tap       | Fit the panel                                                                   | within 320ms and 26px         |
 
 Pinch anchors are captured in **data** coordinates at touch-down, so both anchors stay under both fingers — zoom and pan are one continuous motion with no separate mode.
 
@@ -4517,15 +4519,15 @@ In `bind()`, add the touch branch at the top of the existing `pointerdown` handl
 and register the rest of the touch lifecycle on the overlay:
 
 ```typescript
-    this.overlay.addEventListener("pointermove", (event) => {
-      if (event.pointerType === "touch") this.moveTouch(event);
-    });
-    this.overlay.addEventListener("pointerup", (event) => {
-      if (event.pointerType === "touch") this.endTouch(event);
-    });
-    this.overlay.addEventListener("pointercancel", (event) => {
-      if (event.pointerType === "touch") this.endTouch(event);
-    });
+this.overlay.addEventListener("pointermove", (event) => {
+  if (event.pointerType === "touch") this.moveTouch(event);
+});
+this.overlay.addEventListener("pointerup", (event) => {
+  if (event.pointerType === "touch") this.endTouch(event);
+});
+this.overlay.addEventListener("pointercancel", (event) => {
+  if (event.pointerType === "touch") this.endTouch(event);
+});
 ```
 
 Add the three handlers:
@@ -4849,9 +4851,7 @@ test.describe("touch gestures", () => {
     const fitted = await readout.textContent();
 
     const client = await page.context().newCDPSession(page);
-    const at = (x: number, y: number) => [
-      { x: box.x + x, y: box.y + y },
-    ];
+    const at = (x: number, y: number) => [{ x: box.x + x, y: box.y + y }];
     await client.send("Input.dispatchTouchEvent", {
       type: "touchStart",
       touchPoints: at(200, 120),
@@ -4904,36 +4904,36 @@ git commit -m "feat(touch): restore pinch, pan, tap, and long-press gestures"
 2A deferred the toolbar `Σ Stats` control and shipped only the per-panel button. Add it beside the cursor toggle in `shellMarkup()`:
 
 ```html
-      <button class="tool-button stats-toggle" title="Show statistics on every panel">Σ Stats</button>
+<button class="tool-button stats-toggle" title="Show statistics on every panel">
+  Σ Stats
+</button>
 ```
 
 bind it in `bindControls()`:
 
 ```typescript
-    required(this.root, ".stats-toggle").addEventListener("click", () => {
-      this.commands.run("toggle-all-stats");
-    });
+required(this.root, ".stats-toggle").addEventListener("click", () => {
+  this.commands.run("toggle-all-stats");
+});
 ```
 
 and register the command in `registerCommands()`:
 
 ```typescript
-    this.commands.register({
-      id: "toggle-all-stats",
-      title: "Toggle statistics on every panel",
-      run: () => {
-        // Any panel still hiding stats turns them all on; otherwise all off.
-        const target = this.workspace
-          .panels()
-          .some((panel) => !panel.show_stats);
-        for (const panel of this.workspace.panels()) {
-          if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
-        }
-        required(this.root, ".stats-toggle").classList.toggle("active", target);
-        this.workspaceView?.refreshPanelStates();
-        this.renderTiles();
-      },
-    });
+this.commands.register({
+  id: "toggle-all-stats",
+  title: "Toggle statistics on every panel",
+  run: () => {
+    // Any panel still hiding stats turns them all on; otherwise all off.
+    const target = this.workspace.panels().some((panel) => !panel.show_stats);
+    for (const panel of this.workspace.panels()) {
+      if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
+    }
+    required(this.root, ".stats-toggle").classList.toggle("active", target);
+    this.workspaceView?.refreshPanelStates();
+    this.renderTiles();
+  },
+});
 ```
 
 - [ ] **Step 2: Add the per-mode help rows**
@@ -4941,28 +4941,28 @@ and register the command in `registerCommands()`:
 The spec sanctions `Help: XY mode gestures` as the surface for mode-specific guidance (context-sensitive status hints are v2, so the status strip keeps its desktop gesture list). Register three rows in `registerCommands()`:
 
 ```typescript
-    for (const [mode, text] of [
-      [
-        "XY",
-        "XY: drag box-zoom · wheel zoom · right-drag pan · dbl-click fit · click datatip · drop on the amber strip to set X",
-      ],
-      [
-        "FFT",
-        "FFT: computed over the visible time window · wheel/box zoom the frequency and dB axes · dbl-click fit",
-      ],
-      [
-        "histogram",
-        "Histogram: counts of the visible time window · bins rebin as the window moves · dbl-click fit",
-      ],
-    ] as const) {
-      this.commands.register({
-        id: `help-${mode.toLowerCase()}-gestures`,
-        title: `Help: ${mode} mode gestures`,
-        run: () => {
-          required(this.root, ".render-ms").textContent = text;
-        },
-      });
-    }
+for (const [mode, text] of [
+  [
+    "XY",
+    "XY: drag box-zoom · wheel zoom · right-drag pan · dbl-click fit · click datatip · drop on the amber strip to set X",
+  ],
+  [
+    "FFT",
+    "FFT: computed over the visible time window · wheel/box zoom the frequency and dB axes · dbl-click fit",
+  ],
+  [
+    "histogram",
+    "Histogram: counts of the visible time window · bins rebin as the window moves · dbl-click fit",
+  ],
+] as const) {
+  this.commands.register({
+    id: `help-${mode.toLowerCase()}-gestures`,
+    title: `Help: ${mode} mode gestures`,
+    run: () => {
+      required(this.root, ".render-ms").textContent = text;
+    },
+  });
+}
 ```
 
 - [ ] **Step 3: Add the e2e assertion**
@@ -4970,16 +4970,16 @@ The spec sanctions `Help: XY mode gestures` as the surface for mode-specific gui
 Add to `frontend/tests/e2e/modes.spec.ts`:
 
 ```typescript
-  test("the toolbar stats toggle reaches every panel", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
-    await page.locator(".stats-toggle").click();
-    await expect(page.locator(".panel-stats").first()).toBeVisible();
-    await page.locator(".stats-toggle").click();
-    await expect(page.locator(".panel-stats").first()).toBeHidden();
-  });
+test("the toolbar stats toggle reaches every panel", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  await page.locator(".stats-toggle").click();
+  await expect(page.locator(".panel-stats").first()).toBeVisible();
+  await page.locator(".stats-toggle").click();
+  await expect(page.locator(".panel-stats").first()).toBeHidden();
+});
 ```
 
 - [ ] **Step 4: Update the docs**
@@ -5006,7 +5006,7 @@ equal-axis control was dropped for want of a home in the final chrome.
 In `docs/superpowers/plans/2026-07-24-00-INDEX.md`, replace the sentence "Phase 2B (XY/color channels, FFT/histogram modes, and touch gestures) remains unwritten." with a table row under the Phase 2 heading:
 
 ```markdown
-| 2B  | [Panel modes, colour channel, touch](2026-07-25-phase2b-panel-modes.md) | XY + drop strip, `c:` colorbar, FFT, histogram, touch gestures, toolbar stats | 2A merged |
+| 2B | [Panel modes, colour channel, touch](2026-07-25-phase2b-panel-modes.md) | XY + drop strip, `c:` colorbar, FFT, histogram, touch gestures, toolbar stats | 2A merged |
 ```
 
 In `docs/adr/README.md`, add index rows for ADRs 0015–0018 following that file's existing format.
@@ -5040,5 +5040,3 @@ Before handoff, confirm each of these by inspection, not by assumption:
 - No panel mode writes the linked time window except `time` — grep for `onTimeWindow` and confirm `applyXRange` is the only caller path from XY/FFT gestures.
 - No `smooth`/`deriv` buttons, no `1:1` control, no session save/load, no export, no follow mode were added.
 - The untracked `Screenshot 2026-07-25 *.png` files are still untracked and unstaged.
-
-
