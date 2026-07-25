@@ -24,6 +24,7 @@ import {
 } from "../app/plot-hit";
 import { visibleStats } from "../app/stats";
 import { pairSamples, traceExtent, type XyTrace } from "../app/xy";
+import { nearestXyPoint } from "../app/xy-hit";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
@@ -52,6 +53,7 @@ const MODE_NAMES: Record<PanelMode, string> = {
   fft: "FFT",
   histogram: "Histogram",
 };
+const XY_HOVER_RADIUS = 40;
 
 export interface PanelCallbacks {
   onFocus(id: string): void;
@@ -239,10 +241,21 @@ export class PanelView {
     this.overlay.addEventListener("pointermove", (event) => {
       if (event.pointerType === "touch" || this.dragging) return;
       const layout = this.renderer.lastLayout();
-      const cursorT =
-        layout !== null && insidePlot(layout, event.offsetX, event.offsetY)
-          ? invertX(layout, event.offsetX)
-          : null;
+      const inside =
+        layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
+      let cursorT: number | null = null;
+      if (layout !== null && inside) {
+        cursorT =
+          this.lastState?.mode === "xy"
+            ? (nearestXyPoint(
+                this.xyTraces,
+                layout,
+                event.offsetX,
+                event.offsetY,
+                XY_HOVER_RADIUS,
+              )?.time ?? null)
+            : invertX(layout, event.offsetX);
+      }
       this.callbacks.onCursor(
         this.id,
         cursorT,
@@ -259,7 +272,7 @@ export class PanelView {
       "wheel",
       (event) => {
         const layout = this.renderer.lastLayout();
-        if (layout === null || this.lastState?.mode !== "time") return;
+        if (layout === null || !this.interactiveMode()) return;
         event.preventDefault();
         const factor = wheelZoomFactor(event.deltaY);
         const pivotY = invertY(
@@ -283,17 +296,17 @@ export class PanelView {
         if (event.shiftKey) {
           this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
         } else if (event.altKey) {
-          this.callbacks.onTimeWindow(this.id, nextX.min, nextX.max);
+          this.applyXRange(nextX.min, nextX.max);
         } else {
           this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
-          this.callbacks.onTimeWindow(this.id, nextX.min, nextX.max);
+          this.applyXRange(nextX.min, nextX.max);
         }
       },
       { passive: false },
     );
     this.overlay.addEventListener("pointerdown", (event) => {
       const layout = this.renderer.lastLayout();
-      if (layout === null || this.lastState?.mode !== "time") return;
+      if (layout === null || !this.interactiveMode()) return;
       const isPan =
         event.button === 1 ||
         event.button === 2 ||
@@ -308,7 +321,7 @@ export class PanelView {
     this.overlay.addEventListener("dblclick", (event) => {
       const layout = this.renderer.lastLayout();
       const state = this.lastState;
-      if (layout === null || state === null || state.mode !== "time") return;
+      if (layout === null || state === null || !this.interactiveMode()) return;
       const zone = axisEditZone(
         layout,
         state.axis_style,
@@ -598,6 +611,13 @@ export class PanelView {
       (state?.series ?? []).map((series) => [series.path, series]),
     );
     const cursorT = this.cursorT;
+    const xyMarkers =
+      state?.mode === "xy" && cursorT !== null
+        ? this.xyTraces.flatMap((entry) => {
+            const point = markerAt(entry.trace, cursorT);
+            return point === null ? [] : [point];
+          })
+        : [];
     const cursorPoints =
       this.cursorStyle === "dot" && cursorT !== null
         ? (this.lastTiles?.series ?? []).flatMap((tile) => {
@@ -618,6 +638,7 @@ export class PanelView {
       cursorT: state?.mode === "time" ? this.cursorT : null,
       cursorStyle: this.cursorStyle,
       cursorPoints,
+      xyMarkers,
       box: this.box,
       annotations,
       annotationColorIndices: annotations.map((annotation) => {
@@ -643,7 +664,7 @@ export class PanelView {
       const dv =
         ((event.offsetY - down.offsetY) / layout.plot.height) *
         (startY.max - startY.min);
-      this.callbacks.onTimeWindow(this.id, startX.min + dt, startX.max + dt);
+      this.applyXRange(startX.min + dt, startX.max + dt);
       this.callbacks.onYRange(this.id, [startY.min + dv, startY.max + dv]);
     };
     const finish = (): void => {
@@ -723,7 +744,7 @@ export class PanelView {
         if (Math.abs(box.x1 - box.x0) <= 6) return;
         const t0 = invertX(layout, Math.min(box.x0, box.x1));
         const t1 = invertX(layout, Math.max(box.x0, box.x1));
-        this.callbacks.onTimeWindow(this.id, t0, t1);
+        this.applyXRange(t0, t1);
       } else if (vertical) {
         if (Math.abs(box.y1 - box.y0) <= 6) return;
         const yLow = invertY(layout, Math.max(box.y0, box.y1));
@@ -738,7 +759,7 @@ export class PanelView {
         const yLow = invertY(layout, Math.max(box.y0, box.y1));
         const yHigh = invertY(layout, Math.min(box.y0, box.y1));
         this.callbacks.onYRange(this.id, [yLow, yHigh]);
-        this.callbacks.onTimeWindow(this.id, t0, t1);
+        this.applyXRange(t0, t1);
       }
     };
     const cancel = (): void => {
@@ -755,6 +776,24 @@ export class PanelView {
     this.overlay.addEventListener("pointermove", move);
     this.overlay.addEventListener("pointerup", finish);
     this.overlay.addEventListener("pointercancel", cancel);
+  }
+
+  /** Modes whose plot area accepts zoom/pan gestures. */
+  private interactiveMode(): boolean {
+    const mode = this.lastState?.mode;
+    return mode === "time" || mode === "xy";
+  }
+
+  /**
+   * Applies an x-axis range: the linked time window in time mode, a
+   * panel-local value range everywhere else.
+   */
+  private applyXRange(min: number, max: number): void {
+    if (this.lastState?.mode === "time") {
+      this.callbacks.onTimeWindow(this.id, min, max);
+    } else {
+      this.callbacks.onXRange(this.id, [min, max]);
+    }
   }
 
   private renderStats(): void {
@@ -1228,6 +1267,39 @@ function flattenTrace(
     );
   }
   return points;
+}
+
+/** The trajectory point at a cursor time, or null outside its coverage. */
+function markerAt(
+  trace: XyTrace,
+  cursorT: number,
+): { x: number; y: number } | null {
+  const count = trace.time.length;
+  if (count === 0) return null;
+  if (
+    cursorT < (trace.time[0] ?? 0) ||
+    cursorT > (trace.time[count - 1] ?? 0)
+  ) {
+    return null;
+  }
+  let low = 0;
+  let high = count - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((trace.time[mid] ?? 0) < cursorT) low = mid + 1;
+    else high = mid;
+  }
+  const previous = Math.max(0, low - 1);
+  const span = (trace.time[low] ?? 0) - (trace.time[previous] ?? 0);
+  const alpha = span === 0 ? 0 : (cursorT - (trace.time[previous] ?? 0)) / span;
+  const at = (column: number[]): number => {
+    const before = column[previous] ?? Number.NaN;
+    const after = column[low] ?? Number.NaN;
+    return before + (after - before) * alpha;
+  };
+  const x = at(trace.x);
+  const y = at(trace.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
 }
 
 export function axisEditZone(

@@ -55,6 +55,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     cursorT: 30,
     cursorStyle: "line",
     cursorPoints: [],
+    xyMarkers: [],
     box: { x0: 100, y0: 50, x1: 200, y1: 150 },
     annotations: [],
     annotationColorIndices: [],
@@ -69,6 +70,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     cursorT: 30,
     cursorStyle: "dot",
     cursorPoints: [{ value: 25, colorIndex: 0 }],
+    xyMarkers: [],
     box: null,
     annotations: [],
     annotationColorIndices: [],
@@ -76,4 +78,53 @@ test("draws the cursor and rubber band with interaction amber", () => {
   });
   expect(calls).toContain("strokeStyle:#407fd0");
   expect(calls).toContain("arc");
+});
+
+test("draws XY cursor markers as hollow amber rings", () => {
+  const calls: string[] = [];
+  const context = new Proxy(
+    {
+      measureText: (text: string) => ({ width: text.length * 6 }),
+    },
+    {
+      get(target, property) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+        if (property in target) return Reflect.get(target, property);
+        return (...args: unknown[]) => {
+          void args;
+          calls.push(String(property));
+        };
+      },
+      set(_target, property, value) {
+        calls.push(`${String(property)}:${String(value)}`);
+        return true;
+      },
+    },
+  ) as unknown as CanvasRenderingContext2D;
+  const canvas = {
+    clientWidth: 640,
+    clientHeight: 360,
+    width: 0,
+    height: 0,
+    getContext: () => context,
+  } as unknown as HTMLCanvasElement;
+  const layout: PlotLayout = {
+    plot: { x: 52, y: 8, width: 500, height: 300 },
+    xRange: { min: 0, max: 60 },
+    yRange: { min: -200, max: 200 },
+  };
+  const renderer = new OverlayRenderer(canvas);
+  renderer.setPalette(palette);
+  renderer.draw(layout, {
+    cursorT: null,
+    cursorStyle: "line",
+    cursorPoints: [],
+    xyMarkers: [{ x: 30, y: 0 }],
+    box: null,
+    annotations: [],
+    annotationColorIndices: [],
+    showDelta: false,
+  });
+  expect(calls).toContain("arc");
+  expect(calls).toContain("strokeStyle:#ffa226");
 });

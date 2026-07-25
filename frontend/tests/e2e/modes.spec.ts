@@ -41,4 +41,62 @@ test.describe("panel modes", () => {
     await page.keyboard.press("Enter");
     await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
   });
+
+  test("XY zoom stays panel-local and the cursor rings the trajectory", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const panel = page.locator(".panel").first();
+    await panel.locator(".mode-pill", { hasText: "XY" }).click();
+    const readout = page.locator(".window-readout");
+    const before = await readout.textContent();
+
+    const overlay = panel.locator(".overlay-canvas");
+    await overlay.hover({ position: { x: 200, y: 120 } });
+    await page.mouse.wheel(0, -240);
+    // ADR 0006: an XY panel never writes the linked time window.
+    await expect(readout).toHaveText(before ?? "");
+
+    await page.locator(".cursor-style-toggle").click();
+    const trajectoryPoint = await panel
+      .locator(".plot-canvas")
+      .evaluate((canvas: HTMLCanvasElement) => {
+        const context = canvas.getContext("2d");
+        if (context === null) return null;
+        const color = getComputedStyle(document.documentElement)
+          .getPropertyValue("--series-2")
+          .trim();
+        const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+        if (match === null) return null;
+        const target = match.slice(1).map((part) => Number.parseInt(part, 16));
+        const pixels = context.getImageData(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        ).data;
+        for (let y = 8; y < canvas.height - 8; y += 1) {
+          for (let x = 8; x < canvas.width - 8; x += 1) {
+            const offset = (y * canvas.width + x) * 4;
+            if (
+              Math.abs((pixels[offset] ?? 0) - (target[0] ?? 0)) <= 3 &&
+              Math.abs((pixels[offset + 1] ?? 0) - (target[1] ?? 0)) <= 3 &&
+              Math.abs((pixels[offset + 2] ?? 0) - (target[2] ?? 0)) <= 3
+            ) {
+              return {
+                x: (x * canvas.clientWidth) / canvas.width,
+                y: (y * canvas.clientHeight) / canvas.height,
+              };
+            }
+          }
+        }
+        return null;
+      });
+    expect(trajectoryPoint).not.toBeNull();
+    if (trajectoryPoint !== null) {
+      await overlay.hover({ position: trajectoryPoint });
+    }
+    await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+  });
 });

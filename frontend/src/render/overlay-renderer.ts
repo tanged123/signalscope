@@ -23,6 +23,8 @@ export interface OverlayState {
   cursorT: number | null;
   cursorStyle: CursorStyle;
   cursorPoints: readonly CursorPoint[];
+  /** Data-space trajectory points marked by the global cursor (XY mode). */
+  xyMarkers: readonly XyMarker[];
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   annotations: readonly Annotation[];
   annotationColorIndices: readonly number[];
@@ -33,6 +35,11 @@ export type CursorStyle = "none" | "dot" | "line";
 export interface CursorPoint {
   value: number;
   colorIndex: number;
+}
+
+export interface XyMarker {
+  x: number;
+  y: number;
 }
 
 export class OverlayRenderer {
@@ -63,8 +70,42 @@ export class OverlayRenderer {
       state.cursorPoints,
       palette,
     );
+    this.drawXyMarkers(context, layout, state.xyMarkers, palette);
     this.drawAnnotations(context, layout, state, palette);
     if (state.box !== null) this.drawBox(context, state.box, palette);
+  }
+
+  private drawXyMarkers(
+    context: CanvasRenderingContext2D,
+    layout: PlotLayout,
+    markers: readonly XyMarker[],
+    palette: OverlayPalette,
+  ): void {
+    if (markers.length === 0) return;
+    context.save();
+    // Spec F2: r=4, surface fill, 1.6px amber stroke. Amber because the
+    // marker is the cursor, not a series.
+    context.lineWidth = 1.6;
+    context.setLineDash([]);
+    context.fillStyle = palette.surface0;
+    context.strokeStyle = palette.amber;
+    for (const marker of markers) {
+      const x = projectX(layout, marker.x);
+      const y = projectY(layout, marker.y);
+      if (
+        x < layout.plot.x ||
+        x > layout.plot.x + layout.plot.width ||
+        y < layout.plot.y ||
+        y > layout.plot.y + layout.plot.height
+      ) {
+        continue;
+      }
+      context.beginPath();
+      context.arc(x, y, 4, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+    }
+    context.restore();
   }
 
   private drawCursor(

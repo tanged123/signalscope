@@ -824,6 +824,15 @@ export class AppShell {
   private fitPanelView(panelId: string): void {
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return;
+    if (panel.mode !== "time") {
+      // Non-time panels have no time axis to fit: clearing both ranges
+      // returns them to autoscale, which the renderer recomputes.
+      this.workspace.clearPanelXRange(panelId);
+      this.workspace.clearPanelYRange(panelId);
+      this.workspaceView?.resetYAxis(panelId);
+      this.renderTiles();
+      return;
+    }
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
     let t0 = Number.POSITIVE_INFINITY;
