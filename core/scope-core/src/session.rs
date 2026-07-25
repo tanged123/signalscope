@@ -156,21 +156,7 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate(4, value)
         }
         4 => {
-            if let Some(tabs) = value
-                .get_mut("tabs")
-                .and_then(serde_json::Value::as_array_mut)
-            {
-                for tab in tabs {
-                    let panels = tab
-                        .get_mut("panels")
-                        .and_then(serde_json::Value::as_array_mut);
-                    for panel in panels.into_iter().flatten() {
-                        if let Some(object) = panel.as_object_mut() {
-                            object.entry("x_range").or_insert(serde_json::Value::Null);
-                        }
-                    }
-                }
-            }
+            add_panel_x_ranges(&mut value);
             value["schema_version"] = serde_json::json!(5);
             migrate(5, value)
         }
@@ -187,6 +173,25 @@ pub enum SessionError {
     UnsupportedVersion(u32),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+fn add_panel_x_ranges(value: &mut serde_json::Value) {
+    let Some(tabs) = value
+        .get_mut("tabs")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for tab in tabs {
+        let panels = tab
+            .get_mut("panels")
+            .and_then(serde_json::Value::as_array_mut);
+        for panel in panels.into_iter().flatten() {
+            if let Some(object) = panel.as_object_mut() {
+                object.entry("x_range").or_insert(serde_json::Value::Null);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
