@@ -1,4 +1,65 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
+
+async function trajectoryPoints(
+  panel: Locator,
+  count: number,
+): Promise<{ x: number; y: number }[]> {
+  return panel
+    .locator(".plot-canvas")
+    .evaluate((canvas: HTMLCanvasElement, requested) => {
+      const context = canvas.getContext("2d");
+      if (context === null) return [];
+      const color = getComputedStyle(document.documentElement)
+        .getPropertyValue("--series-2")
+        .trim();
+      const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+      if (match === null) return [];
+      const target = match.slice(1).map((part) => Number.parseInt(part, 16));
+      const pixels = context.getImageData(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      ).data;
+      const matches: { x: number; y: number }[] = [];
+      for (let y = 8; y < canvas.height - 8; y += 1) {
+        for (let x = 8; x < canvas.width - 8; x += 1) {
+          const offset = (y * canvas.width + x) * 4;
+          if (
+            Math.abs((pixels[offset] ?? 0) - (target[0] ?? 0)) <= 3 &&
+            Math.abs((pixels[offset + 1] ?? 0) - (target[1] ?? 0)) <= 3 &&
+            Math.abs((pixels[offset + 2] ?? 0) - (target[2] ?? 0)) <= 3
+          ) {
+            matches.push({
+              x: (x * canvas.clientWidth) / canvas.width,
+              y: (y * canvas.clientHeight) / canvas.height,
+            });
+          }
+        }
+      }
+      if (matches.length === 0) return [];
+      const selected = [matches[0] as { x: number; y: number }];
+      while (selected.length < requested) {
+        let best: { x: number; y: number } | undefined;
+        let bestDistance = -1;
+        for (const candidate of matches) {
+          const distance = Math.min(
+            ...selected.map((point) =>
+              Math.hypot(candidate.x - point.x, candidate.y - point.y),
+            ),
+          );
+          if (distance > bestDistance) {
+            best = candidate;
+            bestDistance = distance;
+          }
+        }
+        if (best === undefined || bestDistance < 20) break;
+        selected.push(best);
+      }
+      return selected;
+    }, count);
+}
 
 test.describe("panel modes", () => {
   test.beforeEach(async ({ page }) => {
@@ -59,44 +120,35 @@ test.describe("panel modes", () => {
     await expect(readout).toHaveText(before ?? "");
 
     await page.locator(".cursor-style-toggle").click();
-    const trajectoryPoint = await panel
-      .locator(".plot-canvas")
-      .evaluate((canvas: HTMLCanvasElement) => {
-        const context = canvas.getContext("2d");
-        if (context === null) return null;
-        const color = getComputedStyle(document.documentElement)
-          .getPropertyValue("--series-2")
-          .trim();
-        const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
-        if (match === null) return null;
-        const target = match.slice(1).map((part) => Number.parseInt(part, 16));
-        const pixels = context.getImageData(
-          0,
-          0,
-          canvas.width,
-          canvas.height,
-        ).data;
-        for (let y = 8; y < canvas.height - 8; y += 1) {
-          for (let x = 8; x < canvas.width - 8; x += 1) {
-            const offset = (y * canvas.width + x) * 4;
-            if (
-              Math.abs((pixels[offset] ?? 0) - (target[0] ?? 0)) <= 3 &&
-              Math.abs((pixels[offset + 1] ?? 0) - (target[1] ?? 0)) <= 3 &&
-              Math.abs((pixels[offset + 2] ?? 0) - (target[2] ?? 0)) <= 3
-            ) {
-              return {
-                x: (x * canvas.clientWidth) / canvas.width,
-                y: (y * canvas.clientHeight) / canvas.height,
-              };
-            }
-          }
-        }
-        return null;
-      });
-    expect(trajectoryPoint).not.toBeNull();
-    if (trajectoryPoint !== null) {
+    const [trajectoryPoint] = await trajectoryPoints(panel, 1);
+    expect(trajectoryPoint).toBeDefined();
+    if (trajectoryPoint !== undefined) {
       await overlay.hover({ position: trajectoryPoint });
     }
     await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+  });
+
+  test("XY datatips pin, list, and show a delta", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const panel = page.locator(".panel").first();
+    await panel.locator(".mode-pill", { hasText: "XY" }).click();
+    const overlay = panel.locator(".overlay-canvas");
+    const list = panel.locator(".panel-annotations");
+    const [firstPoint] = await trajectoryPoints(panel, 1);
+    expect(firstPoint).toBeDefined();
+    if (firstPoint !== undefined) {
+      await overlay.click({ position: firstPoint });
+    }
+    await expect(list).toBeVisible();
+    const pointsAfterReflow = await trajectoryPoints(panel, 2);
+    expect(pointsAfterReflow).toHaveLength(2);
+    const secondPoint = pointsAfterReflow[1];
+    if (secondPoint !== undefined) {
+      await overlay.click({ position: secondPoint });
+    }
+    await expect(list.locator(".annotation-row")).toHaveCount(2);
   });
 });

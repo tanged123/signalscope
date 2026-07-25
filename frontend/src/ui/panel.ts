@@ -11,6 +11,8 @@ import {
   insidePlot,
   invertX,
   invertY,
+  projectX,
+  projectY,
   valueAtTime,
   wheelZoomFactor,
   zoomDragMode,
@@ -574,7 +576,38 @@ export class PanelView {
     const layout = this.renderer.lastLayout();
     const state = this.lastState;
     const tiles = this.lastTiles;
-    if (layout === null || state === null || state.mode !== "time") return;
+    if (layout === null || state === null) return;
+    if (state.mode === "xy") {
+      const points = this.annotationPoints(state);
+      const existing = state.annotations.findIndex((_annotation, index) => {
+        const point = points[index];
+        if (point === null || point === undefined) return false;
+        return (
+          Math.hypot(
+            projectX(layout, point.x) - offsetX,
+            projectY(layout, point.y) - offsetY,
+          ) <= 9
+        );
+      });
+      if (existing !== -1) {
+        const annotation = state.annotations[existing];
+        if (annotation !== undefined) {
+          this.callbacks.onRemoveAnnotation(this.id, annotation.id);
+        }
+        return;
+      }
+      const hit = nearestXyPoint(this.xyTraces, layout, offsetX, offsetY, 14);
+      if (hit !== null) {
+        this.callbacks.onPinAnnotation(this.id, {
+          path: hit.path,
+          time: hit.time,
+          value: hit.y,
+          distance: 0,
+        });
+      }
+      return;
+    }
+    if (state.mode !== "time") return;
     const existing = nearestAnnotation(
       state.annotations,
       layout,
@@ -606,7 +639,8 @@ export class PanelView {
 
   private drawOverlay(): void {
     const state = this.lastState;
-    const annotations = state?.mode === "time" ? state.annotations : [];
+    const annotations =
+      state?.mode === "time" || state?.mode === "xy" ? state.annotations : [];
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -648,7 +682,23 @@ export class PanelView {
           series?.dash ?? "solid",
         ).colorIndex;
       }),
+      annotationPoints: state === null ? [] : this.annotationPoints(state),
       showDelta: annotations.length >= 2,
+    });
+  }
+
+  /** Plot coordinates for each annotation in the current mode. */
+  private annotationPoints(
+    state: PanelState,
+  ): ({ x: number; y: number } | null)[] {
+    if (state.mode !== "xy") return [];
+    return state.annotations.map((annotation) => {
+      const entry = this.xyTraces.find(
+        (item) => item.path === annotation.series_path,
+      );
+      return entry === undefined
+        ? null
+        : markerAt(entry.trace, annotation.time);
     });
   }
 
@@ -840,7 +890,8 @@ export class PanelView {
 
   private renderAnnotationList(state: PanelState): void {
     const list = required<HTMLElement>(this.element, ".panel-annotations");
-    const annotations = state.mode === "time" ? state.annotations : [];
+    const annotations =
+      state.mode === "time" || state.mode === "xy" ? state.annotations : [];
     list.hidden = annotations.length === 0;
     if (annotations.length === 0) {
       list.replaceChildren();

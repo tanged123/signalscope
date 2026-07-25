@@ -59,6 +59,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     box: { x0: 100, y0: 50, x1: 200, y1: 150 },
     annotations: [],
     annotationColorIndices: [],
+    annotationPoints: [],
     showDelta: false,
   });
   expect(calls).toContain(`strokeStyle:${palette.amber}`);
@@ -74,6 +75,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     box: null,
     annotations: [],
     annotationColorIndices: [],
+    annotationPoints: [],
     showDelta: false,
   });
   expect(calls).toContain("strokeStyle:#407fd0");
@@ -123,8 +125,63 @@ test("draws XY cursor markers as hollow amber rings", () => {
     box: null,
     annotations: [],
     annotationColorIndices: [],
+    annotationPoints: [],
     showDelta: false,
   });
   expect(calls).toContain("arc");
   expect(calls).toContain("strokeStyle:#ffa226");
+});
+
+test("places annotations at supplied plot points when given them", () => {
+  const calls: string[] = [];
+  const context = new Proxy(
+    {
+      measureText: (text: string) => ({ width: text.length * 6 }),
+    },
+    {
+      get(target, property) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+        if (property in target) return Reflect.get(target, property);
+        return (...args: unknown[]) => {
+          calls.push(`${String(property)}:${args.map(String).join(":")}`);
+        };
+      },
+      set(_target, property, value) {
+        calls.push(`${String(property)}:${String(value)}`);
+        return true;
+      },
+    },
+  ) as unknown as CanvasRenderingContext2D;
+  const canvas = {
+    clientWidth: 640,
+    clientHeight: 360,
+    width: 0,
+    height: 0,
+    getContext: () => context,
+  } as unknown as HTMLCanvasElement;
+  const layout: PlotLayout = {
+    plot: { x: 52, y: 8, width: 500, height: 300 },
+    xRange: { min: 0, max: 60 },
+    yRange: { min: -200, max: 200 },
+  };
+  const renderer = new OverlayRenderer(canvas);
+  renderer.setPalette(palette);
+  renderer.draw(layout, {
+    cursorT: null,
+    cursorStyle: "none",
+    cursorPoints: [],
+    xyMarkers: [],
+    box: null,
+    annotations: [
+      { id: "a", series_path: "s", time: 10, value: 1, label: "" },
+      { id: "b", series_path: "s", time: 20, value: 2, label: "" },
+    ],
+    annotationColorIndices: [0, 0],
+    annotationPoints: [
+      { x: 10, y: 100 },
+      { x: 40, y: 150 },
+    ],
+    showDelta: true,
+  });
+  expect(calls.join(" ")).toContain("Δx");
 });

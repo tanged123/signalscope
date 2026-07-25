@@ -28,6 +28,11 @@ export interface OverlayState {
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   annotations: readonly Annotation[];
   annotationColorIndices: readonly number[];
+  /**
+   * Plot-space coordinates per annotation, or null when the annotation has
+   * no position in this mode. An empty array means use `(time, value)`.
+   */
+  annotationPoints: readonly (XyMarker | null)[];
   showDelta: boolean;
 }
 
@@ -181,14 +186,21 @@ export class OverlayRenderer {
     context.save();
     context.font = `10px ${palette.fontMono}`;
     state.annotations.forEach((annotation, index) => {
+      const supplied = state.annotationPoints[index];
+      const point =
+        supplied === undefined
+          ? { x: annotation.time, y: annotation.value }
+          : supplied;
+      if (point === null) return;
       if (
-        annotation.time < layout.xRange.min ||
-        annotation.time > layout.xRange.max
+        state.annotationPoints.length === 0 &&
+        (annotation.time < layout.xRange.min ||
+          annotation.time > layout.xRange.max)
       ) {
         return;
       }
-      const x = projectX(layout, annotation.time);
-      const y = projectY(layout, annotation.value);
+      const x = projectX(layout, point.x);
+      const y = projectY(layout, point.y);
       context.beginPath();
       context.fillStyle = palette.surface0;
       context.strokeStyle =
@@ -208,7 +220,13 @@ export class OverlayRenderer {
       context.fillText(text, x + 14, y - 8);
     });
     if (state.showDelta && state.annotations.length >= 2) {
-      this.drawDelta(context, layout, state.annotations, palette);
+      this.drawDelta(
+        context,
+        layout,
+        state.annotations,
+        state.annotationPoints,
+        palette,
+      );
     }
     context.restore();
   }
@@ -217,29 +235,53 @@ export class OverlayRenderer {
     context: CanvasRenderingContext2D,
     layout: PlotLayout,
     annotations: readonly Annotation[],
+    points: readonly (XyMarker | null)[],
     palette: OverlayPalette,
   ): void {
-    const first = annotations[annotations.length - 2];
-    const second = annotations[annotations.length - 1];
+    const firstIndex = annotations.length - 2;
+    const secondIndex = annotations.length - 1;
+    const first = annotations[firstIndex];
+    const second = annotations[secondIndex];
     if (first === undefined || second === undefined) return;
+    const firstPoint =
+      points.length === 0
+        ? { x: first.time, y: first.value }
+        : (points[firstIndex] ?? null);
+    const secondPoint =
+      points.length === 0
+        ? { x: second.time, y: second.value }
+        : (points[secondIndex] ?? null);
+    if (firstPoint === null || secondPoint === null) return;
     context.save();
     context.strokeStyle = palette.fg3;
     context.globalAlpha = 0.6;
     context.lineWidth = 1;
     context.setLineDash([3, 3]);
     context.beginPath();
-    context.moveTo(projectX(layout, first.time), projectY(layout, first.value));
+    context.moveTo(
+      projectX(layout, firstPoint.x),
+      projectY(layout, firstPoint.y),
+    );
     context.lineTo(
-      projectX(layout, second.time),
-      projectY(layout, second.value),
+      projectX(layout, secondPoint.x),
+      projectY(layout, secondPoint.y),
     );
     context.stroke();
     context.restore();
     const deltaT = second.time - first.time;
     const deltaV = second.value - first.value;
-    const slope = deltaT === 0 ? null : deltaV / deltaT;
-    const parts = [`Δt ${formatValue(deltaT)} s`, `Δv ${formatValue(deltaV)}`];
-    if (slope !== null) parts.push(`slope ${formatValue(slope)}/s`);
+    const parts = [`Δt ${formatValue(deltaT)} s`];
+    if (points.length === 0) {
+      // Time mode: Δv and slope are meaningful against the time axis.
+      const slope = deltaT === 0 ? null : deltaV / deltaT;
+      parts.push(`Δv ${formatValue(deltaV)}`);
+      if (slope !== null) parts.push(`slope ${formatValue(slope)}/s`);
+    } else {
+      parts.push(
+        `Δx ${formatValue(secondPoint.x - firstPoint.x)}`,
+        `Δy ${formatValue(secondPoint.y - firstPoint.y)}`,
+      );
+    }
     const text = parts.join(" · ");
     context.save();
     context.font = `10px ${palette.fontMono}`;
