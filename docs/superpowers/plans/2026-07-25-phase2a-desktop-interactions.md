@@ -37,26 +37,26 @@ Verified against the tree; if any turn out false, stop and escalate.
 
 ## Scope: what this plan is and is not
 
-The roadmap's Phase 2 line is: *"Finish linked desktop and touch gestures, gutter/inline axes, editable labels, split legend inspector, visible statistics, annotations and delta readouts, XY drop strip, color channel and colorbar, FFT, and histogram modes."*
+The roadmap's Phase 2 line is: _"Finish linked desktop and touch gestures, gutter/inline axes, editable labels, split legend inspector, visible statistics, annotations and delta readouts, XY drop strip, color channel and colorbar, FFT, and histogram modes."_
 
 Per the maintainer's direction, **this plan (2A) is the desktop-interaction core**. A follow-on **Phase 2B plan** owns the non-time panel modes, because each needs a new native compute surface and at least one open design decision:
 
-| Deferred to Phase 2B (do not implement here)      | Why                                                                                                                                              |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Touch gestures (pinch, long-press, tap readout)   | Explicitly deprioritized by the maintainer; the prototype's touch layer is reference material for later.                                          |
-| XY mode + the amber "use as X" drop strip         | Needs an XY pairing/resample query (raw-sample work, new protocol request, BakedPlane story per ADR 0007's size budget).                          |
-| `c:` color channel + colorbar                     | Colormap must be chosen and recorded (viridis-class, ADR 0011 fixes the source to Crameri's maps); assignment UX has a spec gap.                   |
-| FFT mode                                          | Needs `scope-core::compute` FFT + its first protocol request (ADR 0008 precedent); window/averaging semantics unspecified.                        |
-| Histogram mode                                    | Zero spec coverage — needs a design decision/ADR, not an extraction.                                                                              |
-| Quick transforms in the legend inspector (`smooth`, `deriv`) | ADR 0008: expression evaluation is a native protocol request that does not exist until Phase 3. No dead buttons.                        |
-| `follow` time mode, session save/load, snapshot export | Phase 3/4 per the roadmap.                                                                                                                    |
-| Toolbar all-panels `Σ Stats` toggle               | Kept minimal: per-panel `Σ` + `s` key + palette command satisfy the keyboard invariant; revisit with 2B.                                          |
+| Deferred to Phase 2B (do not implement here)                 | Why                                                                                                                              |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Touch gestures (pinch, long-press, tap readout)              | Explicitly deprioritized by the maintainer; the prototype's touch layer is reference material for later.                         |
+| XY mode + the amber "use as X" drop strip                    | Needs an XY pairing/resample query (raw-sample work, new protocol request, BakedPlane story per ADR 0007's size budget).         |
+| `c:` color channel + colorbar                                | Colormap must be chosen and recorded (viridis-class, ADR 0011 fixes the source to Crameri's maps); assignment UX has a spec gap. |
+| FFT mode                                                     | Needs `scope-core::compute` FFT + its first protocol request (ADR 0008 precedent); window/averaging semantics unspecified.       |
+| Histogram mode                                               | Zero spec coverage — needs a design decision/ADR, not an extraction.                                                             |
+| Quick transforms in the legend inspector (`smooth`, `deriv`) | ADR 0008: expression evaluation is a native protocol request that does not exist until Phase 3. No dead buttons.                 |
+| `follow` time mode, session save/load, snapshot export       | Phase 3/4 per the roadmap.                                                                                                       |
+| Toolbar all-panels `Σ Stats` toggle                          | Kept minimal: per-panel `Σ` + `s` key + palette command satisfy the keyboard invariant; revisit with 2B.                         |
 
 A reviewer should reject a diff that adds any of these.
 
 ## Decisions requiring maintainer awareness (made explicit here, applied in tasks)
 
-1. **Bins gain `sum`, `sum_sq`, `finite_count`** (protocol v2→v3, sidecar cache v1→v2, 64→88-byte bin records). This is the only way to get exact mean/RMS of the visible region in O(bins) on *both* hosts without raw scans in the renderer. Old sidecars become graceful cache misses; no persisted snapshots or sessions exist yet, so the protocol bump orphans nothing. Recorded as ADR 0014 (Task 1).
+1. **Bins gain `sum`, `sum_sq`, `finite_count`** (protocol v2→v3, sidecar cache v1→v2, 64→88-byte bin records). This is the only way to get exact mean/RMS of the visible region in O(bins) on _both_ hosts without raw scans in the renderer. Old sidecars become graceful cache misses; no persisted snapshots or sessions exist yet, so the protocol bump orphans nothing. Recorded as ADR 0014 (Task 1).
 2. **Visible statistics are computed from the displayed bins**, so window edges are bin-granular at coarse zoom and exact at level 0. The strip reflects what is drawn — documented in the ADR.
 3. **Session schema v4** adds `x_label`, `y_label` (editable axis names — the Final Spec requires them editable and serialized but its state model omitted them) and `time_window` (ADR 0006's per-panel local window for unlinked panels).
 4. **Datatips snap to rendered bin vertices** ((t₀, first)/(t₁, last) of each bin), which are true samples at level 0 and envelope representatives at coarse zoom — MATLAB-style snapping to what is actually drawn.
@@ -261,7 +261,7 @@ Expected: everything passes except `conformance_fixture_matches_rust_query`.
 
 Run: `./scripts/dev.sh sh -c 'REGENERATE_FIXTURES=1 cargo test -p scope-core conformance_fixture_matches_rust_query'`
 then: `./scripts/test.sh core`
-Expected: PASS, including the cache round-trip tests (old-version sidecars are covered by the existing `corrupt_payload_and_truncation_are_misses` test, which already writes version 2 — update its forged version to `3_u32` so it still tests a *mismatched* version).
+Expected: PASS, including the cache round-trip tests (old-version sidecars are covered by the existing `corrupt_payload_and_truncation_are_misses` test, which already writes version 2 — update its forged version to `3_u32` so it still tests a _mismatched_ version).
 
 - [ ] **Step 8: Update the TypeScript demo manifest and test literals**
 
@@ -530,21 +530,36 @@ Every gesture needs the pixel↔data mapping the renderer already computes priva
 - Produces (all consumed by Tasks 4–10):
 
 ```ts
-export interface Range { min: number; max: number }
-export interface PlotRect { x: number; y: number; width: number; height: number }
-export interface PlotLayout { plot: PlotRect; xRange: Range; yRange: Range }
+export interface Range {
+  min: number;
+  max: number;
+}
+export interface PlotRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface PlotLayout {
+  plot: PlotRect;
+  xRange: Range;
+  yRange: Range;
+}
 export function projectX(layout: PlotLayout, value: number): number;
 export function projectY(layout: PlotLayout, value: number): number;
 export function invertX(layout: PlotLayout, px: number): number;
 export function invertY(layout: PlotLayout, py: number): number;
 export function insidePlot(layout: PlotLayout, px: number, py: number): boolean;
 export function clamp(value: number, min: number, max: number): number;
-export function wheelZoomFactor(deltaY: number): number;          // Math.exp(deltaY * 0.0016)
+export function wheelZoomFactor(deltaY: number): number; // Math.exp(deltaY * 0.0016)
 export function zoomRange(range: Range, factor: number, pivot: number): Range;
-export function panRange(range: Range, delta: number): Range;     // delta in data units
-export function valueAtTime(bins: readonly EnvelopeBin[], time: number): number | null;
-export function formatValue(value: number | null): string;        // %.4f, exp(3) extremes, "—", U+2212
-export function formatCursorTime(time: number): string;           // `${time.toFixed(4)} s`, U+2212
+export function panRange(range: Range, delta: number): Range; // delta in data units
+export function valueAtTime(
+  bins: readonly EnvelopeBin[],
+  time: number,
+): number | null;
+export function formatValue(value: number | null): string; // %.4f, exp(3) extremes, "—", U+2212
+export function formatCursorTime(time: number): string; // `${time.toFixed(4)} s`, U+2212
 ```
 
 and `CanvasRenderer.lastLayout(): PlotLayout | null`.
@@ -604,17 +619,35 @@ test("wheel deltas map to exp zoom factors", () => {
   expect(wheelZoomFactor(240)).toBeGreaterThan(1);
 });
 
-function bin(t0: number, t1: number, first: number | null, last: number | null, gap = false): EnvelopeBin {
+function bin(
+  t0: number,
+  t1: number,
+  first: number | null,
+  last: number | null,
+  gap = false,
+): EnvelopeBin {
   return {
-    t0, t1, first, last,
+    t0,
+    t1,
+    first,
+    last,
     min: first === null ? last : first,
     max: last === null ? first : last,
-    sum: 0, sum_sq: 0, finite_count: "0", sample_count: "1", has_gap: gap,
+    sum: 0,
+    sum_sq: 0,
+    finite_count: "0",
+    sample_count: "1",
+    has_gap: gap,
   };
 }
 
 test("valueAtTime lerps inside a bin and returns null in gaps", () => {
-  const bins = [bin(0, 1, 0, 10), bin(1, 2, 10, 20), bin(2, 3, null, null, true), bin(3, 4, 30, 40)];
+  const bins = [
+    bin(0, 1, 0, 10),
+    bin(1, 2, 10, 20),
+    bin(2, 3, null, null, true),
+    bin(3, 4, 30, 40),
+  ];
   expect(valueAtTime(bins, 0.5)).toBeCloseTo(5, 9);
   expect(valueAtTime(bins, 1.25)).toBeCloseTo(12.5, 9);
   expect(valueAtTime(bins, 2.5)).toBeNull();
@@ -666,12 +699,18 @@ export function clamp(value: number, min: number, max: number): number {
 
 export function projectX(layout: PlotLayout, value: number): number {
   const { plot, xRange } = layout;
-  return plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width;
+  return (
+    plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width
+  );
 }
 
 export function projectY(layout: PlotLayout, value: number): number {
   const { plot, yRange } = layout;
-  return plot.y + plot.height - ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height;
+  return (
+    plot.y +
+    plot.height -
+    ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height
+  );
 }
 
 export function invertX(layout: PlotLayout, px: number): number {
@@ -681,12 +720,24 @@ export function invertX(layout: PlotLayout, px: number): number {
 
 export function invertY(layout: PlotLayout, py: number): number {
   const { plot, yRange } = layout;
-  return yRange.min + ((plot.y + plot.height - py) / plot.height) * (yRange.max - yRange.min);
+  return (
+    yRange.min +
+    ((plot.y + plot.height - py) / plot.height) * (yRange.max - yRange.min)
+  );
 }
 
-export function insidePlot(layout: PlotLayout, px: number, py: number): boolean {
+export function insidePlot(
+  layout: PlotLayout,
+  px: number,
+  py: number,
+): boolean {
   const { plot } = layout;
-  return px >= plot.x && px <= plot.x + plot.width && py >= plot.y && py <= plot.y + plot.height;
+  return (
+    px >= plot.x &&
+    px <= plot.x + plot.width &&
+    py >= plot.y &&
+    py <= plot.y + plot.height
+  );
 }
 
 /** Prototype-calibrated wheel response: exp(deltaY * 0.0016). */
@@ -714,7 +765,10 @@ export function panRange(range: Range, delta: number): Range {
  * (t0, first) → (t1, last) segment. Bins with null endpoints (all-NaN) and
  * positions outside the covered span yield null, matching the broken stroke.
  */
-export function valueAtTime(bins: readonly EnvelopeBin[], time: number): number | null {
+export function valueAtTime(
+  bins: readonly EnvelopeBin[],
+  time: number,
+): number | null {
   if (bins.length === 0) return null;
   let low = 0;
   let high = bins.length - 1;
@@ -774,7 +828,7 @@ In `frontend/src/render/canvas-renderer.ts`:
 - In `render(...)`, after `plot` is computed, record it:
 
 ```ts
-    this.layout = { plot, xRange: { ...xRange }, yRange: { ...yRange } };
+this.layout = { plot, xRange: { ...xRange }, yRange: { ...yRange } };
 ```
 
 - [ ] **Step 6: Add the renderer test**
@@ -852,10 +906,24 @@ import { OverlayRenderer, type OverlayPalette } from "./overlay-renderer";
 import type { PlotLayout } from "../app/plot-math";
 
 const PALETTE: OverlayPalette = {
-  amber: "#ffa226", amberFill: "rgba(255,162,38,.16)",
-  fg1: "#e8eaee", fg2: "#a7aebb", fg3: "#7a8290",
-  surface0: "#0b0d10", surface2: "#16191e", fontMono: "monospace",
-  series: ["#407fd0", "#c98a2b", "#3aa981", "#9a6fd0", "#d06a86", "#4f9a5e", "#c06848", "#5aa4c9"],
+  amber: "#ffa226",
+  amberFill: "rgba(255,162,38,.16)",
+  fg1: "#e8eaee",
+  fg2: "#a7aebb",
+  fg3: "#7a8290",
+  surface0: "#0b0d10",
+  surface2: "#16191e",
+  fontMono: "monospace",
+  series: [
+    "#407fd0",
+    "#c98a2b",
+    "#3aa981",
+    "#9a6fd0",
+    "#d06a86",
+    "#4f9a5e",
+    "#c06848",
+    "#5aa4c9",
+  ],
 };
 
 const layout: PlotLayout = {
@@ -870,7 +938,11 @@ function draw(state: Partial<Parameters<OverlayRenderer["draw"]>[1]>) {
   const renderer = new OverlayRenderer(canvas);
   renderer.setPalette(PALETTE);
   renderer.draw(layout, {
-    cursorT: null, box: null, annotations: [], annotationColorIndices: [], showDelta: false,
+    cursorT: null,
+    box: null,
+    annotations: [],
+    annotationColorIndices: [],
+    showDelta: false,
     ...state,
   });
   return recording.calls;
@@ -878,9 +950,13 @@ function draw(state: Partial<Parameters<OverlayRenderer["draw"]>[1]>) {
 
 test("cursor draws one amber dashed vertical line at the projected time", () => {
   const calls = draw({ cursorT: 30 });
-  const strokes = calls.filter((call) => call.op === "strokeStyle" && call.value === PALETTE.amber);
+  const strokes = calls.filter(
+    (call) => call.op === "strokeStyle" && call.value === PALETTE.amber,
+  );
   expect(strokes.length).toBeGreaterThan(0);
-  const move = calls.find((call) => call.op === "moveTo" && Math.abs(call.x - 302) < 1);
+  const move = calls.find(
+    (call) => call.op === "moveTo" && Math.abs(call.x - 302) < 1,
+  );
   expect(move).toBeDefined(); // projectX(layout, 30) = 52 + 250
 });
 
@@ -891,7 +967,11 @@ test("cursor outside the x-range draws nothing", () => {
 
 test("box zoom draws the amber rubber band with fill", () => {
   const calls = draw({ box: { x0: 100, y0: 50, x1: 200, y1: 150 } });
-  expect(calls.some((call) => call.op === "fillStyle" && call.value === PALETTE.amberFill)).toBe(true);
+  expect(
+    calls.some(
+      (call) => call.op === "fillStyle" && call.value === PALETTE.amberFill,
+    ),
+  ).toBe(true);
   expect(calls.some((call) => call.op === "setLineDash")).toBe(true);
 });
 ```
@@ -907,7 +987,12 @@ Expected: FAIL — module not found.
 
 ```ts
 import type { Annotation } from "../generated/session";
-import { formatValue, projectX, projectY, type PlotLayout } from "../app/plot-math";
+import {
+  formatValue,
+  projectX,
+  projectY,
+  type PlotLayout,
+} from "../app/plot-math";
 import { SERIES_TOKENS } from "./canvas-renderer";
 
 export interface OverlayPalette {
@@ -963,7 +1048,12 @@ export class OverlayRenderer {
     cursorT: number | null,
     palette: OverlayPalette,
   ): void {
-    if (cursorT === null || cursorT < layout.xRange.min || cursorT > layout.xRange.max) return;
+    if (
+      cursorT === null ||
+      cursorT < layout.xRange.min ||
+      cursorT > layout.xRange.max
+    )
+      return;
     const x = Math.round(projectX(layout, cursorT)) + 0.5;
     context.save();
     context.strokeStyle = palette.amber;
@@ -1005,13 +1095,18 @@ export class OverlayRenderer {
     context.save();
     context.font = `10px ${palette.fontMono}`;
     state.annotations.forEach((annotation, index) => {
-      if (annotation.time < layout.xRange.min || annotation.time > layout.xRange.max) return;
+      if (
+        annotation.time < layout.xRange.min ||
+        annotation.time > layout.xRange.max
+      )
+        return;
       const x = projectX(layout, annotation.time);
       const y = projectY(layout, annotation.value);
       context.beginPath();
       context.fillStyle = palette.surface0;
       context.strokeStyle =
-        palette.series[state.annotationColorIndices[index] ?? -1] ?? palette.fg2;
+        palette.series[state.annotationColorIndices[index] ?? -1] ??
+        palette.fg2;
       context.lineWidth = 1.6;
       context.setLineDash([]);
       context.arc(x, y, 3.5, 0, Math.PI * 2);
@@ -1047,7 +1142,10 @@ export class OverlayRenderer {
     context.setLineDash([3, 3]);
     context.beginPath();
     context.moveTo(projectX(layout, first.time), projectY(layout, first.value));
-    context.lineTo(projectX(layout, second.time), projectY(layout, second.value));
+    context.lineTo(
+      projectX(layout, second.time),
+      projectY(layout, second.value),
+    );
     context.stroke();
     context.restore();
 
@@ -1085,7 +1183,10 @@ export class OverlayRenderer {
     const height = Math.max(1, this.canvas.clientHeight);
     const backingWidth = Math.round(width * ratio);
     const backingHeight = Math.round(height * ratio);
-    if (backingWidth !== this.renderedWidth || backingHeight !== this.renderedHeight) {
+    if (
+      backingWidth !== this.renderedWidth ||
+      backingHeight !== this.renderedHeight
+    ) {
       this.canvas.width = backingWidth;
       this.canvas.height = backingHeight;
       this.renderedWidth = backingWidth;
@@ -1100,7 +1201,8 @@ export class OverlayRenderer {
   private resolvePalette(): OverlayPalette {
     if (this.palette !== null) return this.palette;
     const styles = getComputedStyle(document.documentElement);
-    const token = (name: string): string => styles.getPropertyValue(name).trim();
+    const token = (name: string): string =>
+      styles.getPropertyValue(name).trim();
     this.palette = {
       amber: token("--amber-7"),
       amberFill: token("--amber-3"),
@@ -1117,7 +1219,9 @@ export class OverlayRenderer {
 }
 
 function marker(index: number): string {
-  return index < 20 ? String.fromCodePoint(0x2460 + index) : `(${String(index + 1)})`;
+  return index < 20
+    ? String.fromCodePoint(0x2460 + index)
+    : `(${String(index + 1)})`;
 }
 ```
 
@@ -1204,20 +1308,20 @@ Initialize both in the constructor (`this.overlay = required<HTMLCanvasElement>(
 - In `bind()`, add cursor tracking on the overlay:
 
 ```ts
-    this.overlay.addEventListener("pointermove", (event) => {
-      if (event.pointerType === "touch") return;
-      const layout = this.renderer.lastLayout();
-      const inside =
-        layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
-      this.callbacks.onCursor(
-        this.id,
-        inside && layout !== null ? invertX(layout, event.offsetX) : null,
-        inside ? { x: event.clientX, y: event.clientY } : null,
-      );
-    });
-    this.overlay.addEventListener("pointerleave", () => {
-      this.callbacks.onCursor(this.id, null, null);
-    });
+this.overlay.addEventListener("pointermove", (event) => {
+  if (event.pointerType === "touch") return;
+  const layout = this.renderer.lastLayout();
+  const inside =
+    layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
+  this.callbacks.onCursor(
+    this.id,
+    inside && layout !== null ? invertX(layout, event.offsetX) : null,
+    inside ? { x: event.clientX, y: event.clientY } : null,
+  );
+});
+this.overlay.addEventListener("pointerleave", () => {
+  this.callbacks.onCursor(this.id, null, null);
+});
 ```
 
 - CSS (`app.css`): `.plot-wrap { position: relative; }` (verify — it likely already is, for `.panel-empty`); add
@@ -1268,7 +1372,7 @@ and in `leafElement(...)` change the value span to `value.textContent = this.liv
         },
 ```
 
-  - Implement (new methods on `AppShell`):
+- Implement (new methods on `AppShell`):
 
 ```ts
   private setCursor(
@@ -1378,7 +1482,7 @@ function tooltipRow(color: string, name: string, value: string): HTMLElement {
 }
 ```
 
-  - CSS: `.plot-tip` fixed at top-left with `transform` positioning, `background: var(--surface-2)`, `border: 1px solid var(--border)`, `border-radius: 2px`, `padding: 5px 8px`, `font: 10.5px var(--font-mono)`, `font-variant-numeric: tabular-nums`, `pointer-events: none`, `z-index` above panels; `.plot-tip-header { color: var(--fg-2); margin-bottom: 3px; }`; `.plot-tip-row { display: flex; gap: 6px; align-items: center; }`; `.plot-tip-swatch { width: 9px; height: 2px; }`; `.plot-tip-value { margin-left: auto; color: var(--fg-1); }`.
+- CSS: `.plot-tip` fixed at top-left with `transform` positioning, `background: var(--surface-2)`, `border: 1px solid var(--border)`, `border-radius: 2px`, `padding: 5px 8px`, `font: 10.5px var(--font-mono)`, `font-variant-numeric: tabular-nums`, `pointer-events: none`, `z-index` above panels; `.plot-tip-header { color: var(--fg-2); margin-bottom: 3px; }`; `.plot-tip-row { display: flex; gap: 6px; align-items: center; }`; `.plot-tip-swatch { width: 9px; height: 2px; }`; `.plot-tip-value { margin-left: auto; color: var(--fg-1); }`.
 
 - [ ] **Step 8: Write the e2e test**
 
@@ -1393,7 +1497,10 @@ test.describe("desktop plot interactions", () => {
     await expect(page.locator(".panel").first()).toBeVisible();
   });
 
-  test("hovering a plot shows the amber cursor readouts everywhere", async ({ page, isMobile }) => {
+  test("hovering a plot shows the amber cursor readouts everywhere", async ({
+    page,
+    isMobile,
+  }) => {
     test.skip(isMobile, "desktop interaction");
     const overlay = page.locator(".overlay-canvas").first();
     await overlay.hover({ position: { x: 300, y: 120 } });
@@ -1402,7 +1509,9 @@ test.describe("desktop plot interactions", () => {
     await expect(page.locator(".plot-tip")).toBeVisible();
     await expect(page.locator(".plot-tip-row")).toHaveCount(2);
     // live values appear in the signal tree
-    await expect(page.locator(".tree-leaf .signal-value").first()).not.toHaveText("—");
+    await expect(
+      page.locator(".tree-leaf .signal-value").first(),
+    ).not.toHaveText("—");
     // leaving the plot clears everything
     await page.locator(".tool-bar").hover();
     await expect(page.locator(".cursor-readout")).toHaveText("t = —");
@@ -1457,45 +1566,45 @@ Wheel zooms time about the pointer; ⇧/alt+wheel zooms y; right-/middle-/ctrl-l
 In `bind()` (panel.ts), after the cursor handlers:
 
 ```ts
-    this.overlay.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-    });
-    this.overlay.addEventListener(
-      "wheel",
-      (event) => {
-        const layout = this.renderer.lastLayout();
-        if (layout === null || this.lastState?.mode !== "time") return;
-        event.preventDefault();
-        const factor = wheelZoomFactor(event.deltaY);
-        if (event.shiftKey || event.altKey) {
-          const pivot = invertY(
-            layout,
-            clamp(event.offsetY, layout.plot.y, layout.plot.y + layout.plot.height),
-          );
-          const next = zoomRange(layout.yRange, factor, pivot);
-          this.callbacks.onYRange(this.id, [next.min, next.max]);
-        } else {
-          const pivot = invertX(
-            layout,
-            clamp(event.offsetX, layout.plot.x, layout.plot.x + layout.plot.width),
-          );
-          const next = zoomRange(layout.xRange, factor, pivot);
-          this.callbacks.onTimeWindow(this.id, next.min, next.max);
-        }
-      },
-      { passive: false },
-    );
-    this.overlay.addEventListener("pointerdown", (event) => {
-      const layout = this.renderer.lastLayout();
-      if (layout === null || this.lastState?.mode !== "time") return;
-      const isPan =
-        event.button === 1 ||
-        event.button === 2 ||
-        (event.button === 0 && (event.ctrlKey || event.metaKey));
-      if (!isPan) return; // Task 7 adds the left-button box/click machine
-      event.preventDefault();
-      this.beginPan(event, layout);
-    });
+this.overlay.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+});
+this.overlay.addEventListener(
+  "wheel",
+  (event) => {
+    const layout = this.renderer.lastLayout();
+    if (layout === null || this.lastState?.mode !== "time") return;
+    event.preventDefault();
+    const factor = wheelZoomFactor(event.deltaY);
+    if (event.shiftKey || event.altKey) {
+      const pivot = invertY(
+        layout,
+        clamp(event.offsetY, layout.plot.y, layout.plot.y + layout.plot.height),
+      );
+      const next = zoomRange(layout.yRange, factor, pivot);
+      this.callbacks.onYRange(this.id, [next.min, next.max]);
+    } else {
+      const pivot = invertX(
+        layout,
+        clamp(event.offsetX, layout.plot.x, layout.plot.x + layout.plot.width),
+      );
+      const next = zoomRange(layout.xRange, factor, pivot);
+      this.callbacks.onTimeWindow(this.id, next.min, next.max);
+    }
+  },
+  { passive: false },
+);
+this.overlay.addEventListener("pointerdown", (event) => {
+  const layout = this.renderer.lastLayout();
+  if (layout === null || this.lastState?.mode !== "time") return;
+  const isPan =
+    event.button === 1 ||
+    event.button === 2 ||
+    (event.button === 0 && (event.ctrlKey || event.metaKey));
+  if (!isPan) return; // Task 7 adds the left-button box/click machine
+  event.preventDefault();
+  this.beginPan(event, layout);
+});
 ```
 
 and the private drag scaffold:
@@ -1624,35 +1733,43 @@ Also add `if (this.dragging) return;` as the first line of Task 4's cursor `poin
 In `registerCommands()` (palette-only, no key bindings — `t`/`s`/`l` etc. are taken):
 
 ```ts
-    const zoomFocusedPanel = (factor: number): void => {
-      const id = this.workspace.focusedPanelId();
-      const panel = id === null ? undefined : this.workspace.panel(id);
-      if (id === null || panel === undefined) return;
-      const window = this.effectiveWindow(panel);
-      const pivot = (window.t0 + window.t1) / 2;
-      const next = zoomRange({ min: window.t0, max: window.t1 }, factor, pivot);
-      this.applyTimeWindow(id, next.min, next.max);
-    };
-    const panFocusedPanel = (direction: -1 | 1): void => {
-      const id = this.workspace.focusedPanelId();
-      const panel = id === null ? undefined : this.workspace.panel(id);
-      if (id === null || panel === undefined) return;
-      const window = this.effectiveWindow(panel);
-      const delta = (window.t1 - window.t0) * 0.1 * direction;
-      this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
-    };
-    this.registerFocusedPanelCommand("zoom-in-time", "Panel: zoom in (time)", () => {
-      zoomFocusedPanel(0.8);
-    });
-    this.registerFocusedPanelCommand("zoom-out-time", "Panel: zoom out (time)", () => {
-      zoomFocusedPanel(1.25);
-    });
-    this.registerFocusedPanelCommand("pan-left", "Panel: pan left", () => {
-      panFocusedPanel(-1);
-    });
-    this.registerFocusedPanelCommand("pan-right", "Panel: pan right", () => {
-      panFocusedPanel(1);
-    });
+const zoomFocusedPanel = (factor: number): void => {
+  const id = this.workspace.focusedPanelId();
+  const panel = id === null ? undefined : this.workspace.panel(id);
+  if (id === null || panel === undefined) return;
+  const window = this.effectiveWindow(panel);
+  const pivot = (window.t0 + window.t1) / 2;
+  const next = zoomRange({ min: window.t0, max: window.t1 }, factor, pivot);
+  this.applyTimeWindow(id, next.min, next.max);
+};
+const panFocusedPanel = (direction: -1 | 1): void => {
+  const id = this.workspace.focusedPanelId();
+  const panel = id === null ? undefined : this.workspace.panel(id);
+  if (id === null || panel === undefined) return;
+  const window = this.effectiveWindow(panel);
+  const delta = (window.t1 - window.t0) * 0.1 * direction;
+  this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
+};
+this.registerFocusedPanelCommand(
+  "zoom-in-time",
+  "Panel: zoom in (time)",
+  () => {
+    zoomFocusedPanel(0.8);
+  },
+);
+this.registerFocusedPanelCommand(
+  "zoom-out-time",
+  "Panel: zoom out (time)",
+  () => {
+    zoomFocusedPanel(1.25);
+  },
+);
+this.registerFocusedPanelCommand("pan-left", "Panel: pan left", () => {
+  panFocusedPanel(-1);
+});
+this.registerFocusedPanelCommand("pan-right", "Panel: pan right", () => {
+  panFocusedPanel(1);
+});
 ```
 
 Note `registerFocusedPanelCommand` already calls `afterLayoutChange()` after acting — that refetch is harmless here (the debounce collapses it).
@@ -1662,41 +1779,50 @@ Note `registerFocusedPanelCommand` already calls `afterLayoutChange()` after act
 Append to `interactions.spec.ts`:
 
 ```ts
-  test("wheel zooms the linked window and every panel follows", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const readout = page.locator(".window-readout");
-    const before = await readout.textContent();
-    const overlay = page.locator(".overlay-canvas").first();
-    await overlay.hover({ position: { x: 300, y: 120 } });
-    await page.mouse.wheel(0, -240);
-    await expect(readout).not.toHaveText(before ?? "");
-  });
+test("wheel zooms the linked window and every panel follows", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const readout = page.locator(".window-readout");
+  const before = await readout.textContent();
+  const overlay = page.locator(".overlay-canvas").first();
+  await overlay.hover({ position: { x: 300, y: 120 } });
+  await page.mouse.wheel(0, -240);
+  await expect(readout).not.toHaveText(before ?? "");
+});
 
-  test("right-drag pans without opening a context menu", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const readout = page.locator(".window-readout");
-    const before = await readout.textContent();
-    const overlay = page.locator(".overlay-canvas").first();
-    const box = await overlay.boundingBox();
-    if (box === null) throw new Error("overlay not laid out");
-    await page.mouse.move(box.x + 300, box.y + 120);
-    await page.mouse.down({ button: "right" });
-    await page.mouse.move(box.x + 380, box.y + 120, { steps: 4 });
-    await page.mouse.up({ button: "right" });
-    await expect(readout).not.toHaveText(before ?? "");
-  });
+test("right-drag pans without opening a context menu", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const readout = page.locator(".window-readout");
+  const before = await readout.textContent();
+  const overlay = page.locator(".overlay-canvas").first();
+  const box = await overlay.boundingBox();
+  if (box === null) throw new Error("overlay not laid out");
+  await page.mouse.move(box.x + 300, box.y + 120);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(box.x + 380, box.y + 120, { steps: 4 });
+  await page.mouse.up({ button: "right" });
+  await expect(readout).not.toHaveText(before ?? "");
+});
 
-  test("shift+wheel rescales y locally, not the time window", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const readout = page.locator(".window-readout");
-    const before = await readout.textContent();
-    const overlay = page.locator(".overlay-canvas").first();
-    await overlay.hover({ position: { x: 300, y: 120 } });
-    await page.keyboard.down("Shift");
-    await page.mouse.wheel(0, -240);
-    await page.keyboard.up("Shift");
-    await expect(readout).toHaveText(before ?? "");
-  });
+test("shift+wheel rescales y locally, not the time window", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const readout = page.locator(".window-readout");
+  const before = await readout.textContent();
+  const overlay = page.locator(".overlay-canvas").first();
+  await overlay.hover({ position: { x: 300, y: 120 } });
+  await page.keyboard.down("Shift");
+  await page.mouse.wheel(0, -240);
+  await page.keyboard.up("Shift");
+  await expect(readout).toHaveText(before ?? "");
+});
 ```
 
 - [ ] **Step 5: Run the gates**
@@ -1735,15 +1861,35 @@ Click near a line pins a numbered annotation snapped to the nearest rendered ver
   - `plot-hit.ts`:
 
 ```ts
-export interface HitSeries { path: string; bins: readonly EnvelopeBin[] }
-export interface VertexHit { path: string; time: number; value: number; distance: number }
-export function nearestVertex(series: readonly HitSeries[], layout: PlotLayout, px: number, py: number, threshold: number): VertexHit | null;
-export function nearestAnnotation(annotations: readonly Annotation[], layout: PlotLayout, px: number, py: number, threshold: number): string | null; // annotation id
+export interface HitSeries {
+  path: string;
+  bins: readonly EnvelopeBin[];
+}
+export interface VertexHit {
+  path: string;
+  time: number;
+  value: number;
+  distance: number;
+}
+export function nearestVertex(
+  series: readonly HitSeries[],
+  layout: PlotLayout,
+  px: number,
+  py: number,
+  threshold: number,
+): VertexHit | null;
+export function nearestAnnotation(
+  annotations: readonly Annotation[],
+  layout: PlotLayout,
+  px: number,
+  py: number,
+  threshold: number,
+): string | null; // annotation id
 ```
 
-  - Model ops: `addAnnotation(panelId: string, annotation: Annotation): void`, `removeAnnotation(panelId: string, annotationId: string): void`, `setAnnotationLabel(panelId: string, annotationId: string, label: string): void` (and `removeSeries` in Task 11 prunes by `series_path`).
-  - `PanelCallbacks`: `onPinAnnotation(id: string, hit: VertexHit): void`, `onRemoveAnnotation(id: string, annotationId: string): void`, `onEditAnnotationLabel(id: string, annotationId: string, label: string): void`
-  - `PanelView.plotClick(offsetX: number, offsetY: number): void` — Task 7's state machine calls this for non-promoted left clicks.
+- Model ops: `addAnnotation(panelId: string, annotation: Annotation): void`, `removeAnnotation(panelId: string, annotationId: string): void`, `setAnnotationLabel(panelId: string, annotationId: string, label: string): void` (and `removeSeries` in Task 11 prunes by `series_path`).
+- `PanelCallbacks`: `onPinAnnotation(id: string, hit: VertexHit): void`, `onRemoveAnnotation(id: string, annotationId: string): void`, `onEditAnnotationLabel(id: string, annotationId: string, label: string): void`
+- `PanelView.plotClick(offsetX: number, offsetY: number): void` — Task 7's state machine calls this for non-promoted left clicks.
 - Thresholds: remove 9 px, pin 14 px — the asymmetry makes an accidental double-click pin self-cancel before the fit runs (Task 7 depends on this).
 
 - [ ] **Step 1: Write the failing hit-test tests**
@@ -1765,8 +1911,17 @@ const layout: PlotLayout = {
 
 function bin(t0: number, t1: number, first: number, last: number): EnvelopeBin {
   return {
-    t0, t1, first, last, min: Math.min(first, last), max: Math.max(first, last),
-    sum: 0, sum_sq: 0, finite_count: "2", sample_count: "2", has_gap: false,
+    t0,
+    t1,
+    first,
+    last,
+    min: Math.min(first, last),
+    max: Math.max(first, last),
+    sum: 0,
+    sum_sq: 0,
+    finite_count: "2",
+    sample_count: "2",
+    has_gap: false,
   };
 }
 
@@ -1845,7 +2000,10 @@ export function nearestVertex(
           projectX(layout, time) - px,
           projectY(layout, value) - py,
         );
-        if (distance <= threshold && (best === null || distance < best.distance)) {
+        if (
+          distance <= threshold &&
+          (best === null || distance < best.distance)
+        ) {
           best = { path: entry.path, time, value, distance };
         }
       }
@@ -1888,7 +2046,11 @@ test("annotation ops add, relabel and remove", () => {
   const model = new WorkspaceModel();
   const panel = model.addPanelRow();
   model.addAnnotation(panel.id, {
-    id: "ann-1", series_path: "a/b", time: 2, value: 5, label: "",
+    id: "ann-1",
+    series_path: "a/b",
+    time: 2,
+    value: 5,
+    label: "",
   });
   model.setAnnotationLabel(panel.id, "ann-1", "peak");
   expect(model.panel(panel.id)?.annotations).toEqual([
@@ -1958,20 +2120,20 @@ Run (FAIL), then implement in `workspace.ts`:
   }
 ```
 
-  In `bind()`, add an interim left-click detector (Task 7 replaces it with the box state machine — it is functional on its own):
+In `bind()`, add an interim left-click detector (Task 7 replaces it with the box state machine — it is functional on its own):
 
 ```ts
-    this.overlay.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || event.ctrlKey || event.metaKey) return;
-      const start = { x: event.offsetX, y: event.offsetY };
-      const up = (upEvent: PointerEvent): void => {
-        this.overlay.removeEventListener("pointerup", up);
-        if (Math.hypot(upEvent.offsetX - start.x, upEvent.offsetY - start.y) <= 4) {
-          this.plotClick(upEvent.offsetX, upEvent.offsetY);
-        }
-      };
-      this.overlay.addEventListener("pointerup", up);
-    });
+this.overlay.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || event.ctrlKey || event.metaKey) return;
+  const start = { x: event.offsetX, y: event.offsetY };
+  const up = (upEvent: PointerEvent): void => {
+    this.overlay.removeEventListener("pointerup", up);
+    if (Math.hypot(upEvent.offsetX - start.x, upEvent.offsetY - start.y) <= 4) {
+      this.plotClick(upEvent.offsetX, upEvent.offsetY);
+    }
+  };
+  this.overlay.addEventListener("pointerup", up);
+});
 ```
 
 - `drawOverlay()` now feeds real annotations:
@@ -1998,11 +2160,12 @@ Run (FAIL), then implement in `workspace.ts`:
 ```
 
 (The overlay contract takes palette **indices** — Task 4 fixed that shape; `resolveSeriesStyle(...).colorIndex` is already 0-based.)
+
 - `update(state, maximized)`: call `this.renderAnnotationList(state);` and after any state change also `this.drawOverlay()` (annotations may have changed without a tile refetch).
 - The list DOM — add to `panelMarkup()` after `.plot-wrap`:
 
 ```html
-    <div class="panel-annotations" hidden></div>
+<div class="panel-annotations" hidden></div>
 ```
 
 and:
@@ -2099,16 +2262,16 @@ Callbacks:
 Command (keyboard path for bulk removal; individual ✕ buttons are keyboard-reachable already):
 
 ```ts
-    this.registerFocusedPanelCommand(
-      "clear-annotations",
-      "Panel: clear annotations",
-      (id) => {
-        const panel = this.workspace.panel(id);
-        for (const annotation of [...(panel?.annotations ?? [])]) {
-          this.workspace.removeAnnotation(id, annotation.id);
-        }
-      },
-    );
+this.registerFocusedPanelCommand(
+  "clear-annotations",
+  "Panel: clear annotations",
+  (id) => {
+    const panel = this.workspace.panel(id);
+    for (const annotation of [...(panel?.annotations ?? [])]) {
+      this.workspace.removeAnnotation(id, annotation.id);
+    }
+  },
+);
 ```
 
 CSS: `.panel-annotations { border-top: 1px solid var(--border); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; padding: 6px 10px; color: var(--fg-2); }`, `.annotations-heading { font-size: 9px; color: var(--fg-4); letter-spacing: .08em; margin-bottom: 3px; }`, `.annotation-row { display: flex; gap: 6px; align-items: center; }`, `.annotation-action { margin-left: auto; color: var(--fg-4); background: none; border: none; cursor: pointer; } .annotation-action + .annotation-action { margin-left: 0; }`, `.annotation-label-input { font: inherit; background: var(--surface-2); color: var(--fg-1); border: 1px solid var(--border-strong); border-radius: 2px; }`.
@@ -2116,28 +2279,33 @@ CSS: `.panel-annotations { border-top: 1px solid var(--border); font: 10px var(-
 - [ ] **Step 7: Extend the e2e spec**
 
 ```ts
-  test("clicking near the line pins a datatip; two pins show an amber delta; clicking a pin removes it", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const overlay = page.locator(".overlay-canvas").first();
-    const box = await overlay.boundingBox();
-    if (box === null) throw new Error("overlay not laid out");
-    const rows = page.locator(".panel").first().locator(".annotation-row");
+test("clicking near the line pins a datatip; two pins show an amber delta; clicking a pin removes it", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const overlay = page.locator(".overlay-canvas").first();
+  const box = await overlay.boundingBox();
+  if (box === null) throw new Error("overlay not laid out");
+  const rows = page.locator(".panel").first().locator(".annotation-row");
 
-    const clickNearSeries = async (x: number): Promise<void> => {
-      const before = await rows.count();
-      for (let y = 20; y < box.height - 40; y += 8) {
-        await overlay.click({ position: { x, y } });
-        if ((await rows.count()) > before) return;
-      }
-      throw new Error("no series vertex found in the sampled column");
-    };
+  const clickNearSeries = async (x: number): Promise<void> => {
+    const before = await rows.count();
+    for (let y = 20; y < box.height - 40; y += 8) {
+      await overlay.click({ position: { x, y } });
+      if ((await rows.count()) > before) return;
+    }
+    throw new Error("no series vertex found in the sampled column");
+  };
 
-    await clickNearSeries(180);
-    await expect(rows).toHaveCount(1);
-    await clickNearSeries(420);
-    await expect(rows).toHaveCount(2);
-    await expect(page.locator(".panel").first().locator(".annotations-heading")).toBeVisible();
-  });
+  await clickNearSeries(180);
+  await expect(rows).toHaveCount(1);
+  await clickNearSeries(420);
+  await expect(rows).toHaveCount(2);
+  await expect(
+    page.locator(".panel").first().locator(".annotations-heading"),
+  ).toBeVisible();
+});
 ```
 
 (The column sweep is deterministic: clicks in empty space are no-ops, and the demo series crosses every sampled column.)
@@ -2180,20 +2348,20 @@ Left-drag rubber-bands an amber box; on release (both edges > 6 px) the panel zo
 In `panel.ts` `bind()`, delete Task 6's interim left-button `pointerdown` listener and extend Task 5's `pointerdown` handler:
 
 ```ts
-    this.overlay.addEventListener("pointerdown", (event) => {
-      const layout = this.renderer.lastLayout();
-      if (layout === null || this.lastState?.mode !== "time") return;
-      const isPan =
-        event.button === 1 ||
-        event.button === 2 ||
-        (event.button === 0 && (event.ctrlKey || event.metaKey));
-      if (isPan) {
-        event.preventDefault();
-        this.beginPan(event, layout);
-        return;
-      }
-      if (event.button === 0) this.beginBoxOrClick(event, layout);
-    });
+this.overlay.addEventListener("pointerdown", (event) => {
+  const layout = this.renderer.lastLayout();
+  if (layout === null || this.lastState?.mode !== "time") return;
+  const isPan =
+    event.button === 1 ||
+    event.button === 2 ||
+    (event.button === 0 && (event.ctrlKey || event.metaKey));
+  if (isPan) {
+    event.preventDefault();
+    this.beginPan(event, layout);
+    return;
+  }
+  if (event.button === 0) this.beginBoxOrClick(event, layout);
+});
 ```
 
 with:
@@ -2273,14 +2441,14 @@ In `panel.ts`:
 and in `bind()`:
 
 ```ts
-    this.overlay.addEventListener("dblclick", (event) => {
-      const layout = this.renderer.lastLayout();
-      if (layout === null || this.lastState?.mode !== "time") return;
-      if (insidePlot(layout, event.offsetX, event.offsetY)) {
-        this.callbacks.onFitView(this.id);
-      }
-      // Task 10 extends this handler with the axis-label edit zones.
-    });
+this.overlay.addEventListener("dblclick", (event) => {
+  const layout = this.renderer.lastLayout();
+  if (layout === null || this.lastState?.mode !== "time") return;
+  if (insidePlot(layout, event.offsetX, event.offsetY)) {
+    this.callbacks.onFitView(this.id);
+  }
+  // Task 10 extends this handler with the axis-label edit zones.
+});
 ```
 
 In `app-shell.ts` callbacks + command:
@@ -2317,9 +2485,9 @@ In `app-shell.ts` callbacks + command:
 ```
 
 ```ts
-    this.registerFocusedPanelCommand("fit-panel-view", "Panel: fit view", (id) => {
-      this.fitPanelView(id);
-    });
+this.registerFocusedPanelCommand("fit-panel-view", "Panel: fit view", (id) => {
+  this.fitPanelView(id);
+});
 ```
 
 `workspace-view.ts` gains the pass-through:
@@ -2333,21 +2501,24 @@ In `app-shell.ts` callbacks + command:
 - [ ] **Step 3: Extend the e2e spec**
 
 ```ts
-  test("box zoom narrows both axes and double-click fit restores the window", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const readout = page.locator(".window-readout");
-    const fitted = await readout.textContent();
-    const overlay = page.locator(".overlay-canvas").first();
-    const box = await overlay.boundingBox();
-    if (box === null) throw new Error("overlay not laid out");
-    await page.mouse.move(box.x + 150, box.y + 60);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 420, box.y + 200, { steps: 6 });
-    await page.mouse.up();
-    await expect(readout).not.toHaveText(fitted ?? "");
-    await overlay.dblclick({ position: { x: 300, y: 120 } });
-    await expect(readout).toHaveText(fitted ?? "");
-  });
+test("box zoom narrows both axes and double-click fit restores the window", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const readout = page.locator(".window-readout");
+  const fitted = await readout.textContent();
+  const overlay = page.locator(".overlay-canvas").first();
+  const box = await overlay.boundingBox();
+  if (box === null) throw new Error("overlay not laid out");
+  await page.mouse.move(box.x + 150, box.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 420, box.y + 200, { steps: 6 });
+  await page.mouse.up();
+  await expect(readout).not.toHaveText(fitted ?? "");
+  await overlay.dblclick({ position: { x: 300, y: 120 } });
+  await expect(readout).toHaveText(fitted ?? "");
+});
 ```
 
 (The fitted window equals the demo signals' full extent, which is exactly what `mount()` established, so the readout text round-trips.)
@@ -2387,11 +2558,20 @@ Per-series `min · max · μ · rms` of the visible region, computed exactly fro
 - Produces:
 
 ```ts
-export interface SeriesStats { min: number | null; max: number | null; mean: number | null; rms: number | null }
-export function visibleStats(bins: readonly EnvelopeBin[], t0: number, t1: number): SeriesStats;
+export interface SeriesStats {
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  rms: number | null;
+}
+export function visibleStats(
+  bins: readonly EnvelopeBin[],
+  t0: number,
+  t1: number,
+): SeriesStats;
 ```
 
-  `WorkspaceModel.toggleStats(id: string): void`; `PanelCallbacks.onToggleStats(id: string): void`.
+`WorkspaceModel.toggleStats(id: string): void`; `PanelCallbacks.onToggleStats(id: string): void`.
 
 - [ ] **Step 1: Write the failing stats tests**
 
@@ -2405,7 +2585,8 @@ import { visibleStats } from "./stats";
 function bin(t0: number, t1: number, values: number[]): EnvelopeBin {
   const finite = values.filter(Number.isFinite);
   return {
-    t0, t1,
+    t0,
+    t1,
     first: finite[0] ?? null,
     last: finite[finite.length - 1] ?? null,
     min: finite.length === 0 ? null : Math.min(...finite),
@@ -2423,7 +2604,7 @@ test("visibleStats aggregates only bins overlapping the window", () => {
   const stats = visibleStats(bins, 0, 1.5);
   expect(stats.min).toBe(1);
   expect(stats.max).toBe(7);
-  expect(stats.mean).toBeCloseTo(4, 12);         // (1+3+5+7)/4
+  expect(stats.mean).toBeCloseTo(4, 12); // (1+3+5+7)/4
   expect(stats.rms).toBeCloseTo(Math.sqrt(84 / 4), 12);
 });
 
@@ -2515,9 +2696,9 @@ Implement:
 - `bind()`:
 
 ```ts
-    required(this.element, ".panel-stats-toggle").addEventListener("click", () => {
-      this.callbacks.onToggleStats(this.id);
-    });
+required(this.element, ".panel-stats-toggle").addEventListener("click", () => {
+  this.callbacks.onToggleStats(this.id);
+});
 ```
 
 - `update()`: reflect state — `required<HTMLButtonElement>(this.element, ".panel-stats-toggle").setAttribute("aria-pressed", String(state.show_stats));` and call `this.renderStats();`
@@ -2624,14 +2805,14 @@ The `s` key must reach it, and `registerFocusedPanelCommand` does not take keys 
 and register:
 
 ```ts
-    this.registerFocusedPanelCommand(
-      "toggle-stats",
-      "Panel: toggle statistics",
-      (id) => {
-        this.workspace.toggleStats(id);
-      },
-      "s",
-    );
+this.registerFocusedPanelCommand(
+  "toggle-stats",
+  "Panel: toggle statistics",
+  (id) => {
+    this.workspace.toggleStats(id);
+  },
+  "s",
+);
 ```
 
 (The conditional spread keeps `exactOptionalPropertyTypes` happy.)
@@ -2639,23 +2820,26 @@ and register:
 - [ ] **Step 7: Extend the e2e spec**
 
 ```ts
-  test("the stats strip shows visible-region values and follows zoom", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await panel.locator(".panel-header").click(); // focus routing without plot side effects
-    await page.keyboard.press("s");
-    const strip = panel.locator(".panel-stats");
-    await expect(strip).toBeVisible();
-    await expect(strip).toContainText("μ");
-    await expect(strip).toContainText("visible region · S toggles");
-    const before = await strip.textContent();
-    const overlay = panel.locator(".overlay-canvas");
-    await overlay.hover({ position: { x: 300, y: 120 } });
-    await page.mouse.wheel(0, -480);
-    await expect(strip).not.toHaveText(before ?? "");
-    await page.keyboard.press("s");
-    await expect(strip).toBeHidden();
-  });
+test("the stats strip shows visible-region values and follows zoom", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await panel.locator(".panel-header").click(); // focus routing without plot side effects
+  await page.keyboard.press("s");
+  const strip = panel.locator(".panel-stats");
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText("μ");
+  await expect(strip).toContainText("visible region · S toggles");
+  const before = await strip.textContent();
+  const overlay = panel.locator(".overlay-canvas");
+  await overlay.hover({ position: { x: 300, y: 120 } });
+  await page.mouse.wheel(0, -480);
+  await expect(strip).not.toHaveText(before ?? "");
+  await page.keyboard.press("s");
+  await expect(strip).toBeHidden();
+});
 ```
 
 - [ ] **Step 8: Run the gates**
@@ -2708,12 +2892,18 @@ test("inline axis style uses the full body and skips the spine", () => {
   const { canvas } = fakeCanvas(640, 360, recording);
   const renderer = new CanvasRenderer(canvas);
   renderer.setPalette(TEST_PALETTE);
-  renderer.render(response, { min: 0, max: 10 }, { ...options, axisStyle: "inline" });
+  renderer.render(
+    response,
+    { min: 0, max: 10 },
+    { ...options, axisStyle: "inline" },
+  );
   const layout = renderer.lastLayout();
   expect(layout?.plot).toEqual({ x: 0, y: 0, width: 640, height: 360 });
   // no outward tick marks: no stroke in the spine colour
   expect(
-    recording.calls.some((call) => call.op === "strokeStyle" && call.value === TEST_PALETTE.fg3),
+    recording.calls.some(
+      (call) => call.op === "strokeStyle" && call.value === TEST_PALETTE.fg3,
+    ),
   ).toBe(false);
 });
 ```
@@ -2734,39 +2924,47 @@ In `canvas-renderer.ts`:
 - In `render(...)`:
 
 ```ts
-    const inline = options.axisStyle === "inline";
-    const plot: PlotRect = inline
-      ? { x: 0, y: 0, width, height }
-      : {
-          x: gutter,
-          y: 8,
-          width: Math.max(1, width - gutter - 12),
-          height: Math.max(1, height - 42),
-        };
+const inline = options.axisStyle === "inline";
+const plot: PlotRect = inline
+  ? { x: 0, y: 0, width, height }
+  : {
+      x: gutter,
+      y: 8,
+      width: Math.max(1, width - gutter - 12),
+      height: Math.max(1, height - 42),
+    };
 ```
 
-  and dispatch `inline ? this.drawInlineAxes(...) : this.drawAxes(...)`.
+and dispatch `inline ? this.drawInlineAxes(...) : this.drawAxes(...)`.
+
 - New private `drawInlineAxes(context, plot, project, xRange, yRange, colors, options)`:
   - Grid lines + zero datum exactly as `drawAxes` (same ticks, same colours).
   - No spine, no outward tick marks.
   - Tick labels inside with backing:
 
 ```ts
-    const backed = (text: string, x: number, y: number, align: CanvasTextAlign): void => {
-      context.textAlign = align;
-      const width = context.measureText(text).width;
-      const left = align === "left" ? x : align === "right" ? x - width : x - width / 2;
-      context.save();
-      context.globalAlpha = 0.8;
-      context.fillStyle = colors.background;
-      context.fillRect(left - 3, y - 6, width + 6, 12);
-      context.restore();
-      context.fillText(text, x, y);
-    };
+const backed = (
+  text: string,
+  x: number,
+  y: number,
+  align: CanvasTextAlign,
+): void => {
+  context.textAlign = align;
+  const width = context.measureText(text).width;
+  const left =
+    align === "left" ? x : align === "right" ? x - width : x - width / 2;
+  context.save();
+  context.globalAlpha = 0.8;
+  context.fillStyle = colors.background;
+  context.fillRect(left - 3, y - 6, width + 6, 12);
+  context.restore();
+  context.fillText(text, x, y);
+};
 ```
 
-  y labels: `backed(label, 4, tickY, "left")` skipping ticks within 14 px of the top/bottom edges; x labels: `backed(label, tickX, plot.height - 8, "center")` skipping the outer 30 px.
-  - Corner tags in `labelFont`/`fg2`: y name `backed(options.yLabel, 4, 12, "left")`, x name `backed(options.xLabel, plot.width - 4, plot.height - 8, "right")` (no rotation inline).
+y labels: `backed(label, 4, tickY, "left")` skipping ticks within 14 px of the top/bottom edges; x labels: `backed(label, tickX, plot.height - 8, "center")` skipping the outer 30 px.
+
+- Corner tags in `labelFont`/`fg2`: y name `backed(options.yLabel, 4, 12, "left")`, x name `backed(options.xLabel, plot.width - 4, plot.height - 8, "right")` (no rotation inline).
 
 In `panel.ts`:
 
@@ -2788,9 +2986,13 @@ Model + shell:
 (model test mirroring `toggleStats`), and:
 
 ```ts
-    this.registerFocusedPanelCommand("toggle-axis-style", "Panel: toggle axis style (gutter/inline)", (id) => {
-      this.workspace.toggleAxisStyle(id);
-    });
+this.registerFocusedPanelCommand(
+  "toggle-axis-style",
+  "Panel: toggle axis style (gutter/inline)",
+  (id) => {
+    this.workspace.toggleAxisStyle(id);
+  },
+);
 ```
 
 CSS: `.axis-style-indicator { font-size: 10px; color: var(--fg-4); white-space: nowrap; }`.
@@ -2798,14 +3000,17 @@ CSS: `.axis-style-indicator { font-size: 10px; color: var(--fg-4); white-space: 
 - [ ] **Step 4: e2e**
 
 ```ts
-  test("axis style toggles to inline via the command palette", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    await page.locator(".panel").first().click();
-    await page.keyboard.press("ControlOrMeta+k");
-    await page.keyboard.type("axis style");
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".axis-style-indicator").first()).toBeVisible();
-  });
+test("axis style toggles to inline via the command palette", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  await page.locator(".panel").first().click();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("axis style");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".axis-style-indicator").first()).toBeVisible();
+});
 ```
 
 (Match how the existing `workbench.spec.ts` palette tests open and drive ⌘K — reuse their idiom verbatim.)
@@ -2854,10 +3059,10 @@ In `panel.ts` `renderTiles`, replace the hardcoded labels:
 In `bind()`:
 
 ```ts
-    const title = required<HTMLElement>(this.element, ".panel-title");
-    title.addEventListener("dblclick", () => {
-      this.beginTitleEdit();
-    });
+const title = required<HTMLElement>(this.element, ".panel-title");
+title.addEventListener("dblclick", () => {
+  this.beginTitleEdit();
+});
 ```
 
 and:
@@ -2917,19 +3122,24 @@ CSS: `.panel-title[contenteditable]:not([contenteditable="false"]) { background:
 Extend Task 7's `dblclick` handler:
 
 ```ts
-    this.overlay.addEventListener("dblclick", (event) => {
-      const layout = this.renderer.lastLayout();
-      const state = this.lastState;
-      if (layout === null || state === null || state.mode !== "time") return;
-      const zone = axisEditZone(layout, state.axis_style, event.offsetX, event.offsetY);
-      if (zone !== null) {
-        this.beginAxisEdit(zone);
-        return;
-      }
-      if (insidePlot(layout, event.offsetX, event.offsetY)) {
-        this.callbacks.onFitView(this.id);
-      }
-    });
+this.overlay.addEventListener("dblclick", (event) => {
+  const layout = this.renderer.lastLayout();
+  const state = this.lastState;
+  if (layout === null || state === null || state.mode !== "time") return;
+  const zone = axisEditZone(
+    layout,
+    state.axis_style,
+    event.offsetX,
+    event.offsetY,
+  );
+  if (zone !== null) {
+    this.beginAxisEdit(zone);
+    return;
+  }
+  if (insidePlot(layout, event.offsetX, event.offsetY)) {
+    this.callbacks.onFitView(this.id);
+  }
+});
 ```
 
 Module-level, exported for unit tests:
@@ -2945,7 +3155,8 @@ export function axisEditZone(
   const { plot } = layout;
   if (axisStyle === "inline") {
     if (px <= plot.x + 90 && py <= plot.y + 18) return "y";
-    if (px >= plot.x + plot.width - 90 && py >= plot.y + plot.height - 18) return "x";
+    if (px >= plot.x + plot.width - 90 && py >= plot.y + plot.height - 18)
+      return "x";
     return null;
   }
   if (px < plot.x - 20) return "y";
@@ -3002,8 +3213,15 @@ CSS:
   width: 130px;
   z-index: 3;
 }
-.axis-label-editor-y { left: 4px; top: 45%; }
-.axis-label-editor-x { bottom: 4px; left: 50%; transform: translateX(-50%); }
+.axis-label-editor-y {
+  left: 4px;
+  top: 45%;
+}
+.axis-label-editor-x {
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
 ```
 
 Unit test (`panel.test.ts` is DOM-bound — instead test the exported pure zone function in a new small block inside `plot-math.test.ts`-style file or colocate in `plot-hit.test.ts`): assert gutter-style y/x/null zones and inline corner zones for a fixed layout.
@@ -3027,31 +3245,37 @@ Unit test (`panel.test.ts` is DOM-bound — instead test the exported pure zone 
 - [ ] **Step 5: e2e**
 
 ```ts
-  test("double-click renames the panel title in place", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const title = page.locator(".panel-title").first();
-    await title.dblclick();
-    await page.keyboard.press("ControlOrMeta+a");
-    await page.keyboard.type("Body velocity");
-    await page.keyboard.press("Enter");
-    await expect(title).toHaveText("Body velocity");
-    // Escape reverts
-    await title.dblclick();
-    await page.keyboard.type("scratch");
-    await page.keyboard.press("Escape");
-    await expect(title).toHaveText("Body velocity");
-  });
+test("double-click renames the panel title in place", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const title = page.locator(".panel-title").first();
+  await title.dblclick();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("Body velocity");
+  await page.keyboard.press("Enter");
+  await expect(title).toHaveText("Body velocity");
+  // Escape reverts
+  await title.dblclick();
+  await page.keyboard.type("scratch");
+  await page.keyboard.press("Escape");
+  await expect(title).toHaveText("Body velocity");
+});
 
-  test("double-click in the left gutter edits the y-axis name", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const overlay = page.locator(".overlay-canvas").first();
-    await overlay.dblclick({ position: { x: 10, y: 120 } });
-    const editor = page.locator(".axis-label-editor");
-    await expect(editor).toBeVisible();
-    await page.keyboard.type("velocity (m/s)");
-    await page.keyboard.press("Enter");
-    await expect(editor).toHaveCount(0);
-  });
+test("double-click in the left gutter edits the y-axis name", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const overlay = page.locator(".overlay-canvas").first();
+  await overlay.dblclick({ position: { x: 10, y: 120 } });
+  const editor = page.locator(".axis-label-editor");
+  await expect(editor).toBeVisible();
+  await page.keyboard.type("velocity (m/s)");
+  await page.keyboard.press("Enter");
+  await expect(editor).toHaveCount(0);
+});
 ```
 
 - [ ] **Step 6: Gates and commit**
@@ -3099,13 +3323,25 @@ test("series stroke width follows options and emphasis dims the rest", () => {
   const { canvas } = fakeCanvas(640, 360, recording);
   const renderer = new CanvasRenderer(canvas);
   renderer.setPalette(TEST_PALETTE);
-  renderer.render(twoSeriesResponse, { min: 0, max: 10 }, {
-    ...options,
-    widths: [2.5, 1.4],
-    emphasisIndex: 0,
-  });
-  expect(recording.calls.some((call) => call.op === "lineWidth" && call.value === 2.9)).toBe(true); // 2.5 + 0.4 emphasis
-  expect(recording.calls.some((call) => call.op === "globalAlpha" && call.value === 0.35)).toBe(true);
+  renderer.render(
+    twoSeriesResponse,
+    { min: 0, max: 10 },
+    {
+      ...options,
+      widths: [2.5, 1.4],
+      emphasisIndex: 0,
+    },
+  );
+  expect(
+    recording.calls.some(
+      (call) => call.op === "lineWidth" && call.value === 2.9,
+    ),
+  ).toBe(true); // 2.5 + 0.4 emphasis
+  expect(
+    recording.calls.some(
+      (call) => call.op === "globalAlpha" && call.value === 0.35,
+    ),
+  ).toBe(true);
 });
 ```
 
@@ -3116,17 +3352,17 @@ test("series stroke width follows options and emphasis dims the rest", () => {
 `RenderOptions` gains the two optional fields. In `render(...)`'s series loop pass index context, and in `drawSeries` add parameters `width: number` and `dimmed: boolean`:
 
 ```ts
-      const emphasized = options.emphasisIndex === index;
-      const dimmed = options.emphasisIndex !== undefined && !emphasized;
-      this.drawSeries(
-        context,
-        project,
-        series,
-        colors.series[style.colorIndex] ?? colors.fg2,
-        style.dash,
-        (options.widths?.[index] ?? 1.4) + (emphasized ? 0.4 : 0),
-        dimmed,
-      );
+const emphasized = options.emphasisIndex === index;
+const dimmed = options.emphasisIndex !== undefined && !emphasized;
+this.drawSeries(
+  context,
+  project,
+  series,
+  colors.series[style.colorIndex] ?? colors.fg2,
+  style.dash,
+  (options.widths?.[index] ?? 1.4) + (emphasized ? 0.4 : 0),
+  dimmed,
+);
 ```
 
 and in `drawSeries` set `context.lineWidth = width;` and wrap the stroke with `context.globalAlpha = dimmed ? 0.35 : 1;` (restore to 1 after `stroke()`).
@@ -3143,14 +3379,36 @@ test("setSeriesStyle and removeSeries update series and prune annotations", () =
   const panel = model.addPanelRow();
   model.addSeries(panel.id, "a/b");
   model.addSeries(panel.id, "a/c");
-  model.setSeriesStyle(panel.id, "a/b", { color_slot: 5, dash: "dot", width: 2.5 });
-  const styled = model.panel(panel.id)?.series.find((series) => series.path === "a/b");
+  model.setSeriesStyle(panel.id, "a/b", {
+    color_slot: 5,
+    dash: "dot",
+    width: 2.5,
+  });
+  const styled = model
+    .panel(panel.id)
+    ?.series.find((series) => series.path === "a/b");
   expect(styled).toMatchObject({ color_slot: 5, dash: "dot", width: 2.5 });
-  model.addAnnotation(panel.id, { id: "ann-1", series_path: "a/b", time: 0, value: 0, label: "" });
-  model.addAnnotation(panel.id, { id: "ann-2", series_path: "a/c", time: 0, value: 0, label: "" });
+  model.addAnnotation(panel.id, {
+    id: "ann-1",
+    series_path: "a/b",
+    time: 0,
+    value: 0,
+    label: "",
+  });
+  model.addAnnotation(panel.id, {
+    id: "ann-2",
+    series_path: "a/c",
+    time: 0,
+    value: 0,
+    label: "",
+  });
   model.removeSeries(panel.id, "a/b");
-  expect(model.panel(panel.id)?.series.map((series) => series.path)).toEqual(["a/c"]);
-  expect(model.panel(panel.id)?.annotations.map((annotation) => annotation.id)).toEqual(["ann-2"]);
+  expect(model.panel(panel.id)?.series.map((series) => series.path)).toEqual([
+    "a/c",
+  ]);
+  expect(
+    model.panel(panel.id)?.annotations.map((annotation) => annotation.id),
+  ).toEqual(["ann-2"]);
 });
 ```
 
@@ -3225,7 +3483,8 @@ Implement:
   }
 ```
 
-  Change `legendChips` to `HTMLElement[]` and verify `layoutLegend`'s width math still reads `chip.offsetWidth` (it does — the type widens).
+Change `legendChips` to `HTMLElement[]` and verify `layoutLegend`'s width math still reads `chip.offsetWidth` (it does — the type widens).
+
 - Emphasis re-render from caches:
 
 ```ts
@@ -3240,7 +3499,7 @@ Implement:
   }
 ```
 
-  and in `renderTiles`, derive `emphasisIndex` against the **shown** tile order:
+and in `renderTiles`, derive `emphasisIndex` against the **shown** tile order:
 
 ```ts
       widths: shown.map((tile) => bySeries.get(tile.signal_path)?.width ?? 1.4),
@@ -3384,21 +3643,97 @@ Also call `this.closeInspector()` in `update()` when the series no longer exists
 - [ ] **Step 6: CSS**
 
 ```css
-.legend-chip { display: inline-flex; align-items: center; }
-.legend-chip-body { display: inline-flex; gap: 4px; align-items: center; background: none; border: none; color: var(--fg-2); font: 10.5px var(--font-ui); cursor: pointer; padding: 1px 2px 1px 6px; }
-.legend-chip.muted .legend-chip-body { color: var(--fg-4); text-decoration: line-through; }
-.legend-chip.muted .legend-line { opacity: 0.4; }
-.legend-chip-caret { background: none; border: none; color: var(--fg-4); cursor: pointer; padding: 1px 4px 1px 0; }
-.series-inspector { position: absolute; width: 196px; background: var(--surface-2); box-shadow: var(--elev-2, 0 4px 16px rgba(0,0,0,.4)); border: 1px solid var(--border); border-radius: 2px; padding: 8px; font-size: 10.5px; z-index: 5; }
-.inspector-path { color: var(--fg-1); font-family: var(--font-mono); margin-bottom: 6px; overflow-wrap: anywhere; }
-.inspector-slots { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin-bottom: 6px; }
-.inspector-slot { height: 12px; border: none; border-radius: 1px; cursor: pointer; }
-.inspector-slot.active { box-shadow: 0 0 0 1px var(--fg-1); }
-.inspector-dashes { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
-.inspector-dash { background: var(--surface-3); border: none; border-radius: 2px; color: var(--fg-3); padding: 1px 6px; cursor: pointer; }
-.inspector-dash.active { background: var(--surface-4); color: var(--fg-1); }
-.inspector-dashes input[type="range"] { flex: 1; min-width: 0; }
-.inspector-remove { background: var(--surface-3); border: none; border-radius: 2px; color: var(--status-error, #e5484d); padding: 1px 8px; cursor: pointer; }
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+}
+.legend-chip-body {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--fg-2);
+  font: 10.5px var(--font-ui);
+  cursor: pointer;
+  padding: 1px 2px 1px 6px;
+}
+.legend-chip.muted .legend-chip-body {
+  color: var(--fg-4);
+  text-decoration: line-through;
+}
+.legend-chip.muted .legend-line {
+  opacity: 0.4;
+}
+.legend-chip-caret {
+  background: none;
+  border: none;
+  color: var(--fg-4);
+  cursor: pointer;
+  padding: 1px 4px 1px 0;
+}
+.series-inspector {
+  position: absolute;
+  width: 196px;
+  background: var(--surface-2);
+  box-shadow: var(--elev-2, 0 4px 16px rgba(0, 0, 0, 0.4));
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 8px;
+  font-size: 10.5px;
+  z-index: 5;
+}
+.inspector-path {
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.inspector-slots {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+  margin-bottom: 6px;
+}
+.inspector-slot {
+  height: 12px;
+  border: none;
+  border-radius: 1px;
+  cursor: pointer;
+}
+.inspector-slot.active {
+  box-shadow: 0 0 0 1px var(--fg-1);
+}
+.inspector-dashes {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.inspector-dash {
+  background: var(--surface-3);
+  border: none;
+  border-radius: 2px;
+  color: var(--fg-3);
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.inspector-dash.active {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+.inspector-dashes input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+.inspector-remove {
+  background: var(--surface-3);
+  border: none;
+  border-radius: 2px;
+  color: var(--status-error, #e5484d);
+  padding: 1px 8px;
+  cursor: pointer;
+}
 ```
 
 (Reuse the existing status-error token name from `tokens.css` — check its exact name and drop the fallback.) Adjust the existing `.legend-chip` button rules that assumed the chip itself was a `<button>`.
@@ -3410,21 +3745,24 @@ Also call `this.closeInspector()` in `update()` when the series no longer exists
 - [ ] **Step 8: e2e**
 
 ```ts
-  test("the legend caret opens the inspector; remove drops the series", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
-    const panel = page.locator(".panel").first();
-    await expect(panel.locator(".legend-chip")).toHaveCount(2);
-    await panel.locator(".legend-chip-caret").first().click();
-    const inspector = page.locator(".series-inspector");
-    await expect(inspector).toBeVisible();
-    await expect(inspector.locator(".inspector-slot")).toHaveCount(8);
-    await inspector.locator(".inspector-dash", { hasText: "dot" }).click();
-    await expect(inspector).toBeHidden();
-    await panel.locator(".legend-chip-caret").first().click();
-    await page.locator(".series-inspector .inspector-remove").click();
-    await expect(panel.locator(".legend-chip")).toHaveCount(1);
-    // right-click is a shortcut, not the only path — caret already proved the primary path
-  });
+test("the legend caret opens the inspector; remove drops the series", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "desktop interaction");
+  const panel = page.locator(".panel").first();
+  await expect(panel.locator(".legend-chip")).toHaveCount(2);
+  await panel.locator(".legend-chip-caret").first().click();
+  const inspector = page.locator(".series-inspector");
+  await expect(inspector).toBeVisible();
+  await expect(inspector.locator(".inspector-slot")).toHaveCount(8);
+  await inspector.locator(".inspector-dash", { hasText: "dot" }).click();
+  await expect(inspector).toBeHidden();
+  await panel.locator(".legend-chip-caret").first().click();
+  await page.locator(".series-inspector .inspector-remove").click();
+  await expect(panel.locator(".legend-chip")).toHaveCount(1);
+  // right-click is a shortcut, not the only path — caret already proved the primary path
+});
 ```
 
 - [ ] **Step 9: Gates and commit**
@@ -3460,7 +3798,10 @@ Advertise the bindings in the status bar exactly as the spec's hint strip, recor
 In `shellMarkup()`:
 
 ```html
-      <span class="gesture-hint">drag box-zoom · wheel t · ⇧wheel y · right-drag pan · dbl-click fit · click datatip</span>
+<span class="gesture-hint"
+  >drag box-zoom · wheel t · ⇧wheel y · right-drag pan · dbl-click fit · click
+  datatip</span
+>
 ```
 
 Check `app.spec.ts`/`workbench.spec.ts` for assertions on the old hint text and update them.
