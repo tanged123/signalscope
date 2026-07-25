@@ -61,6 +61,8 @@ export interface PanelCallbacks {
   onMaximize(id: string): void;
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignal(id: string, path: string): void;
+  onSetXSignal(id: string, path: string): void;
+  onExitXy(id: string): void;
   onToggleSeries(id: string, path: string): void;
   onResized(id: string): void;
   onCursor(
@@ -198,6 +200,9 @@ export class PanelView {
         this.callbacks.onSelectMode(this.id, button.dataset.mode as PanelMode);
       });
     }
+    required(this.element, ".x-chip").addEventListener("click", () => {
+      this.callbacks.onExitXy(this.id);
+    });
     const header = required<HTMLElement>(this.element, ".panel-header");
     required<HTMLElement>(this.element, ".panel-title").addEventListener(
       "dblclick",
@@ -210,22 +215,26 @@ export class PanelView {
       event.dataTransfer?.setData(PANEL_DRAG_TYPE, this.id);
     });
     this.element.addEventListener("dragover", (event) => {
-      if (hasDragType(event, SIGNAL_DRAG_TYPE)) {
-        event.preventDefault();
-        this.element.classList.add("drop-target");
-      }
+      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      event.preventDefault();
+      this.element.classList.add("drop-target");
+      this.setDropStripVisible(true);
+      this.element.classList.toggle("drop-x", this.overStrip(event));
     });
     this.element.addEventListener("dragleave", () => {
-      this.element.classList.remove("drop-target");
+      this.element.classList.remove("drop-target", "drop-x");
+      this.setDropStripVisible(false);
     });
     this.element.addEventListener("drop", (event) => {
-      this.element.classList.remove("drop-target");
+      const asX = this.overStrip(event);
+      this.element.classList.remove("drop-target", "drop-x");
+      this.setDropStripVisible(false);
       const path = dragData(event, SIGNAL_DRAG_TYPE);
-      if (path !== null) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.callbacks.onDropSignal(this.id, path);
-      }
+      if (path === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (asX) this.callbacks.onSetXSignal(this.id, path);
+      else this.callbacks.onDropSignal(this.id, path);
     });
     this.overlay.addEventListener("pointermove", (event) => {
       if (event.pointerType === "touch" || this.dragging) return;
@@ -323,6 +332,15 @@ export class PanelView {
       ".mode-pill",
     )) {
       button.classList.toggle("active", button.dataset.mode === state.mode);
+    }
+    const xChip = required<HTMLButtonElement>(this.element, ".x-chip");
+    xChip.hidden = !(state.mode === "xy" && state.x_signal !== null);
+    if (!xChip.hidden && state.x_signal !== null) {
+      xChip.replaceChildren(
+        chipPrefix("x:"),
+        document.createTextNode(state.x_signal.split("/").slice(-2).join("/")),
+      );
+      xChip.title = `X axis: ${state.x_signal} — click to return to time mode`;
     }
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
       maximized ? "Restore panel" : "Maximize panel";
@@ -496,6 +514,23 @@ export class PanelView {
       axisStyle: state.axis_style,
     };
     return this.renderer.renderPaths(paths, options);
+  }
+
+  private setDropStripVisible(visible: boolean): void {
+    required<HTMLElement>(this.element, ".xy-drop-strip").hidden = !visible;
+  }
+
+  /** True when the pointer is inside the 36px strip at the plot's foot. */
+  private overStrip(event: DragEvent): boolean {
+    const strip = required<HTMLElement>(this.element, ".xy-drop-strip");
+    if (strip.hidden) return false;
+    const rect = strip.getBoundingClientRect();
+    return (
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom
+    );
   }
 
   invalidateTheme(): void {
@@ -1076,6 +1111,13 @@ export class PanelView {
       });
     });
     dashes.append(width);
+    const useAsX = document.createElement("button");
+    useAsX.className = "inspector-action";
+    useAsX.textContent = "use as X";
+    useAsX.addEventListener("click", () => {
+      this.closeInspector();
+      this.callbacks.onSetXSignal(this.id, path);
+    });
     const remove = document.createElement("button");
     remove.className = "inspector-remove";
     remove.textContent = "remove";
@@ -1083,7 +1125,7 @@ export class PanelView {
       this.closeInspector();
       this.callbacks.onRemoveSeries(this.id, path);
     });
-    popover.append(pathRow, slots, dashes, remove);
+    popover.append(pathRow, slots, dashes, useAsX, remove);
     this.element.append(popover);
     const panelRect = this.element.getBoundingClientRect();
     popover.style.left = `${String(
@@ -1160,6 +1202,13 @@ function axisName(path: string, unit: string | null): string {
   return unit === null ? leaf : `${leaf} (${unit})`;
 }
 
+function chipPrefix(text: string): HTMLElement {
+  const prefix = document.createElement("span");
+  prefix.className = "axis-chip-prefix";
+  prefix.textContent = text;
+  return prefix;
+}
+
 /**
  * Flattens a trace to renderer vertices. A `window` restricts output to that
  * time span; vertices outside become NaN so the pen lifts rather than
@@ -1232,6 +1281,7 @@ function panelMarkup(): string {
         ({ mode, label }) =>
           `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
       ).join("")}</span>
+      <button class="axis-chip x-chip" hidden></button>
       <span class="panel-legend"></span>
       <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
@@ -1251,6 +1301,9 @@ function panelMarkup(): string {
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
       <div class="panel-empty" hidden></div>
+      <div class="xy-drop-strip" hidden>
+        ⇄ <span>drop here — use as X axis (switches panel to XY)</span>
+      </div>
     </div>
     <div class="panel-stats" hidden></div>
     <div class="panel-annotations" hidden></div>`;

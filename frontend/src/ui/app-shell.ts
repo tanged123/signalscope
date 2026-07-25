@@ -103,6 +103,15 @@ export class AppShell {
         onDropSignal: (id, path) => {
           this.plotSignal(path, id);
         },
+        onSetXSignal: (id, path) => {
+          this.workspace.setMode(id, "xy");
+          this.workspace.setXSignal(id, path);
+          this.workspace.focusPanel(id);
+          this.afterLayoutChange();
+        },
+        onExitXy: (id) => {
+          this.exitXy(id);
+        },
         onToggleSeries: (id, path) => {
           this.workspace.toggleSeriesVisible(id, path);
           this.workspaceView?.refreshPanelStates();
@@ -321,6 +330,21 @@ export class AppShell {
       },
     );
     this.registerFocusedPanelCommand(
+      "panel-switch-xy",
+      "Panel: switch to XY mode",
+      (id) => {
+        this.workspace.setMode(id, "xy");
+        this.workspace.promoteSeriesToX(id);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-clear-x-signal",
+      "Panel: return to time mode",
+      (id) => {
+        this.exitXy(id);
+      },
+    );
+    this.registerFocusedPanelCommand(
       "clear-annotations",
       "Panel: clear annotations",
       (id) => {
@@ -482,7 +506,20 @@ export class AppShell {
         this.afterLayoutChange();
       },
     }));
-    return [...commands, ...tabs, ...panels, ...signals];
+    const focused = this.workspace.focusedPanelId();
+    const xSignals =
+      focused === null
+        ? []
+        : this.signals.map((summary) => ({
+            title: `Panel: set X signal… ${summary.path}`,
+            hint: "then pick from tree",
+            run: () => {
+              this.workspace.setMode(focused, "xy");
+              this.workspace.setXSignal(focused, summary.path);
+              this.afterLayoutChange();
+            },
+          }));
+    return [...commands, ...tabs, ...panels, ...xSignals, ...signals];
   }
 
   private bindControls(): void {
@@ -804,6 +841,15 @@ export class AppShell {
       this.renderTiles();
       this.scheduleRefresh();
     }
+  }
+
+  /** Returns an XY panel to time mode, restoring its x signal as a series. */
+  private exitXy(panelId: string): void {
+    this.workspace.setXSignal(panelId, null);
+    this.workspace.setColorSignal(panelId, null);
+    this.workspace.setMode(panelId, "time");
+    this.workspace.clearPanelXRange(panelId);
+    this.afterLayoutChange();
   }
 
   private setCursor(
