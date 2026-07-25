@@ -46,7 +46,7 @@ function comboFor(event: KeyboardEvent): string | null {
   return key;
 }
 
-/** Display form of a `comboFor` combo, e.g. "mod+k" → "⌘K". */
+/** Display form of a `comboFor` combo, e.g. "mod+p" → "⌘P". */
 export function formatCombo(keys: string): string {
   return keys
     .split("+")

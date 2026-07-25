@@ -88,19 +88,42 @@ export function valueAtTime(
   time: number,
 ): number | null {
   if (bins.length === 0) return null;
+  const center = (bin: EnvelopeBin): number => (bin.t0 + bin.t1) * 0.5;
   let low = 0;
   let high = bins.length - 1;
   while (low < high) {
     const mid = (low + high) >> 1;
-    if ((bins[mid]?.t1 ?? Number.NEGATIVE_INFINITY) < time) low = mid + 1;
+    if (center(bins[mid] as EnvelopeBin) < time) low = mid + 1;
     else high = mid;
   }
-  const hit = bins[low];
-  if (hit === undefined || time < hit.t0 || time > hit.t1) return null;
-  if (hit.first === null || hit.last === null) return null;
-  if (hit.t1 === hit.t0) return hit.last;
-  const alpha = (time - hit.t0) / (hit.t1 - hit.t0);
-  return hit.first + (hit.last - hit.first) * alpha;
+  const next = bins[low];
+  if (next === undefined) return null;
+  const nextCenter = center(next);
+  if (time >= next.t0 && time <= next.t1 && next.t1 > next.t0) {
+    if (next.first === null || next.last === null) return null;
+    const alpha = (time - next.t0) / (next.t1 - next.t0);
+    return next.first + (next.last - next.first) * alpha;
+  }
+  if (time === nextCenter) return next.last;
+  const previous = bins[low - 1];
+  if (
+    previous === undefined ||
+    previous.last === null ||
+    next.first === null ||
+    next.has_gap
+  ) {
+    return null;
+  }
+  const previousCenter = center(previous);
+  if (
+    time < previousCenter ||
+    time > nextCenter ||
+    nextCenter <= previousCenter
+  ) {
+    return null;
+  }
+  const alpha = (time - previousCenter) / (nextCenter - previousCenter);
+  return previous.last + (next.first - previous.last) * alpha;
 }
 
 const MINUS = "−";

@@ -597,7 +597,7 @@ kbd {
   cursor: crosshair;
 }
 
-.axis-style-indicator {
+.panel-axis-toggle {
   color: var(--fg-4);
   font-size: 10px;
   white-space: nowrap;
@@ -984,7 +984,13 @@ kbd {
 }
 
 .tree-favorites {
+  min-height: var(--tree-row-height);
   padding: 0 6px;
+}
+
+.tree-favorites.drop-target {
+  outline: 1px solid var(--amber-7);
+  outline-offset: -1px;
 }
 
 .tree-scroll {

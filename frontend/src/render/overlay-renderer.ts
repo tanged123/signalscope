@@ -21,11 +21,14 @@ export interface OverlayPalette {
 
 export interface OverlayState {
   cursorT: number | null;
+  cursorStyle: CursorStyle;
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   annotations: readonly Annotation[];
   annotationColorIndices: readonly number[];
   showDelta: boolean;
 }
+
+export type CursorStyle = "none" | "dot" | "line";
 
 export class OverlayRenderer {
   private palette: OverlayPalette | null = null;
@@ -47,7 +50,7 @@ export class OverlayRenderer {
     context.clearRect(0, 0, width, height);
     if (layout === null) return;
     const palette = this.resolvePalette();
-    this.drawCursor(context, layout, state.cursorT, palette);
+    this.drawCursor(context, layout, state.cursorT, state.cursorStyle, palette);
     this.drawAnnotations(context, layout, state, palette);
     if (state.box !== null) this.drawBox(context, state.box, palette);
   }
@@ -56,9 +59,11 @@ export class OverlayRenderer {
     context: CanvasRenderingContext2D,
     layout: PlotLayout,
     cursorT: number | null,
+    cursorStyle: CursorStyle,
     palette: OverlayPalette,
   ): void {
     if (
+      cursorStyle === "none" ||
       cursorT === null ||
       cursorT < layout.xRange.min ||
       cursorT > layout.xRange.max
@@ -70,11 +75,17 @@ export class OverlayRenderer {
     context.strokeStyle = palette.amber;
     context.globalAlpha = 0.7;
     context.lineWidth = 1;
-    context.setLineDash([2, 2]);
     context.beginPath();
-    context.moveTo(x, layout.plot.y);
-    context.lineTo(x, layout.plot.y + layout.plot.height);
-    context.stroke();
+    if (cursorStyle === "dot") {
+      context.fillStyle = palette.amber;
+      context.arc(x, layout.plot.y + layout.plot.height, 2.5, 0, Math.PI * 2);
+      context.fill();
+    } else {
+      context.setLineDash([2, 2]);
+      context.moveTo(x, layout.plot.y);
+      context.lineTo(x, layout.plot.y + layout.plot.height);
+      context.stroke();
+    }
     context.restore();
   }
 

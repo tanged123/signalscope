@@ -51,7 +51,9 @@ export const SERIES_TOKENS = [
   "--series-8",
 ] as const;
 
-export const COLOR_SLOTS = SERIES_TOKENS.length;
+// MATLAB advances line style after exhausting its categorical color order.
+// SignalScope keeps --series-8 as the first dashed rollover for compatibility.
+export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const DASH_CYCLE = ["solid", "dash", "dot"] as const;
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
@@ -158,6 +160,7 @@ export class CanvasRenderer {
       );
       this.drawSeries(
         context,
+        plot,
         project,
         series,
         colors.series[style.colorIndex] ?? colors.fg2,
@@ -254,15 +257,6 @@ export class CanvasRenderer {
       context.fillText(yLabels[index] ?? "", plot.x - 11, y);
     });
 
-    if (yRange.min < 0 && yRange.max > 0) {
-      const zero = Math.round(toY(0)) + 0.5;
-      context.strokeStyle = colors.fg3;
-      context.beginPath();
-      context.moveTo(plot.x, zero);
-      context.lineTo(plot.x + plot.width, zero);
-      context.stroke();
-    }
-
     context.strokeStyle = colors.fg3;
     context.beginPath();
     context.moveTo(plot.x + 0.5, plot.y);
@@ -297,6 +291,7 @@ export class CanvasRenderer {
 
   private drawSeries(
     context: CanvasRenderingContext2D,
+    plot: PlotRect,
     project: Projection,
     series: SignalTile,
     color: string,
@@ -306,6 +301,10 @@ export class CanvasRenderer {
   ): void {
     const { toX, toY } = project;
 
+    context.save();
+    context.beginPath();
+    context.rect(plot.x, plot.y, plot.width, plot.height);
+    context.clip();
     context.strokeStyle = color;
     context.lineWidth = width;
     context.globalAlpha = dimmed ? 0.35 : 1;
@@ -337,6 +336,7 @@ export class CanvasRenderer {
     context.stroke();
     context.globalAlpha = 1;
     context.setLineDash([]);
+    context.restore();
   }
 
   private drawInlineAxes(

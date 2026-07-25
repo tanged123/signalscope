@@ -34,6 +34,23 @@ export class SignalTreeView {
     listElement.addEventListener("scroll", () => {
       this.renderRows();
     });
+    favoritesElement.addEventListener("dragover", (event) => {
+      if (event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) === true) {
+        event.preventDefault();
+        favoritesElement.classList.add("drop-target");
+      }
+    });
+    favoritesElement.addEventListener("dragleave", () => {
+      favoritesElement.classList.remove("drop-target");
+    });
+    favoritesElement.addEventListener("drop", (event) => {
+      favoritesElement.classList.remove("drop-target");
+      const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
+      if (path !== undefined && path !== "" && !this.favorites.includes(path)) {
+        event.preventDefault();
+        this.callbacks.onToggleFavorite(path);
+      }
+    });
   }
 
   setSignals(paths: readonly string[]): void {
@@ -139,6 +156,10 @@ export class SignalTreeView {
     star.className = `tree-star ${this.favorites.includes(path) ? "active" : ""}`;
     star.textContent = "★";
     star.title = "Toggle favorite";
+    star.setAttribute(
+      "aria-label",
+      `${this.favorites.includes(path) ? "Remove" : "Add"} ${path} ${this.favorites.includes(path) ? "from" : "to"} favorites`,
+    );
     star.addEventListener("click", (event) => {
       event.stopPropagation();
       this.callbacks.onToggleFavorite(path);
@@ -157,7 +178,7 @@ export class SignalTreeView {
     if (this.favorites.length === 0) {
       const none = document.createElement("div");
       none.className = "tree-empty";
-      none.textContent = "—";
+      none.textContent = "Star a signal or drop it here";
       this.favoritesElement.replaceChildren(none);
       return;
     }

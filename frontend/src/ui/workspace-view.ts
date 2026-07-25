@@ -9,6 +9,7 @@ import {
   hasDragType,
   type PanelCallbacks,
 } from "./panel";
+import type { CursorStyle } from "../render/overlay-renderer";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -25,6 +26,7 @@ export interface WorkspaceCallbacks extends PanelCallbacks {
 export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
   private mountedKey = "";
+  private cursorStyle: CursorStyle = "dot";
 
   constructor(
     private readonly root: HTMLElement,
@@ -131,6 +133,11 @@ export class WorkspaceView {
     for (const view of this.views.values()) view.setCursor(cursorT);
   }
 
+  setCursorStyle(cursorStyle: CursorStyle): void {
+    this.cursorStyle = cursorStyle;
+    for (const view of this.views.values()) view.setCursorStyle(cursorStyle);
+  }
+
   resetYAxis(id: string): void {
     this.views.get(id)?.resetYAxis();
   }
@@ -144,6 +151,7 @@ export class WorkspaceView {
     let view = this.views.get(id);
     if (view === undefined) {
       view = new PanelView(id, this.callbacks);
+      view.setCursorStyle(this.cursorStyle);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);
     }
@@ -303,10 +311,10 @@ function emptyState(hasSignals: boolean): HTMLElement {
   hint.className = "empty-hint";
   if (hasSignals) {
     headline.textContent = "No panels open.";
-    hint.textContent = "New panel (N) · drag a signal here · ⌘K commands";
+    hint.textContent = "New panel (N) · drag a signal here · ⌘P commands";
   } else {
     headline.textContent = "No data loaded.";
-    hint.textContent = "Open CSV / MCAP (O) · ⌘K commands";
+    hint.textContent = "Open CSV / MCAP (O) · ⌘P commands";
   }
   empty.append(headline, hint);
   return empty;

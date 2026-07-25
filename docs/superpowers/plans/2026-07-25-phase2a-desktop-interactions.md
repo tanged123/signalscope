@@ -4,6 +4,14 @@
 
 **Goal:** Give every time-series panel the Final Spec's desktop interaction set — wheel/drag/box zoom, pan, double-click fit, a linked amber cursor with readouts, pinned annotations with delta readouts, a visible-statistics strip, gutter/inline axis styles, editable labels, and a split legend inspector.
 
+> **Acceptance amendment (2026-07-25):** Desktop review replaced box zoom with
+> dominant-direction x/y drag zoom, made ordinary wheel zoom both axes, and
+> added off/dot/line cursor modes (tooltip and live values in line mode only).
+> It also promoted axis style to a visible panel control, made Favorites a drop
+> target, removed the emphasized zero datum, clipped strokes to the plot, moved
+> the command palette to Mod+P, fixed level-zero tooltip interpolation, and
+> adopted the MATLAB-familiar series order recorded in ADR 0011.
+
 **Architecture:** All interaction state flows through the existing controller spine: gestures are detected in `PanelView` (which owns hit-testing because it holds the last rendered tiles and plot layout), translated into semantic callbacks, and applied by `AppShell` to `LinkedTimeModel` / `WorkspaceModel`, which re-render immediately from cached tiles and refetch density-bounded tiles behind a debounce. A second per-panel overlay canvas draws all transient amber interaction ink (cursor, rubber band, markers, deltas) without repainting series. Two schema changes underpin the features: envelope bins gain finite sums (protocol v3, cache v2) so mean/RMS of the visible region are computable from displayed bins on both hosts, and the session schema gains axis labels plus per-panel local time windows (v4).
 
 **Tech Stack:** TypeScript (vanilla, Vite, Canvas 2D), Vitest, Playwright; Rust (`scope-core`, `scope-protocol`) for the bin-sum and session-migration tasks. No new dependencies on either side.

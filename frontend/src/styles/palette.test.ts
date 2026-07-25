@@ -1,16 +1,18 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { SERIES_TOKENS } from "../render/canvas-renderer";
+import { COLOR_SLOTS, SERIES_TOKENS } from "../render/canvas-renderer";
 
 const TOKENS = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 
-const BAND = { dark: [0.48, 0.67], light: [0.43, 0.77] } as const;
-const CHROMA_FLOOR = 0.1;
-const CVD_FLOOR = 8;
-const NORMAL_FLOOR = 15;
-const CONTRAST_MIN = 3;
-const AMBER_BAND = [55, 90] as const;
-const AMBER_DELTA_FLOOR = 10;
+const MATLAB_DEFAULT = [
+  "#0072bd",
+  "#d95319",
+  "#edb120",
+  "#7e2f8e",
+  "#77ac30",
+  "#4dbeee",
+  "#a2142f",
+] as const;
 
 const MACHADO = {
   protan: [
@@ -106,12 +108,14 @@ function token(selector: string, name: string): string {
 }
 
 function series(selector: string): string[] {
-  return SERIES_TOKENS.map((name) => token(selector, name));
+  return SERIES_TOKENS.slice(0, COLOR_SLOTS).map((name) =>
+    token(selector, name),
+  );
 }
 
 const THEMES = [
-  { name: "dark", selector: ":root", mode: "dark" },
-  { name: "light", selector: ':root[data-theme="light"]', mode: "light" },
+  { name: "dark", selector: ":root" },
+  { name: "light", selector: ':root[data-theme="light"]' },
 ] as const;
 
 describe("colour maths", () => {
@@ -134,60 +138,18 @@ describe("colour maths", () => {
   });
 });
 
-describe.each(THEMES)("$name series palette", ({ selector, mode }) => {
+describe.each(THEMES)("$name series palette", ({ selector }) => {
   const palette = series(selector);
 
-  it("keeps every slot inside the lightness band", () => {
-    const [lo, hi] = BAND[mode];
-    for (const hex of palette) {
-      expect(oklch(hex).l).toBeGreaterThanOrEqual(lo);
-      expect(oklch(hex).l).toBeLessThanOrEqual(hi);
-    }
+  it("uses MATLAB's canonical default order", () => {
+    expect(palette).toEqual(MATLAB_DEFAULT);
   });
 
-  it("keeps every slot above the chroma floor", () => {
-    for (const hex of palette) {
-      expect(oklch(hex).c).toBeGreaterThanOrEqual(CHROMA_FLOOR);
-    }
+  it("rolls slot eight over to MATLAB blue", () => {
+    expect(token(selector, "--series-8")).toBe(MATLAB_DEFAULT[0]);
   });
 
-  it("separates adjacent slots under protan and deutan vision", () => {
-    for (let index = 0; index < palette.length - 1; index += 1) {
-      const [first, second] = [palette[index] ?? "", palette[index + 1] ?? ""];
-      for (const kind of ["protan", "deutan"] as const) {
-        expect(deltaE(first, second, kind)).toBeGreaterThanOrEqual(CVD_FLOOR);
-      }
-    }
-  });
-
-  it("separates adjacent slots under normal vision", () => {
-    for (let index = 0; index < palette.length - 1; index += 1) {
-      expect(
-        deltaE(palette[index] ?? "", palette[index + 1] ?? ""),
-      ).toBeGreaterThanOrEqual(NORMAL_FLOOR);
-    }
-  });
-
-  it("reserves the amber hue band for interaction roles", () => {
-    const amber = oklch(token(selector, "--amber-7")).h;
-    expect(amber).toBeGreaterThanOrEqual(AMBER_BAND[0]);
-    expect(amber).toBeLessThanOrEqual(AMBER_BAND[1]);
-    for (const hex of palette) {
-      const { h } = oklch(hex);
-      expect(h < AMBER_BAND[0] || h > AMBER_BAND[1]).toBe(true);
-    }
-  });
-
-  it("keeps every slot perceptually clear of the amber tokens", () => {
-    for (const name of ["--amber-7", "--amber-9"] as const) {
-      const amber = token(selector, name);
-      for (const hex of palette) {
-        expect(deltaE(hex, amber)).toBeGreaterThanOrEqual(AMBER_DELTA_FLOOR);
-      }
-    }
-  });
-
-  it("never reuses an amber or status token as a series colour", () => {
+  it("does not reuse an amber or status token as a series colour", () => {
     const reserved = [
       "--amber-7",
       "--amber-9",
@@ -201,30 +163,6 @@ describe.each(THEMES)("$name series palette", ({ selector, mode }) => {
   });
 });
 
-it("holds hue identity for each slot across themes", () => {
-  const dark = series(":root");
-  const light = series(':root[data-theme="light"]');
-  for (let index = 0; index < dark.length; index += 1) {
-    const delta = Math.abs(
-      oklch(dark[index] ?? "").h - oklch(light[index] ?? "").h,
-    );
-    expect(Math.min(delta, 360 - delta)).toBeLessThanOrEqual(10);
-  }
-});
-
-it("meets the contrast floor on the dark surface", () => {
-  const surface = token(":root", "--surface-0");
-  for (const hex of series(":root")) {
-    expect(contrast(hex, surface)).toBeGreaterThanOrEqual(CONTRAST_MIN);
-  }
-});
-
-it("records the light surface contrast trade", () => {
-  const surface = token(':root[data-theme="light"]', "--surface-0");
-  const ratios = series(':root[data-theme="light"]').map((hex) =>
-    contrast(hex, surface),
-  );
-  const below = ratios.filter((ratio) => ratio < CONTRAST_MIN);
-  expect(below).toHaveLength(3);
-  for (const ratio of below) expect(ratio).toBeGreaterThanOrEqual(1.8);
+it("holds exact series identity across themes", () => {
+  expect(series(":root")).toEqual(series(':root[data-theme="light"]'));
 });

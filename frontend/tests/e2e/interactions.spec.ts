@@ -15,7 +15,12 @@ test.describe("desktop plot interactions", () => {
     const overlay = panel.locator(".overlay-canvas");
     await overlay.hover({ position: { x: 300, y: 120 } });
     await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+    await expect(page.locator(".plot-tip")).toBeHidden();
+    await page.locator(".cursor-style-toggle").click();
+    await overlay.hover({ position: { x: 300, y: 120 } });
+    await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
     await expect(page.locator(".plot-tip")).toBeVisible();
+    await expect(page.locator(".plot-tip-row").first()).not.toContainText("—");
 
     const readout = page.locator(".window-readout");
     const beforeWindow = await readout.textContent();
@@ -28,7 +33,7 @@ test.describe("desktop plot interactions", () => {
     await expect(panel.locator(".panel-stats")).toContainText("μ");
   });
 
-  test("box zoom and double-click fit round-trip the window", async ({
+  test("directional zoom and double-click fit round-trip the window", async ({
     page,
     isMobile,
   }) => {
@@ -38,9 +43,15 @@ test.describe("desktop plot interactions", () => {
     const overlay = page.locator(".overlay-canvas").first();
     const box = await overlay.boundingBox();
     if (box === null) throw new Error("overlay not laid out");
+    await page.mouse.move(box.x + 220, box.y + 50);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 225, box.y + 190, { steps: 6 });
+    await page.mouse.up();
+    await expect(readout).toHaveText(fitted ?? "");
+
     await page.mouse.move(box.x + 150, box.y + 60);
     await page.mouse.down();
-    await page.mouse.move(box.x + 420, box.y + 200, { steps: 6 });
+    await page.mouse.move(box.x + 420, box.y + 65, { steps: 6 });
     await page.mouse.up();
     await expect(readout).not.toHaveText(fitted ?? "");
     await overlay.dblclick({ position: { x: 300, y: 120 } });
@@ -60,16 +71,15 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.press("Enter");
     await expect(title).toHaveText("Body velocity");
 
-    await panel.locator(".panel-header").click();
-    await page.keyboard.press("ControlOrMeta+k");
-    await page.keyboard.type("axis style");
-    await page.keyboard.press("Enter");
-    await expect(panel.locator(".axis-style-indicator")).toBeVisible();
+    await panel.locator(".panel-axis-toggle").click();
+    await expect(panel.locator(".panel-axis-toggle")).toHaveText(
+      "axes: inline",
+    );
 
     await panel.locator(".legend-chip-caret").first().click();
     const inspector = panel.locator(".series-inspector");
     await expect(inspector).toBeVisible();
-    await expect(inspector.locator(".inspector-slot")).toHaveCount(8);
+    await expect(inspector.locator(".inspector-slot")).toHaveCount(7);
     await inspector.locator(".inspector-dash", { hasText: "dot" }).click();
     await expect(inspector).toBeHidden();
   });

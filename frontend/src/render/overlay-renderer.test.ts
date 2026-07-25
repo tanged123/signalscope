@@ -53,6 +53,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
   renderer.setPalette(palette);
   renderer.draw(layout, {
     cursorT: 30,
+    cursorStyle: "line",
     box: { x0: 100, y0: 50, x1: 200, y1: 150 },
     annotations: [],
     annotationColorIndices: [],

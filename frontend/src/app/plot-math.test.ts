@@ -66,6 +66,14 @@ test("valueAtTime interpolates drawn vertices and respects gaps", () => {
   expect(valueAtTime(bins, 2.5)).toBeNull();
 });
 
+test("valueAtTime interpolates between zero-width level-zero bins", () => {
+  const bins = [bin(0, 0, 0, 0), bin(1, 1, 10, 10), bin(2, 2, 20, 20)];
+  expect(valueAtTime(bins, 0.5)).toBeCloseTo(5, 9);
+  expect(valueAtTime(bins, 1.25)).toBeCloseTo(12.5, 9);
+  expect(valueAtTime(bins, -0.1)).toBeNull();
+  expect(valueAtTime(bins, 2.1)).toBeNull();
+});
+
 test("formatValue uses spec precision and minus glyph", () => {
   expect(formatValue(null)).toBe("—");
   expect(formatValue(223.456789)).toBe("223.4568");

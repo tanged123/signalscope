@@ -63,6 +63,12 @@ function recordingContext(charWidth = 6): {
     fillText(text: string, x: number, y: number): void {
       push("fillText", text, x, y);
     },
+    rect(x: number, y: number, width: number, height: number): void {
+      push("rect", x, y, width, height);
+    },
+    clip(): void {
+      push("clip");
+    },
     setLineDash(segments: number[]): void {
       push("setLineDash", [...segments]);
     },
@@ -116,14 +122,14 @@ const TEST_PALETTE: Palette = {
   fg3: "#737985",
   grid: "#1a1d24",
   series: [
-    "#407fd0",
-    "#a7451c",
-    "#29ab79",
-    "#5e57b2",
-    "#a6416b",
-    "#28a4b0",
-    "#247320",
-    "#db6c66",
+    "#0072bd",
+    "#d95319",
+    "#edb120",
+    "#7e2f8e",
+    "#77ac30",
+    "#4dbeee",
+    "#a2142f",
+    "#0072bd",
   ],
   fontMono: '"JetBrains Mono", monospace',
 };
@@ -239,16 +245,16 @@ describe("gutterWidth", () => {
 describe("resolveSeriesStyle", () => {
   it("bands the dash class by colour slot", () => {
     expect(resolveSeriesStyle(1, "solid").dash).toBe("solid");
-    expect(resolveSeriesStyle(8, "solid").dash).toBe("solid");
-    expect(resolveSeriesStyle(9, "solid").dash).toBe("dash");
-    expect(resolveSeriesStyle(16, "solid").dash).toBe("dash");
-    expect(resolveSeriesStyle(17, "solid").dash).toBe("dot");
+    expect(resolveSeriesStyle(7, "solid").dash).toBe("solid");
+    expect(resolveSeriesStyle(8, "solid").dash).toBe("dash");
+    expect(resolveSeriesStyle(14, "solid").dash).toBe("dash");
+    expect(resolveSeriesStyle(15, "solid").dash).toBe("dot");
   });
 
-  it("folds the colour index onto eight slots", () => {
+  it("folds the colour index onto the MATLAB-style cycle", () => {
     expect(resolveSeriesStyle(1, "solid").colorIndex).toBe(0);
-    expect(resolveSeriesStyle(9, "solid").colorIndex).toBe(0);
-    expect(resolveSeriesStyle(10, "solid").colorIndex).toBe(1);
+    expect(resolveSeriesStyle(8, "solid").colorIndex).toBe(0);
+    expect(resolveSeriesStyle(9, "solid").colorIndex).toBe(1);
   });
 
   it("lets an explicit user dash win and handles malformed slots", () => {
@@ -259,9 +265,9 @@ describe("resolveSeriesStyle", () => {
     );
   });
 
-  it("gives the first 24 slots distinct composite identities", () => {
+  it("gives the first 21 slots distinct composite identities", () => {
     const seen = new Set<string>();
-    for (let slot = 1; slot <= 24; slot += 1) {
+    for (let slot = 1; slot <= 21; slot += 1) {
       const style = resolveSeriesStyle(slot, "solid");
       const key = `${String(style.colorIndex)}:${style.dash}`;
       expect(seen.has(key)).toBe(false);
@@ -331,17 +337,17 @@ describe("render", () => {
     const strokes = calls
       .filter((call) => call.op === "=strokeStyle")
       .map((call) => call.args[0]);
-    expect(strokes).toContain("#407fd0");
-    expect(strokes).toContain("#29ab79");
+    expect(strokes).toContain("#0072bd");
+    expect(strokes).toContain("#edb120");
   });
 
-  it("dashes slot 9 and resets the pattern afterwards", () => {
+  it("dashes the first slot after the MATLAB color cycle", () => {
     const calls = renderOnce(
       [
         tile("a", [{ t0: 0, t1: 1, v: 1 }]),
         tile("b", [{ t0: 0, t1: 1, v: 2 }]),
       ],
-      { colorSlots: [1, 9] },
+      { colorSlots: [1, 8] },
     );
     const patterns = calls
       .filter((call) => call.op === "setLineDash")
@@ -350,11 +356,9 @@ describe("render", () => {
     expect(patterns.at(-1)).toBe(JSON.stringify([]));
   });
 
-  it("draws the zero datum with spine ink", () => {
+  it("clips series strokes to the plot rectangle", () => {
     const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])]);
-    const styles = calls
-      .filter((call) => call.op === "=strokeStyle")
-      .map((call) => call.args[0]);
-    expect(styles).toContain(TEST_PALETTE.fg3);
+    expect(calls.some((call) => call.op === "rect")).toBe(true);
+    expect(calls.some((call) => call.op === "clip")).toBe(true);
   });
 });

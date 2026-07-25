@@ -12,6 +12,7 @@ import {
 import { type SignalSummary, type TileResponse } from "../generated/protocol";
 import type { PanelState } from "../generated/session";
 import { resolveSeriesStyle } from "../render/canvas-renderer";
+import type { CursorStyle } from "../render/overlay-renderer";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
 import { SignalTreeView } from "./signal-tree";
@@ -19,6 +20,7 @@ import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
+const CURSOR_STYLES: readonly CursorStyle[] = ["none", "dot", "line"];
 
 export class AppShell {
   private readonly time = new LinkedTimeModel();
@@ -37,6 +39,7 @@ export class AppShell {
   private refreshTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
+  private cursorStyle: CursorStyle = "dot";
 
   constructor(
     private readonly root: HTMLElement,
@@ -133,6 +136,11 @@ export class AppShell {
         },
         onToggleStats: (id) => {
           this.workspace.toggleStats(id);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onToggleAxisStyle: (id) => {
+          this.workspace.toggleAxisStyle(id);
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
@@ -267,6 +275,13 @@ export class AppShell {
       "Split current panel right",
       (id) => void this.workspace.splitPanelRight(id),
     );
+    this.commands.register({
+      id: "cycle-cursor-style",
+      title: "Cursor: cycle off/dot/line",
+      run: () => {
+        this.cycleCursorStyle();
+      },
+    });
     this.registerFocusedPanelCommand(
       "zoom-in-time",
       "Panel: zoom in (time)",
@@ -385,7 +400,7 @@ export class AppShell {
     this.commands.register({
       id: "command-palette",
       title: "Command palette",
-      keys: "mod+k",
+      keys: "mod+p",
       run: () => {
         this.palette?.open();
       },
@@ -478,6 +493,12 @@ export class AppShell {
     required(this.root, ".formula-toggle").addEventListener("click", () => {
       this.commands.run("toggle-formula");
     });
+    required(this.root, ".cursor-style-toggle").addEventListener(
+      "click",
+      () => {
+        this.commands.run("cycle-cursor-style");
+      },
+    );
     const formula = required<HTMLFormElement>(this.root, ".formula-bar");
     formula.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -711,6 +732,7 @@ export class AppShell {
     cursorT: number | null,
     client: { x: number; y: number } | null,
   ): void {
+    if (this.cursorStyle === "none") cursorT = null;
     this.time.setCursor(cursorT);
     const state = this.time.snapshot();
     this.workspaceView?.setCursor(state.cursorT);
@@ -718,8 +740,32 @@ export class AppShell {
       state.cursorT === null
         ? "t = —"
         : `t = ${formatCursorTime(state.cursorT)}`;
-    this.renderTooltip(panelId, state.cursorT, client);
-    this.scheduleLiveValues(state.cursorT);
+    this.renderTooltip(
+      panelId,
+      this.cursorStyle === "line" ? state.cursorT : null,
+      this.cursorStyle === "line" ? client : null,
+    );
+    this.scheduleLiveValues(this.cursorStyle === "line" ? state.cursorT : null);
+  }
+
+  private cycleCursorStyle(): void {
+    const current = CURSOR_STYLES.indexOf(this.cursorStyle);
+    this.cursorStyle =
+      CURSOR_STYLES[(current + 1) % CURSOR_STYLES.length] ?? "dot";
+    this.workspaceView?.setCursorStyle(this.cursorStyle);
+    const button = required<HTMLButtonElement>(
+      this.root,
+      ".cursor-style-toggle",
+    );
+    const symbol =
+      this.cursorStyle === "none"
+        ? "off"
+        : this.cursorStyle === "dot"
+          ? "·"
+          : "│";
+    button.textContent = `cursor ${symbol}`;
+    button.title = `Cursor: ${this.cursorStyle} (click to cycle)`;
+    if (this.cursorStyle === "none") this.setCursor("", null, null);
   }
 
   private renderTooltip(
@@ -984,12 +1030,13 @@ function shellMarkup(): string {
       <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
       <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
+      <button class="tool-button cursor-style-toggle" title="Cursor: dot (click to cycle)">cursor ·</button>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
       <span class="tool-spacer"></span>
       <span class="window-label">window</span>
       <span class="window-readout"></span>
       <button class="tool-button follow-slot" disabled>⏸ FOLLOW</button>
-      <span class="command-hint">commands <kbd>⌘K</kbd></span>
+      <span class="command-hint">commands <kbd>⌘P</kbd></span>
     </div>
 
     <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
@@ -1023,8 +1070,8 @@ function shellMarkup(): string {
       <span class="point-count status-value">0 pts</span>
       <span>render <span class="render-ms status-value">— ms</span></span>
       <span>cursor <span class="status-value cursor-readout">t = —</span></span>
-      <span class="gesture-hint">drag box-zoom · wheel t · ⇧wheel y · right-drag pan · dbl-click fit · click datatip</span>
-      <span class="status-command">⌘K</span>
+      <span class="gesture-hint">drag ↔ x-zoom / ↕ y-zoom · wheel xy · ⇧wheel y · ⌥wheel x · right-drag pan · dbl-click fit</span>
+      <span class="status-command">⌘P</span>
     </footer>
   </main>`;
 }

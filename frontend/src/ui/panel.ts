@@ -27,7 +27,7 @@ import {
   resolveSeriesStyle,
   type RenderOptions,
 } from "../render/canvas-renderer";
-import { OverlayRenderer } from "../render/overlay-renderer";
+import { OverlayRenderer, type CursorStyle } from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
 import { required } from "./dom";
 
@@ -70,6 +70,7 @@ export interface PanelCallbacks {
   onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
   onFitView(id: string): void;
   onToggleStats(id: string): void;
+  onToggleAxisStyle(id: string): void;
   onRenameTitle(id: string, title: string): void;
   onEditAxisLabel(id: string, axis: "x" | "y", label: string | null): void;
   onSetSeriesStyle(
@@ -102,6 +103,7 @@ export class PanelView {
   private lastTiles: TileResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private cursorT: number | null = null;
+  private cursorStyle: CursorStyle = "dot";
   private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private dragging = false;
   private emphasizePath: string | null = null;
@@ -162,6 +164,12 @@ export class PanelView {
       "click",
       () => {
         this.callbacks.onToggleStats(this.id);
+      },
+    );
+    required(this.element, ".panel-axis-toggle").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onToggleAxisStyle(this.id);
       },
     );
     required<HTMLButtonElement>(
@@ -236,28 +244,31 @@ export class PanelView {
         if (layout === null || this.lastState?.mode !== "time") return;
         event.preventDefault();
         const factor = wheelZoomFactor(event.deltaY);
-        if (event.shiftKey || event.altKey) {
-          const pivot = invertY(
-            layout,
-            clamp(
-              event.offsetY,
-              layout.plot.y,
-              layout.plot.y + layout.plot.height,
-            ),
-          );
-          const next = zoomRange(layout.yRange, factor, pivot);
-          this.callbacks.onYRange(this.id, [next.min, next.max]);
+        const pivotY = invertY(
+          layout,
+          clamp(
+            event.offsetY,
+            layout.plot.y,
+            layout.plot.y + layout.plot.height,
+          ),
+        );
+        const nextY = zoomRange(layout.yRange, factor, pivotY);
+        const pivotX = invertX(
+          layout,
+          clamp(
+            event.offsetX,
+            layout.plot.x,
+            layout.plot.x + layout.plot.width,
+          ),
+        );
+        const nextX = zoomRange(layout.xRange, factor, pivotX);
+        if (event.shiftKey) {
+          this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
+        } else if (event.altKey) {
+          this.callbacks.onTimeWindow(this.id, nextX.min, nextX.max);
         } else {
-          const pivot = invertX(
-            layout,
-            clamp(
-              event.offsetX,
-              layout.plot.x,
-              layout.plot.x + layout.plot.width,
-            ),
-          );
-          const next = zoomRange(layout.xRange, factor, pivot);
-          this.callbacks.onTimeWindow(this.id, next.min, next.max);
+          this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
+          this.callbacks.onTimeWindow(this.id, nextX.min, nextX.max);
         }
       },
       { passive: false },
@@ -310,8 +321,12 @@ export class PanelView {
       this.element,
       ".panel-stats-toggle",
     ).setAttribute("aria-pressed", String(state.show_stats));
-    required<HTMLElement>(this.element, ".axis-style-indicator").hidden =
-      state.axis_style !== "inline";
+    const axisToggle = required<HTMLButtonElement>(
+      this.element,
+      ".panel-axis-toggle",
+    );
+    axisToggle.textContent = `axes: ${state.axis_style}`;
+    axisToggle.title = `Switch to ${state.axis_style === "gutter" ? "inline" : "gutter"} axes`;
     this.updateLegend(state);
     this.renderAnnotationList(state);
     this.renderStats();
@@ -398,6 +413,11 @@ export class PanelView {
     this.drawOverlay();
   }
 
+  setCursorStyle(cursorStyle: CursorStyle): void {
+    this.cursorStyle = cursorStyle;
+    this.drawOverlay();
+  }
+
   resetYAxis(): void {
     this.yAxis.reset();
   }
@@ -449,6 +469,7 @@ export class PanelView {
     );
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
       cursorT: state?.mode === "time" ? this.cursorT : null,
+      cursorStyle: this.cursorStyle,
       box: this.box,
       annotations,
       annotationColorIndices: annotations.map((annotation) => {
@@ -507,12 +528,21 @@ export class PanelView {
         this.dragging = true;
         this.overlay.setPointerCapture(down.pointerId);
       }
-      this.box = {
-        x0: clampX(start.x),
-        y0: clampY(start.y),
-        x1: clampX(event.offsetX),
-        y1: clampY(event.offsetY),
-      };
+      const horizontal =
+        Math.abs(event.offsetX - start.x) >= Math.abs(event.offsetY - start.y);
+      this.box = horizontal
+        ? {
+            x0: clampX(start.x),
+            y0: layout.plot.y,
+            x1: clampX(event.offsetX),
+            y1: layout.plot.y + layout.plot.height,
+          }
+        : {
+            x0: layout.plot.x,
+            y0: clampY(start.y),
+            x1: layout.plot.x + layout.plot.width,
+            y1: clampY(event.offsetY),
+          };
       this.drawOverlay();
     };
     const finish = (event: PointerEvent): void => {
@@ -524,19 +554,21 @@ export class PanelView {
         this.plotClick(event.offsetX, event.offsetY);
         return;
       }
-      if (
-        box === null ||
-        Math.abs(box.x1 - box.x0) <= 6 ||
-        Math.abs(box.y1 - box.y0) <= 6
-      ) {
-        return;
+      if (box === null) return;
+      const horizontal =
+        box.y0 === layout.plot.y &&
+        box.y1 === layout.plot.y + layout.plot.height;
+      if (horizontal) {
+        if (Math.abs(box.x1 - box.x0) <= 6) return;
+        const t0 = invertX(layout, Math.min(box.x0, box.x1));
+        const t1 = invertX(layout, Math.max(box.x0, box.x1));
+        this.callbacks.onTimeWindow(this.id, t0, t1);
+      } else {
+        if (Math.abs(box.y1 - box.y0) <= 6) return;
+        const yLow = invertY(layout, Math.max(box.y0, box.y1));
+        const yHigh = invertY(layout, Math.min(box.y0, box.y1));
+        this.callbacks.onYRange(this.id, [yLow, yHigh]);
       }
-      const t0 = invertX(layout, Math.min(box.x0, box.x1));
-      const t1 = invertX(layout, Math.max(box.x0, box.x1));
-      const yLow = invertY(layout, Math.max(box.y0, box.y1));
-      const yHigh = invertY(layout, Math.min(box.y0, box.y1));
-      this.callbacks.onYRange(this.id, [yLow, yHigh]);
-      this.callbacks.onTimeWindow(this.id, t0, t1);
     };
     const cancel = (): void => {
       cleanup();
@@ -1034,7 +1066,7 @@ function panelMarkup(): string {
       ).join("")}</span>
       <span class="panel-legend"></span>
       <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
-      <span class="axis-style-indicator" hidden>axes: inline</span>
+      <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">
