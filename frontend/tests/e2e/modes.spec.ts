@@ -191,4 +191,19 @@ test.describe("panel modes", () => {
     await page.mouse.wheel(0, -240);
     await expect(readout).toHaveText(before ?? "");
   });
+
+  test("histogram mode draws a distribution of the visible window", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const panel = page.locator(".panel").first();
+    await panel.locator(".mode-pill", { hasText: "H" }).click();
+    await expect(panel.locator(".mode-pill.active")).toHaveText("H");
+    await expect(panel.locator(".panel-empty")).toBeHidden();
+    await expect(panel.locator(".panel-mode-note")).toHaveText(
+      "window: visible t",
+    );
+    await expect(page.locator(".render-ms")).not.toHaveText("— ms");
+  });
 });

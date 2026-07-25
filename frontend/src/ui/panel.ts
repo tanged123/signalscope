@@ -24,6 +24,7 @@ import {
   nearestVertex,
   type VertexHit,
 } from "../app/plot-hit";
+import { histogram } from "../app/histogram";
 import { spectrum } from "../app/spectrum";
 import { visibleStats } from "../app/stats";
 import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
@@ -403,11 +404,8 @@ export class PanelView {
     } else if (state.mode === "xy" && state.x_signal === null) {
       empty.hidden = false;
       empty.textContent = "Drop a signal on the strip below to set the X axis.";
-    } else if (state.mode === "histogram") {
-      empty.hidden = false;
-      empty.textContent = "Histogram mode is not implemented yet.";
-    } else if (state.mode === "fft") {
-      // renderSpectra owns this panel's empty state.
+    } else if (state.mode === "fft" || state.mode === "histogram") {
+      // renderSpectra / renderHistogram own these panels' empty states.
       empty.hidden = true;
     } else {
       empty.hidden = true;
@@ -436,10 +434,11 @@ export class PanelView {
       this.drawOverlay();
       return elapsed;
     }
-    if (state.mode !== "time") {
+    if (state.mode === "histogram") {
+      const elapsed = this.renderHistogram(state, samples, window);
       this.renderStats();
       this.drawOverlay();
-      return 0;
+      return elapsed;
     }
     if (tiles === null || state.series.length === 0) {
       this.renderStats();
@@ -653,6 +652,66 @@ export class PanelView {
       yRange: [yRange[0], yRange[1]],
       axisStyle: state.axis_style,
       xScale: "log",
+    });
+  }
+
+  private renderHistogram(
+    state: PanelState,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    if (samples === null) return 0;
+    const byPath = new Map(
+      samples.series.map((series) => [series.signal_path, series]),
+    );
+    const visible = state.series.filter((series) => series.visible);
+    const columns = visible.map((series) => {
+      const source = byPath.get(series.path);
+      if (source === undefined) return [];
+      const values: number[] = [];
+      source.time.forEach((time, index) => {
+        if (time < window.t0 || time > window.t1) return;
+        values.push(source.values[index] ?? Number.NaN);
+      });
+      return values;
+    });
+    const binned = histogram(columns);
+    this.setModeEmpty(binned === null, "No values in view.");
+    if (binned === null) return 0;
+    const edges = binned.edges;
+    let peak = 0;
+    const paths: PlotPath[] = binned.counts.map((counts, index) => {
+      const points: number[] = [];
+      // A staircase outline: rise at each edge, run across each bin, and
+      // close down to zero at both ends so the shape reads as a
+      // distribution rather than a line chart.
+      points.push(edges[0] ?? 0, 0);
+      counts.forEach((count, bin) => {
+        peak = Math.max(peak, count);
+        points.push(edges[bin] ?? 0, count, edges[bin + 1] ?? 0, count);
+      });
+      points.push(edges[edges.length - 1] ?? 0, 0);
+      const series = visible[index];
+      const style = resolveSeriesStyle(
+        series?.color_slot ?? 1,
+        series?.dash ?? "solid",
+      );
+      return {
+        points,
+        colorIndex: style.colorIndex,
+        dash: style.dash,
+        width: series?.width ?? 1.4,
+      };
+    });
+    const units = visible.map(
+      (series) => byPath.get(series.path)?.unit ?? null,
+    );
+    return this.renderer.renderPaths(paths, {
+      xLabel: state.x_label ?? yLabel(units),
+      yLabel: state.y_label ?? "count",
+      xRange: [edges[0] ?? 0, edges[edges.length - 1] ?? 1],
+      yRange: [0, Math.max(1, peak) * 1.06],
+      axisStyle: state.axis_style,
     });
   }
 
