@@ -151,4 +151,23 @@ test.describe("panel modes", () => {
     }
     await expect(list.locator(".annotation-row")).toHaveCount(2);
   });
+
+  test("the colour channel is assignable and clearable", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const panel = page.locator(".panel").first();
+    await panel.locator(".mode-pill", { hasText: "XY" }).click();
+    const chip = panel.locator(".c-chip");
+    await expect(chip).toContainText("none");
+
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("set color signal");
+    await page.keyboard.press("Enter");
+    await expect(chip).toContainText("time");
+
+    await chip.click();
+    await expect(chip).toContainText("none");
+  });
 });

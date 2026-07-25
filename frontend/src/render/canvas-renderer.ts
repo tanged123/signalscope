@@ -9,6 +9,7 @@ import {
   type PlotRect,
   type Range,
 } from "../app/plot-math";
+import { SEQ_TOKENS, sampleColormap } from "../app/colormap";
 
 interface Projection {
   toX: (value: number) => number;
@@ -34,6 +35,7 @@ export interface Palette {
   fg3: string;
   grid: string;
   series: string[];
+  sequential: string[];
   fontMono: string;
 }
 
@@ -58,6 +60,8 @@ export interface PlotPath {
   dimmed?: boolean;
   /** Filled sample dots, for sparse traces. */
   markers?: boolean;
+  /** Per-vertex scalar driving the sequential ramp; enables `c:` colouring. */
+  colorValues?: readonly number[];
 }
 
 export interface PathRenderOptions {
@@ -67,10 +71,14 @@ export interface PathRenderOptions {
   yRange: readonly [number, number];
   axisStyle?: AxisStyle;
   xScale?: AxisScale;
+  /** Domain and axis name of the `c:` channel; reserves the right gutter. */
+  colorbar?: { min: number; max: number; label: string };
 }
 
 /** Sample dots appear only when vertices are sparser than this pixel gap. */
 const MARKER_PIXEL_GAP = 7;
+/** Spec F2: 64px right gutter — 12px bar, ticks, labels, and slack. */
+const COLORBAR_GUTTER = 64;
 
 export const SERIES_TOKENS = [
   "--series-1",
@@ -234,12 +242,14 @@ export class CanvasRenderer {
       charWidth,
     );
     const inline = options.axisStyle === "inline";
+    const colorbarGutter =
+      options.colorbar === undefined || inline ? 0 : COLORBAR_GUTTER;
     const plot: PlotRect = inline
       ? { x: 0, y: 0, width, height }
       : {
           x: gutter,
           y: 8,
-          width: Math.max(1, width - gutter - 12),
+          width: Math.max(1, width - gutter - 12 - colorbarGutter),
           height: Math.max(1, height - 42),
         };
     const scale: AxisScale = options.xScale ?? "linear";
@@ -283,6 +293,9 @@ export class CanvasRenderer {
     for (const path of paths) {
       this.drawPath(context, plot, project, path, colors);
     }
+    if (options.colorbar !== undefined && colorbarGutter > 0) {
+      this.drawColorbar(context, plot, width, options.colorbar, colors);
+    }
     return performance.now() - started;
   }
 
@@ -299,6 +312,11 @@ export class CanvasRenderer {
     context.beginPath();
     context.rect(plot.x, plot.y, plot.width, plot.height);
     context.clip();
+    if (path.colorValues !== undefined && path.dimmed !== true) {
+      this.drawColorMappedPath(context, project, path, colors);
+      context.restore();
+      return;
+    }
     context.strokeStyle =
       path.dimmed === true
         ? colors.fg3
@@ -342,6 +360,93 @@ export class CanvasRenderer {
     context.restore();
   }
 
+  /** Strokes one segment per vertex pair so each carries its own `c:` colour. */
+  private drawColorMappedPath(
+    context: CanvasRenderingContext2D,
+    project: Projection,
+    path: PlotPath,
+    colors: Palette,
+  ): void {
+    const values = path.colorValues ?? [];
+    const vertices = path.points.length >> 1;
+    context.lineWidth = path.width;
+    context.setLineDash(dashPattern(path.dash));
+    context.lineCap = "round";
+    for (let index = 1; index < vertices; index += 1) {
+      const x0 = path.points[(index - 1) * 2] ?? Number.NaN;
+      const y0 = path.points[(index - 1) * 2 + 1] ?? Number.NaN;
+      const x1 = path.points[index * 2] ?? Number.NaN;
+      const y1 = path.points[index * 2 + 1] ?? Number.NaN;
+      if (
+        !Number.isFinite(x0) ||
+        !Number.isFinite(y0) ||
+        !Number.isFinite(x1) ||
+        !Number.isFinite(y1)
+      ) {
+        continue;
+      }
+      // Midpoint of the segment's two scalars keeps the ramp continuous.
+      const scalar = ((values[index - 1] ?? 0) + (values[index] ?? 0)) * 0.5;
+      context.strokeStyle = sampleColormap(colors.sequential, scalar);
+      context.beginPath();
+      context.moveTo(project.toX(x0), project.toY(y0));
+      context.lineTo(project.toX(x1), project.toY(y1));
+      context.stroke();
+    }
+    context.lineCap = "butt";
+    context.setLineDash([]);
+  }
+
+  /**
+   * The `c:` colorbar: an axis with full anatomy — 12px bar flush with the
+   * plot, 3px ticks at both ends and the midpoint, tabular labels, and its
+   * own name in the corner (spec F2).
+   */
+  private drawColorbar(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    width: number,
+    colorbar: { min: number; max: number; label: string },
+    colors: Palette,
+  ): void {
+    const barX = width - COLORBAR_GUTTER + 24;
+    const barWidth = 12;
+    for (let offset = 0; offset < plot.height; offset += 1) {
+      // Bottom is the low end, matching the spec's bottom-to-top gradient.
+      const scalar = 1 - offset / Math.max(1, plot.height - 1);
+      context.fillStyle = sampleColormap(colors.sequential, scalar);
+      context.fillRect(barX, plot.y + offset, barWidth, 1);
+    }
+    context.strokeStyle = colors.border;
+    context.lineWidth = 1;
+    context.strokeRect(barX + 0.5, plot.y + 0.5, barWidth, plot.height);
+    context.beginPath();
+    for (const fraction of [0, 0.5, 1]) {
+      const y = Math.round(plot.y + plot.height * fraction) + 0.5;
+      context.moveTo(barX + barWidth, y);
+      context.lineTo(barX + barWidth + 3, y);
+    }
+    context.strokeStyle = colors.fg3;
+    context.stroke();
+    context.font = tickFont(colors);
+    context.fillStyle = colors.fg3;
+    context.textAlign = "right";
+    context.textBaseline = "middle";
+    const span = colorbar.max - colorbar.min;
+    for (const fraction of [0, 0.5, 1]) {
+      const value = colorbar.max - span * fraction;
+      context.fillText(
+        value.toFixed(1).replace(/^-/, "−"),
+        width - 2,
+        plot.y + plot.height * fraction,
+      );
+    }
+    context.font = labelFont(colors);
+    context.fillStyle = colors.fg2;
+    context.textBaseline = "alphabetic";
+    context.fillText(colorbar.label, width - 2, plot.y + plot.height + 27);
+  }
+
   private prepareCanvas(): {
     context: CanvasRenderingContext2D;
     width: number;
@@ -379,6 +484,9 @@ export class CanvasRenderer {
       fg3: styles.getPropertyValue("--fg-3").trim(),
       grid: styles.getPropertyValue("--grid").trim(),
       series: SERIES_TOKENS.map((token) =>
+        styles.getPropertyValue(token).trim(),
+      ),
+      sequential: SEQ_TOKENS.map((token) =>
         styles.getPropertyValue(token).trim(),
       ),
       fontMono: styles.getPropertyValue("--font-mono").trim() || FALLBACK_MONO,

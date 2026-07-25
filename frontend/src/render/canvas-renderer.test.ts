@@ -60,6 +60,9 @@ function recordingContext(charWidth = 6): {
     fillRect(x: number, y: number, width: number, height: number): void {
       push("fillRect", x, y, width, height);
     },
+    strokeRect(x: number, y: number, width: number, height: number): void {
+      push("strokeRect", x, y, width, height);
+    },
     fillText(text: string, x: number, y: number): void {
       push("fillText", text, x, y);
     },
@@ -131,6 +134,7 @@ const TEST_PALETTE: Palette = {
     "#a2142f",
     "#0072bd",
   ],
+  sequential: ["#000000", "#ffffff"],
   fontMono: '"JetBrains Mono", monospace',
 };
 
@@ -285,6 +289,39 @@ describe("dashPattern", () => {
 });
 
 describe("render", () => {
+  it("reserves a colorbar gutter and strokes per-segment colours", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1, 2, 2],
+          colorValues: [0, 0.5, 1],
+          colorIndex: 0,
+          dash: "solid",
+          width: 1.4,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 2],
+        yRange: [0, 2],
+        colorbar: { min: 0, max: 1, label: "t (s)" },
+      },
+    );
+    const layout = renderer.lastLayout();
+    // Spec F2: 64px right gutter holds the 12px bar, ticks, and labels.
+    expect((layout?.plot.x ?? 0) + (layout?.plot.width ?? 0)).toBeLessThan(
+      600 - 60,
+    );
+    // One stroke per segment rather than one stroke for the path.
+    expect(calls.filter((call) => call.op === "stroke").length).toBeGreaterThan(
+      2,
+    );
+  });
+
   it("renders vertex paths against an explicit x range", () => {
     const { context, calls } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));

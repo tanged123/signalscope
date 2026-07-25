@@ -25,7 +25,7 @@ import {
   type VertexHit,
 } from "../app/plot-hit";
 import { visibleStats } from "../app/stats";
-import { pairSamples, traceExtent, type XyTrace } from "../app/xy";
+import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
 import { nearestXyPoint } from "../app/xy-hit";
 import {
   CanvasRenderer,
@@ -66,6 +66,7 @@ export interface PanelCallbacks {
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignal(id: string, path: string): void;
   onSetXSignal(id: string, path: string): void;
+  onSetColorSignal(id: string, path: string | null): void;
   onExitXy(id: string): void;
   onToggleSeries(id: string, path: string): void;
   onResized(id: string): void;
@@ -206,6 +207,9 @@ export class PanelView {
     }
     required(this.element, ".x-chip").addEventListener("click", () => {
       this.callbacks.onExitXy(this.id);
+    });
+    required(this.element, ".c-chip").addEventListener("click", () => {
+      this.callbacks.onSetColorSignal(this.id, null);
     });
     const header = required<HTMLElement>(this.element, ".panel-header");
     required<HTMLElement>(this.element, ".panel-title").addEventListener(
@@ -357,6 +361,24 @@ export class PanelView {
       );
       xChip.title = `X axis: ${state.x_signal} — click to return to time mode`;
     }
+    const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
+    cChip.hidden = state.mode !== "xy";
+    if (!cChip.hidden) {
+      cChip.replaceChildren(
+        chipPrefix("c:"),
+        document.createTextNode(
+          state.color_signal === null
+            ? "none"
+            : state.color_signal === "time"
+              ? "time"
+              : state.color_signal.split("/").slice(-2).join("/"),
+        ),
+      );
+      cChip.title =
+        state.color_signal === null
+          ? "Assign a colour channel (⌘P → set color signal)"
+          : `Colour channel: ${state.color_signal} — click to clear`;
+    }
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
       maximized ? "Restore panel" : "Maximize panel";
     required<HTMLButtonElement>(
@@ -485,6 +507,31 @@ export class PanelView {
       });
     }
     if (this.xyTraces.length === 0) return 0;
+    const colorSeries: "time" | SampleResponse["series"][number] | null =
+      state.color_signal === null
+        ? null
+        : state.color_signal === "time"
+          ? "time"
+          : (byPath.get(state.color_signal) ?? null);
+    const colorFor = (trace: XyTrace): number[] | null => {
+      if (colorSeries === null) return null;
+      if (colorSeries === "time") return [...trace.time];
+      return trace.time.map((time) =>
+        lerpSample(colorSeries.time, colorSeries.values, time),
+      );
+    };
+    const colorColumns = this.xyTraces.map((entry) => colorFor(entry.trace));
+    let colorMin = Number.POSITIVE_INFINITY;
+    let colorMax = Number.NEGATIVE_INFINITY;
+    for (const column of colorColumns) {
+      for (const value of column ?? []) {
+        if (!Number.isFinite(value)) continue;
+        colorMin = Math.min(colorMin, value);
+        colorMax = Math.max(colorMax, value);
+      }
+    }
+    const hasColor =
+      colorSeries !== null && Number.isFinite(colorMin) && colorMax > colorMin;
     const traces = this.xyTraces.map((entry) => entry.trace);
     const xRange =
       state.x_range ?? traceExtent(traces, "x", window.t0, window.t1);
@@ -502,7 +549,7 @@ export class PanelView {
         dimmed: true,
       });
     }
-    for (const entry of this.xyTraces) {
+    this.xyTraces.forEach((entry, index) => {
       const series = state.series.find((item) => item.path === entry.path);
       paths.push({
         points: flattenTrace(entry.trace, window),
@@ -513,8 +560,15 @@ export class PanelView {
         ).dash,
         width: (series?.width ?? 1.4) + 0.4,
         markers: true,
+        ...(hasColor
+          ? {
+              colorValues: (colorColumns[index] ?? []).map(
+                (value) => (value - colorMin) / (colorMax - colorMin),
+              ),
+            }
+          : {}),
       });
-    }
+    });
     const options: PathRenderOptions = {
       xLabel: state.x_label ?? axisName(state.x_signal, xSeries.unit),
       yLabel:
@@ -527,6 +581,21 @@ export class PanelView {
       xRange: [xRange[0], xRange[1]],
       yRange: [yRange[0], yRange[1]],
       axisStyle: state.axis_style,
+      ...(hasColor
+        ? {
+            colorbar: {
+              min: colorMin,
+              max: colorMax,
+              label:
+                state.color_signal === "time"
+                  ? "t (s)"
+                  : axisName(
+                      state.color_signal ?? "",
+                      colorSeries === "time" ? null : colorSeries.unit,
+                    ),
+            },
+          }
+        : {}),
     };
     return this.renderer.renderPaths(paths, options);
   }
@@ -1407,6 +1476,7 @@ function panelMarkup(): string {
       <button class="axis-chip x-chip" hidden></button>
       <span class="panel-legend"></span>
       <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
+      <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>

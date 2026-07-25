@@ -109,6 +109,11 @@ export class AppShell {
           this.workspace.focusPanel(id);
           this.afterLayoutChange();
         },
+        onSetColorSignal: (id, path) => {
+          this.workspace.setColorSignal(id, path);
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
         onExitXy: (id) => {
           this.exitXy(id);
         },
@@ -519,7 +524,35 @@ export class AppShell {
               this.afterLayoutChange();
             },
           }));
-    return [...commands, ...tabs, ...panels, ...xSignals, ...signals];
+    const colorSignals =
+      focused === null
+        ? []
+        : [
+            {
+              title: "Panel: set color signal (c:)… time",
+              hint: "colour by time",
+              run: () => {
+                this.workspace.setColorSignal(focused, "time");
+                this.afterLayoutChange();
+              },
+            },
+            ...this.signals.map((summary) => ({
+              title: `Panel: set color signal (c:)… ${summary.path}`,
+              hint: "signal",
+              run: () => {
+                this.workspace.setColorSignal(focused, summary.path);
+                this.afterLayoutChange();
+              },
+            })),
+          ];
+    return [
+      ...commands,
+      ...tabs,
+      ...panels,
+      ...xSignals,
+      ...colorSignals,
+      ...signals,
+    ];
   }
 
   private bindControls(): void {
