@@ -449,14 +449,14 @@ kbd {
   width: 12px;
   height: 2px;
   flex: none;
-  background-color: currentColor;
+  background-color: currentcolor;
 }
 
 .legend-line.dash-dash {
   background-color: transparent;
   background-image: repeating-linear-gradient(
     to right,
-    currentColor 0 6px,
+    currentcolor 0 6px,
     transparent 6px 10px
   );
 }
@@ -465,7 +465,7 @@ kbd {
   background-color: transparent;
   background-image: repeating-linear-gradient(
     to right,
-    currentColor 0 2px,
+    currentcolor 0 2px,
     transparent 2px 5px
   );
 }

@@ -24,6 +24,6 @@ Parquet is included when it does not delay MCAP and the core interaction path. L
 
 Phase 1 visualization foundations closed with a validated categorical palette
 that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
-a headless renderer harness and coherent tick pipeline, unbounded colour-slot
+a headless renderer harness and coherent tick pipeline, unbounded series
 allocation with composite colour/dash identity, and stable per-panel y axes
 resolved outside the renderer.
