@@ -25,8 +25,6 @@ const MODE_NAMES: Record<PanelMode, string> = {
   histogram: "Histogram",
 };
 
-export const HEADER_LEGEND_LIMIT = 3;
-
 export interface PanelCallbacks {
   onFocus(id: string): void;
   onClose(id: string): void;
@@ -48,6 +46,7 @@ export class PanelView {
   private readonly renderer: CanvasRenderer;
   private readonly canvas: HTMLCanvasElement;
   private readonly yAxis = new YAxisPolicy();
+  private legendSeries: PanelState["series"] = [];
 
   constructor(
     private readonly id: string,
@@ -60,6 +59,9 @@ export class PanelView {
     this.canvas = required<HTMLCanvasElement>(this.element, ".plot-canvas");
     this.renderer = new CanvasRenderer(this.canvas);
     this.bind();
+    new ResizeObserver(() => {
+      this.layoutLegend();
+    }).observe(required(this.element, ".panel-header"));
     new ResizeObserver(() => {
       this.callbacks.onResized(this.id);
     }).observe(this.canvas);
@@ -205,6 +207,11 @@ export class PanelView {
   }
 
   private updateLegend(state: PanelState): void {
+    this.legendSeries = state.series;
+    this.layoutLegend();
+  }
+
+  private layoutLegend(): void {
     const legend = required(this.element, ".panel-legend");
     const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
     const overflow = required<HTMLButtonElement>(
@@ -212,11 +219,27 @@ export class PanelView {
       ".legend-overflow",
     );
     const menuWasOpen = !menu.hidden;
-    const headerSeries = state.series.slice(0, HEADER_LEGEND_LIMIT);
-    const overflowSeries = state.series.slice(HEADER_LEGEND_LIMIT);
-    legend.replaceChildren(
-      ...headerSeries.map((series) => this.legendChip(series)),
-    );
+    const chips = this.legendSeries.map((series) => this.legendChip(series));
+    legend.replaceChildren(...chips);
+    overflow.hidden = true;
+
+    let visibleCount = chips.length;
+    if (legend.scrollWidth > legend.clientWidth) {
+      overflow.hidden = false;
+      overflow.textContent = `+${String(chips.length)}`;
+      const gap = Number.parseFloat(getComputedStyle(legend).columnGap) || 0;
+      let used = 0;
+      visibleCount = 0;
+      for (const chip of chips) {
+        const next = used + (visibleCount === 0 ? 0 : gap) + chip.offsetWidth;
+        if (next > legend.clientWidth) break;
+        used = next;
+        visibleCount += 1;
+      }
+    }
+
+    const overflowSeries = this.legendSeries.slice(visibleCount);
+    legend.replaceChildren(...chips.slice(0, visibleCount));
     menu.replaceChildren(
       ...overflowSeries.map((series) => this.legendChip(series)),
     );
@@ -238,6 +261,7 @@ export class PanelView {
     const line = document.createElement("span");
     const style = resolveSeriesStyle(series.color_slot, series.dash);
     line.className = `legend-line dash-${style.dash}`;
+    line.setAttribute("aria-hidden", "true");
     line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
     const name = document.createElement("span");
     name.className = "legend-name";

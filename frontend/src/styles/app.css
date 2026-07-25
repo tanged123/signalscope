@@ -425,9 +425,14 @@ kbd {
   overflow: hidden;
 }
 
+.panel-legend .legend-chip {
+  max-width: 220px;
+}
+
 .legend-chip {
   display: flex;
   min-width: 0;
+  flex: none;
   align-items: center;
   gap: 4px;
   padding: 1px 5px;
@@ -441,7 +446,7 @@ kbd {
 }
 
 .legend-line {
-  width: 18px;
+  width: 12px;
   height: 2px;
   flex: none;
   background-color: currentColor;
@@ -476,6 +481,7 @@ kbd {
 }
 
 .legend-overflow {
+  min-width: 30px;
   flex: none;
   padding: 2px 5px;
   border: 1px solid var(--border-strong);
@@ -513,6 +519,7 @@ kbd {
 
 .legend-overflow-menu .legend-chip {
   width: 100%;
+  max-width: none;
   flex: none;
   text-align: left;
 }

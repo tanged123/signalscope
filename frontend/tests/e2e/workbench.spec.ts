@@ -137,7 +137,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
     };
     const host = document.createElement("div");
     host.id = "legend-probe";
-    host.style.width = "720px";
+    host.style.width = "1400px";
     host.style.height = "320px";
     host.style.display = "flex";
     document.body.replaceChildren(host);
@@ -177,13 +177,29 @@ test("panel legend keeps controls visible and exposes overflow", async ({
   });
 
   const panel = page.locator("#legend-probe .panel");
-  await expect(panel.locator(".panel-legend .legend-chip")).toHaveCount(3);
-  await expect(panel.locator(".legend-overflow")).toHaveText("+37");
+  const headerChips = panel.locator(".panel-legend .legend-chip");
+  await expect.poll(() => headerChips.count()).toBeGreaterThan(3);
+  const wideVisible = await headerChips.count();
+  const wideOverflow = Number(
+    (await panel.locator(".legend-overflow").textContent())?.slice(1),
+  );
+  expect(wideVisible + wideOverflow).toBe(40);
   await expect(panel.locator(".panel-actions")).toBeVisible();
+
+  await page.locator("#legend-probe").evaluate((host) => {
+    host.style.width = "520px";
+  });
+  await expect.poll(() => headerChips.count()).toBeLessThan(wideVisible);
+  const narrowVisible = await headerChips.count();
+  const narrowOverflow = Number(
+    (await panel.locator(".legend-overflow").textContent())?.slice(1),
+  );
+  expect(narrowVisible + narrowOverflow).toBe(40);
+
   await panel.locator(".legend-overflow").click();
   await expect(panel.locator(".legend-overflow-menu")).toBeVisible();
   await expect(panel.locator(".legend-overflow-menu .legend-chip")).toHaveCount(
-    37,
+    narrowOverflow,
   );
   await page.keyboard.press("Escape");
   await expect(panel.locator(".legend-overflow-menu")).toBeHidden();

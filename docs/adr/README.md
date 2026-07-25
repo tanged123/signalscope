@@ -14,5 +14,6 @@ Accepted decisions:
 10. [Workspace tabs and chrome hierarchy](0010-workspace-tabs-and-chrome-hierarchy.md)
 11. [Series palette, reserved amber hue band, and colormap sources](0011-series-palette-and-reserved-amber.md)
 12. [Panel command routing and bounded legends](0012-panel-command-routing-and-bounded-legends.md)
+13. [Responsive panel legends](0013-responsive-panel-legends.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.
