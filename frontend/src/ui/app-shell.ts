@@ -9,7 +9,11 @@ import {
   valueAtTime,
   zoomRange,
 } from "../app/plot-math";
-import { type SignalSummary, type TileResponse } from "../generated/protocol";
+import {
+  type SampleResponse,
+  type SignalSummary,
+  type TileResponse,
+} from "../generated/protocol";
 import type { PanelState } from "../generated/session";
 import { resolveSeriesStyle } from "../render/canvas-renderer";
 import type { CursorStyle } from "../render/overlay-renderer";
@@ -21,6 +25,8 @@ import { WorkspaceView } from "./workspace-view";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_STYLES: readonly CursorStyle[] = ["none", "dot", "line"];
+/** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
+const SAMPLE_CAP = 8192;
 
 export class AppShell {
   private readonly time = new LinkedTimeModel();
@@ -33,6 +39,7 @@ export class AppShell {
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
+  private samplesByPanel = new Map<string, SampleResponse>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
   private renderScheduled = false;
@@ -112,6 +119,9 @@ export class AppShell {
         onYRange: (id, range) => {
           this.workspace.setPanelYRange(id, [range[0], range[1]]);
           this.scheduleRender();
+        },
+        onXRange: (id, range) => {
+          this.applyXRange(id, range);
         },
         onPinAnnotation: (id, hit) => {
           this.workspace.addAnnotation(id, {
@@ -620,34 +630,64 @@ export class AppShell {
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
     );
-    const next = new Map<string, TileResponse>();
+    const nextTiles = new Map<string, TileResponse>();
+    const nextSamples = new Map<string, SampleResponse>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
-        if (panel.mode !== "time") return;
-        const ids = panel.series
-          .map((series) => this.signalsByPath.get(series.path)?.signal_id)
-          .filter((id): id is string => id !== undefined);
+        const ids = this.panelSignalIds(panel);
         if (ids.length === 0) return;
-        const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
         const window = this.effectiveWindow(panel);
         try {
-          next.set(
-            panel.id,
-            await this.plane.queryTiles({
-              request_id: crypto.randomUUID(),
-              signal_ids: ids,
-              window,
-              pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
-            }),
-          );
+          if (panel.mode === "time") {
+            const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+            nextTiles.set(
+              panel.id,
+              await this.plane.queryTiles({
+                request_id: crypto.randomUUID(),
+                signal_ids: ids,
+                window,
+                pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
+              }),
+            );
+          } else {
+            nextSamples.set(
+              panel.id,
+              await this.plane.querySamples({
+                request_id: crypto.randomUUID(),
+                signal_ids: ids,
+                window,
+                max_points: SAMPLE_CAP,
+              }),
+            );
+          }
         } catch (error: unknown) {
           this.reportError(error);
         }
       }),
     );
     if (refreshToken !== this.refreshToken) return;
-    this.tilesByPanel = next;
+    this.tilesByPanel = nextTiles;
+    this.samplesByPanel = nextSamples;
     this.renderTiles();
+  }
+
+  /**
+   * Signal ids a panel needs: its series, plus the XY x signal and the
+   * colour channel, which are axes rather than plotted series.
+   */
+  private panelSignalIds(panel: PanelState): string[] {
+    const paths = panel.series.map((series) => series.path);
+    if (panel.mode === "xy") {
+      if (panel.x_signal !== null) paths.unshift(panel.x_signal);
+      if (panel.color_signal !== null) paths.push(panel.color_signal);
+    }
+    return [
+      ...new Set(
+        paths
+          .map((path) => this.signalsByPath.get(path)?.signal_id)
+          .filter((id): id is string => id !== undefined),
+      ),
+    ];
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
@@ -663,12 +703,16 @@ export class AppShell {
   private renderTiles(): void {
     const state = this.time.snapshot();
     const elapsed =
-      this.workspaceView?.renderTiles(this.tilesByPanel, (panelId) => {
-        const panel = this.workspace.panel(panelId);
-        return panel === undefined
-          ? { t0: state.t0, t1: state.t1 }
-          : this.effectiveWindow(panel);
-      }) ?? 0;
+      this.workspaceView?.renderData(
+        this.tilesByPanel,
+        this.samplesByPanel,
+        (panelId) => {
+          const panel = this.workspace.panel(panelId);
+          return panel === undefined
+            ? { t0: state.t0, t1: state.t1 }
+            : this.effectiveWindow(panel);
+        },
+      ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
 
@@ -684,6 +728,18 @@ export class AppShell {
     }
     this.renderTiles();
     this.scheduleRefresh();
+  }
+
+  private applyXRange(panelId: string, range: readonly [number, number]): void {
+    if (
+      !Number.isFinite(range[0]) ||
+      !Number.isFinite(range[1]) ||
+      range[1] <= range[0]
+    ) {
+      return;
+    }
+    this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
+    this.renderTiles();
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {

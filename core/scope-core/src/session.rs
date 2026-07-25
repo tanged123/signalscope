@@ -155,6 +155,25 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(4);
             migrate(4, value)
         }
+        4 => {
+            if let Some(tabs) = value
+                .get_mut("tabs")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for tab in tabs {
+                    let panels = tab
+                        .get_mut("panels")
+                        .and_then(serde_json::Value::as_array_mut);
+                    for panel in panels.into_iter().flatten() {
+                        if let Some(object) = panel.as_object_mut() {
+                            object.entry("x_range").or_insert(serde_json::Value::Null);
+                        }
+                    }
+                }
+            }
+            value["schema_version"] = serde_json::json!(5);
+            migrate(5, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -196,6 +215,7 @@ mod tests {
                         visible: true,
                     }],
                     y_range: None,
+                    x_range: None,
                     x_label: None,
                     y_label: None,
                     time_window: None,
@@ -282,6 +302,35 @@ mod tests {
         assert_eq!(panel.x_label, None);
         assert_eq!(panel.y_label, None);
         assert_eq!(panel.time_window, None);
+    }
+
+    #[test]
+    fn v4_sessions_gain_panel_x_ranges() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 4,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "focused_panel_id": "panel-1",
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "time",
+                    "axis_style": "gutter", "x_signal": null, "color_signal": null,
+                    "series": [], "y_range": null, "x_label": null, "y_label": null,
+                    "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v4 session migrates");
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(session.tabs[0].panels[0].x_range, None);
     }
 
     #[test]

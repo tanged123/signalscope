@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -59,6 +59,7 @@
         "color_signal": "string?",
         "series": "SeriesState[]",
         "y_range": "f64[2]?",
+        "x_range": "f64[2]?",
         "x_label": "string?",
         "y_label": "string?",
         "time_window": "f64[2]?",

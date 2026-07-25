@@ -1,5 +1,5 @@
 import type { WorkspaceModel } from "../app/workspace";
-import type { TileResponse } from "../generated/protocol";
+import type { SampleResponse, TileResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
@@ -105,8 +105,9 @@ export class WorkspaceView {
     }
   }
 
-  renderTiles(
+  renderData(
     tilesByPanel: ReadonlyMap<string, TileResponse>,
+    samplesByPanel: ReadonlyMap<string, SampleResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
   ): number {
     const maximized = this.model.maximizedPanelId();
@@ -116,9 +117,10 @@ export class WorkspaceView {
       total +=
         this.views
           .get(panel.id)
-          ?.renderTiles(
+          ?.renderData(
             panel,
             tilesByPanel.get(panel.id) ?? null,
+            samplesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
           ) ?? 0;
     }

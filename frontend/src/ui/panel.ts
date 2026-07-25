@@ -1,4 +1,4 @@
-import type { TileResponse } from "../generated/protocol";
+import type { SampleResponse, TileResponse } from "../generated/protocol";
 import type {
   AxisStyle,
   DashStyle,
@@ -67,6 +67,7 @@ export interface PanelCallbacks {
   ): void;
   onTimeWindow(id: string, t0: number, t1: number): void;
   onYRange(id: string, range: readonly [number, number]): void;
+  onXRange(id: string, range: readonly [number, number]): void;
   onPinAnnotation(id: string, hit: VertexHit): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
   onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
@@ -103,6 +104,7 @@ export class PanelView {
   private legendChips: HTMLElement[] = [];
   private lastState: PanelState | null = null;
   private lastTiles: TileResponse | null = null;
+  private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private cursorT: number | null = null;
   private cursorStyle: CursorStyle = "none";
@@ -348,15 +350,22 @@ export class PanelView {
     }
   }
 
-  renderTiles(
+  renderData(
     state: PanelState,
     tiles: TileResponse | null,
+    samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
     this.lastState = state;
     this.lastTiles = tiles;
+    this.lastSamples = samples;
     this.lastWindow = { ...window };
-    if (tiles === null || state.mode !== "time" || state.series.length === 0) {
+    if (state.mode !== "time") {
+      this.renderStats();
+      this.drawOverlay();
+      return 0;
+    }
+    if (tiles === null || state.series.length === 0) {
       this.renderStats();
       this.drawOverlay();
       return 0;
@@ -910,7 +919,12 @@ export class PanelView {
     if (this.emphasizePath === path) return;
     this.emphasizePath = path;
     if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderTiles(this.lastState, this.lastTiles, this.lastWindow);
+      this.renderData(
+        this.lastState,
+        this.lastTiles,
+        this.lastSamples,
+        this.lastWindow,
+      );
     }
   }
 

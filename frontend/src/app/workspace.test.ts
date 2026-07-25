@@ -210,6 +210,16 @@ describe("WorkspaceModel", () => {
     expect(model.panels()[0]?.y_range).toBeNull();
   });
 
+  it("stores and clears a panel-local x range", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    expect(model.panel(panel.id)?.x_range).toBeNull();
+    model.setPanelXRange(panel.id, [-4, 9]);
+    expect(model.panel(panel.id)?.x_range).toEqual([-4, 9]);
+    model.clearPanelXRange(panel.id);
+    expect(model.panel(panel.id)?.x_range).toBeNull();
+  });
+
   it("writes title, axis labels and local time windows", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -364,6 +374,7 @@ describe("WorkspaceModel", () => {
       color_signal: null,
       series: [],
       y_range: null,
+      x_range: null,
       x_label: null,
       y_label: null,
       time_window: null,

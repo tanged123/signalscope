@@ -261,6 +261,16 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.y_range = null;
   }
 
+  setPanelXRange(panelId: string, range: readonly [number, number]): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.x_range = [range[0], range[1]];
+  }
+
+  clearPanelXRange(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.x_range = null;
+  }
+
   renamePanel(id: string, title: string): void {
     const panel = this.panel(id);
     if (panel !== undefined) panel.title = title;
@@ -440,6 +450,7 @@ export class WorkspaceModel {
       color_signal: null,
       series: [],
       y_range: null,
+      x_range: null,
       x_label: null,
       y_label: null,
       time_window: null,
