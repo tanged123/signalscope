@@ -440,9 +440,28 @@ kbd {
 }
 
 .legend-line {
-  width: 10px;
+  width: 18px;
   height: 2px;
   flex: none;
+  background-color: currentColor;
+}
+
+.legend-line.dash-dash {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    currentColor 0 6px,
+    transparent 6px 10px
+  );
+}
+
+.legend-line.dash-dot {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to right,
+    currentColor 0 2px,
+    transparent 2px 5px
+  );
 }
 
 .legend-name {

@@ -1,6 +1,11 @@
 import type { TileResponse } from "../generated/protocol";
 import type { PanelMode, PanelState } from "../generated/session";
-import { CanvasRenderer, type RenderOptions } from "../render/canvas-renderer";
+import {
+  CanvasRenderer,
+  resolveSeriesStyle,
+  type RenderOptions,
+} from "../render/canvas-renderer";
+import { YAxisPolicy } from "../render/y-axis";
 import { required } from "./dom";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
@@ -40,6 +45,7 @@ export class PanelView {
   readonly element: HTMLElement;
   private readonly renderer: CanvasRenderer;
   private readonly canvas: HTMLCanvasElement;
+  private readonly yAxis = new YAxisPolicy();
 
   constructor(
     private readonly id: string,
@@ -151,12 +157,22 @@ export class PanelView {
       (tile) => bySeries.get(tile.signal_path)?.visible ?? true,
     );
     const response = { request_id: tiles.request_id, series: shown };
+    const seriesKey = state.series.map((series) => series.path).join("\u0000");
+    const yRange = this.yAxis.resolve(
+      seriesKey,
+      tiles.series.flatMap((tile) => tile.bins),
+      state.y_range,
+    );
     const options: RenderOptions = {
       xLabel: "time (s)",
       yLabel: yLabel(response.series.map((tile) => tile.unit)),
       colorSlots: shown.map(
         (tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1,
       ),
+      dashes: shown.map(
+        (tile) => bySeries.get(tile.signal_path)?.dash ?? "solid",
+      ),
+      yRange,
     };
     return this.renderer.render(
       response,
@@ -177,9 +193,9 @@ export class PanelView {
         chip.className = `legend-chip ${series.visible ? "" : "muted"}`;
         chip.title = `${series.path} — click to toggle visibility`;
         const line = document.createElement("span");
-        line.className = "legend-line";
-        const colorSlot = ((series.color_slot - 1) % 8) + 1;
-        line.style.background = `var(--series-${String(colorSlot)})`;
+        const style = resolveSeriesStyle(series.color_slot, series.dash);
+        line.className = `legend-line dash-${style.dash}`;
+        line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
         const name = document.createElement("span");
         name.className = "legend-name";
         name.textContent = series.path.split("/").slice(-2).join("/");

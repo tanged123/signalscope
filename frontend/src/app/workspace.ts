@@ -8,7 +8,6 @@ import type {
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 
 const MIN_FRACTION = 0.1;
-const MAX_COLOR_SLOTS = 8;
 
 export function emptySession(): Session {
   return {
@@ -245,13 +244,12 @@ export class WorkspaceModel {
     }
     const used = new Set(panel.series.map((series) => series.color_slot));
     let slot = 1;
-    while (used.has(slot) && slot < MAX_COLOR_SLOTS) slot += 1;
-    if (used.has(slot)) slot = (panel.series.length % MAX_COLOR_SLOTS) + 1;
+    while (used.has(slot)) slot += 1;
     panel.series.push({
       path,
       color_slot: slot,
       dash: "solid",
-      width: 1.5,
+      width: 1.4,
       visible: true,
     });
     return true;
@@ -262,6 +260,16 @@ export class WorkspaceModel {
       (entry) => entry.path === path,
     );
     if (series !== undefined) series.visible = !series.visible;
+  }
+
+  setPanelYRange(panelId: string, range: [number, number]): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.y_range = range;
+  }
+
+  clearPanelYRange(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.y_range = null;
   }
 
   resizeRows(seamIndex: number, delta: number): void {

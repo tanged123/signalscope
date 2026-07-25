@@ -21,3 +21,9 @@ Implement the export size-budget model, visible/all-loaded tile selection, PNG a
 Benchmark cold multi-GB first plot, cache build and reuse, tile latency, 100M-point pan/zoom, NaN gaps, corrupt inputs, accessibility invariants, release bundles, and artifact-size regression thresholds.
 
 Parquet is included when it does not delay MCAP and the core interaction path. Live streaming, layout-preset UI, Monte Carlo envelope ergonomics, 3D, and `scope-serverd` remain v2.
+
+Phase 1 visualization foundations closed with a validated categorical palette
+that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
+a headless renderer harness and coherent tick pipeline, unbounded colour-slot
+allocation with composite colour/dash identity, and stable per-panel y axes
+resolved outside the renderer.

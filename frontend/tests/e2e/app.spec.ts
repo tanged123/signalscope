@@ -19,6 +19,9 @@ test("shared presentation plane renders the demo workspace", async ({
   await expect(page.locator(".panel-split-down")).toBeVisible();
   await expect(page.getByLabel("Panel 1 panel")).toBeVisible();
   await expect(page.locator(".legend-chip")).toHaveCount(2);
+  for (const name of await page.locator(".legend-name").allTextContents()) {
+    expect(name.trim()).not.toBe("");
+  }
   await expect(page.locator(".plot-canvas").first()).toBeVisible();
   await expect(page.locator(".render-ms")).not.toHaveText("— ms");
   await expect(page.locator(".open-files")).toBeHidden();

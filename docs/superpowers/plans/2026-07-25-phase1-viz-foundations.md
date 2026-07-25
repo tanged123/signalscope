@@ -4,7 +4,7 @@
 
 **Revision 2 (2026-07-25).** Audited against the design-pass brief, the Final Spec,
 `AGENTS.md`, the data-viz colour method and its validator, Crameri's Scientific colour
-maps, and Rougier, Droettboom & Bourne, *Ten Simple Rules for Better Figures*. Changes
+maps, and Rougier, Droettboom & Bourne, _Ten Simple Rules for Better Figures_. Changes
 from revision 1 are listed in [Revision history](#revision-history) at the end; read it
 if you are picking this up after having seen the earlier draft.
 
@@ -52,7 +52,7 @@ Verified against the tree; if any of these turn out to be false, stop and escala
 than working around them.
 
 - `./scripts/test.sh frontend` runs `pnpm lint && pnpm typecheck && pnpm codegen:check &&
-  pnpm test`, then the snapshot artifact checks. **Every step that says "expected: PASS"
+pnpm test`, then the snapshot artifact checks. **Every step that says "expected: PASS"
   must therefore compile and lint**, not merely pass assertions.
 - `tsconfig.json` sets `noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexedAccess`,
   and `exactOptionalPropertyTypes`. An unused local is a hard typecheck failure. Indexed
@@ -71,19 +71,19 @@ than working around them.
 These were considered and are **deliberately deferred**. Do not implement them; a reviewer
 should reject a diff that adds them.
 
-| Deferred | Why |
-|---|---|
-| `--seq-*` / `--div-*` colormap tokens | No consumer exists yet. Shipping tokens nothing reads repeats the `y_range` / `axis_style` mistake. **But the choice of source is not deferred** — ADR 0011 fixes it to Crameri's maps (see Task 1 Step 5) so phase 2 cannot invent a ramp. Note the Final Spec puts the `c:` colorbar in **v1**, not v2, so this consumer is nearer than it looks. |
-| `PanelState.colormap` and `PanelState.series_style` fields | Session schema change. Adding an unread field costs a version bump now and a second one when the semantics settle. Defer both to a single phase-2 migration. |
-| Family / ramp / envelope series styles for N > 8 | Feature work. Tasks 3 and 4 remove the *correctness* bug (aliasing) using fields already in the schema; the richer policies the Final Spec describes ("folder → colour family or envelope band; hover isolates, click pins") are phase 2. |
-| Type and space scale tokens (`--font-size-*`, `--space-*`) | Mechanical, reversible, touches all 832 lines of `app.css`, and changes no behaviour. High review cost, low foundation risk. |
-| Raising `--fg-3` / `--fg-4` above WCAG AA | The Final Spec fixes these ink values exactly (`fg-3 #7A8290`, `fg-4 #A7AEBB`). `--fg-3` measures 4.32:1 on `--surface-0` — genuinely below AA — but changing it is a spec deviation needing its own ADR. Task 2 instead moves *axis tick labels* — the one place where the low contrast is load-bearing — onto the existing `--fg-2` token (8.67:1 dark, 7.49:1 light, both verified), which needs no token change. |
-| An explicit "fit y-axis" gesture | Task 5 makes the y-axis stable; double-click-to-fit is the gesture that re-fits it, and it is in the brief's gesture set. Wiring input is phase 2 — but see Task 5's deviation note, because the two ship as a pair conceptually. |
-| Writing the resolved y-range into the session at export | There is no HTML snapshot export path in `frontend/src` yet. When one lands, that is where a resolved range gets frozen — not in the render loop. See Task 5. |
-| Injecting a baked palette into the renderer for `BakedPlane` | Task 2 adds the seam (`setPalette`). Using it from the snapshot host is phase 2. |
-| `prefers-reduced-motion` / `prefers-contrast` / `forced-colors` | Real gaps, but leaf-level and cheap at any time. |
-| Inline axis style, annotations, datatips, stats row | Spec'd for v1 but they are features, not foundations. |
-| Live values in the signal tree | Feature. |
+| Deferred                                                        | Why                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--seq-*` / `--div-*` colormap tokens                           | No consumer exists yet. Shipping tokens nothing reads repeats the `y_range` / `axis_style` mistake. **But the choice of source is not deferred** — ADR 0011 fixes it to Crameri's maps (see Task 1 Step 5) so phase 2 cannot invent a ramp. Note the Final Spec puts the `c:` colorbar in **v1**, not v2, so this consumer is nearer than it looks.                                                                  |
+| `PanelState.colormap` and `PanelState.series_style` fields      | Session schema change. Adding an unread field costs a version bump now and a second one when the semantics settle. Defer both to a single phase-2 migration.                                                                                                                                                                                                                                                         |
+| Family / ramp / envelope series styles for N > 8                | Feature work. Tasks 3 and 4 remove the _correctness_ bug (aliasing) using fields already in the schema; the richer policies the Final Spec describes ("folder → colour family or envelope band; hover isolates, click pins") are phase 2.                                                                                                                                                                            |
+| Type and space scale tokens (`--font-size-*`, `--space-*`)      | Mechanical, reversible, touches all 832 lines of `app.css`, and changes no behaviour. High review cost, low foundation risk.                                                                                                                                                                                                                                                                                         |
+| Raising `--fg-3` / `--fg-4` above WCAG AA                       | The Final Spec fixes these ink values exactly (`fg-3 #7A8290`, `fg-4 #A7AEBB`). `--fg-3` measures 4.32:1 on `--surface-0` — genuinely below AA — but changing it is a spec deviation needing its own ADR. Task 2 instead moves _axis tick labels_ — the one place where the low contrast is load-bearing — onto the existing `--fg-2` token (8.67:1 dark, 7.49:1 light, both verified), which needs no token change. |
+| An explicit "fit y-axis" gesture                                | Task 5 makes the y-axis stable; double-click-to-fit is the gesture that re-fits it, and it is in the brief's gesture set. Wiring input is phase 2 — but see Task 5's deviation note, because the two ship as a pair conceptually.                                                                                                                                                                                    |
+| Writing the resolved y-range into the session at export         | There is no HTML snapshot export path in `frontend/src` yet. When one lands, that is where a resolved range gets frozen — not in the render loop. See Task 5.                                                                                                                                                                                                                                                        |
+| Injecting a baked palette into the renderer for `BakedPlane`    | Task 2 adds the seam (`setPalette`). Using it from the snapshot host is phase 2.                                                                                                                                                                                                                                                                                                                                     |
+| `prefers-reduced-motion` / `prefers-contrast` / `forced-colors` | Real gaps, but leaf-level and cheap at any time.                                                                                                                                                                                                                                                                                                                                                                     |
+| Inline axis style, annotations, datatips, stats row             | Spec'd for v1 but they are features, not foundations.                                                                                                                                                                                                                                                                                                                                                                |
+| Live values in the signal tree                                  | Feature.                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ---
 
@@ -95,12 +95,14 @@ derived marks. This task replaces both palettes with a validated set sharing one
 order, and adds a test that keeps them validated.
 
 **Files:**
+
 - Create: `frontend/src/styles/palette.test.ts`
 - Create: `docs/adr/0011-series-palette-and-reserved-amber.md`
 - Modify: `frontend/src/styles/tokens.css:38-45` (dark series), `frontend/src/styles/tokens.css:78-85` (light series)
 - Modify: `docs/adr/README.md:14` (append ADR 11 to the list)
 
 **Interfaces:**
+
 - Consumes: nothing from earlier tasks.
 - Produces: `--series-1` … `--series-8` in both themes, hue-aligned slot-for-slot. Task 4
   relies on there being exactly 8 slots and on `SERIES_TOKENS` in `canvas-renderer.ts:30-39`
@@ -122,16 +124,16 @@ families, re-stepped per mode, with one substitution:
 That derivation is what makes the palette extensible; it is recorded in ADR 0011 so the
 next person to touch a slot does not start from zero.
 
-| Slot | Hue | Dark | Light |
-|---|---|---|---|
-| 1 | 255° blue | `#407fd0` | `#1970d1` |
-| 2 | 41° orange | `#a7451c` | `#89340f` |
-| 3 | 162° green | `#29ab79` | `#33cf93` |
-| 4 | 284° violet | `#5e57b2` | `#6653dc` |
-| 5 | 357° pink | `#a6416b` | `#931553` |
-| 6 | 205° azure | `#28a4b0` | `#33c6d5` |
-| 7 | 142° deep green | `#247320` | `#126410` |
-| 8 | 25° red | `#db6c66` | `#fa8e86` |
+| Slot | Hue             | Dark      | Light     |
+| ---- | --------------- | --------- | --------- |
+| 1    | 255° blue       | `#407fd0` | `#1970d1` |
+| 2    | 41° orange      | `#a7451c` | `#89340f` |
+| 3    | 162° green      | `#29ab79` | `#33cf93` |
+| 4    | 284° violet     | `#5e57b2` | `#6653dc` |
+| 5    | 357° pink       | `#a6416b` | `#931553` |
+| 6    | 205° azure      | `#28a4b0` | `#33c6d5` |
+| 7    | 142° deep green | `#247320` | `#126410` |
+| 8    | 25° red         | `#db6c66` | `#fa8e86` |
 
 Recorded validator results (these are what the test asserts):
 
@@ -431,27 +433,27 @@ in this task means anything.
 In `frontend/src/styles/tokens.css`, replace the dark series block (lines 38-45):
 
 ```css
-  --series-1: #407fd0;
-  --series-2: #a7451c;
-  --series-3: #29ab79;
-  --series-4: #5e57b2;
-  --series-5: #a6416b;
-  --series-6: #28a4b0;
-  --series-7: #247320;
-  --series-8: #db6c66;
+--series-1: #407fd0;
+--series-2: #a7451c;
+--series-3: #29ab79;
+--series-4: #5e57b2;
+--series-5: #a6416b;
+--series-6: #28a4b0;
+--series-7: #247320;
+--series-8: #db6c66;
 ```
 
 and the light series block (lines 78-85):
 
 ```css
-  --series-1: #1970d1;
-  --series-2: #89340f;
-  --series-3: #33cf93;
-  --series-4: #6653dc;
-  --series-5: #931553;
-  --series-6: #33c6d5;
-  --series-7: #126410;
-  --series-8: #fa8e86;
+--series-1: #1970d1;
+--series-2: #89340f;
+--series-3: #33cf93;
+--series-4: #6653dc;
+--series-5: #931553;
+--series-6: #33c6d5;
+--series-7: #126410;
+--series-8: #fa8e86;
 ```
 
 Change nothing else in the file. `--amber-*`, `--status-*`, surfaces, and ink stay exactly
@@ -508,7 +510,7 @@ a caption stays true.
      remaining gap in the hue circle.
    - Re-order, then re-step each slot in OKLCh against the mode's lightness
      band.
-   Anyone adding, removing, or re-stepping a slot repeats this procedure.
+     Anyone adding, removing, or re-stepping a slot repeats this procedure.
 4. Acceptance is by computed check, never by eye: lightness band, chroma floor,
    adjacent OKLab delta-E under Machado-Oliveira-Fernandes protan and deutan
    simulation, an unsimulated normal-vision floor, and WCAG contrast against the
@@ -544,7 +546,7 @@ relaxing a threshold in the test.
 
 No `--seq-*` or `--div-*` tokens are defined in phase 1 — nothing reads them
 yet, and shipping unread tokens is the mistake this plan exists to stop
-repeating. The *source* is fixed now so that phase 2 cannot invent one:
+repeating. The _source_ is fixed now so that phase 2 cannot invent one:
 
 Sequential and diverging colormaps are sampled from Fabio Crameri's Scientific
 colour maps (Zenodo, DOI 10.5281/zenodo.1243862; MIT licensed) — `batlow` for
@@ -603,12 +605,14 @@ first test of the `has_gap` stroke-break invariant, which `AGENTS.md` names as
 architectural and which nothing currently checks.
 
 **Files:**
+
 - Create: `frontend/src/render/canvas-renderer.test.ts`
 - Modify: `frontend/src/render/canvas-renderer.ts` — two testability seams, export `ticks`,
   replace `formatTick` with `formatTicks`, add `gutterWidth`, use `--fg-2` for tick labels,
   emit outward tick marks and a zero line.
 
 **Interfaces:**
+
 - Consumes: `--series-*` tokens from Task 1 (values only; no API dependency).
 - Produces:
   - `export interface Palette` and `setPalette(palette: Palette): void` on
@@ -650,16 +654,16 @@ In `frontend/src/render/canvas-renderer.ts`:
 2. In `prepareCanvas` (line 90), replace
 
 ```ts
-    const ratio = window.devicePixelRatio || 1;
+const ratio = window.devicePixelRatio || 1;
 ```
 
-   with
+with
 
 ```ts
-    const ratio = globalThis.devicePixelRatio || 1;
+const ratio = globalThis.devicePixelRatio || 1;
 ```
 
-   Identical in every browser; defined (as `undefined`, hence `1`) under Node.
+Identical in every browser; defined (as `undefined`, hence `1`) under Node.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -739,7 +743,14 @@ export function recordingContext(charWidth = 6): {
     setLineDash: (segments: number[]): void => {
       push("setLineDash", [...segments]);
     },
-    setTransform: (a: number, b: number, c: number, d: number, e: number, f: number): void => {
+    setTransform: (
+      a: number,
+      b: number,
+      c: number,
+      d: number,
+      e: number,
+      f: number,
+    ): void => {
       push("setTransform", a, b, c, d, e, f);
     },
     save: (): void => {
@@ -819,16 +830,12 @@ export function renderOnce(
   const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
   renderer.setPalette(TEST_PALETTE);
   const response: TileResponse = { request_id: "t", series } as TileResponse;
-  renderer.render(
-    response,
-    { min: 0, max: 10 },
-    {
-      xLabel: "time (s)",
-      yLabel: "v",
-      colorSlots: series.map((_, index) => index + 1),
-      ...options,
-    } as RenderOptions,
-  );
+  renderer.render(response, { min: 0, max: 10 }, {
+    xLabel: "time (s)",
+    yLabel: "v",
+    colorSlots: series.map((_, index) => index + 1),
+    ...options,
+  } as RenderOptions);
   return calls;
 }
 
@@ -923,12 +930,17 @@ describe("render", () => {
     );
     // One moveTo opens the series; has_gap forces a second one. Anything less
     // means the renderer drew a line across missing data.
-    expect(path.filter((call) => call.op === "moveTo").length).toBeGreaterThan(1);
+    expect(path.filter((call) => call.op === "moveTo").length).toBeGreaterThan(
+      1,
+    );
   });
 
   it("paints each series in its slot colour", () => {
     const calls = renderOnce(
-      [tile("a", [{ t0: 0, t1: 1, v: 1 }]), tile("b", [{ t0: 0, t1: 1, v: 2 }])],
+      [
+        tile("a", [{ t0: 0, t1: 1, v: 1 }]),
+        tile("b", [{ t0: 0, t1: 1, v: 2 }]),
+      ],
       { colorSlots: [1, 3] },
     );
     const strokes = calls
@@ -1111,19 +1123,19 @@ measurement is exact, and it survives a future font change (which a hard-coded
 `TICK_CHAR_WIDTH` would not):
 
 ```ts
-    const yRange = visibleYRange(response.series);
-    context.font = TICK_FONT;
-    const charWidth = context.measureText("0").width;
-    const gutter = gutterWidth(
-      formatTicks(ticks(yRange.min, yRange.max, 6)),
-      charWidth,
-    );
-    const plot: PlotRect = {
-      x: gutter,
-      y: 8,
-      width: Math.max(1, width - gutter - 12),
-      height: Math.max(1, height - 42),
-    };
+const yRange = visibleYRange(response.series);
+context.font = TICK_FONT;
+const charWidth = context.measureText("0").width;
+const gutter = gutterWidth(
+  formatTicks(ticks(yRange.min, yRange.max, 6)),
+  charWidth,
+);
+const plot: PlotRect = {
+  x: gutter,
+  y: 8,
+  width: Math.max(1, width - gutter - 12),
+  height: Math.max(1, height - 42),
+};
 ```
 
 and delete the now-duplicated `const yRange = visibleYRange(response.series);` on line 69.
@@ -1150,9 +1162,9 @@ git commit -m "feat(render): headless test harness, measured gutter, outward tic
 `workspace.ts:246-249` caps `color_slot` at 8 and wraps:
 
 ```ts
-    let slot = 1;
-    while (used.has(slot) && slot < MAX_COLOR_SLOTS) slot += 1;
-    if (used.has(slot)) slot = (panel.series.length % MAX_COLOR_SLOTS) + 1;
+let slot = 1;
+while (used.has(slot) && slot < MAX_COLOR_SLOTS) slot += 1;
+if (used.has(slot)) slot = (panel.series.length % MAX_COLOR_SLOTS) + 1;
 ```
 
 so the ninth series in a panel is assigned `color_slot: 1` — indistinguishable from the
@@ -1160,14 +1172,16 @@ first, in the model as well as on screen. This is a self-contained correctness f
 rendering dependency; it lands on its own so it can be reviewed and reverted on its own.
 
 The slot number carries full identity. Decomposing it into a colour index and a dash band
-is the *renderer's* job (Task 4).
+is the _renderer's_ job (Task 4).
 
 **Files:**
+
 - Modify: `frontend/src/app/workspace.ts` — uncap the allocator, drop `MAX_COLOR_SLOTS`,
   fix the default width.
 - Modify: `frontend/src/app/workspace.test.ts` — add coverage.
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `color_slot` values unbounded above 1. `SeriesState.dash` keeps its written
   value of `"solid"`.
@@ -1214,9 +1228,9 @@ Expected: FAIL — the tenth slot comes back as `2` (the wrap), and the width is
 In `frontend/src/app/workspace.ts`, replace lines 246-249 (the capped allocator) with:
 
 ```ts
-    const used = new Set(panel.series.map((series) => series.color_slot));
-    let slot = 1;
-    while (used.has(slot)) slot += 1;
+const used = new Set(panel.series.map((series) => series.color_slot));
+let slot = 1;
+while (used.has(slot)) slot += 1;
 ```
 
 and in the `panel.series.push({...})` immediately below, change `width: 1.5` to
@@ -1256,12 +1270,13 @@ With Task 3 done, `color_slot` can exceed 8 but the renderer still wraps with
 slot into a colour index and a dash band in **one shared function** used by both the
 renderer and the legend, giving 24 deterministic identities with no schema change.
 
-This is what the Final Spec asks for: *"Series: 8 categorical slots (`--series-1…8`), dash
-classes beyond 8; identity never colour alone."* It is also the sanctioned answer under the
+This is what the Final Spec asks for: _"Series: 8 categorical slots (`--series-1…8`), dash
+classes beyond 8; identity never colour alone."_ It is also the sanctioned answer under the
 colour method, which forbids generating a ninth hue and directs you to composite encoding
 instead.
 
 **Files:**
+
 - Modify: `frontend/src/render/canvas-renderer.ts` — `COLOR_SLOTS`, `resolveSeriesStyle`,
   `dashPattern`; accept and render dash classes.
 - Modify: `frontend/src/render/canvas-renderer.test.ts` — add coverage.
@@ -1271,6 +1286,7 @@ instead.
   relief channel.
 
 **Interfaces:**
+
 - Consumes: Task 2's harness; Task 3's uncapped slots.
 - Produces:
   - `export const COLOR_SLOTS: number` — the single canonical modulus.
@@ -1328,7 +1344,9 @@ describe("resolveSeriesStyle", () => {
 
   it("survives a malformed serialized slot", () => {
     expect(resolveSeriesStyle(0, "solid").colorIndex).toBeGreaterThanOrEqual(0);
-    expect(resolveSeriesStyle(-3, "solid").colorIndex).toBeGreaterThanOrEqual(0);
+    expect(resolveSeriesStyle(-3, "solid").colorIndex).toBeGreaterThanOrEqual(
+      0,
+    );
   });
 });
 
@@ -1344,7 +1362,10 @@ describe("dashPattern", () => {
 describe("render with dash classes", () => {
   it("dashes slot 9 and resets the pattern afterwards", () => {
     const calls = renderOnce(
-      [tile("a", [{ t0: 0, t1: 1, v: 1 }]), tile("b", [{ t0: 0, t1: 1, v: 2 }])],
+      [
+        tile("a", [{ t0: 0, t1: 1, v: 1 }]),
+        tile("b", [{ t0: 0, t1: 1, v: 2 }]),
+      ],
       { colorSlots: [1, 9], dashes: ["solid", "solid"] },
     );
     const patterns = calls
@@ -1409,31 +1430,31 @@ Add to `RenderOptions`:
 In `render()`, replace the `response.series.forEach(...)` block (lines 71-81) with:
 
 ```ts
-    response.series.forEach((series, index) => {
-      const style = resolveSeriesStyle(
-        options.colorSlots[index] ?? index + 1,
-        options.dashes[index] ?? "solid",
-      );
-      this.drawSeries(
-        context,
-        plot,
-        series,
-        xRange,
-        yRange,
-        colors.series[style.colorIndex] ?? colors.fg2,
-        style.dash,
-      );
-    });
+response.series.forEach((series, index) => {
+  const style = resolveSeriesStyle(
+    options.colorSlots[index] ?? index + 1,
+    options.dashes[index] ?? "solid",
+  );
+  this.drawSeries(
+    context,
+    plot,
+    series,
+    xRange,
+    yRange,
+    colors.series[style.colorIndex] ?? colors.fg2,
+    style.dash,
+  );
+});
 ```
 
 Add the `dash: DashStyle` parameter to `drawSeries` and set the pattern before stroking.
 Replace lines 204-206 with:
 
 ```ts
-    context.strokeStyle = color;
-    context.lineWidth = 1.4;
-    context.setLineDash(dashPattern(dash));
-    context.beginPath();
+context.strokeStyle = color;
+context.lineWidth = 1.4;
+context.setLineDash(dashPattern(dash));
+context.beginPath();
 ```
 
 and add `context.setLineDash([]);` immediately after the closing `context.stroke();` at
@@ -1454,9 +1475,9 @@ In `updateLegend`, replace the swatch block (the `colorSlot` computation plus th
 shared function, so the legend and the plot cannot disagree:
 
 ```ts
-        const style = resolveSeriesStyle(series.color_slot, series.dash);
-        line.className = `legend-line dash-${style.dash}`;
-        line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
+const style = resolveSeriesStyle(series.color_slot, series.dash);
+line.className = `legend-line dash-${style.dash}`;
+line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
 ```
 
 Import `resolveSeriesStyle` from `"../render/canvas-renderer"` and delete the literal `8`
@@ -1505,13 +1526,13 @@ background needs no prefix and no mask support.
 `lineTo` calls per bin — `first`, `min`, `max`, `last` — almost all inside a single pixel
 column, because bin density is bounded by viewport width. A dash pattern applied to that
 path does not necessarily read as "dashed": it can stipple the vertical excursions so the
-series reads *fainter*, which is a false magnitude cue. `setLineDash` also costs real time
+series reads _fainter_, which is a false magnitude cue. `setLineDash` also costs real time
 on long canvas2d paths, against a product target of interactive framerates on 800k points.
 
 Run: `./scripts/run.sh web`, load demo data, put **at least 9 series** in one panel, and
 record:
 
-1. A screenshot of the panel. Slot 9 must read as *dashed*, not as *dimmer*.
+1. A screenshot of the panel. Slot 9 must read as _dashed_, not as _dimmer_.
 2. The status bar `render N ms` readout, with and without the ≥9th series, on the same
    workspace and window.
 
@@ -1523,7 +1544,7 @@ screenshot next to it.
 
 - [ ] **Step 6: Pin the contrast relief channel**
 
-ADR 0011 accepts a sub-3:1 light palette *on the condition* that legend chips carry the
+ADR 0011 accepts a sub-3:1 light palette _on the condition_ that legend chips carry the
 signal path as text. That condition is currently only a sentence. Make it executable: in
 the existing e2e workspace spec, add an assertion that every rendered legend chip contains
 non-empty `.legend-name` text.
@@ -1556,7 +1577,7 @@ two different scales, with nothing on screen saying so. That is the "do not misl
 reader" failure in this renderer. `PanelState.y_range` is already in the session schema,
 written as `null` and read nowhere.
 
-**What this task does *not* do:** it does not write the autoscale result back into
+**What this task does _not_ do:** it does not write the autoscale result back into
 `PanelState.y_range` during rendering. That would spend the field's one clean meaning —
 `null` = auto, `[a, b]` = the user pinned this — on a cache of whatever the first frame
 happened to contain, make painting a session mutation, and then require erasing the field
@@ -1570,6 +1591,7 @@ to get autoscale back. Instead:
   function of (tiles, viewport, y-range, tokens), which is what `AGENTS.md` asks for.
 
 **Files:**
+
 - Create: `frontend/src/render/y-axis.ts`, `frontend/src/render/y-axis.test.ts`
 - Modify: `frontend/src/render/canvas-renderer.ts` — `RenderOptions.yRange` required;
   delete `visibleYRange`.
@@ -1578,6 +1600,7 @@ to get autoscale back. Instead:
   `setPanelYRange` / `clearPanelYRange` for the gestures that will own them.
 
 **Interfaces:**
+
 - Consumes: Task 2's harness; Task 4's `RenderOptions`.
 - Produces:
   - `export function autoYRange(bins): [number, number] | null` — `null` when no finite
@@ -1802,23 +1825,21 @@ series paths, not just the visible ones, so toggling a series' visibility does n
 the axis for the ones still shown:
 
 ```ts
-    const seriesKey = state.series.map((series) => series.path).join(" ");
-    const yRange = this.yAxis.resolve(
-      seriesKey,
-      response.series.flatMap((tile) => tile.bins),
-      state.y_range,
-    );
-    const options: RenderOptions = {
-      xLabel: "time (s)",
-      yLabel: yLabel(response.series.map((tile) => tile.unit)),
-      colorSlots: shown.map(
-        (tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1,
-      ),
-      dashes: shown.map(
-        (tile) => bySeries.get(tile.signal_path)?.dash ?? "solid",
-      ),
-      yRange,
-    };
+const seriesKey = state.series.map((series) => series.path).join(" ");
+const yRange = this.yAxis.resolve(
+  seriesKey,
+  response.series.flatMap((tile) => tile.bins),
+  state.y_range,
+);
+const options: RenderOptions = {
+  xLabel: "time (s)",
+  yLabel: yLabel(response.series.map((tile) => tile.unit)),
+  colorSlots: shown.map(
+    (tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1,
+  ),
+  dashes: shown.map((tile) => bySeries.get(tile.signal_path)?.dash ?? "solid"),
+  yRange,
+};
 ```
 
 `renderTiles` still returns `this.renderer.render(...)`, a plain number. Nothing in
@@ -1897,7 +1918,7 @@ linking ADR 0011. Commit as `docs: record phase 1 visualization foundations`.
 4. **`--fg-3` remains below WCAG AA** (4.32:1) for chrome text. Task 2 moves only axis tick
    labels to `--fg-2`. The remaining uses are unaddressed by design; see Non-Goals.
 5. **`SeriesState.width` is still written and never read** — the renderer hardcodes
-   `lineWidth = 1.4`. Task 3 corrects the *written* value from `1.5` to `1.4` so the field
+   `lineWidth = 1.4`. Task 3 corrects the _written_ value from `1.5` to `1.4` so the field
    stops contradicting the spec and the renderer, but does not wire it up: per-series width
    has no UI to set it until the phase-2 legend inspector lands.
 6. **`SeriesState.dash` is read but never written by the allocator.** This is deliberate

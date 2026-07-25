@@ -173,12 +173,56 @@ describe("WorkspaceModel", () => {
     expect(slots).toEqual([1, 2]);
   });
 
+  it("allocates slots past 8 instead of wrapping onto slot 1", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    for (let index = 0; index < 10; index += 1) {
+      model.addSeries(panel.id, `rocket/sig_${String(index)}`);
+    }
+    const slots = model.panels()[0]?.series.map((series) => series.color_slot);
+    expect(slots).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("keeps the user dash default solid and writes the spec width", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeries(panel.id, "rocket/velocity_body/x");
+    expect(model.panels()[0]?.series[0]?.dash).toBe("solid");
+    expect(model.panels()[0]?.series[0]?.width).toBe(1.4);
+  });
+
   it("toggles series visibility", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
     model.addSeries(panel.id, "a/one");
     model.toggleSeriesVisible(panel.id, "a/one");
     expect(model.panel(panel.id)?.series[0]?.visible).toBe(false);
+  });
+
+  it("stores and clears a panel y range", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    expect(model.panels()[0]?.y_range).toBeNull();
+    model.setPanelYRange(panel.id, [-100, 300]);
+    expect(model.panels()[0]?.y_range).toEqual([-100, 300]);
+    model.clearPanelYRange(panel.id);
+    expect(model.panels()[0]?.y_range).toBeNull();
+  });
+
+  it("ignores a y range for an unknown panel", () => {
+    const model = new WorkspaceModel();
+    expect(() => {
+      model.setPanelYRange("missing", [0, 1]);
+    }).not.toThrow();
+  });
+
+  it("keeps a pinned y range when the series set changes", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setPanelYRange(panel.id, [-100, 300]);
+    model.addSeries(panel.id, "rocket/velocity_body/x");
+    model.toggleSeriesVisible(panel.id, "rocket/velocity_body/x");
+    expect(model.panels()[0]?.y_range).toEqual([-100, 300]);
   });
 
   it("clamps seam resizes at a 10% minimum fraction", () => {
