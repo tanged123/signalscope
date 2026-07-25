@@ -619,6 +619,13 @@ export class AppShell {
   }
 
   private bindControls(): void {
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        this.hideTooltip();
+      },
+      true,
+    );
     const openButton = required<HTMLButtonElement>(this.root, ".open-files");
     openButton.hidden = this.plane.ingest === null;
     openButton.addEventListener("click", () => {
@@ -1046,15 +1053,14 @@ export class AppShell {
       tip.hidden = true;
       return;
     }
-    const visible = new Set(
-      panel.series
-        .filter((series) => series.visible)
-        .map((series) => series.path),
-    );
     const rows =
       panel.mode === "time"
         ? (this.tilesByPanel.get(panelId)?.series ?? [])
-            .filter((tile) => visible.has(tile.signal_path))
+            .filter((tile) =>
+              panel.series.some(
+                (series) => series.visible && series.path === tile.signal_path,
+              ),
+            )
             .map((tile) => {
               const series = panel.series.find(
                 (entry) => entry.path === tile.signal_path,
@@ -1070,28 +1076,16 @@ export class AppShell {
               );
             })
         : panel.mode === "xy"
-          ? (this.samplesByPanel.get(panelId)?.series ?? [])
-              .filter((series) => visible.has(series.signal_path))
-              .map((sample) => {
-                const series = panel.series.find(
-                  (entry) => entry.path === sample.signal_path,
-                );
-                const style = resolveSeriesStyle(
-                  series?.color_slot ?? 1,
-                  series?.dash ?? "solid",
-                );
-                return tooltipRow(
-                  `var(--series-${String(style.colorIndex + 1)})`,
-                  sample.signal_path.split("/").slice(-2).join("/"),
-                  formatValue(lerpSample(sample.time, sample.values, cursorT)),
-                );
-              })
+          ? this.xyTooltipRows(panel, cursorT)
           : [];
     if (rows.length === 0) {
       tip.hidden = true;
       return;
     }
-    tip.replaceChildren(tooltipHeader(formatCursorTime(cursorT)), ...rows);
+    tip.replaceChildren(
+      tooltipHeader(`t = ${formatCursorTime(cursorT)}`),
+      ...rows,
+    );
     tip.hidden = false;
     const rect = tip.getBoundingClientRect();
     const x =
@@ -1103,6 +1097,66 @@ export class AppShell {
         ? client.y - 14 - rect.height
         : client.y + 14;
     tip.style.transform = `translate(${String(x)}px, ${String(y)}px)`;
+  }
+
+  private xyTooltipRows(panel: PanelState, cursorT: number): HTMLElement[] {
+    const samples = this.samplesByPanel.get(panel.id)?.series ?? [];
+    const byPath = new Map(
+      samples.map((series) => [series.signal_path, series]),
+    );
+    const entries = new Map<
+      string,
+      { roles: string[]; color: string; value: string }
+    >();
+    const add = (role: string, path: string, color: string): void => {
+      const existing = entries.get(path);
+      if (existing !== undefined) {
+        if (!existing.roles.includes(role)) existing.roles.push(role);
+        return;
+      }
+      const sample = byPath.get(path);
+      entries.set(path, {
+        roles: [role],
+        color,
+        value:
+          sample === undefined
+            ? "—"
+            : formatValue(lerpSample(sample.time, sample.values, cursorT)),
+      });
+    };
+    if (panel.x_signal !== null) {
+      add("x", panel.x_signal, "var(--fg-2)");
+    }
+    panel.series
+      .filter((series) => series.visible)
+      .forEach((series, index) => {
+        const style = resolveSeriesStyle(series.color_slot, series.dash);
+        add(
+          index === 0 ? "y" : `y${String(index + 1)}`,
+          series.path,
+          `var(--series-${String(style.colorIndex + 1)})`,
+        );
+      });
+    if (panel.color_signal === "time") {
+      entries.set("\u0000time", {
+        roles: ["c"],
+        color: "var(--fg-2)",
+        value: formatCursorTime(cursorT),
+      });
+    } else if (panel.color_signal !== null) {
+      add("c", panel.color_signal, "var(--fg-2)");
+    }
+    return [...entries.entries()].map(([path, entry]) =>
+      tooltipRow(
+        entry.color,
+        `${entry.roles.join("/")} · ${path === "\u0000time" ? "time" : path}`,
+        entry.value,
+      ),
+    );
+  }
+
+  private hideTooltip(): void {
+    required<HTMLElement>(this.root, ".plot-tip").hidden = true;
   }
 
   private scheduleLiveValues(cursorT: number | null): void {

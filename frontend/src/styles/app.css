@@ -463,6 +463,13 @@ kbd {
   color: var(--fg-4);
 }
 
+.axis-chip.drop-target {
+  border-color: var(--amber-7);
+  color: var(--amber-7);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .panel-legend {
   display: flex;
   flex: 1 1 auto;

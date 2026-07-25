@@ -127,14 +127,27 @@ test.describe("panel modes", () => {
     }
     await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
 
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("set color signal");
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".c-chip")).toContainText("time");
     await page.locator(".cursor-style-toggle").click();
     if (trajectoryPoint !== undefined) {
       await overlay.hover({ position: trajectoryPoint });
     }
     const tip = page.locator(".plot-tip");
     await expect(tip).toBeVisible();
-    await expect(tip.locator(".plot-tip-row")).toHaveCount(1);
+    await expect(tip.locator(".plot-tip-header")).toContainText("t =");
+    await expect(tip.locator(".plot-tip-row")).toHaveCount(3);
+    await expect(tip.locator(".signal-path").nth(0)).toContainText("x ·");
+    await expect(tip.locator(".signal-path").nth(1)).toContainText("y ·");
+    await expect(tip.locator(".signal-path").nth(2)).toContainText("c · time");
     await expect(tip.locator(".plot-tip-row").first()).not.toContainText("—");
+
+    // Clicking elsewhere dismisses the transient tooltip even when a
+    // synthetic pointer event does not first move the cursor off the canvas.
+    await page.locator(".brand").dispatchEvent("pointerdown");
+    await expect(tip).toBeHidden();
   });
 
   test("XY datatips pin, list, and show a delta", async ({
@@ -175,6 +188,20 @@ test.describe("panel modes", () => {
     await page.keyboard.type("set color signal");
     await page.keyboard.press("Enter");
     await expect(chip).toContainText("time");
+
+    await chip.click();
+    await expect(chip).toContainText("none");
+
+    const leaf = page.locator(".tree-scroll .tree-leaf").last();
+    const signalPath = await leaf.getAttribute("data-signal-path");
+    const transfer = await page.evaluateHandle(() => new DataTransfer());
+    await leaf.dispatchEvent("dragstart", { dataTransfer: transfer });
+    await chip.dispatchEvent("dragover", { dataTransfer: transfer });
+    await expect(chip).toHaveClass(/drop-target/);
+    await chip.dispatchEvent("drop", { dataTransfer: transfer });
+    await expect(chip).toContainText(
+      signalPath?.split("/").slice(-2).join("/") ?? "",
+    );
 
     await chip.click();
     await expect(chip).toContainText("none");

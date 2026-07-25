@@ -233,8 +233,27 @@ export class PanelView {
     required(this.element, ".x-chip").addEventListener("click", () => {
       this.callbacks.onExitXy(this.id);
     });
-    required(this.element, ".c-chip").addEventListener("click", () => {
+    const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
+    cChip.addEventListener("click", () => {
       this.callbacks.onSetColorSignal(this.id, null);
+    });
+    cChip.addEventListener("dragover", (event) => {
+      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cChip.classList.add("drop-target");
+    });
+    cChip.addEventListener("dragleave", (event) => {
+      event.stopPropagation();
+      cChip.classList.remove("drop-target");
+    });
+    cChip.addEventListener("drop", (event) => {
+      const path = dragData(event, SIGNAL_DRAG_TYPE);
+      cChip.classList.remove("drop-target");
+      if (path === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.callbacks.onSetColorSignal(this.id, path);
     });
     const header = required<HTMLElement>(this.element, ".panel-header");
     required<HTMLElement>(this.element, ".panel-title").addEventListener(
@@ -421,7 +440,7 @@ export class PanelView {
       );
       cChip.title =
         state.color_signal === null
-          ? "Assign a colour channel (⌘P → set color signal)"
+          ? "Drop a signal here to assign colour, or use ⌘P → set color signal"
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
     const note = required<HTMLElement>(this.element, ".panel-mode-note");
