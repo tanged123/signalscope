@@ -31,12 +31,12 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-use scope_protocol::EnvelopeBin;
+use scope_protocol::{EnvelopeBin, IngestStage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    ingest::IngestSummary,
+    ingest::{self, IngestError, IngestSummary},
     pyramid::Pyramid,
     store::{Signal, SignalId, SignalStore, StoreError},
 };
@@ -70,17 +70,10 @@ fn fingerprint(source: &Path) -> std::io::Result<Fingerprint> {
         .map_or(0, |elapsed| {
             u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX)
         });
-    let mut head = vec![0_u8; FINGERPRINT_HEAD_LEN];
-    let mut file = File::open(source)?;
-    let mut filled = 0;
-    while filled < head.len() {
-        let read = file.read(&mut head[filled..])?;
-        if read == 0 {
-            break;
-        }
-        filled += read;
-    }
-    head.truncate(filled);
+    let mut head = Vec::with_capacity(FINGERPRINT_HEAD_LEN);
+    File::open(source)?
+        .take(FINGERPRINT_HEAD_LEN as u64)
+        .read_to_end(&mut head)?;
     Ok(Fingerprint {
         source_len: metadata.len(),
         mtime_ns,
@@ -117,11 +110,66 @@ pub enum CacheError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error(transparent)]
+    Ingest(#[from] IngestError),
 }
 
 pub struct LoadedCache {
     pub summary: IngestSummary,
     pub pyramids: Vec<(SignalId, Pyramid)>,
+}
+
+pub struct IngestOutcome {
+    pub loaded: LoadedCache,
+    /// `Some` when the freshly built sidecar could not be written. Sidecar
+    /// write failures are non-fatal; callers may log and continue.
+    pub sidecar_error: Option<CacheError>,
+}
+
+/// Loads `source` from a fingerprint-valid sidecar, or ingests it, builds
+/// per-signal pyramids, and writes a fresh sidecar beside it. Progress is
+/// reported per stage: `Cache` while loading or writing the sidecar,
+/// `Decode` and `Pyramid` on the rebuild path.
+///
+/// # Errors
+///
+/// Returns [`CacheError`] when the source cannot be read, decoded, or
+/// registered. Sidecar *write* failures are non-fatal and surface through
+/// [`IngestOutcome::sidecar_error`] instead.
+pub fn ingest_or_load(
+    source: &Path,
+    store: &mut SignalStore,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
+    let mut on_cache = |fraction| progress(IngestStage::Cache, fraction);
+    if let Some(loaded) = try_load(source, store, &mut on_cache)? {
+        return Ok(IngestOutcome {
+            loaded,
+            sidecar_error: None,
+        });
+    }
+
+    let mut on_decode = |fraction| progress(IngestStage::Decode, fraction);
+    let summary = ingest::ingest_path(source, store, &mut on_decode)?;
+    let total = summary.signals.len().max(1);
+    let mut pyramids = Vec::new();
+    for (index, id) in summary.signals.iter().enumerate() {
+        if let Some(signal) = store.signal(*id) {
+            pyramids.push((*id, Pyramid::from_signal(signal)));
+        }
+        progress(IngestStage::Pyramid, fraction(index + 1, total));
+    }
+
+    let entries: Vec<(&Signal, &Pyramid)> = pyramids
+        .iter()
+        .filter_map(|(id, pyramid)| Some((store.signal(*id)?, pyramid)))
+        .collect();
+    let mut on_write = |fraction| progress(IngestStage::Cache, fraction);
+    let sidecar_error = write(source, summary.row_count as u64, &entries, &mut on_write).err();
+    Ok(IngestOutcome {
+        loaded: LoadedCache { summary, pyramids },
+        sidecar_error,
+    })
 }
 
 /// Writes the sidecar beside `source` atomically (temp file + rename).
@@ -130,7 +178,6 @@ pub struct LoadedCache {
 ///
 /// Returns [`CacheError`] when fingerprinting the source or writing the
 /// sidecar fails. Callers should treat write failures as non-fatal.
-#[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding
 pub fn write(
     source: &Path,
     row_count: u64,
@@ -160,27 +207,25 @@ pub fn write(
             point_count: signal.len() as u64,
             sections,
         });
-        progress((index + 1) as f64 / total as f64);
+        progress(fraction(index + 1, total));
     }
 
     let directory_json = serde_json::to_vec(&directory)?;
-    let mut bytes = Vec::with_capacity(HEADER_LEN + directory_json.len() + payload.len() + 8);
-    bytes.extend_from_slice(&MAGIC);
-    bytes.extend_from_slice(&CACHE_VERSION.to_le_bytes());
-    bytes.extend_from_slice(&fingerprint.source_len.to_le_bytes());
-    bytes.extend_from_slice(&fingerprint.mtime_ns.to_le_bytes());
-    bytes.extend_from_slice(&fingerprint.head_crc.to_le_bytes());
-    bytes.extend_from_slice(&(directory_json.len() as u64).to_le_bytes());
-    bytes.extend_from_slice(&directory_json);
-    while bytes.len() % 8 != 0 {
-        bytes.push(0);
-    }
-    bytes.extend_from_slice(&payload);
+    let mut header = Vec::with_capacity(HEADER_LEN + directory_json.len() + 8);
+    header.extend_from_slice(&MAGIC);
+    header.extend_from_slice(&CACHE_VERSION.to_le_bytes());
+    header.extend_from_slice(&fingerprint.source_len.to_le_bytes());
+    header.extend_from_slice(&fingerprint.mtime_ns.to_le_bytes());
+    header.extend_from_slice(&fingerprint.head_crc.to_le_bytes());
+    header.extend_from_slice(&(directory_json.len() as u64).to_le_bytes());
+    header.extend_from_slice(&directory_json);
+    pad_to_8(&mut header);
 
     let target = sidecar_path(source);
     let temporary = target.with_extension("sspyr.tmp");
     let mut file = File::create(&temporary)?;
-    file.write_all(&bytes)?;
+    file.write_all(&header)?;
+    file.write_all(&payload)?;
     file.sync_all()?;
     fs::rename(&temporary, &target)?;
     Ok(target)
@@ -321,9 +366,7 @@ fn section_bytes(payload: &[u8], section: CacheSection) -> Option<&[u8]> {
 }
 
 fn append_section(payload: &mut Vec<u8>, bytes: &[u8]) -> CacheSection {
-    while payload.len() % 8 != 0 {
-        payload.push(0);
-    }
+    pad_to_8(payload);
     let section = CacheSection {
         offset: payload.len() as u64,
         len: bytes.len() as u64,
@@ -394,6 +437,12 @@ fn decode_bins(bytes: &[u8]) -> Option<Vec<EnvelopeBin>> {
             })
             .collect(),
     )
+}
+
+fn pad_to_8(bytes: &mut Vec<u8>) {
+    while bytes.len() % 8 != 0 {
+        bytes.push(0);
+    }
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -472,6 +521,31 @@ mod tests {
         }
         let speed = fresh.signal_by_path("flight/speed").unwrap();
         assert!(speed.values()[42].is_nan());
+    }
+
+    #[test]
+    fn ingest_or_load_builds_then_hits_the_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let mut store = SignalStore::new();
+        let mut stages = Vec::new();
+        let outcome =
+            ingest_or_load(&source, &mut store, &mut |stage, _| stages.push(stage)).unwrap();
+        assert!(outcome.sidecar_error.is_none());
+        assert!(sidecar_path(&source).exists());
+        assert!(stages.contains(&IngestStage::Decode));
+        assert!(stages.contains(&IngestStage::Pyramid));
+
+        let mut fresh = SignalStore::new();
+        stages.clear();
+        let cached =
+            ingest_or_load(&source, &mut fresh, &mut |stage, _| stages.push(stage)).unwrap();
+        assert_eq!(
+            cached.loaded.summary.row_count,
+            outcome.loaded.summary.row_count
+        );
+        assert_eq!(cached.loaded.pyramids.len(), outcome.loaded.pyramids.len());
+        assert!(stages.iter().all(|stage| *stage == IngestStage::Cache));
     }
 
     #[test]

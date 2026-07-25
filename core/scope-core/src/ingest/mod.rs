@@ -61,6 +61,16 @@ pub trait Decoder {
 
 const MCAP_MAGIC: [u8; 8] = *b"\x89MCAP0\r\n";
 
+/// Ingestible formats as (label, extensions), for hosts building file
+/// pickers. Actual dispatch sniffs content, not extensions.
+pub const SUPPORTED_FORMATS: &[(&str, &[&str])] = &[
+    (
+        "Delimited text (CSV, TSV, TXT, DAT)",
+        &["csv", "tsv", "txt", "dat"],
+    ),
+    ("MCAP recordings (MCAP)", &["mcap"]),
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SourceFormat {
     Csv,
@@ -68,17 +78,11 @@ enum SourceFormat {
 }
 
 fn sniff_format(path: &Path) -> Result<SourceFormat, IngestError> {
-    let mut magic = [0_u8; 8];
-    let mut file = File::open(path)?;
-    let mut filled = 0;
-    while filled < magic.len() {
-        let read = file.read(&mut magic[filled..])?;
-        if read == 0 {
-            break;
-        }
-        filled += read;
-    }
-    Ok(if filled == magic.len() && magic == MCAP_MAGIC {
+    let mut magic = Vec::with_capacity(MCAP_MAGIC.len());
+    File::open(path)?
+        .take(MCAP_MAGIC.len() as u64)
+        .read_to_end(&mut magic)?;
+    Ok(if magic == MCAP_MAGIC {
         SourceFormat::Mcap
     } else {
         SourceFormat::Csv
@@ -101,6 +105,22 @@ pub fn ingest_path(
         SourceFormat::Csv => CsvDecoder.ingest(path, store, progress),
         SourceFormat::Mcap => McapDecoder.ingest(path, store, progress),
     }
+}
+
+/// Returns the permutation that sorts `time` ascending (`total_cmp`), or
+/// `None` when the column is already in order.
+pub(crate) fn sort_permutation(time: &[f64]) -> Option<Vec<usize>> {
+    let mut order: Vec<usize> = (0..time.len()).collect();
+    order.sort_by(|&left, &right| time[left].total_cmp(&time[right]));
+    order
+        .iter()
+        .enumerate()
+        .any(|(position, index)| position != *index)
+        .then_some(order)
+}
+
+pub(crate) fn apply_permutation(order: &[usize], column: &[f64]) -> Vec<f64> {
+    order.iter().map(|&index| column[index]).collect()
 }
 
 /// Lowercases a path segment and folds spaces/dots to underscores.

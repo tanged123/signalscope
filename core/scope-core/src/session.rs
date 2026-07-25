@@ -7,6 +7,11 @@ pub use generated::*;
 use serde::Deserialize;
 use thiserror::Error;
 
+/// Id and title of the tab every session starts with; the v2 migration
+/// wraps legacy single-workspace sessions in this same tab.
+pub const DEFAULT_TAB_ID: &str = "workspace-1";
+pub const DEFAULT_TAB_TITLE: &str = "Workspace 1";
+
 impl Default for Session {
     fn default() -> Self {
         Self {
@@ -14,10 +19,10 @@ impl Default for Session {
             schema_version: SESSION_SCHEMA_VERSION,
             theme: Theme::Dark,
             linked_time: LinkedTime::default(),
-            active_tab_id: "workspace-1".into(),
+            active_tab_id: DEFAULT_TAB_ID.into(),
             tabs: vec![WorkspaceTab {
-                id: "workspace-1".into(),
-                title: "Workspace 1".into(),
+                id: DEFAULT_TAB_ID.into(),
+                title: DEFAULT_TAB_TITLE.into(),
                 focused_panel_id: None,
                 panels: Vec::new(),
                 layout: Vec::new(),
@@ -113,12 +118,12 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             let layout = object
                 .remove("layout")
                 .unwrap_or_else(|| serde_json::json!([]));
-            object.insert("active_tab_id".into(), serde_json::json!("workspace-1"));
+            object.insert("active_tab_id".into(), serde_json::json!(DEFAULT_TAB_ID));
             object.insert(
                 "tabs".into(),
                 serde_json::json!([{
-                    "id": "workspace-1",
-                    "title": "Workspace 1",
+                    "id": DEFAULT_TAB_ID,
+                    "title": DEFAULT_TAB_TITLE,
                     "focused_panel_id": focused_panel_id,
                     "panels": panels,
                     "layout": layout

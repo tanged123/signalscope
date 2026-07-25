@@ -7,7 +7,7 @@ use std::{
 
 use scope_core::{
     cache,
-    ingest::ingest_path,
+    ingest::SUPPORTED_FORMATS,
     pyramid::Pyramid,
     store::{Signal, SignalId, SignalStore, Source},
 };
@@ -41,8 +41,7 @@ fn running(stage: IngestStage, fraction: f64) -> IngestStatus {
 }
 
 fn signal_summary(signal: &Signal) -> SignalSummary {
-    let time = signal.time();
-    let (t_min, t_max) = finite_time_bounds(time);
+    let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
         path: signal.path.clone(),
@@ -51,16 +50,6 @@ fn signal_summary(signal: &Signal) -> SignalSummary {
         t_min,
         t_max,
     }
-}
-
-fn finite_time_bounds(time: &[f64]) -> (f64, f64) {
-    let mut finite = time.iter().copied().filter(|value| value.is_finite());
-    let Some(first) = finite.next() else {
-        return (0.0, 1.0);
-    };
-    finite.fold((first, first), |(min, max), value| {
-        (min.min(value), max.max(value))
-    })
 }
 
 fn source_summary(source: &Source) -> SourceSummary {
@@ -86,61 +75,51 @@ fn run_ingest_job(app: &AppHandle, job_id: u64, path: &Path) {
             response: Some(response),
             error: None,
         },
-        Err(error) => IngestStatus {
-            state: IngestState::Failed,
-            stage: IngestStage::Decode,
-            fraction: 0.0,
-            response: None,
-            error: Some(error),
-        },
+        Err(error) => {
+            let (stage, fraction) = last_progress(app, job_id);
+            IngestStatus {
+                state: IngestState::Failed,
+                stage,
+                fraction,
+                response: None,
+                error: Some(error),
+            }
+        }
     };
     set_job(app, job_id, status);
 }
 
-#[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding
+fn last_progress(app: &AppHandle, job_id: u64) -> (IngestStage, f64) {
+    app.state::<Mutex<IngestJobs>>()
+        .inner()
+        .lock()
+        .ok()
+        .and_then(|jobs| {
+            jobs.jobs
+                .get(&job_id)
+                .map(|status| (status.stage, status.fraction))
+        })
+        .unwrap_or((IngestStage::Decode, 0.0))
+}
+
 fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<IngestResponse, String> {
     let state = app.state::<Mutex<DataState>>();
     let mut data = state.lock().map_err(|error| error.to_string())?;
     let DataState { store, pyramids } = &mut *data;
 
-    let mut on_cache = |fraction| set_job(app, job_id, running(IngestStage::Cache, fraction));
-    let summary = if let Some(loaded) =
-        cache::try_load(path, store, &mut on_cache).map_err(|error| error.to_string())?
-    {
-        for (id, pyramid) in loaded.pyramids {
-            pyramids.insert(id, pyramid);
-        }
-        loaded.summary
-    } else {
-        let mut on_decode = |fraction| set_job(app, job_id, running(IngestStage::Decode, fraction));
-        let summary =
-            ingest_path(path, store, &mut on_decode).map_err(|error| error.to_string())?;
-        let total = summary.signals.len().max(1);
-        for (index, id) in summary.signals.iter().enumerate() {
-            let signal = store
-                .signal(*id)
-                .ok_or_else(|| format!("ingested signal {id:?} is missing"))?;
-            pyramids.insert(*id, Pyramid::from_signal(signal));
-            set_job(
-                app,
-                job_id,
-                running(IngestStage::Pyramid, (index + 1) as f64 / total as f64),
-            );
-        }
-        let entries: Vec<(&Signal, &Pyramid)> = summary
-            .signals
-            .iter()
-            .filter_map(|id| Some((store.signal(*id)?, pyramids.get(id)?)))
-            .collect();
-        let mut on_write = |fraction| set_job(app, job_id, running(IngestStage::Cache, fraction));
-        if let Err(error) = cache::write(path, summary.row_count as u64, &entries, &mut on_write) {
-            eprintln!(
-                "pyramid sidecar not written for {}: {error}",
-                path.display()
-            );
-        }
-        summary
-    };
+    let mut on_progress = |stage, fraction| set_job(app, job_id, running(stage, fraction));
+    let outcome =
+        cache::ingest_or_load(path, store, &mut on_progress).map_err(|error| error.to_string())?;
+    if let Some(error) = outcome.sidecar_error {
+        eprintln!(
+            "pyramid sidecar not written for {}: {error}",
+            path.display()
+        );
+    }
+    let summary = outcome.loaded.summary;
+    for (id, pyramid) in outcome.loaded.pyramids {
+        pyramids.insert(id, pyramid);
+    }
 
     let source = store
         .sources()
@@ -161,18 +140,23 @@ fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<Ingest
 #[tauri::command]
 async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .add_filter(
-                "Supported telemetry (CSV, TSV, TXT, DAT, MCAP)",
-                &["csv", "tsv", "txt", "dat", "mcap"],
-            )
-            .add_filter(
-                "Delimited text (CSV, TSV, TXT, DAT)",
-                &["csv", "tsv", "txt", "dat"],
-            )
-            .add_filter("MCAP recordings (MCAP)", &["mcap"])
-            .blocking_pick_files()
+        let extensions: Vec<&str> = SUPPORTED_FORMATS
+            .iter()
+            .flat_map(|(_, extensions)| extensions.iter().copied())
+            .collect();
+        let combined = format!(
+            "Supported telemetry ({})",
+            extensions
+                .iter()
+                .map(|extension| extension.to_uppercase())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let mut dialog = app.dialog().file().add_filter(combined, &extensions);
+        for (label, extensions) in SUPPORTED_FORMATS {
+            dialog = dialog.add_filter(*label, extensions);
+        }
+        dialog.blocking_pick_files()
     })
     .await
     .map_err(|error| error.to_string())?;
@@ -299,35 +283,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use scope_core::store::SourceId;
-
-    use super::*;
-
-    #[test]
-    #[allow(clippy::float_cmp)]
-    fn signal_summary_uses_finite_time_extrema_and_safe_fallbacks() {
-        let signal = Signal::new(
-            SignalId(1),
-            SourceId(1),
-            "source/value",
-            None,
-            Arc::from(vec![f64::NAN, 5.0, -2.0, f64::INFINITY]),
-            Arc::from(vec![0.0; 4]),
-        )
-        .unwrap();
-
-        let summary = signal_summary(&signal);
-        assert_eq!((summary.t_min, summary.t_max), (-2.0, 5.0));
-        assert_eq!(finite_time_bounds(&[]), (0.0, 1.0));
-        assert_eq!(
-            finite_time_bounds(&[f64::NAN, f64::NEG_INFINITY]),
-            (0.0, 1.0)
-        );
-    }
 }

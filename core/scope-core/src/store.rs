@@ -91,6 +91,19 @@ impl Signal {
         &self.values
     }
 
+    /// The finite min/max of the time column, or `(0.0, 1.0)` when no
+    /// finite samples exist, so presentation windows stay well-formed.
+    #[must_use]
+    pub fn time_bounds(&self) -> (f64, f64) {
+        let mut finite = self.time.iter().copied().filter(|value| value.is_finite());
+        let Some(first) = finite.next() else {
+            return (0.0, 1.0);
+        };
+        finite.fold((first, first), |(min, max), value| {
+            (min.min(value), max.max(value))
+        })
+    }
+
     #[must_use]
     pub fn time_shared(&self) -> Arc<[f64]> {
         Arc::clone(&self.time)
@@ -317,6 +330,32 @@ mod tests {
         assert_eq!(store.sources().next().unwrap().point_count, 1);
         assert_eq!(store.signals().count(), 1);
         assert!(store.signal_by_path("rollback/a").is_none());
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn time_bounds_use_finite_extrema_and_safe_fallbacks() {
+        let signal = Signal::new(
+            SignalId(1),
+            SourceId(1),
+            "source/value",
+            None,
+            Arc::from(vec![f64::NAN, 5.0, -2.0, f64::INFINITY]),
+            Arc::from(vec![0.0; 4]),
+        )
+        .unwrap();
+        assert_eq!(signal.time_bounds(), (-2.0, 5.0));
+
+        let empty = Signal::new(
+            SignalId(2),
+            SourceId(1),
+            "source/empty",
+            None,
+            Arc::from(Vec::new()),
+            Arc::from(Vec::new()),
+        )
+        .unwrap();
+        assert_eq!(empty.time_bounds(), (0.0, 1.0));
     }
 
     #[test]

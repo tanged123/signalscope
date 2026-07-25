@@ -1,7 +1,7 @@
 //! MCAP decoding for channels with json-encoded messages (ADR 0009).
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     path::Path,
     sync::Arc,
@@ -9,7 +9,9 @@ use std::{
 
 use serde_json::Value;
 
-use super::{Decoder, IngestError, IngestSummary, normalize_segment};
+use super::{
+    Decoder, IngestError, IngestSummary, apply_permutation, normalize_segment, sort_permutation,
+};
 use crate::store::SignalStore;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -26,11 +28,13 @@ impl TopicColumns {
         let backfill = self.time.len();
         self.time.push(time);
         for (name, value) in fields {
-            let column = self
-                .columns
-                .entry(name.clone())
-                .or_insert_with(|| vec![f64::NAN; backfill]);
-            column.push(*value);
+            if let Some(column) = self.columns.get_mut(name) {
+                column.push(*value);
+            } else {
+                let mut column = vec![f64::NAN; backfill];
+                column.push(*value);
+                self.columns.insert(name.clone(), column);
+            }
         }
         for column in self.columns.values_mut() {
             if column.len() < self.time.len() {
@@ -40,18 +44,11 @@ impl TopicColumns {
     }
 
     fn sorted(mut self) -> Self {
-        let mut order: Vec<usize> = (0..self.time.len()).collect();
-        order.sort_by(|&left, &right| self.time[left].total_cmp(&self.time[right]));
-        if order
-            .iter()
-            .enumerate()
-            .all(|(position, index)| position == *index)
-        {
-            return self;
-        }
-        self.time = order.iter().map(|&index| self.time[index]).collect();
-        for column in self.columns.values_mut() {
-            *column = order.iter().map(|&index| column[index]).collect();
+        if let Some(order) = sort_permutation(&self.time) {
+            self.time = apply_permutation(&order, &self.time);
+            for column in self.columns.values_mut() {
+                *column = apply_permutation(&order, column);
+            }
         }
         self
     }
@@ -69,11 +66,15 @@ impl Decoder for McapDecoder {
         let data = fs::read(path)?;
         let mut topics: BTreeMap<String, TopicColumns> = BTreeMap::new();
         let mut encodings: BTreeSet<String> = BTreeSet::new();
+        let mut topic_by_channel: HashMap<u16, String> = HashMap::new();
         let mut fields: Vec<(String, f64)> = Vec::new();
         for message in ::mcap::MessageStream::new(&data)? {
             let message = message?;
-            encodings.insert(message.channel.message_encoding.clone());
-            if message.channel.message_encoding != "json" {
+            let channel = &message.channel;
+            if !encodings.contains(channel.message_encoding.as_str()) {
+                encodings.insert(channel.message_encoding.clone());
+            }
+            if channel.message_encoding != "json" {
                 continue;
             }
             let Ok(value) = serde_json::from_slice::<Value>(&message.data) else {
@@ -81,10 +82,15 @@ impl Decoder for McapDecoder {
             };
             fields.clear();
             flatten_numeric("", &value, &mut fields);
-            topics
-                .entry(normalize_topic(&message.channel.topic))
-                .or_default()
-                .push_row(message.log_time as f64 * 1e-9, &fields);
+            let topic = topic_by_channel
+                .entry(channel.id)
+                .or_insert_with(|| normalize_topic(&channel.topic));
+            let columns = if let Some(columns) = topics.get_mut(topic.as_str()) {
+                columns
+            } else {
+                topics.entry(topic.clone()).or_default()
+            };
+            columns.push_row(message.log_time as f64 * 1e-9, &fields);
         }
 
         let source_id = store.register_source(path);

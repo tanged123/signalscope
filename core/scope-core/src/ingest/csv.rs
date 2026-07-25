@@ -7,7 +7,9 @@ use std::{
     sync::Arc,
 };
 
-use super::{Decoder, IngestError, IngestSummary, normalize_segment};
+use super::{
+    Decoder, IngestError, IngestSummary, apply_permutation, normalize_segment, sort_permutation,
+};
 use crate::store::SignalStore;
 
 const TIME_NAMES: &[&str] = &[
@@ -205,20 +207,14 @@ fn select_time_column(headers: &[String], columns: &[Vec<f64>]) -> Option<usize>
 }
 
 fn sort_columns_by_time(columns: &mut [Vec<f64>], time_index: usize) {
-    let Some(time) = columns.get(time_index) else {
+    let Some(order) = columns
+        .get(time_index)
+        .and_then(|time| sort_permutation(time))
+    else {
         return;
     };
-    let mut order: Vec<usize> = (0..time.len()).collect();
-    order.sort_by(|&left, &right| time[left].total_cmp(&time[right]));
-    if order
-        .iter()
-        .enumerate()
-        .all(|(position, index)| position == *index)
-    {
-        return;
-    }
     for column in columns {
-        *column = order.iter().map(|&index| column[index]).collect();
+        *column = apply_permutation(&order, column);
     }
 }
 
