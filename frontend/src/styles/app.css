@@ -864,11 +864,20 @@ kbd {
 }
 
 .gesture-hint {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
   overflow: hidden;
   flex: 1;
-  text-align: right;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gesture-hint b {
+  margin-right: 4px;
+  color: var(--fg-2);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
 }
 
 .status-command {

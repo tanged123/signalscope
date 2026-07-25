@@ -11,7 +11,9 @@ import {
   insidePlot,
   invertX,
   invertY,
+  valueAtTime,
   wheelZoomFactor,
+  zoomDragMode,
   zoomRange,
   type PlotLayout,
 } from "../app/plot-math";
@@ -103,7 +105,7 @@ export class PanelView {
   private lastTiles: TileResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private cursorT: number | null = null;
-  private cursorStyle: CursorStyle = "dot";
+  private cursorStyle: CursorStyle = "none";
   private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private dragging = false;
   private emphasizePath: string | null = null;
@@ -467,9 +469,27 @@ export class PanelView {
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
+    const cursorT = this.cursorT;
+    const cursorPoints =
+      this.cursorStyle === "dot" && cursorT !== null
+        ? (this.lastTiles?.series ?? []).flatMap((tile) => {
+            const series = bySeries.get(tile.signal_path);
+            if (series?.visible !== true) return [];
+            const value = valueAtTime(tile.bins, cursorT);
+            if (value === null) return [];
+            return [
+              {
+                value,
+                colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
+                  .colorIndex,
+              },
+            ];
+          })
+        : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
       cursorT: state?.mode === "time" ? this.cursorT : null,
       cursorStyle: this.cursorStyle,
+      cursorPoints,
       box: this.box,
       annotations,
       annotationColorIndices: annotations.map((annotation) => {
@@ -528,21 +548,31 @@ export class PanelView {
         this.dragging = true;
         this.overlay.setPointerCapture(down.pointerId);
       }
-      const horizontal =
-        Math.abs(event.offsetX - start.x) >= Math.abs(event.offsetY - start.y);
-      this.box = horizontal
-        ? {
-            x0: clampX(start.x),
-            y0: layout.plot.y,
-            x1: clampX(event.offsetX),
-            y1: layout.plot.y + layout.plot.height,
-          }
-        : {
-            x0: layout.plot.x,
-            y0: clampY(start.y),
-            x1: layout.plot.x + layout.plot.width,
-            y1: clampY(event.offsetY),
-          };
+      const mode = zoomDragMode(
+        event.offsetX - start.x,
+        event.offsetY - start.y,
+      );
+      this.box =
+        mode === "x"
+          ? {
+              x0: clampX(start.x),
+              y0: layout.plot.y,
+              x1: clampX(event.offsetX),
+              y1: layout.plot.y + layout.plot.height,
+            }
+          : mode === "y"
+            ? {
+                x0: layout.plot.x,
+                y0: clampY(start.y),
+                x1: layout.plot.x + layout.plot.width,
+                y1: clampY(event.offsetY),
+              }
+            : {
+                x0: clampX(start.x),
+                y0: clampY(start.y),
+                x1: clampX(event.offsetX),
+                y1: clampY(event.offsetY),
+              };
       this.drawOverlay();
     };
     const finish = (event: PointerEvent): void => {
@@ -558,16 +588,29 @@ export class PanelView {
       const horizontal =
         box.y0 === layout.plot.y &&
         box.y1 === layout.plot.y + layout.plot.height;
+      const vertical =
+        box.x0 === layout.plot.x &&
+        box.x1 === layout.plot.x + layout.plot.width;
       if (horizontal) {
         if (Math.abs(box.x1 - box.x0) <= 6) return;
         const t0 = invertX(layout, Math.min(box.x0, box.x1));
         const t1 = invertX(layout, Math.max(box.x0, box.x1));
         this.callbacks.onTimeWindow(this.id, t0, t1);
-      } else {
+      } else if (vertical) {
         if (Math.abs(box.y1 - box.y0) <= 6) return;
         const yLow = invertY(layout, Math.max(box.y0, box.y1));
         const yHigh = invertY(layout, Math.min(box.y0, box.y1));
         this.callbacks.onYRange(this.id, [yLow, yHigh]);
+      } else {
+        if (Math.abs(box.x1 - box.x0) <= 6 || Math.abs(box.y1 - box.y0) <= 6) {
+          return;
+        }
+        const t0 = invertX(layout, Math.min(box.x0, box.x1));
+        const t1 = invertX(layout, Math.max(box.x0, box.x1));
+        const yLow = invertY(layout, Math.max(box.y0, box.y1));
+        const yHigh = invertY(layout, Math.min(box.y0, box.y1));
+        this.callbacks.onYRange(this.id, [yLow, yHigh]);
+        this.callbacks.onTimeWindow(this.id, t0, t1);
       }
     };
     const cancel = (): void => {

@@ -39,7 +39,7 @@ export class AppShell {
   private refreshTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
-  private cursorStyle: CursorStyle = "dot";
+  private cursorStyle: CursorStyle = "none";
 
   constructor(
     private readonly root: HTMLElement,
@@ -745,7 +745,7 @@ export class AppShell {
       this.cursorStyle === "line" ? state.cursorT : null,
       this.cursorStyle === "line" ? client : null,
     );
-    this.scheduleLiveValues(this.cursorStyle === "line" ? state.cursorT : null);
+    this.scheduleLiveValues(this.cursorStyle === "none" ? null : state.cursorT);
   }
 
   private cycleCursorStyle(): void {
@@ -1030,7 +1030,7 @@ function shellMarkup(): string {
       <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
       <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
-      <button class="tool-button cursor-style-toggle" title="Cursor: dot (click to cycle)">cursor ·</button>
+      <button class="tool-button cursor-style-toggle" title="Cursor: off (click to cycle)">cursor off</button>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
       <span class="tool-spacer"></span>
       <span class="window-label">window</span>
@@ -1070,7 +1070,12 @@ function shellMarkup(): string {
       <span class="point-count status-value">0 pts</span>
       <span>render <span class="render-ms status-value">— ms</span></span>
       <span>cursor <span class="status-value cursor-readout">t = —</span></span>
-      <span class="gesture-hint">drag ↔ x-zoom / ↕ y-zoom · wheel xy · ⇧wheel y · ⌥wheel x · right-drag pan · dbl-click fit</span>
+      <span class="gesture-hint">
+        <span><b>ZOOM</b> drag box · wheel</span>
+        <span><b>ONE AXIS</b> thin drag · ⇧wheel Y · ⌥wheel X</span>
+        <span><b>PAN</b> right-drag</span>
+        <span><b>FIT</b> double-click</span>
+      </span>
       <span class="status-command">⌘P</span>
     </footer>
   </main>`;

@@ -26,7 +26,7 @@ export interface WorkspaceCallbacks extends PanelCallbacks {
 export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
   private mountedKey = "";
-  private cursorStyle: CursorStyle = "dot";
+  private cursorStyle: CursorStyle = "none";
 
   constructor(
     private readonly root: HTMLElement,

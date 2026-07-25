@@ -83,6 +83,19 @@ export function panRange(range: Range, delta: number): Range {
   return { min: range.min + delta, max: range.max + delta };
 }
 
+export type ZoomDragMode = "x" | "y" | "xy";
+
+/** Axis-only for thin/extreme drags; ordinary rectangles retain box zoom. */
+export function zoomDragMode(deltaX: number, deltaY: number): ZoomDragMode {
+  const width = Math.abs(deltaX);
+  const height = Math.abs(deltaY);
+  if (width <= 8 && height > 8) return "y";
+  if (height <= 8 && width > 8) return "x";
+  if (width >= height * 3) return "x";
+  if (height >= width * 3) return "y";
+  return "xy";
+}
+
 export function valueAtTime(
   bins: readonly EnvelopeBin[],
   time: number,

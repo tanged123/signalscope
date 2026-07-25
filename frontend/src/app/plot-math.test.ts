@@ -8,6 +8,7 @@ import {
   projectX,
   valueAtTime,
   wheelZoomFactor,
+  zoomDragMode,
   zoomRange,
   type PlotLayout,
 } from "./plot-math";
@@ -53,6 +54,13 @@ test("projection inversion, zoom and pan preserve plot ranges", () => {
   expect(panRange({ min: 5, max: 15 }, -2)).toEqual({ min: 3, max: 13 });
   expect(wheelZoomFactor(-240)).toBeLessThan(1);
   expect(wheelZoomFactor(240)).toBeGreaterThan(1);
+});
+
+test("zoom drags snap only strongly directional rectangles to one axis", () => {
+  expect(zoomDragMode(200, 5)).toBe("x");
+  expect(zoomDragMode(5, 200)).toBe("y");
+  expect(zoomDragMode(200, 80)).toBe("xy");
+  expect(zoomDragMode(80, 200)).toBe("xy");
 });
 
 test("valueAtTime interpolates drawn vertices and respects gaps", () => {

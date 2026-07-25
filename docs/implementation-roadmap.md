@@ -28,15 +28,18 @@ a headless renderer harness and coherent tick pipeline, unbounded series
 allocation with composite colour/dash identity, and stable per-panel y axes
 resolved outside the renderer.
 
-Phase 2 desktop interaction (2A) shipped: linked wheel/directional-drag/pan/fit
-gestures with per-panel unlinked windows, both-axis pointer-centered wheel
-zoom, selectable off/dot/line cursor modes (readouts are attached to line
-mode), pinned annotations with delta readouts, a visible-region statistics
+Phase 2 desktop interaction (2A) shipped: linked wheel/box/pan/fit gestures
+with per-panel unlinked windows, aspect-ratio snapping from box zoom to
+single-axis zoom, both-axis pointer-centered wheel zoom, and selectable
+off/dot/line cursor modes (default off; dots track visible series; the tooltip
+is attached to line mode). Pinned annotations have delta readouts, and a
+visible-region statistics
 strip backed by envelope-bin sums
 ([ADR 0014](adr/0014-envelope-bin-sums.md)), gutter/inline axis styles,
 in-place title and axis-name editing, a visible per-panel axis-style control,
 Favorites star/drop affordances, and the split legend inspector. Series
-strokes are clipped to the plot rectangle and level-zero cursor values
+strokes are clipped to the plot rectangle, tile queries retain neighboring
+edge bins for continuous clipped strokes, and level-zero cursor values
 interpolate between rendered samples.
 The categorical series order now uses MATLAB's canonical seven defaults, with
 the eighth slot rolling over to dashed blue; amber remains reserved by token

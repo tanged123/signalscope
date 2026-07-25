@@ -154,15 +154,25 @@ impl Pyramid {
 
     #[must_use]
     pub fn query(&self, t0: f64, t1: f64, pixel_width: u32) -> PyramidQuery {
+        if self.time.first().is_none_or(|first| t1 < *first)
+            || self.time.last().is_none_or(|last| t0 > *last)
+        {
+            return PyramidQuery {
+                level: 0,
+                bins: Vec::new(),
+            };
+        }
         let target = usize::try_from(pixel_width.max(1))
             .unwrap_or(usize::MAX)
             .saturating_mul(2);
         let raw_start = self.time.partition_point(|time| *time < t0);
         let raw_end = self.time.partition_point(|time| *time <= t1);
         if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
+            let start = raw_start.saturating_sub(1);
+            let end = raw_end.saturating_add(1).min(self.time.len());
             return PyramidQuery {
                 level: 0,
-                bins: self.synthesize_raw(raw_start, raw_end),
+                bins: self.synthesize_raw(start, end),
             };
         }
 
@@ -172,8 +182,11 @@ impl Pyramid {
             .position(|level| count_overlapping(level, t0, t1) <= target)
             .unwrap_or_else(|| self.merged.len().saturating_sub(1));
         let level = &self.merged[level_index];
-        let start = level.partition_point(|bin| bin.t1 < t0);
-        let end = level.partition_point(|bin| bin.t0 <= t1);
+        let start = level.partition_point(|bin| bin.t1 < t0).saturating_sub(1);
+        let end = level
+            .partition_point(|bin| bin.t0 <= t1)
+            .saturating_add(1)
+            .min(level.len());
         PyramidQuery {
             level: u32::try_from(level_index + 1).unwrap_or(u32::MAX),
             bins: level[start..end].to_vec(),
@@ -275,8 +288,21 @@ mod tests {
         let pyramid = Pyramid::from_samples(&time, &values);
         let query = pyramid.query(0.0, 9_999.0, 200);
 
-        assert!(query.bins.len() <= 400);
+        assert!(query.bins.len() <= 402);
         assert!(query.level > 0);
+    }
+
+    #[test]
+    fn query_includes_neighbor_bins_for_viewport_edge_strokes() {
+        let pyramid =
+            Pyramid::from_samples(&[0.0, 1.0, 2.0, 3.0, 4.0], &[0.0, 1.0, 4.0, 9.0, 16.0]);
+        let query = pyramid.query(1.5, 2.5, 100);
+
+        assert_eq!(query.level, 0);
+        assert_eq!(
+            query.bins.iter().map(|bin| bin.t0).collect::<Vec<_>>(),
+            [1.0, 2.0, 3.0]
+        );
     }
 
     #[test]

@@ -14,11 +14,19 @@ test.describe("desktop plot interactions", () => {
     const panel = page.locator(".panel").first();
     const overlay = panel.locator(".overlay-canvas");
     await overlay.hover({ position: { x: 300, y: 120 } });
-    await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+    await expect(page.locator(".cursor-readout")).toHaveText("t = —");
     await expect(page.locator(".plot-tip")).toBeHidden();
+
     await page.locator(".cursor-style-toggle").click();
     await overlay.hover({ position: { x: 300, y: 120 } });
     await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+    await expect(page.locator(".plot-tip")).toBeHidden();
+    await expect(
+      page.locator(".tree-scroll .signal-value").first(),
+    ).not.toHaveText("—");
+
+    await page.locator(".cursor-style-toggle").click();
+    await overlay.hover({ position: { x: 300, y: 120 } });
     await expect(page.locator(".plot-tip")).toBeVisible();
     await expect(page.locator(".plot-tip-row").first()).not.toContainText("—");
 

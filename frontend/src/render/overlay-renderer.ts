@@ -22,6 +22,7 @@ export interface OverlayPalette {
 export interface OverlayState {
   cursorT: number | null;
   cursorStyle: CursorStyle;
+  cursorPoints: readonly CursorPoint[];
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   annotations: readonly Annotation[];
   annotationColorIndices: readonly number[];
@@ -29,6 +30,10 @@ export interface OverlayState {
 }
 
 export type CursorStyle = "none" | "dot" | "line";
+export interface CursorPoint {
+  value: number;
+  colorIndex: number;
+}
 
 export class OverlayRenderer {
   private palette: OverlayPalette | null = null;
@@ -50,7 +55,14 @@ export class OverlayRenderer {
     context.clearRect(0, 0, width, height);
     if (layout === null) return;
     const palette = this.resolvePalette();
-    this.drawCursor(context, layout, state.cursorT, state.cursorStyle, palette);
+    this.drawCursor(
+      context,
+      layout,
+      state.cursorT,
+      state.cursorStyle,
+      state.cursorPoints,
+      palette,
+    );
     this.drawAnnotations(context, layout, state, palette);
     if (state.box !== null) this.drawBox(context, state.box, palette);
   }
@@ -60,6 +72,7 @@ export class OverlayRenderer {
     layout: PlotLayout,
     cursorT: number | null,
     cursorStyle: CursorStyle,
+    cursorPoints: readonly CursorPoint[],
     palette: OverlayPalette,
   ): void {
     if (
@@ -72,15 +85,25 @@ export class OverlayRenderer {
     }
     const x = Math.round(projectX(layout, cursorT)) + 0.5;
     context.save();
-    context.strokeStyle = palette.amber;
     context.globalAlpha = 0.7;
-    context.lineWidth = 1;
-    context.beginPath();
     if (cursorStyle === "dot") {
-      context.fillStyle = palette.amber;
-      context.arc(x, layout.plot.y + layout.plot.height, 2.5, 0, Math.PI * 2);
-      context.fill();
+      context.lineWidth = 1.8;
+      for (const point of cursorPoints) {
+        const y = projectY(layout, point.value);
+        if (y < layout.plot.y || y > layout.plot.y + layout.plot.height) {
+          continue;
+        }
+        context.beginPath();
+        context.fillStyle = palette.surface0;
+        context.strokeStyle = palette.series[point.colorIndex] ?? palette.fg2;
+        context.arc(x, y, 3, 0, Math.PI * 2);
+        context.fill();
+        context.stroke();
+      }
     } else {
+      context.strokeStyle = palette.amber;
+      context.lineWidth = 1;
+      context.beginPath();
       context.setLineDash([2, 2]);
       context.moveTo(x, layout.plot.y);
       context.lineTo(x, layout.plot.y + layout.plot.height);

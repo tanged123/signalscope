@@ -54,6 +54,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
   renderer.draw(layout, {
     cursorT: 30,
     cursorStyle: "line",
+    cursorPoints: [],
     box: { x0: 100, y0: 50, x1: 200, y1: 150 },
     annotations: [],
     annotationColorIndices: [],
@@ -62,4 +63,17 @@ test("draws the cursor and rubber band with interaction amber", () => {
   expect(calls).toContain(`strokeStyle:${palette.amber}`);
   expect(calls).toContain(`fillStyle:${palette.amberFill}`);
   expect(calls).toContain("strokeRect");
+
+  calls.length = 0;
+  renderer.draw(layout, {
+    cursorT: 30,
+    cursorStyle: "dot",
+    cursorPoints: [{ value: 25, colorIndex: 0 }],
+    box: null,
+    annotations: [],
+    annotationColorIndices: [],
+    showDelta: false,
+  });
+  expect(calls).toContain("strokeStyle:#407fd0");
+  expect(calls).toContain("arc");
 });
