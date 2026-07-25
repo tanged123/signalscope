@@ -80,7 +80,7 @@ export interface PanelCallbacks {
   onDropSignal(id: string, path: string): void;
   onSetXSignal(id: string, path: string): void;
   onSetColorSignal(id: string, path: string | null): void;
-  onExitXy(id: string): void;
+  onClearXSignal(id: string): void;
   onToggleSeries(id: string, path: string): void;
   onResized(id: string): void;
   onCursor(
@@ -231,7 +231,7 @@ export class PanelView {
       });
     }
     required(this.element, ".x-chip").addEventListener("click", () => {
-      this.callbacks.onExitXy(this.id);
+      this.callbacks.onClearXSignal(this.id);
     });
     const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
     cChip.addEventListener("click", () => {
@@ -423,7 +423,7 @@ export class PanelView {
         chipPrefix("x:"),
         document.createTextNode(state.x_signal.split("/").slice(-2).join("/")),
       );
-      xChip.title = `X axis: ${state.x_signal} — click to return to time mode`;
+      xChip.title = `X axis: ${state.x_signal} — click to remove`;
     }
     const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
     cChip.hidden = state.mode !== "xy";

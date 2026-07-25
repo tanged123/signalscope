@@ -117,8 +117,8 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
-        onExitXy: (id) => {
-          this.exitXy(id);
+        onClearXSignal: (id) => {
+          this.clearXSignal(id);
         },
         onToggleSeries: (id, path) => {
           this.workspace.toggleSeriesVisible(id, path);
@@ -386,9 +386,9 @@ export class AppShell {
     );
     this.registerFocusedPanelCommand(
       "panel-clear-x-signal",
-      "Panel: return to time mode",
+      "Panel: clear X signal",
       (id) => {
-        this.exitXy(id);
+        this.clearXSignal(id);
       },
     );
     this.registerFocusedPanelCommand(
@@ -992,11 +992,16 @@ export class AppShell {
     }
   }
 
-  /** Returns an XY panel to time mode, restoring its x signal as a series. */
-  private exitXy(panelId: string): void {
+  /** Removes the assigned X signal while leaving an empty XY axis slot. */
+  private clearXSignal(panelId: string): void {
+    const panel = this.workspace.panel(panelId);
+    const path = panel?.x_signal;
+    if (panel === undefined || path === null || path === undefined) return;
     this.workspace.setXSignal(panelId, null);
-    this.workspace.setColorSignal(panelId, null);
-    this.workspace.setMode(panelId, "time");
+    this.workspace.removeSeries(panelId, path);
+    if (panel.color_signal === path) {
+      this.workspace.setColorSignal(panelId, null);
+    }
     this.workspace.clearPanelXRange(panelId);
     this.afterLayoutChange();
   }

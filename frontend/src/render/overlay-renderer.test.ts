@@ -129,6 +129,7 @@ test("draws XY cursor markers as hollow amber rings", () => {
     showDelta: false,
   });
   expect(calls).toContain("arc");
+  expect(calls).toContain("lineTo");
   expect(calls).toContain("strokeStyle:#ffa226");
 });
 

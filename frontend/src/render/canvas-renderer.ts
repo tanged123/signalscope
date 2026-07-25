@@ -455,8 +455,13 @@ export class CanvasRenderer {
     }
     context.font = labelFont(colors);
     context.fillStyle = colors.fg2;
-    context.textBaseline = "alphabetic";
-    context.fillText(colorbar.label, width - 2, plot.y + plot.height + 27);
+    context.save();
+    context.translate(barX - 8, plot.y + plot.height / 2);
+    context.rotate(-Math.PI / 2);
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(colorbar.label, 0, 0);
+    context.restore();
   }
 
   private prepareCanvas(): {

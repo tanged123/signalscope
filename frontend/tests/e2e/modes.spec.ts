@@ -94,13 +94,21 @@ test.describe("panel modes", () => {
     await expect(chip).toContainText("x:");
 
     await chip.click();
-    await expect(panel.locator(".mode-pill.active")).toHaveText("T");
+    await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
     await expect(chip).toBeHidden();
+    await expect(panel.locator(".panel-empty")).toContainText("set the X axis");
 
     await page.keyboard.press("ControlOrMeta+p");
     await page.keyboard.type("switch to XY");
     await page.keyboard.press("Enter");
     await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
+    await expect(chip).toBeVisible();
+
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("clear X signal");
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
+    await expect(chip).toBeHidden();
   });
 
   test("XY zoom stays panel-local and the cursor rings the trajectory", async ({

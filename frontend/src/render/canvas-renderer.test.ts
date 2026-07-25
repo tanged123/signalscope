@@ -359,9 +359,11 @@ describe("render", () => {
       (call) => call.op === "fillText" && call.args[0] === "constant",
     );
     expect(xLabel?.args.slice(1)).not.toEqual(colorbarLabel?.args.slice(1));
-    expect(Number(xLabel?.args[1])).toBeLessThan(
-      Number(colorbarLabel?.args[1]),
-    );
+    expect(
+      calls.some(
+        (call) => call.op === "rotate" && call.args[0] === -Math.PI / 2,
+      ),
+    ).toBe(true);
   });
 
   it("renders vertex paths against an explicit x range", () => {

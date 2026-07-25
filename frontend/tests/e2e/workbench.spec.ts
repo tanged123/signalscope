@@ -151,7 +151,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onDropSignal: () => {},
       onSetXSignal: () => {},
       onSetColorSignal: () => {},
-      onExitXy: () => {},
+      onClearXSignal: () => {},
       onToggleSeries: () => {},
       onResized: () => {},
       onCursor: () => {},

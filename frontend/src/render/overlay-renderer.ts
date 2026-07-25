@@ -67,10 +67,13 @@ export class OverlayRenderer {
     context.clearRect(0, 0, width, height);
     if (layout === null) return;
     const palette = this.resolvePalette();
+    const cursorX =
+      state.cursorT ??
+      (state.cursorStyle === "line" ? (state.xyMarkers[0]?.x ?? null) : null);
     this.drawCursor(
       context,
       layout,
-      state.cursorT,
+      cursorX,
       state.cursorStyle,
       state.cursorPoints,
       palette,
