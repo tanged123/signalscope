@@ -37,7 +37,10 @@ Run the native shell:
 
 Press `O` or click **Open CSV / MCAP**, then select
 [`examples/demo_flight.csv`](examples/demo_flight.csv) to explore the ingest
-and plotting workflow.
+and plotting workflow. The demo contains 16 signals spanning smooth and signed
+telemetry, paired XY position, angular values, steps and setpoints, boolean and
+discrete state, high-frequency vibration, thermal drift, and intentional GPS
+gaps. Plot nine or more together to exercise the colour-plus-dash identities.
 
 ### Supported input files
 

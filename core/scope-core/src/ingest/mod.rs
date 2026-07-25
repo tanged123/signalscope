@@ -151,7 +151,21 @@ mod tests {
         let summary = ingest_path(path, &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 41);
-        assert_eq!(summary.signals.len(), 5);
+        assert_eq!(summary.signals.len(), 16);
+        let paths = store
+            .signals()
+            .map(|signal| signal.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"demo_flight/navigation/position_east_m"));
+        assert!(paths.contains(&"demo_flight/events/engine_on"));
+        let gps = store
+            .signals()
+            .find(|signal| signal.path.ends_with("/sensor/gps_altitude_m"))
+            .unwrap();
+        assert_eq!(
+            gps.values().iter().filter(|value| value.is_nan()).count(),
+            2
+        );
     }
 
     #[test]
