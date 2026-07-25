@@ -24,6 +24,7 @@ import {
   nearestVertex,
   type VertexHit,
 } from "../app/plot-hit";
+import { spectrum } from "../app/spectrum";
 import { visibleStats } from "../app/stats";
 import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
 import { nearestXyPoint } from "../app/xy-hit";
@@ -49,12 +50,6 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
   { mode: "histogram", label: "H" },
 ];
 
-const MODE_NAMES: Record<PanelMode, string> = {
-  time: "Time",
-  xy: "XY",
-  fft: "FFT",
-  histogram: "Histogram",
-};
 const XY_HOVER_RADIUS = 40;
 
 export interface PanelCallbacks {
@@ -379,6 +374,9 @@ export class PanelView {
           ? "Assign a colour channel (⌘P → set color signal)"
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
+    const note = required<HTMLElement>(this.element, ".panel-mode-note");
+    note.hidden = state.mode !== "fft" && state.mode !== "histogram";
+    if (!note.hidden) note.textContent = "window: visible t";
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
       maximized ? "Restore panel" : "Maximize panel";
     required<HTMLButtonElement>(
@@ -405,9 +403,12 @@ export class PanelView {
     } else if (state.mode === "xy" && state.x_signal === null) {
       empty.hidden = false;
       empty.textContent = "Drop a signal on the strip below to set the X axis.";
-    } else if (state.mode === "fft" || state.mode === "histogram") {
+    } else if (state.mode === "histogram") {
       empty.hidden = false;
-      empty.textContent = `${MODE_NAMES[state.mode]} mode is not implemented yet.`;
+      empty.textContent = "Histogram mode is not implemented yet.";
+    } else if (state.mode === "fft") {
+      // renderSpectra owns this panel's empty state.
+      empty.hidden = true;
     } else {
       empty.hidden = true;
     }
@@ -425,6 +426,12 @@ export class PanelView {
     this.lastWindow = { ...window };
     if (state.mode === "xy") {
       const elapsed = this.renderXy(state, samples, window);
+      this.renderStats();
+      this.drawOverlay();
+      return elapsed;
+    }
+    if (state.mode === "fft") {
+      const elapsed = this.renderSpectra(state, samples, window);
       this.renderStats();
       this.drawOverlay();
       return elapsed;
@@ -598,6 +605,66 @@ export class PanelView {
         : {}),
     };
     return this.renderer.renderPaths(paths, options);
+  }
+
+  private renderSpectra(
+    state: PanelState,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    if (samples === null) return 0;
+    const byPath = new Map(
+      samples.series.map((series) => [series.signal_path, series]),
+    );
+    const paths: PlotPath[] = [];
+    let minFrequency = Number.POSITIVE_INFINITY;
+    let maxFrequency = 0;
+    for (const series of state.series) {
+      if (!series.visible) continue;
+      const source = byPath.get(series.path);
+      if (source === undefined) continue;
+      const result = spectrum(source, window.t0, window.t1);
+      if (result === null) continue;
+      const points: number[] = [];
+      result.frequency.forEach((frequency, index) => {
+        points.push(frequency, result.amplitudeDb[index] ?? -120);
+      });
+      const style = resolveSeriesStyle(series.color_slot, series.dash);
+      paths.push({
+        points,
+        colorIndex: style.colorIndex,
+        dash: style.dash,
+        width: series.width,
+      });
+      minFrequency = Math.min(minFrequency, result.frequency[0] ?? 1);
+      maxFrequency = Math.max(
+        maxFrequency,
+        result.frequency[result.frequency.length - 1] ?? 1,
+      );
+    }
+    this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
+    if (paths.length === 0) return 0;
+    const xRange = state.x_range ?? [minFrequency, maxFrequency];
+    const yRange = state.y_range ?? [-90, 3];
+    return this.renderer.renderPaths(paths, {
+      xLabel: state.x_label ?? "frequency (Hz), log",
+      yLabel: state.y_label ?? "amplitude (dB)",
+      xRange: [xRange[0], xRange[1]],
+      yRange: [yRange[0], yRange[1]],
+      axisStyle: state.axis_style,
+      xScale: "log",
+    });
+  }
+
+  /**
+   * Shows or clears a mode-specific empty message. Always assigns `hidden`,
+   * so a panel that starts empty and then gets data does not keep a stale
+   * message over its plot.
+   */
+  private setModeEmpty(show: boolean, message: string): void {
+    const empty = required<HTMLElement>(this.element, ".panel-empty");
+    empty.hidden = !show;
+    if (show) empty.textContent = message;
   }
 
   private setDropStripVisible(visible: boolean): void {
@@ -897,10 +964,14 @@ export class PanelView {
     this.overlay.addEventListener("pointercancel", cancel);
   }
 
-  /** Modes whose plot area accepts zoom/pan gestures. */
+  /**
+   * Modes whose plot area accepts zoom/pan gestures. Histogram is excluded:
+   * its x axis is a value axis whose bin edges are recomputed from the
+   * visible window, so panning it would be misleading (ADR 0018).
+   */
   private interactiveMode(): boolean {
     const mode = this.lastState?.mode;
-    return mode === "time" || mode === "xy";
+    return mode === "time" || mode === "xy" || mode === "fft";
   }
 
   /**
@@ -1478,6 +1549,7 @@ function panelMarkup(): string {
       <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
       <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
+      <span class="panel-mode-note" hidden></span>
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">

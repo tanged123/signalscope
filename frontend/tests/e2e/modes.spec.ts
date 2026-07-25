@@ -170,4 +170,25 @@ test.describe("panel modes", () => {
     await chip.click();
     await expect(chip).toContainText("none");
   });
+
+  test("FFT mode announces its window and zooms locally", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const panel = page.locator(".panel").first();
+    await panel.locator(".mode-pill", { hasText: "FFT" }).click();
+    await expect(panel.locator(".panel-mode-note")).toHaveText(
+      "window: visible t",
+    );
+    await expect(panel.locator(".panel-empty")).toBeHidden();
+
+    const readout = page.locator(".window-readout");
+    const before = await readout.textContent();
+    await panel
+      .locator(".overlay-canvas")
+      .hover({ position: { x: 250, y: 120 } });
+    await page.mouse.wheel(0, -240);
+    await expect(readout).toHaveText(before ?? "");
+  });
 });

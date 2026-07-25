@@ -591,6 +591,16 @@ kbd {
   margin-left: auto;
 }
 
+.panel-mode-note {
+  flex: none;
+  color: var(--fg-4);
+  font: 10px var(--font-mono);
+}
+
+.panel-mode-note[hidden] {
+  display: none;
+}
+
 .panel-split-actions {
   display: flex;
   overflow: hidden;
