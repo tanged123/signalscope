@@ -1,6 +1,14 @@
 import type { SignalTile, TileResponse } from "../generated/protocol";
 import type { AxisStyle, DashStyle } from "../generated/session";
-import type { PlotLayout, PlotRect, Range } from "../app/plot-math";
+import {
+  logTicks,
+  projectX,
+  projectY,
+  type AxisScale,
+  type PlotLayout,
+  type PlotRect,
+  type Range,
+} from "../app/plot-math";
 
 interface Projection {
   toX: (value: number) => number;
@@ -39,6 +47,30 @@ export interface RenderOptions {
   widths?: readonly number[];
   emphasisIndex?: number;
 }
+
+export interface PlotPath {
+  /** Flat vertex pairs `[x0, y0, x1, y1, …]`; a NaN vertex lifts the pen. */
+  points: readonly number[];
+  colorIndex: number;
+  dash: DashStyle;
+  width: number;
+  /** Drawn in `--fg-4` at low alpha: present but outside the window. */
+  dimmed?: boolean;
+  /** Filled sample dots, for sparse traces. */
+  markers?: boolean;
+}
+
+export interface PathRenderOptions {
+  xLabel: string;
+  yLabel: string;
+  xRange: readonly [number, number];
+  yRange: readonly [number, number];
+  axisStyle?: AxisStyle;
+  xScale?: AxisScale;
+}
+
+/** Sample dots appear only when vertices are sparser than this pixel gap. */
+const MARKER_PIXEL_GAP = 7;
 
 export const SERIES_TOKENS = [
   "--series-1",
@@ -145,13 +177,21 @@ export class CanvasRenderer {
         context,
         plot,
         project,
-        xRange,
         yRange,
         colors,
-        options,
+        { xLabel: options.xLabel, yLabel: options.yLabel },
+        ticks(xRange.min, xRange.max, 7),
       );
     } else {
-      this.drawAxes(context, plot, project, xRange, yRange, colors, options);
+      this.drawAxes(
+        context,
+        plot,
+        project,
+        yRange,
+        colors,
+        { xLabel: options.xLabel, yLabel: options.yLabel },
+        ticks(xRange.min, xRange.max, 7),
+      );
     }
     response.series.forEach((series, index) => {
       const style = resolveSeriesStyle(
@@ -171,6 +211,135 @@ export class CanvasRenderer {
       );
     });
     return performance.now() - started;
+  }
+
+  /**
+   * Draws vertex paths against arbitrary axes. XY trajectories, spectra, and
+   * histogram outlines are all vertex arrays rather than envelope bins, so
+   * they share this entry point instead of `render()`.
+   */
+  renderPaths(paths: readonly PlotPath[], options: PathRenderOptions): number {
+    const started = performance.now();
+    const { context, width, height } = this.prepareCanvas();
+    const colors = this.resolvePalette();
+    context.fillStyle = colors.background;
+    context.fillRect(0, 0, width, height);
+
+    const xRange: Range = { min: options.xRange[0], max: options.xRange[1] };
+    const yRange: Range = { min: options.yRange[0], max: options.yRange[1] };
+    context.font = tickFont(colors);
+    const charWidth = context.measureText("0").width;
+    const gutter = gutterWidth(
+      formatTicks(ticks(yRange.min, yRange.max, 6)),
+      charWidth,
+    );
+    const inline = options.axisStyle === "inline";
+    const plot: PlotRect = inline
+      ? { x: 0, y: 0, width, height }
+      : {
+          x: gutter,
+          y: 8,
+          width: Math.max(1, width - gutter - 12),
+          height: Math.max(1, height - 42),
+        };
+    const scale: AxisScale = options.xScale ?? "linear";
+    this.layout = {
+      plot,
+      xRange: { ...xRange },
+      yRange: { ...yRange },
+      xScale: scale,
+    };
+    const layout = this.layout;
+    const project: Projection = {
+      toX: (value) => projectX(layout, value),
+      toY: (value) => projectY(layout, value),
+    };
+    const xTickValues =
+      scale === "log"
+        ? logTicks(xRange.min, xRange.max)
+        : ticks(xRange.min, xRange.max, 7);
+    const labels = { xLabel: options.xLabel, yLabel: options.yLabel };
+    if (inline) {
+      this.drawInlineAxes(
+        context,
+        plot,
+        project,
+        yRange,
+        colors,
+        labels,
+        xTickValues,
+      );
+    } else {
+      this.drawAxes(
+        context,
+        plot,
+        project,
+        yRange,
+        colors,
+        labels,
+        xTickValues,
+      );
+    }
+    for (const path of paths) {
+      this.drawPath(context, plot, project, path, colors);
+    }
+    return performance.now() - started;
+  }
+
+  private drawPath(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    project: Projection,
+    path: PlotPath,
+    colors: Palette,
+  ): void {
+    const vertices = path.points.length >> 1;
+    if (vertices === 0) return;
+    context.save();
+    context.beginPath();
+    context.rect(plot.x, plot.y, plot.width, plot.height);
+    context.clip();
+    context.strokeStyle =
+      path.dimmed === true
+        ? colors.fg3
+        : (colors.series[path.colorIndex] ?? colors.fg2);
+    context.lineWidth = path.dimmed === true ? 1.2 : path.width;
+    context.globalAlpha = path.dimmed === true ? 0.5 : 1;
+    context.setLineDash(dashPattern(path.dash));
+    context.beginPath();
+    let penDown = false;
+    for (let index = 0; index < vertices; index += 1) {
+      const x = path.points[index * 2] ?? Number.NaN;
+      const y = path.points[index * 2 + 1] ?? Number.NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        penDown = false;
+        continue;
+      }
+      const px = project.toX(x);
+      const py = project.toY(y);
+      if (penDown) context.lineTo(px, py);
+      else context.moveTo(px, py);
+      penDown = true;
+    }
+    context.stroke();
+    if (path.markers === true && vertices < plot.width / MARKER_PIXEL_GAP) {
+      context.setLineDash([]);
+      context.fillStyle = context.strokeStyle;
+      context.beginPath();
+      for (let index = 0; index < vertices; index += 1) {
+        const x = path.points[index * 2] ?? Number.NaN;
+        const y = path.points[index * 2 + 1] ?? Number.NaN;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const px = project.toX(x);
+        const py = project.toY(y);
+        context.moveTo(px + 2.4, py);
+        context.arc(px, py, 2.4, 0, Math.PI * 2);
+      }
+      context.fill();
+    }
+    context.globalAlpha = 1;
+    context.setLineDash([]);
+    context.restore();
   }
 
   private prepareCanvas(): {
@@ -221,16 +390,15 @@ export class CanvasRenderer {
     context: CanvasRenderingContext2D,
     plot: PlotRect,
     project: Projection,
-    xRange: Range,
     yRange: Range,
     colors: Palette,
-    options: RenderOptions,
+    labels: { xLabel: string; yLabel: string },
+    xTicks: readonly number[],
   ): void {
     context.lineWidth = 1;
     context.font = tickFont(colors);
     context.textBaseline = "middle";
 
-    const xTicks = ticks(xRange.min, xRange.max, 7);
     const yTicks = ticks(yRange.min, yRange.max, 6);
     const xLabels = formatTicks(xTicks);
     const yLabels = formatTicks(yTicks);
@@ -278,14 +446,14 @@ export class CanvasRenderer {
     context.font = labelFont(colors);
     context.textAlign = "center";
     context.fillText(
-      options.xLabel,
+      labels.xLabel,
       plot.x + plot.width / 2,
       plot.y + plot.height + 27,
     );
     context.save();
     context.translate(10, plot.y + plot.height / 2);
     context.rotate(-Math.PI / 2);
-    context.fillText(options.yLabel, 0, 0);
+    context.fillText(labels.yLabel, 0, 0);
     context.restore();
   }
 
@@ -343,15 +511,14 @@ export class CanvasRenderer {
     context: CanvasRenderingContext2D,
     plot: PlotRect,
     project: Projection,
-    xRange: Range,
     yRange: Range,
     colors: Palette,
-    options: RenderOptions,
+    labels: { xLabel: string; yLabel: string },
+    xTicks: readonly number[],
   ): void {
     context.lineWidth = 1;
     context.font = tickFont(colors);
     context.textBaseline = "middle";
-    const xTicks = ticks(xRange.min, xRange.max, 7);
     const yTicks = ticks(yRange.min, yRange.max, 6);
     const { toX, toY } = project;
     context.strokeStyle = colors.grid;
@@ -402,8 +569,8 @@ export class CanvasRenderer {
       }
     });
     context.font = labelFont(colors);
-    backed(options.yLabel, 4, 12, "left");
-    backed(options.xLabel, plot.width - 4, plot.height - 8, "right");
+    backed(labels.yLabel, 4, 12, "left");
+    backed(labels.xLabel, plot.width - 4, plot.height - 8, "right");
   }
 }
 

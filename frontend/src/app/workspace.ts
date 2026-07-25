@@ -223,6 +223,37 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.mode = mode;
   }
 
+  setXSignal(id: string, path: string | null): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    // The outgoing x signal returns to the plotted series, and the incoming
+    // one leaves them: an axis is never also a series.
+    if (panel.x_signal !== null && panel.x_signal !== path) {
+      const restored = panel.x_signal;
+      if (!panel.series.some((series) => series.path === restored)) {
+        this.addSeries(id, restored);
+      }
+    }
+    if (path !== null) this.removeSeries(id, path);
+    panel.x_signal = path;
+    panel.x_range = null;
+    panel.y_range = null;
+    panel.annotations = [];
+  }
+
+  /** Enters XY mode, adopting the first plotted series as the x axis. */
+  promoteSeriesToX(id: string): void {
+    const panel = this.panel(id);
+    if (panel === undefined || panel.x_signal !== null) return;
+    const first = panel.series[0];
+    if (first !== undefined) this.setXSignal(id, first.path);
+  }
+
+  setColorSignal(id: string, path: string | null): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) panel.color_signal = path;
+  }
+
   addSeries(panelId: string, path: string): boolean {
     const panel = this.panel(panelId);
     if (

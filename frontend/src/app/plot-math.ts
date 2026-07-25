@@ -12,10 +12,21 @@ export interface PlotRect {
   height: number;
 }
 
+export type AxisScale = "linear" | "log";
+
 export interface PlotLayout {
   plot: PlotRect;
   xRange: Range;
   yRange: Range;
+  /** Absent means linear. Log axes clamp non-positive values to the floor. */
+  xScale?: AxisScale;
+}
+
+/** Positive floor used so a log axis can survive a zero or negative bound. */
+const LOG_FLOOR = 1e-12;
+
+function logSpace(value: number): number {
+  return Math.log10(Math.max(LOG_FLOOR, value));
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -24,6 +35,11 @@ export function clamp(value: number, min: number, max: number): number {
 
 export function projectX(layout: PlotLayout, value: number): number {
   const { plot, xRange } = layout;
+  if (layout.xScale === "log") {
+    const min = logSpace(xRange.min);
+    const max = logSpace(xRange.max);
+    return plot.x + ((logSpace(value) - min) / (max - min)) * plot.width;
+  }
   return (
     plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width
   );
@@ -40,7 +56,25 @@ export function projectY(layout: PlotLayout, value: number): number {
 
 export function invertX(layout: PlotLayout, px: number): number {
   const { plot, xRange } = layout;
+  if (layout.xScale === "log") {
+    const min = logSpace(xRange.min);
+    const max = logSpace(xRange.max);
+    return 10 ** (min + ((px - plot.x) / plot.width) * (max - min));
+  }
   return xRange.min + ((px - plot.x) / plot.width) * (xRange.max - xRange.min);
+}
+
+/** Decade ticks covering `[min, max]`, empty when the range is unusable. */
+export function logTicks(min: number, max: number): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= 0) return [];
+  const low = Math.floor(Math.log10(Math.max(LOG_FLOOR, min)));
+  const high = Math.ceil(Math.log10(max));
+  const values: number[] = [];
+  for (let exponent = low; exponent <= high; exponent += 1) {
+    const value = 10 ** exponent;
+    if (value >= min * 0.999 && value <= max * 1.001) values.push(value);
+  }
+  return values;
 }
 
 export function invertY(layout: PlotLayout, py: number): number {

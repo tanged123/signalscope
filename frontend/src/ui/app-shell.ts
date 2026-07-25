@@ -96,6 +96,7 @@ export class AppShell {
         },
         onSelectMode: (id, mode) => {
           this.workspace.setMode(id, mode);
+          if (mode === "xy") this.workspace.promoteSeriesToX(id);
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -655,7 +656,7 @@ export class AppShell {
               await this.plane.querySamples({
                 request_id: crypto.randomUUID(),
                 signal_ids: ids,
-                window,
+                window: this.sampleWindow(panel),
                 max_points: SAMPLE_CAP,
               }),
             );
@@ -751,6 +752,28 @@ export class AppShell {
     return local === null
       ? { t0: state.t0, t1: state.t1 }
       : { t0: local[0], t1: local[1] };
+  }
+
+  /**
+   * The window a panel's samples are fetched over. XY panels fetch the full
+   * data extent because the spec dims the out-of-window trajectory rather
+   * than clipping it; FFT and histogram compute over the visible window.
+   */
+  private sampleWindow(panel: PanelState): { t0: number; t1: number } {
+    if (panel.mode !== "xy") return this.effectiveWindow(panel);
+    let t0 = Number.POSITIVE_INFINITY;
+    let t1 = Number.NEGATIVE_INFINITY;
+    const paths = [...panel.series.map((series) => series.path)];
+    if (panel.x_signal !== null) paths.push(panel.x_signal);
+    for (const path of paths) {
+      const summary = this.signalsByPath.get(path);
+      if (summary === undefined) continue;
+      t0 = Math.min(t0, summary.t_min);
+      t1 = Math.max(t1, summary.t_max);
+    }
+    return Number.isFinite(t0) && Number.isFinite(t1)
+      ? { t0, t1: t1 > t0 ? t1 : t0 + 1 }
+      : this.effectiveWindow(panel);
   }
 
   private scheduleRefresh(delay = 150): void {

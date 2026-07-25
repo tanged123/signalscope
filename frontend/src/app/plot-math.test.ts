@@ -4,6 +4,7 @@ import {
   formatValue,
   invertX,
   invertY,
+  logTicks,
   panRange,
   projectX,
   valueAtTime,
@@ -54,6 +55,24 @@ test("projection inversion, zoom and pan preserve plot ranges", () => {
   expect(panRange({ min: 5, max: 15 }, -2)).toEqual({ min: 3, max: 13 });
   expect(wheelZoomFactor(-240)).toBeLessThan(1);
   expect(wheelZoomFactor(240)).toBeGreaterThan(1);
+});
+
+test("projects and inverts a log x axis", () => {
+  const logLayout: PlotLayout = {
+    plot: { x: 0, y: 0, width: 300, height: 100 },
+    xRange: { min: 1, max: 1000 },
+    yRange: { min: 0, max: 1 },
+    xScale: "log",
+  };
+  expect(projectX(logLayout, 1)).toBeCloseTo(0, 6);
+  expect(projectX(logLayout, 10)).toBeCloseTo(100, 6);
+  expect(projectX(logLayout, 1000)).toBeCloseTo(300, 6);
+  expect(invertX(logLayout, 200)).toBeCloseTo(100, 6);
+});
+
+test("emits decade ticks for a log range", () => {
+  expect(logTicks(0.5, 1200)).toEqual([1, 10, 100, 1000]);
+  expect(logTicks(0, -1)).toEqual([]);
 });
 
 test("zoom drags snap only strongly directional rectangles to one axis", () => {

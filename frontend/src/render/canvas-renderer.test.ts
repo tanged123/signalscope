@@ -285,6 +285,34 @@ describe("dashPattern", () => {
 });
 
 describe("render", () => {
+  it("renders vertex paths against an explicit x range", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    const elapsed = renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1, Number.NaN, Number.NaN, 2, 2],
+          colorIndex: 0,
+          dash: "solid",
+          width: 1.4,
+        },
+      ],
+      {
+        xLabel: "pos_east (m)",
+        yLabel: "pos_north (m)",
+        xRange: [0, 2],
+        yRange: [0, 2],
+      },
+    );
+    expect(elapsed).toBeGreaterThanOrEqual(0);
+    // The NaN vertex lifts the pen: two moveTo calls, not one.
+    expect(calls.filter((call) => call.op === "moveTo").length).toBeGreaterThan(
+      1,
+    );
+    expect(renderer.lastLayout()?.xRange).toEqual({ min: 0, max: 2 });
+  });
+
   it("records the plot layout and supports inline axes", () => {
     const { context } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(640, 360, context));

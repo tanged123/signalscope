@@ -200,6 +200,31 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.series[0]?.visible).toBe(false);
   });
 
+  it("promotes a plotted series to the XY x axis", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeries(panel.id, "position/east");
+    model.addSeries(panel.id, "position/north");
+    model.promoteSeriesToX(panel.id);
+    expect(model.panel(panel.id)?.x_signal).toBe("position/east");
+    expect(model.panel(panel.id)?.series.map((series) => series.path)).toEqual([
+      "position/north",
+    ]);
+  });
+
+  it("returns an outgoing x signal to the plotted series", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeries(panel.id, "position/east");
+    model.addSeries(panel.id, "position/north");
+    model.setXSignal(panel.id, "position/east");
+    model.setXSignal(panel.id, "position/north");
+    expect(model.panel(panel.id)?.x_signal).toBe("position/north");
+    expect(model.panel(panel.id)?.series.map((series) => series.path)).toEqual([
+      "position/east",
+    ]);
+  });
+
   it("stores and clears a panel y range", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

@@ -23,10 +23,13 @@ import {
   type VertexHit,
 } from "../app/plot-hit";
 import { visibleStats } from "../app/stats";
+import { pairSamples, traceExtent, type XyTrace } from "../app/xy";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
   resolveSeriesStyle,
+  type PathRenderOptions,
+  type PlotPath,
   type RenderOptions,
 } from "../render/canvas-renderer";
 import { OverlayRenderer, type CursorStyle } from "../render/overlay-renderer";
@@ -106,6 +109,8 @@ export class PanelView {
   private lastTiles: TileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
+  /** Traces from the last XY render, reused by hit-testing and overlays. */
+  private xyTraces: { path: string; colorIndex: number; trace: XyTrace }[] = [];
   private cursorT: number | null = null;
   private cursorStyle: CursorStyle = "none";
   private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -339,12 +344,15 @@ export class PanelView {
       this.closeInspector();
     }
     const empty = required<HTMLElement>(this.element, ".panel-empty");
-    if (state.mode !== "time") {
-      empty.hidden = false;
-      empty.textContent = `${MODE_NAMES[state.mode]} mode is not implemented yet.`;
-    } else if (state.series.length === 0) {
+    if (state.series.length === 0) {
       empty.hidden = false;
       empty.textContent = "Empty panel — drag a signal here.";
+    } else if (state.mode === "xy" && state.x_signal === null) {
+      empty.hidden = false;
+      empty.textContent = "Drop a signal on the strip below to set the X axis.";
+    } else if (state.mode === "fft" || state.mode === "histogram") {
+      empty.hidden = false;
+      empty.textContent = `${MODE_NAMES[state.mode]} mode is not implemented yet.`;
     } else {
       empty.hidden = true;
     }
@@ -360,6 +368,12 @@ export class PanelView {
     this.lastTiles = tiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
+    if (state.mode === "xy") {
+      const elapsed = this.renderXy(state, samples, window);
+      this.renderStats();
+      this.drawOverlay();
+      return elapsed;
+    }
     if (state.mode !== "time") {
       this.renderStats();
       this.drawOverlay();
@@ -412,6 +426,76 @@ export class PanelView {
     this.renderStats();
     this.drawOverlay();
     return elapsed;
+  }
+
+  private renderXy(
+    state: PanelState,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    this.xyTraces = [];
+    if (samples === null || state.x_signal === null) return 0;
+    const byPath = new Map(
+      samples.series.map((series) => [series.signal_path, series]),
+    );
+    const xSeries = byPath.get(state.x_signal);
+    if (xSeries === undefined) return 0;
+    for (const series of state.series) {
+      if (!series.visible) continue;
+      const ySeries = byPath.get(series.path);
+      if (ySeries === undefined) continue;
+      this.xyTraces.push({
+        path: series.path,
+        colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
+          .colorIndex,
+        trace: pairSamples(xSeries, ySeries),
+      });
+    }
+    if (this.xyTraces.length === 0) return 0;
+    const traces = this.xyTraces.map((entry) => entry.trace);
+    const xRange =
+      state.x_range ?? traceExtent(traces, "x", window.t0, window.t1);
+    const yRange =
+      state.y_range ?? traceExtent(traces, "y", window.t0, window.t1);
+    if (xRange === null || yRange === null) return 0;
+    const paths: PlotPath[] = [];
+    for (const entry of this.xyTraces) {
+      // Whole trajectory dimmed underneath, the windowed part lit on top.
+      paths.push({
+        points: flattenTrace(entry.trace, null),
+        colorIndex: entry.colorIndex,
+        dash: "solid",
+        width: 1.2,
+        dimmed: true,
+      });
+    }
+    for (const entry of this.xyTraces) {
+      const series = state.series.find((item) => item.path === entry.path);
+      paths.push({
+        points: flattenTrace(entry.trace, window),
+        colorIndex: entry.colorIndex,
+        dash: resolveSeriesStyle(
+          series?.color_slot ?? 1,
+          series?.dash ?? "solid",
+        ).dash,
+        width: (series?.width ?? 1.4) + 0.4,
+        markers: true,
+      });
+    }
+    const options: PathRenderOptions = {
+      xLabel: state.x_label ?? axisName(state.x_signal, xSeries.unit),
+      yLabel:
+        state.y_label ??
+        yLabel(
+          state.series
+            .filter((series) => series.visible)
+            .map((series) => byPath.get(series.path)?.unit ?? null),
+        ),
+      xRange: [xRange[0], xRange[1]],
+      yRange: [yRange[0], yRange[1]],
+      axisStyle: state.axis_style,
+    };
+    return this.renderer.renderPaths(paths, options);
   }
 
   invalidateTheme(): void {
@@ -1068,6 +1152,33 @@ function yLabel(units: readonly (string | null)[]): string {
   return distinct.size === 1 && only !== undefined
     ? `value (${only})`
     : "value";
+}
+
+/** `path/leaf (unit)` for an axis name, matching the spec's XY gutters. */
+function axisName(path: string, unit: string | null): string {
+  const leaf = path.split("/").slice(-2).join("/");
+  return unit === null ? leaf : `${leaf} (${unit})`;
+}
+
+/**
+ * Flattens a trace to renderer vertices. A `window` restricts output to that
+ * time span; vertices outside become NaN so the pen lifts rather than
+ * bridging the gap.
+ */
+function flattenTrace(
+  trace: XyTrace,
+  window: { t0: number; t1: number } | null,
+): number[] {
+  const points: number[] = [];
+  for (let index = 0; index < trace.time.length; index += 1) {
+    const time = trace.time[index] ?? Number.NaN;
+    const inside = window === null || (time >= window.t0 && time <= window.t1);
+    points.push(
+      inside ? (trace.x[index] ?? Number.NaN) : Number.NaN,
+      inside ? (trace.y[index] ?? Number.NaN) : Number.NaN,
+    );
+  }
+  return points;
 }
 
 export function axisEditZone(
