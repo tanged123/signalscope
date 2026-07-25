@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -92,12 +92,34 @@ pub struct PanelState {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LayoutCell {
+    pub panel_id: String,
+    pub width: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LayoutRow {
+    pub height: f64,
+    pub panels: Vec<LayoutCell>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct WorkspaceTab {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub focused_panel_id: Option<String>,
+    pub panels: Vec<PanelState>,
+    pub layout: Vec<LayoutRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Session {
     pub app: String,
     pub schema_version: u32,
     pub theme: Theme,
     pub linked_time: LinkedTime,
-    #[serde(default)]
-    pub focused_panel_id: Option<String>,
-    pub panels: Vec<PanelState>,
+    pub active_tab_id: String,
+    pub tabs: Vec<WorkspaceTab>,
+    pub favorites: Vec<String>,
 }

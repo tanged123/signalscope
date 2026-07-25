@@ -30,4 +30,12 @@ describe("LinkedTimeModel", () => {
         }),
     ).toThrow("finite and increasing");
   });
+
+  it("setWindow validates and applies the new window", () => {
+    const model = new LinkedTimeModel();
+    model.setWindow(5, 15);
+    expect(model.snapshot().t0).toBe(5);
+    expect(model.snapshot().t1).toBe(15);
+    expect(() => model.setWindow(3, 3)).toThrow();
+  });
 });

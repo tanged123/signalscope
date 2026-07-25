@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -113,6 +113,8 @@ pub struct SignalSummary {
     pub unit: Option<String>,
     #[serde(with = "u64_string")]
     pub point_count: u64,
+    pub t_min: f64,
+    pub t_max: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -128,4 +130,37 @@ pub struct SourceSummary {
 pub struct IngestResponse {
     pub source: SourceSummary,
     pub signals: Vec<SignalSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IngestJob {
+    #[serde(with = "u64_string")]
+    pub job_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IngestStage {
+    Decode,
+    Pyramid,
+    Cache,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IngestState {
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IngestStatus {
+    pub state: IngestState,
+    pub stage: IngestStage,
+    pub fraction: f64,
+    #[serde(default)]
+    pub response: Option<IngestResponse>,
+    #[serde(default)]
+    pub error: Option<String>,
 }

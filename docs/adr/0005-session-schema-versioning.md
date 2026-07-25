@@ -21,3 +21,19 @@ same script as the protocol (ADR 0004), eliminating hand-maintained
 duplicates of session shapes in TypeScript. Deserialization dispatches
 through a `migrate(version, value)` ladder with a v1 identity rung; every
 schema bump adds one rung and one migration test.
+
+## Amendment (2026-07-24, Phase 1)
+
+Session schema version 2 adds fractional layout rows/cells and favorite signal
+paths. Workspace state now mutates this generated session shape directly even
+though durable autosave remains Phase 3. The v1-to-v2 migration preserves panel
+order in one equal-width row and initializes favorites as empty, so current
+application code only consumes the v2 shape.
+
+## Amendment (2026-07-24, Workspace tabs)
+
+Session schema version 3 moves the single top-level panel grid into
+`WorkspaceTab[]` and records the active tab. The v2-to-v3 migration wraps the
+existing panels, focus, and layout in `Workspace 1`. Theme, linked time, and
+favorites remain session-global. See ADR 0010 for the product and chrome
+decision.

@@ -1,5 +1,5 @@
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -59,7 +59,9 @@
         "signal_id": "u64",
         "path": "string",
         "unit": "string?",
-        "point_count": "u64"
+        "point_count": "u64",
+        "t_min": "f64",
+        "t_max": "f64"
       }
     },
     "SourceSummary": {
@@ -75,6 +77,30 @@
       "fields": {
         "source": "SourceSummary",
         "signals": "SignalSummary[]"
+      }
+    },
+    "IngestJob": {
+      "kind": "object",
+      "fields": {
+        "job_id": "u64"
+      }
+    },
+    "IngestStage": {
+      "kind": "enum",
+      "variants": ["decode", "pyramid", "cache"]
+    },
+    "IngestState": {
+      "kind": "enum",
+      "variants": ["running", "done", "failed"]
+    },
+    "IngestStatus": {
+      "kind": "object",
+      "fields": {
+        "state": "IngestState",
+        "stage": "IngestStage",
+        "fraction": "f64",
+        "response": "IngestResponse?",
+        "error": "string?"
       }
     }
   }

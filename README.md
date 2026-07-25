@@ -10,7 +10,11 @@ SignalScope combines a Rust data plane for logs larger than memory with one Type
 - The native Tauri workbench streams and memory-maps source data.
 - A self-contained HTML snapshot uses the same renderer against embedded, size-budgeted tiles.
 
-The repository is currently at the Phase 0 walking-skeleton stage. CSV ingestion, min/max pyramid construction, protocol types, Tauri IPC, the canonical one-panel UI, and snapshot packaging are wired end to end. MCAP, production cache persistence, and the remainder of the v1 interaction surface follow in later phases.
+The repository currently includes the Phase 1 data plane and workbench fundamentals:
+CSV and JSON-channel MCAP ingestion, persistent min/max pyramid caches, native
+progress reporting, multi-panel layouts, a virtualized signal tree, and the
+shared snapshot presentation plane. Workspace tabs retain multiple independent
+panel grids over the same loaded sources and linked time window.
 
 ## Quick start
 
@@ -28,8 +32,25 @@ Run the lightweight local quality gate:
 Run the native shell:
 
 ```bash
-./scripts/run.sh
+./scripts/run.sh native
 ```
+
+Press `O` or click **Open CSV / MCAP**, then select
+[`examples/demo_flight.csv`](examples/demo_flight.csv) to explore the ingest
+and plotting workflow. The demo contains 16 signals spanning smooth and signed
+telemetry, paired XY position, angular values, steps and setpoints, boolean and
+discrete state, high-frequency vibration, thermal drift, and intentional GPS
+gaps. Plot nine or more together to exercise the colour-plus-dash identities.
+
+### Supported input files
+
+- `.csv`, `.tsv`, `.txt`, and `.dat`: numeric delimited text using comma, tab,
+  semicolon, or pipe separators. Headers are optional; `#`, `%`, and `;`
+  comment lines are ignored. A finite, monotonically nondecreasing time column
+  is selected by name or validation, with row index used as a fallback.
+- `.mcap`: MCAP recordings containing channels whose message encoding is
+  `json`. Numeric and boolean fields are flattened into signal paths. Other
+  MCAP message encodings are reported but not decoded yet.
 
 Build the workbench and the portable snapshot template:
 
@@ -79,7 +100,7 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/build.sh native   # native bundle + shared frontend
 ./scripts/setup-appimage.sh # install AppImage dependencies on Ubuntu
 ./scripts/build.sh appimage # portable Linux AppImage (Ubuntu/FHS only)
-./scripts/coverage.sh       # Rust + frontend LCOV reports
+./scripts/coverage.sh       # Rust + merged Vitest/Playwright frontend LCOV
 ./scripts/version.sh check  # verify synchronized release manifests
 ./scripts/release.sh version # validate release metadata
 ./scripts/release.sh tag     # create/push the annotated release tag

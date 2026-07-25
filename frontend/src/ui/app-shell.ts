@@ -1,15 +1,31 @@
-import { type SignalSummary, type TileResponse } from "../generated/protocol";
+import { CommandRegistry, formatCombo } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
+import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
-import { CanvasRenderer, SERIES_TOKENS } from "../render/canvas-renderer";
+import { WorkspaceModel } from "../app/workspace";
+import { type SignalSummary, type TileResponse } from "../generated/protocol";
+import { CommandPalette, type PaletteEntry } from "./command-palette";
+import { basename, bindPointerDrag, required } from "./dom";
+import { SignalTreeView } from "./signal-tree";
+import { WorkspaceTabsView } from "./workspace-tabs";
+import { WorkspaceView } from "./workspace-view";
 
-const MODE_LABELS = ["T", "XY", "FFT", "H"] as const;
+const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
+
 export class AppShell {
   private readonly time = new LinkedTimeModel();
+  private readonly workspace = new WorkspaceModel();
+  private readonly commands = new CommandRegistry();
   private signals: SignalSummary[] = [];
-  private selectedIds: string[] = [];
-  private renderer: CanvasRenderer | null = null;
-  private latestTiles: TileResponse | null = null;
+  private signalsByPath = new Map<string, SignalSummary>();
+  private workspaceView: WorkspaceView | null = null;
+  private workspaceTabs: WorkspaceTabsView | null = null;
+  private tree: SignalTreeView | null = null;
+  private palette: CommandPalette | null = null;
+  private tilesByPanel = new Map<string, TileResponse>();
+  private signalTreeWidth: number = TREE_WIDTH.default;
+  private refreshToken = 0;
+  private renderScheduled = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -17,155 +33,482 @@ export class AppShell {
   ) {}
 
   async mount(): Promise<void> {
-    this.root.innerHTML = shellMarkup(this.plane.sourceLabel);
+    this.root.innerHTML = shellMarkup();
+    this.workspaceTabs = new WorkspaceTabsView(
+      required(this.root, ".workspace-tabs"),
+      {
+        onSelect: (id) => {
+          if (this.workspace.selectTab(id)) this.afterLayoutChange();
+        },
+        onAdd: () => {
+          this.workspace.addTab();
+          this.afterLayoutChange();
+        },
+        onClose: (id) => {
+          this.workspace.closeTab(id);
+          this.afterLayoutChange();
+        },
+      },
+    );
+    this.workspaceView = new WorkspaceView(
+      required(this.root, ".workspace"),
+      this.workspace,
+      {
+        onFocus: (id) => {
+          this.workspace.focusPanel(id);
+        },
+        onClose: (id) => {
+          this.workspace.closePanel(id);
+          this.afterLayoutChange();
+        },
+        onSplitRight: (id) => {
+          this.workspace.splitPanelRight(id);
+          this.afterLayoutChange();
+        },
+        onSplitDown: (id) => {
+          this.workspace.splitPanelDown(id);
+          this.afterLayoutChange();
+        },
+        onMaximize: (id) => {
+          this.workspace.toggleMaximize(id);
+          this.afterLayoutChange();
+        },
+        onSelectMode: (id, mode) => {
+          this.workspace.setMode(id, mode);
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        onDropSignal: (id, path) => {
+          this.plotSignal(path, id);
+        },
+        onToggleSeries: (id, path) => {
+          this.workspace.toggleSeriesVisible(id, path);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onResized: () => {
+          this.scheduleRender();
+        },
+        onLayoutChanged: () => {
+          void this.refreshTiles();
+        },
+        onDropSignalNewPanel: (path) => {
+          const panel = this.workspace.addPanelRow();
+          this.plotSignal(path, panel.id);
+        },
+        onMovePanel: (id, rowIndex, cellIndex) => {
+          this.workspace.movePanel(id, rowIndex, cellIndex);
+          this.afterLayoutChange();
+        },
+        onShowPanel: (id) => {
+          this.workspace.maximizePanel(id);
+          this.afterLayoutChange();
+        },
+        onRestoreGrid: () => {
+          this.workspace.restoreGrid();
+          this.afterLayoutChange();
+        },
+      },
+    );
+    this.tree = new SignalTreeView(
+      required(this.root, ".tree-scroll"),
+      required(this.root, ".tree-favorites"),
+      {
+        onPlotSignal: (path) => {
+          this.plotSignal(path);
+        },
+        onToggleFavorite: (path) => {
+          this.workspace.toggleFavorite(path);
+          this.tree?.setFavorites(this.workspace.favorites());
+        },
+      },
+    );
+    this.palette = new CommandPalette(this.root, () => this.paletteEntries());
+    this.registerCommands();
     this.bindControls();
-    const canvas = this.requireElement<HTMLCanvasElement>(".plot-canvas");
-    this.renderer = new CanvasRenderer(canvas);
+    this.renderWindowReadout();
+    await this.reloadSignals();
+    if (this.signals.length > 0 && this.workspace.panels().length === 0) {
+      const panel = this.workspace.addPanelRow();
+      for (const summary of this.signals.slice(0, 2)) {
+        this.workspace.addSeries(panel.id, summary.path);
+      }
+      this.fitWindowToPlotted();
+    }
+    this.afterLayoutChange();
+  }
 
-    this.signals = await this.plane.listSignals();
-    this.selectedIds = this.signals
-      .slice(0, 3)
-      .map((signal) => signal.signal_id);
-    this.renderSignalTree();
-    this.renderLegend();
-    this.updateStatus();
-    await this.refreshTiles();
+  private registerCommands(): void {
+    this.commands.register({
+      id: "open-files",
+      title: "Open CSV or MCAP…",
+      keys: "o",
+      enabled: () => this.plane.ingest !== null,
+      run: () => {
+        void this.openFiles();
+      },
+    });
+    this.commands.register({
+      id: "new-workspace-tab",
+      title: "New workspace tab",
+      run: () => {
+        this.workspace.addTab();
+        this.afterLayoutChange();
+      },
+    });
+    this.commands.register({
+      id: "close-workspace-tab",
+      title: "Close active workspace tab",
+      enabled: () => this.workspace.tabs().length > 1,
+      run: () => {
+        this.workspace.closeTab(this.workspace.activeTabId());
+        this.afterLayoutChange();
+      },
+    });
+    this.commands.register({
+      id: "split-panel-down",
+      title: "Split current panel down",
+      keys: "n",
+      run: () => {
+        const id = this.workspace.focusedPanelId();
+        if (id === null) {
+          this.workspace.addPanelRow();
+        } else {
+          this.workspace.splitPanelDown(id);
+        }
+        this.afterLayoutChange();
+      },
+    });
+    this.registerFocusedPanelCommand(
+      "split-panel-right",
+      "Split current panel right",
+      (id) => void this.workspace.splitPanelRight(id),
+    );
+    this.registerFocusedPanelCommand(
+      "close-panel",
+      "Close current panel",
+      (id) => {
+        this.workspace.closePanel(id);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "maximize-panel",
+      "Maximize current panel",
+      (id) => {
+        this.workspace.toggleMaximize(id);
+      },
+    );
+    this.commands.register({
+      id: "restore-panel-grid",
+      title: "Restore panel grid",
+      enabled: () => this.workspace.maximizedPanelId() !== null,
+      run: () => {
+        this.workspace.restoreGrid();
+        this.afterLayoutChange();
+      },
+    });
+    this.commands.register({
+      id: "focus-filter",
+      title: "Filter signals",
+      keys: "/",
+      run: () => {
+        required<HTMLInputElement>(this.root, ".signal-search").focus();
+      },
+    });
+    this.commands.register({
+      id: "toggle-signal-tree",
+      title: "Toggle signal tree",
+      enabled: () => window.innerWidth > 820,
+      run: () => {
+        this.toggleSignalTree();
+      },
+    });
+    this.commands.register({
+      id: "toggle-linked",
+      title: "Toggle linked time",
+      keys: "l",
+      run: () => {
+        this.toggleLinked();
+      },
+    });
+    this.commands.register({
+      id: "toggle-theme",
+      title: "Toggle theme",
+      keys: "t",
+      run: () => {
+        this.toggleTheme();
+      },
+    });
+    this.commands.register({
+      id: "toggle-formula",
+      title: "Toggle derived formula editor",
+      keys: "e",
+      run: () => {
+        this.toggleFormula();
+      },
+    });
+    this.commands.register({
+      id: "command-palette",
+      title: "Command palette",
+      keys: "mod+k",
+      run: () => {
+        this.palette?.open();
+      },
+    });
+    this.commands.register({
+      id: "help",
+      title: "Keyboard help",
+      keys: "?",
+      run: () => {
+        this.palette?.open();
+      },
+    });
+  }
 
-    const observer = new ResizeObserver(() => this.renderCanvas());
-    observer.observe(canvas);
+  /** Registers a command that acts on the focused panel and refreshes. */
+  private registerFocusedPanelCommand(
+    id: string,
+    title: string,
+    act: (panelId: string) => void,
+  ): void {
+    this.commands.register({
+      id,
+      title,
+      enabled: () => this.workspace.focusedPanelId() !== null,
+      run: () => {
+        const panelId = this.workspace.focusedPanelId();
+        if (panelId !== null) {
+          act(panelId);
+          this.afterLayoutChange();
+        }
+      },
+    });
+  }
+
+  private paletteEntries(): PaletteEntry[] {
+    const commands = this.commands.list().map((command) => ({
+      title: command.title,
+      hint: command.keys === undefined ? "" : formatCombo(command.keys),
+      run: () => {
+        this.commands.run(command.id);
+      },
+    }));
+    const signals = this.signals.map((summary) => ({
+      title: `plot ${summary.path}`,
+      hint: "signal",
+      run: () => {
+        this.plotSignal(summary.path);
+      },
+    }));
+    const tabs = this.workspace.tabs().map((tab) => ({
+      title: `switch to ${tab.title}`,
+      hint: "workspace",
+      run: () => {
+        this.workspace.selectTab(tab.id);
+        this.afterLayoutChange();
+      },
+    }));
+    const panels = this.workspace.panels().map((panel) => ({
+      title: `focus ${panel.title}`,
+      hint: "panel",
+      run: () => {
+        this.workspace.focusPanel(panel.id);
+        if (this.workspace.maximizedPanelId() !== null) {
+          this.workspace.maximizePanel(panel.id);
+        }
+        this.afterLayoutChange();
+      },
+    }));
+    return [...commands, ...tabs, ...panels, ...signals];
   }
 
   private bindControls(): void {
-    this.requireElement(".theme-toggle").addEventListener("click", () =>
-      this.toggleTheme(),
-    );
-    this.requireElement(".linked-toggle").addEventListener("click", (event) => {
-      const button = event.currentTarget as HTMLButtonElement;
-      const linked = !this.time.snapshot().linked;
-      this.time.setLinked(linked);
-      button.classList.toggle("active", linked);
+    const openButton = required<HTMLButtonElement>(this.root, ".open-files");
+    openButton.hidden = this.plane.ingest === null;
+    openButton.addEventListener("click", () => {
+      this.commands.run("open-files");
     });
-    this.requireElement<HTMLInputElement>(".signal-search").addEventListener(
+    required(this.root, ".tree-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-signal-tree");
+    });
+    this.bindSignalTreeResize();
+    required(this.root, ".theme-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-theme");
+    });
+    required(this.root, ".linked-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-linked");
+    });
+    required(this.root, ".formula-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-formula");
+    });
+    const formula = required<HTMLFormElement>(this.root, ".formula-bar");
+    formula.addEventListener("submit", (event) => {
+      event.preventDefault();
+    });
+    required<HTMLInputElement>(formula, ".formula-input").addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          this.setFormulaOpen(false);
+        }
+      },
+    );
+    required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
       "input",
-      () => this.renderSignalTree(),
+      (event) => {
+        this.tree?.setFilter((event.target as HTMLInputElement).value);
+      },
     );
     window.addEventListener("keydown", (event) => {
+      if (this.palette?.isOpen() === true) return;
+      const target = event.target;
       if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
       ) {
         return;
       }
-      if (event.key.toLowerCase() === "t") this.toggleTheme();
-      if (event.key === "/") {
-        event.preventDefault();
-        this.requireElement<HTMLInputElement>(".signal-search").focus();
-      }
+      if (this.commands.handleKey(event)) event.preventDefault();
     });
+  }
+
+  private plotSignal(path: string, panelId?: string): void {
+    let target = panelId ?? this.workspace.focusedPanelId();
+    if (target === null) {
+      target = this.workspace.addPanelRow().id;
+    }
+    if (this.workspace.addSeries(target, path)) {
+      this.workspace.focusPanel(target);
+      this.fitWindowToPlotted();
+      this.afterLayoutChange();
+    }
+  }
+
+  private async openFiles(): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null) return;
+    const progress = required<HTMLElement>(this.root, ".ingest-progress");
+    try {
+      const paths = await port.pickSources();
+      for (const path of paths) {
+        const name = basename(path);
+        progress.hidden = false;
+        await runIngest(port, path, (status) => {
+          const percent =
+            status.fraction > 0
+              ? `${String(Math.round(status.fraction * 100))}%`
+              : "…";
+          progress.textContent = `${name} · ${status.stage} ${percent}`;
+        });
+      }
+      await this.reloadSignals();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    } finally {
+      progress.hidden = true;
+    }
+  }
+
+  private fitWindowToPlotted(): void {
+    let t0 = Number.POSITIVE_INFINITY;
+    let t1 = Number.NEGATIVE_INFINITY;
+    for (const panel of this.workspace.panels()) {
+      for (const series of panel.series) {
+        const summary = this.signalsByPath.get(series.path);
+        if (summary !== undefined) {
+          t0 = Math.min(t0, summary.t_min);
+          t1 = Math.max(t1, summary.t_max);
+        }
+      }
+    }
+    if (Number.isFinite(t0) && Number.isFinite(t1)) {
+      this.time.setWindow(t0, t1 > t0 ? t1 : t0 + 1);
+      this.renderWindowReadout();
+    }
+  }
+
+  /** Renders the toolbar window readout from the linked-time model. */
+  private renderWindowReadout(): void {
+    const state = this.time.snapshot();
+    required(this.root, ".window-readout").textContent =
+      `t: ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
+  }
+
+  private afterLayoutChange(): void {
+    this.workspaceTabs?.sync(
+      this.workspace.tabs(),
+      this.workspace.activeTabId(),
+    );
+    this.workspaceView?.sync(this.signals.length > 0);
+    void this.refreshTiles();
+  }
+
+  private async reloadSignals(): Promise<void> {
+    this.signals = await this.plane.listSignals();
+    this.signalsByPath = new Map(
+      this.signals.map((summary) => [summary.path, summary]),
+    );
+    this.tree?.setSignals(this.signals.map((summary) => summary.path));
+    this.tree?.setFavorites(this.workspace.favorites());
+    this.updateStatus();
   }
 
   private async refreshTiles(): Promise<void> {
+    const refreshToken = ++this.refreshToken;
     const state = this.time.snapshot();
-    this.latestTiles = await this.plane.queryTiles({
-      request_id: crypto.randomUUID(),
-      signal_ids: this.selectedIds,
-      window: { t0: state.t0, t1: state.t1 },
-      pixel_width: Math.max(
-        1,
-        Math.round(
-          this.requireElement<HTMLCanvasElement>(".plot-canvas").clientWidth,
-        ),
-      ),
-    });
-    this.renderCanvas();
-  }
-
-  private renderCanvas(): void {
-    if (this.renderer === null || this.latestTiles === null) return;
-    const state = this.time.snapshot();
-    const elapsed = this.renderer.render(this.latestTiles, {
-      min: state.t0,
-      max: state.t1,
-    });
-    this.requireElement(".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
-  }
-
-  private renderSignalTree(): void {
-    const filter = this.requireElement<HTMLInputElement>(".signal-search")
-      .value.toLowerCase()
-      .trim();
-    const list = this.requireElement(".tree-list");
-    const visible = this.signals.filter((signal) =>
-      signal.path.toLowerCase().includes(filter),
+    const width = Math.max(
+      1,
+      Math.round(required(this.root, ".workspace").clientWidth),
     );
-    if (visible.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "signal-row";
-      empty.textContent = "No matching signals.";
-      list.replaceChildren(empty);
-    } else {
-      list.replaceChildren(
-        ...visible.map((signal, index) => {
-          const selected = this.selectedIds.includes(signal.signal_id);
-          const row = document.createElement("button");
-          row.className = `signal-row ${selected ? "selected" : ""}`;
-          row.dataset.signalId = signal.signal_id;
-          const mark = document.createElement("span");
-          mark.className = "series-mark";
-          mark.style.background = `var(${SERIES_TOKENS[index % SERIES_TOKENS.length] ?? "--series-1"})`;
-          const path = document.createElement("span");
-          path.className = "signal-path";
-          path.textContent = signal.path;
-          const value = document.createElement("span");
-          value.className = "signal-value";
-          value.textContent = "—";
-          row.append(mark, path, value);
-          return row;
-        }),
-      );
-    }
-
-    for (const row of list.querySelectorAll<HTMLButtonElement>(
-      "[data-signal-id]",
-    )) {
-      row.addEventListener("dblclick", () => {
-        const id = row.dataset.signalId;
-        if (id === undefined) return;
-        this.selectedIds = this.selectedIds.includes(id)
-          ? this.selectedIds.filter((selected) => selected !== id)
-          : [...this.selectedIds, id];
-        this.renderSignalTree();
-        this.renderLegend();
-        void this.refreshTiles().catch((error: unknown) =>
-          this.reportError(error),
-        );
-      });
-    }
-  }
-
-  private renderLegend(): void {
-    const legend = this.requireElement(".panel-legend");
-    const selected = this.signals.filter((signal) =>
-      this.selectedIds.includes(signal.signal_id),
-    );
-    legend.replaceChildren(
-      ...selected.map((signal, index) => {
-        const chip = document.createElement("button");
-        chip.className = "legend-chip";
-        chip.title = signal.path;
-        const line = document.createElement("span");
-        line.className = "legend-line";
-        line.style.background = `var(${SERIES_TOKENS[index % SERIES_TOKENS.length] ?? "--series-1"})`;
-        const name = document.createElement("span");
-        name.className = "legend-name";
-        name.textContent = shortName(signal.path);
-        const menu = document.createElement("span");
-        menu.className = "legend-menu";
-        menu.textContent = "▾";
-        chip.append(line, name, menu);
-        return chip;
+    const next = new Map<string, TileResponse>();
+    await Promise.all(
+      this.workspace.panels().map(async (panel) => {
+        if (panel.mode !== "time") return;
+        const ids = panel.series
+          .map((series) => this.signalsByPath.get(series.path)?.signal_id)
+          .filter((id): id is string => id !== undefined);
+        if (ids.length === 0) return;
+        const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+        try {
+          next.set(
+            panel.id,
+            await this.plane.queryTiles({
+              request_id: crypto.randomUUID(),
+              signal_ids: ids,
+              window: { t0: state.t0, t1: state.t1 },
+              pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
+            }),
+          );
+        } catch (error: unknown) {
+          this.reportError(error);
+        }
       }),
     );
+    if (refreshToken !== this.refreshToken) return;
+    this.tilesByPanel = next;
+    this.renderTiles();
+  }
+
+  /** Coalesces bursts of per-panel resize renders into one frame. */
+  private scheduleRender(): void {
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+    requestAnimationFrame(() => {
+      this.renderScheduled = false;
+      this.renderTiles();
+    });
+  }
+
+  private renderTiles(): void {
+    const state = this.time.snapshot();
+    const elapsed =
+      this.workspaceView?.renderTiles(this.tilesByPanel, {
+        t0: state.t0,
+        t1: state.t1,
+      }) ?? 0;
+    required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
 
   private updateStatus(): void {
@@ -173,107 +516,206 @@ export class AppShell {
       (total, signal) => total + Number(signal.point_count),
       0,
     );
-    this.requireElement(".signal-count").textContent =
+    required(this.root, ".signal-count").textContent =
       `${this.signals.length.toLocaleString()} signals`;
-    this.requireElement(".point-count").textContent =
+    required(this.root, ".point-count").textContent =
       `${pointCount.toLocaleString()} pts`;
-    this.requireElement(".source-points").textContent =
-      `${pointCount.toLocaleString()} pts`;
+    void this.updateSources();
+  }
+
+  private async updateSources(): Promise<void> {
+    const sources = await this.plane.listSources();
+    const rows = required(this.root, ".source-rows");
+    rows.replaceChildren(
+      ...sources.map((source) => {
+        const row = document.createElement("div");
+        row.className = "source-row";
+        const dot = document.createElement("span");
+        dot.className = "status-dot";
+        const name = document.createElement("span");
+        name.className = "signal-path";
+        name.textContent = basename(source.path);
+        name.title = source.path;
+        const points = document.createElement("span");
+        points.className = "source-points";
+        points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
+        row.append(dot, name, points);
+        return row;
+      }),
+    );
+  }
+
+  private toggleLinked(): void {
+    const linked = !this.time.snapshot().linked;
+    this.time.setLinked(linked);
+    required(this.root, ".linked-toggle").classList.toggle("active", linked);
   }
 
   private toggleTheme(): void {
-    const root = document.documentElement;
-    root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
-    this.renderer?.invalidateTheme();
-    this.renderCanvas();
+    const documentRoot = document.documentElement;
+    documentRoot.dataset.theme =
+      documentRoot.dataset.theme === "light" ? "dark" : "light";
+    this.workspaceView?.invalidateTheme();
+    this.renderTiles();
+  }
+
+  private toggleSignalTree(): void {
+    const workbench = required(this.root, ".workbench");
+    this.setSignalTreeOpen(workbench.classList.contains("tree-collapsed"));
+  }
+
+  private setSignalTreeOpen(open: boolean): void {
+    const workbench = required<HTMLElement>(this.root, ".workbench");
+    const button = required<HTMLButtonElement>(this.root, ".tree-toggle");
+    const seam = required<HTMLElement>(this.root, ".tree-resize-handle");
+    workbench.classList.toggle("tree-collapsed", !open);
+    if (open) {
+      workbench.style.setProperty(
+        "--tree-width",
+        `${String(this.signalTreeWidth)}px`,
+      );
+    }
+    button.classList.toggle("active", open);
+    button.ariaExpanded = String(open);
+    button.title = open ? "Hide signal tree" : "Show signal tree";
+    seam.setAttribute(
+      "aria-valuenow",
+      open ? String(this.signalTreeWidth) : "0",
+    );
+  }
+
+  private bindSignalTreeResize(): void {
+    const seam = required<HTMLElement>(this.root, ".tree-resize-handle");
+    const workbench = required<HTMLElement>(this.root, ".workbench");
+    const tokenWidth = Number.parseFloat(
+      getComputedStyle(workbench).getPropertyValue("--tree-width"),
+    );
+    if (Number.isFinite(tokenWidth) && tokenWidth > 0) {
+      this.signalTreeWidth = tokenWidth;
+    }
+    seam.setAttribute("aria-valuemax", String(TREE_WIDTH.max));
+    seam.setAttribute(
+      "aria-valuenow",
+      String(Math.round(this.signalTreeWidth)),
+    );
+    const updateWidth = (width: number): void => {
+      workbench.style.setProperty("--tree-width", `${String(width)}px`);
+      seam.setAttribute("aria-valuenow", String(Math.round(width)));
+    };
+    const commitWidth = (width: number): void => {
+      if (width < TREE_WIDTH.collapse) {
+        this.setSignalTreeOpen(false);
+        return;
+      }
+      this.signalTreeWidth = Math.max(
+        TREE_WIDTH.min,
+        Math.min(TREE_WIDTH.max, width),
+      );
+      this.setSignalTreeOpen(true);
+    };
+
+    bindPointerDrag(seam, (down) => {
+      const collapsed = workbench.classList.contains("tree-collapsed");
+      const startWidth = collapsed ? 0 : this.signalTreeWidth;
+      let width = startWidth;
+      updateWidth(startWidth);
+      workbench.classList.remove("tree-collapsed");
+      return {
+        onMove: (moveEvent) => {
+          width = Math.max(
+            0,
+            Math.min(
+              TREE_WIDTH.max,
+              startWidth + moveEvent.clientX - down.clientX,
+            ),
+          );
+          updateWidth(width);
+        },
+        onEnd: () => {
+          commitWidth(width);
+        },
+      };
+    });
+    seam.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const collapsed = workbench.classList.contains("tree-collapsed");
+      const width = collapsed
+        ? event.key === "ArrowRight"
+          ? this.signalTreeWidth
+          : 0
+        : this.signalTreeWidth + (event.key === "ArrowRight" ? 20 : -20);
+      commitWidth(width);
+    });
+  }
+
+  private toggleFormula(): void {
+    const workbench = required(this.root, ".workbench");
+    this.setFormulaOpen(workbench.classList.contains("formula-collapsed"));
+  }
+
+  private setFormulaOpen(open: boolean): void {
+    const workbench = required(this.root, ".workbench");
+    const button = required<HTMLButtonElement>(this.root, ".formula-toggle");
+    const input = required<HTMLInputElement>(this.root, ".formula-input");
+    workbench.classList.toggle("formula-collapsed", !open);
+    button.classList.toggle("active", open);
+    button.ariaExpanded = String(open);
+    if (open) {
+      input.focus();
+    } else {
+      input.blur();
+    }
   }
 
   private reportError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
-    this.requireElement(".render-ms").textContent = `error: ${message}`;
+    required(this.root, ".render-ms").textContent = `error: ${message}`;
     console.error(error);
-  }
-
-  private requireElement<T extends Element = HTMLElement>(selector: string): T {
-    const element = this.root.querySelector<T>(selector);
-    if (element === null) {
-      throw new Error(`Missing application element: ${selector}`);
-    }
-    return element;
   }
 }
 
-function shellMarkup(sourceLabel: string): string {
-  return `<main class="workbench">
-    <nav class="menu-bar" aria-label="Application menu">
+function shellMarkup(): string {
+  return `<main class="workbench formula-collapsed">
+    <div class="tool-bar">
       <span class="brand">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         SIGNALSCOPE
       </span>
-      ${["File", "Edit", "View", "Panel", "Signals", "Export", "Help"]
-        .map((item) => `<button class="menu-item">${item}</button>`)
-        .join("")}
-      <span class="command-hint">commands <kbd>⌘K</kbd></span>
-    </nav>
-
-    <div class="tool-bar">
-      <button class="tool-button">Open Files</button>
-      <button class="tool-button">Demo Data</button>
       <span class="tool-divider"></span>
-      <button class="tool-button">+ Panel</button>
-      <button class="tool-button">Layout <span class="status-value">walking skeleton</span> ▾</button>
-      <span class="tool-divider"></span>
+      <button class="tool-button active tree-toggle" title="Hide signal tree" aria-controls="signal-tree" aria-expanded="true">☰ Signals</button>
+      <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
-      <button class="tool-button">Σ Stats</button>
-      <button class="tool-button">ƒx Derived</button>
-      <span class="tool-spacer"></span>
+      <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
+      <span class="tool-spacer"></span>
       <span class="window-label">window</span>
-      <span class="window-readout">t: 0.000 → 60.000 s</span>
+      <span class="window-readout"></span>
       <button class="tool-button follow-slot" disabled>⏸ FOLLOW</button>
+      <span class="command-hint">commands <kbd>⌘K</kbd></span>
     </div>
 
-    <aside class="signal-tree" aria-label="Signals">
+    <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
+
+    <aside class="signal-tree" id="signal-tree" aria-label="Signals">
       <div class="search-wrap">
         <label>/ <input class="signal-search" placeholder="filter signals…" spellcheck="false" /></label>
       </div>
       <div class="tree-heading">★ FAVORITES</div>
+      <div class="tree-favorites"></div>
       <div class="tree-heading">SIGNALS</div>
-      <div class="tree-list"></div>
+      <div class="tree-scroll"></div>
       <div class="source-footer">
-        <div class="source-row">
-          <span class="status-dot"></span>
-          <span>${sourceLabel}</span>
-          <span class="source-points">0 pts</span>
-        </div>
+        <div class="ingest-progress" hidden></div>
+        <div class="source-rows"></div>
       </div>
     </aside>
 
-    <section class="workspace" aria-label="Panel workspace">
-      <article class="panel" aria-label="Body velocity panel">
-        <header class="panel-header">
-          <span class="drag-handle" aria-hidden="true">⠿</span>
-          <span class="panel-title">Body velocity</span>
-          <span class="mode-pills" aria-label="Panel mode">
-            ${MODE_LABELS.map(
-              (label, index) =>
-                `<button class="mode-pill ${index === 0 ? "active" : ""}">${label}</button>`,
-            ).join("")}
-          </span>
-          <span class="panel-legend"></span>
-          <span class="panel-actions">
-            <button class="panel-action" title="Split panel">⊞</button>
-            <button class="panel-action" title="Maximize panel">⤢</button>
-            <button class="panel-action" title="Close panel">✕</button>
-          </span>
-        </header>
-        <div class="plot-wrap">
-          <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
-        </div>
-      </article>
-    </section>
+    <div class="tree-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
 
-    <form class="formula-bar">
+    <section class="workspace" aria-label="Panel workspace"></section>
+
+    <form class="formula-bar" id="formula-editor">
       <span class="formula-mark">ƒx</span>
       <input class="formula-input" aria-label="Derived signal formula" placeholder='derived/name = Math.hypot($("signal/x"), $("signal/y"))' spellcheck="false" />
     </form>
@@ -283,12 +725,8 @@ function shellMarkup(sourceLabel: string): string {
       <span class="point-count status-value">0 pts</span>
       <span>render <span class="render-ms status-value">— ms</span></span>
       <span>cursor <span class="status-value">t = —</span></span>
-      <span class="gesture-hint">drag = box zoom · wheel = zoom t · ⇧wheel = zoom y · right-drag = pan · dbl-click = fit · click = datatip</span>
+      <span class="gesture-hint">drag signal → panel · N = split down · / = filter · ⌘K = commands</span>
       <span class="status-command">⌘K</span>
     </footer>
   </main>`;
-}
-
-function shortName(path: string): string {
-  return path.split("/").slice(-2).join("/");
 }

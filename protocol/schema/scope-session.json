@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -63,6 +63,30 @@
         "show_stats": "bool"
       }
     },
+    "LayoutCell": {
+      "kind": "object",
+      "fields": {
+        "panel_id": "string",
+        "width": "f64"
+      }
+    },
+    "LayoutRow": {
+      "kind": "object",
+      "fields": {
+        "height": "f64",
+        "panels": "LayoutCell[]"
+      }
+    },
+    "WorkspaceTab": {
+      "kind": "object",
+      "fields": {
+        "id": "string",
+        "title": "string",
+        "focused_panel_id": "string?",
+        "panels": "PanelState[]",
+        "layout": "LayoutRow[]"
+      }
+    },
     "Session": {
       "kind": "object",
       "fields": {
@@ -70,8 +94,9 @@
         "schema_version": "u32",
         "theme": "Theme",
         "linked_time": "LinkedTime",
-        "focused_panel_id": "string?",
-        "panels": "PanelState[]"
+        "active_tab_id": "string",
+        "tabs": "WorkspaceTab[]",
+        "favorites": "string[]"
       }
     }
   }
