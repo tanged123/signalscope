@@ -220,6 +220,10 @@ describe("formatTicks", () => {
   it("returns nothing for an empty axis", () => {
     expect(formatTicks([])).toEqual([]);
   });
+
+  it("uses the typographic minus for negative ticks", () => {
+    expect(formatTicks([-150, 0, 150])).toEqual(["−150", "0", "150"]);
+  });
 });
 
 describe("gutterWidth", () => {
@@ -275,6 +279,30 @@ describe("dashPattern", () => {
 });
 
 describe("render", () => {
+  it("records the plot layout and supports inline axes", () => {
+    const { context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(640, 360, context));
+    renderer.setPalette(TEST_PALETTE);
+    expect(renderer.lastLayout()).toBeNull();
+    renderer.render(
+      { request_id: "test", series: [] },
+      { min: 0, max: 10 },
+      {
+        xLabel: "time (s)",
+        yLabel: "value",
+        colorSlots: [],
+        dashes: [],
+        yRange: [1, 5],
+        axisStyle: "inline",
+      },
+    );
+    expect(renderer.lastLayout()).toEqual({
+      plot: { x: 0, y: 0, width: 640, height: 360 },
+      xRange: { min: 0, max: 10 },
+      yRange: { min: 1, max: 5 },
+    });
+  });
+
   it("breaks the stroke at gaps", () => {
     const calls = renderOnce([
       tile("a", [

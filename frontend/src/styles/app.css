@@ -430,12 +430,10 @@ kbd {
 }
 
 .legend-chip {
-  display: flex;
+  display: inline-flex;
   min-width: 0;
   flex: none;
   align-items: center;
-  gap: 4px;
-  padding: 1px 5px;
   border-radius: 2px;
   color: var(--fg-2);
   font-size: 10px;
@@ -443,6 +441,22 @@ kbd {
 
 .legend-chip:hover {
   background: var(--surface-3);
+}
+
+.legend-chip-body {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 5px;
+  color: inherit;
+  font: inherit;
+}
+
+.legend-chip-caret {
+  padding: 1px 4px 1px 0;
+  color: var(--fg-4);
+  font: inherit;
 }
 
 .legend-line {
@@ -573,7 +587,230 @@ kbd {
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+.overlay-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   cursor: crosshair;
+}
+
+.axis-style-indicator {
+  color: var(--fg-4);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.panel-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 3px 10px;
+  background: var(--surface-0);
+  border-top: 1px solid var(--border-faint);
+  color: var(--fg-2);
+  font: 10px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-stats[hidden],
+.panel-annotations[hidden],
+.plot-tip[hidden] {
+  display: none;
+}
+
+.stats-name {
+  margin-right: 4px;
+  color: var(--fg-3);
+}
+
+.stats-item {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.stats-item b {
+  color: var(--fg-1);
+  font-weight: 500;
+}
+
+.stats-hint {
+  margin-left: auto;
+  color: var(--fg-4);
+}
+
+.panel-annotations {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-2);
+  font: 10px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.annotations-heading {
+  margin-bottom: 3px;
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.annotation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.annotation-action {
+  margin-left: auto;
+  padding: 0;
+  color: var(--fg-4);
+}
+
+.annotation-action + .annotation-action {
+  margin-left: 0;
+}
+
+.annotation-label-input,
+.axis-label-editor {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-1);
+  font: inherit;
+}
+
+.panel-title[contenteditable]:not([contenteditable="false"]) {
+  padding: 0 3px;
+  border-radius: 2px;
+  outline: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg-1);
+}
+
+.panel-title:empty::before {
+  color: var(--fg-4);
+  content: "untitled";
+}
+
+.axis-label-editor {
+  position: absolute;
+  z-index: 3;
+  width: 130px;
+  padding: 1px 4px;
+  font: 9.5px var(--font-mono);
+}
+
+.axis-label-editor-y {
+  top: 45%;
+  left: 4px;
+}
+
+.axis-label-editor-x {
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.plot-tip {
+  position: fixed;
+  z-index: 8;
+  top: 0;
+  left: 0;
+  min-width: 150px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: 10.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.plot-tip-header {
+  margin-bottom: 3px;
+}
+
+.plot-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plot-tip-swatch {
+  width: 9px;
+  height: 2px;
+}
+
+.plot-tip-value {
+  margin-left: auto;
+  color: var(--fg-1);
+}
+
+.series-inspector {
+  position: absolute;
+  z-index: 5;
+  width: 196px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-2);
+  box-shadow: var(--elev-2);
+  font-size: 10.5px;
+}
+
+.inspector-path {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+}
+
+.inspector-slots {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.inspector-slot {
+  height: 12px;
+  border-radius: 1px;
+}
+
+.inspector-slot.active {
+  outline: 1px solid var(--fg-1);
+}
+
+.inspector-dashes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.inspector-dash,
+.inspector-remove {
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  color: var(--fg-3);
+}
+
+.inspector-dash.active {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.inspector-dashes input[type="range"] {
+  min-width: 0;
+  flex: 1;
+}
+
+.inspector-remove {
+  color: var(--status-error);
 }
 
 .formula-bar {

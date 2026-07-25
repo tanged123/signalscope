@@ -168,6 +168,9 @@ function createDemoManifest(): BakedManifest {
         last: value,
         min: value,
         max: value,
+        sum: Number.isFinite(value) ? value : 0,
+        sum_sq: Number.isFinite(value) ? value * value : 0,
+        finite_count: Number.isFinite(value) ? "1" : "0",
         sample_count: "1",
         has_gap: false,
       };
@@ -235,6 +238,11 @@ function mergeDemoBins(left: EnvelopeBin, right: EnvelopeBin): EnvelopeBin {
     last: right.last ?? left.last,
     min: minOrNull(left.min, right.min),
     max: maxOrNull(left.max, right.max),
+    sum: left.sum + right.sum,
+    sum_sq: left.sum_sq + right.sum_sq,
+    finite_count: String(
+      Number(left.finite_count) + Number(right.finite_count),
+    ),
     sample_count: String(
       Number(left.sample_count) + Number(right.sample_count),
     ),

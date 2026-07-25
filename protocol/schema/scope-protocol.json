@@ -1,5 +1,5 @@
 {
-  "protocol_version": 2,
+  "protocol_version": 3,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -32,6 +32,9 @@
         "last": "f64?",
         "min": "f64?",
         "max": "f64?",
+        "sum": "f64",
+        "sum_sq": "f64",
+        "finite_count": "u64",
         "sample_count": "u64",
         "has_gap": "bool"
       }

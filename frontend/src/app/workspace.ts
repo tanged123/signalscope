@@ -1,4 +1,6 @@
 import type {
+  Annotation,
+  DashStyle,
   LayoutRow,
   PanelMode,
   PanelState,
@@ -259,6 +261,85 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.y_range = null;
   }
 
+  renamePanel(id: string, title: string): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) panel.title = title;
+  }
+
+  setAxisLabel(id: string, axis: "x" | "y", label: string | null): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    if (axis === "x") panel.x_label = label;
+    else panel.y_label = label;
+  }
+
+  setPanelTimeWindow(
+    id: string,
+    window: readonly [number, number] | null,
+  ): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    panel.time_window = window === null ? null : [window[0], window[1]];
+  }
+
+  addAnnotation(panelId: string, annotation: Annotation): void {
+    this.panel(panelId)?.annotations.push({ ...annotation });
+  }
+
+  removeAnnotation(panelId: string, annotationId: string): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.annotations = panel.annotations.filter(
+      (annotation) => annotation.id !== annotationId,
+    );
+  }
+
+  setAnnotationLabel(
+    panelId: string,
+    annotationId: string,
+    label: string,
+  ): void {
+    const annotation = this.panel(panelId)?.annotations.find(
+      (entry) => entry.id === annotationId,
+    );
+    if (annotation !== undefined) annotation.label = label;
+  }
+
+  toggleStats(id: string): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) panel.show_stats = !panel.show_stats;
+  }
+
+  toggleAxisStyle(id: string): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) {
+      panel.axis_style = panel.axis_style === "gutter" ? "inline" : "gutter";
+    }
+  }
+
+  setSeriesStyle(
+    panelId: string,
+    path: string,
+    style: { color_slot: number; dash: DashStyle; width: number },
+  ): void {
+    const series = this.panel(panelId)?.series.find(
+      (entry) => entry.path === path,
+    );
+    if (series === undefined) return;
+    series.color_slot = style.color_slot;
+    series.dash = style.dash;
+    series.width = style.width;
+  }
+
+  removeSeries(panelId: string, path: string): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.series = panel.series.filter((series) => series.path !== path);
+    panel.annotations = panel.annotations.filter(
+      (annotation) => annotation.series_path !== path,
+    );
+  }
+
   resizeRows(seamIndex: number, delta: number): void {
     const above = this.activeTab().layout[seamIndex];
     const below = this.activeTab().layout[seamIndex + 1];
@@ -359,6 +440,9 @@ export class WorkspaceModel {
       color_signal: null,
       series: [],
       y_range: null,
+      x_label: null,
+      y_label: null,
+      time_window: null,
       annotations: [],
       show_stats: false,
     };

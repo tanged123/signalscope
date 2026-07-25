@@ -132,6 +132,29 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             object.insert("schema_version".into(), serde_json::json!(3));
             migrate(3, value)
         }
+        3 => {
+            if let Some(tabs) = value
+                .get_mut("tabs")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for tab in tabs {
+                    let panels = tab
+                        .get_mut("panels")
+                        .and_then(serde_json::Value::as_array_mut);
+                    for panel in panels.into_iter().flatten() {
+                        if let Some(object) = panel.as_object_mut() {
+                            object.entry("x_label").or_insert(serde_json::Value::Null);
+                            object.entry("y_label").or_insert(serde_json::Value::Null);
+                            object
+                                .entry("time_window")
+                                .or_insert(serde_json::Value::Null);
+                        }
+                    }
+                }
+            }
+            value["schema_version"] = serde_json::json!(4);
+            migrate(4, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -173,6 +196,9 @@ mod tests {
                         visible: true,
                     }],
                     y_range: None,
+                    x_label: None,
+                    y_label: None,
+                    time_window: None,
                     annotations: Vec::new(),
                     show_stats: false,
                 }],
@@ -235,6 +261,27 @@ mod tests {
         assert_eq!(session.tabs[0].panels[0].id, "panel-a");
         assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
         assert_eq!(session.favorites, ["rocket/velocity"]);
+    }
+
+    #[test]
+    fn v3_sessions_gain_axis_labels_and_local_windows() {
+        let json = r#"{
+            "app": "signalscope",
+            "schema_version": 3,
+            "theme": "dark",
+            "linked_time": {"t0":0.0,"t1":1.0,"linked":true,"paused":false,"cursorT":null,"mode":"fixed"},
+            "active_tab_id": "workspace-1",
+            "tabs": [{"id":"workspace-1","title":"Workspace 1","focused_panel_id":null,
+                "panels":[{"id":"panel-a","title":"A","mode":"time","axis_style":"gutter","x_signal":null,"color_signal":null,"series":[],"y_range":null,"annotations":[],"show_stats":false}],
+                "layout":[{"height":1.0,"panels":[{"panel_id":"panel-a","width":1.0}]}]}],
+            "favorites": []
+        }"#;
+        let session = from_json(json).unwrap();
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.x_label, None);
+        assert_eq!(panel.y_label, None);
+        assert_eq!(panel.time_window, None);
     }
 
     #[test]

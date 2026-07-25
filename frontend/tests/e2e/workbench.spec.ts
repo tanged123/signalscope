@@ -151,6 +151,18 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onDropSignal: () => {},
       onToggleSeries: () => {},
       onResized: () => {},
+      onCursor: () => {},
+      onTimeWindow: () => {},
+      onYRange: () => {},
+      onPinAnnotation: () => {},
+      onRemoveAnnotation: () => {},
+      onEditAnnotationLabel: () => {},
+      onFitView: () => {},
+      onToggleStats: () => {},
+      onRenameTitle: () => {},
+      onEditAxisLabel: () => {},
+      onSetSeriesStyle: () => {},
+      onRemoveSeries: () => {},
     });
     host.appendChild(view.element);
     view.update(
@@ -169,6 +181,9 @@ test("panel legend keeps controls visible and exposes overflow", async ({
           visible: true,
         })),
         y_range: null,
+        x_label: null,
+        y_label: null,
+        time_window: null,
         annotations: [],
         show_stats: false,
       },

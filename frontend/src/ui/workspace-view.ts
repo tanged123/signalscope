@@ -105,7 +105,7 @@ export class WorkspaceView {
 
   renderTiles(
     tilesByPanel: ReadonlyMap<string, TileResponse>,
-    window: { t0: number; t1: number },
+    windowFor: (panelId: string) => { t0: number; t1: number },
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -114,13 +114,25 @@ export class WorkspaceView {
       total +=
         this.views
           .get(panel.id)
-          ?.renderTiles(panel, tilesByPanel.get(panel.id) ?? null, window) ?? 0;
+          ?.renderTiles(
+            panel,
+            tilesByPanel.get(panel.id) ?? null,
+            windowFor(panel.id),
+          ) ?? 0;
     }
     return total;
   }
 
   invalidateTheme(): void {
     for (const view of this.views.values()) view.invalidateTheme();
+  }
+
+  setCursor(cursorT: number | null): void {
+    for (const view of this.views.values()) view.setCursor(cursorT);
+  }
+
+  resetYAxis(id: string): void {
+    this.views.get(id)?.resetYAxis();
   }
 
   /** The rendered plot width of a panel in CSS pixels, 0 when unmounted. */

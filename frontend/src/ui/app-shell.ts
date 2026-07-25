@@ -3,7 +3,15 @@ import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
 import { WorkspaceModel } from "../app/workspace";
+import {
+  formatCursorTime,
+  formatValue,
+  valueAtTime,
+  zoomRange,
+} from "../app/plot-math";
 import { type SignalSummary, type TileResponse } from "../generated/protocol";
+import type { PanelState } from "../generated/session";
+import { resolveSeriesStyle } from "../render/canvas-renderer";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
 import { SignalTreeView } from "./signal-tree";
@@ -26,6 +34,9 @@ export class AppShell {
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
   private renderScheduled = false;
+  private refreshTimer: number | null = null;
+  private liveValuesScheduled = false;
+  private pendingCursorT: number | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -89,6 +100,61 @@ export class AppShell {
         onResized: () => {
           this.scheduleRender();
         },
+        onCursor: (id, cursorT, client) => {
+          this.setCursor(id, cursorT, client);
+        },
+        onTimeWindow: (id, t0, t1) => {
+          this.applyTimeWindow(id, t0, t1);
+        },
+        onYRange: (id, range) => {
+          this.workspace.setPanelYRange(id, [range[0], range[1]]);
+          this.scheduleRender();
+        },
+        onPinAnnotation: (id, hit) => {
+          this.workspace.addAnnotation(id, {
+            id: crypto.randomUUID(),
+            series_path: hit.path,
+            time: hit.time,
+            value: hit.value,
+            label: "",
+          });
+          this.workspaceView?.refreshPanelStates();
+        },
+        onRemoveAnnotation: (id, annotationId) => {
+          this.workspace.removeAnnotation(id, annotationId);
+          this.workspaceView?.refreshPanelStates();
+        },
+        onEditAnnotationLabel: (id, annotationId, label) => {
+          this.workspace.setAnnotationLabel(id, annotationId, label);
+          this.workspaceView?.refreshPanelStates();
+        },
+        onFitView: (id) => {
+          this.fitPanelView(id);
+        },
+        onToggleStats: (id) => {
+          this.workspace.toggleStats(id);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onRenameTitle: (id, title) => {
+          this.workspace.renamePanel(id, title);
+          this.afterLayoutChange();
+        },
+        onEditAxisLabel: (id, axis, label) => {
+          this.workspace.setAxisLabel(id, axis, label);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetSeriesStyle: (id, path, style) => {
+          this.workspace.setSeriesStyle(id, path, style);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onRemoveSeries: (id, path) => {
+          this.workspace.removeSeries(id, path);
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
         onLayoutChanged: () => {
           void this.refreshTiles();
         },
@@ -139,6 +205,23 @@ export class AppShell {
   }
 
   private registerCommands(): void {
+    const zoomFocusedPanel = (factor: number): void => {
+      const id = this.workspace.focusedPanelId();
+      const panel = id === null ? undefined : this.workspace.panel(id);
+      if (id === null || panel === undefined) return;
+      const window = this.effectiveWindow(panel);
+      const pivot = (window.t0 + window.t1) / 2;
+      const next = zoomRange({ min: window.t0, max: window.t1 }, factor, pivot);
+      this.applyTimeWindow(id, next.min, next.max);
+    };
+    const panFocusedPanel = (direction: -1 | 1): void => {
+      const id = this.workspace.focusedPanelId();
+      const panel = id === null ? undefined : this.workspace.panel(id);
+      if (id === null || panel === undefined) return;
+      const window = this.effectiveWindow(panel);
+      const delta = (window.t1 - window.t0) * 0.1 * direction;
+      this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
+    };
     this.commands.register({
       id: "open-files",
       title: "Open CSV or MCAP…",
@@ -183,6 +266,58 @@ export class AppShell {
       "split-panel-right",
       "Split current panel right",
       (id) => void this.workspace.splitPanelRight(id),
+    );
+    this.registerFocusedPanelCommand(
+      "zoom-in-time",
+      "Panel: zoom in (time)",
+      () => {
+        zoomFocusedPanel(0.8);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "zoom-out-time",
+      "Panel: zoom out (time)",
+      () => {
+        zoomFocusedPanel(1.25);
+      },
+    );
+    this.registerFocusedPanelCommand("pan-left", "Panel: pan left", () => {
+      panFocusedPanel(-1);
+    });
+    this.registerFocusedPanelCommand("pan-right", "Panel: pan right", () => {
+      panFocusedPanel(1);
+    });
+    this.registerFocusedPanelCommand(
+      "fit-panel-view",
+      "Panel: fit view",
+      (id) => {
+        this.fitPanelView(id);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "clear-annotations",
+      "Panel: clear annotations",
+      (id) => {
+        const panel = this.workspace.panel(id);
+        for (const annotation of [...(panel?.annotations ?? [])]) {
+          this.workspace.removeAnnotation(id, annotation.id);
+        }
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "toggle-stats",
+      "Panel: toggle statistics",
+      (id) => {
+        this.workspace.toggleStats(id);
+      },
+      "s",
+    );
+    this.registerFocusedPanelCommand(
+      "toggle-axis-style",
+      "Panel: toggle axis style (gutter/inline)",
+      (id) => {
+        this.workspace.toggleAxisStyle(id);
+      },
     );
     this.registerFocusedPanelCommand(
       "close-panel",
@@ -270,10 +405,12 @@ export class AppShell {
     id: string,
     title: string,
     act: (panelId: string) => void,
+    keys?: string,
   ): void {
     this.commands.register({
       id,
       title,
+      ...(keys === undefined ? {} : { keys }),
       enabled: () => this.workspace.focusedPanelId() !== null,
       run: () => {
         const panelId = this.workspace.focusedPanelId();
@@ -365,7 +502,8 @@ export class AppShell {
       const target = event.target;
       if (
         target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
       ) {
         return;
       }
@@ -457,7 +595,6 @@ export class AppShell {
 
   private async refreshTiles(): Promise<void> {
     const refreshToken = ++this.refreshToken;
-    const state = this.time.snapshot();
     const width = Math.max(
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
@@ -471,13 +608,14 @@ export class AppShell {
           .filter((id): id is string => id !== undefined);
         if (ids.length === 0) return;
         const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+        const window = this.effectiveWindow(panel);
         try {
           next.set(
             panel.id,
             await this.plane.queryTiles({
               request_id: crypto.randomUUID(),
               signal_ids: ids,
-              window: { t0: state.t0, t1: state.t1 },
+              window,
               pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
             }),
           );
@@ -504,11 +642,161 @@ export class AppShell {
   private renderTiles(): void {
     const state = this.time.snapshot();
     const elapsed =
-      this.workspaceView?.renderTiles(this.tilesByPanel, {
-        t0: state.t0,
-        t1: state.t1,
+      this.workspaceView?.renderTiles(this.tilesByPanel, (panelId) => {
+        const panel = this.workspace.panel(panelId);
+        return panel === undefined
+          ? { t0: state.t0, t1: state.t1 }
+          : this.effectiveWindow(panel);
       }) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
+  }
+
+  private applyTimeWindow(panelId: string, t0: number, t1: number): void {
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
+    const panel = this.workspace.panel(panelId);
+    if (panel === undefined) return;
+    if (this.time.snapshot().linked && panel.mode === "time") {
+      this.time.setWindow(t0, t1);
+      this.renderWindowReadout();
+    } else {
+      this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
+    }
+    this.renderTiles();
+    this.scheduleRefresh();
+  }
+
+  private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
+    const state = this.time.snapshot();
+    if (state.linked && panel.mode === "time") {
+      return { t0: state.t0, t1: state.t1 };
+    }
+    const local = panel.time_window;
+    return local === null
+      ? { t0: state.t0, t1: state.t1 }
+      : { t0: local[0], t1: local[1] };
+  }
+
+  private scheduleRefresh(delay = 150): void {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      void this.refreshTiles();
+    }, delay);
+  }
+
+  private fitPanelView(panelId: string): void {
+    const panel = this.workspace.panel(panelId);
+    if (panel === undefined) return;
+    this.workspace.clearPanelYRange(panelId);
+    this.workspaceView?.resetYAxis(panelId);
+    let t0 = Number.POSITIVE_INFINITY;
+    let t1 = Number.NEGATIVE_INFINITY;
+    for (const series of panel.series) {
+      const summary = this.signalsByPath.get(series.path);
+      if (summary !== undefined) {
+        t0 = Math.min(t0, summary.t_min);
+        t1 = Math.max(t1, summary.t_max);
+      }
+    }
+    if (Number.isFinite(t0) && Number.isFinite(t1)) {
+      this.applyTimeWindow(panelId, t0, t1 > t0 ? t1 : t0 + 1);
+    } else {
+      this.renderTiles();
+      this.scheduleRefresh();
+    }
+  }
+
+  private setCursor(
+    panelId: string,
+    cursorT: number | null,
+    client: { x: number; y: number } | null,
+  ): void {
+    this.time.setCursor(cursorT);
+    const state = this.time.snapshot();
+    this.workspaceView?.setCursor(state.cursorT);
+    required(this.root, ".cursor-readout").textContent =
+      state.cursorT === null
+        ? "t = —"
+        : `t = ${formatCursorTime(state.cursorT)}`;
+    this.renderTooltip(panelId, state.cursorT, client);
+    this.scheduleLiveValues(state.cursorT);
+  }
+
+  private renderTooltip(
+    panelId: string,
+    cursorT: number | null,
+    client: { x: number; y: number } | null,
+  ): void {
+    const tip = required<HTMLElement>(this.root, ".plot-tip");
+    const panel = this.workspace.panel(panelId);
+    const tiles = this.tilesByPanel.get(panelId);
+    if (
+      cursorT === null ||
+      client === null ||
+      panel === undefined ||
+      tiles === undefined
+    ) {
+      tip.hidden = true;
+      return;
+    }
+    const visible = new Set(
+      panel.series
+        .filter((series) => series.visible)
+        .map((series) => series.path),
+    );
+    tip.replaceChildren(
+      tooltipHeader(formatCursorTime(cursorT)),
+      ...tiles.series
+        .filter((tile) => visible.has(tile.signal_path))
+        .map((tile) => {
+          const series = panel.series.find(
+            (entry) => entry.path === tile.signal_path,
+          );
+          const style = resolveSeriesStyle(
+            series?.color_slot ?? 1,
+            series?.dash ?? "solid",
+          );
+          return tooltipRow(
+            `var(--series-${String(style.colorIndex + 1)})`,
+            tile.signal_path.split("/").slice(-2).join("/"),
+            formatValue(valueAtTime(tile.bins, cursorT)),
+          );
+        }),
+    );
+    tip.hidden = false;
+    const rect = tip.getBoundingClientRect();
+    const x =
+      client.x + 16 + rect.width > window.innerWidth - 8
+        ? client.x - 16 - rect.width
+        : client.x + 16;
+    const y =
+      client.y + 14 + rect.height > window.innerHeight - 8
+        ? client.y - 14 - rect.height
+        : client.y + 14;
+    tip.style.transform = `translate(${String(x)}px, ${String(y)}px)`;
+  }
+
+  private scheduleLiveValues(cursorT: number | null): void {
+    this.pendingCursorT = cursorT;
+    if (this.liveValuesScheduled) return;
+    this.liveValuesScheduled = true;
+    requestAnimationFrame(() => {
+      this.liveValuesScheduled = false;
+      const values = new Map<string, string>();
+      if (this.pendingCursorT !== null) {
+        for (const tiles of this.tilesByPanel.values()) {
+          for (const tile of tiles.series) {
+            if (!values.has(tile.signal_path)) {
+              values.set(
+                tile.signal_path,
+                formatValue(valueAtTime(tile.bins, this.pendingCursorT)),
+              );
+            }
+          }
+        }
+      }
+      this.tree?.setLiveValues(values);
+    });
   }
 
   private updateStatus(): void {
@@ -546,9 +834,18 @@ export class AppShell {
   }
 
   private toggleLinked(): void {
-    const linked = !this.time.snapshot().linked;
+    const state = this.time.snapshot();
+    const linked = !state.linked;
+    if (!linked) {
+      for (const panel of this.workspace.panels()) {
+        if (panel.mode === "time") {
+          this.workspace.setPanelTimeWindow(panel.id, [state.t0, state.t1]);
+        }
+      }
+    }
     this.time.setLinked(linked);
     required(this.root, ".linked-toggle").classList.toggle("active", linked);
+    void this.refreshTiles();
   }
 
   private toggleTheme(): void {
@@ -719,14 +1016,38 @@ function shellMarkup(): string {
       <span class="formula-mark">ƒx</span>
       <input class="formula-input" aria-label="Derived signal formula" placeholder='derived/name = Math.hypot($("signal/x"), $("signal/y"))' spellcheck="false" />
     </form>
+    <div class="plot-tip" hidden></div>
 
     <footer class="status-bar">
       <span><span class="status-dot"></span> <span class="signal-count">0 signals</span></span>
       <span class="point-count status-value">0 pts</span>
       <span>render <span class="render-ms status-value">— ms</span></span>
-      <span>cursor <span class="status-value">t = —</span></span>
-      <span class="gesture-hint">drag signal → panel · N = split down · / = filter · ⌘K = commands</span>
+      <span>cursor <span class="status-value cursor-readout">t = —</span></span>
+      <span class="gesture-hint">drag box-zoom · wheel t · ⇧wheel y · right-drag pan · dbl-click fit · click datatip</span>
       <span class="status-command">⌘K</span>
     </footer>
   </main>`;
+}
+
+function tooltipHeader(text: string): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "plot-tip-header";
+  header.textContent = text;
+  return header;
+}
+
+function tooltipRow(color: string, name: string, value: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "plot-tip-row";
+  const swatch = document.createElement("span");
+  swatch.className = "plot-tip-swatch";
+  swatch.style.background = color;
+  const label = document.createElement("span");
+  label.className = "signal-path";
+  label.textContent = name;
+  const reading = document.createElement("span");
+  reading.className = "plot-tip-value";
+  reading.textContent = value;
+  row.append(swatch, label, reading);
+  return row;
 }

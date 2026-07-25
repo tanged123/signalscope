@@ -15,6 +15,7 @@ export class SignalTreeView {
   private filter = "";
   private rows: TreeRow[] = [];
   private readonly rowHeight: number;
+  private liveValues: ReadonlyMap<string, string> = new Map();
 
   constructor(
     private readonly listElement: HTMLElement,
@@ -49,6 +50,12 @@ export class SignalTreeView {
   setFilter(filter: string): void {
     this.filter = filter;
     this.refresh();
+  }
+
+  setLiveValues(values: ReadonlyMap<string, string>): void {
+    this.liveValues = values;
+    this.renderRows();
+    this.renderFavorites();
   }
 
   private refresh(): void {
@@ -141,7 +148,7 @@ export class SignalTreeView {
     name.textContent = label;
     const value = document.createElement("span");
     value.className = "signal-value";
-    value.textContent = "—";
+    value.textContent = this.liveValues.get(path) ?? "—";
     rowElement.append(star, name, value);
     return rowElement;
   }

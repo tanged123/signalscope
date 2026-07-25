@@ -38,4 +38,12 @@ describe("LinkedTimeModel", () => {
     expect(model.snapshot().t1).toBe(15);
     expect(() => model.setWindow(3, 3)).toThrow();
   });
+
+  it("stores finite cursor times and clears invalid values", () => {
+    const model = new LinkedTimeModel();
+    model.setCursor(12.5);
+    expect(model.snapshot().cursorT).toBe(12.5);
+    model.setCursor(Number.NaN);
+    expect(model.snapshot().cursorT).toBeNull();
+  });
 });

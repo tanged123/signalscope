@@ -16,7 +16,7 @@
 //! The JSON directory lists per-signal metadata and each payload section's
 //! (offset, len, crc32), offsets relative to the payload base. Sections per
 //! signal, in order: time column, values column, then one section per merged
-//! pyramid level. Levels are arrays of 64-byte bin records; `first`/`last`/
+//! pyramid level. Levels are arrays of 88-byte bin records; `first`/`last`/
 //! `min`/`max` encode `None` as NaN, which is lossless because stored
 //! envelope values are always finite by construction.
 //!
@@ -41,10 +41,10 @@ use crate::{
     store::{Signal, SignalId, SignalStore, StoreError},
 };
 
-pub const CACHE_VERSION: u32 = 1;
+pub const CACHE_VERSION: u32 = 2;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
 const HEADER_LEN: usize = 40;
-const BIN_RECORD_LEN: usize = 64;
+const BIN_RECORD_LEN: usize = 88;
 const FINGERPRINT_HEAD_LEN: usize = 64 * 1024;
 
 /// The sidecar file beside `source`: `<file name>.sspyr`.
@@ -404,7 +404,10 @@ fn encode_bins(bins: &[EnvelopeBin]) -> Vec<u8> {
         for value in [bin.first, bin.last, bin.min, bin.max] {
             out.extend_from_slice(&value.unwrap_or(f64::NAN).to_le_bytes());
         }
+        out.extend_from_slice(&bin.sum.to_le_bytes());
+        out.extend_from_slice(&bin.sum_sq.to_le_bytes());
         out.extend_from_slice(&bin.sample_count.to_le_bytes());
+        out.extend_from_slice(&bin.finite_count.to_le_bytes());
         out.push(u8::from(bin.has_gap));
         out.extend_from_slice(&[0_u8; 7]);
     }
@@ -432,8 +435,11 @@ fn decode_bins(bytes: &[u8]) -> Option<Vec<EnvelopeBin>> {
                 last: optional(chunk, 24),
                 min: optional(chunk, 32),
                 max: optional(chunk, 40),
-                sample_count: u64::from_le_bytes(chunk[48..56].try_into().expect("8-byte field")),
-                has_gap: chunk[56] != 0,
+                sum: field(chunk, 48),
+                sum_sq: field(chunk, 56),
+                sample_count: u64::from_le_bytes(chunk[64..72].try_into().expect("8-byte field")),
+                finite_count: u64::from_le_bytes(chunk[72..80].try_into().expect("8-byte field")),
+                has_gap: chunk[80] != 0,
             })
             .collect(),
     )
@@ -608,7 +614,7 @@ mod tests {
         );
 
         let mut versioned = original;
-        versioned[8..12].copy_from_slice(&2_u32.to_le_bytes());
+        versioned[8..12].copy_from_slice(&3_u32.to_le_bytes());
         fs::write(&path, &versioned).unwrap();
         assert!(
             try_load(&source, &mut fresh, &mut |_| {})

@@ -210,6 +210,73 @@ describe("WorkspaceModel", () => {
     expect(model.panels()[0]?.y_range).toBeNull();
   });
 
+  it("writes title, axis labels and local time windows", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.renamePanel(panel.id, "Body velocity");
+    model.setAxisLabel(panel.id, "y", "velocity (m/s)");
+    model.setPanelTimeWindow(panel.id, [2, 8]);
+    expect(model.panel(panel.id)).toMatchObject({
+      title: "Body velocity",
+      x_label: null,
+      y_label: "velocity (m/s)",
+      time_window: [2, 8],
+    });
+    model.setPanelTimeWindow(panel.id, null);
+    expect(model.panel(panel.id)?.time_window).toBeNull();
+  });
+
+  it("adds, relabels and removes annotations", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addAnnotation(panel.id, {
+      id: "ann-1",
+      series_path: "a/b",
+      time: 2,
+      value: 5,
+      label: "",
+    });
+    model.setAnnotationLabel(panel.id, "ann-1", "peak");
+    expect(model.panel(panel.id)?.annotations[0]?.label).toBe("peak");
+    model.removeAnnotation(panel.id, "ann-1");
+    expect(model.panel(panel.id)?.annotations).toEqual([]);
+  });
+
+  it("toggles statistics and axis style", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.toggleStats(panel.id);
+    model.toggleAxisStyle(panel.id);
+    expect(model.panel(panel.id)?.show_stats).toBe(true);
+    expect(model.panel(panel.id)?.axis_style).toBe("inline");
+  });
+
+  it("updates series style and prunes annotations when removing it", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeries(panel.id, "a/b");
+    model.setSeriesStyle(panel.id, "a/b", {
+      color_slot: 5,
+      dash: "dot",
+      width: 2.5,
+    });
+    model.addAnnotation(panel.id, {
+      id: "ann-1",
+      series_path: "a/b",
+      time: 0,
+      value: 0,
+      label: "",
+    });
+    expect(model.panel(panel.id)?.series[0]).toMatchObject({
+      color_slot: 5,
+      dash: "dot",
+      width: 2.5,
+    });
+    model.removeSeries(panel.id, "a/b");
+    expect(model.panel(panel.id)?.series).toEqual([]);
+    expect(model.panel(panel.id)?.annotations).toEqual([]);
+  });
+
   it("ignores a y range for an unknown panel", () => {
     const model = new WorkspaceModel();
     expect(() => {
@@ -297,6 +364,9 @@ describe("WorkspaceModel", () => {
       color_signal: null,
       series: [],
       y_range: null,
+      x_label: null,
+      y_label: null,
+      time_window: null,
       annotations: [],
       show_stats: false,
     });

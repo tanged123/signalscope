@@ -1,17 +1,6 @@
 import type { SignalTile, TileResponse } from "../generated/protocol";
-import type { DashStyle } from "../generated/session";
-
-interface PlotRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface Range {
-  min: number;
-  max: number;
-}
+import type { AxisStyle, DashStyle } from "../generated/session";
+import type { PlotLayout, PlotRect, Range } from "../app/plot-math";
 
 interface Projection {
   toX: (value: number) => number;
@@ -46,6 +35,9 @@ export interface RenderOptions {
   colorSlots: readonly number[];
   dashes: readonly DashStyle[];
   yRange: readonly [number, number];
+  axisStyle?: AxisStyle;
+  widths?: readonly number[];
+  emphasisIndex?: number;
 }
 
 export const SERIES_TOKENS = [
@@ -94,6 +86,7 @@ export class CanvasRenderer {
   private palette: Palette | null = null;
   private renderedWidth = 0;
   private renderedHeight = 0;
+  private layout: PlotLayout | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
@@ -107,6 +100,10 @@ export class CanvasRenderer {
    */
   setPalette(palette: Palette): void {
     this.palette = palette;
+  }
+
+  lastLayout(): PlotLayout | null {
+    return this.layout;
   }
 
   render(
@@ -130,14 +127,30 @@ export class CanvasRenderer {
       formatTicks(ticks(yRange.min, yRange.max, 6)),
       charWidth,
     );
-    const plot: PlotRect = {
-      x: gutter,
-      y: 8,
-      width: Math.max(1, width - gutter - 12),
-      height: Math.max(1, height - 42),
-    };
+    const inline = options.axisStyle === "inline";
+    const plot: PlotRect = inline
+      ? { x: 0, y: 0, width, height }
+      : {
+          x: gutter,
+          y: 8,
+          width: Math.max(1, width - gutter - 12),
+          height: Math.max(1, height - 42),
+        };
+    this.layout = { plot, xRange: { ...xRange }, yRange: { ...yRange } };
     const project = projection(plot, xRange, yRange);
-    this.drawAxes(context, plot, project, xRange, yRange, colors, options);
+    if (inline) {
+      this.drawInlineAxes(
+        context,
+        plot,
+        project,
+        xRange,
+        yRange,
+        colors,
+        options,
+      );
+    } else {
+      this.drawAxes(context, plot, project, xRange, yRange, colors, options);
+    }
     response.series.forEach((series, index) => {
       const style = resolveSeriesStyle(
         options.colorSlots[index] ?? index + 1,
@@ -149,6 +162,9 @@ export class CanvasRenderer {
         series,
         colors.series[style.colorIndex] ?? colors.fg2,
         style.dash,
+        (options.widths?.[index] ?? 1.4) +
+          (options.emphasisIndex === index ? 0.4 : 0),
+        options.emphasisIndex !== undefined && options.emphasisIndex !== index,
       );
     });
     return performance.now() - started;
@@ -285,11 +301,14 @@ export class CanvasRenderer {
     series: SignalTile,
     color: string,
     dash: DashStyle,
+    width: number,
+    dimmed: boolean,
   ): void {
     const { toX, toY } = project;
 
     context.strokeStyle = color;
-    context.lineWidth = 1.4;
+    context.lineWidth = width;
+    context.globalAlpha = dimmed ? 0.35 : 1;
     context.setLineDash(dashPattern(dash));
     context.beginPath();
     let penDown = false;
@@ -316,7 +335,75 @@ export class CanvasRenderer {
       penDown = !bin.has_gap;
     }
     context.stroke();
+    context.globalAlpha = 1;
     context.setLineDash([]);
+  }
+
+  private drawInlineAxes(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    project: Projection,
+    xRange: Range,
+    yRange: Range,
+    colors: Palette,
+    options: RenderOptions,
+  ): void {
+    context.lineWidth = 1;
+    context.font = tickFont(colors);
+    context.textBaseline = "middle";
+    const xTicks = ticks(xRange.min, xRange.max, 7);
+    const yTicks = ticks(yRange.min, yRange.max, 6);
+    const { toX, toY } = project;
+    context.strokeStyle = colors.grid;
+    for (const value of xTicks) {
+      const x = Math.round(toX(value)) + 0.5;
+      context.beginPath();
+      context.moveTo(x, plot.y);
+      context.lineTo(x, plot.y + plot.height);
+      context.stroke();
+    }
+    for (const value of yTicks) {
+      const y = Math.round(toY(value)) + 0.5;
+      context.beginPath();
+      context.moveTo(plot.x, y);
+      context.lineTo(plot.x + plot.width, y);
+      context.stroke();
+    }
+    const backed = (
+      text: string,
+      x: number,
+      y: number,
+      align: CanvasTextAlign,
+    ): void => {
+      context.textAlign = align;
+      const textWidth = context.measureText(text).width;
+      const left =
+        align === "left"
+          ? x
+          : align === "right"
+            ? x - textWidth
+            : x - textWidth / 2;
+      context.save();
+      context.globalAlpha = 0.8;
+      context.fillStyle = colors.background;
+      context.fillRect(left - 3, y - 6, textWidth + 6, 12);
+      context.restore();
+      context.fillStyle = colors.fg2;
+      context.fillText(text, x, y);
+    };
+    formatTicks(yTicks).forEach((label, index) => {
+      const y = toY(yTicks[index] ?? 0);
+      if (y > 14 && y < plot.height - 14) backed(label, 4, y, "left");
+    });
+    formatTicks(xTicks).forEach((label, index) => {
+      const x = toX(xTicks[index] ?? 0);
+      if (x > 30 && x < plot.width - 30) {
+        backed(label, x, plot.height - 8, "center");
+      }
+    });
+    context.font = labelFont(colors);
+    backed(options.yLabel, 4, 12, "left");
+    backed(options.xLabel, plot.width - 4, plot.height - 8, "right");
   }
 }
 
@@ -341,7 +428,7 @@ export function formatTicks(values: readonly number[]): string[] {
   const largest = magnitudes.length === 0 ? 0 : Math.max(...magnitudes);
   const smallest = magnitudes.length === 0 ? 0 : Math.min(...magnitudes);
   if (largest >= 10_000 || (smallest > 0 && smallest < 0.001)) {
-    return values.map((value) => value.toExponential(1));
+    return values.map((value) => value.toExponential(1).replace(/^-/, "−"));
   }
   let gap = Number.POSITIVE_INFINITY;
   for (let index = 1; index < values.length; index += 1) {
@@ -351,7 +438,7 @@ export function formatTicks(values: readonly number[]): string[] {
   const digits = Number.isFinite(gap)
     ? Math.min(6, Math.max(0, Math.ceil(-Math.log10(gap)) + 1))
     : 0;
-  return values.map((value) => value.toFixed(digits));
+  return values.map((value) => value.toFixed(digits).replace(/^-/, "−"));
 }
 
 export function gutterWidth(

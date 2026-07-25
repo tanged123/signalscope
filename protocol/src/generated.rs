@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -82,6 +82,10 @@ pub struct EnvelopeBin {
     pub min: Option<f64>,
     #[serde(default)]
     pub max: Option<f64>,
+    pub sum: f64,
+    pub sum_sq: f64,
+    #[serde(with = "u64_string")]
+    pub finite_count: u64,
     #[serde(with = "u64_string")]
     pub sample_count: u64,
     pub has_gap: bool,

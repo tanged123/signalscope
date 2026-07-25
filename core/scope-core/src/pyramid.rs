@@ -16,6 +16,9 @@ fn sample_bin(time: f64, value: f64) -> EnvelopeBin {
         last: finite,
         min: finite,
         max: finite,
+        sum: finite.unwrap_or(0.0),
+        sum_sq: finite.map_or(0.0, |value| value * value),
+        finite_count: u64::from(value.is_finite()),
         sample_count: 1,
         has_gap: !value.is_finite(),
     }
@@ -29,6 +32,9 @@ fn merge_bins(left: &EnvelopeBin, right: &EnvelopeBin) -> EnvelopeBin {
         last: right.last.or(left.last),
         min: min_option(left.min, right.min),
         max: max_option(left.max, right.max),
+        sum: left.sum + right.sum,
+        sum_sq: left.sum_sq + right.sum_sq,
+        finite_count: left.finite_count + right.finite_count,
         sample_count: left.sample_count + right.sample_count,
         has_gap: left.has_gap || right.has_gap,
     }
@@ -249,6 +255,20 @@ mod tests {
     }
 
     #[test]
+    fn bins_accumulate_finite_sums() {
+        let pyramid = Pyramid::from_samples(&[0.0, 1.0, 2.0, 3.0], &[1.0, f64::NAN, 2.0, 3.0]);
+        let top = pyramid.level(2).unwrap()[0].clone();
+        assert_eq!(top.sample_count, 4);
+        assert_eq!(top.finite_count, 3);
+        assert!((top.sum - 6.0).abs() < 1e-12);
+        assert!((top.sum_sq - 14.0).abs() < 1e-12);
+
+        let raw = pyramid.level(0).unwrap();
+        assert_eq!(raw[1].finite_count, 0);
+        assert!(raw[1].sum.abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn query_is_bounded_by_display_density() {
         let time = (0..10_000).map(f64::from).collect::<Vec<_>>();
         let values = time.iter().map(|value| value.sin()).collect::<Vec<_>>();
@@ -401,6 +421,9 @@ mod tests {
         assert_option_close(current.last, stored.last);
         assert_option_close(current.min, stored.min);
         assert_option_close(current.max, stored.max);
+        assert_close(current.sum, stored.sum);
+        assert_close(current.sum_sq, stored.sum_sq);
+        assert_eq!(current.finite_count, stored.finite_count);
         assert_eq!(current.sample_count, stored.sample_count);
         assert_eq!(current.has_gap, stored.has_gap);
     }
