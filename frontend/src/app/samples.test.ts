@@ -1,7 +1,8 @@
 import fixtureJson from "../../../protocol/testdata/sample-conformance.json";
 import { describe, expect, it } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
-import { binsToSamples, sampleWindow } from "./samples";
+import type { SampleResponse } from "../generated/protocol";
+import { binsToSamples, mergeSampleResponses, sampleWindow } from "./samples";
 
 interface Fixture {
   time: number[];
@@ -71,5 +72,38 @@ describe("binsToSamples", () => {
     expect(samples.values[0]).toBe(5);
     expect(Number.isNaN(samples.values[1])).toBe(true);
     expect(samples.values[2]).toBe(7);
+  });
+});
+
+describe("mergeSampleResponses", () => {
+  it("replaces coarse overlap with visible-window detail", () => {
+    const response = (
+      request_id: string,
+      time: number[],
+      values: number[],
+      stride: number,
+    ): SampleResponse => ({
+      request_id,
+      series: [
+        {
+          signal_id: "1",
+          signal_path: "demo/value",
+          unit: null,
+          time,
+          values,
+          stride,
+        },
+      ],
+    });
+    const merged = mergeSampleResponses(
+      response("coarse", [0, 5, 10, 15, 20], [0, 5, 10, 15, 20], 5),
+      response("detail", [8, 9, 10, 11, 12], [80, 90, 100, 110, 120], 1),
+    );
+    expect(merged.request_id).toBe("detail");
+    expect(merged.series[0]?.time).toEqual([0, 5, 8, 9, 10, 11, 12, 15, 20]);
+    expect(merged.series[0]?.values).toEqual([
+      0, 5, 80, 90, 100, 110, 120, 15, 20,
+    ]);
+    expect(merged.series[0]?.stride).toBe(1);
   });
 });

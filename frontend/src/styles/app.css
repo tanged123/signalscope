@@ -823,6 +823,26 @@ kbd {
   color: var(--fg-1);
 }
 
+.mode-help {
+  position: fixed;
+  z-index: 9;
+  top: 48px;
+  left: 50%;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 6px 9px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: 10.5px var(--font-mono);
+  pointer-events: none;
+}
+
+.mode-help[hidden] {
+  display: none;
+}
+
 .series-inspector {
   position: absolute;
   z-index: 5;

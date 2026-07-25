@@ -2,7 +2,9 @@ import { CommandRegistry, formatCombo } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
+import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
+import { lerpSample } from "../app/xy";
 import {
   formatCursorTime,
   formatValue,
@@ -44,6 +46,7 @@ export class AppShell {
   private refreshToken = 0;
   private renderScheduled = false;
   private refreshTimer: number | null = null;
+  private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
   private cursorStyle: CursorStyle = "none";
@@ -161,6 +164,7 @@ export class AppShell {
         },
         onToggleStats: (id) => {
           this.workspace.toggleStats(id);
+          this.syncStatsToggle();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
@@ -307,6 +311,44 @@ export class AppShell {
         this.cycleCursorStyle();
       },
     });
+    this.commands.register({
+      id: "toggle-all-stats",
+      title: "Toggle statistics on every panel",
+      run: () => {
+        // Any panel still hiding stats turns them all on; otherwise all off.
+        const target = this.workspace
+          .panels()
+          .some((panel) => !panel.show_stats);
+        for (const panel of this.workspace.panels()) {
+          if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
+        }
+        this.syncStatsToggle();
+        this.workspaceView?.refreshPanelStates();
+        this.renderTiles();
+      },
+    });
+    for (const [mode, text] of [
+      [
+        "XY",
+        "XY: drag box-zoom · wheel zoom · right-drag pan · dbl-click fit · click datatip · drop on the amber strip to set X",
+      ],
+      [
+        "FFT",
+        "FFT: computed over the visible time window · wheel/box zoom the frequency and dB axes · dbl-click fit",
+      ],
+      [
+        "histogram",
+        "Histogram: counts of the visible time window · bins rebin as the window moves · dbl-click fit",
+      ],
+    ] as const) {
+      this.commands.register({
+        id: `help-${mode.toLowerCase()}-gestures`,
+        title: `Help: ${mode} mode gestures`,
+        run: () => {
+          this.showModeHelp(text);
+        },
+      });
+    }
     this.registerFocusedPanelCommand(
       "zoom-in-time",
       "Panel: zoom in (time)",
@@ -347,6 +389,27 @@ export class AppShell {
       "Panel: return to time mode",
       (id) => {
         this.exitXy(id);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-switch-fft",
+      "Panel: switch to FFT mode",
+      (id) => {
+        this.workspace.setMode(id, "fft");
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-switch-histogram",
+      "Panel: switch to histogram mode",
+      (id) => {
+        this.workspace.setMode(id, "histogram");
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-clear-color-signal",
+      "Panel: clear color signal (c:)",
+      (id) => {
+        this.workspace.setColorSignal(id, null);
       },
     );
     this.registerFocusedPanelCommand(
@@ -580,6 +643,9 @@ export class AppShell {
         this.commands.run("cycle-cursor-style");
       },
     );
+    required(this.root, ".stats-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-all-stats");
+    });
     const formula = required<HTMLFormElement>(this.root, ".formula-bar");
     formula.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -682,7 +748,26 @@ export class AppShell {
       this.workspace.activeTabId(),
     );
     this.workspaceView?.sync(this.signals.length > 0);
+    this.syncStatsToggle();
     void this.refreshTiles();
+  }
+
+  private syncStatsToggle(): void {
+    const panels = this.workspace.panels();
+    const active =
+      panels.length > 0 && panels.every((panel) => panel.show_stats);
+    required(this.root, ".stats-toggle").classList.toggle("active", active);
+  }
+
+  private showModeHelp(text: string): void {
+    const help = required<HTMLElement>(this.root, ".mode-help");
+    help.textContent = text;
+    help.hidden = false;
+    if (this.helpTimer !== null) window.clearTimeout(this.helpTimer);
+    this.helpTimer = window.setTimeout(() => {
+      help.hidden = true;
+      this.helpTimer = null;
+    }, 6000);
   }
 
   private async reloadSignals(): Promise<void> {
@@ -721,15 +806,30 @@ export class AppShell {
               }),
             );
           } else {
-            nextSamples.set(
-              panel.id,
-              await this.plane.querySamples({
+            const contextRequest = {
+              request_id: crypto.randomUUID(),
+              signal_ids: ids,
+              window: this.sampleWindow(panel),
+              max_points: SAMPLE_CAP,
+            };
+            if (panel.mode === "xy") {
+              const detailRequest = {
                 request_id: crypto.randomUUID(),
                 signal_ids: ids,
-                window: this.sampleWindow(panel),
+                window,
                 max_points: SAMPLE_CAP,
-              }),
-            );
+              };
+              const [context, detail] = await Promise.all([
+                this.plane.querySamples(contextRequest),
+                this.plane.querySamples(detailRequest),
+              ]);
+              nextSamples.set(panel.id, mergeSampleResponses(context, detail));
+            } else {
+              nextSamples.set(
+                panel.id,
+                await this.plane.querySamples(contextRequest),
+              );
+            }
           }
         } catch (error: unknown) {
           this.reportError(error);
@@ -942,13 +1042,7 @@ export class AppShell {
   ): void {
     const tip = required<HTMLElement>(this.root, ".plot-tip");
     const panel = this.workspace.panel(panelId);
-    const tiles = this.tilesByPanel.get(panelId);
-    if (
-      cursorT === null ||
-      client === null ||
-      panel === undefined ||
-      tiles === undefined
-    ) {
+    if (cursorT === null || client === null || panel === undefined) {
       tip.hidden = true;
       return;
     }
@@ -957,25 +1051,47 @@ export class AppShell {
         .filter((series) => series.visible)
         .map((series) => series.path),
     );
-    tip.replaceChildren(
-      tooltipHeader(formatCursorTime(cursorT)),
-      ...tiles.series
-        .filter((tile) => visible.has(tile.signal_path))
-        .map((tile) => {
-          const series = panel.series.find(
-            (entry) => entry.path === tile.signal_path,
-          );
-          const style = resolveSeriesStyle(
-            series?.color_slot ?? 1,
-            series?.dash ?? "solid",
-          );
-          return tooltipRow(
-            `var(--series-${String(style.colorIndex + 1)})`,
-            tile.signal_path.split("/").slice(-2).join("/"),
-            formatValue(valueAtTime(tile.bins, cursorT)),
-          );
-        }),
-    );
+    const rows =
+      panel.mode === "time"
+        ? (this.tilesByPanel.get(panelId)?.series ?? [])
+            .filter((tile) => visible.has(tile.signal_path))
+            .map((tile) => {
+              const series = panel.series.find(
+                (entry) => entry.path === tile.signal_path,
+              );
+              const style = resolveSeriesStyle(
+                series?.color_slot ?? 1,
+                series?.dash ?? "solid",
+              );
+              return tooltipRow(
+                `var(--series-${String(style.colorIndex + 1)})`,
+                tile.signal_path.split("/").slice(-2).join("/"),
+                formatValue(valueAtTime(tile.bins, cursorT)),
+              );
+            })
+        : panel.mode === "xy"
+          ? (this.samplesByPanel.get(panelId)?.series ?? [])
+              .filter((series) => visible.has(series.signal_path))
+              .map((sample) => {
+                const series = panel.series.find(
+                  (entry) => entry.path === sample.signal_path,
+                );
+                const style = resolveSeriesStyle(
+                  series?.color_slot ?? 1,
+                  series?.dash ?? "solid",
+                );
+                return tooltipRow(
+                  `var(--series-${String(style.colorIndex + 1)})`,
+                  sample.signal_path.split("/").slice(-2).join("/"),
+                  formatValue(lerpSample(sample.time, sample.values, cursorT)),
+                );
+              })
+          : [];
+    if (rows.length === 0) {
+      tip.hidden = true;
+      return;
+    }
+    tip.replaceChildren(tooltipHeader(formatCursorTime(cursorT)), ...rows);
     tip.hidden = false;
     const rect = tip.getBoundingClientRect();
     const x =
@@ -1198,6 +1314,7 @@ function shellMarkup(): string {
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
       <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
       <button class="tool-button cursor-style-toggle" title="Cursor: off (click to cycle)">cursor off</button>
+      <button class="tool-button stats-toggle" title="Show statistics on every panel">Σ Stats</button>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
       <span class="tool-spacer"></span>
       <span class="window-label">window</span>
@@ -1225,6 +1342,8 @@ function shellMarkup(): string {
     <div class="tree-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
 
     <section class="workspace" aria-label="Panel workspace"></section>
+
+    <div class="mode-help" role="status" hidden></div>
 
     <form class="formula-bar" id="formula-editor">
       <span class="formula-mark">ƒx</span>

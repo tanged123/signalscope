@@ -126,6 +126,15 @@ test.describe("panel modes", () => {
       await overlay.hover({ position: trajectoryPoint });
     }
     await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+
+    await page.locator(".cursor-style-toggle").click();
+    if (trajectoryPoint !== undefined) {
+      await overlay.hover({ position: trajectoryPoint });
+    }
+    const tip = page.locator(".plot-tip");
+    await expect(tip).toBeVisible();
+    await expect(tip.locator(".plot-tip-row")).toHaveCount(1);
+    await expect(tip.locator(".plot-tip-row").first()).not.toContainText("—");
   });
 
   test("XY datatips pin, list, and show a delta", async ({
@@ -169,6 +178,15 @@ test.describe("panel modes", () => {
 
     await chip.click();
     await expect(chip).toContainText("none");
+
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("set color signal");
+    await page.keyboard.press("Enter");
+    await expect(chip).toContainText("time");
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("clear color signal");
+    await page.keyboard.press("Enter");
+    await expect(chip).toContainText("none");
   });
 
   test("FFT mode announces its window and zooms locally", async ({
@@ -185,9 +203,14 @@ test.describe("panel modes", () => {
 
     const readout = page.locator(".window-readout");
     const before = await readout.textContent();
+    const cursorReadout = page.locator(".cursor-readout");
+    const cursorBefore = await cursorReadout.textContent();
+    await page.locator(".cursor-style-toggle").click();
+    await page.locator(".cursor-style-toggle").click();
     await panel
       .locator(".overlay-canvas")
       .hover({ position: { x: 250, y: 120 } });
+    await expect(cursorReadout).toHaveText(cursorBefore ?? "");
     await page.mouse.wheel(0, -240);
     await expect(readout).toHaveText(before ?? "");
   });
@@ -205,5 +228,30 @@ test.describe("panel modes", () => {
       "window: visible t",
     );
     await expect(page.locator(".render-ms")).not.toHaveText("— ms");
+  });
+
+  test("the toolbar stats toggle reaches every panel", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const toggle = page.locator(".stats-toggle");
+    await toggle.click();
+    await expect(toggle).toHaveClass(/active/);
+    await expect(page.locator(".panel-stats").first()).toBeVisible();
+    await toggle.click();
+    await expect(toggle).not.toHaveClass(/active/);
+    await expect(page.locator(".panel-stats").first()).toBeHidden();
+  });
+
+  test("mode help preserves the render metric", async ({ page, isMobile }) => {
+    test.skip(isMobile, "desktop interaction");
+    const renderMetric = page.locator(".render-ms");
+    const before = await renderMetric.textContent();
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("Help: XY mode gestures");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".mode-help")).toContainText("XY: drag box-zoom");
+    await expect(renderMetric).toHaveText(before ?? "");
   });
 });

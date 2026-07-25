@@ -242,10 +242,14 @@ export class CanvasRenderer {
       charWidth,
     );
     const inline = options.axisStyle === "inline";
-    const colorbarGutter =
-      options.colorbar === undefined || inline ? 0 : COLORBAR_GUTTER;
+    const colorbarGutter = options.colorbar === undefined ? 0 : COLORBAR_GUTTER;
     const plot: PlotRect = inline
-      ? { x: 0, y: 0, width, height }
+      ? {
+          x: 0,
+          y: 0,
+          width: Math.max(1, width - colorbarGutter),
+          height,
+        }
       : {
           x: gutter,
           y: 8,
@@ -293,8 +297,16 @@ export class CanvasRenderer {
     for (const path of paths) {
       this.drawPath(context, plot, project, path, colors);
     }
-    if (options.colorbar !== undefined && colorbarGutter > 0) {
-      this.drawColorbar(context, plot, width, options.colorbar, colors);
+    if (options.colorbar !== undefined) {
+      const colorbarPlot = inline
+        ? {
+            x: plot.x,
+            y: 8,
+            width: plot.width,
+            height: Math.max(1, height - 42),
+          }
+        : plot;
+      this.drawColorbar(context, colorbarPlot, width, options.colorbar, colors);
     }
     return performance.now() - started;
   }

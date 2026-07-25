@@ -11,13 +11,16 @@ import {
   insidePlot,
   invertX,
   invertY,
+  panScaledRange,
   pinchRange,
+  pinchScaledRange,
   projectX,
   projectY,
   valueAtTime,
   wheelZoomFactor,
   zoomDragMode,
   zoomRange,
+  zoomScaledRange,
   type PlotLayout,
   type Range,
 } from "../app/plot-math";
@@ -282,7 +285,9 @@ export class PanelView {
                 event.offsetY,
                 XY_HOVER_RADIUS,
               )?.time ?? null)
-            : invertX(layout, event.offsetX);
+            : this.lastState?.mode === "time"
+              ? invertX(layout, event.offsetX)
+              : null;
       }
       this.callbacks.onCursor(
         this.id,
@@ -320,7 +325,12 @@ export class PanelView {
             layout.plot.x + layout.plot.width,
           ),
         );
-        const nextX = zoomRange(layout.xRange, factor, pivotX);
+        const nextX = zoomScaledRange(
+          layout.xRange,
+          factor,
+          pivotX,
+          layout.xScale,
+        );
         if (event.shiftKey) {
           this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
         } else if (event.altKey) {
@@ -576,7 +586,16 @@ export class PanelView {
       }
     }
     const hasColor =
-      colorSeries !== null && Number.isFinite(colorMin) && colorMax > colorMin;
+      colorSeries !== null &&
+      Number.isFinite(colorMin) &&
+      Number.isFinite(colorMax);
+    const colorPadding =
+      hasColor && colorMin === colorMax
+        ? Math.max(1, Math.abs(colorMin) * 0.05)
+        : 0;
+    const colorDomainMin = colorMin - colorPadding;
+    const colorDomainMax = colorMax + colorPadding;
+    const colorSpan = colorDomainMax - colorDomainMin;
     const traces = this.xyTraces.map((entry) => entry.trace);
     const xRange =
       state.x_range ?? traceExtent(traces, "x", window.t0, window.t1);
@@ -608,7 +627,7 @@ export class PanelView {
         ...(hasColor
           ? {
               colorValues: (colorColumns[index] ?? []).map(
-                (value) => (value - colorMin) / (colorMax - colorMin),
+                (value) => (value - colorDomainMin) / colorSpan,
               ),
             }
           : {}),
@@ -629,8 +648,8 @@ export class PanelView {
       ...(hasColor
         ? {
             colorbar: {
-              min: colorMin,
-              max: colorMax,
+              min: colorDomainMin,
+              max: colorDomainMax,
               label:
                 state.color_signal === "time"
                   ? "t (s)"
@@ -747,7 +766,7 @@ export class PanelView {
     );
     return this.renderer.renderPaths(paths, {
       xLabel: state.x_label ?? yLabel(units),
-      yLabel: state.y_label ?? "count",
+      yLabel: state.y_label ?? "sample count",
       xRange: [edges[0] ?? 0, edges[edges.length - 1] ?? 1],
       yRange: [0, Math.max(1, peak) * 1.06],
       axisStyle: state.axis_style,
@@ -927,7 +946,8 @@ export class PanelView {
       this.longPressTimer = null;
       if (this.touchMode !== "tap" || this.touchStart === null) return;
       this.pinAt(this.touchStart.x, this.touchStart.y, TOUCH.longPressRadius);
-      navigator.vibrate(8);
+      const vibrate = (navigator as { vibrate?: Navigator["vibrate"] }).vibrate;
+      vibrate?.call(navigator, [8]);
       this.touchMode = "dead";
     }, TOUCH.longPressMs);
   }
@@ -961,13 +981,15 @@ export class PanelView {
       this.touchMode = "pan";
     }
     if (this.touchMode !== "pan") return;
-    const dt =
-      ((start.x - event.offsetX) / layout.plot.width) *
-      (ranges.x.max - ranges.x.min);
+    const nextX = panScaledRange(
+      ranges.x,
+      (start.x - event.offsetX) / layout.plot.width,
+      layout.xScale,
+    );
     const dv =
       ((event.offsetY - start.y) / layout.plot.height) *
       (ranges.y.max - ranges.y.min);
-    this.applyXRange(ranges.x.min + dt, ranges.x.max + dt);
+    this.applyXRange(nextX.min, nextX.max);
     this.callbacks.onYRange(this.id, [ranges.y.min + dv, ranges.y.max + dv]);
   }
 
@@ -977,13 +999,14 @@ export class PanelView {
     if (anchors === null || first === undefined || second === undefined) return;
     const { plot } = layout;
     if (Math.abs(first.x - second.x) > TOUCH.pinchSeparation) {
-      const next = pinchRange(
+      const next = pinchScaledRange(
         anchors.xA,
         anchors.xB,
         first.x,
         second.x,
         plot.x,
         plot.x + plot.width,
+        layout.xScale,
       );
       if (next !== null) this.applyXRange(next.min, next.max);
     }
@@ -1046,8 +1069,9 @@ export class PanelView {
       this.callbacks.onCursor(this.id, null, null);
       return;
     }
+    const mode = this.lastState?.mode;
     const cursorT =
-      this.lastState?.mode === "xy"
+      mode === "xy"
         ? (nearestXyPoint(
             this.xyTraces,
             layout,
@@ -1055,7 +1079,9 @@ export class PanelView {
             event.offsetY,
             TOUCH.tapCursorRadius,
           )?.time ?? null)
-        : invertX(layout, event.offsetX);
+        : mode === "time"
+          ? invertX(layout, event.offsetX)
+          : null;
     const rect = this.element.getBoundingClientRect();
     this.callbacks.onCursor(
       this.id,
@@ -1137,13 +1163,15 @@ export class PanelView {
     const startX = { ...layout.xRange };
     const startY = { ...layout.yRange };
     const move = (event: PointerEvent): void => {
-      const dt =
-        ((down.offsetX - event.offsetX) / layout.plot.width) *
-        (startX.max - startX.min);
+      const nextX = panScaledRange(
+        startX,
+        (down.offsetX - event.offsetX) / layout.plot.width,
+        layout.xScale,
+      );
       const dv =
         ((event.offsetY - down.offsetY) / layout.plot.height) *
         (startY.max - startY.min);
-      this.applyXRange(startX.min + dt, startX.max + dt);
+      this.applyXRange(nextX.min, nextX.max);
       this.callbacks.onYRange(this.id, [startY.min + dv, startY.max + dv]);
     };
     const finish = (): void => {

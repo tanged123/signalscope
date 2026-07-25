@@ -43,6 +43,19 @@ edge bins for continuous clipped strokes, and level-zero cursor values
 interpolate between rendered samples.
 The categorical series order now uses MATLAB's canonical seven defaults, with
 the eighth slot rolling over to dashed blue; amber remains reserved by token
-and semantic role rather than by banning MATLAB yellow. Remaining Phase 2
-scope (2B): XY drop strip and mode, colour channel and
-colorbar, FFT and histogram modes, and touch gestures.
+and semantic role rather than by banning MATLAB yellow.
+
+Phase 2B closed the phase: XY panels with the amber drop strip, dashed `x:`
+and `c:` axis chips, window-dimmed trajectories, a trajectory cursor ring and
+datatips; a `batlow` sequential colormap with a labelled colorbar
+([ADR 0016](adr/0016-sequential-colormap.md)); FFT panels over the visible
+window ([ADR 0017](adr/0017-spectrum-semantics.md)); histogram panels
+([ADR 0018](adr/0018-histogram-semantics.md)); and the full touch gesture
+set. All three modes are presentation-plane computations over a bounded
+window slice served by one new protocol request
+([ADR 0015](adr/0015-window-sample-requests.md)).
+
+Two design gaps were closed by decision rather than extraction and should be
+reviewed against any future design pass: histogram mode has no specification
+at all, and the FFT panel has only a pixel reference. The prototype's `1:1`
+equal-axis control was dropped for want of a home in the final chrome.

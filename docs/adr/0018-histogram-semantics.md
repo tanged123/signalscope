@@ -28,9 +28,11 @@ This is therefore a design decision, not an extraction.
   a panel is never a solid block or a comb.
 - **Edges are shared** across every visible series, computed from the union
   of their finite values, so overlaid distributions are directly comparable.
-- **Counts, not densities.** A count is what a reader can check against the
-  status bar's point total; a density needs a units caption the chrome has
-  no room for.
+- **Sample counts, not densities.** Counts describe the finite values in the
+  bounded `SampleResponse` slice from ADR 0015. They equal source cardinality
+  only while that window is below the response cap; larger windows remain a
+  bounded sampled distribution and are not presented as an exact raw-point
+  total. A density would need a units caption the chrome has no room for.
 - **Step outlines in series colour**, not filled bars. Filled bars occlude
   each other, and this app's identity channel is already colour-plus-text.
   Outlines let two distributions overlap and stay readable.

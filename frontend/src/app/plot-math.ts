@@ -117,6 +117,37 @@ export function panRange(range: Range, delta: number): Range {
   return { min: range.min + delta, max: range.max + delta };
 }
 
+/** Zooms an axis in its authored coordinate system (linear or log10). */
+export function zoomScaledRange(
+  range: Range,
+  factor: number,
+  pivot: number,
+  scale: AxisScale = "linear",
+): Range {
+  if (scale !== "log") return zoomRange(range, factor, pivot);
+  const next = zoomRange(
+    { min: logSpace(range.min), max: logSpace(range.max) },
+    factor,
+    logSpace(pivot),
+  );
+  return { min: 10 ** next.min, max: 10 ** next.max };
+}
+
+/** Pans by a fraction of the displayed span, preserving log positivity. */
+export function panScaledRange(
+  range: Range,
+  fraction: number,
+  scale: AxisScale = "linear",
+): Range {
+  if (scale !== "log") {
+    return panRange(range, fraction * (range.max - range.min));
+  }
+  const logarithmic = { min: logSpace(range.min), max: logSpace(range.max) };
+  const delta = fraction * (logarithmic.max - logarithmic.min);
+  const next = panRange(logarithmic, delta);
+  return { min: 10 ** next.min, max: 10 ** next.max };
+}
+
 /**
  * The axis range that keeps two data anchors under two fingers.
  *
@@ -144,6 +175,28 @@ export function pinchRange(
     return null;
   }
   return { min, max };
+}
+
+/** Pinch range in linear or log10 coordinates. */
+export function pinchScaledRange(
+  anchorA: number,
+  anchorB: number,
+  pixelA: number,
+  pixelB: number,
+  edgeLow: number,
+  edgeHigh: number,
+  scale: AxisScale = "linear",
+): Range | null {
+  const next = pinchRange(
+    scale === "log" ? logSpace(anchorA) : anchorA,
+    scale === "log" ? logSpace(anchorB) : anchorB,
+    pixelA,
+    pixelB,
+    edgeLow,
+    edgeHigh,
+  );
+  if (next === null || scale !== "log") return next;
+  return { min: 10 ** next.min, max: 10 ** next.max };
 }
 
 export type ZoomDragMode = "x" | "y" | "xy";

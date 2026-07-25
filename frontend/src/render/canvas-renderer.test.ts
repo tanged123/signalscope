@@ -322,6 +322,48 @@ describe("render", () => {
     );
   });
 
+  it("keeps the colorbar visible with inline axes", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1],
+          colorValues: [0.5, 0.5],
+          colorIndex: 0,
+          dash: "solid",
+          width: 1.4,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 1],
+        yRange: [0, 1],
+        axisStyle: "inline",
+        colorbar: { min: 4, max: 6, label: "constant" },
+      },
+    );
+    expect(renderer.lastLayout()?.plot).toEqual({
+      x: 0,
+      y: 0,
+      width: 600 - 64,
+      height: 300,
+    });
+    expect(calls.some((call) => call.op === "strokeRect")).toBe(true);
+    const xLabel = calls.find(
+      (call) => call.op === "fillText" && call.args[0] === "x",
+    );
+    const colorbarLabel = calls.find(
+      (call) => call.op === "fillText" && call.args[0] === "constant",
+    );
+    expect(xLabel?.args.slice(1)).not.toEqual(colorbarLabel?.args.slice(1));
+    expect(Number(xLabel?.args[1])).toBeLessThan(
+      Number(colorbarLabel?.args[1]),
+    );
+  });
+
   it("renders vertex paths against an explicit x range", () => {
     const { context, calls } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));

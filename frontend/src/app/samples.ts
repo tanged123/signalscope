@@ -1,4 +1,8 @@
-import type { EnvelopeBin } from "../generated/protocol";
+import type {
+  EnvelopeBin,
+  SampleResponse,
+  SampleSeries,
+} from "../generated/protocol";
 
 export interface SampleSlice {
   time: number[];
@@ -83,4 +87,59 @@ export function binsToSamples(bins: readonly EnvelopeBin[]): {
     values.push(bin.first ?? Number.NaN);
   }
   return { time, values };
+}
+
+/**
+ * Combines a coarse full-extent response with a detailed visible-window
+ * response. Detail replaces the overlapping context interval so timestamps
+ * are not double-rendered, while context remains on either side for the
+ * dimmed XY trajectory.
+ */
+export function mergeSampleResponses(
+  context: SampleResponse,
+  detail: SampleResponse,
+): SampleResponse {
+  const coarseByPath = new Map(
+    context.series.map((series) => [series.signal_path, series]),
+  );
+  const detailByPath = new Map(
+    detail.series.map((series) => [series.signal_path, series]),
+  );
+  const paths = new Set([...coarseByPath.keys(), ...detailByPath.keys()]);
+  const series: SampleSeries[] = [];
+  for (const path of paths) {
+    const coarse = coarseByPath.get(path);
+    const fine = detailByPath.get(path);
+    if (fine === undefined || fine.time.length === 0) {
+      if (coarse !== undefined) series.push(coarse);
+      continue;
+    }
+    if (coarse === undefined) {
+      series.push(fine);
+      continue;
+    }
+    const low = fine.time[0] ?? Number.NEGATIVE_INFINITY;
+    const high = fine.time[fine.time.length - 1] ?? Number.POSITIVE_INFINITY;
+    const time: number[] = [];
+    const values: number[] = [];
+    coarse.time.forEach((sampleTime, index) => {
+      if (sampleTime >= low) return;
+      time.push(sampleTime);
+      values.push(coarse.values[index] ?? Number.NaN);
+    });
+    time.push(...fine.time);
+    values.push(...fine.values);
+    coarse.time.forEach((sampleTime, index) => {
+      if (sampleTime <= high) return;
+      time.push(sampleTime);
+      values.push(coarse.values[index] ?? Number.NaN);
+    });
+    series.push({
+      ...fine,
+      time,
+      values,
+      stride: Math.min(coarse.stride, fine.stride),
+    });
+  }
+  return { request_id: detail.request_id, series };
 }
