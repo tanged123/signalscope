@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Accepted Phase 0 decisions:
+Accepted decisions:
 
 1. [Product shape and two-host frontend](0001-product-shape-and-two-host-frontend.md)
 2. [Layer boundaries](0002-layer-boundaries.md)
@@ -13,5 +13,6 @@ Accepted Phase 0 decisions:
 9. [Ingest jobs, progress reporting, and MCAP scope](0009-ingest-jobs-and-progress.md)
 10. [Workspace tabs and chrome hierarchy](0010-workspace-tabs-and-chrome-hierarchy.md)
 11. [Series palette, reserved amber hue band, and colormap sources](0011-series-palette-and-reserved-amber.md)
+12. [Panel command routing and bounded legends](0012-panel-command-routing-and-bounded-legends.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

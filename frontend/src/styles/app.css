@@ -367,10 +367,6 @@ kbd {
   pointer-events: none;
 }
 
-.panel.focused::after {
-  border-color: var(--focus-ring);
-}
-
 .panel.drop-target::after {
   border-color: var(--amber-7);
 }
@@ -393,13 +389,17 @@ kbd {
 }
 
 .panel-title {
+  min-width: 0;
+  overflow: hidden;
   color: var(--fg-1);
   font: 500 11px var(--font-ui);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .mode-pills {
   display: flex;
+  flex: none;
   overflow: hidden;
   border: 1px solid var(--border-strong);
   border-radius: 2px;
@@ -418,6 +418,7 @@ kbd {
 
 .panel-legend {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   gap: 2px;
@@ -474,8 +475,51 @@ kbd {
   color: var(--fg-4);
 }
 
+.legend-overflow {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+  font: 10px var(--font-mono);
+}
+
+.legend-overflow:hover,
+.legend-overflow[aria-expanded="true"] {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.legend-overflow-menu {
+  position: absolute;
+  z-index: 4;
+  top: 27px;
+  right: 7px;
+  display: flex;
+  width: min(360px, calc(100% - 14px));
+  max-height: min(280px, calc(100% - 40px));
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  overflow-y: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.legend-overflow-menu[hidden] {
+  display: none;
+}
+
+.legend-overflow-menu .legend-chip {
+  width: 100%;
+  flex: none;
+  text-align: left;
+}
+
 .panel-actions {
   display: flex;
+  flex: none;
   margin-left: auto;
 }
 

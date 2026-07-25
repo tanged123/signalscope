@@ -52,8 +52,7 @@ export class AppShell {
       this.workspace,
       {
         onFocus: (id) => {
-          this.workspace.togglePanelFocus(id);
-          this.workspaceView?.refreshPanelStates();
+          this.workspace.focusPanel(id);
         },
         onClose: (id) => {
           this.workspace.closePanel(id);
@@ -164,7 +163,7 @@ export class AppShell {
     });
     this.commands.register({
       id: "split-panel-down",
-      title: "Split focused panel down",
+      title: "Split current panel down",
       keys: "n",
       run: () => {
         const id = this.workspace.focusedPanelId();
@@ -178,7 +177,7 @@ export class AppShell {
     });
     this.commands.register({
       id: "split-panel-right",
-      title: "Split focused panel right",
+      title: "Split current panel right",
       enabled: () => this.workspace.focusedPanelId() !== null,
       run: () => {
         const id = this.workspace.focusedPanelId();
@@ -188,7 +187,7 @@ export class AppShell {
     });
     this.commands.register({
       id: "close-panel",
-      title: "Close focused panel",
+      title: "Close current panel",
       enabled: () => this.workspace.focusedPanelId() !== null,
       run: () => {
         const id = this.workspace.focusedPanelId();
@@ -200,7 +199,7 @@ export class AppShell {
     });
     this.commands.register({
       id: "maximize-panel",
-      title: "Maximize focused panel",
+      title: "Maximize current panel",
       enabled: () => this.workspace.focusedPanelId() !== null,
       run: () => {
         const id = this.workspace.focusedPanelId();

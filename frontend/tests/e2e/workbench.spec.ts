@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import type { PanelView as PanelViewClass } from "../../src/ui/panel";
 
 test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await page.goto("/");
@@ -8,12 +9,7 @@ test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await expect(page.locator(".panel")).toHaveCount(2);
   await expect(page.locator(".workspace-row")).toHaveCount(2);
   await expect(page.locator(".panel-empty").last()).toBeVisible();
-  await expect(page.locator(".panel").last()).toHaveClass(/focused/);
-
-  await page.locator(".panel").last().click();
   await expect(page.locator(".panel.focused")).toHaveCount(0);
-  await page.locator(".panel").last().click();
-  await expect(page.locator(".panel").last()).toHaveClass(/focused/);
 
   const bottomRow = page.locator(".workspace-row").last();
   await bottomRow.locator(".panel-split-right").click();
@@ -124,10 +120,73 @@ test("command palette runs workspace-scoped panel commands", async ({
   await page.goto("/");
   await page.keyboard.press("ControlOrMeta+k");
   await expect(page.locator(".palette-input")).toBeFocused();
-  await page.locator(".palette-input").fill("split focused panel right");
+  await page.locator(".palette-input").fill("split current panel right");
   await page.keyboard.press("Enter");
   await expect(page.locator(".panel")).toHaveCount(2);
   await expect(page.locator(".palette-overlay")).toBeHidden();
+});
+
+test("panel legend keeps controls visible and exposes overflow", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/src/ui/panel.ts";
+    const { PanelView } = (await import(/* @vite-ignore */ modulePath)) as {
+      PanelView: typeof PanelViewClass;
+    };
+    const host = document.createElement("div");
+    host.id = "legend-probe";
+    host.style.width = "720px";
+    host.style.height = "320px";
+    host.style.display = "flex";
+    document.body.replaceChildren(host);
+    const view = new PanelView("legend-probe-panel", {
+      onFocus: () => {},
+      onClose: () => {},
+      onSplitRight: () => {},
+      onSplitDown: () => {},
+      onMaximize: () => {},
+      onSelectMode: () => {},
+      onDropSignal: () => {},
+      onToggleSeries: () => {},
+      onResized: () => {},
+    });
+    host.appendChild(view.element);
+    view.update(
+      {
+        id: "legend-probe-panel",
+        title: "Many series",
+        mode: "time",
+        axis_style: "gutter",
+        x_signal: null,
+        color_signal: null,
+        series: Array.from({ length: 40 }, (_, index) => ({
+          path: `monte_carlo/run_${String(index + 1)}`,
+          color_slot: index + 1,
+          dash: "solid" as const,
+          width: 1.4,
+          visible: true,
+        })),
+        y_range: null,
+        annotations: [],
+        show_stats: false,
+      },
+      false,
+    );
+  });
+
+  const panel = page.locator("#legend-probe .panel");
+  await expect(panel.locator(".panel-legend .legend-chip")).toHaveCount(3);
+  await expect(panel.locator(".legend-overflow")).toHaveText("+37");
+  await expect(panel.locator(".panel-actions")).toBeVisible();
+  await panel.locator(".legend-overflow").click();
+  await expect(panel.locator(".legend-overflow-menu")).toBeVisible();
+  await expect(panel.locator(".legend-overflow-menu .legend-chip")).toHaveCount(
+    37,
+  );
+  await page.keyboard.press("Escape");
+  await expect(panel.locator(".legend-overflow-menu")).toBeHidden();
 });
 
 test("formula editor is transient with pointer and keyboard paths", async ({
@@ -254,15 +313,8 @@ test("tree filters, favorites, and drag-to-plot", async ({
   await target.dispatchEvent("drop", { dataTransfer });
   await leaf.dispatchEvent("dragend", { dataTransfer });
   await expect(target.locator(".legend-chip")).toHaveCount(2);
-  await expect(target).toHaveClass(/focused/);
+  await expect(target).not.toHaveClass(/focused/);
   await expect(target).not.toHaveClass(/drop-target/);
-  const focusColors = await target.evaluate((element) => ({
-    actual: getComputedStyle(element, "::after").borderTopColor,
-    expected: getComputedStyle(document.documentElement)
-      .getPropertyValue("--focus-ring")
-      .trim(),
-  }));
-  expect(focusColors.actual).toBe(focusColors.expected);
 });
 
 test("seam drag resizes panel rows", async ({ page, isMobile }) => {

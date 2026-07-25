@@ -205,12 +205,6 @@ export class WorkspaceModel {
     if (this.panel(id) !== undefined) this.activeTab().focused_panel_id = id;
   }
 
-  togglePanelFocus(id: string): void {
-    if (this.panel(id) === undefined) return;
-    const tab = this.activeTab();
-    tab.focused_panel_id = tab.focused_panel_id === id ? null : id;
-  }
-
   toggleMaximize(id: string): void {
     if (this.maximized === id) {
       this.maximized = null;

@@ -81,12 +81,9 @@ export class WorkspaceView {
   }
 
   refreshPanelStates(): void {
-    const focused = this.model.focusedPanelId();
     const maximized = this.model.maximizedPanelId();
     for (const panel of this.model.panels()) {
-      this.views
-        .get(panel.id)
-        ?.update(panel, panel.id === focused, panel.id === maximized);
+      this.views.get(panel.id)?.update(panel, panel.id === maximized);
     }
   }
 

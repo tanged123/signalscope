@@ -25,6 +25,8 @@ const MODE_NAMES: Record<PanelMode, string> = {
   histogram: "Histogram",
 };
 
+export const HEADER_LEGEND_LIMIT = 3;
+
 export interface PanelCallbacks {
   onFocus(id: string): void;
   onClose(id: string): void;
@@ -64,8 +66,16 @@ export class PanelView {
   }
 
   private bind(): void {
-    this.element.addEventListener("pointerdown", () => {
+    this.element.addEventListener("pointerdown", (event) => {
       this.callbacks.onFocus(this.id);
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !required(this.element, ".legend-overflow-menu").contains(target) &&
+        !required(this.element, ".legend-overflow").contains(target)
+      ) {
+        this.closeLegendOverflow();
+      }
     });
     required(this.element, ".panel-close").addEventListener("click", () => {
       this.callbacks.onClose(this.id);
@@ -84,6 +94,16 @@ export class PanelView {
     );
     required(this.element, ".panel-maximize").addEventListener("click", () => {
       this.callbacks.onMaximize(this.id);
+    });
+    required<HTMLButtonElement>(
+      this.element,
+      ".legend-overflow",
+    ).addEventListener("click", () => {
+      const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
+      this.setLegendOverflowOpen(menu.hidden);
+    });
+    this.element.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") this.closeLegendOverflow();
     });
     for (const button of this.element.querySelectorAll<HTMLButtonElement>(
       ".mode-pill",
@@ -117,8 +137,7 @@ export class PanelView {
     });
   }
 
-  update(state: PanelState, focused: boolean, maximized: boolean): void {
-    this.element.classList.toggle("focused", focused);
+  update(state: PanelState, maximized: boolean): void {
     this.element.classList.toggle("maximized", maximized);
     this.element.setAttribute("aria-label", `${state.title} panel`);
     required(this.element, ".panel-title").textContent = state.title;
@@ -187,25 +206,71 @@ export class PanelView {
 
   private updateLegend(state: PanelState): void {
     const legend = required(this.element, ".panel-legend");
-    legend.replaceChildren(
-      ...state.series.map((series) => {
-        const chip = document.createElement("button");
-        chip.className = `legend-chip ${series.visible ? "" : "muted"}`;
-        chip.title = `${series.path} — click to toggle visibility`;
-        const line = document.createElement("span");
-        const style = resolveSeriesStyle(series.color_slot, series.dash);
-        line.className = `legend-line dash-${style.dash}`;
-        line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
-        const name = document.createElement("span");
-        name.className = "legend-name";
-        name.textContent = series.path.split("/").slice(-2).join("/");
-        chip.append(line, name);
-        chip.addEventListener("click", () => {
-          this.callbacks.onToggleSeries(this.id, series.path);
-        });
-        return chip;
-      }),
+    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
+    const overflow = required<HTMLButtonElement>(
+      this.element,
+      ".legend-overflow",
     );
+    const menuWasOpen = !menu.hidden;
+    const headerSeries = state.series.slice(0, HEADER_LEGEND_LIMIT);
+    const overflowSeries = state.series.slice(HEADER_LEGEND_LIMIT);
+    legend.replaceChildren(
+      ...headerSeries.map((series) => this.legendChip(series)),
+    );
+    menu.replaceChildren(
+      ...overflowSeries.map((series) => this.legendChip(series)),
+    );
+
+    overflow.hidden = overflowSeries.length === 0;
+    overflow.textContent = `+${String(overflowSeries.length)}`;
+    overflow.setAttribute(
+      "aria-label",
+      `${String(overflowSeries.length)} additional series`,
+    );
+    menu.hidden = overflowSeries.length === 0 || !menuWasOpen;
+    this.syncLegendOverflowButton();
+  }
+
+  private legendChip(series: PanelState["series"][number]): HTMLButtonElement {
+    const chip = document.createElement("button");
+    chip.className = `legend-chip ${series.visible ? "" : "muted"}`;
+    chip.title = `${series.path} — click to toggle visibility`;
+    const line = document.createElement("span");
+    const style = resolveSeriesStyle(series.color_slot, series.dash);
+    line.className = `legend-line dash-${style.dash}`;
+    line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
+    const name = document.createElement("span");
+    name.className = "legend-name";
+    name.textContent = series.path.split("/").slice(-2).join("/");
+    chip.append(line, name);
+    chip.addEventListener("click", () => {
+      this.callbacks.onToggleSeries(this.id, series.path);
+    });
+    return chip;
+  }
+
+  private setLegendOverflowOpen(open: boolean): void {
+    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
+    if (required<HTMLButtonElement>(this.element, ".legend-overflow").hidden) {
+      return;
+    }
+    menu.hidden = !open;
+    this.syncLegendOverflowButton();
+  }
+
+  private closeLegendOverflow(): void {
+    this.setLegendOverflowOpen(false);
+  }
+
+  private syncLegendOverflowButton(): void {
+    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
+    const overflow = required<HTMLButtonElement>(
+      this.element,
+      ".legend-overflow",
+    );
+    const open = !menu.hidden;
+    overflow.setAttribute("aria-expanded", String(open));
+    overflow.title = open ? "Hide additional series" : "Show additional series";
   }
 }
 
@@ -228,6 +293,7 @@ function panelMarkup(): string {
           `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
       ).join("")}</span>
       <span class="panel-legend"></span>
+      <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
       <span class="panel-actions">
         <span class="panel-split-actions" aria-label="Split panel" role="group">
           <span class="panel-split-label" aria-hidden="true">split</span>
@@ -238,6 +304,7 @@ function panelMarkup(): string {
         <button class="panel-action panel-close" title="Close panel">✕</button>
       </span>
     </header>
+    <div class="legend-overflow-menu" role="group" aria-label="Additional plotted series" hidden></div>
     <div class="plot-wrap">
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
       <div class="panel-empty" hidden></div>

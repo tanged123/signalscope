@@ -79,15 +79,16 @@ describe("WorkspaceModel", () => {
     expect(model.focusedPanelId()).toBe(second.id);
   });
 
-  it("toggles pointer focus off when the focused panel is selected again", () => {
+  it("keeps panel routing idempotent when the current panel is reused", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
     const second = model.addPanelRow();
 
-    model.togglePanelFocus(second.id);
-    expect(model.focusedPanelId()).toBeNull();
-
-    model.togglePanelFocus(first.id);
+    model.focusPanel(second.id);
+    expect(model.focusedPanelId()).toBe(second.id);
+    model.focusPanel(second.id);
+    expect(model.focusedPanelId()).toBe(second.id);
+    model.focusPanel(first.id);
     expect(model.focusedPanelId()).toBe(first.id);
   });
 
