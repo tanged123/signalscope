@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -106,6 +106,33 @@ pub struct SignalTile {
 pub struct TileResponse {
     pub request_id: String,
     pub series: Vec<SignalTile>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SampleRequest {
+    pub request_id: String,
+    #[serde(with = "u64_vec_string")]
+    pub signal_ids: Vec<u64>,
+    pub window: TimeWindow,
+    pub max_points: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SampleSeries {
+    #[serde(with = "u64_string")]
+    pub signal_id: u64,
+    pub signal_path: String,
+    #[serde(default)]
+    pub unit: Option<String>,
+    pub time: Vec<f64>,
+    pub values: Vec<f64>,
+    pub stride: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SampleResponse {
+    pub request_id: String,
+    pub series: Vec<SampleSeries>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

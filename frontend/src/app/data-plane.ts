@@ -3,6 +3,8 @@ import {
   type IngestJob,
   type IngestRequest,
   type IngestStatus,
+  type SampleRequest,
+  type SampleResponse,
   type SignalSummary,
   type SourceSummary,
   type TileRequest,
@@ -10,6 +12,7 @@ import {
 } from "../generated/protocol";
 import { open, seal, type Envelope } from "./envelope";
 import { queryPyramid } from "./pyramid-query";
+import { binsToSamples, sampleWindow } from "./samples";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
@@ -23,6 +26,7 @@ export interface DataPlane {
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
+  querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
 interface BakedSignal {
@@ -80,6 +84,27 @@ export class TauriPlane implements DataPlane {
         request: seal(request),
       }),
     );
+  }
+
+  async querySamples(request: SampleRequest): Promise<SampleResponse> {
+    const response = open(
+      await this.invoke<Envelope<SampleResponse>>("query_samples", {
+        request: seal(request),
+      }),
+    );
+    return {
+      ...response,
+      series: response.series.map((series) => ({
+        ...series,
+        // JSON represents Rust's non-finite gap samples as null. Restore the
+        // data-plane contract before presentation-plane interpolation sees it.
+        values: series.values.map((value) =>
+          typeof value === "number" && Number.isFinite(value)
+            ? value
+            : Number.NaN,
+        ),
+      })),
+    };
   }
 }
 
@@ -140,6 +165,34 @@ export class BakedPlane implements DataPlane {
             unit: signal.summary.unit,
             level: query.level,
             bins: query.bins,
+          };
+        }),
+    });
+  }
+
+  querySamples(request: SampleRequest): Promise<SampleResponse> {
+    const requested = new Set(request.signal_ids);
+    return Promise.resolve({
+      request_id: request.request_id,
+      series: this.payload.signals
+        .filter((signal) => requested.has(signal.summary.signal_id))
+        .map((signal) => {
+          // ADR 0015: the finest baked level stands in for raw samples.
+          const raw = binsToSamples(signal.levels[0] ?? []);
+          const slice = sampleWindow(
+            raw.time,
+            raw.values,
+            request.window.t0,
+            request.window.t1,
+            request.max_points,
+          );
+          return {
+            signal_id: signal.summary.signal_id,
+            signal_path: signal.summary.path,
+            unit: signal.summary.unit,
+            time: slice.time,
+            values: slice.values,
+            stride: slice.stride,
           };
         }),
     });

@@ -6,14 +6,15 @@ use std::{
 };
 
 use scope_core::{
-    cache,
+    cache, compute,
     ingest::SUPPORTED_FORMATS,
     pyramid::Pyramid,
     store::{Signal, SignalId, SignalStore, Source},
 };
 use scope_protocol::{
     Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState, IngestStatus,
-    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    SampleRequest, SampleResponse, SampleSeries, SignalSummary, SignalTile, SourceSummary,
+    TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -262,6 +263,43 @@ fn query_tiles(
     }))
 }
 
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn query_samples(
+    request: Envelope<SampleRequest>,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<SampleResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let data = state.lock().map_err(|error| error.to_string())?;
+    let mut series = Vec::new();
+    for raw_id in request.signal_ids {
+        let signal = data
+            .store
+            .signal(SignalId(raw_id))
+            .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
+        let slice = compute::sample_window(
+            signal.time(),
+            signal.values(),
+            request.window.t0,
+            request.window.t1,
+            request.max_points,
+        );
+        series.push(SampleSeries {
+            signal_id: raw_id,
+            signal_path: signal.path.clone(),
+            unit: signal.unit.clone(),
+            time: slice.time,
+            values: slice.values,
+            stride: slice.stride,
+        });
+    }
+
+    Ok(Envelope::new(SampleResponse {
+        request_id: request.request_id,
+        series,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the native `SignalScope` application.
 ///
@@ -279,7 +317,8 @@ pub fn run() {
             ingest_status,
             list_sources,
             list_signals,
-            query_tiles
+            query_tiles,
+            query_samples
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");
