@@ -13,6 +13,23 @@ interface Range {
   max: number;
 }
 
+interface Projection {
+  toX: (value: number) => number;
+  toY: (value: number) => number;
+}
+
+/** Data-to-pixel mapping shared by axes, ticks, and series strokes. */
+function projection(plot: PlotRect, xRange: Range, yRange: Range): Projection {
+  return {
+    toX: (value) =>
+      plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width,
+    toY: (value) =>
+      plot.y +
+      plot.height -
+      ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height,
+  };
+}
+
 export interface Palette {
   background: string;
   border: string;
@@ -20,6 +37,7 @@ export interface Palette {
   fg3: string;
   grid: string;
   series: string[];
+  fontMono: string;
 }
 
 export interface RenderOptions {
@@ -44,8 +62,15 @@ export const SERIES_TOKENS = [
 export const COLOR_SLOTS = SERIES_TOKENS.length;
 
 const DASH_CYCLE = ["solid", "dash", "dot"] as const;
-const TICK_FONT = '9px "JetBrains Mono", monospace';
-const LABEL_FONT = '9.5px "JetBrains Mono", monospace';
+const FALLBACK_MONO = '"JetBrains Mono", monospace';
+
+function tickFont(palette: Palette): string {
+  return `9px ${palette.fontMono}`;
+}
+
+function labelFont(palette: Palette): string {
+  return `9.5px ${palette.fontMono}`;
+}
 
 export function resolveSeriesStyle(
   colorSlot: number,
@@ -99,7 +124,7 @@ export class CanvasRenderer {
       min: options.yRange[0],
       max: options.yRange[1],
     };
-    context.font = TICK_FONT;
+    context.font = tickFont(colors);
     const charWidth = context.measureText("0").width;
     const gutter = gutterWidth(
       formatTicks(ticks(yRange.min, yRange.max, 6)),
@@ -111,7 +136,8 @@ export class CanvasRenderer {
       width: Math.max(1, width - gutter - 12),
       height: Math.max(1, height - 42),
     };
-    this.drawAxes(context, plot, xRange, yRange, colors, options);
+    const project = projection(plot, xRange, yRange);
+    this.drawAxes(context, plot, project, xRange, yRange, colors, options);
     response.series.forEach((series, index) => {
       const style = resolveSeriesStyle(
         options.colorSlots[index] ?? index + 1,
@@ -119,10 +145,8 @@ export class CanvasRenderer {
       );
       this.drawSeries(
         context,
-        plot,
+        project,
         series,
-        xRange,
-        yRange,
         colors.series[style.colorIndex] ?? colors.fg2,
         style.dash,
       );
@@ -169,6 +193,7 @@ export class CanvasRenderer {
       series: SERIES_TOKENS.map((token) =>
         styles.getPropertyValue(token).trim(),
       ),
+      fontMono: styles.getPropertyValue("--font-mono").trim() || FALLBACK_MONO,
     };
     return this.palette;
   }
@@ -176,26 +201,21 @@ export class CanvasRenderer {
   private drawAxes(
     context: CanvasRenderingContext2D,
     plot: PlotRect,
+    project: Projection,
     xRange: Range,
     yRange: Range,
     colors: Palette,
     options: RenderOptions,
   ): void {
     context.lineWidth = 1;
-    context.font = TICK_FONT;
+    context.font = tickFont(colors);
     context.textBaseline = "middle";
 
     const xTicks = ticks(xRange.min, xRange.max, 7);
     const yTicks = ticks(yRange.min, yRange.max, 6);
     const xLabels = formatTicks(xTicks);
     const yLabels = formatTicks(yTicks);
-
-    const toX = (value: number): number =>
-      plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width;
-    const toY = (value: number): number =>
-      plot.y +
-      plot.height -
-      ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height;
+    const { toX, toY } = project;
 
     context.strokeStyle = colors.grid;
     context.fillStyle = colors.fg2;
@@ -245,7 +265,7 @@ export class CanvasRenderer {
     context.stroke();
 
     context.fillStyle = colors.fg2;
-    context.font = LABEL_FONT;
+    context.font = labelFont(colors);
     context.textAlign = "center";
     context.fillText(
       options.xLabel,
@@ -261,19 +281,12 @@ export class CanvasRenderer {
 
   private drawSeries(
     context: CanvasRenderingContext2D,
-    plot: PlotRect,
+    project: Projection,
     series: SignalTile,
-    xRange: Range,
-    yRange: Range,
     color: string,
     dash: DashStyle,
   ): void {
-    const toX = (value: number): number =>
-      plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width;
-    const toY = (value: number): number =>
-      plot.y +
-      plot.height -
-      ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height;
+    const { toX, toY } = project;
 
     context.strokeStyle = color;
     context.lineWidth = 1.4;

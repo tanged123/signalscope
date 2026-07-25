@@ -23,15 +23,7 @@ export function emptySession(): Session {
       mode: "fixed",
     },
     active_tab_id: "workspace-1",
-    tabs: [
-      {
-        id: "workspace-1",
-        title: "Workspace 1",
-        focused_panel_id: null,
-        panels: [],
-        layout: [],
-      },
-    ],
+    tabs: [createWorkspaceTab(1)],
     favorites: [],
   };
 }
@@ -86,11 +78,12 @@ export class WorkspaceModel {
   }
 
   addTab(): WorkspaceTab {
-    let tab = createWorkspaceTab(this.nextTabNumber);
-    while (this.session.tabs.some((entry) => entry.id === tab.id)) {
-      this.nextTabNumber += 1;
-      tab = createWorkspaceTab(this.nextTabNumber);
-    }
+    this.nextTabNumber = nextUnusedNumber(this.nextTabNumber, (number) =>
+      this.session.tabs.some(
+        (entry) => entry.id === `workspace-${String(number)}`,
+      ),
+    );
+    const tab = createWorkspaceTab(this.nextTabNumber);
     this.nextTabNumber += 1;
     this.session.tabs.push(tab);
     this.session.active_tab_id = tab.id;
@@ -354,13 +347,11 @@ export class WorkspaceModel {
   }
 
   private createPanel(): PanelState {
-    let id = `panel-${String(this.nextPanelNumber)}`;
-    while (this.panelIdExists(id)) {
-      this.nextPanelNumber += 1;
-      id = `panel-${String(this.nextPanelNumber)}`;
-    }
+    this.nextPanelNumber = nextUnusedNumber(this.nextPanelNumber, (number) =>
+      this.panelIdExists(`panel-${String(number)}`),
+    );
     const panel: PanelState = {
-      id,
+      id: `panel-${String(this.nextPanelNumber)}`,
       title: `Panel ${String(this.nextPanelNumber)}`,
       mode: "time",
       axis_style: "gutter",
@@ -381,6 +372,15 @@ export class WorkspaceModel {
       tab.panels.some((panel) => panel.id === id),
     );
   }
+}
+
+function nextUnusedNumber(
+  start: number,
+  taken: (number: number) => boolean,
+): number {
+  let number = start;
+  while (taken(number)) number += 1;
+  return number;
 }
 
 function createWorkspaceTab(number: number): WorkspaceTab {

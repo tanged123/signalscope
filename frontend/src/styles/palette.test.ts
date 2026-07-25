@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { SERIES_TOKENS } from "../render/canvas-renderer";
 
 const TOKENS = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 
@@ -105,9 +106,7 @@ function token(selector: string, name: string): string {
 }
 
 function series(selector: string): string[] {
-  return Array.from({ length: 8 }, (_, index) =>
-    token(selector, `--series-${String(index + 1)}`),
-  );
+  return SERIES_TOKENS.map((name) => token(selector, name));
 }
 
 const THEMES = [

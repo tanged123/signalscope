@@ -1,14 +1,16 @@
-import { CommandRegistry } from "../app/commands";
+import { CommandRegistry, formatCombo } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
 import { WorkspaceModel } from "../app/workspace";
 import { type SignalSummary, type TileResponse } from "../generated/protocol";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
-import { required } from "./dom";
+import { basename, bindPointerDrag, required } from "./dom";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
+
+const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 
 export class AppShell {
   private readonly time = new LinkedTimeModel();
@@ -21,8 +23,9 @@ export class AppShell {
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
-  private signalTreeWidth = 262;
+  private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
+  private renderScheduled = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -84,7 +87,7 @@ export class AppShell {
           this.renderTiles();
         },
         onResized: () => {
-          this.renderTiles();
+          this.scheduleRender();
         },
         onLayoutChanged: () => {
           void this.refreshTiles();
@@ -123,6 +126,7 @@ export class AppShell {
     this.palette = new CommandPalette(this.root, () => this.paletteEntries());
     this.registerCommands();
     this.bindControls();
+    this.renderWindowReadout();
     await this.reloadSignals();
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
       const panel = this.workspace.addPanelRow();
@@ -175,40 +179,25 @@ export class AppShell {
         this.afterLayoutChange();
       },
     });
-    this.commands.register({
-      id: "split-panel-right",
-      title: "Split current panel right",
-      enabled: () => this.workspace.focusedPanelId() !== null,
-      run: () => {
-        const id = this.workspace.focusedPanelId();
-        if (id !== null) this.workspace.splitPanelRight(id);
-        this.afterLayoutChange();
+    this.registerFocusedPanelCommand(
+      "split-panel-right",
+      "Split current panel right",
+      (id) => void this.workspace.splitPanelRight(id),
+    );
+    this.registerFocusedPanelCommand(
+      "close-panel",
+      "Close current panel",
+      (id) => {
+        this.workspace.closePanel(id);
       },
-    });
-    this.commands.register({
-      id: "close-panel",
-      title: "Close current panel",
-      enabled: () => this.workspace.focusedPanelId() !== null,
-      run: () => {
-        const id = this.workspace.focusedPanelId();
-        if (id !== null) {
-          this.workspace.closePanel(id);
-          this.afterLayoutChange();
-        }
+    );
+    this.registerFocusedPanelCommand(
+      "maximize-panel",
+      "Maximize current panel",
+      (id) => {
+        this.workspace.toggleMaximize(id);
       },
-    });
-    this.commands.register({
-      id: "maximize-panel",
-      title: "Maximize current panel",
-      enabled: () => this.workspace.focusedPanelId() !== null,
-      run: () => {
-        const id = this.workspace.focusedPanelId();
-        if (id !== null) {
-          this.workspace.toggleMaximize(id);
-          this.afterLayoutChange();
-        }
-      },
-    });
+    );
     this.commands.register({
       id: "restore-panel-grid",
       title: "Restore panel grid",
@@ -276,10 +265,30 @@ export class AppShell {
     });
   }
 
+  /** Registers a command that acts on the focused panel and refreshes. */
+  private registerFocusedPanelCommand(
+    id: string,
+    title: string,
+    act: (panelId: string) => void,
+  ): void {
+    this.commands.register({
+      id,
+      title,
+      enabled: () => this.workspace.focusedPanelId() !== null,
+      run: () => {
+        const panelId = this.workspace.focusedPanelId();
+        if (panelId !== null) {
+          act(panelId);
+          this.afterLayoutChange();
+        }
+      },
+    });
+  }
+
   private paletteEntries(): PaletteEntry[] {
     const commands = this.commands.list().map((command) => ({
       title: command.title,
-      hint: command.keys === undefined ? "" : keyHint(command.keys),
+      hint: command.keys === undefined ? "" : formatCombo(command.keys),
       run: () => {
         this.commands.run(command.id);
       },
@@ -324,10 +333,10 @@ export class AppShell {
     });
     this.bindSignalTreeResize();
     required(this.root, ".theme-toggle").addEventListener("click", () => {
-      this.toggleTheme();
+      this.commands.run("toggle-theme");
     });
     required(this.root, ".linked-toggle").addEventListener("click", () => {
-      this.toggleLinked();
+      this.commands.run("toggle-linked");
     });
     required(this.root, ".formula-toggle").addEventListener("click", () => {
       this.commands.run("toggle-formula");
@@ -383,7 +392,7 @@ export class AppShell {
     try {
       const paths = await port.pickSources();
       for (const path of paths) {
-        const name = path.split(/[\\/]/).at(-1) ?? path;
+        const name = basename(path);
         progress.hidden = false;
         await runIngest(port, path, (status) => {
           const percent =
@@ -416,10 +425,15 @@ export class AppShell {
     }
     if (Number.isFinite(t0) && Number.isFinite(t1)) {
       this.time.setWindow(t0, t1 > t0 ? t1 : t0 + 1);
-      const state = this.time.snapshot();
-      required(this.root, ".window-readout").textContent =
-        `t: ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
+      this.renderWindowReadout();
     }
+  }
+
+  /** Renders the toolbar window readout from the linked-time model. */
+  private renderWindowReadout(): void {
+    const state = this.time.snapshot();
+    required(this.root, ".window-readout").textContent =
+      `t: ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
   }
 
   private afterLayoutChange(): void {
@@ -456,6 +470,7 @@ export class AppShell {
           .map((series) => this.signalsByPath.get(series.path)?.signal_id)
           .filter((id): id is string => id !== undefined);
         if (ids.length === 0) return;
+        const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
         try {
           next.set(
             panel.id,
@@ -463,7 +478,7 @@ export class AppShell {
               request_id: crypto.randomUUID(),
               signal_ids: ids,
               window: { t0: state.t0, t1: state.t1 },
-              pixel_width: width,
+              pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
             }),
           );
         } catch (error: unknown) {
@@ -474,6 +489,16 @@ export class AppShell {
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = next;
     this.renderTiles();
+  }
+
+  /** Coalesces bursts of per-panel resize renders into one frame. */
+  private scheduleRender(): void {
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+    requestAnimationFrame(() => {
+      this.renderScheduled = false;
+      this.renderTiles();
+    });
   }
 
   private renderTiles(): void {
@@ -509,7 +534,7 @@ export class AppShell {
         dot.className = "status-dot";
         const name = document.createElement("span");
         name.className = "signal-path";
-        name.textContent = source.path.split(/[\\/]/).at(-1) ?? source.path;
+        name.textContent = basename(source.path);
         name.title = source.path;
         const points = document.createElement("span");
         points.className = "source-points";
@@ -562,43 +587,54 @@ export class AppShell {
   private bindSignalTreeResize(): void {
     const seam = required<HTMLElement>(this.root, ".tree-resize-handle");
     const workbench = required<HTMLElement>(this.root, ".workbench");
+    const tokenWidth = Number.parseFloat(
+      getComputedStyle(workbench).getPropertyValue("--tree-width"),
+    );
+    if (Number.isFinite(tokenWidth) && tokenWidth > 0) {
+      this.signalTreeWidth = tokenWidth;
+    }
+    seam.setAttribute("aria-valuemax", String(TREE_WIDTH.max));
+    seam.setAttribute(
+      "aria-valuenow",
+      String(Math.round(this.signalTreeWidth)),
+    );
     const updateWidth = (width: number): void => {
       workbench.style.setProperty("--tree-width", `${String(width)}px`);
       seam.setAttribute("aria-valuenow", String(Math.round(width)));
     };
     const commitWidth = (width: number): void => {
-      if (width < 120) {
+      if (width < TREE_WIDTH.collapse) {
         this.setSignalTreeOpen(false);
         return;
       }
-      this.signalTreeWidth = Math.max(180, Math.min(480, width));
+      this.signalTreeWidth = Math.max(
+        TREE_WIDTH.min,
+        Math.min(TREE_WIDTH.max, width),
+      );
       this.setSignalTreeOpen(true);
     };
 
-    seam.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      seam.setPointerCapture(event.pointerId);
+    bindPointerDrag(seam, (down) => {
       const collapsed = workbench.classList.contains("tree-collapsed");
       const startWidth = collapsed ? 0 : this.signalTreeWidth;
       let width = startWidth;
       updateWidth(startWidth);
       workbench.classList.remove("tree-collapsed");
-      const move = (moveEvent: PointerEvent): void => {
-        width = Math.max(
-          0,
-          Math.min(480, startWidth + moveEvent.clientX - event.clientX),
-        );
-        updateWidth(width);
+      return {
+        onMove: (moveEvent) => {
+          width = Math.max(
+            0,
+            Math.min(
+              TREE_WIDTH.max,
+              startWidth + moveEvent.clientX - down.clientX,
+            ),
+          );
+          updateWidth(width);
+        },
+        onEnd: () => {
+          commitWidth(width);
+        },
       };
-      const finish = (): void => {
-        seam.removeEventListener("pointermove", move);
-        seam.removeEventListener("pointerup", finish);
-        seam.removeEventListener("pointercancel", finish);
-        commitWidth(width);
-      };
-      seam.addEventListener("pointermove", move);
-      seam.addEventListener("pointerup", finish);
-      seam.addEventListener("pointercancel", finish);
     });
     seam.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -639,10 +675,6 @@ export class AppShell {
   }
 }
 
-function keyHint(keys: string): string {
-  return keys === "mod+k" ? "⌘K" : keys.toUpperCase();
-}
-
 function shellMarkup(): string {
   return `<main class="workbench formula-collapsed">
     <div class="tool-bar">
@@ -658,7 +690,7 @@ function shellMarkup(): string {
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
       <span class="tool-spacer"></span>
       <span class="window-label">window</span>
-      <span class="window-readout">t: 0.000 → 60.000 s</span>
+      <span class="window-readout"></span>
       <button class="tool-button follow-slot" disabled>⏸ FOLLOW</button>
       <span class="command-hint">commands <kbd>⌘K</kbd></span>
     </div>
@@ -679,7 +711,7 @@ function shellMarkup(): string {
       </div>
     </aside>
 
-    <div class="tree-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="480" aria-valuenow="262" tabindex="0"></div>
+    <div class="tree-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
 
     <section class="workspace" aria-label="Panel workspace"></section>
 

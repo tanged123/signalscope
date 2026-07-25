@@ -41,12 +41,18 @@ export function hasDragType(event: DragEvent, type: string): boolean {
   return event.dataTransfer?.types.includes(type) ?? false;
 }
 
+/** The non-empty payload carried for `type` on a drop event, or null. */
+export function dragData(event: DragEvent, type: string): string | null {
+  const value = event.dataTransfer?.getData(type);
+  return value !== undefined && value !== "" ? value : null;
+}
+
 export class PanelView {
   readonly element: HTMLElement;
   private readonly renderer: CanvasRenderer;
   private readonly canvas: HTMLCanvasElement;
   private readonly yAxis = new YAxisPolicy();
-  private legendSeries: PanelState["series"] = [];
+  private legendChips: HTMLButtonElement[] = [];
 
   constructor(
     private readonly id: string,
@@ -130,8 +136,8 @@ export class PanelView {
     });
     this.element.addEventListener("drop", (event) => {
       this.element.classList.remove("drop-target");
-      const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
-      if (path !== undefined && path !== "") {
+      const path = dragData(event, SIGNAL_DRAG_TYPE);
+      if (path !== null) {
         event.preventDefault();
         event.stopPropagation();
         this.callbacks.onDropSignal(this.id, path);
@@ -181,7 +187,7 @@ export class PanelView {
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
     const yRange = this.yAxis.resolve(
       seriesKey,
-      tiles.series.flatMap((tile) => tile.bins),
+      () => tiles.series.flatMap((tile) => tile.bins),
       state.y_range,
     );
     const options: RenderOptions = {
@@ -206,8 +212,13 @@ export class PanelView {
     this.renderer.invalidateTheme();
   }
 
+  /** The canvas's rendered CSS width, for density-bounded tile queries. */
+  plotWidth(): number {
+    return this.canvas.clientWidth;
+  }
+
   private updateLegend(state: PanelState): void {
-    this.legendSeries = state.series;
+    this.legendChips = state.series.map((series) => this.legendChip(series));
     this.layoutLegend();
   }
 
@@ -219,7 +230,7 @@ export class PanelView {
       ".legend-overflow",
     );
     const menuWasOpen = !menu.hidden;
-    const chips = this.legendSeries.map((series) => this.legendChip(series));
+    const chips = this.legendChips;
     legend.replaceChildren(...chips);
     overflow.hidden = true;
 
@@ -238,19 +249,17 @@ export class PanelView {
       }
     }
 
-    const overflowSeries = this.legendSeries.slice(visibleCount);
+    const overflowCount = chips.length - visibleCount;
     legend.replaceChildren(...chips.slice(0, visibleCount));
-    menu.replaceChildren(
-      ...overflowSeries.map((series) => this.legendChip(series)),
-    );
+    menu.replaceChildren(...chips.slice(visibleCount));
 
-    overflow.hidden = overflowSeries.length === 0;
-    overflow.textContent = `+${String(overflowSeries.length)}`;
+    overflow.hidden = overflowCount === 0;
+    overflow.textContent = `+${String(overflowCount)}`;
     overflow.setAttribute(
       "aria-label",
-      `${String(overflowSeries.length)} additional series`,
+      `${String(overflowCount)} additional series`,
     );
-    menu.hidden = overflowSeries.length === 0 || !menuWasOpen;
+    menu.hidden = overflowCount === 0 || !menuWasOpen;
     this.syncLegendOverflowButton();
   }
 

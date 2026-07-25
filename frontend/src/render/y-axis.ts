@@ -43,7 +43,7 @@ export class YAxisPolicy {
 
   resolve(
     seriesKey: string,
-    bins: readonly Extent[],
+    bins: () => readonly Extent[],
     serialized: readonly [number, number] | null,
   ): [number, number] {
     if (isUsableYRange(serialized)) return [serialized[0], serialized[1]];
@@ -51,7 +51,7 @@ export class YAxisPolicy {
       this.key = seriesKey;
       this.sticky = null;
     }
-    this.sticky ??= autoYRange(bins);
+    this.sticky ??= autoYRange(bins());
     return this.sticky ?? [-1, 1];
   }
 

@@ -645,6 +645,13 @@ kbd {
   min-height: 0;
 }
 
+.maximized-row,
+.maximized-row > .panel {
+  flex: 1 1 100%;
+  width: 100%;
+  height: 100%;
+}
+
 .maximized-panel-bar {
   display: flex;
   min-width: 0;
@@ -764,7 +771,7 @@ kbd {
 .tree-row {
   display: flex;
   width: 100%;
-  height: 22px;
+  height: var(--tree-row-height);
   align-items: center;
   gap: 5px;
   border-radius: 2px;

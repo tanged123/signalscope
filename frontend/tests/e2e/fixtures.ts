@@ -18,8 +18,8 @@ export const test = base.extend<CoverageFixtures>({
       const sourceEntries = entries.filter((entry) => {
         const path = new URL(entry.url).pathname;
         return (
-          (path === "/src/main.ts" ||
-            (path.startsWith("/src/") && path.endsWith(".ts"))) &&
+          path.startsWith("/src/") &&
+          path.endsWith(".ts") &&
           !path.startsWith("/src/generated/")
         );
       });

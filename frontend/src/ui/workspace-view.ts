@@ -1,9 +1,11 @@
 import type { WorkspaceModel } from "../app/workspace";
 import type { TileResponse } from "../generated/protocol";
+import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
   PanelView,
   SIGNAL_DRAG_TYPE,
+  dragData,
   hasDragType,
   type PanelCallbacks,
 } from "./panel";
@@ -22,6 +24,7 @@ export interface WorkspaceCallbacks extends PanelCallbacks {
 
 export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
+  private mountedKey = "";
 
   constructor(
     private readonly root: HTMLElement,
@@ -39,6 +42,15 @@ export class WorkspaceView {
         this.views.delete(id);
       }
     }
+    const key = this.structureKey(hasSignals);
+    if (key === this.mountedKey) {
+      // Same rows/cells/maximization: refresh sizes and state in place
+      // instead of tearing down and re-observing every panel.
+      if (this.model.maximizedPanelId() === null) this.applySizes();
+      this.refreshPanelStates();
+      return;
+    }
+    this.mountedKey = key;
     this.root.replaceChildren();
     if (this.model.panels().length === 0) {
       this.root.appendChild(emptyState(hasSignals));
@@ -48,13 +60,8 @@ export class WorkspaceView {
     if (maximized !== null) {
       const rowElement = document.createElement("div");
       rowElement.className = "workspace-row maximized-row";
-      rowElement.style.flex = "1 1 100%";
-      rowElement.style.width = "100%";
-      rowElement.style.height = "100%";
       const view = this.view(maximized);
-      view.element.style.flex = "1 1 100%";
-      view.element.style.width = "100%";
-      view.element.style.height = "100%";
+      view.element.style.removeProperty("flex");
       rowElement.appendChild(view.element);
       this.root.append(this.maximizedPanelBar(maximized), rowElement);
       this.refreshPanelStates();
@@ -71,13 +78,22 @@ export class WorkspaceView {
         }
         const view = this.view(cell.panel_id);
         view.element.style.flex = `${String(cell.width)} 1 0`;
-        view.element.style.removeProperty("width");
-        view.element.style.removeProperty("height");
         rowElement.appendChild(view.element);
       });
       this.root.appendChild(rowElement);
     });
     this.refreshPanelStates();
+  }
+
+  /** Identity of the mounted DOM: rows, cell order, maximization, empty. */
+  private structureKey(hasSignals: boolean): string {
+    if (this.model.panels().length === 0) return `empty:${String(hasSignals)}`;
+    const maximized = this.model.maximizedPanelId();
+    if (maximized !== null) return `max:${maximized}`;
+    return this.model
+      .layout()
+      .map((row) => row.panels.map((cell) => cell.panel_id).join(","))
+      .join(";");
   }
 
   refreshPanelStates(): void {
@@ -105,6 +121,11 @@ export class WorkspaceView {
 
   invalidateTheme(): void {
     for (const view of this.views.values()) view.invalidateTheme();
+  }
+
+  /** The rendered plot width of a panel in CSS pixels, 0 when unmounted. */
+  panelWidth(id: string): number {
+    return this.views.get(id)?.plotWidth() ?? 0;
   }
 
   private view(id: string): PanelView {
@@ -157,8 +178,8 @@ export class WorkspaceView {
       if (hasDragType(event, PANEL_DRAG_TYPE)) event.preventDefault();
     });
     element.addEventListener("drop", (event) => {
-      const dragged = event.dataTransfer?.getData(PANEL_DRAG_TYPE);
-      if (dragged === undefined || dragged === "" || dragged === id) return;
+      const dragged = dragData(event, PANEL_DRAG_TYPE);
+      if (dragged === null || dragged === id) return;
       event.preventDefault();
       event.stopPropagation();
       const location = this.model.locate(id);
@@ -190,8 +211,8 @@ export class WorkspaceView {
     this.root.addEventListener("drop", (event) => {
       this.root.classList.remove("drop-target");
       if (!this.isWorkspaceBackground(event.target)) return;
-      const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
-      if (path !== undefined && path !== "") {
+      const path = dragData(event, SIGNAL_DRAG_TYPE);
+      if (path !== null) {
         event.preventDefault();
         this.callbacks.onDropSignalNewPanel(path);
       }
@@ -225,26 +246,22 @@ export class WorkspaceView {
   ): HTMLElement {
     const seamElement = document.createElement("div");
     seamElement.className = className;
-    seamElement.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      seamElement.setPointerCapture(event.pointerId);
-      let last = { x: event.clientX, y: event.clientY };
-      const move = (moveEvent: PointerEvent): void => {
-        apply(
-          moveEvent.clientX - last.x,
-          moveEvent.clientY - last.y,
-          seamElement,
-        );
-        last = { x: moveEvent.clientX, y: moveEvent.clientY };
-        this.applySizes();
+    bindPointerDrag(seamElement, (down) => {
+      let last = { x: down.clientX, y: down.clientY };
+      return {
+        onMove: (moveEvent) => {
+          apply(
+            moveEvent.clientX - last.x,
+            moveEvent.clientY - last.y,
+            seamElement,
+          );
+          last = { x: moveEvent.clientX, y: moveEvent.clientY };
+          this.applySizes();
+        },
+        onEnd: () => {
+          this.callbacks.onLayoutChanged();
+        },
       };
-      const up = (): void => {
-        seamElement.removeEventListener("pointermove", move);
-        seamElement.removeEventListener("pointerup", up);
-        this.callbacks.onLayoutChanged();
-      };
-      seamElement.addEventListener("pointermove", move);
-      seamElement.addEventListener("pointerup", up);
     });
     return seamElement;
   }

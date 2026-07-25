@@ -1,7 +1,7 @@
 import { buildTreeRows, virtualSlice, type TreeRow } from "../app/tree-model";
 import { SIGNAL_DRAG_TYPE } from "./panel";
 
-const ROW_HEIGHT = 22;
+const FALLBACK_ROW_HEIGHT = 22;
 
 export interface SignalTreeCallbacks {
   onPlotSignal(path: string): void;
@@ -14,12 +14,22 @@ export class SignalTreeView {
   private readonly collapsed = new Set<string>();
   private filter = "";
   private rows: TreeRow[] = [];
+  private readonly rowHeight: number;
 
   constructor(
     private readonly listElement: HTMLElement,
     private readonly favoritesElement: HTMLElement,
     private readonly callbacks: SignalTreeCallbacks,
   ) {
+    // Virtual-scroll math follows the `--tree-row-height` design token so a
+    // CSS restyle cannot silently desynchronize row offsets.
+    const tokenHeight = Number.parseFloat(
+      getComputedStyle(listElement).getPropertyValue("--tree-row-height"),
+    );
+    this.rowHeight =
+      Number.isFinite(tokenHeight) && tokenHeight > 0
+        ? tokenHeight
+        : FALLBACK_ROW_HEIGHT;
     listElement.addEventListener("scroll", () => {
       this.renderRows();
     });
@@ -44,7 +54,6 @@ export class SignalTreeView {
   private refresh(): void {
     this.rows = buildTreeRows(this.paths, this.collapsed, this.filter);
     this.renderRows();
-    this.renderFavorites();
   }
 
   private renderRows(): void {
@@ -60,7 +69,7 @@ export class SignalTreeView {
       this.rows.length,
       this.listElement.scrollTop,
       this.listElement.clientHeight > 0 ? this.listElement.clientHeight : 400,
-      ROW_HEIGHT,
+      this.rowHeight,
     );
     const spacer = document.createElement("div");
     spacer.className = "tree-spacer";

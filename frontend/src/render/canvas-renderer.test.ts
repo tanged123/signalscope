@@ -125,6 +125,7 @@ const TEST_PALETTE: Palette = {
     "#247320",
     "#db6c66",
   ],
+  fontMono: '"JetBrains Mono", monospace',
 };
 
 function tile(

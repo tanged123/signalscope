@@ -40,33 +40,35 @@ describe("autoYRange", () => {
 describe("YAxisPolicy", () => {
   it("uses a usable serialized range verbatim", () => {
     const policy = new YAxisPolicy();
-    expect(policy.resolve("a", bins, [-100, 300])).toEqual([-100, 300]);
+    expect(policy.resolve("a", () => bins, [-100, 300])).toEqual([-100, 300]);
   });
 
   it("ignores a serialized range that cannot be rendered", () => {
     const policy = new YAxisPolicy();
-    expect(policy.resolve("a", bins, [5, 5])).not.toEqual([5, 5]);
-    expect(policy.resolve("a", bins, [300, -100])).not.toEqual([300, -100]);
+    expect(policy.resolve("a", () => bins, [5, 5])).not.toEqual([5, 5]);
+    expect(policy.resolve("a", () => bins, [300, -100])).not.toEqual([
+      300, -100,
+    ]);
   });
 
   it("holds the autoscale as visible data changes", () => {
     const policy = new YAxisPolicy();
-    const first = policy.resolve("a", [{ min: 0, max: 1 }], null);
-    const second = policy.resolve("a", [{ min: -900, max: 900 }], null);
+    const first = policy.resolve("a", () => [{ min: 0, max: 1 }], null);
+    const second = policy.resolve("a", () => [{ min: -900, max: 900 }], null);
     expect(second).toEqual(first);
   });
 
   it("refits when the series set changes", () => {
     const policy = new YAxisPolicy();
-    const first = policy.resolve("a", [{ min: 0, max: 1 }], null);
-    const second = policy.resolve("a|b", [{ min: -900, max: 900 }], null);
+    const first = policy.resolve("a", () => [{ min: 0, max: 1 }], null);
+    const second = policy.resolve("a|b", () => [{ min: -900, max: 900 }], null);
     expect(second).not.toEqual(first);
   });
 
   it("does not latch onto an empty first frame", () => {
     const policy = new YAxisPolicy();
-    policy.resolve("a", [{ min: null, max: null }], null);
-    const settled = policy.resolve("a", [{ min: 0, max: 10 }], null);
+    policy.resolve("a", () => [{ min: null, max: null }], null);
+    const settled = policy.resolve("a", () => [{ min: 0, max: 10 }], null);
     expect(settled[1]).toBeGreaterThan(9);
   });
 });

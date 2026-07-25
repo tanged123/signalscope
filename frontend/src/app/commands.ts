@@ -45,3 +45,11 @@ function comboFor(event: KeyboardEvent): string | null {
   if (event.metaKey || event.ctrlKey) return `mod+${key}`;
   return key;
 }
+
+/** Display form of a `comboFor` combo, e.g. "mod+k" → "⌘K". */
+export function formatCombo(keys: string): string {
+  return keys
+    .split("+")
+    .map((part) => (part === "mod" ? "⌘" : part.toUpperCase()))
+    .join("");
+}
