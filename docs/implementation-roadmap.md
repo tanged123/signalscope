@@ -27,3 +27,12 @@ that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
 a headless renderer harness and coherent tick pipeline, unbounded series
 allocation with composite colour/dash identity, and stable per-panel y axes
 resolved outside the renderer.
+
+Phase 2 desktop interaction (2A) shipped: linked wheel/box/pan/fit gestures
+with per-panel unlinked windows, the global amber cursor with readouts and
+live tree values, pinned annotations with delta readouts, a visible-region
+statistics strip backed by envelope-bin sums
+([ADR 0014](adr/0014-envelope-bin-sums.md)), gutter/inline axis styles,
+in-place title and axis-name editing, and the split legend inspector.
+Remaining Phase 2 scope (2B): XY drop strip and mode, colour channel and
+colorbar, FFT and histogram modes, and touch gestures.
