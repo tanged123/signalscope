@@ -652,6 +652,23 @@ kbd {
   width: 100%;
   height: 100%;
   cursor: crosshair;
+  /* Without this the browser claims every drag for scrolling and no
+     gesture ever reaches the handlers. */
+  touch-action: none;
+}
+
+/* Coarse pointers need larger targets; the spec's 26px header stays. */
+@media (hover: none) {
+  .panel-action,
+  .mode-pill,
+  .legend-chip-body,
+  .legend-chip-caret {
+    padding: 6px 9px;
+  }
+
+  .axis-chip {
+    padding: 4px 10px;
+  }
 }
 
 .panel-axis-toggle {

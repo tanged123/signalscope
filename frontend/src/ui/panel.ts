@@ -11,6 +11,7 @@ import {
   insidePlot,
   invertX,
   invertY,
+  pinchRange,
   projectX,
   projectY,
   valueAtTime,
@@ -18,6 +19,7 @@ import {
   zoomDragMode,
   zoomRange,
   type PlotLayout,
+  type Range,
 } from "../app/plot-math";
 import {
   nearestAnnotation,
@@ -52,6 +54,18 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
 ];
 
 const XY_HOVER_RADIUS = 40;
+const TOUCH = {
+  /** Movement that promotes a tap to a pan. */
+  panSlop: 9,
+  /** Finger separation below which an axis pans instead of zooming. */
+  pinchSeparation: 40,
+  longPressMs: 430,
+  longPressRadius: 28,
+  tapRemoveRadius: 16,
+  tapCursorRadius: 48,
+  doubleTapMs: 320,
+  doubleTapRadius: 26,
+} as const;
 
 export interface PanelCallbacks {
   onFocus(id: string): void;
@@ -120,6 +134,18 @@ export class PanelView {
   private dragging = false;
   private emphasizePath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
+  private readonly touchPoints = new Map<number, { x: number; y: number }>();
+  private touchMode: "tap" | "pan" | "pinch" | "dead" | null = null;
+  private touchStart: { x: number; y: number } | null = null;
+  private touchStartRanges: { x: Range; y: Range } | null = null;
+  private pinchAnchors: {
+    xA: number;
+    xB: number;
+    yA: number;
+    yB: number;
+  } | null = null;
+  private longPressTimer: number | null = null;
+  private lastTap = { time: 0, x: 0, y: 0 };
 
   constructor(
     private readonly id: string,
@@ -309,6 +335,10 @@ export class PanelView {
     this.overlay.addEventListener("pointerdown", (event) => {
       const layout = this.renderer.lastLayout();
       if (layout === null || !this.interactiveMode()) return;
+      if (event.pointerType === "touch") {
+        this.beginTouch(event, layout);
+        return;
+      }
       const isPan =
         event.button === 1 ||
         event.button === 2 ||
@@ -319,6 +349,15 @@ export class PanelView {
       } else if (event.button === 0) {
         this.beginBoxOrClick(event, layout);
       }
+    });
+    this.overlay.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "touch") this.moveTouch(event);
+    });
+    this.overlay.addEventListener("pointerup", (event) => {
+      if (event.pointerType === "touch") this.endTouch(event);
+    });
+    this.overlay.addEventListener("pointercancel", (event) => {
+      if (event.pointerType === "touch") this.endTouch(event);
     });
     this.overlay.addEventListener("dblclick", (event) => {
       const layout = this.renderer.lastLayout();
@@ -768,30 +807,60 @@ export class PanelView {
   }
 
   plotClick(offsetX: number, offsetY: number): void {
+    // 2A's asymmetry: the remove radius is smaller than the pin radius so a
+    // double-click cancels its own accidental pin before fitting.
+    if (this.removeAt(offsetX, offsetY, 9)) return;
+    this.pinAt(offsetX, offsetY, 14);
+  }
+
+  /** Removes the annotation under the pixel; true when one was removed. */
+  private removeAt(offsetX: number, offsetY: number, radius: number): boolean {
     const layout = this.renderer.lastLayout();
     const state = this.lastState;
-    const tiles = this.lastTiles;
-    if (layout === null || state === null) return;
+    if (layout === null || state === null) return false;
     if (state.mode === "xy") {
       const points = this.annotationPoints(state);
-      const existing = state.annotations.findIndex((_annotation, index) => {
-        const point = points[index];
+      const index = state.annotations.findIndex((_, position) => {
+        const point = points[position];
         if (point === null || point === undefined) return false;
         return (
           Math.hypot(
             projectX(layout, point.x) - offsetX,
             projectY(layout, point.y) - offsetY,
-          ) <= 9
+          ) <= radius
         );
       });
-      if (existing !== -1) {
-        const annotation = state.annotations[existing];
-        if (annotation !== undefined) {
-          this.callbacks.onRemoveAnnotation(this.id, annotation.id);
-        }
-        return;
-      }
-      const hit = nearestXyPoint(this.xyTraces, layout, offsetX, offsetY, 14);
+      const annotation = index === -1 ? undefined : state.annotations[index];
+      if (annotation === undefined) return false;
+      this.callbacks.onRemoveAnnotation(this.id, annotation.id);
+      return true;
+    }
+    if (state.mode !== "time") return false;
+    const existing = nearestAnnotation(
+      state.annotations,
+      layout,
+      offsetX,
+      offsetY,
+      radius,
+    );
+    if (existing === null) return false;
+    this.callbacks.onRemoveAnnotation(this.id, existing);
+    return true;
+  }
+
+  /** Pins the nearest plotted vertex under the pixel, when one is in range. */
+  private pinAt(offsetX: number, offsetY: number, radius: number): void {
+    const layout = this.renderer.lastLayout();
+    const state = this.lastState;
+    if (layout === null || state === null) return;
+    if (state.mode === "xy") {
+      const hit = nearestXyPoint(
+        this.xyTraces,
+        layout,
+        offsetX,
+        offsetY,
+        radius,
+      );
       if (hit !== null) {
         this.callbacks.onPinAnnotation(this.id, {
           path: hit.path,
@@ -803,17 +872,7 @@ export class PanelView {
       return;
     }
     if (state.mode !== "time") return;
-    const existing = nearestAnnotation(
-      state.annotations,
-      layout,
-      offsetX,
-      offsetY,
-      9,
-    );
-    if (existing !== null) {
-      this.callbacks.onRemoveAnnotation(this.id, existing);
-      return;
-    }
+    const tiles = this.lastTiles;
     if (tiles === null) return;
     const visible = new Set(
       state.series
@@ -827,9 +886,184 @@ export class PanelView {
       layout,
       offsetX,
       offsetY,
-      14,
+      radius,
     );
     if (hit !== null) this.callbacks.onPinAnnotation(this.id, hit);
+  }
+
+  private beginTouch(event: PointerEvent, layout: PlotLayout): void {
+    this.overlay.setPointerCapture(event.pointerId);
+    this.touchPoints.set(event.pointerId, {
+      x: event.offsetX,
+      y: event.offsetY,
+    });
+    if (this.touchPoints.size === 2) {
+      this.clearLongPress();
+      this.box = null;
+      this.drawOverlay();
+      const [first, second] = [...this.touchPoints.values()];
+      if (first === undefined || second === undefined) return;
+      // Anchors are captured in data space so both stay under their finger.
+      this.pinchAnchors = {
+        xA: invertX(layout, first.x),
+        xB: invertX(layout, second.x),
+        yA: invertY(layout, first.y),
+        yB: invertY(layout, second.y),
+      };
+      this.touchMode = "pinch";
+      return;
+    }
+    if (this.touchPoints.size > 2) {
+      this.touchMode = "dead";
+      return;
+    }
+    this.touchStart = { x: event.offsetX, y: event.offsetY };
+    this.touchStartRanges = {
+      x: { ...layout.xRange },
+      y: { ...layout.yRange },
+    };
+    this.touchMode = "tap";
+    this.longPressTimer = window.setTimeout(() => {
+      this.longPressTimer = null;
+      if (this.touchMode !== "tap" || this.touchStart === null) return;
+      this.pinAt(this.touchStart.x, this.touchStart.y, TOUCH.longPressRadius);
+      navigator.vibrate(8);
+      this.touchMode = "dead";
+    }, TOUCH.longPressMs);
+  }
+
+  private moveTouch(event: PointerEvent): void {
+    const layout = this.renderer.lastLayout();
+    if (
+      layout === null ||
+      this.touchMode === null ||
+      this.touchMode === "dead"
+    ) {
+      return;
+    }
+    const point = this.touchPoints.get(event.pointerId);
+    if (point === undefined) return;
+    point.x = event.offsetX;
+    point.y = event.offsetY;
+    if (this.touchMode === "pinch") {
+      this.applyPinch(layout);
+      return;
+    }
+    const start = this.touchStart;
+    const ranges = this.touchStartRanges;
+    if (start === null || ranges === null) return;
+    if (
+      this.touchMode === "tap" &&
+      Math.hypot(event.offsetX - start.x, event.offsetY - start.y) >
+        TOUCH.panSlop
+    ) {
+      this.clearLongPress();
+      this.touchMode = "pan";
+    }
+    if (this.touchMode !== "pan") return;
+    const dt =
+      ((start.x - event.offsetX) / layout.plot.width) *
+      (ranges.x.max - ranges.x.min);
+    const dv =
+      ((event.offsetY - start.y) / layout.plot.height) *
+      (ranges.y.max - ranges.y.min);
+    this.applyXRange(ranges.x.min + dt, ranges.x.max + dt);
+    this.callbacks.onYRange(this.id, [ranges.y.min + dv, ranges.y.max + dv]);
+  }
+
+  private applyPinch(layout: PlotLayout): void {
+    const anchors = this.pinchAnchors;
+    const [first, second] = [...this.touchPoints.values()];
+    if (anchors === null || first === undefined || second === undefined) return;
+    const { plot } = layout;
+    if (Math.abs(first.x - second.x) > TOUCH.pinchSeparation) {
+      const next = pinchRange(
+        anchors.xA,
+        anchors.xB,
+        first.x,
+        second.x,
+        plot.x,
+        plot.x + plot.width,
+      );
+      if (next !== null) this.applyXRange(next.min, next.max);
+    }
+    if (Math.abs(first.y - second.y) > TOUCH.pinchSeparation) {
+      const next = pinchRange(
+        anchors.yA,
+        anchors.yB,
+        first.y,
+        second.y,
+        plot.y,
+        plot.y + plot.height,
+      );
+      if (next !== null) this.callbacks.onYRange(this.id, [next.min, next.max]);
+    }
+  }
+
+  private endTouch(event: PointerEvent): void {
+    this.touchPoints.delete(event.pointerId);
+    if (this.touchMode === "pinch" && this.touchPoints.size < 2) {
+      this.touchMode = this.touchPoints.size === 0 ? null : "dead";
+      this.pinchAnchors = null;
+      return;
+    }
+    if (this.touchMode !== "tap") {
+      if (this.touchPoints.size === 0) this.touchMode = null;
+      return;
+    }
+    this.clearLongPress();
+    this.touchMode = null;
+    const now = performance.now();
+    if (
+      now - this.lastTap.time < TOUCH.doubleTapMs &&
+      Math.hypot(
+        event.offsetX - this.lastTap.x,
+        event.offsetY - this.lastTap.y,
+      ) < TOUCH.doubleTapRadius
+    ) {
+      this.lastTap = { time: 0, x: 0, y: 0 };
+      this.callbacks.onFitView(this.id);
+      return;
+    }
+    this.lastTap = { time: now, x: event.offsetX, y: event.offsetY };
+    if (this.removeAt(event.offsetX, event.offsetY, TOUCH.tapRemoveRadius)) {
+      return;
+    }
+    this.publishTouchCursor(event);
+  }
+
+  private clearLongPress(): void {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+  }
+
+  private publishTouchCursor(event: PointerEvent): void {
+    const layout = this.renderer.lastLayout();
+    if (layout === null) return;
+    if (!insidePlot(layout, event.offsetX, event.offsetY)) {
+      this.callbacks.onCursor(this.id, null, null);
+      return;
+    }
+    const cursorT =
+      this.lastState?.mode === "xy"
+        ? (nearestXyPoint(
+            this.xyTraces,
+            layout,
+            event.offsetX,
+            event.offsetY,
+            TOUCH.tapCursorRadius,
+          )?.time ?? null)
+        : invertX(layout, event.offsetX);
+    const rect = this.element.getBoundingClientRect();
+    this.callbacks.onCursor(
+      this.id,
+      cursorT,
+      // Dock at the panel's top edge so the finger does not cover the
+      // readout (prototype behaviour).
+      cursorT === null ? null : { x: rect.left + rect.width / 2, y: rect.top },
+    );
   }
 
   private drawOverlay(): void {
