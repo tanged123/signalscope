@@ -35,6 +35,15 @@ jobs:
           install-frontend: "false"
       - run: ./scripts/ci.sh flake
 
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: ./scripts/ci.sh quality
+
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -128,7 +137,7 @@ jobs:
 
   tag:
     if: github.ref == 'refs/heads/main'
-    needs: [version, flake, rust, frontend, e2e, build, appimage]
+    needs: [version, flake, quality, rust, frontend, e2e, build, appimage]
     runs-on: ubuntu-latest
     permissions:
       contents: write

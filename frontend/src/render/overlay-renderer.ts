@@ -19,7 +19,7 @@ export interface OverlayPalette {
   series: string[];
 }
 
-export interface OverlayAnnotation {
+interface OverlayAnnotation {
   x: number;
   y: number;
   colorIndex: number;

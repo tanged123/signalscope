@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc --noEmit && vite build && node scripts/build-snapshot.mjs",
     "check:artifacts": "node scripts/check-snapshot.mjs",
+    "check:unused": "knip",
     "dev": "vite --host 127.0.0.1 --port 4173",
     "e2e": "playwright test",
     "lint": "eslint src tests",
@@ -22,6 +23,7 @@
     "istanbul-lib-coverage": "3.2.2",
     "istanbul-lib-report": "3.0.1",
     "istanbul-reports": "3.2.0",
+    "knip": "6.29.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.3",
     "vite": "7.2.4",

@@ -8,12 +8,14 @@ mode="${1:-all}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/ci.sh [all|flake|format|rust|frontend|e2e|build|appimage]
+Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|build|appimage]
 
 Each named mode matches the GitHub Actions job with the same name:
 
   flake     nix flake check; includes the treefmt formatting gate.
   format    treefmt --fail-on-change (fast local shortcut for the flake gate).
+  quality   Deterministic dependency, shell, workflow, spelling, and unused-code
+            checks. RustSec advisory checks need network access on a cold cache.
   rust      cargo clippy plus the full cargo test suite.
   frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
             snapshot artifact checks.
@@ -21,8 +23,8 @@ Each named mode matches the GitHub Actions job with the same name:
   build     Native Tauri bundles via ./scripts/build.sh native.
   appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
 
-`all` runs format, rust, frontend, and e2e sequentially with Cargo capped at
-two jobs by default — the complete local quality gate.
+`all` runs format, quality, rust, frontend, and e2e sequentially with Cargo
+capped at two jobs by default — the complete local quality gate.
 EOF
 }
 
@@ -52,6 +54,7 @@ check_e2e() {
 case "$mode" in
 all)
   check_format
+  quality_checks
   rust_checks
   frontend_checks
   artifact_checks
@@ -59,6 +62,9 @@ all)
   ;;
 format)
   check_format
+  ;;
+quality)
+  quality_checks
   ;;
 rust)
   rust_checks

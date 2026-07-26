@@ -65,8 +65,11 @@
           packages =
             with pkgs;
             [
+              actionlint
               cargo
+              cargo-deny
               cargo-llvm-cov
+              cargo-machete
               cargo-tauri
               clippy
               llvmPackages.llvm
@@ -75,7 +78,9 @@
               pkg-config
               rustc
               rustfmt
+              shellcheck
               treefmtEval.config.build.wrapper
+              typos
             ]
             ++ linuxTauriPackages;
 

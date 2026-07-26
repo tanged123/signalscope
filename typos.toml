@@ -1,0 +1,10 @@
+[files]
+extend-exclude = [
+  "docs/Signal Scope UI Design Pass/**",
+  "Cargo.lock",
+  "pnpm-lock.yaml",
+  "flake.lock",
+  "frontend/src/generated/**",
+  "protocol/src/generated.rs",
+  "core/scope-core/src/session/generated.rs",
+]

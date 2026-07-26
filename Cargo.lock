@@ -2972,7 +2972,6 @@ version = "0.3.0"
 dependencies = [
  "scope-core",
  "scope-protocol",
- "serde",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

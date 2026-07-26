@@ -105,6 +105,7 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/release.sh version # validate release metadata
 ./scripts/release.sh tag     # create/push the annotated release tag
 ./scripts/ci.sh             # complete CI-oriented quality gate
+./scripts/ci.sh quality     # dependency, workflow, shell, spelling, unused code
 ./scripts/ci.sh rust        # reproduce one named GitHub Actions job
 nix fmt                     # format the workspace
 ```
