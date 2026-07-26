@@ -379,6 +379,24 @@ describe("render", () => {
     ).toBe(true);
   });
 
+  it("formats colorbar ticks with the shared axis formatter", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.renderPaths([], {
+      xLabel: "x",
+      yLabel: "y",
+      xRange: [0, 1],
+      yRange: [0, 1],
+      colorbar: { min: 0.0001, max: 0.0003, label: "magnitude" },
+    });
+
+    const labels = calls
+      .filter((call) => call.op === "fillText" && call.args[1] === 598)
+      .map((call) => call.args[0]);
+    expect(labels).toEqual(formatTicks([0.0003, 0.0002, 0.0001]));
+  });
+
   it("renders vertex paths against an explicit x range", () => {
     const { context, calls } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));

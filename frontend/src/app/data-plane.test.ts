@@ -46,12 +46,13 @@ describe("BakedPlane.querySamples", () => {
       request_id: "samples-1",
       signal_ids: ["7"],
       window: { t0: 1, t1: 3 },
-      max_points: 64,
+      max_points: 3,
     });
 
     expect(response.request_id).toBe("samples-1");
-    expect(response.series[0]?.time).toEqual([0, 1, 2, 3, 4]);
-    expect(Number.isNaN(response.series[0]?.values[2])).toBe(true);
+    expect(response.series[0]?.time).toEqual([0, 2, 4]);
+    expect(response.series[0]?.stride).toBe(2);
+    expect(Number.isNaN(response.series[0]?.values[1])).toBe(true);
   });
 });
 

@@ -200,6 +200,7 @@ export class OverlayRenderer {
       }
       const x = projectX(layout, annotation.x);
       const y = projectY(layout, annotation.y);
+      if (!insidePlot(layout, x, y)) return;
       context.beginPath();
       context.fillStyle = palette.surface0;
       context.strokeStyle =

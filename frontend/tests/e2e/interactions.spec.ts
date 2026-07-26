@@ -100,6 +100,8 @@ test.describe("desktop plot interactions", () => {
     const inspector = panel.locator(".series-inspector");
     await expect(inspector).toBeVisible();
     await expect(inspector.locator(".inspector-slot")).toHaveCount(7);
+    await page.keyboard.press("s");
+    await expect(inspector).toBeVisible();
     await inspector.locator(".inspector-dash", { hasText: "dot" }).click();
     await expect(inspector).toBeHidden();
   });

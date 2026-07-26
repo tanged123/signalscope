@@ -5,6 +5,7 @@ import {
   invertX,
   invertY,
   logTicks,
+  panScaledRange,
   panRange,
   pinchRange,
   pinchScaledRange,
@@ -79,6 +80,12 @@ test("zooms and pinches log axes in decade space", () => {
   expect(pinched).not.toBeNull();
   expect(pinched?.min ?? 0).toBeCloseTo(Math.sqrt(10));
   expect(pinched?.max ?? 0).toBeCloseTo(Math.sqrt(100_000));
+});
+
+test("pans log axes in decade space", () => {
+  const panned = panScaledRange({ min: 1, max: 100 }, 0.5, "log");
+  expect(panned.min).toBeCloseTo(10);
+  expect(panned.max).toBeCloseTo(1000);
 });
 
 test("projects and inverts a log x axis", () => {

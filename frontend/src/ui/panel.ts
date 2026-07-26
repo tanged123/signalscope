@@ -161,6 +161,7 @@ export class PanelView {
   private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private dragging = false;
   private emphasizePath: string | null = null;
+  private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
   private readonly touchPoints = new Map<number, { x: number; y: number }>();
   private touchMode: "tap" | "pan" | "pinch" | "dead" | null = null;
@@ -477,7 +478,10 @@ export class PanelView {
     this.renderAnnotationList(state);
     this.renderStats();
     this.drawOverlay();
-    if (!state.series.some((series) => series.path === this.emphasizePath)) {
+    if (
+      this.inspectorPath !== null &&
+      !state.series.some((series) => series.path === this.inspectorPath)
+    ) {
       this.closeInspector();
     }
     const empty = required<HTMLElement>(this.element, ".panel-empty");
@@ -1688,6 +1692,7 @@ export class PanelView {
     this.closeInspector();
     const series = this.lastState?.series.find((entry) => entry.path === path);
     if (series === undefined) return;
+    this.inspectorPath = path;
     const popover = document.createElement("div");
     popover.className = "series-inspector";
     popover.setAttribute("role", "dialog");
@@ -1795,6 +1800,7 @@ export class PanelView {
   private closeInspector(): void {
     this.inspectorCleanup?.();
     this.inspectorCleanup = null;
+    this.inspectorPath = null;
     this.element.querySelector(".series-inspector")?.remove();
   }
 

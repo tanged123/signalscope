@@ -15,7 +15,7 @@ import {
   type SignalSummary,
   type TileResponse,
 } from "../generated/protocol";
-import type { PanelState } from "../generated/session";
+import type { PanelMode, PanelState } from "../generated/session";
 import type { CursorStyle } from "../render/overlay-renderer";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
@@ -97,8 +97,7 @@ export class AppShell {
           this.afterLayoutChange();
         },
         onSelectMode: (id, mode) => {
-          this.workspace.setMode(id, mode);
-          if (mode === "xy") this.workspace.promoteSeriesToX(id);
+          this.transitionPanelMode(id, mode);
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -380,8 +379,7 @@ export class AppShell {
       "panel-switch-xy",
       "Panel: switch to XY mode",
       (id) => {
-        this.workspace.setMode(id, "xy");
-        this.workspace.promoteSeriesToX(id);
+        this.transitionPanelMode(id, "xy");
       },
     );
     this.registerFocusedPanelCommand(
@@ -395,14 +393,14 @@ export class AppShell {
       "panel-switch-fft",
       "Panel: switch to FFT mode",
       (id) => {
-        this.workspace.setMode(id, "fft");
+        this.transitionPanelMode(id, "fft");
       },
     );
     this.registerFocusedPanelCommand(
       "panel-switch-histogram",
       "Panel: switch to histogram mode",
       (id) => {
-        this.workspace.setMode(id, "histogram");
+        this.transitionPanelMode(id, "histogram");
       },
     );
     this.registerFocusedPanelCommand(
@@ -516,6 +514,16 @@ export class AppShell {
         this.palette?.open();
       },
     });
+  }
+
+  /** Moves between panel domains without dropping the assigned XY x series. */
+  private transitionPanelMode(panelId: string, mode: PanelMode): void {
+    const panel = this.workspace.panel(panelId);
+    if (panel?.mode === "xy" && mode !== "xy") {
+      this.workspace.setXSignal(panelId, null);
+    }
+    this.workspace.setMode(panelId, mode);
+    if (mode === "xy") this.workspace.promoteSeriesToX(panelId);
   }
 
   /** Registers a command that acts on the focused panel and refreshes. */

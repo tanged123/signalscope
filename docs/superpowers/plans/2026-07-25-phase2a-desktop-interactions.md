@@ -26,7 +26,7 @@
 - Amber (`--amber-7`, `--amber-9`, `--amber-3`, `--focus-ring`) is **interaction-only**: cursor, box-zoom band, Δ readouts, drag targets, ƒx marks. Never a series colour, never an active-control fill. Chrome stays achromatic (`--surface-4` + `--fg-1` for active states).
 - Dark surfaces stay near-black and flat: 1px seams, radii ≤ 4px, no glows/gradients/shadows (the spec's `--elev-*` popover shadows are the sanctioned exception for popovers/tooltips). Light mode is a token swap only.
 - All values, paths, axes, readouts: `--font-mono` (JetBrains Mono) with `font-variant-numeric: tabular-nums`, values `%.4f`, `—` for absent, U+2212 for minus in tick labels.
-- A keyboard path must exist for every pointer action — the command palette (⌘K) is the sanctioned long-tail path. Right-click is never the only way to do anything.
+- A keyboard path must exist for every pointer action — the command palette (⌘P / mod+p) is the sanctioned long-tail path. Right-click is never the only way to do anything.
 - UI and renderer code never branch on host identity. Anything computed for the plot must work from protocol bins so `BakedPlane` snapshots behave identically (this is why stats come from bin sums, not raw arrays).
 - Preserve: two-host `DataPlane`, versioned protocol/session schemas, tile-pyramid gap/extrema invariants, transactional ingest, self-contained no-network snapshots.
 - Do not use `git add -A`. Stage only the files named in each task's commit step. Preserve unrelated worktree changes; inspect `git status` before each task.
@@ -3024,7 +3024,7 @@ test("axis style toggles to inline via the command palette", async ({
 });
 ```
 
-(Match how the existing `workbench.spec.ts` palette tests open and drive ⌘K — reuse their idiom verbatim.)
+(Match how the existing `workbench.spec.ts` palette tests open and drive ⌘P / mod+p — reuse their idiom verbatim.)
 
 - [ ] **Step 5: Gates and commit**
 
@@ -3854,6 +3854,6 @@ git commit -m "docs: advertise desktop gesture set and record phase 2a scope"
 ## Final verification checklist (for the executing agent)
 
 - `./scripts/ci.sh all` green at HEAD.
-- Manual pass in `./scripts/run.sh web`: hint-strip gestures all work as advertised; amber appears **only** as cursor, rubber band, Δ readout and drag targets; unlink (`l`) isolates panel windows; `s` toggles stats on the focused panel; every pointer action has a palette path (`⌘K` → zoom/pan/fit/axis style/stats/clear annotations).
+- Manual pass in `./scripts/run.sh web`: hint-strip gestures all work as advertised; amber appears **only** as cursor, rubber band, Δ readout and drag targets; unlink (`l`) isolates panel windows; `s` toggles stats on the focused panel; every pointer action has a palette path (`⌘P` / `mod+p` → zoom/pan/fit/axis style/stats/clear annotations).
 - Manual pass in `./scripts/run.sh native` if the platform allows; otherwise state that the native host was not exercised.
 - No `x_signal`/`color_signal` consumers were added, no FFT/histogram/XY code paths, no touch handlers — those belong to Phase 2B.

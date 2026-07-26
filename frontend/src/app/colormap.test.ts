@@ -19,6 +19,11 @@ describe("sampleColormap", () => {
     expect(sampleColormap(stops, Number.NaN)).toBe("#000000");
   });
 
+  it("normalizes malformed colour channels to zero", () => {
+    expect(sampleColormap(["#zz", "#ffffff"], 0)).toBe("#000000");
+    expect(sampleColormap(["#", "#ffffff"], 0)).toBe("#000000");
+  });
+
   it("declares sixteen ordered tokens", () => {
     expect(SEQ_TOKENS).toHaveLength(16);
     expect(SEQ_TOKENS[0]).toBe("--seq-01");

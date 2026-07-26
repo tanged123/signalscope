@@ -14,7 +14,11 @@ async function trajectoryPoints(
         .getPropertyValue("--series-2")
         .trim();
       const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
-      if (match === null) return [];
+      if (match === null) {
+        throw new Error(
+          `trajectoryPoints expected --series-2 as #rrggbb, received "${color}"`,
+        );
+      }
       const target = match.slice(1).map((part) => Number.parseInt(part, 16));
       const pixels = context.getImageData(
         0,
@@ -79,6 +83,17 @@ test.describe("panel modes", () => {
     // The promoted x signal leaves the plotted series.
     await expect(panel.locator(".legend-chip")).toHaveCount(1);
     await expect(panel.locator(".panel-empty")).toBeHidden();
+
+    await panel.locator(".mode-pill", { hasText: "FFT" }).click();
+    await expect(panel.locator(".legend-chip")).toHaveCount(2);
+
+    await panel.locator(".mode-pill", { hasText: "XY" }).click();
+    await expect(panel.locator(".legend-chip")).toHaveCount(1);
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("switch to histogram");
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".mode-pill.active")).toHaveText("H");
+    await expect(panel.locator(".legend-chip")).toHaveCount(2);
   });
 
   test("the x chip and the palette both reach XY mode", async ({

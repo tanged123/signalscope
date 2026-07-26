@@ -184,6 +184,12 @@ test("places annotations at supplied plot points when given them", () => {
         colorIndex: 0,
         label: "40.0000 · 150.0000",
       },
+      {
+        x: 30,
+        y: 300,
+        colorIndex: 0,
+        label: "outside",
+      },
     ],
     delta: {
       label: "Δx 30.0000 · Δy 50.0000 · Δc 4.0000",
@@ -192,6 +198,7 @@ test("places annotations at supplied plot points when given them", () => {
     },
   };
   renderer.draw(layout, state);
+  expect(calls.filter((call) => call.startsWith("arc:"))).toHaveLength(2);
   expect(calls.join(" ")).toContain("Δx");
   expect(calls.join(" ")).toContain("Δc 4.0000");
 });

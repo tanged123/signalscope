@@ -52,4 +52,11 @@ describe("spectrum", () => {
     const series = sampled(256, 4, 16);
     expect(spectrum(series, 0, 0.1)).toBeNull();
   });
+
+  it("caps large transforms at 4096 samples", () => {
+    const series = sampled(8192, 1, 16);
+    const result = spectrum(series, 0, 8191 / 8192);
+    expect(result).not.toBeNull();
+    expect(result?.size ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(4096);
+  });
 });

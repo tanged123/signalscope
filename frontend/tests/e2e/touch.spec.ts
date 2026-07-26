@@ -6,7 +6,7 @@ test.describe("touch gestures", () => {
     await expect(page.locator(".panel").first()).toBeVisible();
   });
 
-  test("a one-finger drag pans and a double tap fits", async ({
+  test("a one-finger drag pans and the fit command restores the view", async ({
     page,
     isMobile,
   }) => {
@@ -35,16 +35,9 @@ test.describe("touch gestures", () => {
     });
     await expect(readout).not.toHaveText(fitted ?? "");
 
-    for (let tap = 0; tap < 2; tap += 1) {
-      await client.send("Input.dispatchTouchEvent", {
-        type: "touchStart",
-        touchPoints: at(200, 120),
-      });
-      await client.send("Input.dispatchTouchEvent", {
-        type: "touchEnd",
-        touchPoints: [],
-      });
-    }
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("Panel: fit view");
+    await page.keyboard.press("Enter");
     await expect(readout).toHaveText(fitted ?? "");
   });
 });

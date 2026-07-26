@@ -431,14 +431,16 @@ export class CanvasRenderer {
     context.textAlign = "right";
     context.textBaseline = "middle";
     const span = colorbar.max - colorbar.min;
-    for (const fraction of [0, 0.5, 1]) {
-      const value = colorbar.max - span * fraction;
+    const fractions = [0, 0.5, 1];
+    const values = fractions.map((fraction) => colorbar.max - span * fraction);
+    const labels = formatTicks(values);
+    fractions.forEach((fraction, index) => {
       context.fillText(
-        value.toFixed(1).replace(/^-/, "−"),
+        labels[index] ?? "",
         width - 2,
         plot.y + plot.height * fraction,
       );
-    }
+    });
     context.font = labelFont(colors);
     context.fillStyle = colors.fg2;
     context.save();

@@ -27,9 +27,10 @@ export const SEQ_TOKENS = [
 
 function channels(hex: string): [number, number, number] {
   const body = hex.trim().replace("#", "");
-  const parts = [0, 2, 4].map((offset) =>
-    Number.parseInt(body.slice(offset, offset + 2), 16),
-  );
+  const parts = [0, 2, 4].map((offset) => {
+    const channel = Number.parseInt(body.slice(offset, offset + 2), 16);
+    return Number.isFinite(channel) ? channel : 0;
+  });
   return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
 }
 
