@@ -110,6 +110,10 @@ All CI tools are provided by the pinned Nix flake.
 nix fmt                     # format the workspace
 ```
 
+`./scripts/ci.sh quality` is implemented by `quality_checks()` in
+`scripts/lib.sh`, which is the single source of truth shared with GitHub
+Actions. The aggregate `ci-ok` job is the stable required-check target.
+
 The UI design authority is in `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/`. Production code recreates that design; it does not import the reference prototype.
 
 ## License

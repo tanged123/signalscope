@@ -56,6 +56,10 @@ Canonical commands:
 ./scripts/ci.sh flake                 flake check (includes formatting)
 ```
 
+`quality_checks()` in `scripts/lib.sh` is the single source of truth for the
+deterministic quality gate. Extend that function and its matching `quality` job
+rather than adding parallel ad-hoc workflow commands.
+
 Run `./scripts/setup.sh` before frontend work when dependencies are absent.
 The Nix flake supplies the normal pinned toolchain. AppImage packaging is the
 intentional exception: run it outside the Nix shell on Ubuntu/FHS using the
