@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 5;
+pub const SESSION_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -44,6 +44,14 @@ pub enum DashStyle {
     Dot,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnnotationDomain {
+    Time,
+    Frequency,
+    Distribution,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct LinkedTime {
     pub t0: f64,
@@ -69,8 +77,9 @@ pub struct SeriesState {
 pub struct Annotation {
     pub id: String,
     pub series_path: String,
-    pub time: f64,
-    pub value: f64,
+    pub domain: AnnotationDomain,
+    pub anchor: f64,
+    pub pinned_value: f64,
     pub label: String,
 }
 

@@ -261,20 +261,34 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.time_window).toBeNull();
   });
 
-  it("adds, relabels and removes annotations", () => {
+  it("retains separate annotation domains across mode changes", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
     model.addAnnotation(panel.id, {
       id: "ann-1",
       series_path: "a/b",
-      time: 2,
-      value: 5,
+      domain: "time",
+      anchor: 2,
+      pinned_value: 5,
       label: "",
     });
+    model.addAnnotation(panel.id, {
+      id: "ann-2",
+      series_path: "a/b",
+      domain: "frequency",
+      anchor: 20,
+      pinned_value: -3,
+      label: "",
+    });
+    model.setMode(panel.id, "fft");
+    model.setMode(panel.id, "time");
     model.setAnnotationLabel(panel.id, "ann-1", "peak");
     expect(model.panel(panel.id)?.annotations[0]?.label).toBe("peak");
+    expect(model.panel(panel.id)?.annotations.map((item) => item.domain)).toEqual(
+      ["time", "frequency"],
+    );
     model.removeAnnotation(panel.id, "ann-1");
-    expect(model.panel(panel.id)?.annotations).toEqual([]);
+    expect(model.panel(panel.id)?.annotations).toHaveLength(1);
   });
 
   it("toggles statistics and axis style", () => {
@@ -298,8 +312,9 @@ describe("WorkspaceModel", () => {
     model.addAnnotation(panel.id, {
       id: "ann-1",
       series_path: "a/b",
-      time: 0,
-      value: 0,
+      domain: "time",
+      anchor: 0,
+      pinned_value: 0,
       label: "",
     });
     expect(model.panel(panel.id)?.series[0]).toMatchObject({

@@ -142,6 +142,32 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(5);
             migrate(5, value)
         }
+        5 => {
+            for_each_panel(&mut value, |panel| {
+                let Some(annotations) = panel
+                    .get_mut("annotations")
+                    .and_then(serde_json::Value::as_array_mut)
+                else {
+                    return;
+                };
+                for annotation in annotations {
+                    let Some(object) = annotation.as_object_mut() else {
+                        continue;
+                    };
+                    let anchor = object
+                        .remove("time")
+                        .unwrap_or_else(|| serde_json::json!(0.0));
+                    let pinned_value = object
+                        .remove("value")
+                        .unwrap_or_else(|| serde_json::json!(0.0));
+                    object.insert("domain".into(), serde_json::json!("time"));
+                    object.insert("anchor".into(), anchor);
+                    object.insert("pinned_value".into(), pinned_value);
+                }
+            });
+            value["schema_version"] = serde_json::json!(6);
+            migrate(6, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -334,6 +360,43 @@ mod tests {
         let session = from_json(&json).expect("v4 session migrates");
         assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
         assert_eq!(session.tabs[0].panels[0].x_range, None);
+    }
+
+    #[test]
+    fn v5_annotations_gain_explicit_time_domains() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 5,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "focused_panel_id": "panel-1",
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "time",
+                    "axis_style": "gutter", "x_signal": null, "color_signal": null,
+                    "series": [], "y_range": null, "x_range": null,
+                    "x_label": null, "y_label": null, "time_window": null,
+                    "annotations": [{
+                        "id": "ann-1", "series_path": "demo/altitude",
+                        "time": 12.5, "value": 42.0, "label": "peak"
+                    }],
+                    "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v5 session migrates");
+        let annotation = &session.tabs[0].panels[0].annotations[0];
+        assert_eq!(annotation.domain, AnnotationDomain::Time);
+        assert_eq!(annotation.anchor, 12.5);
+        assert_eq!(annotation.pinned_value, 42.0);
+        assert_eq!(annotation.label, "peak");
     }
 
     #[test]

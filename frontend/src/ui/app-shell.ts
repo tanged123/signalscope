@@ -146,8 +146,9 @@ export class AppShell {
           this.workspace.addAnnotation(id, {
             id: crypto.randomUUID(),
             series_path: hit.path,
-            time: hit.time,
-            value: hit.value,
+            domain: "time",
+            anchor: hit.time,
+            pinned_value: hit.value,
             label: "",
           });
           this.workspaceView?.refreshPanelStates();

@@ -1310,21 +1310,21 @@ export class PanelView {
       );
       return entry === undefined
         ? null
-        : markerAt(entry.trace, annotation.time);
+        : markerAt(entry.trace, annotation.anchor);
     });
   }
 
   private annotationColorValues(state: PanelState): readonly (number | null)[] {
     if (state.mode !== "xy" || state.color_signal === null) return [];
     if (state.color_signal === "time") {
-      return state.annotations.map((annotation) => annotation.time);
+      return state.annotations.map((annotation) => annotation.anchor);
     }
     const sample = this.lastSamples?.series.find(
       (series) => series.signal_path === state.color_signal,
     );
     if (sample === undefined) return [];
     return state.annotations.map((annotation) => {
-      const value = lerpSample(sample.time, sample.values, annotation.time);
+      const value = lerpSample(sample.time, sample.values, annotation.anchor);
       return Number.isFinite(value) ? value : null;
     });
   }
@@ -1509,7 +1509,7 @@ export class PanelView {
       const text = document.createElement("span");
       text.className = "annotation-text";
       text.textContent =
-        `${marker(index)} t ${annotation.time.toFixed(3)} · v ${formatValue(annotation.value)}` +
+        `${marker(index)} t ${annotation.anchor.toFixed(3)} · v ${formatValue(annotation.pinned_value)}` +
         (annotation.label === "" ? "" : ` "${annotation.label}"`);
       const edit = document.createElement("button");
       edit.className = "annotation-action";

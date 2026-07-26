@@ -57,8 +57,8 @@ export function nearestAnnotation(
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const annotation of annotations) {
     const distance = Math.hypot(
-      projectX(layout, annotation.time) - px,
-      projectY(layout, annotation.value) - py,
+      projectX(layout, annotation.anchor) - px,
+      projectY(layout, annotation.pinned_value) - py,
     );
     if (distance <= threshold && distance < bestDistance) {
       bestId = annotation.id;

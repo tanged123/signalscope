@@ -198,13 +198,13 @@ export class OverlayRenderer {
     const timeSpace = state.annotationSpace === "time";
     state.annotations.forEach((annotation, index) => {
       const point = timeSpace
-        ? { x: annotation.time, y: annotation.value }
+        ? { x: annotation.anchor, y: annotation.pinned_value }
         : (state.annotationPoints[index] ?? null);
       if (point === null) return;
       if (
         timeSpace &&
-        (annotation.time < layout.xRange.min ||
-          annotation.time > layout.xRange.max)
+        (annotation.anchor < layout.xRange.min ||
+          annotation.anchor > layout.xRange.max)
       ) {
         return;
       }
@@ -221,7 +221,7 @@ export class OverlayRenderer {
       context.fill();
       context.stroke();
       const label = annotation.label === "" ? "" : ` ${annotation.label}`;
-      const text = `${marker(index)}${label} ${formatValue(annotation.value)} @ ${annotation.time.toFixed(3)}`;
+      const text = `${marker(index)}${label} ${formatValue(annotation.pinned_value)} @ ${annotation.anchor.toFixed(3)}`;
       const textWidth = context.measureText(text).width;
       context.fillStyle = palette.surface2;
       context.fillRect(x + 7, y - 20, textWidth + 14, 16);
@@ -258,10 +258,10 @@ export class OverlayRenderer {
     if (first === undefined || second === undefined) return;
     const timeSpace = space === "time";
     const firstPoint = timeSpace
-      ? { x: first.time, y: first.value }
+      ? { x: first.anchor, y: first.pinned_value }
       : (points[firstIndex] ?? null);
     const secondPoint = timeSpace
-      ? { x: second.time, y: second.value }
+      ? { x: second.anchor, y: second.pinned_value }
       : (points[secondIndex] ?? null);
     if (firstPoint === null || secondPoint === null) return;
     context.save();
@@ -280,8 +280,8 @@ export class OverlayRenderer {
     );
     context.stroke();
     context.restore();
-    const deltaT = second.time - first.time;
-    const deltaV = second.value - first.value;
+    const deltaT = second.anchor - first.anchor;
+    const deltaV = second.pinned_value - first.pinned_value;
     const parts = [`Δt ${formatValue(deltaT)} s`];
     if (timeSpace) {
       // Time mode: Δv and slope are meaningful against the time axis.

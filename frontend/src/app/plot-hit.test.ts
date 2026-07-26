@@ -40,7 +40,14 @@ test("nearestVertex snaps globally within its threshold", () => {
 
 test("nearestAnnotation uses the tighter marker radius", () => {
   const annotations: Annotation[] = [
-    { id: "ann-1", series_path: "a/b", time: 5, value: 5, label: "" },
+    {
+      id: "ann-1",
+      series_path: "a/b",
+      domain: "time",
+      anchor: 5,
+      pinned_value: 5,
+      label: "",
+    },
   ];
   expect(nearestAnnotation(annotations, layout, 52, 52, 9)).toBe("ann-1");
   expect(nearestAnnotation(annotations, layout, 65, 52, 9)).toBeNull();
