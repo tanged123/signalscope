@@ -299,16 +299,32 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
         input.series.find((series) => series.path === hit.path)?.colorIndex ??
         0;
       const rows = [
-        reading(input.x.path, hit.x, null, hitColor),
+        reading(input.x.path, hit.x, null, hitColor, `x · ${input.x.path}`),
         ...input.series.map((series) =>
           reading(
             series.path,
             lerpSample(series.trace.time, series.trace.y, hit.time),
             null,
             series.colorIndex,
+            `y · ${series.path}`,
           ),
         ),
       ];
+      if (input.color !== null) {
+        rows.push(
+          reading(
+            input.color.path,
+            lerpSample(
+              input.series[0]?.trace.time ?? [],
+              input.color.values,
+              hit.time,
+            ),
+            null,
+            hitColor,
+            `c · ${input.color.path}`,
+          ),
+        );
+      }
       return cursor(
         "time",
         hit.time,
@@ -338,7 +354,12 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
     stats() {
       const xStats = numericStats(input.x.values);
       const groups = [
-        statsGroup(input.x.path, `x · ${input.x.path}`, null, statItems(xStats)),
+        statsGroup(
+          input.x.path,
+          `x · ${input.x.path}`,
+          null,
+          statItems(xStats),
+        ),
         ...input.series.map((series) =>
           statsGroup(
             series.path,
@@ -407,13 +428,7 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
           series.colorIndex,
         ),
       );
-      return cursor(
-        "frequency",
-        x,
-        `f = ${formatValue(x)} Hz`,
-        rows,
-        "local",
-      );
+      return cursor("frequency", x, `f = ${formatValue(x)} Hz`, rows, "local");
     },
     annotationAt(layout, point, radius) {
       return transformedHit(
@@ -443,7 +458,11 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
         const first = series.frequency[0] ?? null;
         const last = series.frequency[series.frequency.length - 1] ?? null;
         return statsGroup(series.path, series.path, series.colorIndex, [
-          stat("peak f", peakIndex < 0 ? null : series.frequency[peakIndex], "Hz"),
+          stat(
+            "peak f",
+            peakIndex < 0 ? null : series.frequency[peakIndex],
+            "Hz",
+          ),
           stat("peak", peakIndex < 0 ? null : peak, "dB"),
           stat(
             "span",
@@ -470,9 +489,7 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
   };
 }
 
-export function prepareHistogramPlot(
-  input: HistogramPlotInput,
-): PreparedPlot {
+export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
   const binAt = (value: number): number =>
     input.edges.findIndex(
       (edge, index) =>
@@ -523,25 +540,25 @@ export function prepareHistogramPlot(
         [low, high],
       );
     },
-    annotationAt(layout, point, radius) {
+    annotationAt(layout, point) {
       const x = invertX(layout, point.x);
       const bin = binAt(x);
       if (bin < 0) return null;
-      const low = input.edges[bin] ?? x;
-      const high = input.edges[bin + 1] ?? x;
-      return transformedHit(
-        input.series.map((series) => ({
+      let best: AnnotationAnchor | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const series of input.series) {
+        const count = series.counts[bin] ?? 0;
+        const distance = Math.abs(projectY(layout, count) - point.y);
+        if (distance > bestDistance) continue;
+        bestDistance = distance;
+        best = {
           path: series.path,
-          colorIndex: series.colorIndex,
-          x: [(low + high) / 2],
-          y: [series.counts[bin] ?? 0],
-        })),
-        "distribution",
-        layout,
-        point,
-        radius,
-        x,
-      );
+          domain: "distribution",
+          anchor: x,
+          pinnedValue: count,
+        };
+      }
+      return best;
     },
     resolveAnnotation: resolve,
     stats() {
@@ -581,7 +598,11 @@ function cursor(
     x,
     heading,
     rows,
-    markers: rows.map((row) => ({ x, y: row.value, colorIndex: row.colorIndex })),
+    markers: rows.map((row) => ({
+      x,
+      y: row.value,
+      colorIndex: row.colorIndex,
+    })),
     link,
     interval,
   };
@@ -592,8 +613,9 @@ function reading(
   value: number,
   unit: string | null,
   colorIndex: number,
+  label = path,
 ): PlotReadingRow {
-  return { path, label: path, value, unit, colorIndex };
+  return { path, label, value, unit, colorIndex };
 }
 
 function resolved(
@@ -721,10 +743,7 @@ function timeDelta(
   const [first, second] = pair;
   const deltaT = second.x - first.x;
   const deltaY = second.y - first.y;
-  const parts = [
-    `Δt ${formatValue(deltaT)} s`,
-    `Δy ${formatValue(deltaY)}`,
-  ];
+  const parts = [`Δt ${formatValue(deltaT)} s`, `Δy ${formatValue(deltaY)}`];
   if (deltaT !== 0) parts.push(`slope ${formatValue(deltaY / deltaT)}/s`);
   return delta(parts, first, second);
 }

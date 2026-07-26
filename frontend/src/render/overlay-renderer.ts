@@ -1,6 +1,4 @@
-import type { Annotation } from "../generated/session";
 import {
-  formatValue,
   insidePlot,
   projectX,
   projectY,
@@ -21,13 +19,18 @@ export interface OverlayPalette {
   series: string[];
 }
 
-/**
- * Which coordinates annotations live in.
- *
- * `time` panels place them at `(time, value)` and read deltas against the
- * time axis; `plot` panels supply explicit positions and report `Δx`/`Δy`.
- */
-export type AnnotationSpace = "time" | "plot";
+export interface OverlayAnnotation {
+  x: number;
+  y: number;
+  colorIndex: number;
+  label: string;
+}
+
+export interface OverlayDelta {
+  label: string;
+  first: XyMarker;
+  second: XyMarker;
+}
 
 export interface OverlayState {
   cursorT: number | null;
@@ -36,17 +39,10 @@ export interface OverlayState {
   /** Data-space trajectory points marked by the global cursor (XY mode). */
   xyMarkers: readonly XyMarker[];
   box: { x0: number; y0: number; x1: number; y1: number } | null;
-  annotations: readonly Annotation[];
-  annotationColorIndices: readonly number[];
-  /** C-channel values per annotation, or null when unavailable. */
-  annotationColorValues: readonly (number | null)[];
-  annotationSpace: AnnotationSpace;
-  /**
-   * Plot-space coordinates per annotation, or null when the annotation has
-   * no position in this mode. Ignored when `annotationSpace` is `time`.
-   */
-  annotationPoints: readonly (XyMarker | null)[];
-  showDelta: boolean;
+  /** Mode-resolved plot coordinates and readouts. */
+  annotations: readonly OverlayAnnotation[];
+  /** Mode-native delta geometry and copy. */
+  delta: OverlayDelta | null;
 }
 
 export type CursorStyle = "none" | "dot" | "line";
@@ -195,49 +191,33 @@ export class OverlayRenderer {
   ): void {
     context.save();
     context.font = `10px ${palette.fontMono}`;
-    const timeSpace = state.annotationSpace === "time";
     state.annotations.forEach((annotation, index) => {
-      const point = timeSpace
-        ? { x: annotation.anchor, y: annotation.pinned_value }
-        : (state.annotationPoints[index] ?? null);
-      if (point === null) return;
       if (
-        timeSpace &&
-        (annotation.anchor < layout.xRange.min ||
-          annotation.anchor > layout.xRange.max)
+        annotation.x < layout.xRange.min ||
+        annotation.x > layout.xRange.max
       ) {
         return;
       }
-      const x = projectX(layout, point.x);
-      const y = projectY(layout, point.y);
+      const x = projectX(layout, annotation.x);
+      const y = projectY(layout, annotation.y);
       context.beginPath();
       context.fillStyle = palette.surface0;
       context.strokeStyle =
-        palette.series[state.annotationColorIndices[index] ?? -1] ??
-        palette.fg2;
+        palette.series[annotation.colorIndex] ?? palette.fg2;
       context.lineWidth = 1.6;
       context.setLineDash([]);
       context.arc(x, y, 3.5, 0, Math.PI * 2);
       context.fill();
       context.stroke();
-      const label = annotation.label === "" ? "" : ` ${annotation.label}`;
-      const text = `${marker(index)}${label} ${formatValue(annotation.pinned_value)} @ ${annotation.anchor.toFixed(3)}`;
+      const text = `${marker(index)} ${annotation.label}`;
       const textWidth = context.measureText(text).width;
       context.fillStyle = palette.surface2;
       context.fillRect(x + 7, y - 20, textWidth + 14, 16);
       context.fillStyle = palette.fg1;
       context.fillText(text, x + 14, y - 8);
     });
-    if (state.showDelta && state.annotations.length >= 2) {
-      this.drawDelta(
-        context,
-        layout,
-        state.annotations,
-        state.annotationSpace,
-        state.annotationPoints,
-        state.annotationColorValues,
-        palette,
-      );
+    if (state.delta !== null) {
+      this.drawDelta(context, layout, state.delta, palette);
     }
     context.restore();
   }
@@ -245,25 +225,9 @@ export class OverlayRenderer {
   private drawDelta(
     context: CanvasRenderingContext2D,
     layout: PlotLayout,
-    annotations: readonly Annotation[],
-    space: AnnotationSpace,
-    points: readonly (XyMarker | null)[],
-    colorValues: readonly (number | null)[],
+    delta: OverlayDelta,
     palette: OverlayPalette,
   ): void {
-    const firstIndex = annotations.length - 2;
-    const secondIndex = annotations.length - 1;
-    const first = annotations[firstIndex];
-    const second = annotations[secondIndex];
-    if (first === undefined || second === undefined) return;
-    const timeSpace = space === "time";
-    const firstPoint = timeSpace
-      ? { x: first.anchor, y: first.pinned_value }
-      : (points[firstIndex] ?? null);
-    const secondPoint = timeSpace
-      ? { x: second.anchor, y: second.pinned_value }
-      : (points[secondIndex] ?? null);
-    if (firstPoint === null || secondPoint === null) return;
     context.save();
     context.strokeStyle = palette.fg3;
     context.globalAlpha = 0.6;
@@ -271,42 +235,16 @@ export class OverlayRenderer {
     context.setLineDash([3, 3]);
     context.beginPath();
     context.moveTo(
-      projectX(layout, firstPoint.x),
-      projectY(layout, firstPoint.y),
+      projectX(layout, delta.first.x),
+      projectY(layout, delta.first.y),
     );
     context.lineTo(
-      projectX(layout, secondPoint.x),
-      projectY(layout, secondPoint.y),
+      projectX(layout, delta.second.x),
+      projectY(layout, delta.second.y),
     );
     context.stroke();
     context.restore();
-    const deltaT = second.anchor - first.anchor;
-    const deltaV = second.pinned_value - first.pinned_value;
-    const parts = [`Δt ${formatValue(deltaT)} s`];
-    if (timeSpace) {
-      // Time mode: Δv and slope are meaningful against the time axis.
-      const slope = deltaT === 0 ? null : deltaV / deltaT;
-      parts.push(`Δv ${formatValue(deltaV)}`);
-      if (slope !== null) parts.push(`slope ${formatValue(slope)}/s`);
-    } else {
-      parts.push(
-        `Δx ${formatValue(secondPoint.x - firstPoint.x)}`,
-        `Δy ${formatValue(secondPoint.y - firstPoint.y)}`,
-      );
-      const firstColor = colorValues[firstIndex];
-      const secondColor = colorValues[secondIndex];
-      if (
-        firstColor !== null &&
-        firstColor !== undefined &&
-        secondColor !== null &&
-        secondColor !== undefined &&
-        Number.isFinite(firstColor) &&
-        Number.isFinite(secondColor)
-      ) {
-        parts.push(`Δc ${formatValue(secondColor - firstColor)}`);
-      }
-    }
-    const text = parts.join(" · ");
+    const text = delta.label;
     context.save();
     context.font = `10px ${palette.fontMono}`;
     const textWidth = context.measureText(text).width;

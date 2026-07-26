@@ -4,7 +4,6 @@ import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
-import { lerpSample } from "../app/xy";
 import {
   formatCursorTime,
   formatValue,
@@ -17,11 +16,10 @@ import {
   type TileResponse,
 } from "../generated/protocol";
 import type { PanelState } from "../generated/session";
-import { resolveSeriesStyle } from "../render/canvas-renderer";
 import type { CursorStyle } from "../render/overlay-renderer";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
-import { basename, bindPointerDrag, required, signalLabel } from "./dom";
-import type { PanelCursor } from "./panel";
+import { basename, bindPointerDrag, required } from "./dom";
+import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
@@ -146,9 +144,9 @@ export class AppShell {
           this.workspace.addAnnotation(id, {
             id: crypto.randomUUID(),
             series_path: hit.path,
-            domain: "time",
-            anchor: hit.time,
-            pinned_value: hit.value,
+            domain: hit.domain,
+            anchor: hit.anchor,
+            pinned_value: hit.pinnedValue,
             label: "",
           });
           this.workspaceView?.refreshPanelStates();
@@ -1004,27 +1002,16 @@ export class AppShell {
 
   private setCursor(
     panelId: string,
-    cursor: PanelCursor | null,
+    cursor: PlotCursor | null,
     client: { x: number; y: number } | null,
   ): void {
     if (this.cursorStyle === "none") cursor = null;
     const panel = this.workspace.panel(panelId);
     const localDomain = panel?.mode === "fft" || panel?.mode === "histogram";
-    if (
-      cursor?.domain === "frequency" ||
-      cursor?.domain === "histogram" ||
-      (cursor === null && localDomain)
-    ) {
-      this.workspaceView?.setLocalCursor(panelId, cursor?.value ?? null);
-      if (cursor?.domain === "frequency") {
-        required(this.root, ".cursor-readout").textContent =
-          `f = ${formatValue(cursor.value)} Hz`;
-      } else if (cursor?.domain === "histogram") {
-        required(this.root, ".cursor-readout").textContent =
-          `bin ${formatValue(cursor.low)} – ${formatValue(cursor.high)}`;
-      } else {
-        this.renderLinkedCursorReadout();
-      }
+    if (cursor?.link === "local" || (cursor === null && localDomain)) {
+      this.workspaceView?.setLocalCursor(panelId, cursor?.x ?? null);
+      if (cursor === null) this.renderLinkedCursorReadout();
+      else required(this.root, ".cursor-readout").textContent = cursor.heading;
       this.renderTooltip(
         panelId,
         this.cursorStyle === "line" ? cursor : null,
@@ -1032,16 +1019,14 @@ export class AppShell {
       );
       return;
     }
-    const cursorT = cursor?.domain === "time" ? cursor.value : null;
+    const cursorT = cursor?.link === "time" ? cursor.x : null;
     this.time.setCursor(cursorT);
     const state = this.time.snapshot();
     this.workspaceView?.setCursor(state.cursorT);
     this.renderLinkedCursorReadout();
     this.renderTooltip(
       panelId,
-      this.cursorStyle === "line" && state.cursorT !== null
-        ? { domain: "time", value: state.cursorT }
-        : null,
+      this.cursorStyle === "line" && state.cursorT !== null ? cursor : null,
       this.cursorStyle === "line" ? client : null,
     );
     this.scheduleLiveValues(this.cursorStyle === "none" ? null : state.cursorT);
@@ -1075,7 +1060,7 @@ export class AppShell {
 
   private renderTooltip(
     panelId: string,
-    cursor: PanelCursor | null,
+    cursor: PlotCursor | null,
     client: { x: number; y: number } | null,
   ): void {
     const tip = required<HTMLElement>(this.root, ".plot-tip");
@@ -1084,53 +1069,20 @@ export class AppShell {
       tip.hidden = true;
       return;
     }
-    const rows =
-      cursor.domain === "frequency" || cursor.domain === "histogram"
-        ? cursor.rows.map((row) =>
-            tooltipRow(
-              `var(--series-${String(row.colorIndex + 1)})`,
-              signalLabel(row.path),
-              cursor.domain === "frequency"
-                ? `${formatValue(row.value)} dB`
-                : `${formatValue(row.value)} samples`,
-            ),
-          )
-        : panel.mode === "time"
-          ? (this.tilesByPanel.get(panelId)?.series ?? [])
-              .filter((tile) =>
-                panel.series.some(
-                  (series) =>
-                    series.visible && series.path === tile.signal_path,
-                ),
-              )
-              .map((tile) => {
-                const series = panel.series.find(
-                  (entry) => entry.path === tile.signal_path,
-                );
-                const style = resolveSeriesStyle(
-                  series?.color_slot ?? 1,
-                  series?.dash ?? "solid",
-                );
-                return tooltipRow(
-                  `var(--series-${String(style.colorIndex + 1)})`,
-                  signalLabel(tile.signal_path),
-                  formatValue(valueAtTime(tile.bins, cursor.value)),
-                );
-              })
-          : panel.mode === "xy"
-            ? this.xyTooltipRows(panel, cursor.value)
-            : [];
+    const rows = cursor.rows.map((row) =>
+      tooltipRow(
+        `var(--series-${String(row.colorIndex + 1)})`,
+        row.label,
+        row.unit === null
+          ? formatValue(row.value)
+          : `${formatValue(row.value)} ${row.unit}`,
+      ),
+    );
     if (rows.length === 0) {
       tip.hidden = true;
       return;
     }
-    const header =
-      cursor.domain === "time"
-        ? `t = ${formatCursorTime(cursor.value)}`
-        : cursor.domain === "frequency"
-          ? `f = ${formatValue(cursor.value)} Hz`
-          : `bin ${formatValue(cursor.low)} – ${formatValue(cursor.high)}`;
-    tip.replaceChildren(tooltipHeader(header), ...rows);
+    tip.replaceChildren(tooltipHeader(cursor.heading), ...rows);
     tip.hidden = false;
     const rect = tip.getBoundingClientRect();
     const x =
@@ -1142,62 +1094,6 @@ export class AppShell {
         ? client.y - 14 - rect.height
         : client.y + 14;
     tip.style.transform = `translate(${String(x)}px, ${String(y)}px)`;
-  }
-
-  private xyTooltipRows(panel: PanelState, cursorT: number): HTMLElement[] {
-    const samples = this.samplesByPanel.get(panel.id)?.series ?? [];
-    const byPath = new Map(
-      samples.map((series) => [series.signal_path, series]),
-    );
-    const entries = new Map<
-      string,
-      { roles: string[]; color: string; value: string }
-    >();
-    const add = (role: string, path: string, color: string): void => {
-      const existing = entries.get(path);
-      if (existing !== undefined) {
-        if (!existing.roles.includes(role)) existing.roles.push(role);
-        return;
-      }
-      const sample = byPath.get(path);
-      entries.set(path, {
-        roles: [role],
-        color,
-        value:
-          sample === undefined
-            ? "—"
-            : formatValue(lerpSample(sample.time, sample.values, cursorT)),
-      });
-    };
-    if (panel.x_signal !== null) {
-      add("x", panel.x_signal, "var(--fg-2)");
-    }
-    panel.series
-      .filter((series) => series.visible)
-      .forEach((series, index) => {
-        const style = resolveSeriesStyle(series.color_slot, series.dash);
-        add(
-          index === 0 ? "y" : `y${String(index + 1)}`,
-          series.path,
-          `var(--series-${String(style.colorIndex + 1)})`,
-        );
-      });
-    if (panel.color_signal === "time") {
-      entries.set("\u0000time", {
-        roles: ["c"],
-        color: "var(--fg-2)",
-        value: formatCursorTime(cursorT),
-      });
-    } else if (panel.color_signal !== null) {
-      add("c", panel.color_signal, "var(--fg-2)");
-    }
-    return [...entries.entries()].map(([path, entry]) =>
-      tooltipRow(
-        entry.color,
-        `${entry.roles.join("/")} · ${path === "\u0000time" ? "time" : path}`,
-        entry.value,
-      ),
-    );
   }
 
   private hideTooltip(): void {

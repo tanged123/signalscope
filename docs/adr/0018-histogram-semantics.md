@@ -39,6 +39,10 @@ This is therefore a design decision, not an extraction.
 - **Cursor inspection is bin-local.** The line cursor reports the selected
   bin interval plus each visible series' sample count, and the dot cursor
   marks the counts at that bin. Bin values are not published as linked time.
+- **Annotations and statistics are distribution-native.** A click selects the
+  nearest visible series in that bin. Retained annotations store a source
+  value anchor and resolve to the current bin after rebinning. Deltas report
+  `Δvalue` and `Δcount`; statistics describe the source values plus bin count.
 - **Axes** are `value (<unit>)` on x and `count` on y.
 - **No zoom or pan.** The bin edges are a function of the visible window, so
   dragging the x axis would show bins that no longer describe what is drawn.

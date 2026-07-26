@@ -108,10 +108,12 @@ test("XY capabilities share time anchors and report X, Y and C statistics", () =
     "y · demo/y",
     "c · demo/c",
   ]);
-  expect(plot.delta([
-    mustResolve(plot, annotation("time", 0, 2)),
-    mustResolve(plot, annotation("time", 2, 8)),
-  ])?.label).toBe("Δt 2.0000 s · Δx 4.0000 · Δy 6.0000 · Δc 20.0000");
+  expect(
+    plot.delta([
+      mustResolve(plot, annotation("time", 0, 2)),
+      mustResolve(plot, annotation("time", 2, 8)),
+    ])?.label,
+  ).toBe("Δt 2.0000 s · Δx 4.0000 · Δy 6.0000 · Δc 20.0000");
 });
 
 test("FFT capabilities retain frequency anchors and follow recomputed spectra", () => {
@@ -166,9 +168,7 @@ test("histogram capabilities retain source anchors and resolve current bins", ()
       },
     ],
   });
-  const resolved = plot.resolveAnnotation(
-    annotation("distribution", 7, 4),
-  );
+  const resolved = plot.resolveAnnotation(annotation("distribution", 7, 4));
 
   expect(plot.interaction.cursorLink).toBe("local");
   expect(resolved).toMatchObject({ x: 7.5, y: 4 });
@@ -186,7 +186,11 @@ test("histogram capabilities retain source anchors and resolve current bins", ()
       mustResolve(plot, annotation("distribution", 7, 4)),
     ])?.label,
   ).toBe("Δvalue 5.0000 · Δcount 2.0000");
-  expect(
-    plot.resolveAnnotation(annotation("frequency", 7, 4)),
-  ).toBeNull();
+  expect(plot.annotationAt(layout, { x: 70, y: 95 }, 14)).toMatchObject({
+    path: "demo/y",
+    domain: "distribution",
+    anchor: 7,
+    pinnedValue: 4,
+  });
+  expect(plot.resolveAnnotation(annotation("frequency", 7, 4))).toBeNull();
 });

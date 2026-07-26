@@ -37,3 +37,12 @@ Session schema version 3 moves the single top-level panel grid into
 existing panels, focus, and layout in `Workspace 1`. Theme, linked time, and
 favorites remain session-global. See ADR 0010 for the product and chrome
 decision.
+
+## Amendment (2026-07-26, plot domains)
+
+Session schema version 6 replaces time-only annotation coordinates with a
+domain-tagged anchor: `time`, `frequency`, or `distribution`. The stored anchor
+identifies the source-domain location while `pinned_value` is retained as
+historical context. Plot adapters resolve the current display position after
+FFT recomputation or histogram rebinning. The v5-to-v6 migration maps existing
+`time`/`value` annotations to the `time` domain without changing their meaning.

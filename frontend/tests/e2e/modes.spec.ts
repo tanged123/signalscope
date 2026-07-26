@@ -283,6 +283,44 @@ test.describe("panel modes", () => {
     );
   });
 
+  for (const mode of [
+    { pill: "FFT", delta: "Δf", stats: "peak f" },
+    { pill: "H", delta: "Δvalue", stats: "bins" },
+  ]) {
+    test(`${mode.pill} supports retained annotations, deltas, and native stats`, async ({
+      page,
+      isMobile,
+    }) => {
+      test.skip(isMobile, "desktop interaction");
+      const panel = page.locator(".panel").first();
+      await panel.locator(".mode-pill", { hasText: mode.pill }).click();
+      await panel.locator(".panel-stats-toggle").click();
+      await expect(panel.locator(".panel-stats")).toBeVisible();
+      await expect(panel.locator(".panel-stats")).toContainText(mode.stats);
+
+      const [firstPoint] = await trajectoryPoints(panel, 1);
+      expect(firstPoint).toBeDefined();
+      const overlay = panel.locator(".overlay-canvas");
+      if (firstPoint !== undefined) {
+        await overlay.click({ position: firstPoint });
+      }
+      const pointsAfterReflow = await trajectoryPoints(panel, 2);
+      expect(pointsAfterReflow).toHaveLength(2);
+      const secondPoint = pointsAfterReflow[1];
+      if (secondPoint !== undefined) {
+        await overlay.click({ position: secondPoint });
+      }
+      const list = panel.locator(".panel-annotations");
+      await expect(list.locator(".annotation-row")).toHaveCount(2);
+      await expect(list.locator(".annotation-delta")).toContainText(mode.delta);
+
+      await panel.getByRole("button", { name: "T", exact: true }).click();
+      await expect(list).toBeHidden();
+      await panel.locator(".mode-pill", { hasText: mode.pill }).click();
+      await expect(list.locator(".annotation-row")).toHaveCount(2);
+    });
+  }
+
   test("the toolbar stats toggle reaches every panel", async ({
     page,
     isMobile,

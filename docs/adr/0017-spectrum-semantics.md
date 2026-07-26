@@ -49,6 +49,10 @@ Every choice is made once, here, and implemented in
   plus interpolated amplitude in dB for every visible spectrum, and the dot
   cursor marks those intersections. Frequency is not published as linked
   time, so inspecting an FFT cannot move time or XY cursors.
+- **Annotations and statistics are frequency-native.** Retained annotations
+  store a frequency anchor and resolve against each recomputed spectrum.
+  Deltas report `Δf` and `ΔdB`. Statistics report peak frequency, peak level,
+  displayed span, and bin count rather than time-series mean/RMS.
 
 ## Consequences
 

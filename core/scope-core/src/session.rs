@@ -394,8 +394,8 @@ mod tests {
         let session = from_json(&json).expect("v5 session migrates");
         let annotation = &session.tabs[0].panels[0].annotations[0];
         assert_eq!(annotation.domain, AnnotationDomain::Time);
-        assert_eq!(annotation.anchor, 12.5);
-        assert_eq!(annotation.pinned_value, 42.0);
+        assert!((annotation.anchor - 12.5).abs() < f64::EPSILON);
+        assert!((annotation.pinned_value - 42.0).abs() < f64::EPSILON);
         assert_eq!(annotation.label, "peak");
     }
 

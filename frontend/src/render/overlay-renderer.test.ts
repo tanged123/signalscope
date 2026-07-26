@@ -62,11 +62,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     xyMarkers: [],
     box: { x0: 100, y0: 50, x1: 200, y1: 150 },
     annotations: [],
-    annotationColorIndices: [],
-    annotationSpace: "time",
-    annotationPoints: [],
-    annotationColorValues: [],
-    showDelta: false,
+    delta: null,
   });
   expect(calls).toContain(`strokeStyle:${palette.amber}`);
   expect(calls).toContain(`fillStyle:${palette.amberFill}`);
@@ -80,11 +76,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     xyMarkers: [],
     box: null,
     annotations: [],
-    annotationColorIndices: [],
-    annotationSpace: "time",
-    annotationPoints: [],
-    annotationColorValues: [],
-    showDelta: false,
+    delta: null,
   });
   expect(calls).toContain("strokeStyle:#407fd0");
   expect(calls).toContain("arc");
@@ -132,11 +124,7 @@ test("draws XY cursor markers as hollow amber rings", () => {
     xyMarkers: [{ x: 30, y: 0 }],
     box: null,
     annotations: [],
-    annotationColorIndices: [],
-    annotationSpace: "time",
-    annotationPoints: [],
-    annotationColorValues: [],
-    showDelta: false,
+    delta: null,
   });
   expect(calls).toContain("arc");
   expect(calls).toContain("lineTo");
@@ -185,30 +173,23 @@ test("places annotations at supplied plot points when given them", () => {
     box: null,
     annotations: [
       {
-        id: "a",
-        series_path: "s",
-        domain: "time",
-        anchor: 10,
-        pinned_value: 1,
-        label: "",
+        x: 10,
+        y: 100,
+        colorIndex: 0,
+        label: "10.0000 · 100.0000",
       },
       {
-        id: "b",
-        series_path: "s",
-        domain: "time",
-        anchor: 20,
-        pinned_value: 2,
-        label: "",
+        x: 40,
+        y: 150,
+        colorIndex: 0,
+        label: "40.0000 · 150.0000",
       },
     ],
-    annotationColorIndices: [0, 0],
-    annotationSpace: "plot",
-    annotationPoints: [
-      { x: 10, y: 100 },
-      { x: 40, y: 150 },
-    ],
-    annotationColorValues: [10, 14],
-    showDelta: true,
+    delta: {
+      label: "Δx 30.0000 · Δy 50.0000 · Δc 4.0000",
+      first: { x: 10, y: 100 },
+      second: { x: 40, y: 150 },
+    },
   };
   renderer.draw(layout, state);
   expect(calls.join(" ")).toContain("Δx");

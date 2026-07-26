@@ -26,16 +26,19 @@ import {
   type Range,
   type ZoomDragMode,
 } from "../app/plot-math";
-import {
-  nearestAnnotation,
-  nearestVertex,
-  type VertexHit,
-} from "../app/plot-hit";
 import { histogram } from "../app/histogram";
+import {
+  policyFor,
+  prepareFftPlot,
+  prepareHistogramPlot,
+  prepareTimePlot,
+  prepareXyPlot,
+  type AnnotationAnchor,
+  type PlotCursor,
+  type PreparedPlot,
+} from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
-import { visibleStats } from "../app/stats";
 import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
-import { nearestXyPoint } from "../app/xy-hit";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
@@ -50,29 +53,13 @@ import {
   type CursorPoint,
   type CursorStyle,
 } from "../render/overlay-renderer";
-import { MODE_TRAITS, traits } from "../app/panel-mode";
 import { YAxisPolicy } from "../render/y-axis";
 import { required, signalLabel } from "./dom";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 
-export interface DomainCursorRow {
-  path: string;
-  value: number;
-  colorIndex: number;
-}
-
-export type PanelCursor =
-  | { domain: "time"; value: number }
-  | { domain: "frequency"; value: number; rows: DomainCursorRow[] }
-  | {
-      domain: "histogram";
-      value: number;
-      low: number;
-      high: number;
-      rows: DomainCursorRow[];
-    };
+export type PanelCursor = PlotCursor;
 
 const MODES: readonly { mode: PanelMode; label: string }[] = [
   { mode: "time", label: "T" },
@@ -116,7 +103,7 @@ export interface PanelCallbacks {
   onTimeWindow(id: string, t0: number, t1: number): void;
   onYRange(id: string, range: readonly [number, number]): void;
   onXRange(id: string, range: readonly [number, number]): void;
-  onPinAnnotation(id: string, hit: VertexHit): void;
+  onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
   onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
   onFitView(id: string): void;
@@ -154,6 +141,7 @@ export class PanelView {
   private lastTiles: TileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
+  private preparedPlot: PreparedPlot | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
   private xyTraces: {
     path: string;
@@ -168,10 +156,6 @@ export class PanelView {
     x: number[];
     y: number[];
   }[] = [];
-  private histogramBins: {
-    edges: number[];
-    series: { path: string; colorIndex: number; counts: number[] }[];
-  } | null = null;
   private cursorT: number | null = null;
   private cursorStyle: CursorStyle = "none";
   private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -474,8 +458,9 @@ export class PanelView {
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
     const note = required<HTMLElement>(this.element, ".panel-mode-note");
-    note.hidden = !MODE_TRAITS[state.mode].windowNote;
-    if (!note.hidden) note.textContent = "window: visible t";
+    const windowNote = policyFor(state.mode).windowNote;
+    note.hidden = windowNote === null;
+    if (windowNote !== null) note.textContent = windowNote;
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
       maximized ? "Restore panel" : "Maximize panel";
     required<HTMLButtonElement>(
@@ -518,10 +503,11 @@ export class PanelView {
     this.lastTiles = tiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
+    this.preparedPlot = null;
     this.domainSeries = [];
-    this.histogramBins = null;
     const elapsed = this.renderForMode(state, tiles, samples, window);
     this.renderStats();
+    this.renderAnnotationList(state);
     this.drawOverlay();
     return elapsed;
   }
@@ -545,6 +531,20 @@ export class PanelView {
       (tile) => bySeries.get(tile.signal_path)?.visible ?? true,
     );
     const response = { request_id: tiles.request_id, series: shown };
+    this.preparedPlot = prepareTimePlot({
+      series: shown.map((tile) => {
+        const series = bySeries.get(tile.signal_path);
+        return {
+          path: tile.signal_path,
+          colorIndex: resolveSeriesStyle(
+            series?.color_slot ?? 1,
+            series?.dash ?? "solid",
+          ).colorIndex,
+          bins: tile.bins,
+        };
+      }),
+      window,
+    });
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
     const yRange = this.yAxis.resolve(
       seriesKey,
@@ -700,6 +700,18 @@ export class PanelView {
           }
         : {}),
     };
+    this.preparedPlot = prepareXyPlot({
+      x: { path: state.x_signal, values: xSeries.values },
+      series: this.xyTraces,
+      color:
+        colorSeries === null
+          ? null
+          : {
+              path: state.color_signal ?? "time",
+              values:
+                colorSeries === "time" ? xSeries.time : (colorColumns[0] ?? []),
+            },
+    });
     return this.renderer.renderPaths(paths, options);
   }
 
@@ -745,6 +757,14 @@ export class PanelView {
       );
     }
     this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
+    this.preparedPlot = prepareFftPlot({
+      series: this.domainSeries.map((series) => ({
+        path: series.path,
+        colorIndex: series.colorIndex,
+        frequency: series.x,
+        amplitudeDb: series.y,
+      })),
+    });
     if (paths.length === 0) return 0;
     const xRange = state.x_range ?? [minFrequency, maxFrequency];
     const yRange = state.y_range ?? [-90, 3];
@@ -787,6 +807,7 @@ export class PanelView {
       path: string;
       colorIndex: number;
       counts: number[];
+      sourceValues: number[];
     }[] = [];
     const paths: PlotPath[] = binned.counts.map((counts, index) => {
       const points: number[] = [];
@@ -809,6 +830,7 @@ export class PanelView {
           path: series.path,
           colorIndex: style.colorIndex,
           counts,
+          sourceValues: columns[index] ?? [],
         });
       }
       return {
@@ -818,7 +840,10 @@ export class PanelView {
         width: series?.width ?? 1.4,
       };
     });
-    this.histogramBins = { edges, series: histogramSeries };
+    this.preparedPlot = prepareHistogramPlot({
+      edges,
+      series: histogramSeries,
+    });
     const units = visible.map(
       (series) => byPath.get(series.path)?.unit ?? null,
     );
@@ -865,7 +890,7 @@ export class PanelView {
   }
 
   setCursor(cursorT: number | null): void {
-    if (!traits(this.lastState?.mode).globalCursor) return;
+    if (this.preparedPlot?.interaction.cursorLink !== "time") return;
     this.cursorT = cursorT;
     this.drawOverlay();
   }
@@ -905,78 +930,36 @@ export class PanelView {
   private removeAt(offsetX: number, offsetY: number, radius: number): boolean {
     const layout = this.renderer.lastLayout();
     const state = this.lastState;
-    if (layout === null || state === null) return false;
-    if (state.mode === "xy") {
-      const points = this.annotationPoints(state);
-      const index = state.annotations.findIndex((_, position) => {
-        const point = points[position];
-        if (point === null || point === undefined) return false;
-        return (
+    const prepared = this.preparedPlot;
+    if (layout === null || state === null || prepared === null) return false;
+    const annotation = state.annotations
+      .filter((entry) => entry.domain === prepared.domain)
+      .map((entry) => prepared.resolveAnnotation(entry))
+      .filter((entry) => entry !== null)
+      .find(
+        (entry) =>
           Math.hypot(
-            projectX(layout, point.x) - offsetX,
-            projectY(layout, point.y) - offsetY,
-          ) <= radius
-        );
-      });
-      const annotation = index === -1 ? undefined : state.annotations[index];
-      if (annotation === undefined) return false;
-      this.callbacks.onRemoveAnnotation(this.id, annotation.id);
-      return true;
-    }
-    if (state.mode !== "time") return false;
-    const existing = nearestAnnotation(
-      state.annotations,
-      layout,
-      offsetX,
-      offsetY,
-      radius,
-    );
-    if (existing === null) return false;
-    this.callbacks.onRemoveAnnotation(this.id, existing);
+            projectX(layout, entry.x) - offsetX,
+            projectY(layout, entry.y) - offsetY,
+          ) <= radius,
+      );
+    if (annotation === undefined) return false;
+    this.callbacks.onRemoveAnnotation(this.id, annotation.annotation.id);
     return true;
   }
 
   /** Pins the nearest plotted vertex under the pixel, when one is in range. */
   private pinAt(offsetX: number, offsetY: number, radius: number): void {
     const layout = this.renderer.lastLayout();
-    const state = this.lastState;
-    if (layout === null || state === null) return;
-    if (state.mode === "xy") {
-      const hit = nearestXyPoint(
-        this.xyTraces,
-        layout,
-        offsetX,
-        offsetY,
-        radius,
-      );
-      if (hit !== null) {
-        this.callbacks.onPinAnnotation(this.id, {
-          path: hit.path,
-          time: hit.time,
-          value: hit.y,
-          distance: 0,
-        });
-      }
-      return;
-    }
-    if (state.mode !== "time") return;
-    const tiles = this.lastTiles;
-    if (tiles === null) return;
-    const visible = new Set(
-      state.series
-        .filter((series) => series.visible)
-        .map((series) => series.path),
-    );
-    const hit = nearestVertex(
-      tiles.series
-        .filter((tile) => visible.has(tile.signal_path))
-        .map((tile) => ({ path: tile.signal_path, bins: tile.bins })),
+    if (layout === null) return;
+    const hit = this.preparedPlot?.annotationAt(
       layout,
-      offsetX,
-      offsetY,
+      { x: offsetX, y: offsetY },
       radius,
     );
-    if (hit !== null) this.callbacks.onPinAnnotation(this.id, hit);
+    if (hit !== null && hit !== undefined) {
+      this.callbacks.onPinAnnotation(this.id, hit);
+    }
   }
 
   private beginTouch(event: PointerEvent, layout: PlotLayout): void {
@@ -1174,60 +1157,32 @@ export class PanelView {
     offsetY: number,
     xyRadius: number,
   ): PanelCursor | null {
-    const mode = this.lastState?.mode;
-    if (mode === "xy") {
-      const time =
-        nearestXyPoint(this.xyTraces, layout, offsetX, offsetY, xyRadius)
-          ?.time ?? null;
-      return time === null ? null : { domain: "time", value: time };
-    }
-    const value = invertX(layout, offsetX);
-    if (!Number.isFinite(value)) return null;
-    if (mode === "time") return { domain: "time", value };
-    if (mode === "fft") {
-      return {
-        domain: "frequency",
-        value,
-        rows: this.domainSeries.map((series) => ({
-          path: series.path,
-          colorIndex: series.colorIndex,
-          value: lerpSample(series.x, series.y, value),
-        })),
-      };
-    }
-    if (mode !== "histogram" || this.histogramBins === null) return null;
-    return this.histogramCursorAt(value);
-  }
-
-  private histogramCursorAt(value: number): PanelCursor | null {
-    if (this.histogramBins === null) return null;
-    const edges = this.histogramBins.edges;
-    const bin = edges.findIndex(
-      (edge, index) =>
-        index < edges.length - 1 &&
-        value >= edge &&
-        (value < (edges[index + 1] ?? edge) ||
-          (index === edges.length - 2 && value <= (edges[index + 1] ?? edge))),
+    return (
+      this.preparedPlot?.cursorAt(
+        layout,
+        { x: offsetX, y: offsetY },
+        xyRadius,
+      ) ?? null
     );
-    if (bin < 0) return null;
-    return {
-      domain: "histogram",
-      value,
-      low: edges[bin] ?? value,
-      high: edges[bin + 1] ?? value,
-      rows: this.histogramBins.series.map((series) => ({
-        path: series.path,
-        colorIndex: series.colorIndex,
-        value: series.counts[bin] ?? 0,
-      })),
-    };
   }
 
   private drawOverlay(): void {
     const state = this.lastState;
-    const mode = traits(state?.mode);
+    const prepared = this.preparedPlot;
     const annotations =
-      state !== null && mode.annotations ? state.annotations : [];
+      state === null || prepared === null
+        ? []
+        : state.annotations.filter(
+            (annotation) => annotation.domain === prepared.domain,
+          );
+    const resolved = annotations.map(
+      (annotation) => prepared?.resolveAnnotation(annotation) ?? null,
+    );
+    const resolvedAnnotations = resolved.filter(
+      (annotation) => annotation !== null,
+    );
+    const delta =
+      prepared === null ? null : prepared.delta(resolvedAnnotations);
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -1240,7 +1195,7 @@ export class PanelView {
           })
         : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
-      cursorT: mode.verticalCursor ? cursorT : null,
+      cursorT: state?.mode === "xy" ? null : cursorT,
       cursorStyle: this.cursorStyle,
       cursorPoints:
         this.cursorStyle === "dot" && cursorT !== null
@@ -1248,19 +1203,13 @@ export class PanelView {
           : [],
       xyMarkers,
       box: this.box,
-      annotations,
-      annotationColorIndices: annotations.map((annotation) => {
-        const series = bySeries.get(annotation.series_path);
-        return resolveSeriesStyle(
-          series?.color_slot ?? 1,
-          series?.dash ?? "solid",
-        ).colorIndex;
-      }),
-      annotationSpace: mode.annotationSpace,
-      annotationPoints: state === null ? [] : this.annotationPoints(state),
-      annotationColorValues:
-        state === null ? [] : this.annotationColorValues(state),
-      showDelta: annotations.length >= 2,
+      annotations: resolvedAnnotations.map((annotation) => ({
+        x: annotation.x,
+        y: annotation.y,
+        colorIndex: annotation.colorIndex,
+        label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label} `}${annotation.summary}`,
+      })),
+      delta,
     });
   }
 
@@ -1277,11 +1226,19 @@ export class PanelView {
       }));
     }
     if (mode === "histogram") {
-      const cursor = this.histogramCursorAt(cursorT);
-      const rows = cursor?.domain === "histogram" ? cursor.rows : [];
-      return rows.map((row) => ({
-        value: row.value,
-        colorIndex: row.colorIndex,
+      const layout = this.renderer.lastLayout();
+      if (layout === null) return [];
+      const cursor = this.preparedPlot?.cursorAt(
+        layout,
+        {
+          x: projectX(layout, cursorT),
+          y: layout.plot.y + layout.plot.height / 2,
+        },
+        0,
+      );
+      return (cursor?.markers ?? []).map((point) => ({
+        value: point.y,
+        colorIndex: point.colorIndex,
       }));
     }
     return (this.lastTiles?.series ?? []).flatMap((tile) => {
@@ -1296,36 +1253,6 @@ export class PanelView {
             .colorIndex,
         },
       ];
-    });
-  }
-
-  /** Plot coordinates for each annotation in the current mode. */
-  private annotationPoints(
-    state: PanelState,
-  ): ({ x: number; y: number } | null)[] {
-    if (state.mode !== "xy") return [];
-    return state.annotations.map((annotation) => {
-      const entry = this.xyTraces.find(
-        (item) => item.path === annotation.series_path,
-      );
-      return entry === undefined
-        ? null
-        : markerAt(entry.trace, annotation.anchor);
-    });
-  }
-
-  private annotationColorValues(state: PanelState): readonly (number | null)[] {
-    if (state.mode !== "xy" || state.color_signal === null) return [];
-    if (state.color_signal === "time") {
-      return state.annotations.map((annotation) => annotation.anchor);
-    }
-    const sample = this.lastSamples?.series.find(
-      (series) => series.signal_path === state.color_signal,
-    );
-    if (sample === undefined) return [];
-    return state.annotations.map((annotation) => {
-      const value = lerpSample(sample.time, sample.values, annotation.anchor);
-      return Number.isFinite(value) ? value : null;
     });
   }
 
@@ -1433,7 +1360,13 @@ export class PanelView {
   }
 
   private interactiveMode(): boolean {
-    return traits(this.lastState?.mode).interactive;
+    const interaction = this.preparedPlot?.interaction;
+    if (interaction === undefined) return false;
+    return (
+      interaction.pan.size !== 0 ||
+      interaction.zoom.size !== 0 ||
+      interaction.fit
+    );
   }
 
   /**
@@ -1441,7 +1374,7 @@ export class PanelView {
    * panel-local value range everywhere else.
    */
   private applyXRange(min: number, max: number): void {
-    if (traits(this.lastState?.mode).xIsTime) {
+    if (this.preparedPlot?.interaction.xAxis === "linked-time") {
       this.callbacks.onTimeWindow(this.id, min, max);
     } else {
       this.callbacks.onXRange(this.id, [min, max]);
@@ -1451,39 +1384,28 @@ export class PanelView {
   private renderStats(): void {
     const strip = required<HTMLElement>(this.element, ".panel-stats");
     const state = this.lastState;
-    const tiles = this.lastTiles;
-    const window = this.lastWindow;
-    const show =
-      state !== null &&
-      MODE_TRAITS[state.mode].stats &&
-      state.show_stats &&
-      tiles !== null &&
-      window !== null;
+    const groups = this.preparedPlot?.stats() ?? [];
+    const show = state !== null && state.show_stats && groups.length > 0;
     strip.hidden = !show;
     if (!show) {
       strip.replaceChildren();
       return;
     }
-    const visible = new Set(
-      state.series
-        .filter((series) => series.visible)
-        .map((series) => series.path),
-    );
-    const rows = tiles.series
-      .filter((tile) => visible.has(tile.signal_path))
-      .map((tile) => {
-        const stats = visibleStats(tile.bins, window.t0, window.t1);
-        const row = document.createElement("span");
-        row.className = "stats-series";
-        row.append(
-          statsName(signalLabel(tile.signal_path)),
-          statsItem("min", stats.min),
-          statsItem("max", stats.max),
-          statsItem("μ", stats.mean),
-          statsItem("rms", stats.rms),
-        );
-        return row;
-      });
+    const rows = groups.map((group) => {
+      const row = document.createElement("span");
+      row.className = "stats-series";
+      row.append(
+        statsName(group.label),
+        ...group.items.map((item) =>
+          statsItem(
+            item.label === "mean" ? "μ" : item.label,
+            item.value,
+            item.unit,
+          ),
+        ),
+      );
+      return row;
+    });
     const hint = document.createElement("span");
     hint.className = "stats-hint";
     hint.textContent = "visible region · S toggles";
@@ -1492,9 +1414,13 @@ export class PanelView {
 
   private renderAnnotationList(state: PanelState): void {
     const list = required<HTMLElement>(this.element, ".panel-annotations");
-    const annotations = MODE_TRAITS[state.mode].annotations
-      ? state.annotations
-      : [];
+    const prepared = this.preparedPlot;
+    const annotations =
+      prepared === null
+        ? []
+        : state.annotations.filter(
+            (annotation) => annotation.domain === prepared.domain,
+          );
     list.hidden = annotations.length === 0;
     if (annotations.length === 0) {
       list.replaceChildren();
@@ -1508,8 +1434,15 @@ export class PanelView {
       row.className = "annotation-row";
       const text = document.createElement("span");
       text.className = "annotation-text";
+      const current = prepared?.resolveAnnotation(annotation);
+      const domainLabel =
+        annotation.domain === "time"
+          ? "t"
+          : annotation.domain === "frequency"
+            ? "f"
+            : "value";
       text.textContent =
-        `${marker(index)} t ${annotation.anchor.toFixed(3)} · v ${formatValue(annotation.pinned_value)}` +
+        `${marker(index)} ${domainLabel} ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
         (annotation.label === "" ? "" : ` "${annotation.label}"`);
       const edit = document.createElement("button");
       edit.className = "annotation-action";
@@ -1528,7 +1461,18 @@ export class PanelView {
       row.append(text, edit, remove);
       return row;
     });
-    list.replaceChildren(heading, ...rows);
+    const resolved = annotations
+      .map((annotation) => prepared?.resolveAnnotation(annotation) ?? null)
+      .filter((annotation) => annotation !== null);
+    const delta = prepared?.delta(resolved) ?? null;
+    const deltaRow = document.createElement("div");
+    deltaRow.className = "annotation-delta";
+    deltaRow.textContent = delta?.label ?? "";
+    list.replaceChildren(
+      heading,
+      ...rows,
+      ...(delta === null ? [] : [deltaRow]),
+    );
   }
 
   private openAnnotationLabelEditor(
@@ -1959,13 +1903,18 @@ function statsName(text: string): HTMLElement {
   return name;
 }
 
-function statsItem(label: string, value: number | null): HTMLElement {
+function statsItem(
+  label: string,
+  value: number | null,
+  unit: string | null = null,
+): HTMLElement {
   const item = document.createElement("span");
   item.className = "stats-item";
   const key = document.createElement("span");
   key.textContent = label;
   const reading = document.createElement("b");
-  reading.textContent = formatValue(value);
+  reading.textContent =
+    unit === null ? formatValue(value) : `${formatValue(value)} ${unit}`;
   item.append(key, reading);
   return item;
 }

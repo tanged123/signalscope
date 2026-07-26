@@ -284,9 +284,9 @@ describe("WorkspaceModel", () => {
     model.setMode(panel.id, "time");
     model.setAnnotationLabel(panel.id, "ann-1", "peak");
     expect(model.panel(panel.id)?.annotations[0]?.label).toBe("peak");
-    expect(model.panel(panel.id)?.annotations.map((item) => item.domain)).toEqual(
-      ["time", "frequency"],
-    );
+    expect(
+      model.panel(panel.id)?.annotations.map((item) => item.domain),
+    ).toEqual(["time", "frequency"]);
     model.removeAnnotation(panel.id, "ann-1");
     expect(model.panel(panel.id)?.annotations).toHaveLength(1);
   });
