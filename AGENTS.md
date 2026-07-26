@@ -78,6 +78,12 @@ Install the repository hook with `./scripts/install-hooks.sh`. Do not use a
 blanket `git add -A` or silently stage unrelated work. Review staged and
 unstaged diffs separately before committing.
 
+Completed task work must be committed before handoff. Stage only files
+belonging to the task, review staged and unstaged diffs separately, and create
+a small conventional commit after validation. Do not leave finished agent work
+uncommitted for the human to clean up. Push the completed commit only when the
+human author explicitly requests a push, including requests to trigger CI.
+
 ## Product and architecture invariants
 
 SignalScope is native software with a portable export, not a web app:
