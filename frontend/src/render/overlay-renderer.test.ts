@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 import type { PlotLayout } from "../app/plot-math";
-import { OverlayRenderer, type OverlayPalette } from "./overlay-renderer";
+import {
+  OverlayRenderer,
+  type OverlayPalette,
+  type OverlayState,
+} from "./overlay-renderer";
 
 const palette: OverlayPalette = {
   amber: "#ffa226",
@@ -60,6 +64,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     annotations: [],
     annotationColorIndices: [],
     annotationPoints: [],
+    annotationColorValues: [],
     showDelta: false,
   });
   expect(calls).toContain(`strokeStyle:${palette.amber}`);
@@ -76,6 +81,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     annotations: [],
     annotationColorIndices: [],
     annotationPoints: [],
+    annotationColorValues: [],
     showDelta: false,
   });
   expect(calls).toContain("strokeStyle:#407fd0");
@@ -126,6 +132,7 @@ test("draws XY cursor markers as hollow amber rings", () => {
     annotations: [],
     annotationColorIndices: [],
     annotationPoints: [],
+    annotationColorValues: [],
     showDelta: false,
   });
   expect(calls).toContain("arc");
@@ -167,7 +174,7 @@ test("places annotations at supplied plot points when given them", () => {
   };
   const renderer = new OverlayRenderer(canvas);
   renderer.setPalette(palette);
-  renderer.draw(layout, {
+  const state: OverlayState = {
     cursorT: null,
     cursorStyle: "none",
     cursorPoints: [],
@@ -182,7 +189,10 @@ test("places annotations at supplied plot points when given them", () => {
       { x: 10, y: 100 },
       { x: 40, y: 150 },
     ],
+    annotationColorValues: [10, 14],
     showDelta: true,
-  });
+  };
+  renderer.draw(layout, state);
   expect(calls.join(" ")).toContain("Δx");
+  expect(calls.join(" ")).toContain("Δc 4.0000");
 });

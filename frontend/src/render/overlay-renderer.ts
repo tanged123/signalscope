@@ -28,6 +28,8 @@ export interface OverlayState {
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   annotations: readonly Annotation[];
   annotationColorIndices: readonly number[];
+  /** C-channel values per annotation, or null when unavailable. */
+  annotationColorValues: readonly (number | null)[];
   /**
    * Plot-space coordinates per annotation, or null when the annotation has
    * no position in this mode. An empty array means use `(time, value)`.
@@ -228,6 +230,7 @@ export class OverlayRenderer {
         layout,
         state.annotations,
         state.annotationPoints,
+        state.annotationColorValues,
         palette,
       );
     }
@@ -239,6 +242,7 @@ export class OverlayRenderer {
     layout: PlotLayout,
     annotations: readonly Annotation[],
     points: readonly (XyMarker | null)[],
+    colorValues: readonly (number | null)[],
     palette: OverlayPalette,
   ): void {
     const firstIndex = annotations.length - 2;
@@ -284,6 +288,18 @@ export class OverlayRenderer {
         `Δx ${formatValue(secondPoint.x - firstPoint.x)}`,
         `Δy ${formatValue(secondPoint.y - firstPoint.y)}`,
       );
+      const firstColor = colorValues[firstIndex];
+      const secondColor = colorValues[secondIndex];
+      if (
+        firstColor !== null &&
+        firstColor !== undefined &&
+        secondColor !== null &&
+        secondColor !== undefined &&
+        Number.isFinite(firstColor) &&
+        Number.isFinite(secondColor)
+      ) {
+        parts.push(`Δc ${formatValue(secondColor - firstColor)}`);
+      }
     }
     const text = parts.join(" · ");
     context.save();

@@ -1157,6 +1157,8 @@ export class PanelView {
         ).colorIndex;
       }),
       annotationPoints: state === null ? [] : this.annotationPoints(state),
+      annotationColorValues:
+        state === null ? [] : this.annotationColorValues(state),
       showDelta: annotations.length >= 2,
     });
   }
@@ -1173,6 +1175,21 @@ export class PanelView {
       return entry === undefined
         ? null
         : markerAt(entry.trace, annotation.time);
+    });
+  }
+
+  private annotationColorValues(state: PanelState): readonly (number | null)[] {
+    if (state.mode !== "xy" || state.color_signal === null) return [];
+    if (state.color_signal === "time") {
+      return state.annotations.map((annotation) => annotation.time);
+    }
+    const sample = this.lastSamples?.series.find(
+      (series) => series.signal_path === state.color_signal,
+    );
+    if (sample === undefined) return [];
+    return state.annotations.map((annotation) => {
+      const value = lerpSample(sample.time, sample.values, annotation.time);
+      return Number.isFinite(value) ? value : null;
     });
   }
 
