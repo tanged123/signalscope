@@ -27,6 +27,9 @@ export class AppMenu {
     this.popover = document.createElement("div");
     this.popover.className = "app-menu";
     this.popover.role = "menu";
+    // Every other landmark in the shell names itself; the popover is opened
+    // from an icon button, so without this the menu announces unnamed.
+    this.popover.ariaLabel = "Application menu";
     this.popover.hidden = true;
     button.insertAdjacentElement("afterend", this.popover);
     button.addEventListener("click", () => {
