@@ -1,5 +1,7 @@
 /.direnv/
 /.agtx/
+/.claude/settings.local.json
+/.codex/config.toml
 /build/
 /target/
 /result
