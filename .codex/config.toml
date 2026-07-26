@@ -1,0 +1,3 @@
+[mcp_servers.agtx]
+command = "/home/tanged/.local/bin/agtx"
+args = ["mcp-serve", "/home/tanged/sources/signalscope"]
