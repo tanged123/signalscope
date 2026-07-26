@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="ds/colors_and_type.css">
+<style>
+body{margin:0;background:var(--surface-void);font-family:var(--font-ui);color:var(--fg-2)}
+a{color:var(--amber-7);text-decoration:none}a:hover{color:var(--amber-9)}
+</style>
+</helmet>
+<div style="max-width:1280px;margin:0 auto;padding:40px 44px 64px;display:flex;flex-direction:column;gap:28px">
+
+<div style="display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--border);padding-bottom:18px">
+  <div style="display:flex;align-items:baseline;gap:10px">
+    <span style="font:600 10px var(--font-mono);padding:3px 7px;background:var(--amber-7);color:#0E1116;border-radius:2px">AUDIT V2</span>
+    <span style="font:600 15px var(--font-ui);color:var(--fg-1)">SignalScope — chrome + rendering audit</span>
+    <span style="font:400 11px var(--font-mono);color:var(--fg-3);margin-left:auto">2026-07-25 · build screenshot 14:17</span>
+  </div>
+  <div style="font-size:12px;line-height:1.55;max-width:900px">Amends AUDIT v1 where noted. Standing rules unchanged: chrome is three strips (title bar · tab strip · status bar), no toolbar; chrome holds nouns and toggles, one-shot verbs live in the palette; document-scoped controls live on the panel header; ⌘P = go-to-signal, ⌘⇧P = commands, hinted once; gesture legend is contextual only.</div>
+</div>
+
+<!-- 1 -->
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">1 · RENDER CLIP<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">severity: defect</div></div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">Series paint below the x-axis spine.</b> Data must never render outside the plot rect — not into the gutter, not over the axis, not under other panels.</div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-2);background:var(--surface-1);border:1px solid var(--border);border-radius:2px;padding:8px 10px;display:flex;flex-direction:column;gap:3px">
+      <span>— Clip the series layer (lines, fills, markers, cursor hairline, annotation carets) to the axes rect. One clip region per panel.</span>
+      <span>— Out-of-range data is cut at the boundary, never redrawn or rescaled silently.</span>
+      <span>— Axis spines, ticks, and labels render outside/after the clip — they are chrome, series never overpaint them.</span>
+      <span>— Applies identically in gutter and inline axes modes; inline tick labels keep their translucent backing above series.</span>
+    </div>
+  </div>
+</div>
+
+<!-- 2 -->
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">2 · CURSOR = POPUP<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">amends v1 ④</div></div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">Agreed — the in-plot popup is the cursor readout.</b> It sits at the point of attention; a status-bar value cluster would split it again. v1's "cursor cluster bottom-right" is withdrawn; only the time scalar survives in chrome (finding 5).</div>
+    <div>Cursor is <b style="color:var(--fg-1)">modal</b>, default <span style="font-family:var(--font-mono)">none</span> — no clutter until asked:</div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-2);background:var(--surface-1);border:1px solid var(--border);border-radius:2px;padding:8px 10px;display:flex;flex-direction:column;gap:3px">
+      <span><b style="color:var(--fg-1)">none</b> (default) — nothing renders. Status bar shows no cursor item.</span>
+      <span><b style="color:var(--fg-1)">track</b> — hairline + popup: t header, one row per visible series (swatch · path · value %.4f, tabular, right-aligned), legend order. Offset 12px from hairline, flips side near plot edge, never under the pointer, clipped to panel.</span>
+      <span><b style="color:var(--fg-1)">measure</b> — two anchors + Δ chip (Δt · Δv · slope). Click drops numbered annotations, as built.</span>
+      <span>— C cycles modes (or per-panel header toggle). Mode is per-workspace, serialized.</span>
+      <span>— DELETE: toolbar "cursor |" item and status-left "cursor t = —". No persistent per-signal readout anywhere in chrome — the tree's live-value column already covers "values now".</span>
+    </div>
+  </div>
+</div>
+
+<!-- 3 -->
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">3 · TIME = ONE CLUSTER<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">amends v1 ① ②</div></div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">Correct instinct: all time state lives in one place.</b> Today it is scattered (window t top-right, cursor t bottom-left, Linked t toolbar, FOLLOW top-right). Consolidate into a single time cluster on the <b style="color:var(--fg-1)">status-bar right</b> — the editor-caret position, which for this tool IS time. This supersedes v1 putting window t on the title bar and Linked t on the tab strip.</div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-2);background:var(--surface-1);border:1px solid var(--border);border-radius:2px;padding:8px 10px;display:flex;flex-direction:column;gap:3px">
+      <span>— Order, left→right: <span style="color:var(--fg-1)">⛓ linked · t 9.9661 · window 0.000 → 20.000 s · ⏸ FOLLOW</span></span>
+      <span>— ⛓ linked: workspace-scoped toggle; active = achromatic fill (surface-4 + fg-1), inactive = dim glyph.</span>
+      <span>— t: cursor time; renders — when cursor mode is none. Click → jump-to-t input.</span>
+      <span>— window: live during pan/zoom; click → exact-range input. FOLLOW stays a reserved slot for streaming.</span>
+      <span>— Title bar right now holds only OS window controls. Tab-strip right holds only "layout ▾".</span>
+    </div>
+  </div>
+</div>
+
+<!-- 4 -->
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">4 · MENU BEHIND ≡<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">new · Zed pattern</div></div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">Adopt Zed's hidden menu:</b> the top-left logo block becomes ≡; click opens the menu, otherwise no menu bar exists. The menu is the browsable mirror of the palette — every item is also a ⌘⇧P command; nothing lives only in the menu. Four menus, not seven. <b style="color:var(--fg-1)">Cut:</b> Edit (no text-document model; view undo/redo are palette commands + keys), Signals (signal detail belongs to the tree context menu and a future signal inspector, not global chrome), Panel (verbs live on the panel header), Export as top-level (nests under File).</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:2px;overflow:hidden;font-family:var(--font-mono);font-size:11px">
+      <div style="background:var(--surface-1);padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+        <span style="color:var(--fg-1);font-weight:600;font-size:10px;letter-spacing:.08em">FILE</span>
+        <span>Open CSV / MCAP…</span><span>Open Recent ▸</span>
+        <span style="border-top:1px solid var(--border-faint);margin:3px 0"></span>
+        <span>Open Workspace…</span><span>Save Workspace</span><span>Save Workspace As…</span>
+        <span style="border-top:1px solid var(--border-faint);margin:3px 0"></span>
+        <span>Export ▸ <span style="color:var(--fg-4)">HTML snapshot · PNG · visible CSV</span></span>
+      </div>
+      <div style="background:var(--surface-1);padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+        <span style="color:var(--fg-1);font-weight:600;font-size:10px;letter-spacing:.08em">VIEW</span>
+        <span>Signals dock <span style="color:var(--fg-4)">✓</span></span><span>Formula dock <span style="color:var(--fg-4)">✓</span></span><span>Annotations dock</span>
+        <span style="border-top:1px solid var(--border-faint);margin:3px 0"></span>
+        <span>Theme ▸ <span style="color:var(--fg-4)">dark · light</span></span><span>Font size ▸</span><span>Axes default ▸ <span style="color:var(--fg-4)">gutter · inline</span></span><span>Series palette ▸</span>
+      </div>
+      <div style="background:var(--surface-1);padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+        <span style="color:var(--fg-1);font-weight:600;font-size:10px;letter-spacing:.08em">WORKSPACE</span>
+        <span>New Panel</span><span>Duplicate Workspace</span>
+        <span style="border-top:1px solid var(--border-faint);margin:3px 0"></span>
+        <span>Save Layout As Preset…</span><span>Apply Preset ▸</span><span>Reset Layout</span>
+      </div>
+      <div style="background:var(--surface-1);padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+        <span style="color:var(--fg-1);font-weight:600;font-size:10px;letter-spacing:.08em">HELP</span>
+        <span>Command List <span style="color:var(--fg-4)">⌘⇧P</span></span><span>Keymap</span><span>About SignalScope</span>
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:var(--fg-3)">Workspace file = layout + panels + signal assignments + time window + cursor mode + annotations, native format. Future HTML export/import is the same object serialized into a snapshot — both live under File. Global preferences (theme, font size, palette, axes default) live under View and persist across sessions; everything else is per-workspace.</div>
+  </div>
+</div>
+
+<!-- 5 -->
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">5 · STATUS DOTS: CUT<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">amends v1 mockups</div></div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">The dots were over-applied — remove them.</b> A status dot means connection state. A loaded file has no connection state, so <span style="font-family:var(--font-mono)">● demo_flight.csv</span> communicates nothing and adds a green light to every session. Files render as <span style="font-family:var(--font-mono)">demo_flight.csv · 656 pts</span>, no indicator. Dots return only when streaming ships, exclusively on live sources: connected green · connecting yellow · error red. No other decorative indicators anywhere — if it does not encode state that can change, it does not render.</div>
+  </div>
+</div>
+
+<!-- 6 -->
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">6 · RESULTING CHROME<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">reference strips</div></div>
+  <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;line-height:1.55">
+    <div style="box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;min-width:1100px;width:1100px">
+      <div style="display:flex;align-items:center;height:30px;background:var(--surface-2);border-bottom:1px solid var(--border);padding:0 10px;font:11px var(--font-mono);color:var(--fg-2)">
+        <span style="padding:2px 8px;background:var(--surface-3);color:var(--fg-1);border-radius:2px;margin-right:8px">≡</span>
+        <span style="color:var(--fg-1);font-weight:600;letter-spacing:.08em;font-size:10px;margin-right:10px">SIGNALSCOPE</span>
+        <span style="color:var(--fg-3);font-size:10.5px">demo_flight.csv — 16 signals</span>
+        <span style="margin-left:auto;display:flex;gap:10px;color:var(--fg-4);font-size:10px"><span>─</span><span>▢</span><span>✕</span></span>
+      </div>
+      <div style="display:flex;align-items:stretch;height:30px;background:var(--surface-1);border-bottom:1px solid var(--border);font:11px var(--font-mono);color:var(--fg-3)">
+        <span style="display:flex;align-items:center;gap:7px;padding:0 12px;background:var(--surface-0);color:var(--fg-1);border-right:1px solid var(--border-faint);box-shadow:inset 0 1px 0 var(--border-strong)">Workspace 1 <span style="color:var(--fg-4)">✕</span></span>
+        <span style="display:flex;align-items:center;gap:7px;padding:0 12px;border-right:1px solid var(--border-faint)">Workspace 2 <span style="color:var(--fg-4)">✕</span></span>
+        <span style="display:flex;align-items:center;padding:0 10px">+</span>
+        <span style="flex:1"></span>
+        <span style="display:flex;align-items:center;padding:0 10px;color:var(--fg-3)">layout ▾</span>
+      </div>
+      <div style="height:26px;background:var(--surface-0);display:flex;align-items:center;padding:0 10px;font:10px var(--font-mono);color:var(--fg-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">… panels (header controls unchanged: ⠿ · title · T XY FFT H · chips · +N · axes · Σ · ⊞ ⤢ ✕) …</div>
+      <div style="display:flex;align-items:center;gap:8px;height:24px;background:var(--surface-2);border-top:1px solid var(--border);padding:0 8px;font:10.5px var(--font-mono);color:var(--fg-3)">
+        <span style="display:flex;gap:2px">
+          <span style="padding:2px 6px;background:var(--surface-4);color:var(--fg-1);border-radius:2px">▤</span>
+          <span style="padding:2px 6px;background:var(--surface-4);color:var(--fg-1);border-radius:2px">ƒx</span>
+          <span style="padding:2px 6px;border-radius:2px">⌖</span>
+        </span>
+        <span style="width:1px;height:12px;background:var(--border-strong)"></span>
+        <span style="color:var(--fg-2)">demo_flight.csv</span><span>16 signals</span><span>656 pts</span><span>render <span style="color:var(--fg-2)">2.0 ms</span></span>
+        <span style="flex:1"></span>
+        <span style="color:var(--fg-4)">drag: zoom</span>
+        <span style="width:1px;height:12px;background:var(--border-strong)"></span>
+        <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1);border-radius:2px">⛓ linked</span>
+        <span style="color:var(--fg-1);font-variant-numeric:tabular-nums">t 9.9661</span>
+        <span style="color:var(--fg-2);font-variant-numeric:tabular-nums">window 0.000 → 20.000 s</span>
+        <span style="color:var(--fg-4)">⏸ FOLLOW</span>
+        <span style="width:1px;height:12px;background:var(--border-strong)"></span>
+        <span>⌘P <span style="color:var(--fg-4)">signals</span></span><span>⌘⇧P <span style="color:var(--fg-4)">commands</span></span>
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:var(--fg-3)">Title bar: ≡ menu + identity + OS controls only. Tab strip: workspaces + layout preset only. Status bar: dock toggles + source truth left · contextual gesture hint · time cluster · palette hints right. The toolbar row does not exist. Cursor readout is the in-plot popup (finding 2); the only cursor trace in chrome is <span style="font-family:var(--font-mono)">t</span> inside the time cluster.</div>
+  </div>
+</div>
+
+</div>
+
+<!-- 7 all-up -->
+<div style="width:fit-content;margin:0 auto;padding:0 44px 28px;display:flex;flex-direction:column;gap:10px">
+<div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">7 · ALL-UP REFERENCE — 1440×880 <span style="color:var(--fg-3);font-weight:400">· resulting UI, same session · pixel reference</span></div>
+<div style="width:1440px;height:880px;background:var(--surface-void);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;display:grid;grid-template-rows:30px 30px 1fr 30px 24px;grid-template-columns:262px 1fr;grid-template-areas:'title title' 'tree tabs' 'tree main' 'tree formula' 'status status';font-family:var(--font-mono)">
+  <div style="grid-area:title;display:flex;align-items:center;background:var(--surface-2);border-bottom:1px solid var(--border);padding:0 10px;font-size:11px;color:var(--fg-2)">
+    <span style="padding:2px 8px;background:var(--surface-3);color:var(--fg-1);border-radius:2px;margin-right:8px">≡</span>
+    <svg width="14" height="14" viewBox="0 0 16 16" style="margin-right:6px"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <span style="color:var(--fg-1);font-weight:600;letter-spacing:.08em;font-size:10px;margin-right:10px">SIGNALSCOPE</span>
+    <span style="color:var(--fg-3);font-size:10.5px">demo_flight.csv — 16 signals</span>
+    <span style="margin-left:auto;display:flex;gap:10px;color:var(--fg-4);font-size:10px"><span>─</span><span>▢</span><span>✕</span></span>
+  </div>
+  <div style="grid-area:tabs;display:flex;align-items:stretch;background:var(--surface-1);border-bottom:1px solid var(--border);font-size:11px;color:var(--fg-3)">
+    <span style="display:flex;align-items:center;gap:7px;padding:0 12px;background:var(--surface-0);color:var(--fg-1);border-right:1px solid var(--border-faint);box-shadow:inset 0 1px 0 var(--border-strong)">Workspace 1 <span style="color:var(--fg-4)">✕</span></span>
+    <span style="display:flex;align-items:center;gap:7px;padding:0 12px;border-right:1px solid var(--border-faint)">Workspace 2 <span style="color:var(--fg-4)">✕</span></span>
+    <span style="display:flex;align-items:center;padding:0 10px">+</span>
+    <span style="flex:1"></span>
+    <span style="display:flex;align-items:center;padding:0 10px">layout ▾</span>
+  </div>
+  <div style="grid-area:tree;background:var(--surface-0);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;font-size:11.5px">
+    <div style="padding:8px;border-bottom:1px solid var(--border-faint)">
+      <div style="display:flex;align-items:center;gap:6px;background:var(--surface-void);border:1px solid var(--border-strong);border-radius:2px;padding:5px 8px;color:var(--fg-3)">/ <span style="color:var(--fg-2)">filter signals…</span></div>
+    </div>
+    <div style="padding:8px 6px 4px;color:var(--fg-3);font-size:10px;letter-spacing:.08em">★ FAVORITES</div>
+    <div style="padding:0 10px 6px;border-bottom:1px solid var(--border-faint);color:var(--fg-4);font-size:10.5px">Star a signal or drop it here</div>
+    <div style="padding:8px 6px 4px;color:var(--fg-3);font-size:10px;letter-spacing:.08em">SIGNALS</div>
+    <div style="flex:1;overflow:hidden;padding:0 6px">
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>demo_flight</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--series-2)">—</span>accel_z_mps2<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">5.3814</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1);background:var(--surface-3)"><span style="width:12px"></span><span style="color:var(--series-4)">—</span>altitude_m<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">372.6441</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>attitude</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-5)">—</span>pitch_deg<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">15.4746</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:24px"></span><span style="color:var(--fg-4)">·</span>roll_deg<span style="margin-left:auto;color:var(--fg-4)">—</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>battery_v</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>control</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>events</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>flight</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>guidance</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-6)">—</span>target_altitude_m<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">486.4407</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>navigation</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-7)">—</span>position_north_m<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">23.3593</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>sensor</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-1)">—</span>gps_altitude_m<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">372.2915</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▾</span>thermal</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-1)"><span style="width:24px"></span><span style="color:var(--series-8)">—</span>avionics_c<span style="margin-left:auto;color:var(--fg-2);font-variant-numeric:tabular-nums">43.3525</span></div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>velocity_body</div>
+      <div style="display:flex;gap:5px;padding:2px 6px;color:var(--fg-2)"><span style="width:12px"></span><span style="color:var(--fg-3);width:10px;text-align:center">▸</span>vibration</div>
+    </div>
+    <div style="padding:7px 10px;border-top:1px solid var(--border-faint);font-size:10px;color:var(--fg-3);display:flex;flex-direction:column;gap:3px">
+      <div style="display:flex;gap:6px;align-items:center"><span style="color:var(--fg-2)">demo_flight.csv</span><span style="margin-left:auto;color:var(--fg-2)">656 pts</span></div>
+      <div style="display:flex;gap:6px;align-items:center;color:var(--fg-4)">+ source <span style="margin-left:auto">CSV · MCAP</span></div>
+    </div>
+  </div>
+  <div style="grid-area:main;display:flex;flex-direction:column;min-height:0;gap:1px;background:var(--border)">
+    <div style="flex:3;background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;flex:none;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Panel 1</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-6)"></span>guidance/target_altitude_m <span style="color:var(--fg-4)">▾</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-1)"></span>sensor/gps_altitude_m <span style="color:var(--fg-4)">▾</span></span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-4)"></span>demo_flight/altitude_m <span style="color:var(--fg-4)">▾</span></span>
+        <span style="padding:1px 6px;background:var(--surface-3);border-radius:2px;color:var(--fg-2);font-size:10px">+2</span>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">axes: <span style="color:var(--fg-2)">gutter</span></span><span style="padding:2px 5px">Σ</span><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 1177 420" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="56" y="10" width="1105" height="370" fill="url(#agrid)"></rect>
+          <path d="M56 10V380H1161" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M56 380v4M166.5 380v4M277 380v4M387.5 380v4M498 380v4M608.5 380v4M719 380v4M829.5 380v4M940 380v4M1050.5 380v4M1161 380v4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M56 380h-4M56 318h-4M56 257h-4M56 195h-4M56 133h-4M56 72h-4M56 10h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <polyline fill="none" stroke="var(--series-6)" stroke-width="1.5" points="56,318 299,318 316,195 608,195 625,72 851,72 868,10 1161,10"></polyline>
+          <path d="M56 378 C 300 372, 420 240, 608 160 S 900 40, 1161 28" fill="none" stroke="var(--series-1)" stroke-width="1.5"></path>
+          <path d="M56 380 C 320 368, 450 260, 640 170 S 920 55, 1161 40" fill="none" stroke="var(--series-4)" stroke-width="1.5"></path>
+          <polyline fill="none" stroke="var(--series-5)" stroke-width="1.3" points="56,376 300,360 500,354 700,362 900,372 1161,375"></polyline>
+          <polyline fill="none" stroke="var(--series-8)" stroke-width="1.3" points="56,353 1161,349"></polyline>
+          <line x1="606" y1="10" x2="606" y2="380" stroke="var(--amber-7)" stroke-width="1" stroke-dasharray="2 2" opacity=".75"></line>
+        </svg>
+        <div style="position:absolute;left:50px;top:376px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">0</div>
+        <div style="position:absolute;left:50px;top:314px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">100</div>
+        <div style="position:absolute;left:50px;top:253px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">200</div>
+        <div style="position:absolute;left:50px;top:191px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">300</div>
+        <div style="position:absolute;left:50px;top:129px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">400</div>
+        <div style="position:absolute;left:50px;top:68px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">500</div>
+        <div style="position:absolute;left:50px;top:6px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">600</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">altitude (m)</div>
+        <div style="position:absolute;bottom:16px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:56px;transform:translateX(-50%)">0.0</span><span style="position:absolute;left:277px;transform:translateX(-50%)">4.0</span><span style="position:absolute;left:498px;transform:translateX(-50%)">8.0</span><span style="position:absolute;left:719px;transform:translateX(-50%)">12.0</span><span style="position:absolute;left:940px;transform:translateX(-50%)">16.0</span><span style="position:absolute;left:1161px;transform:translateX(-50%)">20.0</span></div>
+        <div style="position:absolute;bottom:2px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">time (s)</div>
+        <div style="position:absolute;left:632px;top:96px;width:236px;background:var(--surface-2);box-shadow:var(--elev-2);border-radius:2px;padding:7px 9px;font-size:10px;color:var(--fg-2);font-variant-numeric:tabular-nums">
+          <div style="color:var(--fg-1);margin-bottom:5px">9.9661 s</div>
+          <div style="display:flex;gap:5px;align-items:center;padding:1px 0"><span style="width:9px;height:2px;background:var(--series-6)"></span>guidance/target_altitude_m<span style="margin-left:auto;color:var(--fg-1)">486.4407</span></div>
+          <div style="display:flex;gap:5px;align-items:center;padding:1px 0"><span style="width:9px;height:2px;background:var(--series-1)"></span>sensor/gps_altitude_m<span style="margin-left:auto;color:var(--fg-1)">372.2915</span></div>
+          <div style="display:flex;gap:5px;align-items:center;padding:1px 0"><span style="width:9px;height:2px;background:var(--series-4)"></span>demo_flight/altitude_m<span style="margin-left:auto;color:var(--fg-1)">372.6441</span></div>
+          <div style="display:flex;gap:5px;align-items:center;padding:1px 0"><span style="width:9px;height:2px;background:var(--series-5)"></span>attitude/pitch_deg<span style="margin-left:auto;color:var(--fg-1)">15.4746</span></div>
+          <div style="display:flex;gap:5px;align-items:center;padding:1px 0"><span style="width:9px;height:2px;background:var(--series-8)"></span>thermal/avionics_c<span style="margin-left:auto;color:var(--fg-1)">43.3525</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="flex:2;background:var(--surface-0);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;align-items:center;gap:7px;height:26px;flex:none;padding:0 8px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:11px">
+        <span style="color:var(--fg-4);letter-spacing:-2px;cursor:grab">⠿</span>
+        <span style="color:var(--fg-1);font-weight:500">Panel 2</span>
+        <span style="display:flex;border:1px solid var(--border-strong);border-radius:2px;overflow:hidden;font-size:9px">
+          <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1)">T</span><span style="padding:1px 6px;color:var(--fg-3)">XY</span><span style="padding:1px 6px;color:var(--fg-3)">FFT</span><span style="padding:1px 6px;color:var(--fg-3)">H</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;color:var(--fg-2);font-size:10.5px"><span style="width:10px;height:2px;background:var(--series-2)"></span>demo_flight/accel_z_mps2 <span style="color:var(--fg-4)">▾</span></span>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:2px;color:var(--fg-3);font-size:10px"><span style="padding:2px 5px">axes: <span style="color:var(--fg-2)">gutter</span></span><span style="padding:2px 5px">Σ</span><span style="padding:2px 5px">⊞</span><span style="padding:2px 5px">⤢</span><span style="padding:2px 5px">✕</span></span>
+      </div>
+      <div style="flex:1;position:relative;min-height:0">
+        <svg viewBox="0 0 1177 258" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <rect x="56" y="8" width="1105" height="210" fill="url(#agrid)"></rect>
+          <path d="M56 8V218H1161" fill="none" stroke="var(--fg-3)" stroke-width="1"></path>
+          <path d="M56 218v4M277 218v4M498 218v4M719 218v4M940 218v4M1161 218v4M56 218h-4M56 148h-4M56 78h-4M56 8h-4" stroke="var(--fg-3)" stroke-width="1"></path>
+          <line x1="56" y1="183" x2="1161" y2="183" stroke="var(--border-strong)" stroke-width="1"></line>
+          <path d="M56 178 C 200 150, 320 70, 440 62 S 640 130, 760 158 S 1000 196, 1161 190" fill="none" stroke="var(--series-2)" stroke-width="1.5"></path>
+          <line x1="440" y1="62" x2="740" y2="152" stroke="var(--fg-3)" stroke-width="1" stroke-dasharray="3 3" opacity=".6"></line>
+          <circle cx="440" cy="62" r="3.5" fill="none" stroke="var(--series-2)" stroke-width="1.5"></circle>
+          <circle cx="740" cy="152" r="3.5" fill="none" stroke="var(--series-2)" stroke-width="1.5"></circle>
+        </svg>
+        <div style="position:absolute;left:50px;top:214px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">−2</div>
+        <div style="position:absolute;left:50px;top:144px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">2</div>
+        <div style="position:absolute;left:50px;top:74px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">6</div>
+        <div style="position:absolute;left:50px;top:4px;transform:translateX(-100%);font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1">10</div>
+        <div style="position:absolute;left:8px;top:50%;transform:rotate(180deg);writing-mode:vertical-rl;font-size:9.5px;color:var(--fg-2);translate:0 -50%">accel_z (m/s²)</div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;height:10px;font-size:9px;color:var(--fg-3);font-variant-numeric:tabular-nums"><span style="position:absolute;left:56px;transform:translateX(-50%)">0.0</span><span style="position:absolute;left:277px;transform:translateX(-50%)">4.0</span><span style="position:absolute;left:498px;transform:translateX(-50%)">8.0</span><span style="position:absolute;left:719px;transform:translateX(-50%)">12.0</span><span style="position:absolute;left:940px;transform:translateX(-50%)">16.0</span><span style="position:absolute;left:1161px;transform:translateX(-50%)">20.0</span></div>
+        <div style="position:absolute;bottom:1px;left:52%;transform:translateX(-50%);font-size:9.5px;color:var(--fg-2)">time (s)</div>
+        <div style="position:absolute;right:10px;top:8px;background:var(--surface-2);box-shadow:0 0 0 1px rgba(255,162,38,.4);border-radius:2px;padding:4px 8px;font-size:10px;color:var(--amber-7);font-variant-numeric:tabular-nums">Δt 5.4300 s · Δv −5.1400 · slope −0.9466/s</div>
+      </div>
+    </div>
+  </div>
+  <div style="grid-area:formula;display:flex;align-items:center;gap:8px;background:var(--surface-1);border-top:1px solid var(--border);padding:0 10px;font-size:11px">
+    <span style="color:var(--amber-7);font-size:10px">ƒx</span>
+    <span style="color:var(--fg-1)">new_temp = accel_z_mps2 + altitude_m</span>
+    <span style="width:1px;height:14px;background:var(--amber-7);margin-left:1px"></span>
+  </div>
+  <div style="grid-area:status;display:flex;align-items:center;gap:8px;background:var(--surface-2);border-top:1px solid var(--border);padding:0 8px;font-size:10.5px;color:var(--fg-3)">
+    <span style="display:flex;gap:2px">
+      <span style="padding:2px 6px;background:var(--surface-4);color:var(--fg-1);border-radius:2px" title="signals dock">▤</span>
+      <span style="padding:2px 6px;background:var(--surface-4);color:var(--fg-1);border-radius:2px" title="formula dock">ƒx</span>
+      <span style="padding:2px 6px;border-radius:2px" title="annotations dock">⌖</span>
+    </span>
+    <span style="width:1px;height:12px;background:var(--border-strong)"></span>
+    <span style="color:var(--fg-2)">demo_flight.csv</span><span>16 signals</span><span>656 pts</span><span>render <span style="color:var(--fg-2)">2.0 ms</span></span>
+    <span style="flex:1"></span>
+    <span style="color:var(--fg-4)">cursor: track</span>
+    <span style="width:1px;height:12px;background:var(--border-strong)"></span>
+    <span style="padding:1px 6px;background:var(--surface-4);color:var(--fg-1);border-radius:2px">⛓ linked</span>
+    <span style="color:var(--fg-1);font-variant-numeric:tabular-nums">t 9.9661</span>
+    <span style="color:var(--fg-2);font-variant-numeric:tabular-nums">window 0.000 → 20.000 s</span>
+    <span style="color:var(--fg-4)">⏸ FOLLOW</span>
+    <span style="width:1px;height:12px;background:var(--border-strong)"></span>
+    <span>⌘P <span style="color:var(--fg-4)">signals</span></span><span>⌘⇧P <span style="color:var(--fg-4)">commands</span></span>
+  </div>
+</div>
+<svg width="0" height="0" style="position:absolute"><defs><pattern id="agrid" width="44" height="26" patternUnits="userSpaceOnUse"><path d="M44 0H0V26" fill="none" stroke="var(--grid)" stroke-width="1"></path></pattern></defs></svg>
+<div style="width:1440px;font:11px/1.5 var(--font-ui);color:var(--fg-3)">Panel 1 in track mode: hairline + popup readout (the cursor readout — finding 2); Panel 2 in measure mode: anchors + Δ chip. All series clipped hard at the plot rect (finding 1). Status bar: dock toggles + source truth (no dot — finding 5) · cursor-mode indicator · time cluster ⛓ linked · t · window · FOLLOW (finding 3) · palette hints. Title bar: ≡ menu + identity + OS controls (finding 4). No toolbar row.</div>
+</div>
+
+<!-- 8 implementation -->
+<div style="max-width:1280px;margin:0 auto;padding:0 44px 64px">
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">8 · IMPLEMENTATION<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">high-level, in order</div></div>
+  <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;line-height:1.55">
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-2);background:var(--surface-1);border:1px solid var(--border);border-radius:2px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">
+      <span><b style="color:var(--fg-1)">P1 — chrome re-home (layout only, no new behavior).</b> Delete the toolbar row. Title bar: ≡ button · wordmark · session name · OS controls. Tab-strip right: layout ▾ only. Status bar: [dock toggles | source truth] left · [gesture hint | cursor mode | time cluster | ⌘P hints] right. Every relocated control keeps its existing handler.</span>
+      <span><b style="color:var(--fg-1)">P2 — render clip.</b> One clip region per panel = axes rect. Series, markers, hairline, annotation carets inside; spines/ticks/labels outside. Verify in gutter and inline modes.</span>
+      <span><b style="color:var(--fg-1)">P3 — cursor state machine.</b> Modes none | track | measure, per workspace, C cycles, serialized. Track = hairline + popup (12px offset, edge-flip, panel-clipped, legend order, %.4f tabular). Measure = existing anchors + Δ chip + click-to-annotate. Delete the toolbar cursor item and status-left readout.</span>
+      <span><b style="color:var(--fg-1)">P4 — command registry + ≡ menu.</b> Single registry: every action defined once {id, title, section, keybinding}; ⌘⇧P and the ≡ menu are two views of it — nothing is menu-only. Menu tree per finding 4. Then workspace serialization (layout + panels + signals + window + cursor mode + annotations) under File; global prefs (theme · font size · palette · axes default) under View, persisted across sessions. Future HTML snapshot export/import = the same workspace object, also under File.</span>
+      <span><b style="color:var(--fg-1)">P5 — polish.</b> Remove file status dots (streaming-only later). Gesture legend → single contextual hint while dragging. ⌘P retargets to go-to-signal; ⌘⇧P commands. FOLLOW stays a reserved dim slot.</span>
+    </div>
+    <div><b style="color:var(--fg-1)">Acceptance:</b> no toolbar row exists · no series pixel renders outside any plot rect · time appears in exactly one cluster (plus the transient popup/Δ overlays) · a fresh session with cursor none shows zero readouts, dots, or hints beyond source truth · each ⌘P/⌘⇧P hint renders once · every ≡ menu item is invocable from ⌘⇧P.</div>
+  </div>
+</div>
+</div>
+</x-dc>
+</body>
+</html>
