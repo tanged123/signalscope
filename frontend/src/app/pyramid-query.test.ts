@@ -24,4 +24,22 @@ describe("queryPyramid", () => {
       ).toEqual({ level: query.level, bins: query.bins });
     }
   });
+
+  it("includes one neighboring bin on each viewport edge", () => {
+    const level = [0, 1, 2, 3, 4].map(
+      (time) =>
+        ({
+          t0: time,
+          t1: time,
+          first: time,
+          last: time,
+          min: time,
+          max: time,
+          has_gap: false,
+        }) as EnvelopeBin,
+    );
+    const result = queryPyramid([level], 1.5, 2.5, 100);
+
+    expect(result.bins.map((bin) => bin.t0)).toEqual([1, 2, 3]);
+  });
 });

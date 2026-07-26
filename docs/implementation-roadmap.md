@@ -27,3 +27,35 @@ that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
 a headless renderer harness and coherent tick pipeline, unbounded series
 allocation with composite colour/dash identity, and stable per-panel y axes
 resolved outside the renderer.
+
+Phase 2 desktop interaction (2A) shipped: linked wheel/box/pan/fit gestures
+with per-panel unlinked windows, aspect-ratio snapping from box zoom to
+single-axis zoom, both-axis pointer-centered wheel zoom, and selectable
+off/dot/line cursor modes (default off; dots track visible series; the tooltip
+is attached to line mode). Pinned annotations have delta readouts, and a
+visible-region statistics
+strip backed by envelope-bin sums
+([ADR 0014](adr/0014-envelope-bin-sums.md)), gutter/inline axis styles,
+in-place title and axis-name editing, a visible per-panel axis-style control,
+Favorites star/drop affordances, and the split legend inspector. Series
+strokes are clipped to the plot rectangle, tile queries retain neighboring
+edge bins for continuous clipped strokes, and level-zero cursor values
+interpolate between rendered samples.
+The categorical series order now uses MATLAB's canonical seven defaults, with
+the eighth slot rolling over to dashed blue; amber remains reserved by token
+and semantic role rather than by banning MATLAB yellow.
+
+Phase 2B closed the phase: XY panels with the amber drop strip, dashed `x:`
+and `c:` axis chips, window-dimmed trajectories, a trajectory cursor ring and
+datatips; a `batlow` sequential colormap with a labelled colorbar
+([ADR 0016](adr/0016-sequential-colormap.md)); FFT panels over the visible
+window ([ADR 0017](adr/0017-spectrum-semantics.md)); histogram panels
+([ADR 0018](adr/0018-histogram-semantics.md)); and the full touch gesture
+set. All three modes are presentation-plane computations over a bounded
+window slice served by one new protocol request
+([ADR 0015](adr/0015-window-sample-requests.md)).
+
+Two design gaps were closed by decision rather than extraction and should be
+reviewed against any future design pass: histogram mode has no specification
+at all, and the FFT panel has only a pixel reference. The prototype's `1:1`
+equal-axis control was dropped for want of a home in the final chrome.

@@ -32,6 +32,13 @@ export class LinkedTimeModel {
     this.state = next;
   }
 
+  setCursor(cursorT: number | null): void {
+    this.state = {
+      ...this.state,
+      cursorT: cursorT !== null && Number.isFinite(cursorT) ? cursorT : null,
+    };
+  }
+
   private validateWindow(window: TimeWindow): void {
     if (
       !Number.isFinite(window.t0) ||

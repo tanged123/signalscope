@@ -18,13 +18,27 @@ export function queryPyramid(
   t1: number,
   pixelWidth: number,
 ): PyramidQueryResult {
+  const raw = levels[0] ?? [];
+  if (
+    raw.length === 0 ||
+    t1 < (raw[0] as EnvelopeBin).t0 ||
+    t0 > (raw[raw.length - 1] as EnvelopeBin).t1
+  ) {
+    return { level: 0, bins: [] };
+  }
   const target = Math.max(1, Math.floor(pixelWidth)) * 2;
   for (let index = 0; index < levels.length; index += 1) {
     const level = levels[index] ?? [];
     const start = firstOverlapping(level, t0);
     const end = pastLastOverlapping(level, t1);
     if (end - start <= target || index === levels.length - 1) {
-      return { level: index, bins: level.slice(start, end) };
+      return {
+        level: index,
+        bins: level.slice(
+          Math.max(0, start - 1),
+          Math.min(level.length, end + 1),
+        ),
+      };
     }
   }
   return { level: 0, bins: [] };

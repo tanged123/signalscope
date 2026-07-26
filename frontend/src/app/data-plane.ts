@@ -3,6 +3,8 @@ import {
   type IngestJob,
   type IngestRequest,
   type IngestStatus,
+  type SampleRequest,
+  type SampleResponse,
   type SignalSummary,
   type SourceSummary,
   type TileRequest,
@@ -10,6 +12,7 @@ import {
 } from "../generated/protocol";
 import { open, seal, type Envelope } from "./envelope";
 import { queryPyramid } from "./pyramid-query";
+import { binsToSamples, sampleWindow } from "./samples";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
@@ -23,6 +26,7 @@ export interface DataPlane {
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
+  querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
 interface BakedSignal {
@@ -81,6 +85,27 @@ export class TauriPlane implements DataPlane {
       }),
     );
   }
+
+  async querySamples(request: SampleRequest): Promise<SampleResponse> {
+    const response = open(
+      await this.invoke<Envelope<SampleResponse>>("query_samples", {
+        request: seal(request),
+      }),
+    );
+    return {
+      ...response,
+      series: response.series.map((series) => ({
+        ...series,
+        // JSON represents Rust's non-finite gap samples as null. Restore the
+        // data-plane contract before presentation-plane interpolation sees it.
+        values: series.values.map((value) =>
+          typeof value === "number" && Number.isFinite(value)
+            ? value
+            : Number.NaN,
+        ),
+      })),
+    };
+  }
 }
 
 export class BakedPlane implements DataPlane {
@@ -89,6 +114,16 @@ export class BakedPlane implements DataPlane {
   readonly ingest = null;
 
   private readonly payload: BakedManifest["payload"];
+
+  /**
+   * Level-0 bins reconstructed as raw samples, per signal id. The mapping is
+   * fixed for a baked payload, so it is built on first use rather than on
+   * every windowed query.
+   */
+  private readonly rawSamples = new Map<
+    string,
+    { time: number[]; values: number[] }
+  >();
 
   constructor(manifest: BakedManifest) {
     this.payload = open(manifest);
@@ -144,6 +179,47 @@ export class BakedPlane implements DataPlane {
         }),
     });
   }
+
+  querySamples(request: SampleRequest): Promise<SampleResponse> {
+    const requested = new Set(request.signal_ids);
+    return Promise.resolve({
+      request_id: request.request_id,
+      series: this.payload.signals
+        .filter((signal) => requested.has(signal.summary.signal_id))
+        .map((signal) => {
+          const raw = this.rawFor(signal);
+          const slice = sampleWindow(
+            raw.time,
+            raw.values,
+            request.window.t0,
+            request.window.t1,
+            request.max_points,
+          );
+          return {
+            signal_id: signal.summary.signal_id,
+            signal_path: signal.summary.path,
+            unit: signal.summary.unit,
+            time: slice.time,
+            values: slice.values,
+            stride: slice.stride,
+          };
+        }),
+    });
+  }
+
+  /** ADR 0015: the finest baked level stands in for raw samples. */
+  private rawFor(signal: BakedManifest["payload"]["signals"][number]): {
+    time: number[];
+    values: number[];
+  } {
+    const id = signal.summary.signal_id;
+    let raw = this.rawSamples.get(id);
+    if (raw === undefined) {
+      raw = binsToSamples(signal.levels[0] ?? []);
+      this.rawSamples.set(id, raw);
+    }
+    return raw;
+  }
 }
 
 export function selectDataPlane(): DataPlane {
@@ -168,6 +244,9 @@ function createDemoManifest(): BakedManifest {
         last: value,
         min: value,
         max: value,
+        sum: Number.isFinite(value) ? value : 0,
+        sum_sq: Number.isFinite(value) ? value * value : 0,
+        finite_count: Number.isFinite(value) ? "1" : "0",
         sample_count: "1",
         has_gap: false,
       };
@@ -235,6 +314,11 @@ function mergeDemoBins(left: EnvelopeBin, right: EnvelopeBin): EnvelopeBin {
     last: right.last ?? left.last,
     min: minOrNull(left.min, right.min),
     max: maxOrNull(left.max, right.max),
+    sum: left.sum + right.sum,
+    sum_sq: left.sum_sq + right.sum_sq,
+    finite_count: String(
+      Number(left.finite_count) + Number(right.finite_count),
+    ),
     sample_count: String(
       Number(left.sample_count) + Number(right.sample_count),
     ),

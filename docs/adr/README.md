@@ -15,5 +15,11 @@ Accepted decisions:
 11. [Series palette, reserved amber hue band, and colormap sources](0011-series-palette-and-reserved-amber.md)
 12. [Panel command routing and bounded legends](0012-panel-command-routing-and-bounded-legends.md)
 13. [Responsive panel legends](0013-responsive-panel-legends.md)
+14. [Envelope bins carry finite sums](0014-envelope-bin-sums.md)
+15. [Bounded window sample requests](0015-window-sample-requests.md)
+16. [Sequential colormap](0016-sequential-colormap.md)
+17. [Spectrum semantics](0017-spectrum-semantics.md)
+18. [Histogram semantics](0018-histogram-semantics.md)
+19. [Prepared plot capabilities](0019-prepared-plot-capabilities.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

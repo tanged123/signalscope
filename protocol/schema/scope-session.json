@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 6,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -17,6 +17,10 @@
     },
     "AxisStyle": { "kind": "enum", "variants": ["gutter", "inline"] },
     "DashStyle": { "kind": "enum", "variants": ["solid", "dash", "dot"] },
+    "AnnotationDomain": {
+      "kind": "enum",
+      "variants": ["time", "frequency", "distribution"]
+    },
     "LinkedTime": {
       "kind": "object",
       "fields": {
@@ -43,8 +47,9 @@
       "fields": {
         "id": "string",
         "series_path": "string",
-        "time": "f64",
-        "value": "f64",
+        "domain": "AnnotationDomain",
+        "anchor": "f64",
+        "pinned_value": "f64",
         "label": "string"
       }
     },
@@ -59,6 +64,10 @@
         "color_signal": "string?",
         "series": "SeriesState[]",
         "y_range": "f64[2]?",
+        "x_range": "f64[2]?",
+        "x_label": "string?",
+        "y_label": "string?",
+        "time_window": "f64[2]?",
         "annotations": "Annotation[]",
         "show_stats": "bool"
       }

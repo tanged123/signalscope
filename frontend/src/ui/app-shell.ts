@@ -2,15 +2,32 @@ import { CommandRegistry, formatCombo } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
+import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
-import { type SignalSummary, type TileResponse } from "../generated/protocol";
+import {
+  formatCursorTime,
+  formatValue,
+  valueAtTime,
+  zoomRange,
+} from "../app/plot-math";
+import {
+  type SampleResponse,
+  type SignalSummary,
+  type TileResponse,
+} from "../generated/protocol";
+import type { PanelMode, PanelState } from "../generated/session";
+import type { CursorStyle } from "../render/overlay-renderer";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
+import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
+const CURSOR_STYLES: readonly CursorStyle[] = ["none", "dot", "line"];
+/** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
+const SAMPLE_CAP = 8192;
 
 export class AppShell {
   private readonly time = new LinkedTimeModel();
@@ -23,9 +40,15 @@ export class AppShell {
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
+  private samplesByPanel = new Map<string, SampleResponse>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
   private renderScheduled = false;
+  private refreshTimer: number | null = null;
+  private helpTimer: number | null = null;
+  private liveValuesScheduled = false;
+  private pendingCursorT: number | null = null;
+  private cursorStyle: CursorStyle = "none";
 
   constructor(
     private readonly root: HTMLElement,
@@ -74,12 +97,26 @@ export class AppShell {
           this.afterLayoutChange();
         },
         onSelectMode: (id, mode) => {
-          this.workspace.setMode(id, mode);
+          this.transitionPanelMode(id, mode);
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
         onDropSignal: (id, path) => {
           this.plotSignal(path, id);
+        },
+        onSetXSignal: (id, path) => {
+          this.workspace.setMode(id, "xy");
+          this.workspace.setXSignal(id, path);
+          this.workspace.focusPanel(id);
+          this.afterLayoutChange();
+        },
+        onSetColorSignal: (id, path) => {
+          this.workspace.setColorSignal(id, path);
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        onClearXSignal: (id) => {
+          this.clearXSignal(id);
         },
         onToggleSeries: (id, path) => {
           this.workspace.toggleSeriesVisible(id, path);
@@ -88,6 +125,71 @@ export class AppShell {
         },
         onResized: () => {
           this.scheduleRender();
+        },
+        onCursor: (id, cursor, client) => {
+          this.setCursor(id, cursor, client);
+        },
+        onTimeWindow: (id, t0, t1) => {
+          this.applyTimeWindow(id, t0, t1);
+        },
+        onYRange: (id, range) => {
+          this.workspace.setPanelYRange(id, [range[0], range[1]]);
+          this.scheduleRender();
+        },
+        onXRange: (id, range) => {
+          this.applyXRange(id, range);
+        },
+        onPinAnnotation: (id, hit) => {
+          this.workspace.addAnnotation(id, {
+            id: crypto.randomUUID(),
+            series_path: hit.path,
+            domain: hit.domain,
+            anchor: hit.anchor,
+            pinned_value: hit.pinnedValue,
+            label: "",
+          });
+          this.workspaceView?.refreshPanelStates();
+        },
+        onRemoveAnnotation: (id, annotationId) => {
+          this.workspace.removeAnnotation(id, annotationId);
+          this.workspaceView?.refreshPanelStates();
+        },
+        onEditAnnotationLabel: (id, annotationId, label) => {
+          this.workspace.setAnnotationLabel(id, annotationId, label);
+          this.workspaceView?.refreshPanelStates();
+        },
+        onFitView: (id) => {
+          this.fitPanelView(id);
+        },
+        onToggleStats: (id) => {
+          this.workspace.toggleStats(id);
+          this.syncStatsToggle();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onToggleAxisStyle: (id) => {
+          this.workspace.toggleAxisStyle(id);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onRenameTitle: (id, title) => {
+          this.workspace.renamePanel(id, title);
+          this.afterLayoutChange();
+        },
+        onEditAxisLabel: (id, axis, label) => {
+          this.workspace.setAxisLabel(id, axis, label);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetSeriesStyle: (id, path, style) => {
+          this.workspace.setSeriesStyle(id, path, style);
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onRemoveSeries: (id, path) => {
+          this.workspace.removeSeries(id, path);
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
         },
         onLayoutChanged: () => {
           void this.refreshTiles();
@@ -139,6 +241,23 @@ export class AppShell {
   }
 
   private registerCommands(): void {
+    const zoomFocusedPanel = (factor: number): void => {
+      const id = this.workspace.focusedPanelId();
+      const panel = id === null ? undefined : this.workspace.panel(id);
+      if (id === null || panel === undefined) return;
+      const window = this.effectiveWindow(panel);
+      const pivot = (window.t0 + window.t1) / 2;
+      const next = zoomRange({ min: window.t0, max: window.t1 }, factor, pivot);
+      this.applyTimeWindow(id, next.min, next.max);
+    };
+    const panFocusedPanel = (direction: -1 | 1): void => {
+      const id = this.workspace.focusedPanelId();
+      const panel = id === null ? undefined : this.workspace.panel(id);
+      if (id === null || panel === undefined) return;
+      const window = this.effectiveWindow(panel);
+      const delta = (window.t1 - window.t0) * 0.1 * direction;
+      this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
+    };
     this.commands.register({
       id: "open-files",
       title: "Open CSV or MCAP…",
@@ -183,6 +302,138 @@ export class AppShell {
       "split-panel-right",
       "Split current panel right",
       (id) => void this.workspace.splitPanelRight(id),
+    );
+    this.commands.register({
+      id: "cycle-cursor-style",
+      title: "Cursor: cycle off/dot/line",
+      run: () => {
+        this.cycleCursorStyle();
+      },
+    });
+    this.commands.register({
+      id: "toggle-all-stats",
+      title: "Toggle statistics on every panel",
+      run: () => {
+        // Any panel still hiding stats turns them all on; otherwise all off.
+        const target = this.workspace
+          .panels()
+          .some((panel) => !panel.show_stats);
+        for (const panel of this.workspace.panels()) {
+          if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
+        }
+        this.syncStatsToggle();
+        this.workspaceView?.refreshPanelStates();
+        this.renderTiles();
+      },
+    });
+    for (const [mode, text] of [
+      [
+        "XY",
+        "XY: drag box-zoom · wheel zoom · right-drag pan · dbl-click fit · click datatip · drop on the amber strip to set X",
+      ],
+      [
+        "FFT",
+        "FFT: computed over the visible time window · wheel/box zoom the frequency and dB axes · dbl-click fit",
+      ],
+      [
+        "histogram",
+        "Histogram: counts of the visible time window · bins rebin as the window moves · dbl-click fit",
+      ],
+    ] as const) {
+      this.commands.register({
+        id: `help-${mode.toLowerCase()}-gestures`,
+        title: `Help: ${mode} mode gestures`,
+        run: () => {
+          this.showModeHelp(text);
+        },
+      });
+    }
+    this.registerFocusedPanelCommand(
+      "zoom-in-time",
+      "Panel: zoom in (time)",
+      () => {
+        zoomFocusedPanel(0.8);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "zoom-out-time",
+      "Panel: zoom out (time)",
+      () => {
+        zoomFocusedPanel(1.25);
+      },
+    );
+    this.registerFocusedPanelCommand("pan-left", "Panel: pan left", () => {
+      panFocusedPanel(-1);
+    });
+    this.registerFocusedPanelCommand("pan-right", "Panel: pan right", () => {
+      panFocusedPanel(1);
+    });
+    this.registerFocusedPanelCommand(
+      "fit-panel-view",
+      "Panel: fit view",
+      (id) => {
+        this.fitPanelView(id);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-switch-xy",
+      "Panel: switch to XY mode",
+      (id) => {
+        this.transitionPanelMode(id, "xy");
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-clear-x-signal",
+      "Panel: clear X signal",
+      (id) => {
+        this.clearXSignal(id);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-switch-fft",
+      "Panel: switch to FFT mode",
+      (id) => {
+        this.transitionPanelMode(id, "fft");
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-switch-histogram",
+      "Panel: switch to histogram mode",
+      (id) => {
+        this.transitionPanelMode(id, "histogram");
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "panel-clear-color-signal",
+      "Panel: clear color signal (c:)",
+      (id) => {
+        this.workspace.setColorSignal(id, null);
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "clear-annotations",
+      "Panel: clear annotations",
+      (id) => {
+        const panel = this.workspace.panel(id);
+        for (const annotation of [...(panel?.annotations ?? [])]) {
+          this.workspace.removeAnnotation(id, annotation.id);
+        }
+      },
+    );
+    this.registerFocusedPanelCommand(
+      "toggle-stats",
+      "Panel: toggle statistics",
+      (id) => {
+        this.workspace.toggleStats(id);
+      },
+      "s",
+    );
+    this.registerFocusedPanelCommand(
+      "toggle-axis-style",
+      "Panel: toggle axis style (gutter/inline)",
+      (id) => {
+        this.workspace.toggleAxisStyle(id);
+      },
     );
     this.registerFocusedPanelCommand(
       "close-panel",
@@ -250,7 +501,7 @@ export class AppShell {
     this.commands.register({
       id: "command-palette",
       title: "Command palette",
-      keys: "mod+k",
+      keys: "mod+p",
       run: () => {
         this.palette?.open();
       },
@@ -265,15 +516,27 @@ export class AppShell {
     });
   }
 
+  /** Moves between panel domains without dropping the assigned XY x series. */
+  private transitionPanelMode(panelId: string, mode: PanelMode): void {
+    const panel = this.workspace.panel(panelId);
+    if (panel?.mode === "xy" && mode !== "xy") {
+      this.workspace.setXSignal(panelId, null);
+    }
+    this.workspace.setMode(panelId, mode);
+    if (mode === "xy") this.workspace.promoteSeriesToX(panelId);
+  }
+
   /** Registers a command that acts on the focused panel and refreshes. */
   private registerFocusedPanelCommand(
     id: string,
     title: string,
     act: (panelId: string) => void,
+    keys?: string,
   ): void {
     this.commands.register({
       id,
       title,
+      ...(keys === undefined ? {} : { keys }),
       enabled: () => this.workspace.focusedPanelId() !== null,
       run: () => {
         const panelId = this.workspace.focusedPanelId();
@@ -319,10 +582,58 @@ export class AppShell {
         this.afterLayoutChange();
       },
     }));
-    return [...commands, ...tabs, ...panels, ...signals];
+    const focused = this.workspace.focusedPanelId();
+    const xSignals =
+      focused === null
+        ? []
+        : this.signals.map((summary) => ({
+            title: `Panel: set X signal… ${summary.path}`,
+            hint: "then pick from tree",
+            run: () => {
+              this.workspace.setMode(focused, "xy");
+              this.workspace.setXSignal(focused, summary.path);
+              this.afterLayoutChange();
+            },
+          }));
+    const colorSignals =
+      focused === null
+        ? []
+        : [
+            {
+              title: "Panel: set color signal (c:)… time",
+              hint: "colour by time",
+              run: () => {
+                this.workspace.setColorSignal(focused, "time");
+                this.afterLayoutChange();
+              },
+            },
+            ...this.signals.map((summary) => ({
+              title: `Panel: set color signal (c:)… ${summary.path}`,
+              hint: "signal",
+              run: () => {
+                this.workspace.setColorSignal(focused, summary.path);
+                this.afterLayoutChange();
+              },
+            })),
+          ];
+    return [
+      ...commands,
+      ...tabs,
+      ...panels,
+      ...xSignals,
+      ...colorSignals,
+      ...signals,
+    ];
   }
 
   private bindControls(): void {
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        this.hideTooltip();
+      },
+      true,
+    );
     const openButton = required<HTMLButtonElement>(this.root, ".open-files");
     openButton.hidden = this.plane.ingest === null;
     openButton.addEventListener("click", () => {
@@ -340,6 +651,15 @@ export class AppShell {
     });
     required(this.root, ".formula-toggle").addEventListener("click", () => {
       this.commands.run("toggle-formula");
+    });
+    required(this.root, ".cursor-style-toggle").addEventListener(
+      "click",
+      () => {
+        this.commands.run("cycle-cursor-style");
+      },
+    );
+    required(this.root, ".stats-toggle").addEventListener("click", () => {
+      this.commands.run("toggle-all-stats");
     });
     const formula = required<HTMLFormElement>(this.root, ".formula-bar");
     formula.addEventListener("submit", (event) => {
@@ -365,7 +685,8 @@ export class AppShell {
       const target = event.target;
       if (
         target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
       ) {
         return;
       }
@@ -411,22 +732,34 @@ export class AppShell {
     }
   }
 
-  private fitWindowToPlotted(): void {
+  /**
+   * The union time extent of `paths`, or null when none are known. A
+   * collapsed extent widens to one second so the window always has a span.
+   */
+  private timeExtent(
+    paths: Iterable<string>,
+  ): { t0: number; t1: number } | null {
     let t0 = Number.POSITIVE_INFINITY;
     let t1 = Number.NEGATIVE_INFINITY;
-    for (const panel of this.workspace.panels()) {
-      for (const series of panel.series) {
-        const summary = this.signalsByPath.get(series.path);
-        if (summary !== undefined) {
-          t0 = Math.min(t0, summary.t_min);
-          t1 = Math.max(t1, summary.t_max);
-        }
-      }
+    for (const path of paths) {
+      const summary = this.signalsByPath.get(path);
+      if (summary === undefined) continue;
+      t0 = Math.min(t0, summary.t_min);
+      t1 = Math.max(t1, summary.t_max);
     }
-    if (Number.isFinite(t0) && Number.isFinite(t1)) {
-      this.time.setWindow(t0, t1 > t0 ? t1 : t0 + 1);
-      this.renderWindowReadout();
-    }
+    if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+    return { t0, t1: t1 > t0 ? t1 : t0 + 1 };
+  }
+
+  private fitWindowToPlotted(): void {
+    const extent = this.timeExtent(
+      [...this.workspace.panels()].flatMap((panel) =>
+        panel.series.map((series) => series.path),
+      ),
+    );
+    if (extent === null) return;
+    this.time.setWindow(extent.t0, extent.t1);
+    this.renderWindowReadout();
   }
 
   /** Renders the toolbar window readout from the linked-time model. */
@@ -442,7 +775,26 @@ export class AppShell {
       this.workspace.activeTabId(),
     );
     this.workspaceView?.sync(this.signals.length > 0);
+    this.syncStatsToggle();
     void this.refreshTiles();
+  }
+
+  private syncStatsToggle(): void {
+    const panels = this.workspace.panels();
+    const active =
+      panels.length > 0 && panels.every((panel) => panel.show_stats);
+    required(this.root, ".stats-toggle").classList.toggle("active", active);
+  }
+
+  private showModeHelp(text: string): void {
+    const help = required<HTMLElement>(this.root, ".mode-help");
+    help.textContent = text;
+    help.hidden = false;
+    if (this.helpTimer !== null) window.clearTimeout(this.helpTimer);
+    this.helpTimer = window.setTimeout(() => {
+      help.hidden = true;
+      this.helpTimer = null;
+    }, 6000);
   }
 
   private async reloadSignals(): Promise<void> {
@@ -457,38 +809,83 @@ export class AppShell {
 
   private async refreshTiles(): Promise<void> {
     const refreshToken = ++this.refreshToken;
-    const state = this.time.snapshot();
     const width = Math.max(
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
     );
-    const next = new Map<string, TileResponse>();
+    const nextTiles = new Map<string, TileResponse>();
+    const nextSamples = new Map<string, SampleResponse>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
-        if (panel.mode !== "time") return;
-        const ids = panel.series
-          .map((series) => this.signalsByPath.get(series.path)?.signal_id)
-          .filter((id): id is string => id !== undefined);
+        const ids = this.panelSignalIds(panel);
         if (ids.length === 0) return;
-        const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+        const window = this.effectiveWindow(panel);
         try {
-          next.set(
-            panel.id,
-            await this.plane.queryTiles({
+          if (panel.mode === "time") {
+            const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+            nextTiles.set(
+              panel.id,
+              await this.plane.queryTiles({
+                request_id: crypto.randomUUID(),
+                signal_ids: ids,
+                window,
+                pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
+              }),
+            );
+          } else {
+            const contextRequest = {
               request_id: crypto.randomUUID(),
               signal_ids: ids,
-              window: { t0: state.t0, t1: state.t1 },
-              pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
-            }),
-          );
+              window: this.sampleWindow(panel),
+              max_points: SAMPLE_CAP,
+            };
+            if (panel.mode === "xy") {
+              const detailRequest = {
+                request_id: crypto.randomUUID(),
+                signal_ids: ids,
+                window,
+                max_points: SAMPLE_CAP,
+              };
+              const [context, detail] = await Promise.all([
+                this.plane.querySamples(contextRequest),
+                this.plane.querySamples(detailRequest),
+              ]);
+              nextSamples.set(panel.id, mergeSampleResponses(context, detail));
+            } else {
+              nextSamples.set(
+                panel.id,
+                await this.plane.querySamples(contextRequest),
+              );
+            }
+          }
         } catch (error: unknown) {
           this.reportError(error);
         }
       }),
     );
     if (refreshToken !== this.refreshToken) return;
-    this.tilesByPanel = next;
+    this.tilesByPanel = nextTiles;
+    this.samplesByPanel = nextSamples;
     this.renderTiles();
+  }
+
+  /**
+   * Signal ids a panel needs: its series, plus the XY x signal and the
+   * colour channel, which are axes rather than plotted series.
+   */
+  private panelSignalIds(panel: PanelState): string[] {
+    const paths = panel.series.map((series) => series.path);
+    if (panel.mode === "xy") {
+      if (panel.x_signal !== null) paths.unshift(panel.x_signal);
+      if (panel.color_signal !== null) paths.push(panel.color_signal);
+    }
+    return [
+      ...new Set(
+        paths
+          .map((path) => this.signalsByPath.get(path)?.signal_id)
+          .filter((id): id is string => id !== undefined),
+      ),
+    ];
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
@@ -504,11 +901,240 @@ export class AppShell {
   private renderTiles(): void {
     const state = this.time.snapshot();
     const elapsed =
-      this.workspaceView?.renderTiles(this.tilesByPanel, {
-        t0: state.t0,
-        t1: state.t1,
-      }) ?? 0;
+      this.workspaceView?.renderData(
+        this.tilesByPanel,
+        this.samplesByPanel,
+        (panelId) => {
+          const panel = this.workspace.panel(panelId);
+          return panel === undefined
+            ? { t0: state.t0, t1: state.t1 }
+            : this.effectiveWindow(panel);
+        },
+      ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
+  }
+
+  private applyTimeWindow(panelId: string, t0: number, t1: number): void {
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
+    const panel = this.workspace.panel(panelId);
+    if (panel === undefined) return;
+    if (this.time.snapshot().linked && panel.mode === "time") {
+      this.time.setWindow(t0, t1);
+      this.renderWindowReadout();
+    } else {
+      this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
+    }
+    this.renderTiles();
+    this.scheduleRefresh();
+  }
+
+  private applyXRange(panelId: string, range: readonly [number, number]): void {
+    if (
+      !Number.isFinite(range[0]) ||
+      !Number.isFinite(range[1]) ||
+      range[1] <= range[0]
+    ) {
+      return;
+    }
+    this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
+    this.renderTiles();
+  }
+
+  private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
+    const state = this.time.snapshot();
+    if (state.linked && panel.mode === "time") {
+      return { t0: state.t0, t1: state.t1 };
+    }
+    const local = panel.time_window;
+    return local === null
+      ? { t0: state.t0, t1: state.t1 }
+      : { t0: local[0], t1: local[1] };
+  }
+
+  /**
+   * The window a panel's samples are fetched over. XY panels fetch the full
+   * data extent because the spec dims the out-of-window trajectory rather
+   * than clipping it; FFT and histogram compute over the visible window.
+   */
+  private sampleWindow(panel: PanelState): { t0: number; t1: number } {
+    if (panel.mode !== "xy") return this.effectiveWindow(panel);
+    const paths = panel.series.map((series) => series.path);
+    if (panel.x_signal !== null) paths.push(panel.x_signal);
+    return this.timeExtent(paths) ?? this.effectiveWindow(panel);
+  }
+
+  private scheduleRefresh(delay = 150): void {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      void this.refreshTiles();
+    }, delay);
+  }
+
+  private fitPanelView(panelId: string): void {
+    const panel = this.workspace.panel(panelId);
+    if (panel === undefined) return;
+    if (panel.mode !== "time") {
+      // Non-time panels have no time axis to fit: clearing both ranges
+      // returns them to autoscale, which the renderer recomputes.
+      this.workspace.clearPanelXRange(panelId);
+      this.workspace.clearPanelYRange(panelId);
+      this.workspaceView?.resetYAxis(panelId);
+      this.renderTiles();
+      return;
+    }
+    this.workspace.clearPanelYRange(panelId);
+    this.workspaceView?.resetYAxis(panelId);
+    const extent = this.timeExtent(panel.series.map((series) => series.path));
+    if (extent === null) {
+      this.renderTiles();
+      this.scheduleRefresh();
+      return;
+    }
+    this.applyTimeWindow(panelId, extent.t0, extent.t1);
+  }
+
+  /** Removes the assigned X signal while leaving an empty XY axis slot. */
+  private clearXSignal(panelId: string): void {
+    const panel = this.workspace.panel(panelId);
+    const path = panel?.x_signal;
+    if (panel === undefined || path === null || path === undefined) return;
+    this.workspace.setXSignal(panelId, null);
+    this.workspace.removeSeries(panelId, path);
+    if (panel.color_signal === path) {
+      this.workspace.setColorSignal(panelId, null);
+    }
+    this.workspace.clearPanelXRange(panelId);
+    this.afterLayoutChange();
+  }
+
+  private setCursor(
+    panelId: string,
+    cursor: PlotCursor | null,
+    client: { x: number; y: number } | null,
+  ): void {
+    if (this.cursorStyle === "none") cursor = null;
+    const panel = this.workspace.panel(panelId);
+    const localDomain = panel?.mode === "fft" || panel?.mode === "histogram";
+    if (cursor?.link === "local" || (cursor === null && localDomain)) {
+      this.workspaceView?.setLocalCursor(panelId, cursor?.x ?? null);
+      if (cursor === null) this.renderLinkedCursorReadout();
+      else required(this.root, ".cursor-readout").textContent = cursor.heading;
+      this.renderTooltip(
+        panelId,
+        this.cursorStyle === "line" ? cursor : null,
+        this.cursorStyle === "line" ? client : null,
+      );
+      return;
+    }
+    const cursorT = cursor?.link === "time" ? cursor.x : null;
+    this.time.setCursor(cursorT);
+    const state = this.time.snapshot();
+    this.workspaceView?.setCursor(state.cursorT);
+    this.renderLinkedCursorReadout();
+    this.renderTooltip(
+      panelId,
+      this.cursorStyle === "line" && state.cursorT !== null ? cursor : null,
+      this.cursorStyle === "line" ? client : null,
+    );
+    this.scheduleLiveValues(this.cursorStyle === "none" ? null : state.cursorT);
+  }
+
+  private cycleCursorStyle(): void {
+    const current = CURSOR_STYLES.indexOf(this.cursorStyle);
+    this.cursorStyle =
+      CURSOR_STYLES[(current + 1) % CURSOR_STYLES.length] ?? "dot";
+    this.workspaceView?.setCursorStyle(this.cursorStyle);
+    const button = required<HTMLButtonElement>(
+      this.root,
+      ".cursor-style-toggle",
+    );
+    const symbol =
+      this.cursorStyle === "none"
+        ? "off"
+        : this.cursorStyle === "dot"
+          ? "·"
+          : "│";
+    button.textContent = `cursor ${symbol}`;
+    button.title = `Cursor: ${this.cursorStyle} (click to cycle)`;
+    if (this.cursorStyle === "none") {
+      this.workspaceView?.clearCursors();
+      this.time.setCursor(null);
+      this.renderLinkedCursorReadout();
+      this.hideTooltip();
+      this.scheduleLiveValues(null);
+    }
+  }
+
+  private renderTooltip(
+    panelId: string,
+    cursor: PlotCursor | null,
+    client: { x: number; y: number } | null,
+  ): void {
+    const tip = required<HTMLElement>(this.root, ".plot-tip");
+    const panel = this.workspace.panel(panelId);
+    if (cursor === null || client === null || panel === undefined) {
+      tip.hidden = true;
+      return;
+    }
+    const rows = cursor.rows.map((row) =>
+      tooltipRow(
+        `var(--series-${String(row.colorIndex + 1)})`,
+        row.label,
+        row.unit === null
+          ? formatValue(row.value)
+          : `${formatValue(row.value)} ${row.unit}`,
+      ),
+    );
+    if (rows.length === 0) {
+      tip.hidden = true;
+      return;
+    }
+    tip.replaceChildren(tooltipHeader(cursor.heading), ...rows);
+    tip.hidden = false;
+    const rect = tip.getBoundingClientRect();
+    const x =
+      client.x + 16 + rect.width > window.innerWidth - 8
+        ? client.x - 16 - rect.width
+        : client.x + 16;
+    const y =
+      client.y + 14 + rect.height > window.innerHeight - 8
+        ? client.y - 14 - rect.height
+        : client.y + 14;
+    tip.style.transform = `translate(${String(x)}px, ${String(y)}px)`;
+  }
+
+  private hideTooltip(): void {
+    required<HTMLElement>(this.root, ".plot-tip").hidden = true;
+  }
+
+  private renderLinkedCursorReadout(): void {
+    const cursorT = this.time.snapshot().cursorT;
+    required(this.root, ".cursor-readout").textContent =
+      cursorT === null ? "t = —" : `t = ${formatCursorTime(cursorT)}`;
+  }
+
+  private scheduleLiveValues(cursorT: number | null): void {
+    this.pendingCursorT = cursorT;
+    if (this.liveValuesScheduled) return;
+    this.liveValuesScheduled = true;
+    requestAnimationFrame(() => {
+      this.liveValuesScheduled = false;
+      const values = new Map<string, string>();
+      if (this.pendingCursorT !== null) {
+        for (const tiles of this.tilesByPanel.values()) {
+          for (const tile of tiles.series) {
+            if (!values.has(tile.signal_path)) {
+              values.set(
+                tile.signal_path,
+                formatValue(valueAtTime(tile.bins, this.pendingCursorT)),
+              );
+            }
+          }
+        }
+      }
+      this.tree?.setLiveValues(values);
+    });
   }
 
   private updateStatus(): void {
@@ -546,9 +1172,18 @@ export class AppShell {
   }
 
   private toggleLinked(): void {
-    const linked = !this.time.snapshot().linked;
+    const state = this.time.snapshot();
+    const linked = !state.linked;
+    if (!linked) {
+      for (const panel of this.workspace.panels()) {
+        if (panel.mode === "time") {
+          this.workspace.setPanelTimeWindow(panel.id, [state.t0, state.t1]);
+        }
+      }
+    }
     this.time.setLinked(linked);
     required(this.root, ".linked-toggle").classList.toggle("active", linked);
+    void this.refreshTiles();
   }
 
   private toggleTheme(): void {
@@ -687,12 +1322,14 @@ function shellMarkup(): string {
       <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
       <button class="tool-button active linked-toggle">⇄ Linked t</button>
       <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
+      <button class="tool-button cursor-style-toggle" title="Cursor: off (click to cycle)">cursor off</button>
+      <button class="tool-button stats-toggle" title="Show statistics on every panel">Σ Stats</button>
       <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
       <span class="tool-spacer"></span>
       <span class="window-label">window</span>
       <span class="window-readout"></span>
       <button class="tool-button follow-slot" disabled>⏸ FOLLOW</button>
-      <span class="command-hint">commands <kbd>⌘K</kbd></span>
+      <span class="command-hint">commands <kbd>⌘P</kbd></span>
     </div>
 
     <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
@@ -715,18 +1352,49 @@ function shellMarkup(): string {
 
     <section class="workspace" aria-label="Panel workspace"></section>
 
+    <div class="mode-help" role="status" hidden></div>
+
     <form class="formula-bar" id="formula-editor">
       <span class="formula-mark">ƒx</span>
       <input class="formula-input" aria-label="Derived signal formula" placeholder='derived/name = Math.hypot($("signal/x"), $("signal/y"))' spellcheck="false" />
     </form>
+    <div class="plot-tip" hidden></div>
 
     <footer class="status-bar">
       <span><span class="status-dot"></span> <span class="signal-count">0 signals</span></span>
       <span class="point-count status-value">0 pts</span>
       <span>render <span class="render-ms status-value">— ms</span></span>
-      <span>cursor <span class="status-value">t = —</span></span>
-      <span class="gesture-hint">drag signal → panel · N = split down · / = filter · ⌘K = commands</span>
-      <span class="status-command">⌘K</span>
+      <span>cursor <span class="status-value cursor-readout">t = —</span></span>
+      <span class="gesture-hint">
+        <span><b>ZOOM</b> drag box · wheel</span>
+        <span><b>ONE AXIS</b> thin drag · ⇧wheel Y · ⌥wheel X</span>
+        <span><b>PAN</b> right-drag</span>
+        <span><b>FIT</b> double-click</span>
+      </span>
+      <span class="status-command">⌘P</span>
     </footer>
   </main>`;
+}
+
+function tooltipHeader(text: string): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "plot-tip-header";
+  header.textContent = text;
+  return header;
+}
+
+function tooltipRow(color: string, name: string, value: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "plot-tip-row";
+  const swatch = document.createElement("span");
+  swatch.className = "plot-tip-swatch";
+  swatch.style.background = color;
+  const label = document.createElement("span");
+  label.className = "signal-path";
+  label.textContent = name;
+  const reading = document.createElement("span");
+  reading.className = "plot-tip-value";
+  reading.textContent = value;
+  row.append(swatch, label, reading);
+  return row;
 }

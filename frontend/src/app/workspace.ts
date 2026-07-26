@@ -1,4 +1,6 @@
 import type {
+  Annotation,
+  DashStyle,
   LayoutRow,
   PanelMode,
   PanelState,
@@ -221,6 +223,37 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.mode = mode;
   }
 
+  setXSignal(id: string, path: string | null): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    // The outgoing x signal returns to the plotted series, and the incoming
+    // one leaves them: an axis is never also a series.
+    if (panel.x_signal !== null && panel.x_signal !== path) {
+      const restored = panel.x_signal;
+      if (!panel.series.some((series) => series.path === restored)) {
+        this.addSeries(id, restored);
+      }
+    }
+    if (path !== null) this.removeSeries(id, path);
+    panel.x_signal = path;
+    panel.x_range = null;
+    panel.y_range = null;
+    panel.annotations = [];
+  }
+
+  /** Enters XY mode, adopting the first plotted series as the x axis. */
+  promoteSeriesToX(id: string): void {
+    const panel = this.panel(id);
+    if (panel === undefined || panel.x_signal !== null) return;
+    const first = panel.series[0];
+    if (first !== undefined) this.setXSignal(id, first.path);
+  }
+
+  setColorSignal(id: string, path: string | null): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) panel.color_signal = path;
+  }
+
   addSeries(panelId: string, path: string): boolean {
     const panel = this.panel(panelId);
     if (
@@ -257,6 +290,95 @@ export class WorkspaceModel {
   clearPanelYRange(panelId: string): void {
     const panel = this.panel(panelId);
     if (panel !== undefined) panel.y_range = null;
+  }
+
+  setPanelXRange(panelId: string, range: readonly [number, number]): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.x_range = [range[0], range[1]];
+  }
+
+  clearPanelXRange(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.x_range = null;
+  }
+
+  renamePanel(id: string, title: string): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) panel.title = title;
+  }
+
+  setAxisLabel(id: string, axis: "x" | "y", label: string | null): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    if (axis === "x") panel.x_label = label;
+    else panel.y_label = label;
+  }
+
+  setPanelTimeWindow(
+    id: string,
+    window: readonly [number, number] | null,
+  ): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    panel.time_window = window === null ? null : [window[0], window[1]];
+  }
+
+  addAnnotation(panelId: string, annotation: Annotation): void {
+    this.panel(panelId)?.annotations.push({ ...annotation });
+  }
+
+  removeAnnotation(panelId: string, annotationId: string): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.annotations = panel.annotations.filter(
+      (annotation) => annotation.id !== annotationId,
+    );
+  }
+
+  setAnnotationLabel(
+    panelId: string,
+    annotationId: string,
+    label: string,
+  ): void {
+    const annotation = this.panel(panelId)?.annotations.find(
+      (entry) => entry.id === annotationId,
+    );
+    if (annotation !== undefined) annotation.label = label;
+  }
+
+  toggleStats(id: string): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) panel.show_stats = !panel.show_stats;
+  }
+
+  toggleAxisStyle(id: string): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) {
+      panel.axis_style = panel.axis_style === "gutter" ? "inline" : "gutter";
+    }
+  }
+
+  setSeriesStyle(
+    panelId: string,
+    path: string,
+    style: { color_slot: number; dash: DashStyle; width: number },
+  ): void {
+    const series = this.panel(panelId)?.series.find(
+      (entry) => entry.path === path,
+    );
+    if (series === undefined) return;
+    series.color_slot = style.color_slot;
+    series.dash = style.dash;
+    series.width = style.width;
+  }
+
+  removeSeries(panelId: string, path: string): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.series = panel.series.filter((series) => series.path !== path);
+    panel.annotations = panel.annotations.filter(
+      (annotation) => annotation.series_path !== path,
+    );
   }
 
   resizeRows(seamIndex: number, delta: number): void {
@@ -359,6 +481,10 @@ export class WorkspaceModel {
       color_signal: null,
       series: [],
       y_range: null,
+      x_range: null,
+      x_label: null,
+      y_label: null,
+      time_window: null,
       annotations: [],
       show_stats: false,
     };

@@ -101,3 +101,20 @@ Carlo run index, tiers, buckets) and the wrong one for series identity.
   slot 8 are distinguished by dash class.
 - This record supersedes the Final Spec's per-theme slot assignment and its
   pending-validation note. The spec is not rewritten.
+
+## 2026-07-25 amendment: familiar order and line-style rollover
+
+Desktop acceptance testing found the original first five slots visually too
+similar in dense multi-series plots despite passing the computed checks. The
+seven base slots therefore use MATLAB's familiar default sequence exactly:
+`#0072BD`, `#D95319`, `#EDB120`, `#7E2F8E`, `#77AC30`, `#4DBEEE`, and
+`#A2142F`. The eighth serialized slot rolls over to blue with a dash, matching
+MATLAB's convention of advancing line style after the color order is
+exhausted. `--series-8` remains as the compatible rollover token.
+
+This amendment supersedes the earlier hue-band exclusion and theme-specific
+re-stepping. “Amber is interaction-only” now reserves the SignalScope amber
+tokens and their semantic roles; it does not forbid MATLAB yellow as a series
+color. Series identity still has path text and dash relief, and tests pin the
+canonical values and ensure no series token is byte-identical to an amber or
+status token.

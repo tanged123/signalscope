@@ -1,33 +1,20 @@
 import type { SignalTile, TileResponse } from "../generated/protocol";
-import type { DashStyle } from "../generated/session";
-
-interface PlotRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface Range {
-  min: number;
-  max: number;
-}
+import type { AxisStyle, DashStyle } from "../generated/session";
+import {
+  logTicks,
+  projectX,
+  projectY,
+  type AxisScale,
+  type PlotLayout,
+  type PlotRect,
+  type Range,
+} from "../app/plot-math";
+import { ColormapRamp, SEQ_TOKENS } from "../app/colormap";
+import { CanvasSurface } from "./surface";
 
 interface Projection {
   toX: (value: number) => number;
   toY: (value: number) => number;
-}
-
-/** Data-to-pixel mapping shared by axes, ticks, and series strokes. */
-function projection(plot: PlotRect, xRange: Range, yRange: Range): Projection {
-  return {
-    toX: (value) =>
-      plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width,
-    toY: (value) =>
-      plot.y +
-      plot.height -
-      ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height,
-  };
 }
 
 export interface Palette {
@@ -37,6 +24,7 @@ export interface Palette {
   fg3: string;
   grid: string;
   series: string[];
+  sequential: string[];
   fontMono: string;
 }
 
@@ -46,7 +34,40 @@ export interface RenderOptions {
   colorSlots: readonly number[];
   dashes: readonly DashStyle[];
   yRange: readonly [number, number];
+  axisStyle?: AxisStyle;
+  widths?: readonly number[];
+  emphasisIndex?: number;
 }
+
+export interface PlotPath {
+  /** Flat vertex pairs `[x0, y0, x1, y1, …]`; a NaN vertex lifts the pen. */
+  points: readonly number[];
+  colorIndex: number;
+  dash: DashStyle;
+  width: number;
+  /** Drawn in `--fg-4` at low alpha: present but outside the window. */
+  dimmed?: boolean;
+  /** Filled sample dots, for sparse traces. */
+  markers?: boolean;
+  /** Per-vertex scalar driving the sequential ramp; enables `c:` colouring. */
+  colorValues?: readonly number[];
+}
+
+export interface PathRenderOptions {
+  xLabel: string;
+  yLabel: string;
+  xRange: readonly [number, number];
+  yRange: readonly [number, number];
+  axisStyle?: AxisStyle;
+  xScale?: AxisScale;
+  /** Domain and axis name of the `c:` channel; reserves the right gutter. */
+  colorbar?: { min: number; max: number; label: string };
+}
+
+/** Sample dots appear only when vertices are sparser than this pixel gap. */
+const MARKER_PIXEL_GAP = 7;
+/** Spec F2: 64px right gutter — 12px bar, ticks, labels, and slack. */
+const COLORBAR_GUTTER = 64;
 
 export const SERIES_TOKENS = [
   "--series-1",
@@ -59,7 +80,9 @@ export const SERIES_TOKENS = [
   "--series-8",
 ] as const;
 
-export const COLOR_SLOTS = SERIES_TOKENS.length;
+// MATLAB advances line style after exhausting its categorical color order.
+// SignalScope keeps --series-8 as the first dashed rollover for compatibility.
+export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const DASH_CYCLE = ["solid", "dash", "dot"] as const;
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
@@ -90,15 +113,58 @@ export function dashPattern(dash: DashStyle): number[] {
   return [];
 }
 
+/** Canvas geometry and palette shared by every draw call in one frame. */
+interface Frame {
+  context: CanvasRenderingContext2D;
+  colors: Palette;
+  plot: PlotRect;
+  project: Projection;
+  width: number;
+  height: number;
+}
+
+/** What both axis routines draw against, so they share one call shape. */
+interface AxisFrame {
+  context: CanvasRenderingContext2D;
+  plot: PlotRect;
+  project: Projection;
+  colors: Palette;
+  xTicks: readonly number[];
+}
+
+/** The axis furniture and geometry one frame needs before anything is drawn. */
+interface FrameSpec {
+  xRange: Range;
+  yRange: Range;
+  xLabel: string;
+  yLabel: string;
+  axisStyle?: AxisStyle;
+  xScale?: AxisScale;
+  /** Pixels reserved on the right for a decoration such as the colorbar. */
+  rightGutter?: number;
+}
+
 export class CanvasRenderer {
   private palette: Palette | null = null;
-  private renderedWidth = 0;
-  private renderedHeight = 0;
+  private readonly surface: CanvasSurface;
+  private layout: PlotLayout | null = null;
+  private colorbarGradient: CanvasGradient | null = null;
+  private colorbarBottom = 0;
+  private sequentialRamp: ColormapRamp | null = null;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {}
+  constructor(canvas: HTMLCanvasElement) {
+    this.surface = new CanvasSurface(canvas);
+  }
 
   invalidateTheme(): void {
     this.palette = null;
+    this.colorbarGradient = null;
+    this.sequentialRamp = null;
+  }
+
+  private ramp(colors: Palette): ColormapRamp {
+    this.sequentialRamp ??= new ColormapRamp(colors.sequential);
+    return this.sequentialRamp;
   }
 
   /**
@@ -107,6 +173,12 @@ export class CanvasRenderer {
    */
   setPalette(palette: Palette): void {
     this.palette = palette;
+    this.colorbarGradient = null;
+    this.sequentialRamp = null;
+  }
+
+  lastLayout(): PlotLayout | null {
+    return this.layout;
   }
 
   render(
@@ -115,29 +187,15 @@ export class CanvasRenderer {
     options: RenderOptions,
   ): number {
     const started = performance.now();
-    const { context, width, height } = this.prepareCanvas();
-    const colors = this.resolvePalette();
-    context.fillStyle = colors.background;
-    context.fillRect(0, 0, width, height);
-
-    const yRange: Range = {
-      min: options.yRange[0],
-      max: options.yRange[1],
-    };
-    context.font = tickFont(colors);
-    const charWidth = context.measureText("0").width;
-    const gutter = gutterWidth(
-      formatTicks(ticks(yRange.min, yRange.max, 6)),
-      charWidth,
-    );
-    const plot: PlotRect = {
-      x: gutter,
-      y: 8,
-      width: Math.max(1, width - gutter - 12),
-      height: Math.max(1, height - 42),
-    };
-    const project = projection(plot, xRange, yRange);
-    this.drawAxes(context, plot, project, xRange, yRange, colors, options);
+    const { context, colors, plot, project } = this.beginFrame({
+      xRange,
+      yRange: { min: options.yRange[0], max: options.yRange[1] },
+      xLabel: options.xLabel,
+      yLabel: options.yLabel,
+      ...(options.axisStyle === undefined
+        ? {}
+        : { axisStyle: options.axisStyle }),
+    });
     response.series.forEach((series, index) => {
       const style = resolveSeriesStyle(
         options.colorSlots[index] ?? index + 1,
@@ -145,40 +203,279 @@ export class CanvasRenderer {
       );
       this.drawSeries(
         context,
+        plot,
         project,
         series,
         colors.series[style.colorIndex] ?? colors.fg2,
         style.dash,
+        (options.widths?.[index] ?? 1.4) +
+          (options.emphasisIndex === index ? 0.4 : 0),
+        options.emphasisIndex !== undefined && options.emphasisIndex !== index,
       );
     });
     return performance.now() - started;
   }
 
-  private prepareCanvas(): {
-    context: CanvasRenderingContext2D;
-    width: number;
-    height: number;
-  } {
-    const ratio = globalThis.devicePixelRatio || 1;
-    const width = Math.max(1, this.canvas.clientWidth);
-    const height = Math.max(1, this.canvas.clientHeight);
-    const backingWidth = Math.round(width * ratio);
-    const backingHeight = Math.round(height * ratio);
-    if (
-      backingWidth !== this.renderedWidth ||
-      backingHeight !== this.renderedHeight
-    ) {
-      this.canvas.width = backingWidth;
-      this.canvas.height = backingHeight;
-      this.renderedWidth = backingWidth;
-      this.renderedHeight = backingHeight;
+  /**
+   * Draws vertex paths against arbitrary axes. XY trajectories, spectra, and
+   * histogram outlines are all vertex arrays rather than envelope bins, so
+   * they share this entry point instead of `render()`.
+   */
+  renderPaths(paths: readonly PlotPath[], options: PathRenderOptions): number {
+    const started = performance.now();
+    const { context, colors, plot, project, width, height } = this.beginFrame({
+      xRange: { min: options.xRange[0], max: options.xRange[1] },
+      yRange: { min: options.yRange[0], max: options.yRange[1] },
+      xLabel: options.xLabel,
+      yLabel: options.yLabel,
+      ...(options.axisStyle === undefined
+        ? {}
+        : { axisStyle: options.axisStyle }),
+      ...(options.xScale === undefined ? {} : { xScale: options.xScale }),
+      ...(options.colorbar === undefined
+        ? {}
+        : { rightGutter: COLORBAR_GUTTER }),
+    });
+    for (const path of paths) {
+      this.drawPath(context, plot, project, path, colors);
     }
-    const context = this.canvas.getContext("2d");
-    if (context === null) {
-      throw new Error("Canvas 2D context is unavailable");
+    if (options.colorbar !== undefined) {
+      // Inline axes give the plot the full canvas height; the bar keeps the
+      // gutter layout's vertical insets so its ticks stay readable.
+      const colorbarPlot =
+        options.axisStyle === "inline"
+          ? { ...plot, y: 8, height: Math.max(1, height - 42) }
+          : plot;
+      this.drawColorbar(context, colorbarPlot, width, options.colorbar, colors);
     }
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    return { context, width, height };
+    return performance.now() - started;
+  }
+
+  /**
+   * Clears the canvas, derives the plot rectangle, publishes `this.layout`,
+   * and draws the axis furniture. Both entry points share it so the spec's
+   * plot insets and tick policy live in exactly one place.
+   */
+  private beginFrame(spec: FrameSpec): Frame {
+    const { context, width, height } = this.surface.prepare();
+    const colors = this.resolvePalette();
+    context.fillStyle = colors.background;
+    context.fillRect(0, 0, width, height);
+    context.font = tickFont(colors);
+    const gutter = gutterWidth(
+      formatTicks(ticks(spec.yRange.min, spec.yRange.max, 6)),
+      context.measureText("0").width,
+    );
+    const inline = spec.axisStyle === "inline";
+    const rightGutter = spec.rightGutter ?? 0;
+    const plot: PlotRect = inline
+      ? { x: 0, y: 0, width: Math.max(1, width - rightGutter), height }
+      : {
+          x: gutter,
+          y: 8,
+          width: Math.max(1, width - gutter - 12 - rightGutter),
+          height: Math.max(1, height - 42),
+        };
+    const scale: AxisScale = spec.xScale ?? "linear";
+    const layout: PlotLayout = {
+      plot,
+      xRange: { ...spec.xRange },
+      yRange: { ...spec.yRange },
+      xScale: scale,
+    };
+    this.layout = layout;
+    const project: Projection = {
+      toX: (value) => projectX(layout, value),
+      toY: (value) => projectY(layout, value),
+    };
+    const xTicks =
+      scale === "log"
+        ? logTicks(spec.xRange.min, spec.xRange.max)
+        : ticks(spec.xRange.min, spec.xRange.max, 7);
+    const axes = { context, plot, project, colors, xTicks } as const;
+    const labels = { xLabel: spec.xLabel, yLabel: spec.yLabel };
+    if (inline) this.drawInlineAxes(axes, spec.yRange, labels);
+    else this.drawAxes(axes, spec.yRange, labels);
+    return { context, colors, plot, project, width, height };
+  }
+
+  private drawPath(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    project: Projection,
+    path: PlotPath,
+    colors: Palette,
+  ): void {
+    const vertices = path.points.length >> 1;
+    if (vertices === 0) return;
+    context.save();
+    context.beginPath();
+    context.rect(plot.x, plot.y, plot.width, plot.height);
+    context.clip();
+    if (path.colorValues !== undefined && path.dimmed !== true) {
+      this.drawColorMappedPath(context, project, path, colors);
+      context.restore();
+      return;
+    }
+    context.strokeStyle =
+      path.dimmed === true
+        ? colors.fg3
+        : (colors.series[path.colorIndex] ?? colors.fg2);
+    context.lineWidth = path.dimmed === true ? 1.2 : path.width;
+    context.globalAlpha = path.dimmed === true ? 0.5 : 1;
+    context.setLineDash(dashPattern(path.dash));
+    context.beginPath();
+    let penDown = false;
+    for (let index = 0; index < vertices; index += 1) {
+      const x = path.points[index * 2] ?? Number.NaN;
+      const y = path.points[index * 2 + 1] ?? Number.NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        penDown = false;
+        continue;
+      }
+      const px = project.toX(x);
+      const py = project.toY(y);
+      if (penDown) context.lineTo(px, py);
+      else context.moveTo(px, py);
+      penDown = true;
+    }
+    context.stroke();
+    if (path.markers === true && vertices < plot.width / MARKER_PIXEL_GAP) {
+      context.setLineDash([]);
+      context.fillStyle = context.strokeStyle;
+      context.beginPath();
+      for (let index = 0; index < vertices; index += 1) {
+        const x = path.points[index * 2] ?? Number.NaN;
+        const y = path.points[index * 2 + 1] ?? Number.NaN;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const px = project.toX(x);
+        const py = project.toY(y);
+        context.moveTo(px + 2.4, py);
+        context.arc(px, py, 2.4, 0, Math.PI * 2);
+      }
+      context.fill();
+    }
+    context.globalAlpha = 1;
+    context.setLineDash([]);
+    context.restore();
+  }
+
+  /** Strokes one segment per vertex pair so each carries its own `c:` colour. */
+  private drawColorMappedPath(
+    context: CanvasRenderingContext2D,
+    project: Projection,
+    path: PlotPath,
+    colors: Palette,
+  ): void {
+    const values = path.colorValues ?? [];
+    const vertices = path.points.length >> 1;
+    const ramp = this.ramp(colors);
+    context.lineWidth = path.width;
+    context.setLineDash(dashPattern(path.dash));
+    context.lineCap = "round";
+    for (let index = 1; index < vertices; index += 1) {
+      const x0 = path.points[(index - 1) * 2] ?? Number.NaN;
+      const y0 = path.points[(index - 1) * 2 + 1] ?? Number.NaN;
+      const x1 = path.points[index * 2] ?? Number.NaN;
+      const y1 = path.points[index * 2 + 1] ?? Number.NaN;
+      if (
+        !Number.isFinite(x0) ||
+        !Number.isFinite(y0) ||
+        !Number.isFinite(x1) ||
+        !Number.isFinite(y1)
+      ) {
+        continue;
+      }
+      // Midpoint of the segment's two scalars keeps the ramp continuous.
+      const scalar = ((values[index - 1] ?? 0) + (values[index] ?? 0)) * 0.5;
+      context.strokeStyle = ramp.at(scalar);
+      context.beginPath();
+      context.moveTo(project.toX(x0), project.toY(y0));
+      context.lineTo(project.toX(x1), project.toY(y1));
+      context.stroke();
+    }
+    context.lineCap = "butt";
+    context.setLineDash([]);
+  }
+
+  /**
+   * The `c:` colorbar: an axis with full anatomy — 12px bar flush with the
+   * plot, 3px ticks at both ends and the midpoint, tabular labels, and its
+   * own name in the corner (spec F2).
+   */
+  private drawColorbar(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    width: number,
+    colorbar: { min: number; max: number; label: string },
+    colors: Palette,
+  ): void {
+    const barX = width - COLORBAR_GUTTER + 24;
+    const barWidth = 12;
+    // Bottom is the low end, matching the spec's bottom-to-top gradient.
+    context.fillStyle = this.colorbarFill(context, plot, colors);
+    context.fillRect(barX, plot.y, barWidth, plot.height);
+    context.strokeStyle = colors.border;
+    context.lineWidth = 1;
+    context.strokeRect(barX + 0.5, plot.y + 0.5, barWidth, plot.height);
+    context.beginPath();
+    for (const fraction of [0, 0.5, 1]) {
+      const y = Math.round(plot.y + plot.height * fraction) + 0.5;
+      context.moveTo(barX + barWidth, y);
+      context.lineTo(barX + barWidth + 3, y);
+    }
+    context.strokeStyle = colors.fg3;
+    context.stroke();
+    context.font = tickFont(colors);
+    context.fillStyle = colors.fg3;
+    context.textAlign = "right";
+    context.textBaseline = "middle";
+    const span = colorbar.max - colorbar.min;
+    const fractions = [0, 0.5, 1];
+    const values = fractions.map((fraction) => colorbar.max - span * fraction);
+    const labels = formatTicks(values);
+    fractions.forEach((fraction, index) => {
+      context.fillText(
+        labels[index] ?? "",
+        width - 2,
+        plot.y + plot.height * fraction,
+      );
+    });
+    context.font = labelFont(colors);
+    context.fillStyle = colors.fg2;
+    context.save();
+    context.translate(barX - 8, plot.y + plot.height / 2);
+    context.rotate(-Math.PI / 2);
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(colorbar.label, 0, 0);
+    context.restore();
+  }
+
+  /**
+   * The sequential ramp as a canvas gradient. Cached because the bar is
+   * otherwise one `fillRect` and one hex interpolation per pixel row, on
+   * every XY frame that carries a `c:` channel.
+   */
+  private colorbarFill(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    colors: Palette,
+  ): CanvasGradient | string {
+    const stops = colors.sequential;
+    if (stops.length === 0) return "#000000";
+    const bottom = plot.y + plot.height;
+    if (this.colorbarGradient !== null && this.colorbarBottom === bottom) {
+      return this.colorbarGradient;
+    }
+    const gradient = context.createLinearGradient(0, bottom, 0, plot.y);
+    const last = Math.max(1, stops.length - 1);
+    stops.forEach((stop, index) => {
+      gradient.addColorStop(index / last, stop);
+    });
+    this.colorbarGradient = gradient;
+    this.colorbarBottom = bottom;
+    return gradient;
   }
 
   private resolvePalette(): Palette {
@@ -193,25 +490,24 @@ export class CanvasRenderer {
       series: SERIES_TOKENS.map((token) =>
         styles.getPropertyValue(token).trim(),
       ),
+      sequential: SEQ_TOKENS.map((token) =>
+        styles.getPropertyValue(token).trim(),
+      ),
       fontMono: styles.getPropertyValue("--font-mono").trim() || FALLBACK_MONO,
     };
     return this.palette;
   }
 
   private drawAxes(
-    context: CanvasRenderingContext2D,
-    plot: PlotRect,
-    project: Projection,
-    xRange: Range,
+    axes: AxisFrame,
     yRange: Range,
-    colors: Palette,
-    options: RenderOptions,
+    labels: { xLabel: string; yLabel: string },
   ): void {
+    const { context, plot, project, colors, xTicks } = axes;
     context.lineWidth = 1;
     context.font = tickFont(colors);
     context.textBaseline = "middle";
 
-    const xTicks = ticks(xRange.min, xRange.max, 7);
     const yTicks = ticks(yRange.min, yRange.max, 6);
     const xLabels = formatTicks(xTicks);
     const yLabels = formatTicks(yTicks);
@@ -238,15 +534,6 @@ export class CanvasRenderer {
       context.fillText(yLabels[index] ?? "", plot.x - 11, y);
     });
 
-    if (yRange.min < 0 && yRange.max > 0) {
-      const zero = Math.round(toY(0)) + 0.5;
-      context.strokeStyle = colors.fg3;
-      context.beginPath();
-      context.moveTo(plot.x, zero);
-      context.lineTo(plot.x + plot.width, zero);
-      context.stroke();
-    }
-
     context.strokeStyle = colors.fg3;
     context.beginPath();
     context.moveTo(plot.x + 0.5, plot.y);
@@ -268,28 +555,36 @@ export class CanvasRenderer {
     context.font = labelFont(colors);
     context.textAlign = "center";
     context.fillText(
-      options.xLabel,
+      labels.xLabel,
       plot.x + plot.width / 2,
       plot.y + plot.height + 27,
     );
     context.save();
     context.translate(10, plot.y + plot.height / 2);
     context.rotate(-Math.PI / 2);
-    context.fillText(options.yLabel, 0, 0);
+    context.fillText(labels.yLabel, 0, 0);
     context.restore();
   }
 
   private drawSeries(
     context: CanvasRenderingContext2D,
+    plot: PlotRect,
     project: Projection,
     series: SignalTile,
     color: string,
     dash: DashStyle,
+    width: number,
+    dimmed: boolean,
   ): void {
     const { toX, toY } = project;
 
+    context.save();
+    context.beginPath();
+    context.rect(plot.x, plot.y, plot.width, plot.height);
+    context.clip();
     context.strokeStyle = color;
-    context.lineWidth = 1.4;
+    context.lineWidth = width;
+    context.globalAlpha = dimmed ? 0.35 : 1;
     context.setLineDash(dashPattern(dash));
     context.beginPath();
     let penDown = false;
@@ -316,7 +611,72 @@ export class CanvasRenderer {
       penDown = !bin.has_gap;
     }
     context.stroke();
+    context.globalAlpha = 1;
     context.setLineDash([]);
+    context.restore();
+  }
+
+  private drawInlineAxes(
+    axes: AxisFrame,
+    yRange: Range,
+    labels: { xLabel: string; yLabel: string },
+  ): void {
+    const { context, plot, project, colors, xTicks } = axes;
+    context.lineWidth = 1;
+    context.font = tickFont(colors);
+    context.textBaseline = "middle";
+    const yTicks = ticks(yRange.min, yRange.max, 6);
+    const { toX, toY } = project;
+    context.strokeStyle = colors.grid;
+    for (const value of xTicks) {
+      const x = Math.round(toX(value)) + 0.5;
+      context.beginPath();
+      context.moveTo(x, plot.y);
+      context.lineTo(x, plot.y + plot.height);
+      context.stroke();
+    }
+    for (const value of yTicks) {
+      const y = Math.round(toY(value)) + 0.5;
+      context.beginPath();
+      context.moveTo(plot.x, y);
+      context.lineTo(plot.x + plot.width, y);
+      context.stroke();
+    }
+    const backed = (
+      text: string,
+      x: number,
+      y: number,
+      align: CanvasTextAlign,
+    ): void => {
+      context.textAlign = align;
+      const textWidth = context.measureText(text).width;
+      const left =
+        align === "left"
+          ? x
+          : align === "right"
+            ? x - textWidth
+            : x - textWidth / 2;
+      context.save();
+      context.globalAlpha = 0.8;
+      context.fillStyle = colors.background;
+      context.fillRect(left - 3, y - 6, textWidth + 6, 12);
+      context.restore();
+      context.fillStyle = colors.fg2;
+      context.fillText(text, x, y);
+    };
+    formatTicks(yTicks).forEach((label, index) => {
+      const y = toY(yTicks[index] ?? 0);
+      if (y > 14 && y < plot.height - 14) backed(label, 4, y, "left");
+    });
+    formatTicks(xTicks).forEach((label, index) => {
+      const x = toX(xTicks[index] ?? 0);
+      if (x > 30 && x < plot.width - 30) {
+        backed(label, x, plot.height - 8, "center");
+      }
+    });
+    context.font = labelFont(colors);
+    backed(labels.yLabel, 4, 12, "left");
+    backed(labels.xLabel, plot.width - 4, plot.height - 8, "right");
   }
 }
 
@@ -341,7 +701,7 @@ export function formatTicks(values: readonly number[]): string[] {
   const largest = magnitudes.length === 0 ? 0 : Math.max(...magnitudes);
   const smallest = magnitudes.length === 0 ? 0 : Math.min(...magnitudes);
   if (largest >= 10_000 || (smallest > 0 && smallest < 0.001)) {
-    return values.map((value) => value.toExponential(1));
+    return values.map((value) => value.toExponential(1).replace(/^-/, "−"));
   }
   let gap = Number.POSITIVE_INFINITY;
   for (let index = 1; index < values.length; index += 1) {
@@ -351,7 +711,7 @@ export function formatTicks(values: readonly number[]): string[] {
   const digits = Number.isFinite(gap)
     ? Math.min(6, Math.max(0, Math.ceil(-Math.log10(gap)) + 1))
     : 0;
-  return values.map((value) => value.toFixed(digits));
+  return values.map((value) => value.toFixed(digits).replace(/^-/, "−"));
 }
 
 export function gutterWidth(

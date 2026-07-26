@@ -60,8 +60,17 @@ function recordingContext(charWidth = 6): {
     fillRect(x: number, y: number, width: number, height: number): void {
       push("fillRect", x, y, width, height);
     },
+    strokeRect(x: number, y: number, width: number, height: number): void {
+      push("strokeRect", x, y, width, height);
+    },
     fillText(text: string, x: number, y: number): void {
       push("fillText", text, x, y);
+    },
+    rect(x: number, y: number, width: number, height: number): void {
+      push("rect", x, y, width, height);
+    },
+    clip(): void {
+      push("clip");
     },
     setLineDash(segments: number[]): void {
       push("setLineDash", [...segments]);
@@ -91,6 +100,19 @@ function recordingContext(charWidth = 6): {
     measureText(text: string): TextMetrics {
       return { width: text.length * charWidth } as TextMetrics;
     },
+    createLinearGradient(
+      x0: number,
+      y0: number,
+      x1: number,
+      y1: number,
+    ): CanvasGradient {
+      push("createLinearGradient", x0, y0, x1, y1);
+      return {
+        addColorStop(offset: number, color: string): void {
+          push("addColorStop", offset, color);
+        },
+      } as unknown as CanvasGradient;
+    },
   };
   return { calls, context: stub as unknown as CanvasRenderingContext2D };
 }
@@ -116,15 +138,16 @@ const TEST_PALETTE: Palette = {
   fg3: "#737985",
   grid: "#1a1d24",
   series: [
-    "#407fd0",
-    "#a7451c",
-    "#29ab79",
-    "#5e57b2",
-    "#a6416b",
-    "#28a4b0",
-    "#247320",
-    "#db6c66",
+    "#0072bd",
+    "#d95319",
+    "#edb120",
+    "#7e2f8e",
+    "#77ac30",
+    "#4dbeee",
+    "#a2142f",
+    "#0072bd",
   ],
+  sequential: ["#000000", "#ffffff"],
   fontMono: '"JetBrains Mono", monospace',
 };
 
@@ -220,6 +243,10 @@ describe("formatTicks", () => {
   it("returns nothing for an empty axis", () => {
     expect(formatTicks([])).toEqual([]);
   });
+
+  it("uses the typographic minus for negative ticks", () => {
+    expect(formatTicks([-150, 0, 150])).toEqual(["−150", "0", "150"]);
+  });
 });
 
 describe("gutterWidth", () => {
@@ -235,16 +262,16 @@ describe("gutterWidth", () => {
 describe("resolveSeriesStyle", () => {
   it("bands the dash class by colour slot", () => {
     expect(resolveSeriesStyle(1, "solid").dash).toBe("solid");
-    expect(resolveSeriesStyle(8, "solid").dash).toBe("solid");
-    expect(resolveSeriesStyle(9, "solid").dash).toBe("dash");
-    expect(resolveSeriesStyle(16, "solid").dash).toBe("dash");
-    expect(resolveSeriesStyle(17, "solid").dash).toBe("dot");
+    expect(resolveSeriesStyle(7, "solid").dash).toBe("solid");
+    expect(resolveSeriesStyle(8, "solid").dash).toBe("dash");
+    expect(resolveSeriesStyle(14, "solid").dash).toBe("dash");
+    expect(resolveSeriesStyle(15, "solid").dash).toBe("dot");
   });
 
-  it("folds the colour index onto eight slots", () => {
+  it("folds the colour index onto the MATLAB-style cycle", () => {
     expect(resolveSeriesStyle(1, "solid").colorIndex).toBe(0);
-    expect(resolveSeriesStyle(9, "solid").colorIndex).toBe(0);
-    expect(resolveSeriesStyle(10, "solid").colorIndex).toBe(1);
+    expect(resolveSeriesStyle(8, "solid").colorIndex).toBe(0);
+    expect(resolveSeriesStyle(9, "solid").colorIndex).toBe(1);
   });
 
   it("lets an explicit user dash win and handles malformed slots", () => {
@@ -255,9 +282,9 @@ describe("resolveSeriesStyle", () => {
     );
   });
 
-  it("gives the first 24 slots distinct composite identities", () => {
+  it("gives the first 21 slots distinct composite identities", () => {
     const seen = new Set<string>();
-    for (let slot = 1; slot <= 24; slot += 1) {
+    for (let slot = 1; slot <= 21; slot += 1) {
       const style = resolveSeriesStyle(slot, "solid");
       const key = `${String(style.colorIndex)}:${style.dash}`;
       expect(seen.has(key)).toBe(false);
@@ -275,6 +302,154 @@ describe("dashPattern", () => {
 });
 
 describe("render", () => {
+  it("reserves a colorbar gutter and strokes per-segment colours", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1, 2, 2],
+          colorValues: [0, 0.5, 1],
+          colorIndex: 0,
+          dash: "solid",
+          width: 1.4,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 2],
+        yRange: [0, 2],
+        colorbar: { min: 0, max: 1, label: "t (s)" },
+      },
+    );
+    const layout = renderer.lastLayout();
+    // Spec F2: 64px right gutter holds the 12px bar, ticks, and labels.
+    expect((layout?.plot.x ?? 0) + (layout?.plot.width ?? 0)).toBeLessThan(
+      600 - 60,
+    );
+    // One stroke per segment rather than one stroke for the path.
+    expect(calls.filter((call) => call.op === "stroke").length).toBeGreaterThan(
+      2,
+    );
+  });
+
+  it("keeps the colorbar visible with inline axes", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1],
+          colorValues: [0.5, 0.5],
+          colorIndex: 0,
+          dash: "solid",
+          width: 1.4,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 1],
+        yRange: [0, 1],
+        axisStyle: "inline",
+        colorbar: { min: 4, max: 6, label: "constant" },
+      },
+    );
+    expect(renderer.lastLayout()?.plot).toEqual({
+      x: 0,
+      y: 0,
+      width: 600 - 64,
+      height: 300,
+    });
+    expect(calls.some((call) => call.op === "strokeRect")).toBe(true);
+    const xLabel = calls.find(
+      (call) => call.op === "fillText" && call.args[0] === "x",
+    );
+    const colorbarLabel = calls.find(
+      (call) => call.op === "fillText" && call.args[0] === "constant",
+    );
+    expect(xLabel?.args.slice(1)).not.toEqual(colorbarLabel?.args.slice(1));
+    expect(
+      calls.some(
+        (call) => call.op === "rotate" && call.args[0] === -Math.PI / 2,
+      ),
+    ).toBe(true);
+  });
+
+  it("formats colorbar ticks with the shared axis formatter", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.renderPaths([], {
+      xLabel: "x",
+      yLabel: "y",
+      xRange: [0, 1],
+      yRange: [0, 1],
+      colorbar: { min: 0.0001, max: 0.0003, label: "magnitude" },
+    });
+
+    const labels = calls
+      .filter((call) => call.op === "fillText" && call.args[1] === 598)
+      .map((call) => call.args[0]);
+    expect(labels).toEqual(formatTicks([0.0003, 0.0002, 0.0001]));
+  });
+
+  it("renders vertex paths against an explicit x range", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    const elapsed = renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1, Number.NaN, Number.NaN, 2, 2],
+          colorIndex: 0,
+          dash: "solid",
+          width: 1.4,
+        },
+      ],
+      {
+        xLabel: "pos_east (m)",
+        yLabel: "pos_north (m)",
+        xRange: [0, 2],
+        yRange: [0, 2],
+      },
+    );
+    expect(elapsed).toBeGreaterThanOrEqual(0);
+    // The NaN vertex lifts the pen: two moveTo calls, not one.
+    expect(calls.filter((call) => call.op === "moveTo").length).toBeGreaterThan(
+      1,
+    );
+    expect(renderer.lastLayout()?.xRange).toEqual({ min: 0, max: 2 });
+  });
+
+  it("records the plot layout and supports inline axes", () => {
+    const { context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(640, 360, context));
+    renderer.setPalette(TEST_PALETTE);
+    expect(renderer.lastLayout()).toBeNull();
+    renderer.render(
+      { request_id: "test", series: [] },
+      { min: 0, max: 10 },
+      {
+        xLabel: "time (s)",
+        yLabel: "value",
+        colorSlots: [],
+        dashes: [],
+        yRange: [1, 5],
+        axisStyle: "inline",
+      },
+    );
+    expect(renderer.lastLayout()).toEqual({
+      plot: { x: 0, y: 0, width: 640, height: 360 },
+      xRange: { min: 0, max: 10 },
+      yRange: { min: 1, max: 5 },
+      xScale: "linear",
+    });
+  });
+
   it("breaks the stroke at gaps", () => {
     const calls = renderOnce([
       tile("a", [
@@ -303,17 +478,17 @@ describe("render", () => {
     const strokes = calls
       .filter((call) => call.op === "=strokeStyle")
       .map((call) => call.args[0]);
-    expect(strokes).toContain("#407fd0");
-    expect(strokes).toContain("#29ab79");
+    expect(strokes).toContain("#0072bd");
+    expect(strokes).toContain("#edb120");
   });
 
-  it("dashes slot 9 and resets the pattern afterwards", () => {
+  it("dashes the first slot after the MATLAB color cycle", () => {
     const calls = renderOnce(
       [
         tile("a", [{ t0: 0, t1: 1, v: 1 }]),
         tile("b", [{ t0: 0, t1: 1, v: 2 }]),
       ],
-      { colorSlots: [1, 9] },
+      { colorSlots: [1, 8] },
     );
     const patterns = calls
       .filter((call) => call.op === "setLineDash")
@@ -322,11 +497,9 @@ describe("render", () => {
     expect(patterns.at(-1)).toBe(JSON.stringify([]));
   });
 
-  it("draws the zero datum with spine ink", () => {
+  it("clips series strokes to the plot rectangle", () => {
     const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])]);
-    const styles = calls
-      .filter((call) => call.op === "=strokeStyle")
-      .map((call) => call.args[0]);
-    expect(styles).toContain(TEST_PALETTE.fg3);
+    expect(calls.some((call) => call.op === "rect")).toBe(true);
+    expect(calls.some((call) => call.op === "clip")).toBe(true);
   });
 });

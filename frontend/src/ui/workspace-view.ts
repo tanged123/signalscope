@@ -1,5 +1,5 @@
 import type { WorkspaceModel } from "../app/workspace";
-import type { TileResponse } from "../generated/protocol";
+import type { SampleResponse, TileResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
@@ -9,6 +9,7 @@ import {
   hasDragType,
   type PanelCallbacks,
 } from "./panel";
+import type { CursorStyle } from "../render/overlay-renderer";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -25,6 +26,7 @@ export interface WorkspaceCallbacks extends PanelCallbacks {
 export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
   private mountedKey = "";
+  private cursorStyle: CursorStyle = "none";
 
   constructor(
     private readonly root: HTMLElement,
@@ -103,9 +105,10 @@ export class WorkspaceView {
     }
   }
 
-  renderTiles(
+  renderData(
     tilesByPanel: ReadonlyMap<string, TileResponse>,
-    window: { t0: number; t1: number },
+    samplesByPanel: ReadonlyMap<string, SampleResponse>,
+    windowFor: (panelId: string) => { t0: number; t1: number },
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -114,13 +117,39 @@ export class WorkspaceView {
       total +=
         this.views
           .get(panel.id)
-          ?.renderTiles(panel, tilesByPanel.get(panel.id) ?? null, window) ?? 0;
+          ?.renderData(
+            panel,
+            tilesByPanel.get(panel.id) ?? null,
+            samplesByPanel.get(panel.id) ?? null,
+            windowFor(panel.id),
+          ) ?? 0;
     }
     return total;
   }
 
   invalidateTheme(): void {
     for (const view of this.views.values()) view.invalidateTheme();
+  }
+
+  setCursor(cursorT: number | null): void {
+    for (const view of this.views.values()) view.setCursor(cursorT);
+  }
+
+  setLocalCursor(id: string, cursorValue: number | null): void {
+    this.views.get(id)?.setLocalCursor(cursorValue);
+  }
+
+  clearCursors(): void {
+    for (const view of this.views.values()) view.clearCursor();
+  }
+
+  setCursorStyle(cursorStyle: CursorStyle): void {
+    this.cursorStyle = cursorStyle;
+    for (const view of this.views.values()) view.setCursorStyle(cursorStyle);
+  }
+
+  resetYAxis(id: string): void {
+    this.views.get(id)?.resetYAxis();
   }
 
   /** The rendered plot width of a panel in CSS pixels, 0 when unmounted. */
@@ -132,6 +161,7 @@ export class WorkspaceView {
     let view = this.views.get(id);
     if (view === undefined) {
       view = new PanelView(id, this.callbacks);
+      view.setCursorStyle(this.cursorStyle);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);
     }
@@ -291,10 +321,10 @@ function emptyState(hasSignals: boolean): HTMLElement {
   hint.className = "empty-hint";
   if (hasSignals) {
     headline.textContent = "No panels open.";
-    hint.textContent = "New panel (N) · drag a signal here · ⌘K commands";
+    hint.textContent = "New panel (N) · drag a signal here · ⌘P commands";
   } else {
     headline.textContent = "No data loaded.";
-    hint.textContent = "Open CSV / MCAP (O) · ⌘K commands";
+    hint.textContent = "Open CSV / MCAP (O) · ⌘P commands";
   }
   empty.append(headline, hint);
   return empty;

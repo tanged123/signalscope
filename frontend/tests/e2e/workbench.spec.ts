@@ -118,7 +118,7 @@ test("command palette runs workspace-scoped panel commands", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.press("ControlOrMeta+p");
   await expect(page.locator(".palette-input")).toBeFocused();
   await page.locator(".palette-input").fill("split current panel right");
   await page.keyboard.press("Enter");
@@ -149,8 +149,25 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onMaximize: () => {},
       onSelectMode: () => {},
       onDropSignal: () => {},
+      onSetXSignal: () => {},
+      onSetColorSignal: () => {},
+      onClearXSignal: () => {},
       onToggleSeries: () => {},
       onResized: () => {},
+      onCursor: () => {},
+      onTimeWindow: () => {},
+      onYRange: () => {},
+      onXRange: () => {},
+      onPinAnnotation: () => {},
+      onRemoveAnnotation: () => {},
+      onEditAnnotationLabel: () => {},
+      onFitView: () => {},
+      onToggleStats: () => {},
+      onToggleAxisStyle: () => {},
+      onRenameTitle: () => {},
+      onEditAxisLabel: () => {},
+      onSetSeriesStyle: () => {},
+      onRemoveSeries: () => {},
     });
     host.appendChild(view.element);
     view.update(
@@ -169,6 +186,10 @@ test("panel legend keeps controls visible and exposes overflow", async ({
           visible: true,
         })),
         y_range: null,
+        x_range: null,
+        x_label: null,
+        y_label: null,
+        time_window: null,
         annotations: [],
         show_stats: false,
       },
@@ -299,6 +320,18 @@ test("tree filters, favorites, and drag-to-plot", async ({
 
   await firstLeaf.locator(".tree-star").click();
   await expect(page.locator(".tree-favorites .tree-leaf")).toHaveCount(1);
+  const favoriteTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await page
+    .locator(".tree-scroll .tree-leaf")
+    .nth(1)
+    .dispatchEvent("dragstart", { dataTransfer: favoriteTransfer });
+  await page.locator(".tree-favorites").dispatchEvent("dragover", {
+    dataTransfer: favoriteTransfer,
+  });
+  await page.locator(".tree-favorites").dispatchEvent("drop", {
+    dataTransfer: favoriteTransfer,
+  });
+  await expect(page.locator(".tree-favorites .tree-leaf")).toHaveCount(2);
 
   await page.keyboard.press("n");
   const enterTarget = page.locator(".panel").last();

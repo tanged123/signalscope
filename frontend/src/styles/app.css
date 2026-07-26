@@ -371,6 +371,32 @@ kbd {
   border-color: var(--amber-7);
 }
 
+/* Spec F6·4: 36px, bottom-anchored inside the plot body, amber because it is
+   a drag target — one of amber's sanctioned interaction roles. */
+.xy-drop-strip {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--amber-3);
+  border-top: 1px dashed var(--amber-7);
+  color: var(--amber-7);
+  font: 10.5px var(--font-mono);
+  inset: auto 0 0;
+  pointer-events: none;
+}
+
+.xy-drop-strip[hidden] {
+  display: none;
+}
+
+.panel.drop-x .xy-drop-strip {
+  background: var(--focus-ring);
+}
+
 .panel-header {
   display: flex;
   min-height: 26px;
@@ -416,6 +442,34 @@ kbd {
   color: var(--fg-1);
 }
 
+/* Dashed chips mark an axis assignment rather than a plotted series. */
+.axis-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+  font: 10.5px var(--font-mono);
+}
+
+.axis-chip[hidden] {
+  display: none;
+}
+
+.axis-chip .axis-chip-prefix {
+  color: var(--fg-4);
+}
+
+.axis-chip.drop-target {
+  border-color: var(--amber-7);
+  color: var(--amber-7);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .panel-legend {
   display: flex;
   flex: 1 1 auto;
@@ -430,12 +484,10 @@ kbd {
 }
 
 .legend-chip {
-  display: flex;
+  display: inline-flex;
   min-width: 0;
   flex: none;
   align-items: center;
-  gap: 4px;
-  padding: 1px 5px;
   border-radius: 2px;
   color: var(--fg-2);
   font-size: 10px;
@@ -443,6 +495,22 @@ kbd {
 
 .legend-chip:hover {
   background: var(--surface-3);
+}
+
+.legend-chip-body {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 5px;
+  color: inherit;
+  font: inherit;
+}
+
+.legend-chip-caret {
+  padding: 1px 4px 1px 0;
+  color: var(--fg-4);
+  font: inherit;
 }
 
 .legend-line {
@@ -530,6 +598,16 @@ kbd {
   margin-left: auto;
 }
 
+.panel-mode-note {
+  flex: none;
+  color: var(--fg-4);
+  font: 10px var(--font-mono);
+}
+
+.panel-mode-note[hidden] {
+  display: none;
+}
+
 .panel-split-actions {
   display: flex;
   overflow: hidden;
@@ -573,7 +651,285 @@ kbd {
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+.overlay-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   cursor: crosshair;
+  /* Without this the browser claims every drag for scrolling and no
+     gesture ever reaches the handlers. */
+  touch-action: none;
+}
+
+/* Coarse pointers need larger targets; the spec's 26px header stays. */
+@media (hover: none) {
+  .panel-action,
+  .mode-pill,
+  .legend-chip-body,
+  .legend-chip-caret {
+    padding: 6px 9px;
+  }
+
+  .axis-chip {
+    padding: 4px 10px;
+  }
+}
+
+.panel-axis-toggle {
+  color: var(--fg-4);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.panel-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 3px 10px;
+  background: var(--surface-0);
+  border-top: 1px solid var(--border-faint);
+  color: var(--fg-2);
+  font: 10px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-stats[hidden],
+.panel-annotations[hidden],
+.plot-tip[hidden] {
+  display: none;
+}
+
+.stats-name {
+  margin-right: 4px;
+  color: var(--fg-3);
+}
+
+.stats-item {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.stats-item + .stats-item {
+  margin-left: 8px;
+}
+
+.stats-item b {
+  color: var(--fg-1);
+  font-weight: 500;
+}
+
+.stats-hint {
+  margin-left: auto;
+  color: var(--fg-4);
+}
+
+.panel-annotations {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-2);
+  font: 10px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.annotations-heading {
+  margin-bottom: 3px;
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.annotation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.annotation-action {
+  margin-left: auto;
+  padding: 0;
+  color: var(--fg-4);
+}
+
+.annotation-action + .annotation-action {
+  margin-left: 0;
+}
+
+.annotation-label-input,
+.axis-label-editor {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-1);
+  font: inherit;
+}
+
+.panel-title[contenteditable]:not([contenteditable="false"]) {
+  padding: 0 3px;
+  border-radius: 2px;
+  outline: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg-1);
+}
+
+.panel-title:empty::before {
+  color: var(--fg-4);
+  content: "untitled";
+}
+
+.axis-label-editor {
+  position: absolute;
+  z-index: 3;
+  width: 130px;
+  padding: 1px 4px;
+  font: 9.5px var(--font-mono);
+}
+
+.axis-label-editor-y {
+  top: 45%;
+  left: 4px;
+}
+
+.axis-label-editor-x {
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.plot-tip {
+  position: fixed;
+  z-index: 8;
+  top: 0;
+  left: 0;
+  min-width: 150px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: 10.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.plot-tip-header {
+  margin-bottom: 3px;
+}
+
+.plot-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plot-tip-swatch {
+  width: 9px;
+  height: 2px;
+}
+
+.plot-tip-value {
+  margin-left: auto;
+  color: var(--fg-1);
+}
+
+.mode-help {
+  position: fixed;
+  z-index: 9;
+  top: 48px;
+  left: 50%;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 6px 9px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: 10.5px var(--font-mono);
+  pointer-events: none;
+}
+
+.mode-help[hidden] {
+  display: none;
+}
+
+.series-inspector {
+  position: absolute;
+  z-index: 5;
+  width: 196px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-2);
+  box-shadow: var(--elev-2);
+  font-size: 10.5px;
+}
+
+.inspector-path {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+}
+
+.inspector-slots {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.inspector-slot {
+  height: 12px;
+  border-radius: 1px;
+}
+
+.inspector-slot.active {
+  outline: 1px solid var(--fg-1);
+}
+
+.inspector-dashes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.inspector-dash,
+.inspector-remove {
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  color: var(--fg-3);
+}
+
+.inspector-dash.active {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.inspector-dashes input[type="range"] {
+  min-width: 0;
+  flex: 1;
+}
+
+.inspector-remove {
+  color: var(--status-error);
+}
+
+.inspector-action {
+  margin-top: 6px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font: inherit;
+}
+
+.inspector-action:hover {
+  background: var(--surface-4);
+  color: var(--fg-1);
 }
 
 .formula-bar {
@@ -627,11 +983,20 @@ kbd {
 }
 
 .gesture-hint {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
   overflow: hidden;
   flex: 1;
-  text-align: right;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gesture-hint b {
+  margin-right: 4px;
+  color: var(--fg-2);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
 }
 
 .status-command {
@@ -747,7 +1112,13 @@ kbd {
 }
 
 .tree-favorites {
+  min-height: var(--tree-row-height);
   padding: 0 6px;
+}
+
+.tree-favorites.drop-target {
+  outline: 1px solid var(--amber-7);
+  outline-offset: -1px;
 }
 
 .tree-scroll {

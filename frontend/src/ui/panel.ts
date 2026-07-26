@@ -1,15 +1,72 @@
-import type { TileResponse } from "../generated/protocol";
-import type { PanelMode, PanelState } from "../generated/session";
+import type { SampleResponse, TileResponse } from "../generated/protocol";
+import type {
+  AxisStyle,
+  DashStyle,
+  PanelMode,
+  PanelState,
+} from "../generated/session";
+import {
+  clamp,
+  formatValue,
+  insidePlot,
+  invertX,
+  invertY,
+  panRange,
+  panScaledRange,
+  pinchRange,
+  pinchScaledRange,
+  projectX,
+  projectY,
+  valueAtTime,
+  wheelZoomFactor,
+  zoomDragMode,
+  zoomRange,
+  zoomScaledRange,
+  type PlotLayout,
+  type Range,
+  type ZoomDragMode,
+} from "../app/plot-math";
+import { histogram } from "../app/histogram";
+import {
+  policyFor,
+  prepareFftPlot,
+  prepareHistogramPlot,
+  prepareTimePlot,
+  prepareXyPlot,
+  type AnnotationAnchor,
+  type PlotDelta,
+  type PlotCursor,
+  type PreparedPlot,
+  type ResolvedAnnotation,
+} from "../app/plot-capabilities";
+import { spectrum } from "../app/spectrum";
+import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
 import {
   CanvasRenderer,
+  COLOR_SLOTS,
   resolveSeriesStyle,
+  type PathRenderOptions,
+  type PlotPath,
   type RenderOptions,
 } from "../render/canvas-renderer";
+import {
+  marker,
+  OverlayRenderer,
+  type CursorPoint,
+  type CursorStyle,
+} from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
-import { required } from "./dom";
+import { required, signalLabel } from "./dom";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
+
+export type PanelCursor = PlotCursor;
+
+interface ResolvedAnnotations {
+  resolved: readonly ResolvedAnnotation[];
+  delta: PlotDelta | null;
+}
 
 const MODES: readonly { mode: PanelMode; label: string }[] = [
   { mode: "time", label: "T" },
@@ -18,12 +75,19 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
   { mode: "histogram", label: "H" },
 ];
 
-const MODE_NAMES: Record<PanelMode, string> = {
-  time: "Time",
-  xy: "XY",
-  fft: "FFT",
-  histogram: "Histogram",
-};
+const XY_HOVER_RADIUS = 40;
+const TOUCH = {
+  /** Movement that promotes a tap to a pan. */
+  panSlop: 9,
+  /** Finger separation below which an axis pans instead of zooming. */
+  pinchSeparation: 40,
+  longPressMs: 430,
+  longPressRadius: 28,
+  tapRemoveRadius: 16,
+  tapCursorRadius: 48,
+  doubleTapMs: 320,
+  doubleTapRadius: 26,
+} as const;
 
 export interface PanelCallbacks {
   onFocus(id: string): void;
@@ -33,8 +97,33 @@ export interface PanelCallbacks {
   onMaximize(id: string): void;
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignal(id: string, path: string): void;
+  onSetXSignal(id: string, path: string): void;
+  onSetColorSignal(id: string, path: string | null): void;
+  onClearXSignal(id: string): void;
   onToggleSeries(id: string, path: string): void;
   onResized(id: string): void;
+  onCursor(
+    id: string,
+    cursor: PanelCursor | null,
+    client: { x: number; y: number } | null,
+  ): void;
+  onTimeWindow(id: string, t0: number, t1: number): void;
+  onYRange(id: string, range: readonly [number, number]): void;
+  onXRange(id: string, range: readonly [number, number]): void;
+  onPinAnnotation(id: string, hit: AnnotationAnchor): void;
+  onRemoveAnnotation(id: string, annotationId: string): void;
+  onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
+  onFitView(id: string): void;
+  onToggleStats(id: string): void;
+  onToggleAxisStyle(id: string): void;
+  onRenameTitle(id: string, title: string): void;
+  onEditAxisLabel(id: string, axis: "x" | "y", label: string | null): void;
+  onSetSeriesStyle(
+    id: string,
+    path: string,
+    style: { color_slot: number; dash: DashStyle; width: number },
+  ): void;
+  onRemoveSeries(id: string, path: string): void;
 }
 
 export function hasDragType(event: DragEvent, type: string): boolean {
@@ -51,8 +140,48 @@ export class PanelView {
   readonly element: HTMLElement;
   private readonly renderer: CanvasRenderer;
   private readonly canvas: HTMLCanvasElement;
+  private readonly overlay: HTMLCanvasElement;
+  private readonly overlayRenderer: OverlayRenderer;
   private readonly yAxis = new YAxisPolicy();
-  private legendChips: HTMLButtonElement[] = [];
+  private legendChips: HTMLElement[] = [];
+  private lastState: PanelState | null = null;
+  private lastTiles: TileResponse | null = null;
+  private lastSamples: SampleResponse | null = null;
+  private lastWindow: { t0: number; t1: number } | null = null;
+  private preparedPlot: PreparedPlot | null = null;
+  /** Traces from the last XY render, reused by hit-testing and overlays. */
+  private xyTraces: {
+    path: string;
+    colorIndex: number;
+    dash: DashStyle;
+    width: number;
+    trace: XyTrace;
+  }[] = [];
+  private domainSeries: {
+    path: string;
+    colorIndex: number;
+    x: number[];
+    y: number[];
+  }[] = [];
+  private cursorT: number | null = null;
+  private cursorStyle: CursorStyle = "none";
+  private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  private dragging = false;
+  private emphasizePath: string | null = null;
+  private inspectorPath: string | null = null;
+  private inspectorCleanup: (() => void) | null = null;
+  private readonly touchPoints = new Map<number, { x: number; y: number }>();
+  private touchMode: "tap" | "pan" | "pinch" | "dead" | null = null;
+  private touchStart: { x: number; y: number } | null = null;
+  private touchStartRanges: { x: Range; y: Range } | null = null;
+  private pinchAnchors: {
+    xA: number;
+    xB: number;
+    yA: number;
+    yB: number;
+  } | null = null;
+  private longPressTimer: number | null = null;
+  private lastTap = { time: 0, x: 0, y: 0 };
 
   constructor(
     private readonly id: string,
@@ -63,7 +192,9 @@ export class PanelView {
     this.element.dataset.panelId = id;
     this.element.innerHTML = panelMarkup();
     this.canvas = required<HTMLCanvasElement>(this.element, ".plot-canvas");
+    this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
     this.renderer = new CanvasRenderer(this.canvas);
+    this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
     new ResizeObserver(() => {
       this.layoutLegend();
@@ -103,6 +234,18 @@ export class PanelView {
     required(this.element, ".panel-maximize").addEventListener("click", () => {
       this.callbacks.onMaximize(this.id);
     });
+    required(this.element, ".panel-stats-toggle").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onToggleStats(this.id);
+      },
+    );
+    required(this.element, ".panel-axis-toggle").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onToggleAxisStyle(this.id);
+      },
+    );
     required<HTMLButtonElement>(
       this.element,
       ".legend-overflow",
@@ -120,32 +263,173 @@ export class PanelView {
         this.callbacks.onSelectMode(this.id, button.dataset.mode as PanelMode);
       });
     }
+    required(this.element, ".x-chip").addEventListener("click", () => {
+      this.callbacks.onClearXSignal(this.id);
+    });
+    const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
+    cChip.addEventListener("click", () => {
+      this.callbacks.onSetColorSignal(this.id, null);
+    });
+    cChip.addEventListener("dragover", (event) => {
+      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cChip.classList.add("drop-target");
+    });
+    cChip.addEventListener("dragleave", (event) => {
+      event.stopPropagation();
+      cChip.classList.remove("drop-target");
+    });
+    cChip.addEventListener("drop", (event) => {
+      const path = dragData(event, SIGNAL_DRAG_TYPE);
+      cChip.classList.remove("drop-target");
+      if (path === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.callbacks.onSetColorSignal(this.id, path);
+    });
     const header = required<HTMLElement>(this.element, ".panel-header");
+    required<HTMLElement>(this.element, ".panel-title").addEventListener(
+      "dblclick",
+      () => {
+        this.beginTitleEdit();
+      },
+    );
     header.draggable = true;
     header.addEventListener("dragstart", (event) => {
       event.dataTransfer?.setData(PANEL_DRAG_TYPE, this.id);
     });
     this.element.addEventListener("dragover", (event) => {
-      if (hasDragType(event, SIGNAL_DRAG_TYPE)) {
-        event.preventDefault();
-        this.element.classList.add("drop-target");
-      }
+      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      event.preventDefault();
+      this.element.classList.add("drop-target");
+      this.setDropStripVisible(true);
+      this.element.classList.toggle("drop-x", this.overStrip(event));
     });
     this.element.addEventListener("dragleave", () => {
-      this.element.classList.remove("drop-target");
+      this.element.classList.remove("drop-target", "drop-x");
+      this.setDropStripVisible(false);
     });
     this.element.addEventListener("drop", (event) => {
-      this.element.classList.remove("drop-target");
+      const asX = this.overStrip(event);
+      this.element.classList.remove("drop-target", "drop-x");
+      this.setDropStripVisible(false);
       const path = dragData(event, SIGNAL_DRAG_TYPE);
-      if (path !== null) {
+      if (path === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (asX) this.callbacks.onSetXSignal(this.id, path);
+      else this.callbacks.onDropSignal(this.id, path);
+    });
+    this.overlay.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "touch" || this.dragging) return;
+      const layout = this.renderer.lastLayout();
+      const inside =
+        layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
+      const cursor =
+        layout !== null && inside
+          ? this.cursorAt(layout, event.offsetX, event.offsetY, XY_HOVER_RADIUS)
+          : null;
+      this.callbacks.onCursor(
+        this.id,
+        cursor,
+        cursor === null ? null : { x: event.clientX, y: event.clientY },
+      );
+    });
+    this.overlay.addEventListener("pointerleave", () => {
+      if (!this.dragging) this.callbacks.onCursor(this.id, null, null);
+    });
+    this.overlay.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+    });
+    this.overlay.addEventListener(
+      "wheel",
+      (event) => {
+        const layout = this.renderer.lastLayout();
+        if (layout === null || !this.interactiveMode()) return;
         event.preventDefault();
-        event.stopPropagation();
-        this.callbacks.onDropSignal(this.id, path);
+        const factor = wheelZoomFactor(event.deltaY);
+        const pivotY = invertY(
+          layout,
+          clamp(
+            event.offsetY,
+            layout.plot.y,
+            layout.plot.y + layout.plot.height,
+          ),
+        );
+        const nextY = zoomRange(layout.yRange, factor, pivotY);
+        const pivotX = invertX(
+          layout,
+          clamp(
+            event.offsetX,
+            layout.plot.x,
+            layout.plot.x + layout.plot.width,
+          ),
+        );
+        const nextX = zoomScaledRange(
+          layout.xRange,
+          factor,
+          pivotX,
+          layout.xScale,
+        );
+        if (event.shiftKey) {
+          this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
+        } else if (event.altKey) {
+          this.applyXRange(nextX.min, nextX.max);
+        } else {
+          this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
+          this.applyXRange(nextX.min, nextX.max);
+        }
+      },
+      { passive: false },
+    );
+    this.overlay.addEventListener("pointerdown", (event) => {
+      const layout = this.renderer.lastLayout();
+      if (layout === null || !this.interactiveMode()) return;
+      if (event.pointerType === "touch") {
+        this.beginTouch(event, layout);
+        return;
+      }
+      const isPan =
+        event.button === 1 ||
+        event.button === 2 ||
+        (event.button === 0 && (event.ctrlKey || event.metaKey));
+      if (isPan) {
+        event.preventDefault();
+        this.beginPan(event, layout);
+      } else if (event.button === 0) {
+        this.beginBoxOrClick(event, layout);
+      }
+    });
+    this.overlay.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "touch") this.moveTouch(event);
+    });
+    this.overlay.addEventListener("pointerup", (event) => {
+      if (event.pointerType === "touch") this.endTouch(event);
+    });
+    this.overlay.addEventListener("pointercancel", (event) => {
+      if (event.pointerType === "touch") this.endTouch(event);
+    });
+    this.overlay.addEventListener("dblclick", (event) => {
+      const layout = this.renderer.lastLayout();
+      const state = this.lastState;
+      if (layout === null || state === null || !this.interactiveMode()) return;
+      const zone = axisEditZone(
+        layout,
+        state.axis_style,
+        event.offsetX,
+        event.offsetY,
+      );
+      if (zone !== null) {
+        this.beginAxisEdit(zone);
+      } else if (insidePlot(layout, event.offsetX, event.offsetY)) {
+        this.callbacks.onFitView(this.id);
       }
     });
   }
 
   update(state: PanelState, maximized: boolean): void {
+    this.lastState = state;
     this.element.classList.toggle("maximized", maximized);
     this.element.setAttribute("aria-label", `${state.title} panel`);
     required(this.element, ".panel-title").textContent = state.title;
@@ -154,29 +438,105 @@ export class PanelView {
     )) {
       button.classList.toggle("active", button.dataset.mode === state.mode);
     }
+    const xChip = required<HTMLButtonElement>(this.element, ".x-chip");
+    xChip.hidden = !(state.mode === "xy" && state.x_signal !== null);
+    if (!xChip.hidden && state.x_signal !== null) {
+      xChip.replaceChildren(
+        chipPrefix("x:"),
+        document.createTextNode(signalLabel(state.x_signal)),
+      );
+      xChip.title = `X axis: ${state.x_signal} — click to remove`;
+    }
+    const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
+    cChip.hidden = state.mode !== "xy";
+    if (!cChip.hidden) {
+      cChip.replaceChildren(
+        chipPrefix("c:"),
+        document.createTextNode(
+          state.color_signal === null
+            ? "none"
+            : state.color_signal === "time"
+              ? "time"
+              : signalLabel(state.color_signal),
+        ),
+      );
+      cChip.title =
+        state.color_signal === null
+          ? "Drop a signal here to assign colour, or use ⌘P → set color signal"
+          : `Colour channel: ${state.color_signal} — click to clear`;
+    }
+    const note = required<HTMLElement>(this.element, ".panel-mode-note");
+    const windowNote = policyFor(state.mode).windowNote;
+    note.hidden = windowNote === null;
+    if (windowNote !== null) note.textContent = windowNote;
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
       maximized ? "Restore panel" : "Maximize panel";
+    required<HTMLButtonElement>(
+      this.element,
+      ".panel-stats-toggle",
+    ).setAttribute("aria-pressed", String(state.show_stats));
+    const axisToggle = required<HTMLButtonElement>(
+      this.element,
+      ".panel-axis-toggle",
+    );
+    axisToggle.textContent = `axes: ${state.axis_style}`;
+    axisToggle.title = `Switch to ${state.axis_style === "gutter" ? "inline" : "gutter"} axes`;
     this.updateLegend(state);
+    const annotations = this.resolvedAnnotations(state);
+    this.renderAnnotationList(state, annotations);
+    this.renderStats();
+    this.drawOverlay(annotations);
+    if (
+      this.inspectorPath !== null &&
+      !state.series.some((series) => series.path === this.inspectorPath)
+    ) {
+      this.closeInspector();
+    }
     const empty = required<HTMLElement>(this.element, ".panel-empty");
-    if (state.mode !== "time") {
-      empty.hidden = false;
-      empty.textContent = `${MODE_NAMES[state.mode]} mode is not implemented yet.`;
-    } else if (state.series.length === 0) {
+    if (state.series.length === 0) {
       empty.hidden = false;
       empty.textContent = "Empty panel — drag a signal here.";
+    } else if (state.mode === "xy" && state.x_signal === null) {
+      empty.hidden = false;
+      empty.textContent = "Drop a signal on the strip below to set the X axis.";
     } else {
+      // In fft/histogram, renderSpectra/renderHistogram own the empty state.
       empty.hidden = true;
     }
   }
 
-  renderTiles(
+  renderData(
     state: PanelState,
     tiles: TileResponse | null,
+    samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
-    if (tiles === null || state.mode !== "time" || state.series.length === 0) {
-      return 0;
+    this.lastState = state;
+    this.lastTiles = tiles;
+    this.lastSamples = samples;
+    this.lastWindow = { ...window };
+    this.preparedPlot = null;
+    this.domainSeries = [];
+    const elapsed = this.renderForMode(state, tiles, samples, window);
+    this.renderStats();
+    const annotations = this.resolvedAnnotations(state);
+    this.renderAnnotationList(state, annotations);
+    this.drawOverlay(annotations);
+    return elapsed;
+  }
+
+  private renderForMode(
+    state: PanelState,
+    tiles: TileResponse | null,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    if (state.mode === "xy") return this.renderXy(state, samples, window);
+    if (state.mode === "fft") return this.renderSpectra(state, samples, window);
+    if (state.mode === "histogram") {
+      return this.renderHistogram(state, samples, window);
     }
+    if (tiles === null || state.series.length === 0) return 0;
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
     );
@@ -184,6 +544,20 @@ export class PanelView {
       (tile) => bySeries.get(tile.signal_path)?.visible ?? true,
     );
     const response = { request_id: tiles.request_id, series: shown };
+    this.preparedPlot = prepareTimePlot({
+      series: shown.map((tile) => {
+        const series = bySeries.get(tile.signal_path);
+        return {
+          path: tile.signal_path,
+          colorIndex: resolveSeriesStyle(
+            series?.color_slot ?? 1,
+            series?.dash ?? "solid",
+          ).colorIndex,
+          bins: tile.bins,
+        };
+      }),
+      window,
+    });
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
     const yRange = this.yAxis.resolve(
       seriesKey,
@@ -191,8 +565,8 @@ export class PanelView {
       state.y_range,
     );
     const options: RenderOptions = {
-      xLabel: "time (s)",
-      yLabel: yLabel(response.series.map((tile) => tile.unit)),
+      xLabel: state.x_label ?? "time (s)",
+      yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
       colorSlots: shown.map(
         (tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1,
       ),
@@ -200,6 +574,16 @@ export class PanelView {
         (tile) => bySeries.get(tile.signal_path)?.dash ?? "solid",
       ),
       yRange,
+      axisStyle: state.axis_style,
+      widths: shown.map((tile) => bySeries.get(tile.signal_path)?.width ?? 1.4),
+      ...(this.emphasizePath !== null &&
+      shown.some((tile) => tile.signal_path === this.emphasizePath)
+        ? {
+            emphasisIndex: shown.findIndex(
+              (tile) => tile.signal_path === this.emphasizePath,
+            ),
+          }
+        : {}),
     };
     return this.renderer.render(
       response,
@@ -208,13 +592,1013 @@ export class PanelView {
     );
   }
 
+  private renderXy(
+    state: PanelState,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    this.xyTraces = [];
+    if (samples === null || state.x_signal === null) return 0;
+    const byPath = new Map(
+      samples.series.map((series) => [series.signal_path, series]),
+    );
+    const xSeries = byPath.get(state.x_signal);
+    if (xSeries === undefined) return 0;
+    for (const series of state.series) {
+      if (!series.visible) continue;
+      const ySeries = byPath.get(series.path);
+      if (ySeries === undefined) continue;
+      const style = resolveSeriesStyle(series.color_slot, series.dash);
+      this.xyTraces.push({
+        path: series.path,
+        colorIndex: style.colorIndex,
+        dash: style.dash,
+        width: series.width,
+        trace: pairSamples(xSeries, ySeries),
+      });
+    }
+    if (this.xyTraces.length === 0) return 0;
+    const colorSeries: "time" | SampleResponse["series"][number] | null =
+      state.color_signal === null
+        ? null
+        : state.color_signal === "time"
+          ? "time"
+          : (byPath.get(state.color_signal) ?? null);
+    const colorFor = (trace: XyTrace): number[] | null => {
+      if (colorSeries === null) return null;
+      if (colorSeries === "time") return [...trace.time];
+      return trace.time.map((time) =>
+        lerpSample(colorSeries.time, colorSeries.values, time),
+      );
+    };
+    const colorColumns = this.xyTraces.map((entry) => colorFor(entry.trace));
+    let colorMin = Number.POSITIVE_INFINITY;
+    let colorMax = Number.NEGATIVE_INFINITY;
+    for (const column of colorColumns) {
+      for (const value of column ?? []) {
+        if (!Number.isFinite(value)) continue;
+        colorMin = Math.min(colorMin, value);
+        colorMax = Math.max(colorMax, value);
+      }
+    }
+    const hasColor =
+      colorSeries !== null &&
+      Number.isFinite(colorMin) &&
+      Number.isFinite(colorMax);
+    const colorPadding =
+      hasColor && colorMin === colorMax
+        ? Math.max(1, Math.abs(colorMin) * 0.05)
+        : 0;
+    const colorDomainMin = colorMin - colorPadding;
+    const colorDomainMax = colorMax + colorPadding;
+    const colorSpan = colorDomainMax - colorDomainMin;
+    const traces = this.xyTraces.map((entry) => entry.trace);
+    const xRange =
+      state.x_range ?? traceExtent(traces, "x", window.t0, window.t1);
+    const yRange =
+      state.y_range ?? traceExtent(traces, "y", window.t0, window.t1);
+    if (xRange === null || yRange === null) return 0;
+    const paths: PlotPath[] = [];
+    for (const entry of this.xyTraces) {
+      // Whole trajectory dimmed underneath, the windowed part lit on top.
+      paths.push({
+        points: flattenTrace(entry.trace, null),
+        colorIndex: entry.colorIndex,
+        dash: "solid",
+        width: 1.2,
+        dimmed: true,
+      });
+    }
+    this.xyTraces.forEach((entry, index) => {
+      paths.push({
+        points: flattenTrace(entry.trace, window),
+        colorIndex: entry.colorIndex,
+        dash: entry.dash,
+        width: entry.width + 0.4,
+        markers: true,
+        ...(hasColor
+          ? {
+              colorValues: (colorColumns[index] ?? []).map(
+                (value) => (value - colorDomainMin) / colorSpan,
+              ),
+            }
+          : {}),
+      });
+    });
+    const options: PathRenderOptions = {
+      xLabel: state.x_label ?? axisName(state.x_signal, xSeries.unit),
+      yLabel:
+        state.y_label ??
+        yLabel(
+          state.series
+            .filter((series) => series.visible)
+            .map((series) => byPath.get(series.path)?.unit ?? null),
+        ),
+      xRange: [xRange[0], xRange[1]],
+      yRange: [yRange[0], yRange[1]],
+      axisStyle: state.axis_style,
+      ...(hasColor
+        ? {
+            colorbar: {
+              min: colorDomainMin,
+              max: colorDomainMax,
+              label:
+                state.color_signal === "time"
+                  ? "t (s)"
+                  : axisName(
+                      state.color_signal ?? "",
+                      colorSeries === "time" ? null : colorSeries.unit,
+                    ),
+            },
+          }
+        : {}),
+    };
+    this.preparedPlot = prepareXyPlot({
+      x: { path: state.x_signal, values: xSeries.values },
+      series: this.xyTraces.map((entry, index) => ({
+        ...entry,
+        colorValues: colorColumns[index] ?? null,
+      })),
+      color:
+        colorSeries === null
+          ? null
+          : {
+              path: state.color_signal ?? "time",
+            },
+    });
+    return this.renderer.renderPaths(paths, options);
+  }
+
+  private renderSpectra(
+    state: PanelState,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    if (samples === null) return 0;
+    const byPath = new Map(
+      samples.series.map((series) => [series.signal_path, series]),
+    );
+    const paths: PlotPath[] = [];
+    let minFrequency = Number.POSITIVE_INFINITY;
+    let maxFrequency = 0;
+    for (const series of state.series) {
+      if (!series.visible) continue;
+      const source = byPath.get(series.path);
+      if (source === undefined) continue;
+      const result = spectrum(source, window.t0, window.t1);
+      if (result === null) continue;
+      const points: number[] = [];
+      result.frequency.forEach((frequency, index) => {
+        points.push(frequency, result.amplitudeDb[index] ?? -120);
+      });
+      const style = resolveSeriesStyle(series.color_slot, series.dash);
+      this.domainSeries.push({
+        path: series.path,
+        colorIndex: style.colorIndex,
+        x: result.frequency,
+        y: result.amplitudeDb,
+      });
+      paths.push({
+        points,
+        colorIndex: style.colorIndex,
+        dash: style.dash,
+        width: series.width,
+      });
+      minFrequency = Math.min(minFrequency, result.frequency[0] ?? 1);
+      maxFrequency = Math.max(
+        maxFrequency,
+        result.frequency[result.frequency.length - 1] ?? 1,
+      );
+    }
+    this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
+    this.preparedPlot = prepareFftPlot({
+      series: this.domainSeries.map((series) => ({
+        path: series.path,
+        colorIndex: series.colorIndex,
+        frequency: series.x,
+        amplitudeDb: series.y,
+      })),
+    });
+    if (paths.length === 0) return 0;
+    const xRange = state.x_range ?? [minFrequency, maxFrequency];
+    const yRange = state.y_range ?? [-90, 3];
+    return this.renderer.renderPaths(paths, {
+      xLabel: state.x_label ?? "frequency (Hz), log",
+      yLabel: state.y_label ?? "amplitude (dB)",
+      xRange: [xRange[0], xRange[1]],
+      yRange: [yRange[0], yRange[1]],
+      axisStyle: state.axis_style,
+      xScale: "log",
+    });
+  }
+
+  private renderHistogram(
+    state: PanelState,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    if (samples === null) return 0;
+    const byPath = new Map(
+      samples.series.map((series) => [series.signal_path, series]),
+    );
+    const visible = state.series.filter((series) => series.visible);
+    const columns = visible.map((series) => {
+      const source = byPath.get(series.path);
+      if (source === undefined) return [];
+      const values: number[] = [];
+      source.time.forEach((time, index) => {
+        if (time < window.t0 || time > window.t1) return;
+        values.push(source.values[index] ?? Number.NaN);
+      });
+      return values;
+    });
+    const binned = histogram(columns);
+    this.setModeEmpty(binned === null, "No values in view.");
+    if (binned === null) return 0;
+    const edges = binned.edges;
+    let peak = 0;
+    const histogramSeries: {
+      path: string;
+      colorIndex: number;
+      counts: number[];
+      sourceValues: number[];
+    }[] = [];
+    const paths: PlotPath[] = binned.counts.map((counts, index) => {
+      const points: number[] = [];
+      // A staircase outline: rise at each edge, run across each bin, and
+      // close down to zero at both ends so the shape reads as a
+      // distribution rather than a line chart.
+      points.push(edges[0] ?? 0, 0);
+      counts.forEach((count, bin) => {
+        peak = Math.max(peak, count);
+        points.push(edges[bin] ?? 0, count, edges[bin + 1] ?? 0, count);
+      });
+      points.push(edges[edges.length - 1] ?? 0, 0);
+      const series = visible[index];
+      const style = resolveSeriesStyle(
+        series?.color_slot ?? 1,
+        series?.dash ?? "solid",
+      );
+      if (series !== undefined) {
+        histogramSeries.push({
+          path: series.path,
+          colorIndex: style.colorIndex,
+          counts,
+          sourceValues: columns[index] ?? [],
+        });
+      }
+      return {
+        points,
+        colorIndex: style.colorIndex,
+        dash: style.dash,
+        width: series?.width ?? 1.4,
+      };
+    });
+    this.preparedPlot = prepareHistogramPlot({
+      edges,
+      series: histogramSeries,
+    });
+    const units = visible.map(
+      (series) => byPath.get(series.path)?.unit ?? null,
+    );
+    return this.renderer.renderPaths(paths, {
+      xLabel: state.x_label ?? yLabel(units),
+      yLabel: state.y_label ?? "sample count",
+      xRange: [edges[0] ?? 0, edges[edges.length - 1] ?? 1],
+      yRange: [0, Math.max(1, peak) * 1.06],
+      axisStyle: state.axis_style,
+    });
+  }
+
+  /**
+   * Shows or clears a mode-specific empty message. Always assigns `hidden`,
+   * so a panel that starts empty and then gets data does not keep a stale
+   * message over its plot.
+   */
+  private setModeEmpty(show: boolean, message: string): void {
+    const empty = required<HTMLElement>(this.element, ".panel-empty");
+    empty.hidden = !show;
+    if (show) empty.textContent = message;
+  }
+
+  private setDropStripVisible(visible: boolean): void {
+    required<HTMLElement>(this.element, ".xy-drop-strip").hidden = !visible;
+  }
+
+  /** True when the pointer is inside the 36px strip at the plot's foot. */
+  private overStrip(event: DragEvent): boolean {
+    const strip = required<HTMLElement>(this.element, ".xy-drop-strip");
+    if (strip.hidden) return false;
+    const rect = strip.getBoundingClientRect();
+    return (
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom
+    );
+  }
+
   invalidateTheme(): void {
     this.renderer.invalidateTheme();
+    this.overlayRenderer.invalidateTheme();
+  }
+
+  setCursor(cursorT: number | null): void {
+    if (this.preparedPlot?.interaction.cursorLink !== "time") return;
+    this.cursorT = cursorT;
+    this.drawOverlay();
+  }
+
+  setLocalCursor(cursorValue: number | null): void {
+    this.cursorT = cursorValue;
+    this.drawOverlay();
+  }
+
+  clearCursor(): void {
+    this.cursorT = null;
+    this.drawOverlay();
+  }
+
+  setCursorStyle(cursorStyle: CursorStyle): void {
+    this.cursorStyle = cursorStyle;
+    this.drawOverlay();
+  }
+
+  resetYAxis(): void {
+    this.yAxis.reset();
   }
 
   /** The canvas's rendered CSS width, for density-bounded tile queries. */
   plotWidth(): number {
     return this.canvas.clientWidth;
+  }
+
+  plotClick(offsetX: number, offsetY: number): void {
+    // 2A's asymmetry: the remove radius is smaller than the pin radius so a
+    // double-click cancels its own accidental pin before fitting.
+    if (this.removeAt(offsetX, offsetY, 9)) return;
+    this.pinAt(offsetX, offsetY, 14);
+  }
+
+  /** Removes the annotation under the pixel; true when one was removed. */
+  private removeAt(offsetX: number, offsetY: number, radius: number): boolean {
+    const layout = this.renderer.lastLayout();
+    const state = this.lastState;
+    const prepared = this.preparedPlot;
+    if (layout === null || state === null || prepared === null) return false;
+    const annotation = state.annotations
+      .filter((entry) => entry.domain === prepared.domain)
+      .map((entry) => prepared.resolveAnnotation(entry))
+      .filter((entry) => entry !== null)
+      .find(
+        (entry) =>
+          Math.hypot(
+            projectX(layout, entry.x) - offsetX,
+            projectY(layout, entry.y) - offsetY,
+          ) <= radius,
+      );
+    if (annotation === undefined) return false;
+    this.callbacks.onRemoveAnnotation(this.id, annotation.annotation.id);
+    return true;
+  }
+
+  /** Pins the nearest plotted vertex under the pixel, when one is in range. */
+  private pinAt(offsetX: number, offsetY: number, radius: number): void {
+    const layout = this.renderer.lastLayout();
+    if (layout === null) return;
+    const hit = this.preparedPlot?.annotationAt(
+      layout,
+      { x: offsetX, y: offsetY },
+      radius,
+    );
+    if (hit !== null && hit !== undefined) {
+      this.callbacks.onPinAnnotation(this.id, hit);
+    }
+  }
+
+  private beginTouch(event: PointerEvent, layout: PlotLayout): void {
+    this.overlay.setPointerCapture(event.pointerId);
+    this.touchPoints.set(event.pointerId, {
+      x: event.offsetX,
+      y: event.offsetY,
+    });
+    if (this.touchPoints.size === 2) {
+      this.clearLongPress();
+      this.box = null;
+      this.drawOverlay();
+      const [first, second] = [...this.touchPoints.values()];
+      if (first === undefined || second === undefined) return;
+      // Anchors are captured in data space so both stay under their finger.
+      this.pinchAnchors = {
+        xA: invertX(layout, first.x),
+        xB: invertX(layout, second.x),
+        yA: invertY(layout, first.y),
+        yB: invertY(layout, second.y),
+      };
+      this.touchMode = "pinch";
+      return;
+    }
+    if (this.touchPoints.size > 2) {
+      this.touchMode = "dead";
+      return;
+    }
+    this.touchStart = { x: event.offsetX, y: event.offsetY };
+    this.touchStartRanges = {
+      x: { ...layout.xRange },
+      y: { ...layout.yRange },
+    };
+    this.touchMode = "tap";
+    this.longPressTimer = window.setTimeout(() => {
+      this.longPressTimer = null;
+      if (this.touchMode !== "tap" || this.touchStart === null) return;
+      this.pinAt(this.touchStart.x, this.touchStart.y, TOUCH.longPressRadius);
+      const vibrate = (navigator as { vibrate?: Navigator["vibrate"] }).vibrate;
+      vibrate?.call(navigator, [8]);
+      this.touchMode = "dead";
+    }, TOUCH.longPressMs);
+  }
+
+  private moveTouch(event: PointerEvent): void {
+    const layout = this.renderer.lastLayout();
+    if (
+      layout === null ||
+      this.touchMode === null ||
+      this.touchMode === "dead"
+    ) {
+      return;
+    }
+    const point = this.touchPoints.get(event.pointerId);
+    if (point === undefined) return;
+    point.x = event.offsetX;
+    point.y = event.offsetY;
+    if (this.touchMode === "pinch") {
+      this.applyPinch(layout);
+      return;
+    }
+    const start = this.touchStart;
+    const ranges = this.touchStartRanges;
+    if (start === null || ranges === null) return;
+    if (
+      this.touchMode === "tap" &&
+      Math.hypot(event.offsetX - start.x, event.offsetY - start.y) >
+        TOUCH.panSlop
+    ) {
+      this.clearLongPress();
+      this.touchMode = "pan";
+    }
+    if (this.touchMode !== "pan") return;
+    this.panFrom(layout, ranges, start, {
+      x: event.offsetX,
+      y: event.offsetY,
+    });
+  }
+
+  /** Pans both axes so the data under `from` follows the pointer to `to`. */
+  private panFrom(
+    layout: PlotLayout,
+    ranges: { x: Range; y: Range },
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): void {
+    const nextX = panScaledRange(
+      ranges.x,
+      (from.x - to.x) / layout.plot.width,
+      layout.xScale,
+    );
+    const nextY = panRange(
+      ranges.y,
+      ((to.y - from.y) / layout.plot.height) * (ranges.y.max - ranges.y.min),
+    );
+    this.applyXRange(nextX.min, nextX.max);
+    this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
+  }
+
+  private applyPinch(layout: PlotLayout): void {
+    const anchors = this.pinchAnchors;
+    const [first, second] = [...this.touchPoints.values()];
+    if (anchors === null || first === undefined || second === undefined) return;
+    const { plot } = layout;
+    if (Math.abs(first.x - second.x) > TOUCH.pinchSeparation) {
+      const next = pinchScaledRange(
+        anchors.xA,
+        anchors.xB,
+        first.x,
+        second.x,
+        plot.x,
+        plot.x + plot.width,
+        layout.xScale,
+      );
+      if (next !== null) this.applyXRange(next.min, next.max);
+    }
+    if (Math.abs(first.y - second.y) > TOUCH.pinchSeparation) {
+      const next = pinchRange(
+        anchors.yA,
+        anchors.yB,
+        first.y,
+        second.y,
+        plot.y,
+        plot.y + plot.height,
+      );
+      if (next !== null) this.callbacks.onYRange(this.id, [next.min, next.max]);
+    }
+  }
+
+  private endTouch(event: PointerEvent): void {
+    this.touchPoints.delete(event.pointerId);
+    if (this.touchMode === "pinch" && this.touchPoints.size < 2) {
+      this.touchMode = this.touchPoints.size === 0 ? null : "dead";
+      this.pinchAnchors = null;
+      return;
+    }
+    if (this.touchMode !== "tap") {
+      if (this.touchPoints.size === 0) this.touchMode = null;
+      return;
+    }
+    this.clearLongPress();
+    this.touchMode = null;
+    const now = performance.now();
+    if (
+      now - this.lastTap.time < TOUCH.doubleTapMs &&
+      Math.hypot(
+        event.offsetX - this.lastTap.x,
+        event.offsetY - this.lastTap.y,
+      ) < TOUCH.doubleTapRadius
+    ) {
+      this.lastTap = { time: 0, x: 0, y: 0 };
+      this.callbacks.onFitView(this.id);
+      return;
+    }
+    this.lastTap = { time: now, x: event.offsetX, y: event.offsetY };
+    if (this.removeAt(event.offsetX, event.offsetY, TOUCH.tapRemoveRadius)) {
+      return;
+    }
+    this.publishTouchCursor(event);
+  }
+
+  private clearLongPress(): void {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+  }
+
+  private publishTouchCursor(event: PointerEvent): void {
+    const layout = this.renderer.lastLayout();
+    if (layout === null) return;
+    if (!insidePlot(layout, event.offsetX, event.offsetY)) {
+      this.callbacks.onCursor(this.id, null, null);
+      return;
+    }
+    const cursor = this.cursorAt(
+      layout,
+      event.offsetX,
+      event.offsetY,
+      TOUCH.tapCursorRadius,
+    );
+    const rect = this.element.getBoundingClientRect();
+    this.callbacks.onCursor(
+      this.id,
+      cursor,
+      // Dock at the panel's top edge so the finger does not cover the
+      // readout (prototype behaviour).
+      cursor === null ? null : { x: rect.left + rect.width / 2, y: rect.top },
+    );
+  }
+
+  private cursorAt(
+    layout: PlotLayout,
+    offsetX: number,
+    offsetY: number,
+    xyRadius: number,
+  ): PanelCursor | null {
+    return (
+      this.preparedPlot?.cursorAt(
+        layout,
+        { x: offsetX, y: offsetY },
+        xyRadius,
+      ) ?? null
+    );
+  }
+
+  private resolvedAnnotations(state: PanelState): ResolvedAnnotations {
+    const prepared = this.preparedPlot;
+    if (prepared === null) return { resolved: [], delta: null };
+    const resolved = state.annotations
+      .filter((annotation) => annotation.domain === prepared.domain)
+      .map((annotation) => prepared.resolveAnnotation(annotation))
+      .filter((annotation) => annotation !== null);
+    return { resolved, delta: prepared.delta(resolved) };
+  }
+
+  private drawOverlay(resolution?: ResolvedAnnotations): void {
+    const state = this.lastState;
+    const { resolved, delta } =
+      resolution ??
+      (state === null
+        ? { resolved: [], delta: null }
+        : this.resolvedAnnotations(state));
+    const bySeries = new Map(
+      (state?.series ?? []).map((series) => [series.path, series]),
+    );
+    const cursorT = this.cursorT;
+    const xyMarkers =
+      state?.mode === "xy" && cursorT !== null
+        ? this.xyTraces.flatMap((entry) => {
+            const point = markerAt(entry.trace, cursorT);
+            return point === null ? [] : [point];
+          })
+        : [];
+    this.overlayRenderer.draw(this.renderer.lastLayout(), {
+      cursorT: state?.mode === "xy" ? null : cursorT,
+      cursorStyle: this.cursorStyle,
+      cursorPoints:
+        this.cursorStyle === "dot" && cursorT !== null
+          ? this.cursorPointsAt(state?.mode, cursorT, bySeries)
+          : [],
+      xyMarkers,
+      box: this.box,
+      annotations: resolved.map((annotation) => ({
+        x: annotation.x,
+        y: annotation.y,
+        colorIndex: annotation.colorIndex,
+        label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label} `}${annotation.summary}`,
+      })),
+      delta,
+    });
+  }
+
+  /** The dots the cursor puts on each series, in that mode's own domain. */
+  private cursorPointsAt(
+    mode: PanelMode | undefined,
+    cursorT: number,
+    bySeries: ReadonlyMap<string, PanelState["series"][number]>,
+  ): CursorPoint[] {
+    if (mode === "fft") {
+      return this.domainSeries.map((series) => ({
+        value: lerpSample(series.x, series.y, cursorT),
+        colorIndex: series.colorIndex,
+      }));
+    }
+    if (mode === "histogram") {
+      const layout = this.renderer.lastLayout();
+      if (layout === null) return [];
+      const cursor = this.preparedPlot?.cursorAt(
+        layout,
+        {
+          x: projectX(layout, cursorT),
+          y: layout.plot.y + layout.plot.height / 2,
+        },
+        0,
+      );
+      return (cursor?.markers ?? []).map((point) => ({
+        value: point.y,
+        colorIndex: point.colorIndex,
+      }));
+    }
+    return (this.lastTiles?.series ?? []).flatMap((tile) => {
+      const series = bySeries.get(tile.signal_path);
+      if (series?.visible !== true) return [];
+      const value = valueAtTime(tile.bins, cursorT);
+      if (value === null) return [];
+      return [
+        {
+          value,
+          colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
+            .colorIndex,
+        },
+      ];
+    });
+  }
+
+  private beginPan(down: PointerEvent, layout: PlotLayout): void {
+    this.dragging = true;
+    this.overlay.setPointerCapture(down.pointerId);
+    const startX = { ...layout.xRange };
+    const startY = { ...layout.yRange };
+    const move = (event: PointerEvent): void => {
+      this.panFrom(
+        layout,
+        { x: startX, y: startY },
+        { x: down.offsetX, y: down.offsetY },
+        { x: event.offsetX, y: event.offsetY },
+      );
+    };
+    const finish = (): void => {
+      this.overlay.removeEventListener("pointermove", move);
+      this.overlay.removeEventListener("pointerup", finish);
+      this.overlay.removeEventListener("pointercancel", finish);
+      this.dragging = false;
+    };
+    this.overlay.addEventListener("pointermove", move);
+    this.overlay.addEventListener("pointerup", finish);
+    this.overlay.addEventListener("pointercancel", finish);
+  }
+
+  private beginBoxOrClick(down: PointerEvent, layout: PlotLayout): void {
+    const start = { x: down.offsetX, y: down.offsetY };
+    let promoted = false;
+    // Which axes the drag chose, kept from `move` so `finish` need not
+    // recover it by comparing the box against the plot bounds.
+    let dragMode: ZoomDragMode = "xy";
+    const clampX = (value: number): number =>
+      clamp(value, layout.plot.x, layout.plot.x + layout.plot.width);
+    const clampY = (value: number): number =>
+      clamp(value, layout.plot.y, layout.plot.y + layout.plot.height);
+    const move = (event: PointerEvent): void => {
+      if (
+        !promoted &&
+        Math.hypot(event.offsetX - start.x, event.offsetY - start.y) <= 4
+      ) {
+        return;
+      }
+      if (!promoted) {
+        promoted = true;
+        this.dragging = true;
+        this.overlay.setPointerCapture(down.pointerId);
+      }
+      dragMode = zoomDragMode(event.offsetX - start.x, event.offsetY - start.y);
+      // An axis the drag excluded spans the whole plot, so the marquee reads
+      // as a band rather than a rectangle.
+      const spansX = dragMode !== "y";
+      const spansY = dragMode !== "x";
+      this.box = {
+        x0: spansX ? clampX(start.x) : layout.plot.x,
+        y0: spansY ? clampY(start.y) : layout.plot.y,
+        x1: spansX ? clampX(event.offsetX) : layout.plot.x + layout.plot.width,
+        y1: spansY ? clampY(event.offsetY) : layout.plot.y + layout.plot.height,
+      };
+      this.drawOverlay();
+    };
+    const finish = (event: PointerEvent): void => {
+      cleanup();
+      const box = this.box;
+      this.box = null;
+      this.drawOverlay();
+      if (!promoted) {
+        this.plotClick(event.offsetX, event.offsetY);
+        return;
+      }
+      if (box === null) return;
+      // Each axis the drag chose must clear the 6px dead zone on its own.
+      const zoomX = dragMode !== "y";
+      const zoomY = dragMode !== "x";
+      if (zoomX && Math.abs(box.x1 - box.x0) <= 6) return;
+      if (zoomY && Math.abs(box.y1 - box.y0) <= 6) return;
+      if (zoomY) {
+        this.callbacks.onYRange(this.id, [
+          invertY(layout, Math.max(box.y0, box.y1)),
+          invertY(layout, Math.min(box.y0, box.y1)),
+        ]);
+      }
+      if (zoomX) {
+        this.applyXRange(
+          invertX(layout, Math.min(box.x0, box.x1)),
+          invertX(layout, Math.max(box.x0, box.x1)),
+        );
+      }
+    };
+    const cancel = (): void => {
+      cleanup();
+      this.box = null;
+      this.drawOverlay();
+    };
+    const cleanup = (): void => {
+      this.overlay.removeEventListener("pointermove", move);
+      this.overlay.removeEventListener("pointerup", finish);
+      this.overlay.removeEventListener("pointercancel", cancel);
+      this.dragging = false;
+    };
+    this.overlay.addEventListener("pointermove", move);
+    this.overlay.addEventListener("pointerup", finish);
+    this.overlay.addEventListener("pointercancel", cancel);
+  }
+
+  private interactiveMode(): boolean {
+    const interaction = this.preparedPlot?.interaction;
+    if (interaction === undefined) return false;
+    return (
+      interaction.pan.size !== 0 ||
+      interaction.zoom.size !== 0 ||
+      interaction.fit
+    );
+  }
+
+  /**
+   * Applies an x-axis range: the linked time window in time mode, a
+   * panel-local value range everywhere else.
+   */
+  private applyXRange(min: number, max: number): void {
+    if (this.preparedPlot?.interaction.xAxis === "linked-time") {
+      this.callbacks.onTimeWindow(this.id, min, max);
+    } else {
+      this.callbacks.onXRange(this.id, [min, max]);
+    }
+  }
+
+  private renderStats(): void {
+    const strip = required<HTMLElement>(this.element, ".panel-stats");
+    const state = this.lastState;
+    const groups = this.preparedPlot?.stats() ?? [];
+    const show = state !== null && state.show_stats && groups.length > 0;
+    strip.hidden = !show;
+    if (!show) {
+      strip.replaceChildren();
+      return;
+    }
+    const rows = groups.map((group) => {
+      const row = document.createElement("span");
+      row.className = "stats-series";
+      row.append(
+        statsName(group.label),
+        ...group.items.map((item) =>
+          statsItem(
+            item.label === "mean" ? "μ" : item.label,
+            item.value,
+            item.unit,
+          ),
+        ),
+      );
+      return row;
+    });
+    const hint = document.createElement("span");
+    hint.className = "stats-hint";
+    hint.textContent = "visible region · S toggles";
+    strip.replaceChildren(...rows, hint);
+  }
+
+  private renderAnnotationList(
+    state: PanelState,
+    resolution: ResolvedAnnotations,
+  ): void {
+    const list = required<HTMLElement>(this.element, ".panel-annotations");
+    const prepared = this.preparedPlot;
+    const annotations =
+      prepared === null
+        ? []
+        : state.annotations.filter(
+            (annotation) => annotation.domain === prepared.domain,
+          );
+    list.hidden = annotations.length === 0;
+    if (annotations.length === 0) {
+      list.replaceChildren();
+      return;
+    }
+    const heading = document.createElement("div");
+    heading.className = "annotations-heading";
+    heading.textContent = `ANNOTATIONS — ${state.title.toUpperCase()}`;
+    const resolvedById = new Map(
+      resolution.resolved.map((entry) => [entry.annotation.id, entry]),
+    );
+    const rows = annotations.map((annotation, index) => {
+      const row = document.createElement("div");
+      row.className = "annotation-row";
+      const text = document.createElement("span");
+      text.className = "annotation-text";
+      const current = resolvedById.get(annotation.id);
+      const domainLabel =
+        annotation.domain === "time"
+          ? "t"
+          : annotation.domain === "frequency"
+            ? "f"
+            : "value";
+      text.textContent =
+        `${marker(index)} ${domainLabel} ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
+        (annotation.label === "" ? "" : ` "${annotation.label}"`);
+      const edit = document.createElement("button");
+      edit.className = "annotation-action";
+      edit.textContent = "✎";
+      edit.title = "Edit label";
+      edit.addEventListener("click", () => {
+        this.openAnnotationLabelEditor(row, annotation.id, annotation.label);
+      });
+      const remove = document.createElement("button");
+      remove.className = "annotation-action";
+      remove.textContent = "✕";
+      remove.title = "Delete annotation";
+      remove.addEventListener("click", () => {
+        this.callbacks.onRemoveAnnotation(this.id, annotation.id);
+      });
+      row.append(text, edit, remove);
+      return row;
+    });
+    const deltaRow = document.createElement("div");
+    deltaRow.className = "annotation-delta";
+    deltaRow.textContent = resolution.delta?.label ?? "";
+    list.replaceChildren(
+      heading,
+      ...rows,
+      ...(resolution.delta === null ? [] : [deltaRow]),
+    );
+  }
+
+  private openAnnotationLabelEditor(
+    row: HTMLElement,
+    annotationId: string,
+    current: string,
+  ): void {
+    const input = document.createElement("input");
+    input.className = "annotation-label-input";
+    input.value = current;
+    input.setAttribute("aria-label", "Annotation label");
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") input.blur();
+      if (event.key === "Escape") {
+        input.value = current;
+        input.blur();
+      }
+      event.stopPropagation();
+    });
+    input.addEventListener("blur", () => {
+      this.callbacks.onEditAnnotationLabel(
+        this.id,
+        annotationId,
+        input.value.trim(),
+      );
+    });
+    row.append(input);
+    input.focus();
+    input.select();
+  }
+
+  private beginTitleEdit(): void {
+    const header = required<HTMLElement>(this.element, ".panel-header");
+    const title = required<HTMLElement>(this.element, ".panel-title");
+    const previous = title.textContent;
+    header.draggable = false;
+    try {
+      title.contentEditable = "plaintext-only";
+    } catch {
+      title.contentEditable = "true";
+    }
+    const finish = (commit: boolean): void => {
+      title.removeEventListener("keydown", onKey);
+      title.removeEventListener("blur", onBlur);
+      title.contentEditable = "false";
+      header.draggable = true;
+      if (commit) {
+        this.callbacks.onRenameTitle(this.id, title.textContent.trim());
+      } else {
+        title.textContent = previous;
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    };
+    const onBlur = (): void => {
+      finish(true);
+    };
+    title.addEventListener("keydown", onKey);
+    title.addEventListener("blur", onBlur);
+    title.focus();
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  private beginAxisEdit(axis: "x" | "y"): void {
+    const wrap = required<HTMLElement>(this.element, ".plot-wrap");
+    if (wrap.querySelector(".axis-label-editor") !== null) return;
+    const state = this.lastState;
+    const input = document.createElement("input");
+    input.className = `axis-label-editor axis-label-editor-${axis}`;
+    input.setAttribute(
+      "aria-label",
+      axis === "x" ? "X axis name" : "Y axis name",
+    );
+    input.value = (axis === "x" ? state?.x_label : state?.y_label) ?? "";
+    input.placeholder = axis === "x" ? "time (s)" : "value";
+    let cancelled = false;
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") input.blur();
+      if (event.key === "Escape") {
+        cancelled = true;
+        input.blur();
+      }
+    });
+    input.addEventListener("blur", () => {
+      const value = input.value.trim();
+      input.remove();
+      if (!cancelled) {
+        this.callbacks.onEditAxisLabel(
+          this.id,
+          axis,
+          value === "" ? null : value,
+        );
+      }
+    });
+    wrap.append(input);
+    input.focus();
+    input.select();
   }
 
   private updateLegend(state: PanelState): void {
@@ -263,10 +1647,12 @@ export class PanelView {
     this.syncLegendOverflowButton();
   }
 
-  private legendChip(series: PanelState["series"][number]): HTMLButtonElement {
-    const chip = document.createElement("button");
+  private legendChip(series: PanelState["series"][number]): HTMLElement {
+    const chip = document.createElement("span");
     chip.className = `legend-chip ${series.visible ? "" : "muted"}`;
-    chip.title = `${series.path} — click to toggle visibility`;
+    const body = document.createElement("button");
+    body.className = "legend-chip-body";
+    body.title = `${series.path} — click to toggle visibility`;
     const line = document.createElement("span");
     const style = resolveSeriesStyle(series.color_slot, series.dash);
     line.className = `legend-line dash-${style.dash}`;
@@ -274,12 +1660,160 @@ export class PanelView {
     line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
     const name = document.createElement("span");
     name.className = "legend-name";
-    name.textContent = series.path.split("/").slice(-2).join("/");
-    chip.append(line, name);
-    chip.addEventListener("click", () => {
+    name.textContent = signalLabel(series.path);
+    body.append(line, name);
+    body.addEventListener("click", () => {
       this.callbacks.onToggleSeries(this.id, series.path);
     });
+    body.addEventListener("mouseenter", () => {
+      this.setEmphasis(series.path);
+    });
+    body.addEventListener("mouseleave", () => {
+      this.setEmphasis(null);
+    });
+    const caret = document.createElement("button");
+    caret.className = "legend-chip-caret";
+    caret.textContent = "▾";
+    caret.title = `${series.path} — series inspector`;
+    caret.setAttribute("aria-haspopup", "true");
+    caret.addEventListener("click", (event) => {
+      this.openInspector(series.path, event.clientX, event.clientY);
+    });
+    chip.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      this.openInspector(series.path, event.clientX, event.clientY);
+    });
+    chip.append(body, caret);
     return chip;
+  }
+
+  private setEmphasis(path: string | null): void {
+    if (this.emphasizePath === path) return;
+    this.emphasizePath = path;
+    if (this.lastState !== null && this.lastWindow !== null) {
+      this.renderData(
+        this.lastState,
+        this.lastTiles,
+        this.lastSamples,
+        this.lastWindow,
+      );
+    }
+  }
+
+  private openInspector(path: string, clientX: number, clientY: number): void {
+    this.closeInspector();
+    const series = this.lastState?.series.find((entry) => entry.path === path);
+    if (series === undefined) return;
+    this.inspectorPath = path;
+    const popover = document.createElement("div");
+    popover.className = "series-inspector";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", `${path} series inspector`);
+    const pathRow = document.createElement("div");
+    pathRow.className = "inspector-path";
+    pathRow.textContent = path;
+    const slots = document.createElement("div");
+    slots.className = "inspector-slots";
+    for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
+      const swatch = document.createElement("button");
+      swatch.className = "inspector-slot";
+      swatch.style.background = `var(--series-${String(slot)})`;
+      swatch.setAttribute("aria-label", `Colour slot ${String(slot)}`);
+      swatch.classList.toggle(
+        "active",
+        resolveSeriesStyle(series.color_slot, "solid").colorIndex + 1 === slot,
+      );
+      swatch.addEventListener("click", () => {
+        this.callbacks.onSetSeriesStyle(this.id, path, {
+          color_slot: slot,
+          dash: series.dash,
+          width: series.width,
+        });
+        this.closeInspector();
+      });
+      slots.append(swatch);
+    }
+    const dashes = document.createElement("div");
+    dashes.className = "inspector-dashes";
+    for (const dash of ["solid", "dash", "dot"] as const) {
+      const button = document.createElement("button");
+      button.className = "inspector-dash";
+      button.textContent = dash;
+      button.classList.toggle("active", series.dash === dash);
+      button.addEventListener("click", () => {
+        this.callbacks.onSetSeriesStyle(this.id, path, {
+          color_slot: series.color_slot,
+          dash,
+          width: series.width,
+        });
+        this.closeInspector();
+      });
+      dashes.append(button);
+    }
+    const width = document.createElement("input");
+    width.type = "range";
+    width.min = "0.5";
+    width.max = "4";
+    width.step = "0.25";
+    width.value = String(series.width);
+    width.setAttribute("aria-label", "Line width");
+    width.addEventListener("change", () => {
+      this.callbacks.onSetSeriesStyle(this.id, path, {
+        color_slot: series.color_slot,
+        dash: series.dash,
+        width: Number(width.value),
+      });
+    });
+    dashes.append(width);
+    const useAsX = document.createElement("button");
+    useAsX.className = "inspector-action";
+    useAsX.textContent = "use as X";
+    useAsX.addEventListener("click", () => {
+      this.closeInspector();
+      this.callbacks.onSetXSignal(this.id, path);
+    });
+    const remove = document.createElement("button");
+    remove.className = "inspector-remove";
+    remove.textContent = "remove";
+    remove.addEventListener("click", () => {
+      this.closeInspector();
+      this.callbacks.onRemoveSeries(this.id, path);
+    });
+    popover.append(pathRow, slots, dashes, useAsX, remove);
+    this.element.append(popover);
+    const panelRect = this.element.getBoundingClientRect();
+    popover.style.left = `${String(
+      clamp(
+        clientX - panelRect.left - 8,
+        4,
+        Math.max(4, panelRect.width - 204),
+      ),
+    )}px`;
+    popover.style.top = `${String(
+      clamp(clientY - panelRect.top + 8, 4, Math.max(4, panelRect.height - 40)),
+    )}px`;
+    const dismiss = (event: PointerEvent): void => {
+      if (event.target instanceof Node && popover.contains(event.target)) {
+        return;
+      }
+      this.closeInspector();
+    };
+    const onEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") this.closeInspector();
+    };
+    document.addEventListener("pointerdown", dismiss, { capture: true });
+    document.addEventListener("keydown", onEscape);
+    this.inspectorCleanup = () => {
+      document.removeEventListener("pointerdown", dismiss, { capture: true });
+      document.removeEventListener("keydown", onEscape);
+    };
+  }
+
+  private closeInspector(): void {
+    this.inspectorCleanup?.();
+    this.inspectorCleanup = null;
+    this.inspectorPath = null;
+    this.element.querySelector(".series-inspector")?.remove();
   }
 
   private setLegendOverflowOpen(open: boolean): void {
@@ -317,6 +1851,92 @@ function yLabel(units: readonly (string | null)[]): string {
     : "value";
 }
 
+/** `path/leaf (unit)` for an axis name, matching the spec's XY gutters. */
+function axisName(path: string, unit: string | null): string {
+  const leaf = signalLabel(path);
+  return unit === null ? leaf : `${leaf} (${unit})`;
+}
+
+function chipPrefix(text: string): HTMLElement {
+  const prefix = document.createElement("span");
+  prefix.className = "axis-chip-prefix";
+  prefix.textContent = text;
+  return prefix;
+}
+
+/**
+ * Flattens a trace to renderer vertices. A `window` restricts output to that
+ * time span; vertices outside become NaN so the pen lifts rather than
+ * bridging the gap.
+ */
+function flattenTrace(
+  trace: XyTrace,
+  window: { t0: number; t1: number } | null,
+): number[] {
+  const points: number[] = [];
+  for (let index = 0; index < trace.time.length; index += 1) {
+    const time = trace.time[index] ?? Number.NaN;
+    const inside = window === null || (time >= window.t0 && time <= window.t1);
+    points.push(
+      inside ? (trace.x[index] ?? Number.NaN) : Number.NaN,
+      inside ? (trace.y[index] ?? Number.NaN) : Number.NaN,
+    );
+  }
+  return points;
+}
+
+/** The trajectory point at a cursor time, or null outside its coverage. */
+function markerAt(
+  trace: XyTrace,
+  cursorT: number,
+): { x: number; y: number } | null {
+  const x = lerpSample(trace.time, trace.x, cursorT);
+  const y = lerpSample(trace.time, trace.y, cursorT);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+export function axisEditZone(
+  layout: PlotLayout,
+  axisStyle: AxisStyle,
+  px: number,
+  py: number,
+): "x" | "y" | null {
+  const { plot } = layout;
+  if (axisStyle === "inline") {
+    if (px <= plot.x + 90 && py <= plot.y + 18) return "y";
+    if (px >= plot.x + plot.width - 90 && py >= plot.y + plot.height - 18) {
+      return "x";
+    }
+    return null;
+  }
+  if (px < plot.x - 20) return "y";
+  if (py > plot.y + plot.height + 14) return "x";
+  return null;
+}
+
+function statsName(text: string): HTMLElement {
+  const name = document.createElement("span");
+  name.className = "stats-name";
+  name.textContent = text;
+  return name;
+}
+
+function statsItem(
+  label: string,
+  value: number | null,
+  unit: string | null = null,
+): HTMLElement {
+  const item = document.createElement("span");
+  item.className = "stats-item";
+  const key = document.createElement("span");
+  key.textContent = label;
+  const reading = document.createElement("b");
+  reading.textContent =
+    unit === null ? formatValue(value) : `${formatValue(value)} ${unit}`;
+  item.append(key, reading);
+  return item;
+}
+
 function panelMarkup(): string {
   return `<header class="panel-header">
       <span class="drag-handle" aria-hidden="true">⠿</span>
@@ -325,9 +1945,14 @@ function panelMarkup(): string {
         ({ mode, label }) =>
           `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
       ).join("")}</span>
+      <button class="axis-chip x-chip" hidden></button>
       <span class="panel-legend"></span>
       <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
+      <button class="axis-chip c-chip" hidden></button>
+      <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
+      <span class="panel-mode-note" hidden></span>
       <span class="panel-actions">
+        <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">
           <span class="panel-split-label" aria-hidden="true">split</span>
           <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right">→</button>
@@ -340,6 +1965,12 @@ function panelMarkup(): string {
     <div class="legend-overflow-menu" role="group" aria-label="Additional plotted series" hidden></div>
     <div class="plot-wrap">
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
+      <canvas class="overlay-canvas" aria-hidden="true"></canvas>
       <div class="panel-empty" hidden></div>
-    </div>`;
+      <div class="xy-drop-strip" hidden>
+        ⇄ <span>drop here — use as X axis (switches panel to XY)</span>
+      </div>
+    </div>
+    <div class="panel-stats" hidden></div>
+    <div class="panel-annotations" hidden></div>`;
 }

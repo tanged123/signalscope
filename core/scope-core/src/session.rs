@@ -132,6 +132,42 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             object.insert("schema_version".into(), serde_json::json!(3));
             migrate(3, value)
         }
+        3 => {
+            default_panel_fields(&mut value, &["x_label", "y_label", "time_window"]);
+            value["schema_version"] = serde_json::json!(4);
+            migrate(4, value)
+        }
+        4 => {
+            default_panel_fields(&mut value, &["x_range"]);
+            value["schema_version"] = serde_json::json!(5);
+            migrate(5, value)
+        }
+        5 => {
+            for_each_panel(&mut value, |panel| {
+                let Some(annotations) = panel
+                    .get_mut("annotations")
+                    .and_then(serde_json::Value::as_array_mut)
+                else {
+                    return;
+                };
+                for annotation in annotations {
+                    let Some(object) = annotation.as_object_mut() else {
+                        continue;
+                    };
+                    let anchor = object
+                        .remove("time")
+                        .unwrap_or_else(|| serde_json::json!(0.0));
+                    let pinned_value = object
+                        .remove("value")
+                        .unwrap_or_else(|| serde_json::json!(0.0));
+                    object.insert("domain".into(), serde_json::json!("time"));
+                    object.insert("anchor".into(), anchor);
+                    object.insert("pinned_value".into(), pinned_value);
+                }
+            });
+            value["schema_version"] = serde_json::json!(6);
+            migrate(6, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -145,6 +181,41 @@ pub enum SessionError {
     UnsupportedVersion(u32),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+/// Runs `visit` over every panel object across every tab.
+///
+/// Most migrations only widen panels, so the traversal lives here once rather
+/// than being re-inlined by each new arm.
+fn for_each_panel(
+    value: &mut serde_json::Value,
+    mut visit: impl FnMut(&mut serde_json::Map<String, serde_json::Value>),
+) {
+    let Some(tabs) = value
+        .get_mut("tabs")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for tab in tabs {
+        let panels = tab
+            .get_mut("panels")
+            .and_then(serde_json::Value::as_array_mut);
+        for panel in panels.into_iter().flatten() {
+            if let Some(object) = panel.as_object_mut() {
+                visit(object);
+            }
+        }
+    }
+}
+
+/// Adds each missing panel field as null, leaving authored values alone.
+fn default_panel_fields(value: &mut serde_json::Value, fields: &[&str]) {
+    for_each_panel(value, |panel| {
+        for field in fields {
+            panel.entry(*field).or_insert(serde_json::Value::Null);
+        }
+    });
 }
 
 #[cfg(test)]
@@ -173,6 +244,10 @@ mod tests {
                         visible: true,
                     }],
                     y_range: None,
+                    x_range: None,
+                    x_label: None,
+                    y_label: None,
+                    time_window: None,
                     annotations: Vec::new(),
                     show_stats: false,
                 }],
@@ -235,6 +310,93 @@ mod tests {
         assert_eq!(session.tabs[0].panels[0].id, "panel-a");
         assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
         assert_eq!(session.favorites, ["rocket/velocity"]);
+    }
+
+    #[test]
+    fn v3_sessions_gain_axis_labels_and_local_windows() {
+        let json = r#"{
+            "app": "signalscope",
+            "schema_version": 3,
+            "theme": "dark",
+            "linked_time": {"t0":0.0,"t1":1.0,"linked":true,"paused":false,"cursorT":null,"mode":"fixed"},
+            "active_tab_id": "workspace-1",
+            "tabs": [{"id":"workspace-1","title":"Workspace 1","focused_panel_id":null,
+                "panels":[{"id":"panel-a","title":"A","mode":"time","axis_style":"gutter","x_signal":null,"color_signal":null,"series":[],"y_range":null,"annotations":[],"show_stats":false}],
+                "layout":[{"height":1.0,"panels":[{"panel_id":"panel-a","width":1.0}]}]}],
+            "favorites": []
+        }"#;
+        let session = from_json(json).unwrap();
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.x_label, None);
+        assert_eq!(panel.y_label, None);
+        assert_eq!(panel.time_window, None);
+    }
+
+    #[test]
+    fn v4_sessions_gain_panel_x_ranges() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 4,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "focused_panel_id": "panel-1",
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "time",
+                    "axis_style": "gutter", "x_signal": null, "color_signal": null,
+                    "series": [], "y_range": null, "x_label": null, "y_label": null,
+                    "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v4 session migrates");
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(session.tabs[0].panels[0].x_range, None);
+    }
+
+    #[test]
+    fn v5_annotations_gain_explicit_time_domains() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 5,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "focused_panel_id": "panel-1",
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "time",
+                    "axis_style": "gutter", "x_signal": null, "color_signal": null,
+                    "series": [], "y_range": null, "x_range": null,
+                    "x_label": null, "y_label": null, "time_window": null,
+                    "annotations": [{
+                        "id": "ann-1", "series_path": "demo/altitude",
+                        "time": 12.5, "value": 42.0, "label": "peak"
+                    }],
+                    "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v5 session migrates");
+        let annotation = &session.tabs[0].panels[0].annotations[0];
+        assert_eq!(annotation.domain, AnnotationDomain::Time);
+        assert!((annotation.anchor - 12.5).abs() < f64::EPSILON);
+        assert!((annotation.pinned_value - 42.0).abs() < f64::EPSILON);
+        assert_eq!(annotation.label, "peak");
     }
 
     #[test]

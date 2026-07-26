@@ -1,5 +1,5 @@
 {
-  "protocol_version": 2,
+  "protocol_version": 4,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -32,6 +32,9 @@
         "last": "f64?",
         "min": "f64?",
         "max": "f64?",
+        "sum": "f64",
+        "sum_sq": "f64",
+        "finite_count": "u64",
         "sample_count": "u64",
         "has_gap": "bool"
       }
@@ -51,6 +54,33 @@
       "fields": {
         "request_id": "string",
         "series": "SignalTile[]"
+      }
+    },
+    "SampleRequest": {
+      "kind": "object",
+      "fields": {
+        "request_id": "string",
+        "signal_ids": "u64[]",
+        "window": "TimeWindow",
+        "max_points": "u32"
+      }
+    },
+    "SampleSeries": {
+      "kind": "object",
+      "fields": {
+        "signal_id": "u64",
+        "signal_path": "string",
+        "unit": "string?",
+        "time": "f64[]",
+        "values": "f64[]",
+        "stride": "u32"
+      }
+    },
+    "SampleResponse": {
+      "kind": "object",
+      "fields": {
+        "request_id": "string",
+        "series": "SampleSeries[]"
       }
     },
     "SignalSummary": {

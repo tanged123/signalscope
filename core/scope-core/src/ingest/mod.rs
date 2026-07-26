@@ -170,8 +170,12 @@ mod tests {
         let mut store = SignalStore::new();
         let summary = ingest_path(path, &mut store, &mut |_| {}).unwrap();
 
-        assert_eq!(summary.row_count, 41);
+        assert_eq!(summary.row_count, 201);
         assert_eq!(summary.signals.len(), 16);
+        assert!(
+            store.signals().all(|signal| signal.values().len() >= 64),
+            "every bundled signal must have enough samples for FFT mode"
+        );
         let paths = store
             .signals()
             .map(|signal| signal.path.as_str())
