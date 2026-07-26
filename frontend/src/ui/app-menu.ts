@@ -128,6 +128,10 @@ export class AppMenu {
   }
 
   private onKeyDown(event: KeyboardEvent): void {
+    // The shell binds single-key commands on `window`. While the menu owns
+    // focus a stray `t`/`n`/`o` must not run behind the open popover, so no
+    // key typed inside it reaches the global handler.
+    event.stopPropagation();
     const items = this.items();
     const current = Math.max(
       0,

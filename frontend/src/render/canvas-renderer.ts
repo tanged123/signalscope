@@ -298,8 +298,7 @@ export class CanvasRenderer {
         : ticks(spec.xRange.min, spec.xRange.max, 7);
     const axes = { context, plot, project, colors, xTicks } as const;
     const labels = { xLabel: spec.xLabel, yLabel: spec.yLabel };
-    if (inline) this.drawInlineGrid(axes, spec.yRange);
-    else this.drawGrid(axes, spec.yRange);
+    this.drawGrid(axes, spec.yRange);
     const finishAxes = (): void => {
       if (inline) this.drawInlineFurniture(axes, spec.yRange, labels);
       else this.drawAxisFurniture(axes, spec.yRange, labels);
@@ -506,6 +505,7 @@ export class CanvasRenderer {
     return this.palette;
   }
 
+  /** Gridlines only; both axis styles share them and both draw them first. */
   private drawGrid(axes: AxisFrame, yRange: Range): void {
     const { context, plot, project, colors, xTicks } = axes;
     const yTicks = ticks(yRange.min, yRange.max, 6);
@@ -634,27 +634,6 @@ export class CanvasRenderer {
     context.globalAlpha = 1;
     context.setLineDash([]);
     context.restore();
-  }
-
-  private drawInlineGrid(axes: AxisFrame, yRange: Range): void {
-    const { context, plot, project, colors, xTicks } = axes;
-    context.lineWidth = 1;
-    const yTicks = ticks(yRange.min, yRange.max, 6);
-    context.strokeStyle = colors.grid;
-    for (const value of xTicks) {
-      const x = Math.round(project.toX(value)) + 0.5;
-      context.beginPath();
-      context.moveTo(x, plot.y);
-      context.lineTo(x, plot.y + plot.height);
-      context.stroke();
-    }
-    for (const value of yTicks) {
-      const y = Math.round(project.toY(value)) + 0.5;
-      context.beginPath();
-      context.moveTo(plot.x, y);
-      context.lineTo(plot.x + plot.width, y);
-      context.stroke();
-    }
   }
 
   private drawInlineFurniture(

@@ -74,6 +74,12 @@ test("application menu mirrors commands and marks planned work", async ({
   await page.keyboard.press("Home");
   await expect(items.first()).toBeFocused();
 
+  // Single-key commands belong to the workbench, not to the open menu: typing
+  // in the popover must not toggle the theme behind it.
+  await page.keyboard.press("t");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(menu).toBeVisible();
+
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
   await expect(button).toBeFocused();
