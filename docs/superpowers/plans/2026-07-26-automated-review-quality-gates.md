@@ -8,6 +8,10 @@
 
 **Tech Stack:** Bash/Nix, Cargo, pnpm/TypeScript, GitHub Actions, CodeQL, Codecov, CodeRabbit, `openai/codex-action`.
 
+**Status:** Proposed future work. The repository does not provide
+`./scripts/ci.sh quality` or a required `quality` workflow job until Task 1 is
+implemented.
+
 ## Global Constraints
 
 - AI findings are advisory and never determine mergeability.
@@ -26,7 +30,8 @@
 - Create: `deny.toml`, `frontend/knip.json`
 - Modify: `frontend/package.json`, `pnpm-lock.yaml`
 
-**Produces:** `./scripts/ci.sh quality`, used identically locally and in GitHub Actions.
+**Planned output (not currently available):** `./scripts/ci.sh quality`, used
+identically locally and in GitHub Actions after Task 1 is complete.
 
 - [ ] Add `actionlint`, `cargo-deny`, `cargo-machete`, and `shellcheck` to the Nix dev shell.
 

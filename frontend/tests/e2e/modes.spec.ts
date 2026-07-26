@@ -4,10 +4,10 @@ import { expect, test } from "./fixtures";
 async function trajectoryPoints(
   panel: Locator,
   count: number,
+  horizontalOnly = false,
 ): Promise<{ x: number; y: number }[]> {
-  return panel
-    .locator(".plot-canvas")
-    .evaluate((canvas: HTMLCanvasElement, requested) => {
+  return panel.locator(".plot-canvas").evaluate(
+    (canvas: HTMLCanvasElement, options) => {
       const context = canvas.getContext("2d");
       if (context === null) return [];
       const color = getComputedStyle(document.documentElement)
@@ -26,14 +26,21 @@ async function trajectoryPoints(
         canvas.width,
         canvas.height,
       ).data;
+      const matchesColor = (x: number, y: number): boolean => {
+        const offset = (y * canvas.width + x) * 4;
+        return (
+          Math.abs((pixels[offset] ?? 0) - (target[0] ?? 0)) <= 3 &&
+          Math.abs((pixels[offset + 1] ?? 0) - (target[1] ?? 0)) <= 3 &&
+          Math.abs((pixels[offset + 2] ?? 0) - (target[2] ?? 0)) <= 3
+        );
+      };
       const matches: { x: number; y: number }[] = [];
       for (let y = 8; y < canvas.height - 8; y += 1) {
         for (let x = 8; x < canvas.width - 8; x += 1) {
-          const offset = (y * canvas.width + x) * 4;
           if (
-            Math.abs((pixels[offset] ?? 0) - (target[0] ?? 0)) <= 3 &&
-            Math.abs((pixels[offset + 1] ?? 0) - (target[1] ?? 0)) <= 3 &&
-            Math.abs((pixels[offset + 2] ?? 0) - (target[2] ?? 0)) <= 3
+            matchesColor(x, y) &&
+            (!options.horizontalOnly ||
+              (matchesColor(x - 4, y) && matchesColor(x + 4, y)))
           ) {
             matches.push({
               x: (x * canvas.clientWidth) / canvas.width,
@@ -44,7 +51,7 @@ async function trajectoryPoints(
       }
       if (matches.length === 0) return [];
       const selected = [matches[0] as { x: number; y: number }];
-      while (selected.length < requested) {
+      while (selected.length < options.count) {
         let best: { x: number; y: number } | undefined;
         let bestDistance = -1;
         for (const candidate of matches) {
@@ -62,7 +69,9 @@ async function trajectoryPoints(
         selected.push(best);
       }
       return selected;
-    }, count);
+    },
+    { count, horizontalOnly },
+  );
 }
 
 test.describe("panel modes", () => {
@@ -313,13 +322,18 @@ test.describe("panel modes", () => {
       await expect(panel.locator(".panel-stats")).toBeVisible();
       await expect(panel.locator(".panel-stats")).toContainText(mode.stats);
 
-      const [firstPoint] = await trajectoryPoints(panel, 1);
+      const horizontalOnly = mode.pill === "H";
+      const [firstPoint] = await trajectoryPoints(panel, 1, horizontalOnly);
       expect(firstPoint).toBeDefined();
       const overlay = panel.locator(".overlay-canvas");
       if (firstPoint !== undefined) {
         await overlay.click({ position: firstPoint });
       }
-      const pointsAfterReflow = await trajectoryPoints(panel, 2);
+      const pointsAfterReflow = await trajectoryPoints(
+        panel,
+        2,
+        horizontalOnly,
+      );
       expect(pointsAfterReflow).toHaveLength(2);
       const secondPoint = pointsAfterReflow[1];
       if (secondPoint !== undefined) {

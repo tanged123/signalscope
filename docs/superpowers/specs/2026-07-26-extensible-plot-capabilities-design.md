@@ -58,19 +58,25 @@ interface PlotModeAdapter {
   prepare(input: PlotPreparationInput): PreparedPlot;
 }
 
-interface PreparedPlot {
+export interface PreparedPlot {
   readonly mode: PanelMode;
+  readonly domain: AnnotationDomain;
   readonly frame: PlotFrame;
   readonly interaction: PlotInteractionPolicy;
 
-  cursorAt(point: PlotPoint): PlotCursor | null;
-  annotationAt(point: PlotPoint, radius: number): AnnotationAnchor | null;
+  cursorAt(
+    layout: PlotLayout,
+    point: PlotPoint,
+    radius: number,
+  ): PlotCursor | null;
+  annotationAt(
+    layout: PlotLayout,
+    point: PlotPoint,
+    radius: number,
+  ): AnnotationAnchor | null;
   resolveAnnotation(annotation: Annotation): ResolvedAnnotation | null;
   stats(): readonly PlotStatGroup[];
-  delta(
-    first: ResolvedAnnotation,
-    second: ResolvedAnnotation,
-  ): PlotDelta | null;
+  delta(resolved: readonly ResolvedAnnotation[]): PlotDelta | null;
 }
 ```
 

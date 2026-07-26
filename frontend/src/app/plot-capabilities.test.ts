@@ -92,9 +92,10 @@ test("XY capabilities share time anchors and report X, Y and C statistics", () =
         path: "demo/y",
         colorIndex: 1,
         trace: { time: [0, 1, 2], x: [1, 3, 5], y: [2, 4, 8] },
+        colorValues: [10, 20, 30],
       },
     ],
-    color: { path: "demo/c", values: [10, 20, 30] },
+    color: { path: "demo/c" },
   });
 
   expect(plot.domain).toBe("time");
@@ -114,6 +115,41 @@ test("XY capabilities share time anchors and report X, Y and C statistics", () =
       mustResolve(plot, annotation("time", 2, 8)),
     ])?.label,
   ).toBe("Δt 2.0000 s · Δx 4.0000 · Δy 6.0000 · Δc 20.0000");
+});
+
+test("XY capabilities sample colour on the focused trace's timebase", () => {
+  const plot = prepareXyPlot({
+    x: { path: "demo/x", values: [1, 3, 6, 8] },
+    series: [
+      {
+        path: "demo/first",
+        colorIndex: 0,
+        trace: { time: [0, 2], x: [1, 3], y: [1, 3] },
+        colorValues: [10, 30],
+      },
+      {
+        path: "demo/second",
+        colorIndex: 1,
+        trace: { time: [1, 2, 3], x: [6, 7, 8], y: [6, 7, 8] },
+        colorValues: [100, 200, 300],
+      },
+    ],
+    color: { path: "demo/c" },
+  });
+
+  const cursor = plot.cursorAt(layout, { x: 70, y: 30 }, 5);
+  expect(cursor?.rows.find((row) => row.label === "c · demo/c")?.value).toBe(
+    200,
+  );
+  expect(
+    plot.resolveAnnotation(annotation("time", 2, 7, "demo/second"))?.colorValue,
+  ).toBe(200);
+  expect(
+    plot.delta([
+      mustResolve(plot, annotation("time", 1, 6, "demo/second")),
+      mustResolve(plot, annotation("time", 3, 8, "demo/second")),
+    ])?.label,
+  ).toContain("Δc 200.0000");
 });
 
 test("FFT capabilities retain frequency anchors and follow recomputed spectra", () => {
@@ -186,7 +222,8 @@ test("histogram capabilities retain source anchors and resolve current bins", ()
       mustResolve(plot, annotation("distribution", 7, 4)),
     ])?.label,
   ).toBe("Δvalue 5.0000 · Δcount 2.0000");
-  expect(plot.annotationAt(layout, { x: 70, y: 95 }, 14)).toMatchObject({
+  expect(plot.annotationAt(layout, { x: 70, y: 95 }, 14)).toBeNull();
+  expect(plot.annotationAt(layout, { x: 70, y: 60 }, 14)).toMatchObject({
     path: "demo/y",
     domain: "distribution",
     anchor: 7,

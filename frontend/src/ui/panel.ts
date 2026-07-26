@@ -34,8 +34,10 @@ import {
   prepareTimePlot,
   prepareXyPlot,
   type AnnotationAnchor,
+  type PlotDelta,
   type PlotCursor,
   type PreparedPlot,
+  type ResolvedAnnotation,
 } from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
 import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
@@ -60,6 +62,11 @@ export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 
 export type PanelCursor = PlotCursor;
+
+interface ResolvedAnnotations {
+  resolved: readonly ResolvedAnnotation[];
+  delta: PlotDelta | null;
+}
 
 const MODES: readonly { mode: PanelMode; label: string }[] = [
   { mode: "time", label: "T" },
@@ -475,9 +482,10 @@ export class PanelView {
     axisToggle.textContent = `axes: ${state.axis_style}`;
     axisToggle.title = `Switch to ${state.axis_style === "gutter" ? "inline" : "gutter"} axes`;
     this.updateLegend(state);
-    this.renderAnnotationList(state);
+    const annotations = this.resolvedAnnotations(state);
+    this.renderAnnotationList(state, annotations);
     this.renderStats();
-    this.drawOverlay();
+    this.drawOverlay(annotations);
     if (
       this.inspectorPath !== null &&
       !state.series.some((series) => series.path === this.inspectorPath)
@@ -511,8 +519,9 @@ export class PanelView {
     this.domainSeries = [];
     const elapsed = this.renderForMode(state, tiles, samples, window);
     this.renderStats();
-    this.renderAnnotationList(state);
-    this.drawOverlay();
+    const annotations = this.resolvedAnnotations(state);
+    this.renderAnnotationList(state, annotations);
+    this.drawOverlay(annotations);
     return elapsed;
   }
 
@@ -706,14 +715,15 @@ export class PanelView {
     };
     this.preparedPlot = prepareXyPlot({
       x: { path: state.x_signal, values: xSeries.values },
-      series: this.xyTraces,
+      series: this.xyTraces.map((entry, index) => ({
+        ...entry,
+        colorValues: colorColumns[index] ?? null,
+      })),
       color:
         colorSeries === null
           ? null
           : {
               path: state.color_signal ?? "time",
-              values:
-                colorSeries === "time" ? xSeries.time : (colorColumns[0] ?? []),
             },
     });
     return this.renderer.renderPaths(paths, options);
@@ -1170,23 +1180,23 @@ export class PanelView {
     );
   }
 
-  private drawOverlay(): void {
-    const state = this.lastState;
+  private resolvedAnnotations(state: PanelState): ResolvedAnnotations {
     const prepared = this.preparedPlot;
-    const annotations =
-      state === null || prepared === null
-        ? []
-        : state.annotations.filter(
-            (annotation) => annotation.domain === prepared.domain,
-          );
-    const resolved = annotations.map(
-      (annotation) => prepared?.resolveAnnotation(annotation) ?? null,
-    );
-    const resolvedAnnotations = resolved.filter(
-      (annotation) => annotation !== null,
-    );
-    const delta =
-      prepared === null ? null : prepared.delta(resolvedAnnotations);
+    if (prepared === null) return { resolved: [], delta: null };
+    const resolved = state.annotations
+      .filter((annotation) => annotation.domain === prepared.domain)
+      .map((annotation) => prepared.resolveAnnotation(annotation))
+      .filter((annotation) => annotation !== null);
+    return { resolved, delta: prepared.delta(resolved) };
+  }
+
+  private drawOverlay(resolution?: ResolvedAnnotations): void {
+    const state = this.lastState;
+    const { resolved, delta } =
+      resolution ??
+      (state === null
+        ? { resolved: [], delta: null }
+        : this.resolvedAnnotations(state));
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -1207,7 +1217,7 @@ export class PanelView {
           : [],
       xyMarkers,
       box: this.box,
-      annotations: resolvedAnnotations.map((annotation) => ({
+      annotations: resolved.map((annotation) => ({
         x: annotation.x,
         y: annotation.y,
         colorIndex: annotation.colorIndex,
@@ -1416,7 +1426,10 @@ export class PanelView {
     strip.replaceChildren(...rows, hint);
   }
 
-  private renderAnnotationList(state: PanelState): void {
+  private renderAnnotationList(
+    state: PanelState,
+    resolution: ResolvedAnnotations,
+  ): void {
     const list = required<HTMLElement>(this.element, ".panel-annotations");
     const prepared = this.preparedPlot;
     const annotations =
@@ -1433,12 +1446,15 @@ export class PanelView {
     const heading = document.createElement("div");
     heading.className = "annotations-heading";
     heading.textContent = `ANNOTATIONS — ${state.title.toUpperCase()}`;
+    const resolvedById = new Map(
+      resolution.resolved.map((entry) => [entry.annotation.id, entry]),
+    );
     const rows = annotations.map((annotation, index) => {
       const row = document.createElement("div");
       row.className = "annotation-row";
       const text = document.createElement("span");
       text.className = "annotation-text";
-      const current = prepared?.resolveAnnotation(annotation);
+      const current = resolvedById.get(annotation.id);
       const domainLabel =
         annotation.domain === "time"
           ? "t"
@@ -1465,17 +1481,13 @@ export class PanelView {
       row.append(text, edit, remove);
       return row;
     });
-    const resolved = annotations
-      .map((annotation) => prepared?.resolveAnnotation(annotation) ?? null)
-      .filter((annotation) => annotation !== null);
-    const delta = prepared?.delta(resolved) ?? null;
     const deltaRow = document.createElement("div");
     deltaRow.className = "annotation-delta";
-    deltaRow.textContent = delta?.label ?? "";
+    deltaRow.textContent = resolution.delta?.label ?? "";
     list.replaceChildren(
       heading,
       ...rows,
-      ...(delta === null ? [] : [deltaRow]),
+      ...(resolution.delta === null ? [] : [deltaRow]),
     );
   }
 

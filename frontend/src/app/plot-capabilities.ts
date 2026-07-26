@@ -126,8 +126,11 @@ export interface TimePlotInput {
 
 export interface XyPlotInput {
   x: { path: string; values: readonly number[] };
-  series: readonly (PreparedSeries & { trace: XyTrace })[];
-  color: { path: string; values: readonly number[] } | null;
+  series: readonly (PreparedSeries & {
+    trace: XyTrace;
+    colorValues: readonly number[] | null;
+  })[];
+  color: { path: string } | null;
 }
 
 export interface FftPlotInput {
@@ -273,9 +276,9 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
     const y = lerpSample(series.trace.time, series.trace.y, annotation.anchor);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     const colorValue =
-      input.color === null
+      input.color === null || series.colorValues === null
         ? null
-        : lerpSample(series.trace.time, input.color.values, annotation.anchor);
+        : lerpSample(series.trace.time, series.colorValues, annotation.anchor);
     return {
       ...resolved(annotation, x, y, series.colorIndex),
       colorValue: Number.isFinite(colorValue) ? colorValue : null,
@@ -311,14 +314,20 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
         ),
       ];
       if (input.color !== null) {
+        const hitSeries = input.series.find(
+          (series) => series.path === hit.path,
+        );
         rows.push(
           reading(
             input.color.path,
-            lerpSample(
-              input.series[0]?.trace.time ?? [],
-              input.color.values,
-              hit.time,
-            ),
+            hitSeries?.colorValues === null ||
+              hitSeries?.colorValues === undefined
+              ? Number.NaN
+              : lerpSample(
+                  hitSeries.trace.time,
+                  hitSeries.colorValues,
+                  hit.time,
+                ),
             null,
             hitColor,
             `c · ${input.color.path}`,
@@ -370,7 +379,9 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
         ),
       ];
       if (input.color !== null) {
-        const colorStats = numericStats(input.color.values);
+        const colorStats = numericStats(
+          input.series.flatMap((series) => series.colorValues ?? []),
+        );
         groups.push(
           statsGroup(input.color.path, `c · ${input.color.path}`, null, [
             stat("min", colorStats.min),
@@ -540,12 +551,12 @@ export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
         [low, high],
       );
     },
-    annotationAt(layout, point) {
+    annotationAt(layout, point, radius) {
       const x = invertX(layout, point.x);
       const bin = binAt(x);
       if (bin < 0) return null;
       let best: AnnotationAnchor | null = null;
-      let bestDistance = Number.POSITIVE_INFINITY;
+      let bestDistance = radius;
       for (const series of input.series) {
         const count = series.counts[bin] ?? 0;
         const distance = Math.abs(projectY(layout, count) - point.y);
