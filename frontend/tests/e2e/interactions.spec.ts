@@ -39,6 +39,18 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.press("s");
     await expect(panel.locator(".panel-stats")).toBeVisible();
     await expect(panel.locator(".panel-stats")).toContainText("μ");
+    const metricGaps = await panel
+      .locator(".stats-series")
+      .first()
+      .locator(".stats-item")
+      .evaluateAll((items) =>
+        items.slice(1).map((item, index) => {
+          const previous = items[index]?.getBoundingClientRect();
+          const current = item.getBoundingClientRect();
+          return previous === undefined ? 0 : current.left - previous.right;
+        }),
+      );
+    expect(metricGaps.every((gap) => gap >= 8)).toBe(true);
   });
 
   test("directional zoom and double-click fit round-trip the window", async ({

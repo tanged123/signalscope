@@ -712,6 +712,10 @@ kbd {
   gap: 4px;
 }
 
+.stats-item + .stats-item {
+  margin-left: 8px;
+}
+
 .stats-item b {
   color: var(--fg-1);
   font-weight: 500;
