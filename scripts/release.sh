@@ -52,10 +52,10 @@ publish() {
     echo "publish requires a tag and staged asset directory" >&2
     exit 2
   fi
-  case "$tag" in
-    v[0-9]*.[0-9]*.[0-9]*) ;;
-    *) echo "invalid release tag: $tag" >&2; exit 2 ;;
-  esac
+  if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "invalid release tag: $tag" >&2
+    exit 2
+  fi
   if [ ! -d "$asset_dir" ]; then
     echo "asset directory does not exist: $asset_dir" >&2
     exit 1
@@ -77,22 +77,22 @@ publish() {
 
 mode="${1:-version}"
 case "$mode" in
-  version)
-    version
-    ;;
-  tag)
-    tag
-    ;;
-  publish)
-    shift
-    publish "$@"
-    ;;
-  -h | --help | help)
-    show_help
-    ;;
-  *)
-    echo "Unknown release mode: $mode" >&2
-    show_help >&2
-    exit 2
-    ;;
+version)
+  version
+  ;;
+tag)
+  tag
+  ;;
+publish)
+  shift
+  publish "$@"
+  ;;
+-h | --help | help)
+  show_help
+  ;;
+*)
+  echo "Unknown release mode: $mode" >&2
+  show_help >&2
+  exit 2
+  ;;
 esac

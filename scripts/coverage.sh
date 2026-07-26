@@ -42,25 +42,25 @@ mkdir -p "$coverage_dir"
 
 mode="${1:-all}"
 case "$mode" in
-  all)
-    coverage_rust
-    coverage_frontend
-    ;;
-  rust)
-    coverage_rust
-    ;;
-  frontend)
-    coverage_frontend
-    ;;
-  -h | --help | help)
-    show_help
-    exit 0
-    ;;
-  *)
-    echo "Unknown coverage mode: $mode" >&2
-    show_help >&2
-    exit 2
-    ;;
+all)
+  coverage_rust
+  coverage_frontend
+  ;;
+rust)
+  coverage_rust
+  ;;
+frontend)
+  coverage_frontend
+  ;;
+-h | --help | help)
+  show_help
+  exit 0
+  ;;
+*)
+  echo "Unknown coverage mode: $mode" >&2
+  show_help >&2
+  exit 2
+  ;;
 esac
 
 echo "Coverage reports are available under build/coverage."

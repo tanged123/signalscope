@@ -35,3 +35,15 @@ rust_checks() {
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
 }
+
+quality_checks() {
+  shellcheck scripts/*.sh .github/hooks/pre-commit
+  "$signalscope_scripts_dir/ci-policy.test.sh"
+  actionlint
+  typos
+  cargo deny check
+  cargo machete
+  pnpm --filter @signalscope/frontend check:deps
+  pnpm --filter @signalscope/frontend check:unused
+  zizmor .github/workflows/ .github/actions/
+}

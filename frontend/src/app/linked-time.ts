@@ -1,7 +1,7 @@
 import type { TimeWindow } from "../generated/protocol";
-import type { LinkedTime, TimeMode } from "../generated/session";
+import type { LinkedTime } from "../generated/session";
 
-export type { TimeMode, TimeWindow };
+export type { TimeWindow };
 export type LinkedTimeState = LinkedTime;
 
 export class LinkedTimeModel {

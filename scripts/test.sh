@@ -29,31 +29,31 @@ test_frontend() {
 
 mode="${1:-quick}"
 case "$mode" in
-  quick)
-    test_core
-    test_frontend
-    ;;
-  core)
-    test_core
-    ;;
-  frontend)
-    test_frontend
-    ;;
-  e2e)
-    pnpm e2e
-    ;;
-  full)
-    test_core
-    test_frontend
-    cargo test -p signalscope-shell
-    pnpm e2e
-    ;;
-  -h | --help | help)
-    show_help
-    ;;
-  *)
-    echo "Unknown test mode: $mode" >&2
-    show_help >&2
-    exit 2
-    ;;
+quick)
+  test_core
+  test_frontend
+  ;;
+core)
+  test_core
+  ;;
+frontend)
+  test_frontend
+  ;;
+e2e)
+  pnpm e2e
+  ;;
+full)
+  test_core
+  test_frontend
+  cargo test -p signalscope-shell
+  pnpm e2e
+  ;;
+-h | --help | help)
+  show_help
+  ;;
+*)
+  echo "Unknown test mode: $mode" >&2
+  show_help >&2
+  exit 2
+  ;;
 esac
