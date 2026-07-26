@@ -4,7 +4,11 @@ const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
 
-for (const field of ["dependencies", "peerDependencies"]) {
+for (const field of [
+  "dependencies",
+  "optionalDependencies",
+  "peerDependencies",
+]) {
   if (
     packageJson[field] !== undefined &&
     Object.keys(packageJson[field]).length > 0

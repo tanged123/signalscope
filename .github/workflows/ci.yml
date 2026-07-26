@@ -115,10 +115,18 @@ jobs:
     needs: [version, flake, quality, rust, frontend, e2e, coverage]
     runs-on: ubuntu-latest
     steps:
-      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: |
-          echo "One or more required CI jobs did not succeed." >&2
-          exit 1
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - env:
+          VERSION_RESULT: ${{ needs.version.result }}
+          FLAKE_RESULT: ${{ needs.flake.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: ./scripts/check-ci-results.sh
 
   build:
     if: github.event_name != 'pull_request'
