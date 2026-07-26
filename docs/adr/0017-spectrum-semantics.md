@@ -45,6 +45,10 @@ Every choice is made once, here, and implemented in
 - **Multi-series** panels draw one spectrum per visible series, because the
   spec renders FFT panels with ordinary legend chips rather than the dashed
   axis chips that mark a single-signal mode.
+- **Cursor inspection is frequency-local.** The line cursor reports frequency
+  plus interpolated amplitude in dB for every visible spectrum, and the dot
+  cursor marks those intersections. Frequency is not published as linked
+  time, so inspecting an FFT cannot move time or XY cursors.
 
 ## Consequences
 

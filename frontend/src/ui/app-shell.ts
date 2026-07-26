@@ -21,6 +21,7 @@ import { resolveSeriesStyle } from "../render/canvas-renderer";
 import type { CursorStyle } from "../render/overlay-renderer";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
+import type { PanelCursor } from "./panel";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
@@ -128,8 +129,8 @@ export class AppShell {
         onResized: () => {
           this.scheduleRender();
         },
-        onCursor: (id, cursorT, client) => {
-          this.setCursor(id, cursorT, client);
+        onCursor: (id, cursor, client) => {
+          this.setCursor(id, cursor, client);
         },
         onTimeWindow: (id, t0, t1) => {
           this.applyTimeWindow(id, t0, t1);
@@ -1008,20 +1009,44 @@ export class AppShell {
 
   private setCursor(
     panelId: string,
-    cursorT: number | null,
+    cursor: PanelCursor | null,
     client: { x: number; y: number } | null,
   ): void {
-    if (this.cursorStyle === "none") cursorT = null;
+    if (this.cursorStyle === "none") cursor = null;
+    const panel = this.workspace.panel(panelId);
+    const localDomain = panel?.mode === "fft" || panel?.mode === "histogram";
+    if (
+      cursor?.domain === "frequency" ||
+      cursor?.domain === "histogram" ||
+      (cursor === null && localDomain)
+    ) {
+      this.workspaceView?.setLocalCursor(panelId, cursor?.value ?? null);
+      if (cursor?.domain === "frequency") {
+        required(this.root, ".cursor-readout").textContent =
+          `f = ${formatValue(cursor.value)} Hz`;
+      } else if (cursor?.domain === "histogram") {
+        required(this.root, ".cursor-readout").textContent =
+          `bin ${formatValue(cursor.low)} – ${formatValue(cursor.high)}`;
+      } else {
+        this.renderLinkedCursorReadout();
+      }
+      this.renderTooltip(
+        panelId,
+        this.cursorStyle === "line" ? cursor : null,
+        this.cursorStyle === "line" ? client : null,
+      );
+      return;
+    }
+    const cursorT = cursor?.domain === "time" ? cursor.value : null;
     this.time.setCursor(cursorT);
     const state = this.time.snapshot();
     this.workspaceView?.setCursor(state.cursorT);
-    required(this.root, ".cursor-readout").textContent =
-      state.cursorT === null
-        ? "t = —"
-        : `t = ${formatCursorTime(state.cursorT)}`;
+    this.renderLinkedCursorReadout();
     this.renderTooltip(
       panelId,
-      this.cursorStyle === "line" ? state.cursorT : null,
+      this.cursorStyle === "line" && state.cursorT !== null
+        ? { domain: "time", value: state.cursorT }
+        : null,
       this.cursorStyle === "line" ? client : null,
     );
     this.scheduleLiveValues(this.cursorStyle === "none" ? null : state.cursorT);
@@ -1044,53 +1069,73 @@ export class AppShell {
           : "│";
     button.textContent = `cursor ${symbol}`;
     button.title = `Cursor: ${this.cursorStyle} (click to cycle)`;
-    if (this.cursorStyle === "none") this.setCursor("", null, null);
+    if (this.cursorStyle === "none") {
+      this.workspaceView?.clearCursors();
+      this.time.setCursor(null);
+      this.renderLinkedCursorReadout();
+      this.hideTooltip();
+      this.scheduleLiveValues(null);
+    }
   }
 
   private renderTooltip(
     panelId: string,
-    cursorT: number | null,
+    cursor: PanelCursor | null,
     client: { x: number; y: number } | null,
   ): void {
     const tip = required<HTMLElement>(this.root, ".plot-tip");
     const panel = this.workspace.panel(panelId);
-    if (cursorT === null || client === null || panel === undefined) {
+    if (cursor === null || client === null || panel === undefined) {
       tip.hidden = true;
       return;
     }
     const rows =
-      panel.mode === "time"
-        ? (this.tilesByPanel.get(panelId)?.series ?? [])
-            .filter((tile) =>
-              panel.series.some(
-                (series) => series.visible && series.path === tile.signal_path,
-              ),
-            )
-            .map((tile) => {
-              const series = panel.series.find(
-                (entry) => entry.path === tile.signal_path,
-              );
-              const style = resolveSeriesStyle(
-                series?.color_slot ?? 1,
-                series?.dash ?? "solid",
-              );
-              return tooltipRow(
-                `var(--series-${String(style.colorIndex + 1)})`,
-                tile.signal_path.split("/").slice(-2).join("/"),
-                formatValue(valueAtTime(tile.bins, cursorT)),
-              );
-            })
-        : panel.mode === "xy"
-          ? this.xyTooltipRows(panel, cursorT)
-          : [];
+      cursor.domain === "frequency" || cursor.domain === "histogram"
+        ? cursor.rows.map((row) =>
+            tooltipRow(
+              `var(--series-${String(row.colorIndex + 1)})`,
+              row.path.split("/").slice(-2).join("/"),
+              cursor.domain === "frequency"
+                ? `${formatValue(row.value)} dB`
+                : `${formatValue(row.value)} samples`,
+            ),
+          )
+        : panel.mode === "time"
+          ? (this.tilesByPanel.get(panelId)?.series ?? [])
+              .filter((tile) =>
+                panel.series.some(
+                  (series) =>
+                    series.visible && series.path === tile.signal_path,
+                ),
+              )
+              .map((tile) => {
+                const series = panel.series.find(
+                  (entry) => entry.path === tile.signal_path,
+                );
+                const style = resolveSeriesStyle(
+                  series?.color_slot ?? 1,
+                  series?.dash ?? "solid",
+                );
+                return tooltipRow(
+                  `var(--series-${String(style.colorIndex + 1)})`,
+                  tile.signal_path.split("/").slice(-2).join("/"),
+                  formatValue(valueAtTime(tile.bins, cursor.value)),
+                );
+              })
+          : panel.mode === "xy"
+            ? this.xyTooltipRows(panel, cursor.value)
+            : [];
     if (rows.length === 0) {
       tip.hidden = true;
       return;
     }
-    tip.replaceChildren(
-      tooltipHeader(`t = ${formatCursorTime(cursorT)}`),
-      ...rows,
-    );
+    const header =
+      cursor.domain === "time"
+        ? `t = ${formatCursorTime(cursor.value)}`
+        : cursor.domain === "frequency"
+          ? `f = ${formatValue(cursor.value)} Hz`
+          : `bin ${formatValue(cursor.low)} – ${formatValue(cursor.high)}`;
+    tip.replaceChildren(tooltipHeader(header), ...rows);
     tip.hidden = false;
     const rect = tip.getBoundingClientRect();
     const x =
@@ -1162,6 +1207,12 @@ export class AppShell {
 
   private hideTooltip(): void {
     required<HTMLElement>(this.root, ".plot-tip").hidden = true;
+  }
+
+  private renderLinkedCursorReadout(): void {
+    const cursorT = this.time.snapshot().cursorT;
+    required(this.root, ".cursor-readout").textContent =
+      cursorT === null ? "t = —" : `t = ${formatCursorTime(cursorT)}`;
   }
 
   private scheduleLiveValues(cursorT: number | null): void {

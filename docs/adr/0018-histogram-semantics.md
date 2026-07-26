@@ -36,6 +36,9 @@ This is therefore a design decision, not an extraction.
 - **Step outlines in series colour**, not filled bars. Filled bars occlude
   each other, and this app's identity channel is already colour-plus-text.
   Outlines let two distributions overlap and stay readable.
+- **Cursor inspection is bin-local.** The line cursor reports the selected
+  bin interval plus each visible series' sample count, and the dot cursor
+  marks the counts at that bin. Bin values are not published as linked time.
 - **Axes** are `value (<unit>)` on x and `count` on y.
 - **No zoom or pan.** The bin edges are a function of the visible window, so
   dragging the x axis would show bins that no longer describe what is drawn.

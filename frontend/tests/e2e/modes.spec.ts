@@ -239,13 +239,17 @@ test.describe("panel modes", () => {
     const readout = page.locator(".window-readout");
     const before = await readout.textContent();
     const cursorReadout = page.locator(".cursor-readout");
-    const cursorBefore = await cursorReadout.textContent();
     await page.locator(".cursor-style-toggle").click();
     await page.locator(".cursor-style-toggle").click();
     await panel
       .locator(".overlay-canvas")
       .hover({ position: { x: 250, y: 120 } });
-    await expect(cursorReadout).toHaveText(cursorBefore ?? "");
+    await expect(cursorReadout).toContainText("f =");
+    const tip = page.locator(".plot-tip");
+    await expect(tip).toBeVisible();
+    await expect(tip.locator(".plot-tip-header")).toContainText("f =");
+    await expect(tip.locator(".plot-tip-row")).toHaveCount(2);
+    await expect(tip.locator(".plot-tip-value").first()).toContainText("dB");
     await page.mouse.wheel(0, -240);
     await expect(readout).toHaveText(before ?? "");
   });
@@ -263,6 +267,20 @@ test.describe("panel modes", () => {
       "window: visible t",
     );
     await expect(page.locator(".render-ms")).not.toHaveText("— ms");
+
+    await page.locator(".cursor-style-toggle").click();
+    await page.locator(".cursor-style-toggle").click();
+    await panel
+      .locator(".overlay-canvas")
+      .hover({ position: { x: 250, y: 120 } });
+    await expect(page.locator(".cursor-readout")).toContainText("bin");
+    const tip = page.locator(".plot-tip");
+    await expect(tip).toBeVisible();
+    await expect(tip.locator(".plot-tip-header")).toContainText("bin");
+    await expect(tip.locator(".plot-tip-row")).toHaveCount(2);
+    await expect(tip.locator(".plot-tip-value").first()).toContainText(
+      "samples",
+    );
   });
 
   test("the toolbar stats toggle reaches every panel", async ({

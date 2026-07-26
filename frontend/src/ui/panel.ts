@@ -49,6 +49,23 @@ import { required } from "./dom";
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 
+export interface DomainCursorRow {
+  path: string;
+  value: number;
+  colorIndex: number;
+}
+
+export type PanelCursor =
+  | { domain: "time"; value: number }
+  | { domain: "frequency"; value: number; rows: DomainCursorRow[] }
+  | {
+      domain: "histogram";
+      value: number;
+      low: number;
+      high: number;
+      rows: DomainCursorRow[];
+    };
+
 const MODES: readonly { mode: PanelMode; label: string }[] = [
   { mode: "time", label: "T" },
   { mode: "xy", label: "XY" },
@@ -85,7 +102,7 @@ export interface PanelCallbacks {
   onResized(id: string): void;
   onCursor(
     id: string,
-    cursorT: number | null,
+    cursor: PanelCursor | null,
     client: { x: number; y: number } | null,
   ): void;
   onTimeWindow(id: string, t0: number, t1: number): void;
@@ -131,6 +148,16 @@ export class PanelView {
   private lastWindow: { t0: number; t1: number } | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
   private xyTraces: { path: string; colorIndex: number; trace: XyTrace }[] = [];
+  private domainSeries: {
+    path: string;
+    colorIndex: number;
+    x: number[];
+    y: number[];
+  }[] = [];
+  private histogramBins: {
+    edges: number[];
+    series: { path: string; colorIndex: number; counts: number[] }[];
+  } | null = null;
   private cursorT: number | null = null;
   private cursorStyle: CursorStyle = "none";
   private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -293,25 +320,14 @@ export class PanelView {
       const layout = this.renderer.lastLayout();
       const inside =
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
-      let cursorT: number | null = null;
-      if (layout !== null && inside) {
-        cursorT =
-          this.lastState?.mode === "xy"
-            ? (nearestXyPoint(
-                this.xyTraces,
-                layout,
-                event.offsetX,
-                event.offsetY,
-                XY_HOVER_RADIUS,
-              )?.time ?? null)
-            : this.lastState?.mode === "time"
-              ? invertX(layout, event.offsetX)
-              : null;
-      }
+      const cursor =
+        layout !== null && inside
+          ? this.cursorAt(layout, event.offsetX, event.offsetY, XY_HOVER_RADIUS)
+          : null;
       this.callbacks.onCursor(
         this.id,
-        cursorT,
-        cursorT === null ? null : { x: event.clientX, y: event.clientY },
+        cursor,
+        cursor === null ? null : { x: event.clientX, y: event.clientY },
       );
     });
     this.overlay.addEventListener("pointerleave", () => {
@@ -490,6 +506,8 @@ export class PanelView {
     this.lastTiles = tiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
+    this.domainSeries = [];
+    this.histogramBins = null;
     if (state.mode === "xy") {
       const elapsed = this.renderXy(state, samples, window);
       this.renderStats();
@@ -706,6 +724,12 @@ export class PanelView {
         points.push(frequency, result.amplitudeDb[index] ?? -120);
       });
       const style = resolveSeriesStyle(series.color_slot, series.dash);
+      this.domainSeries.push({
+        path: series.path,
+        colorIndex: style.colorIndex,
+        x: result.frequency,
+        y: result.amplitudeDb,
+      });
       paths.push({
         points,
         colorIndex: style.colorIndex,
@@ -757,6 +781,11 @@ export class PanelView {
     if (binned === null) return 0;
     const edges = binned.edges;
     let peak = 0;
+    const histogramSeries: {
+      path: string;
+      colorIndex: number;
+      counts: number[];
+    }[] = [];
     const paths: PlotPath[] = binned.counts.map((counts, index) => {
       const points: number[] = [];
       // A staircase outline: rise at each edge, run across each bin, and
@@ -773,6 +802,13 @@ export class PanelView {
         series?.color_slot ?? 1,
         series?.dash ?? "solid",
       );
+      if (series !== undefined) {
+        histogramSeries.push({
+          path: series.path,
+          colorIndex: style.colorIndex,
+          counts,
+        });
+      }
       return {
         points,
         colorIndex: style.colorIndex,
@@ -780,6 +816,7 @@ export class PanelView {
         width: series?.width ?? 1.4,
       };
     });
+    this.histogramBins = { edges, series: histogramSeries };
     const units = visible.map(
       (series) => byPath.get(series.path)?.unit ?? null,
     );
@@ -826,7 +863,23 @@ export class PanelView {
   }
 
   setCursor(cursorT: number | null): void {
+    if (
+      this.lastState?.mode === "fft" ||
+      this.lastState?.mode === "histogram"
+    ) {
+      return;
+    }
     this.cursorT = cursorT;
+    this.drawOverlay();
+  }
+
+  setLocalCursor(cursorValue: number | null): void {
+    this.cursorT = cursorValue;
+    this.drawOverlay();
+  }
+
+  clearCursor(): void {
+    this.cursorT = null;
     this.drawOverlay();
   }
 
@@ -1088,27 +1141,75 @@ export class PanelView {
       this.callbacks.onCursor(this.id, null, null);
       return;
     }
-    const mode = this.lastState?.mode;
-    const cursorT =
-      mode === "xy"
-        ? (nearestXyPoint(
-            this.xyTraces,
-            layout,
-            event.offsetX,
-            event.offsetY,
-            TOUCH.tapCursorRadius,
-          )?.time ?? null)
-        : mode === "time"
-          ? invertX(layout, event.offsetX)
-          : null;
+    const cursor = this.cursorAt(
+      layout,
+      event.offsetX,
+      event.offsetY,
+      TOUCH.tapCursorRadius,
+    );
     const rect = this.element.getBoundingClientRect();
     this.callbacks.onCursor(
       this.id,
-      cursorT,
+      cursor,
       // Dock at the panel's top edge so the finger does not cover the
       // readout (prototype behaviour).
-      cursorT === null ? null : { x: rect.left + rect.width / 2, y: rect.top },
+      cursor === null ? null : { x: rect.left + rect.width / 2, y: rect.top },
     );
+  }
+
+  private cursorAt(
+    layout: PlotLayout,
+    offsetX: number,
+    offsetY: number,
+    xyRadius: number,
+  ): PanelCursor | null {
+    const mode = this.lastState?.mode;
+    if (mode === "xy") {
+      const time =
+        nearestXyPoint(this.xyTraces, layout, offsetX, offsetY, xyRadius)
+          ?.time ?? null;
+      return time === null ? null : { domain: "time", value: time };
+    }
+    const value = invertX(layout, offsetX);
+    if (!Number.isFinite(value)) return null;
+    if (mode === "time") return { domain: "time", value };
+    if (mode === "fft") {
+      return {
+        domain: "frequency",
+        value,
+        rows: this.domainSeries.map((series) => ({
+          path: series.path,
+          colorIndex: series.colorIndex,
+          value: lerpSample(series.x, series.y, value),
+        })),
+      };
+    }
+    if (mode !== "histogram" || this.histogramBins === null) return null;
+    return this.histogramCursorAt(value);
+  }
+
+  private histogramCursorAt(value: number): PanelCursor | null {
+    if (this.histogramBins === null) return null;
+    const edges = this.histogramBins.edges;
+    const bin = edges.findIndex(
+      (edge, index) =>
+        index < edges.length - 1 &&
+        value >= edge &&
+        (value < (edges[index + 1] ?? edge) ||
+          (index === edges.length - 2 && value <= (edges[index + 1] ?? edge))),
+    );
+    if (bin < 0) return null;
+    return {
+      domain: "histogram",
+      value,
+      low: edges[bin] ?? value,
+      high: edges[bin + 1] ?? value,
+      rows: this.histogramBins.series.map((series) => ({
+        path: series.path,
+        colorIndex: series.colorIndex,
+        value: series.counts[bin] ?? 0,
+      })),
+    };
   }
 
   private drawOverlay(): void {
@@ -1126,24 +1227,48 @@ export class PanelView {
             return point === null ? [] : [point];
           })
         : [];
+    const histogramCursor =
+      state?.mode === "histogram" && cursorT !== null
+        ? this.histogramCursorAt(cursorT)
+        : null;
     const cursorPoints =
       this.cursorStyle === "dot" && cursorT !== null
-        ? (this.lastTiles?.series ?? []).flatMap((tile) => {
-            const series = bySeries.get(tile.signal_path);
-            if (series?.visible !== true) return [];
-            const value = valueAtTime(tile.bins, cursorT);
-            if (value === null) return [];
-            return [
-              {
-                value,
-                colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
-                  .colorIndex,
-              },
-            ];
-          })
+        ? state?.mode === "fft"
+          ? this.domainSeries.map((series) => ({
+              value: lerpSample(series.x, series.y, cursorT),
+              colorIndex: series.colorIndex,
+            }))
+          : state?.mode === "histogram"
+            ? (histogramCursor?.domain === "histogram"
+                ? histogramCursor.rows
+                : []
+              ).map((row) => ({
+                value: row.value,
+                colorIndex: row.colorIndex,
+              }))
+            : (this.lastTiles?.series ?? []).flatMap((tile) => {
+                const series = bySeries.get(tile.signal_path);
+                if (series?.visible !== true) return [];
+                const value = valueAtTime(tile.bins, cursorT);
+                if (value === null) return [];
+                return [
+                  {
+                    value,
+                    colorIndex: resolveSeriesStyle(
+                      series.color_slot,
+                      series.dash,
+                    ).colorIndex,
+                  },
+                ];
+              })
         : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
-      cursorT: state?.mode === "time" ? this.cursorT : null,
+      cursorT:
+        state?.mode === "time" ||
+        state?.mode === "fft" ||
+        state?.mode === "histogram"
+          ? this.cursorT
+          : null,
       cursorStyle: this.cursorStyle,
       cursorPoints,
       xyMarkers,
