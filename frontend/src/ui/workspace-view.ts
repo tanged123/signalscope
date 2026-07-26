@@ -9,7 +9,7 @@ import {
   hasDragType,
   type PanelCallbacks,
 } from "./panel";
-import type { CursorStyle } from "../render/overlay-renderer";
+import type { CursorMode } from "../render/overlay-renderer";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -26,7 +26,7 @@ export interface WorkspaceCallbacks extends PanelCallbacks {
 export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
   private mountedKey = "";
-  private cursorStyle: CursorStyle = "none";
+  private cursorMode: CursorMode = "none";
 
   constructor(
     private readonly root: HTMLElement,
@@ -143,9 +143,9 @@ export class WorkspaceView {
     for (const view of this.views.values()) view.clearCursor();
   }
 
-  setCursorStyle(cursorStyle: CursorStyle): void {
-    this.cursorStyle = cursorStyle;
-    for (const view of this.views.values()) view.setCursorStyle(cursorStyle);
+  setCursorMode(cursorMode: CursorMode): void {
+    this.cursorMode = cursorMode;
+    for (const view of this.views.values()) view.setCursorMode(cursorMode);
   }
 
   resetYAxis(id: string): void {
@@ -157,11 +157,15 @@ export class WorkspaceView {
     return this.views.get(id)?.plotWidth() ?? 0;
   }
 
+  panelRect(id: string): DOMRect | null {
+    return this.views.get(id)?.panelRect() ?? null;
+  }
+
   private view(id: string): PanelView {
     let view = this.views.get(id);
     if (view === undefined) {
       view = new PanelView(id, this.callbacks);
-      view.setCursorStyle(this.cursorStyle);
+      view.setCursorMode(this.cursorMode);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);
     }
@@ -321,10 +325,10 @@ function emptyState(hasSignals: boolean): HTMLElement {
   hint.className = "empty-hint";
   if (hasSignals) {
     headline.textContent = "No panels open.";
-    hint.textContent = "New panel (N) · drag a signal here · ⌘P commands";
+    hint.textContent = "New panel (N) · drag a signal here · ⌘⇧P commands";
   } else {
     headline.textContent = "No data loaded.";
-    hint.textContent = "Open CSV / MCAP (O) · ⌘P commands";
+    hint.textContent = "Open CSV / MCAP (O) · ⌘⇧P commands";
   }
   empty.append(headline, hint);
   return empty;

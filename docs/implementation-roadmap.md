@@ -22,6 +22,13 @@ Benchmark cold multi-GB first plot, cache build and reuse, tile latency, 100M-po
 
 Parquet is included when it does not delay MCAP and the core interaction path. Live streaming, layout-preset UI, Monte Carlo envelope ergonomics, 3D, and `scope-serverd` remain v2.
 
+The July 2026 UI audit pass replaced the global toolbar with three permanent
+strips: title, workspace tabs, and status. The hidden `≡` application menu and
+the split signal/command palettes now mirror one registry. File persistence,
+HTML/PNG/CSV export, and layout-preset entries remain visible planned stubs;
+their backing behavior continues in Phases 3–4 rather than being implied by
+inert chrome.
+
 Phase 1 visualization foundations closed with a validated categorical palette
 that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
 a headless renderer harness and coherent tick pipeline, unbounded series

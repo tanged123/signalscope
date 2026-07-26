@@ -98,7 +98,7 @@ test.describe("panel modes", () => {
 
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     await expect(panel.locator(".legend-chip")).toHaveCount(1);
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("switch to histogram");
     await page.keyboard.press("Enter");
     await expect(panel.locator(".mode-pill.active")).toHaveText("H");
@@ -122,13 +122,13 @@ test.describe("panel modes", () => {
     await expect(chip).toBeHidden();
     await expect(panel.locator(".panel-empty")).toContainText("set the X axis");
 
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("switch to XY");
     await page.keyboard.press("Enter");
     await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
     await expect(chip).toBeVisible();
 
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("clear X signal");
     await page.keyboard.press("Enter");
     await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
@@ -151,19 +151,19 @@ test.describe("panel modes", () => {
     // ADR 0006: an XY panel never writes the linked time window.
     await expect(readout).toHaveText(before ?? "");
 
-    await page.locator(".cursor-style-toggle").click();
+    await page.keyboard.press("c");
     const [trajectoryPoint] = await trajectoryPoints(panel, 1);
     expect(trajectoryPoint).toBeDefined();
     if (trajectoryPoint !== undefined) {
       await overlay.hover({ position: trajectoryPoint });
     }
-    await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
+    await expect(page.locator(".cursor-mode")).toHaveText("cursor: track");
+    await expect(page.locator(".cursor-time")).not.toHaveText("t —");
 
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("set color signal");
     await page.keyboard.press("Enter");
     await expect(panel.locator(".c-chip")).toContainText("time");
-    await page.locator(".cursor-style-toggle").click();
     if (trajectoryPoint !== undefined) {
       await overlay.hover({ position: trajectoryPoint });
     }
@@ -216,7 +216,7 @@ test.describe("panel modes", () => {
     const chip = panel.locator(".c-chip");
     await expect(chip).toContainText("none");
 
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("set color signal");
     await page.keyboard.press("Enter");
     await expect(chip).toContainText("time");
@@ -238,11 +238,11 @@ test.describe("panel modes", () => {
     await chip.click();
     await expect(chip).toContainText("none");
 
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("set color signal");
     await page.keyboard.press("Enter");
     await expect(chip).toContainText("time");
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("clear color signal");
     await page.keyboard.press("Enter");
     await expect(chip).toContainText("none");
@@ -262,9 +262,8 @@ test.describe("panel modes", () => {
 
     const readout = page.locator(".window-readout");
     const before = await readout.textContent();
-    const cursorReadout = page.locator(".cursor-readout");
-    await page.locator(".cursor-style-toggle").click();
-    await page.locator(".cursor-style-toggle").click();
+    const cursorReadout = page.locator(".cursor-time");
+    await page.keyboard.press("c");
     await panel
       .locator(".overlay-canvas")
       .hover({ position: { x: 250, y: 120 } });
@@ -292,12 +291,11 @@ test.describe("panel modes", () => {
     );
     await expect(page.locator(".render-ms")).not.toHaveText("— ms");
 
-    await page.locator(".cursor-style-toggle").click();
-    await page.locator(".cursor-style-toggle").click();
+    await page.keyboard.press("c");
     await panel
       .locator(".overlay-canvas")
       .hover({ position: { x: 250, y: 120 } });
-    await expect(page.locator(".cursor-readout")).toContainText("bin");
+    await expect(page.locator(".cursor-time")).toContainText("bin");
     const tip = page.locator(".plot-tip");
     await expect(tip).toBeVisible();
     await expect(tip.locator(".plot-tip-header")).toContainText("bin");
@@ -350,17 +348,26 @@ test.describe("panel modes", () => {
     });
   }
 
-  test("the toolbar stats toggle reaches every panel", async ({
+  test("the application menu stats command reaches every panel", async ({
     page,
     isMobile,
   }) => {
     test.skip(isMobile, "desktop interaction");
-    const toggle = page.locator(".stats-toggle");
+    await page.locator(".menu-button").click();
+    const toggle = page.locator(".app-menu-item", {
+      hasText: "Toggle statistics",
+    });
     await toggle.click();
-    await expect(toggle).toHaveClass(/active/);
     await expect(page.locator(".panel-stats").first()).toBeVisible();
-    await toggle.click();
-    await expect(toggle).not.toHaveClass(/active/);
+    await page.locator(".menu-button").click();
+    await expect(
+      page
+        .locator(".app-menu-item", { hasText: "Toggle statistics" })
+        .locator(".app-menu-check"),
+    ).toHaveText("✓");
+    await page
+      .locator(".app-menu-item", { hasText: "Toggle statistics" })
+      .click();
     await expect(page.locator(".panel-stats").first()).toBeHidden();
   });
 
@@ -368,7 +375,7 @@ test.describe("panel modes", () => {
     test.skip(isMobile, "desktop interaction");
     const renderMetric = page.locator(".render-ms");
     const before = await renderMetric.textContent();
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("Help: XY mode gestures");
     await page.keyboard.press("Enter");
     await expect(page.locator(".mode-help")).toContainText("XY: drag box-zoom");

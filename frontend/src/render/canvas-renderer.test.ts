@@ -302,6 +302,27 @@ describe("dashPattern", () => {
 });
 
 describe("render", () => {
+  it.each(["gutter", "inline"] as const)(
+    "paints %s axis furniture after the series stroke",
+    (axisStyle) => {
+      const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
+        axisStyle,
+      });
+      const seriesStyle = calls.findIndex(
+        (call) =>
+          call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.series[0],
+      );
+      const seriesStroke = calls.findIndex(
+        (call, index) => index > seriesStyle && call.op === "stroke",
+      );
+      const firstAxisLabel = calls.findIndex((call) => call.op === "fillText");
+
+      expect(seriesStyle).toBeGreaterThan(-1);
+      expect(seriesStroke).toBeGreaterThan(seriesStyle);
+      expect(firstAxisLabel).toBeGreaterThan(seriesStroke);
+    },
+  );
+
   it("reserves a colorbar gutter and strokes per-segment colours", () => {
     const { context, calls } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));

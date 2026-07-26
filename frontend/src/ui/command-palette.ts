@@ -5,7 +5,11 @@ export interface PaletteEntry {
   title: string;
   hint: string;
   run: () => void;
+  /** Set when the entry is listed but not runnable; the text says why. */
+  unavailable?: string;
 }
+
+export type PaletteMode = "commands" | "signals";
 
 export class CommandPalette {
   private readonly element: HTMLElement;
@@ -17,7 +21,7 @@ export class CommandPalette {
 
   constructor(
     root: HTMLElement,
-    private readonly provider: () => PaletteEntry[],
+    private readonly provider: (mode: PaletteMode) => PaletteEntry[],
   ) {
     this.element = document.createElement("div");
     this.element.className = "palette-overlay";
@@ -54,9 +58,11 @@ export class CommandPalette {
     });
   }
 
-  open(): void {
-    this.entries = this.provider();
+  open(mode: PaletteMode): void {
+    this.entries = this.provider(mode);
     this.element.hidden = false;
+    this.input.placeholder =
+      mode === "signals" ? "signals, workspaces, panels…" : "commands…";
     this.input.value = "";
     this.filter();
     this.input.focus();
@@ -90,6 +96,10 @@ export class CommandPalette {
       ...this.matches.map((entry, index) => {
         const row = document.createElement("button");
         row.className = `palette-row ${index === this.selected ? "selected" : ""}`;
+        if (entry.unavailable !== undefined) {
+          row.disabled = true;
+          row.title = entry.unavailable;
+        }
         const title = document.createElement("span");
         title.textContent = entry.title;
         const hint = document.createElement("span");
@@ -107,7 +117,7 @@ export class CommandPalette {
 
   private runSelected(): void {
     const entry = this.matches[this.selected];
-    if (entry !== undefined) {
+    if (entry !== undefined && entry.unavailable === undefined) {
       this.close();
       entry.run();
     }

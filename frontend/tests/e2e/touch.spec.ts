@@ -35,7 +35,7 @@ test.describe("touch gestures", () => {
     });
     await expect(readout).not.toHaveText(fitted ?? "");
 
-    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("Panel: fit view");
     await page.keyboard.press("Enter");
     await expect(readout).toHaveText(fitted ?? "");

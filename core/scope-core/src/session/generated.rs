@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 6;
+pub const SESSION_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -18,6 +18,15 @@ pub enum TimeMode {
     #[default]
     Fixed,
     Follow,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorMode {
+    #[default]
+    None,
+    Track,
+    Measure,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -124,6 +133,7 @@ pub struct LayoutRow {
 pub struct WorkspaceTab {
     pub id: String,
     pub title: String,
+    pub cursor_mode: CursorMode,
     #[serde(default)]
     pub focused_panel_id: Option<String>,
     pub panels: Vec<PanelState>,

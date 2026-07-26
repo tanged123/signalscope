@@ -5,7 +5,7 @@ import { CommandRegistry, type Command } from "./commands";
 function key(
   keyValue: string,
   modifiers: Partial<
-    Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey">
+    Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey">
   > = {},
 ): KeyboardEvent {
   return {
@@ -13,6 +13,7 @@ function key(
     ctrlKey: false,
     metaKey: false,
     altKey: false,
+    shiftKey: false,
     ...modifiers,
   } as KeyboardEvent;
 }
@@ -60,10 +61,54 @@ describe("CommandRegistry", () => {
     expect(ran).toEqual(["open", "palette", "palette"]);
   });
 
+  it("distinguishes mod+p from mod+shift+p and formats both", () => {
+    const registry = new CommandRegistry();
+    const ran: string[] = [];
+    registry.register(
+      command({
+        id: "signals",
+        keys: "mod+p",
+        run: () => ran.push("signals"),
+      }),
+    );
+    registry.register(
+      command({
+        id: "commands",
+        keys: "mod+shift+p",
+        run: () => ran.push("commands"),
+      }),
+    );
+
+    expect(registry.handleKey(key("p", { metaKey: true }))).toBe(true);
+    expect(
+      registry.handleKey(key("P", { metaKey: true, shiftKey: true })),
+    ).toBe(true);
+    expect(ran).toEqual(["signals", "commands"]);
+  });
+
   it("list() hides disabled commands", () => {
     const registry = new CommandRegistry();
     registry.register(command({ id: "on" }));
     registry.register(command({ id: "off", enabled: () => false }));
     expect(registry.list().map((entry) => entry.id)).toEqual(["on"]);
+  });
+
+  it("lists planned commands for menus but never runs them", () => {
+    const registry = new CommandRegistry();
+    let ran = false;
+    registry.register(
+      command({
+        id: "planned",
+        status: "planned",
+        run: () => {
+          ran = true;
+        },
+      }),
+    );
+
+    expect(registry.list()).toEqual([]);
+    expect(registry.listAll().map((entry) => entry.id)).toEqual(["planned"]);
+    expect(registry.run("planned")).toBe(false);
+    expect(ran).toBe(false);
   });
 });

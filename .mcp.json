@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agtx": {
+      "args": ["mcp-serve", "/home/tanged/sources/signalscope"],
+      "command": "/home/tanged/.local/bin/agtx"
+    }
+  }
+}

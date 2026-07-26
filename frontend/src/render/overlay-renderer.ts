@@ -4,6 +4,7 @@ import {
   projectY,
   type PlotLayout,
 } from "../app/plot-math";
+import type { CursorMode as SessionCursorMode } from "../generated/session";
 import { SERIES_TOKENS } from "./canvas-renderer";
 import { CanvasSurface } from "./surface";
 
@@ -34,7 +35,7 @@ export interface OverlayDelta {
 
 export interface OverlayState {
   cursorT: number | null;
-  cursorStyle: CursorStyle;
+  cursorMode: CursorMode;
   cursorPoints: readonly CursorPoint[];
   /** Data-space trajectory points marked by the global cursor (XY mode). */
   xyMarkers: readonly XyMarker[];
@@ -45,7 +46,7 @@ export interface OverlayState {
   delta: OverlayDelta | null;
 }
 
-export type CursorStyle = "none" | "dot" | "line";
+export type CursorMode = SessionCursorMode;
 export interface CursorPoint {
   value: number;
   colorIndex: number;
@@ -77,20 +78,30 @@ export class OverlayRenderer {
     context.clearRect(0, 0, width, height);
     if (layout === null) return;
     const palette = this.resolvePalette();
+    context.save();
+    context.beginPath();
+    context.rect(
+      layout.plot.x,
+      layout.plot.y,
+      layout.plot.width,
+      layout.plot.height,
+    );
+    context.clip();
     const cursorX =
       state.cursorT ??
-      (state.cursorStyle === "line" ? (state.xyMarkers[0]?.x ?? null) : null);
+      (state.cursorMode !== "none" ? (state.xyMarkers[0]?.x ?? null) : null);
     this.drawCursor(
       context,
       layout,
       cursorX,
-      state.cursorStyle,
+      state.cursorMode,
       state.cursorPoints,
       palette,
     );
     this.drawXyMarkers(context, layout, state.xyMarkers, palette);
     this.drawAnnotations(context, layout, state, palette);
-    if (state.box !== null) this.drawBox(context, state.box, palette);
+    if (state.box !== null) this.drawBox(context, layout, state.box, palette);
+    context.restore();
   }
 
   private drawXyMarkers(
@@ -123,12 +134,12 @@ export class OverlayRenderer {
     context: CanvasRenderingContext2D,
     layout: PlotLayout,
     cursorT: number | null,
-    cursorStyle: CursorStyle,
+    cursorMode: CursorMode,
     cursorPoints: readonly CursorPoint[],
     palette: OverlayPalette,
   ): void {
     if (
-      cursorStyle === "none" ||
+      cursorMode === "none" ||
       cursorT === null ||
       cursorT < layout.xRange.min ||
       cursorT > layout.xRange.max
@@ -138,7 +149,15 @@ export class OverlayRenderer {
     const x = Math.round(projectX(layout, cursorT)) + 0.5;
     context.save();
     context.globalAlpha = 0.7;
-    if (cursorStyle === "dot") {
+    context.strokeStyle = palette.amber;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.setLineDash([2, 2]);
+    context.moveTo(x, layout.plot.y);
+    context.lineTo(x, layout.plot.y + layout.plot.height);
+    context.stroke();
+    if (cursorMode === "track") {
+      context.setLineDash([]);
       context.lineWidth = 1.8;
       for (const point of cursorPoints) {
         const y = projectY(layout, point.value);
@@ -152,27 +171,26 @@ export class OverlayRenderer {
         context.fill();
         context.stroke();
       }
-    } else {
-      context.strokeStyle = palette.amber;
-      context.lineWidth = 1;
-      context.beginPath();
-      context.setLineDash([2, 2]);
-      context.moveTo(x, layout.plot.y);
-      context.lineTo(x, layout.plot.y + layout.plot.height);
-      context.stroke();
     }
     context.restore();
   }
 
   private drawBox(
     context: CanvasRenderingContext2D,
+    layout: PlotLayout,
     box: { x0: number; y0: number; x1: number; y1: number },
     palette: OverlayPalette,
   ): void {
-    const x = Math.min(box.x0, box.x1);
-    const y = Math.min(box.y0, box.y1);
-    const width = Math.abs(box.x1 - box.x0);
-    const height = Math.abs(box.y1 - box.y0);
+    const right = layout.plot.x + layout.plot.width;
+    const bottom = layout.plot.y + layout.plot.height;
+    const x0 = Math.max(layout.plot.x, Math.min(right, box.x0));
+    const x1 = Math.max(layout.plot.x, Math.min(right, box.x1));
+    const y0 = Math.max(layout.plot.y, Math.min(bottom, box.y0));
+    const y1 = Math.max(layout.plot.y, Math.min(bottom, box.y1));
+    const x = Math.min(x0, x1);
+    const y = Math.min(y0, y1);
+    const width = Math.abs(x1 - x0);
+    const height = Math.abs(y1 - y0);
     context.save();
     context.fillStyle = palette.amberFill;
     context.fillRect(x, y, width, height);
@@ -212,10 +230,14 @@ export class OverlayRenderer {
       context.stroke();
       const text = `${marker(index)} ${annotation.label}`;
       const textWidth = context.measureText(text).width;
+      const plateWidth = textWidth + 14;
+      const right = layout.plot.x + layout.plot.width;
+      const plateX = x + 7 + plateWidth > right ? x - plateWidth - 7 : x + 7;
+      const plateY = y - 20 < layout.plot.y ? y + 4 : y - 20;
       context.fillStyle = palette.surface2;
-      context.fillRect(x + 7, y - 20, textWidth + 14, 16);
+      context.fillRect(plateX, plateY, plateWidth, 16);
       context.fillStyle = palette.fg1;
-      context.fillText(text, x + 14, y - 8);
+      context.fillText(text, plateX + 7, plateY + 12);
     });
     if (state.delta !== null) {
       this.drawDelta(context, layout, state.delta, palette);
@@ -249,15 +271,22 @@ export class OverlayRenderer {
     context.save();
     context.font = `10px ${palette.fontMono}`;
     const textWidth = context.measureText(text).width;
-    const x = layout.plot.x + layout.plot.width - textWidth - 24;
-    const y = layout.plot.y + 6;
+    const width = Math.min(textWidth + 16, layout.plot.width);
+    const x = Math.max(
+      layout.plot.x,
+      layout.plot.x + layout.plot.width - width - 8,
+    );
+    const y = Math.max(
+      layout.plot.y,
+      Math.min(layout.plot.y + 6, layout.plot.y + layout.plot.height - 18),
+    );
     context.fillStyle = palette.surface2;
-    context.fillRect(x, y, textWidth + 16, 18);
+    context.fillRect(x, y, width, 18);
     context.strokeStyle = palette.amber;
     context.globalAlpha = 0.4;
     context.lineWidth = 1;
     context.setLineDash([]);
-    context.strokeRect(x + 0.5, y + 0.5, textWidth + 15, 17);
+    context.strokeRect(x + 0.5, y + 0.5, Math.max(0, width - 1), 17);
     context.globalAlpha = 1;
     context.fillStyle = palette.amber;
     context.fillText(text, x + 8, y + 13);
