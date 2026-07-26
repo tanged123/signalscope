@@ -43,4 +43,5 @@ quality_checks() {
   cargo deny check
   cargo machete
   pnpm --filter @signalscope/frontend check:unused
+  zizmor .github/workflows/ .github/actions/
 }

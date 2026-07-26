@@ -81,6 +81,7 @@
               shellcheck
               treefmtEval.config.build.wrapper
               typos
+              zizmor
             ]
             ++ linuxTauriPackages;
 
