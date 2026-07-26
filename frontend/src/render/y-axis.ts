@@ -1,9 +1,9 @@
+import { paddedExtent } from "../app/plot-math";
+
 interface Extent {
   min: number | null;
   max: number | null;
 }
-
-const PADDING = 0.06;
 
 export function isUsableYRange(
   range: readonly [number, number] | null | undefined,
@@ -25,10 +25,7 @@ export function autoYRange(bins: readonly Extent[]): [number, number] | null {
       max = Math.max(max, bin.max);
     }
   }
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-  if (min === max) return [min - 1, max + 1];
-  const padding = (max - min) * PADDING;
-  return [min - padding, max + padding];
+  return paddedExtent(min, max);
 }
 
 /**

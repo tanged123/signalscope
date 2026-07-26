@@ -1,11 +1,13 @@
 import type { Annotation } from "../generated/session";
 import {
   formatValue,
+  insidePlot,
   projectX,
   projectY,
   type PlotLayout,
 } from "../app/plot-math";
 import { SERIES_TOKENS } from "./canvas-renderer";
+import { CanvasSurface } from "./surface";
 
 export interface OverlayPalette {
   amber: string;
@@ -19,6 +21,14 @@ export interface OverlayPalette {
   series: string[];
 }
 
+/**
+ * Which coordinates annotations live in.
+ *
+ * `time` panels place them at `(time, value)` and read deltas against the
+ * time axis; `plot` panels supply explicit positions and report `Δx`/`Δy`.
+ */
+export type AnnotationSpace = "time" | "plot";
+
 export interface OverlayState {
   cursorT: number | null;
   cursorStyle: CursorStyle;
@@ -30,9 +40,10 @@ export interface OverlayState {
   annotationColorIndices: readonly number[];
   /** C-channel values per annotation, or null when unavailable. */
   annotationColorValues: readonly (number | null)[];
+  annotationSpace: AnnotationSpace;
   /**
    * Plot-space coordinates per annotation, or null when the annotation has
-   * no position in this mode. An empty array means use `(time, value)`.
+   * no position in this mode. Ignored when `annotationSpace` is `time`.
    */
   annotationPoints: readonly (XyMarker | null)[];
   showDelta: boolean;
@@ -51,10 +62,11 @@ export interface XyMarker {
 
 export class OverlayRenderer {
   private palette: OverlayPalette | null = null;
-  private renderedWidth = 0;
-  private renderedHeight = 0;
+  private readonly surface: CanvasSurface;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {}
+  constructor(canvas: HTMLCanvasElement) {
+    this.surface = new CanvasSurface(canvas);
+  }
 
   setPalette(palette: OverlayPalette): void {
     this.palette = palette;
@@ -65,7 +77,7 @@ export class OverlayRenderer {
   }
 
   draw(layout: PlotLayout | null, state: OverlayState): void {
-    const { context, width, height } = this.prepareCanvas();
+    const { context, width, height } = this.surface.prepare();
     context.clearRect(0, 0, width, height);
     if (layout === null) return;
     const palette = this.resolvePalette();
@@ -102,14 +114,7 @@ export class OverlayRenderer {
     for (const marker of markers) {
       const x = projectX(layout, marker.x);
       const y = projectY(layout, marker.y);
-      if (
-        x < layout.plot.x ||
-        x > layout.plot.x + layout.plot.width ||
-        y < layout.plot.y ||
-        y > layout.plot.y + layout.plot.height
-      ) {
-        continue;
-      }
+      if (!insidePlot(layout, x, y)) continue;
       context.beginPath();
       context.arc(x, y, 4, 0, Math.PI * 2);
       context.fill();
@@ -190,15 +195,14 @@ export class OverlayRenderer {
   ): void {
     context.save();
     context.font = `10px ${palette.fontMono}`;
+    const timeSpace = state.annotationSpace === "time";
     state.annotations.forEach((annotation, index) => {
-      const supplied = state.annotationPoints[index];
-      const point =
-        supplied === undefined
-          ? { x: annotation.time, y: annotation.value }
-          : supplied;
+      const point = timeSpace
+        ? { x: annotation.time, y: annotation.value }
+        : (state.annotationPoints[index] ?? null);
       if (point === null) return;
       if (
-        state.annotationPoints.length === 0 &&
+        timeSpace &&
         (annotation.time < layout.xRange.min ||
           annotation.time > layout.xRange.max)
       ) {
@@ -229,6 +233,7 @@ export class OverlayRenderer {
         context,
         layout,
         state.annotations,
+        state.annotationSpace,
         state.annotationPoints,
         state.annotationColorValues,
         palette,
@@ -241,6 +246,7 @@ export class OverlayRenderer {
     context: CanvasRenderingContext2D,
     layout: PlotLayout,
     annotations: readonly Annotation[],
+    space: AnnotationSpace,
     points: readonly (XyMarker | null)[],
     colorValues: readonly (number | null)[],
     palette: OverlayPalette,
@@ -250,14 +256,13 @@ export class OverlayRenderer {
     const first = annotations[firstIndex];
     const second = annotations[secondIndex];
     if (first === undefined || second === undefined) return;
-    const firstPoint =
-      points.length === 0
-        ? { x: first.time, y: first.value }
-        : (points[firstIndex] ?? null);
-    const secondPoint =
-      points.length === 0
-        ? { x: second.time, y: second.value }
-        : (points[secondIndex] ?? null);
+    const timeSpace = space === "time";
+    const firstPoint = timeSpace
+      ? { x: first.time, y: first.value }
+      : (points[firstIndex] ?? null);
+    const secondPoint = timeSpace
+      ? { x: second.time, y: second.value }
+      : (points[secondIndex] ?? null);
     if (firstPoint === null || secondPoint === null) return;
     context.save();
     context.strokeStyle = palette.fg3;
@@ -278,7 +283,7 @@ export class OverlayRenderer {
     const deltaT = second.time - first.time;
     const deltaV = second.value - first.value;
     const parts = [`Δt ${formatValue(deltaT)} s`];
-    if (points.length === 0) {
+    if (timeSpace) {
       // Time mode: Δv and slope are meaningful against the time axis.
       const slope = deltaT === 0 ? null : deltaV / deltaT;
       parts.push(`Δv ${formatValue(deltaV)}`);
@@ -320,31 +325,6 @@ export class OverlayRenderer {
     context.restore();
   }
 
-  private prepareCanvas(): {
-    context: CanvasRenderingContext2D;
-    width: number;
-    height: number;
-  } {
-    const ratio = globalThis.devicePixelRatio || 1;
-    const width = Math.max(1, this.canvas.clientWidth);
-    const height = Math.max(1, this.canvas.clientHeight);
-    const backingWidth = Math.round(width * ratio);
-    const backingHeight = Math.round(height * ratio);
-    if (
-      backingWidth !== this.renderedWidth ||
-      backingHeight !== this.renderedHeight
-    ) {
-      this.canvas.width = backingWidth;
-      this.canvas.height = backingHeight;
-      this.renderedWidth = backingWidth;
-      this.renderedHeight = backingHeight;
-    }
-    const context = this.canvas.getContext("2d");
-    if (context === null) throw new Error("Canvas 2D context is unavailable");
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    return { context, width, height };
-  }
-
   private resolvePalette(): OverlayPalette {
     if (this.palette !== null) return this.palette;
     const styles = getComputedStyle(document.documentElement);
@@ -365,7 +345,8 @@ export class OverlayRenderer {
   }
 }
 
-function marker(index: number): string {
+/** Annotation badge glyph: circled digits ①–⑳, then parenthesised numbers. */
+export function marker(index: number): string {
   return index < 20
     ? String.fromCodePoint(0x2460 + index)
     : `(${String(index + 1)})`;

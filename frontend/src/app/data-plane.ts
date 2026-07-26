@@ -115,6 +115,16 @@ export class BakedPlane implements DataPlane {
 
   private readonly payload: BakedManifest["payload"];
 
+  /**
+   * Level-0 bins reconstructed as raw samples, per signal id. The mapping is
+   * fixed for a baked payload, so it is built on first use rather than on
+   * every windowed query.
+   */
+  private readonly rawSamples = new Map<
+    string,
+    { time: number[]; values: number[] }
+  >();
+
   constructor(manifest: BakedManifest) {
     this.payload = open(manifest);
   }
@@ -177,8 +187,7 @@ export class BakedPlane implements DataPlane {
       series: this.payload.signals
         .filter((signal) => requested.has(signal.summary.signal_id))
         .map((signal) => {
-          // ADR 0015: the finest baked level stands in for raw samples.
-          const raw = binsToSamples(signal.levels[0] ?? []);
+          const raw = this.rawFor(signal);
           const slice = sampleWindow(
             raw.time,
             raw.values,
@@ -196,6 +205,20 @@ export class BakedPlane implements DataPlane {
           };
         }),
     });
+  }
+
+  /** ADR 0015: the finest baked level stands in for raw samples. */
+  private rawFor(signal: BakedManifest["payload"]["signals"][number]): {
+    time: number[];
+    values: number[];
+  } {
+    const id = signal.summary.signal_id;
+    let raw = this.rawSamples.get(id);
+    if (raw === undefined) {
+      raw = binsToSamples(signal.levels[0] ?? []);
+      this.rawSamples.set(id, raw);
+    }
+    return raw;
   }
 }
 

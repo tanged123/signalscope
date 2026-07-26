@@ -22,28 +22,35 @@ export function nearestXyPoint(
   py: number,
   maxDistance: number,
 ): XyHit | null {
-  let best: XyHit | null = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
+  // Squared distances throughout: this runs over every vertex of every trace
+  // on each hover, and only the ordering matters until the final compare.
+  let bestTrace: { path: string; trace: XyTrace } | null = null;
+  let bestIndex = -1;
+  let bestSquared = Number.POSITIVE_INFINITY;
   for (const entry of traces) {
     const { trace } = entry;
     for (let index = 0; index < trace.time.length; index += 1) {
       const x = trace.x[index] ?? Number.NaN;
       const y = trace.y[index] ?? Number.NaN;
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const distance = Math.hypot(
-        projectX(layout, x) - px,
-        projectY(layout, y) - py,
-      );
-      if (distance >= bestDistance) continue;
-      bestDistance = distance;
-      best = {
-        path: entry.path,
-        index,
-        time: trace.time[index] ?? Number.NaN,
-        x,
-        y,
-      };
+      const dx = projectX(layout, x) - px;
+      const dy = projectY(layout, y) - py;
+      const squared = dx * dx + dy * dy;
+      if (squared >= bestSquared) continue;
+      bestSquared = squared;
+      bestTrace = entry;
+      bestIndex = index;
     }
   }
-  return bestDistance <= maxDistance ? best : null;
+  if (bestTrace === null || bestSquared > maxDistance * maxDistance) {
+    return null;
+  }
+  const { trace } = bestTrace;
+  return {
+    path: bestTrace.path,
+    index: bestIndex,
+    time: trace.time[bestIndex] ?? Number.NaN,
+    x: trace.x[bestIndex] ?? Number.NaN,
+    y: trace.y[bestIndex] ?? Number.NaN,
+  };
 }

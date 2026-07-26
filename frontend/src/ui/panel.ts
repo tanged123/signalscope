@@ -11,6 +11,7 @@ import {
   insidePlot,
   invertX,
   invertY,
+  panRange,
   panScaledRange,
   pinchRange,
   pinchScaledRange,
@@ -23,6 +24,7 @@ import {
   zoomScaledRange,
   type PlotLayout,
   type Range,
+  type ZoomDragMode,
 } from "../app/plot-math";
 import {
   nearestAnnotation,
@@ -42,9 +44,15 @@ import {
   type PlotPath,
   type RenderOptions,
 } from "../render/canvas-renderer";
-import { OverlayRenderer, type CursorStyle } from "../render/overlay-renderer";
+import {
+  marker,
+  OverlayRenderer,
+  type CursorPoint,
+  type CursorStyle,
+} from "../render/overlay-renderer";
+import { MODE_TRAITS, traits } from "../app/panel-mode";
 import { YAxisPolicy } from "../render/y-axis";
-import { required } from "./dom";
+import { required, signalLabel } from "./dom";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
@@ -147,7 +155,13 @@ export class PanelView {
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
-  private xyTraces: { path: string; colorIndex: number; trace: XyTrace }[] = [];
+  private xyTraces: {
+    path: string;
+    colorIndex: number;
+    dash: DashStyle;
+    width: number;
+    trace: XyTrace;
+  }[] = [];
   private domainSeries: {
     path: string;
     colorIndex: number;
@@ -437,7 +451,7 @@ export class PanelView {
     if (!xChip.hidden && state.x_signal !== null) {
       xChip.replaceChildren(
         chipPrefix("x:"),
-        document.createTextNode(state.x_signal.split("/").slice(-2).join("/")),
+        document.createTextNode(signalLabel(state.x_signal)),
       );
       xChip.title = `X axis: ${state.x_signal} — click to remove`;
     }
@@ -451,7 +465,7 @@ export class PanelView {
             ? "none"
             : state.color_signal === "time"
               ? "time"
-              : state.color_signal.split("/").slice(-2).join("/"),
+              : signalLabel(state.color_signal),
         ),
       );
       cChip.title =
@@ -460,7 +474,7 @@ export class PanelView {
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
     const note = required<HTMLElement>(this.element, ".panel-mode-note");
-    note.hidden = state.mode !== "fft" && state.mode !== "histogram";
+    note.hidden = !MODE_TRAITS[state.mode].windowNote;
     if (!note.hidden) note.textContent = "window: visible t";
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
       maximized ? "Restore panel" : "Maximize panel";
@@ -488,10 +502,8 @@ export class PanelView {
     } else if (state.mode === "xy" && state.x_signal === null) {
       empty.hidden = false;
       empty.textContent = "Drop a signal on the strip below to set the X axis.";
-    } else if (state.mode === "fft" || state.mode === "histogram") {
-      // renderSpectra / renderHistogram own these panels' empty states.
-      empty.hidden = true;
     } else {
+      // In fft/histogram, renderSpectra/renderHistogram own the empty state.
       empty.hidden = true;
     }
   }
@@ -508,29 +520,24 @@ export class PanelView {
     this.lastWindow = { ...window };
     this.domainSeries = [];
     this.histogramBins = null;
-    if (state.mode === "xy") {
-      const elapsed = this.renderXy(state, samples, window);
-      this.renderStats();
-      this.drawOverlay();
-      return elapsed;
-    }
-    if (state.mode === "fft") {
-      const elapsed = this.renderSpectra(state, samples, window);
-      this.renderStats();
-      this.drawOverlay();
-      return elapsed;
-    }
+    const elapsed = this.renderForMode(state, tiles, samples, window);
+    this.renderStats();
+    this.drawOverlay();
+    return elapsed;
+  }
+
+  private renderForMode(
+    state: PanelState,
+    tiles: TileResponse | null,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    if (state.mode === "xy") return this.renderXy(state, samples, window);
+    if (state.mode === "fft") return this.renderSpectra(state, samples, window);
     if (state.mode === "histogram") {
-      const elapsed = this.renderHistogram(state, samples, window);
-      this.renderStats();
-      this.drawOverlay();
-      return elapsed;
+      return this.renderHistogram(state, samples, window);
     }
-    if (tiles === null || state.series.length === 0) {
-      this.renderStats();
-      this.drawOverlay();
-      return 0;
-    }
+    if (tiles === null || state.series.length === 0) return 0;
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
     );
@@ -565,14 +572,11 @@ export class PanelView {
           }
         : {}),
     };
-    const elapsed = this.renderer.render(
+    return this.renderer.render(
       response,
       { min: window.t0, max: window.t1 },
       options,
     );
-    this.renderStats();
-    this.drawOverlay();
-    return elapsed;
   }
 
   private renderXy(
@@ -591,10 +595,12 @@ export class PanelView {
       if (!series.visible) continue;
       const ySeries = byPath.get(series.path);
       if (ySeries === undefined) continue;
+      const style = resolveSeriesStyle(series.color_slot, series.dash);
       this.xyTraces.push({
         path: series.path,
-        colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
-          .colorIndex,
+        colorIndex: style.colorIndex,
+        dash: style.dash,
+        width: series.width,
         trace: pairSamples(xSeries, ySeries),
       });
     }
@@ -651,15 +657,11 @@ export class PanelView {
       });
     }
     this.xyTraces.forEach((entry, index) => {
-      const series = state.series.find((item) => item.path === entry.path);
       paths.push({
         points: flattenTrace(entry.trace, window),
         colorIndex: entry.colorIndex,
-        dash: resolveSeriesStyle(
-          series?.color_slot ?? 1,
-          series?.dash ?? "solid",
-        ).dash,
-        width: (series?.width ?? 1.4) + 0.4,
+        dash: entry.dash,
+        width: entry.width + 0.4,
         markers: true,
         ...(hasColor
           ? {
@@ -863,12 +865,7 @@ export class PanelView {
   }
 
   setCursor(cursorT: number | null): void {
-    if (
-      this.lastState?.mode === "fft" ||
-      this.lastState?.mode === "histogram"
-    ) {
-      return;
-    }
+    if (!traits(this.lastState?.mode).globalCursor) return;
     this.cursorT = cursorT;
     this.drawOverlay();
   }
@@ -1053,16 +1050,30 @@ export class PanelView {
       this.touchMode = "pan";
     }
     if (this.touchMode !== "pan") return;
+    this.panFrom(layout, ranges, start, {
+      x: event.offsetX,
+      y: event.offsetY,
+    });
+  }
+
+  /** Pans both axes so the data under `from` follows the pointer to `to`. */
+  private panFrom(
+    layout: PlotLayout,
+    ranges: { x: Range; y: Range },
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): void {
     const nextX = panScaledRange(
       ranges.x,
-      (start.x - event.offsetX) / layout.plot.width,
+      (from.x - to.x) / layout.plot.width,
       layout.xScale,
     );
-    const dv =
-      ((event.offsetY - start.y) / layout.plot.height) *
-      (ranges.y.max - ranges.y.min);
+    const nextY = panRange(
+      ranges.y,
+      ((to.y - from.y) / layout.plot.height) * (ranges.y.max - ranges.y.min),
+    );
     this.applyXRange(nextX.min, nextX.max);
-    this.callbacks.onYRange(this.id, [ranges.y.min + dv, ranges.y.max + dv]);
+    this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
   }
 
   private applyPinch(layout: PlotLayout): void {
@@ -1214,8 +1225,9 @@ export class PanelView {
 
   private drawOverlay(): void {
     const state = this.lastState;
+    const mode = traits(state?.mode);
     const annotations =
-      state?.mode === "time" || state?.mode === "xy" ? state.annotations : [];
+      state !== null && mode.annotations ? state.annotations : [];
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -1227,50 +1239,13 @@ export class PanelView {
             return point === null ? [] : [point];
           })
         : [];
-    const histogramCursor =
-      state?.mode === "histogram" && cursorT !== null
-        ? this.histogramCursorAt(cursorT)
-        : null;
-    const cursorPoints =
-      this.cursorStyle === "dot" && cursorT !== null
-        ? state?.mode === "fft"
-          ? this.domainSeries.map((series) => ({
-              value: lerpSample(series.x, series.y, cursorT),
-              colorIndex: series.colorIndex,
-            }))
-          : state?.mode === "histogram"
-            ? (histogramCursor?.domain === "histogram"
-                ? histogramCursor.rows
-                : []
-              ).map((row) => ({
-                value: row.value,
-                colorIndex: row.colorIndex,
-              }))
-            : (this.lastTiles?.series ?? []).flatMap((tile) => {
-                const series = bySeries.get(tile.signal_path);
-                if (series?.visible !== true) return [];
-                const value = valueAtTime(tile.bins, cursorT);
-                if (value === null) return [];
-                return [
-                  {
-                    value,
-                    colorIndex: resolveSeriesStyle(
-                      series.color_slot,
-                      series.dash,
-                    ).colorIndex,
-                  },
-                ];
-              })
-        : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
-      cursorT:
-        state?.mode === "time" ||
-        state?.mode === "fft" ||
-        state?.mode === "histogram"
-          ? this.cursorT
-          : null,
+      cursorT: mode.verticalCursor ? cursorT : null,
       cursorStyle: this.cursorStyle,
-      cursorPoints,
+      cursorPoints:
+        this.cursorStyle === "dot" && cursorT !== null
+          ? this.cursorPointsAt(state?.mode, cursorT, bySeries)
+          : [],
       xyMarkers,
       box: this.box,
       annotations,
@@ -1281,10 +1256,46 @@ export class PanelView {
           series?.dash ?? "solid",
         ).colorIndex;
       }),
+      annotationSpace: mode.annotationSpace,
       annotationPoints: state === null ? [] : this.annotationPoints(state),
       annotationColorValues:
         state === null ? [] : this.annotationColorValues(state),
       showDelta: annotations.length >= 2,
+    });
+  }
+
+  /** The dots the cursor puts on each series, in that mode's own domain. */
+  private cursorPointsAt(
+    mode: PanelMode | undefined,
+    cursorT: number,
+    bySeries: ReadonlyMap<string, PanelState["series"][number]>,
+  ): CursorPoint[] {
+    if (mode === "fft") {
+      return this.domainSeries.map((series) => ({
+        value: lerpSample(series.x, series.y, cursorT),
+        colorIndex: series.colorIndex,
+      }));
+    }
+    if (mode === "histogram") {
+      const cursor = this.histogramCursorAt(cursorT);
+      const rows = cursor?.domain === "histogram" ? cursor.rows : [];
+      return rows.map((row) => ({
+        value: row.value,
+        colorIndex: row.colorIndex,
+      }));
+    }
+    return (this.lastTiles?.series ?? []).flatMap((tile) => {
+      const series = bySeries.get(tile.signal_path);
+      if (series?.visible !== true) return [];
+      const value = valueAtTime(tile.bins, cursorT);
+      if (value === null) return [];
+      return [
+        {
+          value,
+          colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
+            .colorIndex,
+        },
+      ];
     });
   }
 
@@ -1324,16 +1335,12 @@ export class PanelView {
     const startX = { ...layout.xRange };
     const startY = { ...layout.yRange };
     const move = (event: PointerEvent): void => {
-      const nextX = panScaledRange(
-        startX,
-        (down.offsetX - event.offsetX) / layout.plot.width,
-        layout.xScale,
+      this.panFrom(
+        layout,
+        { x: startX, y: startY },
+        { x: down.offsetX, y: down.offsetY },
+        { x: event.offsetX, y: event.offsetY },
       );
-      const dv =
-        ((event.offsetY - down.offsetY) / layout.plot.height) *
-        (startY.max - startY.min);
-      this.applyXRange(nextX.min, nextX.max);
-      this.callbacks.onYRange(this.id, [startY.min + dv, startY.max + dv]);
     };
     const finish = (): void => {
       this.overlay.removeEventListener("pointermove", move);
@@ -1349,6 +1356,9 @@ export class PanelView {
   private beginBoxOrClick(down: PointerEvent, layout: PlotLayout): void {
     const start = { x: down.offsetX, y: down.offsetY };
     let promoted = false;
+    // Which axes the drag chose, kept from `move` so `finish` need not
+    // recover it by comparing the box against the plot bounds.
+    let dragMode: ZoomDragMode = "xy";
     const clampX = (value: number): number =>
       clamp(value, layout.plot.x, layout.plot.x + layout.plot.width);
     const clampY = (value: number): number =>
@@ -1365,31 +1375,17 @@ export class PanelView {
         this.dragging = true;
         this.overlay.setPointerCapture(down.pointerId);
       }
-      const mode = zoomDragMode(
-        event.offsetX - start.x,
-        event.offsetY - start.y,
-      );
-      this.box =
-        mode === "x"
-          ? {
-              x0: clampX(start.x),
-              y0: layout.plot.y,
-              x1: clampX(event.offsetX),
-              y1: layout.plot.y + layout.plot.height,
-            }
-          : mode === "y"
-            ? {
-                x0: layout.plot.x,
-                y0: clampY(start.y),
-                x1: layout.plot.x + layout.plot.width,
-                y1: clampY(event.offsetY),
-              }
-            : {
-                x0: clampX(start.x),
-                y0: clampY(start.y),
-                x1: clampX(event.offsetX),
-                y1: clampY(event.offsetY),
-              };
+      dragMode = zoomDragMode(event.offsetX - start.x, event.offsetY - start.y);
+      // An axis the drag excluded spans the whole plot, so the marquee reads
+      // as a band rather than a rectangle.
+      const spansX = dragMode !== "y";
+      const spansY = dragMode !== "x";
+      this.box = {
+        x0: spansX ? clampX(start.x) : layout.plot.x,
+        y0: spansY ? clampY(start.y) : layout.plot.y,
+        x1: spansX ? clampX(event.offsetX) : layout.plot.x + layout.plot.width,
+        y1: spansY ? clampY(event.offsetY) : layout.plot.y + layout.plot.height,
+      };
       this.drawOverlay();
     };
     const finish = (event: PointerEvent): void => {
@@ -1402,32 +1398,22 @@ export class PanelView {
         return;
       }
       if (box === null) return;
-      const horizontal =
-        box.y0 === layout.plot.y &&
-        box.y1 === layout.plot.y + layout.plot.height;
-      const vertical =
-        box.x0 === layout.plot.x &&
-        box.x1 === layout.plot.x + layout.plot.width;
-      if (horizontal) {
-        if (Math.abs(box.x1 - box.x0) <= 6) return;
-        const t0 = invertX(layout, Math.min(box.x0, box.x1));
-        const t1 = invertX(layout, Math.max(box.x0, box.x1));
-        this.applyXRange(t0, t1);
-      } else if (vertical) {
-        if (Math.abs(box.y1 - box.y0) <= 6) return;
-        const yLow = invertY(layout, Math.max(box.y0, box.y1));
-        const yHigh = invertY(layout, Math.min(box.y0, box.y1));
-        this.callbacks.onYRange(this.id, [yLow, yHigh]);
-      } else {
-        if (Math.abs(box.x1 - box.x0) <= 6 || Math.abs(box.y1 - box.y0) <= 6) {
-          return;
-        }
-        const t0 = invertX(layout, Math.min(box.x0, box.x1));
-        const t1 = invertX(layout, Math.max(box.x0, box.x1));
-        const yLow = invertY(layout, Math.max(box.y0, box.y1));
-        const yHigh = invertY(layout, Math.min(box.y0, box.y1));
-        this.callbacks.onYRange(this.id, [yLow, yHigh]);
-        this.applyXRange(t0, t1);
+      // Each axis the drag chose must clear the 6px dead zone on its own.
+      const zoomX = dragMode !== "y";
+      const zoomY = dragMode !== "x";
+      if (zoomX && Math.abs(box.x1 - box.x0) <= 6) return;
+      if (zoomY && Math.abs(box.y1 - box.y0) <= 6) return;
+      if (zoomY) {
+        this.callbacks.onYRange(this.id, [
+          invertY(layout, Math.max(box.y0, box.y1)),
+          invertY(layout, Math.min(box.y0, box.y1)),
+        ]);
+      }
+      if (zoomX) {
+        this.applyXRange(
+          invertX(layout, Math.min(box.x0, box.x1)),
+          invertX(layout, Math.max(box.x0, box.x1)),
+        );
       }
     };
     const cancel = (): void => {
@@ -1446,14 +1432,8 @@ export class PanelView {
     this.overlay.addEventListener("pointercancel", cancel);
   }
 
-  /**
-   * Modes whose plot area accepts zoom/pan gestures. Histogram is excluded:
-   * its x axis is a value axis whose bin edges are recomputed from the
-   * visible window, so panning it would be misleading (ADR 0018).
-   */
   private interactiveMode(): boolean {
-    const mode = this.lastState?.mode;
-    return mode === "time" || mode === "xy" || mode === "fft";
+    return traits(this.lastState?.mode).interactive;
   }
 
   /**
@@ -1461,7 +1441,7 @@ export class PanelView {
    * panel-local value range everywhere else.
    */
   private applyXRange(min: number, max: number): void {
-    if (this.lastState?.mode === "time") {
+    if (traits(this.lastState?.mode).xIsTime) {
       this.callbacks.onTimeWindow(this.id, min, max);
     } else {
       this.callbacks.onXRange(this.id, [min, max]);
@@ -1475,7 +1455,7 @@ export class PanelView {
     const window = this.lastWindow;
     const show =
       state !== null &&
-      state.mode === "time" &&
+      MODE_TRAITS[state.mode].stats &&
       state.show_stats &&
       tiles !== null &&
       window !== null;
@@ -1496,7 +1476,7 @@ export class PanelView {
         const row = document.createElement("span");
         row.className = "stats-series";
         row.append(
-          statsName(tile.signal_path.split("/").slice(-2).join("/")),
+          statsName(signalLabel(tile.signal_path)),
           statsItem("min", stats.min),
           statsItem("max", stats.max),
           statsItem("μ", stats.mean),
@@ -1512,8 +1492,9 @@ export class PanelView {
 
   private renderAnnotationList(state: PanelState): void {
     const list = required<HTMLElement>(this.element, ".panel-annotations");
-    const annotations =
-      state.mode === "time" || state.mode === "xy" ? state.annotations : [];
+    const annotations = MODE_TRAITS[state.mode].annotations
+      ? state.annotations
+      : [];
     list.hidden = annotations.length === 0;
     if (annotations.length === 0) {
       list.replaceChildren();
@@ -1719,7 +1700,7 @@ export class PanelView {
     line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
     const name = document.createElement("span");
     name.className = "legend-name";
-    name.textContent = series.path.split("/").slice(-2).join("/");
+    name.textContent = signalLabel(series.path);
     body.append(line, name);
     body.addEventListener("click", () => {
       this.callbacks.onToggleSeries(this.id, series.path);
@@ -1910,7 +1891,7 @@ function yLabel(units: readonly (string | null)[]): string {
 
 /** `path/leaf (unit)` for an axis name, matching the spec's XY gutters. */
 function axisName(path: string, unit: string | null): string {
-  const leaf = path.split("/").slice(-2).join("/");
+  const leaf = signalLabel(path);
   return unit === null ? leaf : `${leaf} (${unit})`;
 }
 
@@ -1947,31 +1928,8 @@ function markerAt(
   trace: XyTrace,
   cursorT: number,
 ): { x: number; y: number } | null {
-  const count = trace.time.length;
-  if (count === 0) return null;
-  if (
-    cursorT < (trace.time[0] ?? 0) ||
-    cursorT > (trace.time[count - 1] ?? 0)
-  ) {
-    return null;
-  }
-  let low = 0;
-  let high = count - 1;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if ((trace.time[mid] ?? 0) < cursorT) low = mid + 1;
-    else high = mid;
-  }
-  const previous = Math.max(0, low - 1);
-  const span = (trace.time[low] ?? 0) - (trace.time[previous] ?? 0);
-  const alpha = span === 0 ? 0 : (cursorT - (trace.time[previous] ?? 0)) / span;
-  const at = (column: number[]): number => {
-    const before = column[previous] ?? Number.NaN;
-    const after = column[low] ?? Number.NaN;
-    return before + (after - before) * alpha;
-  };
-  const x = at(trace.x);
-  const y = at(trace.y);
+  const x = lerpSample(trace.time, trace.x, cursorT);
+  const y = lerpSample(trace.time, trace.y, cursorT);
   return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
 }
 
@@ -1992,12 +1950,6 @@ export function axisEditZone(
   if (px < plot.x - 20) return "y";
   if (py > plot.y + plot.height + 14) return "x";
   return null;
-}
-
-function marker(index: number): string {
-  return index < 20
-    ? String.fromCodePoint(0x2460 + index)
-    : `(${String(index + 1)})`;
 }
 
 function statsName(text: string): HTMLElement {

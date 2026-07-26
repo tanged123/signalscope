@@ -21,7 +21,10 @@ export function nearestVertex(
   py: number,
   threshold: number,
 ): VertexHit | null {
-  let best: VertexHit | null = null;
+  // Ranked on squared distance — two vertices per bin over every visible bin
+  // on each pointer move — then the winner's true distance is reported once.
+  let best: { path: string; time: number; value: number } | null = null;
+  let bestSquared = threshold * threshold;
   for (const entry of series) {
     for (const bin of entry.bins) {
       for (const [time, value] of [
@@ -29,20 +32,18 @@ export function nearestVertex(
         [bin.t1, bin.last],
       ] as const) {
         if (value === null) continue;
-        const distance = Math.hypot(
-          projectX(layout, time) - px,
-          projectY(layout, value) - py,
-        );
-        if (
-          distance <= threshold &&
-          (best === null || distance < best.distance)
-        ) {
-          best = { path: entry.path, time, value, distance };
-        }
+        const dx = projectX(layout, time) - px;
+        const dy = projectY(layout, value) - py;
+        const squared = dx * dx + dy * dy;
+        if (squared > bestSquared) continue;
+        // `<=` on the first candidate keeps a zero-threshold exact hit.
+        if (best !== null && squared === bestSquared) continue;
+        bestSquared = squared;
+        best = { path: entry.path, time, value };
       }
     }
   }
-  return best;
+  return best === null ? null : { ...best, distance: Math.sqrt(bestSquared) };
 }
 
 export function nearestAnnotation(

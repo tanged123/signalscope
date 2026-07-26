@@ -1,3 +1,5 @@
+import { clamp } from "./plot-math";
+
 /**
  * Custom-property names of the sequential ramp, low to high. The ramp is
  * `batlow` (ADR 0016) and is theme-invariant: a sequential map's monotone
@@ -32,7 +34,7 @@ function channels(hex: string): [number, number, number] {
 }
 
 function hex(value: number): string {
-  return Math.round(Math.min(255, Math.max(0, value)))
+  return Math.round(clamp(value, 0, 255))
     .toString(16)
     .padStart(2, "0");
 }
@@ -42,7 +44,7 @@ export function sampleColormap(stops: readonly string[], t: number): string {
   const first = stops[0] ?? "#000000";
   if (stops.length === 0) return first;
   if (!Number.isFinite(t)) return first;
-  const position = Math.min(1, Math.max(0, t)) * (stops.length - 1);
+  const position = clamp(t, 0, 1) * (stops.length - 1);
   const low = Math.floor(position);
   const high = Math.min(stops.length - 1, low + 1);
   const alpha = position - low;
@@ -51,4 +53,30 @@ export function sampleColormap(stops: readonly string[], t: number): string {
   return `#${hex(r0 + (r1 - r0) * alpha)}${hex(g0 + (g1 - g0) * alpha)}${hex(
     b0 + (b1 - b0) * alpha,
   )}`;
+}
+
+/** Ramp steps a `ColormapRamp` quantises to; finer than the eye resolves. */
+const RAMP_STEPS = 64;
+
+/**
+ * A ramp pre-sampled into fixed steps.
+ *
+ * Per-segment `c:` colouring asks for a colour once per vertex — thousands of
+ * times per frame — so the hex interpolation runs once per step here and each
+ * lookup becomes an array index.
+ */
+export class ColormapRamp {
+  private readonly steps: string[];
+
+  constructor(stops: readonly string[]) {
+    this.steps = Array.from({ length: RAMP_STEPS + 1 }, (_, index) =>
+      sampleColormap(stops, index / RAMP_STEPS),
+    );
+  }
+
+  at(t: number): string {
+    if (!Number.isFinite(t)) return this.steps[0] ?? "#000000";
+    const index = Math.round(clamp(t, 0, 1) * RAMP_STEPS);
+    return this.steps[index] ?? this.steps[0] ?? "#000000";
+  }
 }

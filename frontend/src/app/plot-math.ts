@@ -33,6 +33,24 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** Fraction of the data span added to each end of an automatic extent. */
+const EXTENT_PADDING = 0.06;
+
+/**
+ * The display extent for a data range: padded by a fixed fraction of its
+ * span, or widened by one unit when the range collapses to a single value.
+ * Null when either bound is not finite.
+ */
+export function paddedExtent(
+  min: number,
+  max: number,
+): [number, number] | null {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  if (min === max) return [min - 1, max + 1];
+  const padding = (max - min) * EXTENT_PADDING;
+  return [min - padding, max + padding];
+}
+
 export function projectX(layout: PlotLayout, value: number): number {
   const { plot, xRange } = layout;
   if (layout.xScale === "log") {

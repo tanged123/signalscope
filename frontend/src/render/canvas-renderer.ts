@@ -9,23 +9,12 @@ import {
   type PlotRect,
   type Range,
 } from "../app/plot-math";
-import { SEQ_TOKENS, sampleColormap } from "../app/colormap";
+import { ColormapRamp, SEQ_TOKENS } from "../app/colormap";
+import { CanvasSurface } from "./surface";
 
 interface Projection {
   toX: (value: number) => number;
   toY: (value: number) => number;
-}
-
-/** Data-to-pixel mapping shared by axes, ticks, and series strokes. */
-function projection(plot: PlotRect, xRange: Range, yRange: Range): Projection {
-  return {
-    toX: (value) =>
-      plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width,
-    toY: (value) =>
-      plot.y +
-      plot.height -
-      ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height,
-  };
 }
 
 export interface Palette {
@@ -124,16 +113,58 @@ export function dashPattern(dash: DashStyle): number[] {
   return [];
 }
 
+/** Canvas geometry and palette shared by every draw call in one frame. */
+interface Frame {
+  context: CanvasRenderingContext2D;
+  colors: Palette;
+  plot: PlotRect;
+  project: Projection;
+  width: number;
+  height: number;
+}
+
+/** What both axis routines draw against, so they share one call shape. */
+interface AxisFrame {
+  context: CanvasRenderingContext2D;
+  plot: PlotRect;
+  project: Projection;
+  colors: Palette;
+  xTicks: readonly number[];
+}
+
+/** The axis furniture and geometry one frame needs before anything is drawn. */
+interface FrameSpec {
+  xRange: Range;
+  yRange: Range;
+  xLabel: string;
+  yLabel: string;
+  axisStyle?: AxisStyle;
+  xScale?: AxisScale;
+  /** Pixels reserved on the right for a decoration such as the colorbar. */
+  rightGutter?: number;
+}
+
 export class CanvasRenderer {
   private palette: Palette | null = null;
-  private renderedWidth = 0;
-  private renderedHeight = 0;
+  private readonly surface: CanvasSurface;
   private layout: PlotLayout | null = null;
+  private colorbarGradient: CanvasGradient | null = null;
+  private colorbarBottom = 0;
+  private sequentialRamp: ColormapRamp | null = null;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {}
+  constructor(canvas: HTMLCanvasElement) {
+    this.surface = new CanvasSurface(canvas);
+  }
 
   invalidateTheme(): void {
     this.palette = null;
+    this.colorbarGradient = null;
+    this.sequentialRamp = null;
+  }
+
+  private ramp(colors: Palette): ColormapRamp {
+    this.sequentialRamp ??= new ColormapRamp(colors.sequential);
+    return this.sequentialRamp;
   }
 
   /**
@@ -142,6 +173,8 @@ export class CanvasRenderer {
    */
   setPalette(palette: Palette): void {
     this.palette = palette;
+    this.colorbarGradient = null;
+    this.sequentialRamp = null;
   }
 
   lastLayout(): PlotLayout | null {
@@ -154,53 +187,15 @@ export class CanvasRenderer {
     options: RenderOptions,
   ): number {
     const started = performance.now();
-    const { context, width, height } = this.prepareCanvas();
-    const colors = this.resolvePalette();
-    context.fillStyle = colors.background;
-    context.fillRect(0, 0, width, height);
-
-    const yRange: Range = {
-      min: options.yRange[0],
-      max: options.yRange[1],
-    };
-    context.font = tickFont(colors);
-    const charWidth = context.measureText("0").width;
-    const gutter = gutterWidth(
-      formatTicks(ticks(yRange.min, yRange.max, 6)),
-      charWidth,
-    );
-    const inline = options.axisStyle === "inline";
-    const plot: PlotRect = inline
-      ? { x: 0, y: 0, width, height }
-      : {
-          x: gutter,
-          y: 8,
-          width: Math.max(1, width - gutter - 12),
-          height: Math.max(1, height - 42),
-        };
-    this.layout = { plot, xRange: { ...xRange }, yRange: { ...yRange } };
-    const project = projection(plot, xRange, yRange);
-    if (inline) {
-      this.drawInlineAxes(
-        context,
-        plot,
-        project,
-        yRange,
-        colors,
-        { xLabel: options.xLabel, yLabel: options.yLabel },
-        ticks(xRange.min, xRange.max, 7),
-      );
-    } else {
-      this.drawAxes(
-        context,
-        plot,
-        project,
-        yRange,
-        colors,
-        { xLabel: options.xLabel, yLabel: options.yLabel },
-        ticks(xRange.min, xRange.max, 7),
-      );
-    }
+    const { context, colors, plot, project } = this.beginFrame({
+      xRange,
+      yRange: { min: options.yRange[0], max: options.yRange[1] },
+      xLabel: options.xLabel,
+      yLabel: options.yLabel,
+      ...(options.axisStyle === undefined
+        ? {}
+        : { axisStyle: options.axisStyle }),
+    });
     response.series.forEach((series, index) => {
       const style = resolveSeriesStyle(
         options.colorSlots[index] ?? index + 1,
@@ -228,87 +223,80 @@ export class CanvasRenderer {
    */
   renderPaths(paths: readonly PlotPath[], options: PathRenderOptions): number {
     const started = performance.now();
-    const { context, width, height } = this.prepareCanvas();
-    const colors = this.resolvePalette();
-    context.fillStyle = colors.background;
-    context.fillRect(0, 0, width, height);
-
-    const xRange: Range = { min: options.xRange[0], max: options.xRange[1] };
-    const yRange: Range = { min: options.yRange[0], max: options.yRange[1] };
-    context.font = tickFont(colors);
-    const charWidth = context.measureText("0").width;
-    const gutter = gutterWidth(
-      formatTicks(ticks(yRange.min, yRange.max, 6)),
-      charWidth,
-    );
-    const inline = options.axisStyle === "inline";
-    const colorbarGutter = options.colorbar === undefined ? 0 : COLORBAR_GUTTER;
-    const plot: PlotRect = inline
-      ? {
-          x: 0,
-          y: 0,
-          width: Math.max(1, width - colorbarGutter),
-          height,
-        }
-      : {
-          x: gutter,
-          y: 8,
-          width: Math.max(1, width - gutter - 12 - colorbarGutter),
-          height: Math.max(1, height - 42),
-        };
-    const scale: AxisScale = options.xScale ?? "linear";
-    this.layout = {
-      plot,
-      xRange: { ...xRange },
-      yRange: { ...yRange },
-      xScale: scale,
-    };
-    const layout = this.layout;
-    const project: Projection = {
-      toX: (value) => projectX(layout, value),
-      toY: (value) => projectY(layout, value),
-    };
-    const xTickValues =
-      scale === "log"
-        ? logTicks(xRange.min, xRange.max)
-        : ticks(xRange.min, xRange.max, 7);
-    const labels = { xLabel: options.xLabel, yLabel: options.yLabel };
-    if (inline) {
-      this.drawInlineAxes(
-        context,
-        plot,
-        project,
-        yRange,
-        colors,
-        labels,
-        xTickValues,
-      );
-    } else {
-      this.drawAxes(
-        context,
-        plot,
-        project,
-        yRange,
-        colors,
-        labels,
-        xTickValues,
-      );
-    }
+    const { context, colors, plot, project, width, height } = this.beginFrame({
+      xRange: { min: options.xRange[0], max: options.xRange[1] },
+      yRange: { min: options.yRange[0], max: options.yRange[1] },
+      xLabel: options.xLabel,
+      yLabel: options.yLabel,
+      ...(options.axisStyle === undefined
+        ? {}
+        : { axisStyle: options.axisStyle }),
+      ...(options.xScale === undefined ? {} : { xScale: options.xScale }),
+      ...(options.colorbar === undefined
+        ? {}
+        : { rightGutter: COLORBAR_GUTTER }),
+    });
     for (const path of paths) {
       this.drawPath(context, plot, project, path, colors);
     }
     if (options.colorbar !== undefined) {
-      const colorbarPlot = inline
-        ? {
-            x: plot.x,
-            y: 8,
-            width: plot.width,
-            height: Math.max(1, height - 42),
-          }
-        : plot;
+      // Inline axes give the plot the full canvas height; the bar keeps the
+      // gutter layout's vertical insets so its ticks stay readable.
+      const colorbarPlot =
+        options.axisStyle === "inline"
+          ? { ...plot, y: 8, height: Math.max(1, height - 42) }
+          : plot;
       this.drawColorbar(context, colorbarPlot, width, options.colorbar, colors);
     }
     return performance.now() - started;
+  }
+
+  /**
+   * Clears the canvas, derives the plot rectangle, publishes `this.layout`,
+   * and draws the axis furniture. Both entry points share it so the spec's
+   * plot insets and tick policy live in exactly one place.
+   */
+  private beginFrame(spec: FrameSpec): Frame {
+    const { context, width, height } = this.surface.prepare();
+    const colors = this.resolvePalette();
+    context.fillStyle = colors.background;
+    context.fillRect(0, 0, width, height);
+    context.font = tickFont(colors);
+    const gutter = gutterWidth(
+      formatTicks(ticks(spec.yRange.min, spec.yRange.max, 6)),
+      context.measureText("0").width,
+    );
+    const inline = spec.axisStyle === "inline";
+    const rightGutter = spec.rightGutter ?? 0;
+    const plot: PlotRect = inline
+      ? { x: 0, y: 0, width: Math.max(1, width - rightGutter), height }
+      : {
+          x: gutter,
+          y: 8,
+          width: Math.max(1, width - gutter - 12 - rightGutter),
+          height: Math.max(1, height - 42),
+        };
+    const scale: AxisScale = spec.xScale ?? "linear";
+    const layout: PlotLayout = {
+      plot,
+      xRange: { ...spec.xRange },
+      yRange: { ...spec.yRange },
+      xScale: scale,
+    };
+    this.layout = layout;
+    const project: Projection = {
+      toX: (value) => projectX(layout, value),
+      toY: (value) => projectY(layout, value),
+    };
+    const xTicks =
+      scale === "log"
+        ? logTicks(spec.xRange.min, spec.xRange.max)
+        : ticks(spec.xRange.min, spec.xRange.max, 7);
+    const axes = { context, plot, project, colors, xTicks } as const;
+    const labels = { xLabel: spec.xLabel, yLabel: spec.yLabel };
+    if (inline) this.drawInlineAxes(axes, spec.yRange, labels);
+    else this.drawAxes(axes, spec.yRange, labels);
+    return { context, colors, plot, project, width, height };
   }
 
   private drawPath(
@@ -381,6 +369,7 @@ export class CanvasRenderer {
   ): void {
     const values = path.colorValues ?? [];
     const vertices = path.points.length >> 1;
+    const ramp = this.ramp(colors);
     context.lineWidth = path.width;
     context.setLineDash(dashPattern(path.dash));
     context.lineCap = "round";
@@ -399,7 +388,7 @@ export class CanvasRenderer {
       }
       // Midpoint of the segment's two scalars keeps the ramp continuous.
       const scalar = ((values[index - 1] ?? 0) + (values[index] ?? 0)) * 0.5;
-      context.strokeStyle = sampleColormap(colors.sequential, scalar);
+      context.strokeStyle = ramp.at(scalar);
       context.beginPath();
       context.moveTo(project.toX(x0), project.toY(y0));
       context.lineTo(project.toX(x1), project.toY(y1));
@@ -423,12 +412,9 @@ export class CanvasRenderer {
   ): void {
     const barX = width - COLORBAR_GUTTER + 24;
     const barWidth = 12;
-    for (let offset = 0; offset < plot.height; offset += 1) {
-      // Bottom is the low end, matching the spec's bottom-to-top gradient.
-      const scalar = 1 - offset / Math.max(1, plot.height - 1);
-      context.fillStyle = sampleColormap(colors.sequential, scalar);
-      context.fillRect(barX, plot.y + offset, barWidth, 1);
-    }
+    // Bottom is the low end, matching the spec's bottom-to-top gradient.
+    context.fillStyle = this.colorbarFill(context, plot, colors);
+    context.fillRect(barX, plot.y, barWidth, plot.height);
     context.strokeStyle = colors.border;
     context.lineWidth = 1;
     context.strokeRect(barX + 0.5, plot.y + 0.5, barWidth, plot.height);
@@ -464,31 +450,30 @@ export class CanvasRenderer {
     context.restore();
   }
 
-  private prepareCanvas(): {
-    context: CanvasRenderingContext2D;
-    width: number;
-    height: number;
-  } {
-    const ratio = globalThis.devicePixelRatio || 1;
-    const width = Math.max(1, this.canvas.clientWidth);
-    const height = Math.max(1, this.canvas.clientHeight);
-    const backingWidth = Math.round(width * ratio);
-    const backingHeight = Math.round(height * ratio);
-    if (
-      backingWidth !== this.renderedWidth ||
-      backingHeight !== this.renderedHeight
-    ) {
-      this.canvas.width = backingWidth;
-      this.canvas.height = backingHeight;
-      this.renderedWidth = backingWidth;
-      this.renderedHeight = backingHeight;
+  /**
+   * The sequential ramp as a canvas gradient. Cached because the bar is
+   * otherwise one `fillRect` and one hex interpolation per pixel row, on
+   * every XY frame that carries a `c:` channel.
+   */
+  private colorbarFill(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    colors: Palette,
+  ): CanvasGradient | string {
+    const stops = colors.sequential;
+    if (stops.length === 0) return "#000000";
+    const bottom = plot.y + plot.height;
+    if (this.colorbarGradient !== null && this.colorbarBottom === bottom) {
+      return this.colorbarGradient;
     }
-    const context = this.canvas.getContext("2d");
-    if (context === null) {
-      throw new Error("Canvas 2D context is unavailable");
-    }
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    return { context, width, height };
+    const gradient = context.createLinearGradient(0, bottom, 0, plot.y);
+    const last = Math.max(1, stops.length - 1);
+    stops.forEach((stop, index) => {
+      gradient.addColorStop(index / last, stop);
+    });
+    this.colorbarGradient = gradient;
+    this.colorbarBottom = bottom;
+    return gradient;
   }
 
   private resolvePalette(): Palette {
@@ -512,14 +497,11 @@ export class CanvasRenderer {
   }
 
   private drawAxes(
-    context: CanvasRenderingContext2D,
-    plot: PlotRect,
-    project: Projection,
+    axes: AxisFrame,
     yRange: Range,
-    colors: Palette,
     labels: { xLabel: string; yLabel: string },
-    xTicks: readonly number[],
   ): void {
+    const { context, plot, project, colors, xTicks } = axes;
     context.lineWidth = 1;
     context.font = tickFont(colors);
     context.textBaseline = "middle";
@@ -633,14 +615,11 @@ export class CanvasRenderer {
   }
 
   private drawInlineAxes(
-    context: CanvasRenderingContext2D,
-    plot: PlotRect,
-    project: Projection,
+    axes: AxisFrame,
     yRange: Range,
-    colors: Palette,
     labels: { xLabel: string; yLabel: string },
-    xTicks: readonly number[],
   ): void {
+    const { context, plot, project, colors, xTicks } = axes;
     context.lineWidth = 1;
     context.font = tickFont(colors);
     context.textBaseline = "middle";

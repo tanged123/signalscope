@@ -127,8 +127,12 @@ export function mergeSampleResponses(
       time.push(sampleTime);
       values.push(coarse.values[index] ?? Number.NaN);
     });
-    time.push(...fine.time);
-    values.push(...fine.values);
+    // Appended rather than argument-spread: `fine` can hold SAMPLE_CAP
+    // elements, which spreading would push onto the call stack.
+    for (let index = 0; index < fine.time.length; index += 1) {
+      time.push(fine.time[index] ?? Number.NaN);
+      values.push(fine.values[index] ?? Number.NaN);
+    }
     coarse.time.forEach((sampleTime, index) => {
       if (sampleTime <= high) return;
       time.push(sampleTime);

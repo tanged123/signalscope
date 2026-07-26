@@ -20,7 +20,7 @@ import type { PanelState } from "../generated/session";
 import { resolveSeriesStyle } from "../render/canvas-renderer";
 import type { CursorStyle } from "../render/overlay-renderer";
 import { CommandPalette, type PaletteEntry } from "./command-palette";
-import { basename, bindPointerDrag, required } from "./dom";
+import { basename, bindPointerDrag, required, signalLabel } from "./dom";
 import type { PanelCursor } from "./panel";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
@@ -725,22 +725,34 @@ export class AppShell {
     }
   }
 
-  private fitWindowToPlotted(): void {
+  /**
+   * The union time extent of `paths`, or null when none are known. A
+   * collapsed extent widens to one second so the window always has a span.
+   */
+  private timeExtent(
+    paths: Iterable<string>,
+  ): { t0: number; t1: number } | null {
     let t0 = Number.POSITIVE_INFINITY;
     let t1 = Number.NEGATIVE_INFINITY;
-    for (const panel of this.workspace.panels()) {
-      for (const series of panel.series) {
-        const summary = this.signalsByPath.get(series.path);
-        if (summary !== undefined) {
-          t0 = Math.min(t0, summary.t_min);
-          t1 = Math.max(t1, summary.t_max);
-        }
-      }
+    for (const path of paths) {
+      const summary = this.signalsByPath.get(path);
+      if (summary === undefined) continue;
+      t0 = Math.min(t0, summary.t_min);
+      t1 = Math.max(t1, summary.t_max);
     }
-    if (Number.isFinite(t0) && Number.isFinite(t1)) {
-      this.time.setWindow(t0, t1 > t0 ? t1 : t0 + 1);
-      this.renderWindowReadout();
-    }
+    if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+    return { t0, t1: t1 > t0 ? t1 : t0 + 1 };
+  }
+
+  private fitWindowToPlotted(): void {
+    const extent = this.timeExtent(
+      [...this.workspace.panels()].flatMap((panel) =>
+        panel.series.map((series) => series.path),
+      ),
+    );
+    if (extent === null) return;
+    this.time.setWindow(extent.t0, extent.t1);
+    this.renderWindowReadout();
   }
 
   /** Renders the toolbar window readout from the linked-time model. */
@@ -939,19 +951,9 @@ export class AppShell {
    */
   private sampleWindow(panel: PanelState): { t0: number; t1: number } {
     if (panel.mode !== "xy") return this.effectiveWindow(panel);
-    let t0 = Number.POSITIVE_INFINITY;
-    let t1 = Number.NEGATIVE_INFINITY;
-    const paths = [...panel.series.map((series) => series.path)];
+    const paths = panel.series.map((series) => series.path);
     if (panel.x_signal !== null) paths.push(panel.x_signal);
-    for (const path of paths) {
-      const summary = this.signalsByPath.get(path);
-      if (summary === undefined) continue;
-      t0 = Math.min(t0, summary.t_min);
-      t1 = Math.max(t1, summary.t_max);
-    }
-    return Number.isFinite(t0) && Number.isFinite(t1)
-      ? { t0, t1: t1 > t0 ? t1 : t0 + 1 }
-      : this.effectiveWindow(panel);
+    return this.timeExtent(paths) ?? this.effectiveWindow(panel);
   }
 
   private scheduleRefresh(delay = 150): void {
@@ -976,21 +978,13 @@ export class AppShell {
     }
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
-    let t0 = Number.POSITIVE_INFINITY;
-    let t1 = Number.NEGATIVE_INFINITY;
-    for (const series of panel.series) {
-      const summary = this.signalsByPath.get(series.path);
-      if (summary !== undefined) {
-        t0 = Math.min(t0, summary.t_min);
-        t1 = Math.max(t1, summary.t_max);
-      }
-    }
-    if (Number.isFinite(t0) && Number.isFinite(t1)) {
-      this.applyTimeWindow(panelId, t0, t1 > t0 ? t1 : t0 + 1);
-    } else {
+    const extent = this.timeExtent(panel.series.map((series) => series.path));
+    if (extent === null) {
       this.renderTiles();
       this.scheduleRefresh();
+      return;
     }
+    this.applyTimeWindow(panelId, extent.t0, extent.t1);
   }
 
   /** Removes the assigned X signal while leaving an empty XY axis slot. */
@@ -1094,7 +1088,7 @@ export class AppShell {
         ? cursor.rows.map((row) =>
             tooltipRow(
               `var(--series-${String(row.colorIndex + 1)})`,
-              row.path.split("/").slice(-2).join("/"),
+              signalLabel(row.path),
               cursor.domain === "frequency"
                 ? `${formatValue(row.value)} dB`
                 : `${formatValue(row.value)} samples`,
@@ -1118,7 +1112,7 @@ export class AppShell {
                 );
                 return tooltipRow(
                   `var(--series-${String(style.colorIndex + 1)})`,
-                  tile.signal_path.split("/").slice(-2).join("/"),
+                  signalLabel(tile.signal_path),
                   formatValue(valueAtTime(tile.bins, cursor.value)),
                 );
               })

@@ -1,4 +1,5 @@
 import type { SampleSeries } from "../generated/protocol";
+import { paddedExtent } from "./plot-math";
 
 /** One y signal paired onto an x signal's timebase. */
 export interface XyTrace {
@@ -6,9 +7,6 @@ export interface XyTrace {
   x: number[];
   y: number[];
 }
-
-/** Fraction of the data span added to each end of an auto extent. */
-const EXTENT_PADDING = 0.06;
 
 function sameTimebase(
   left: readonly number[],
@@ -93,8 +91,5 @@ export function traceExtent(
       if (value > max) max = value;
     }
   }
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-  if (min === max) return [min - 1, max + 1];
-  const padding = (max - min) * EXTENT_PADDING;
-  return [min - padding, max + padding];
+  return paddedExtent(min, max);
 }

@@ -133,30 +133,12 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate(3, value)
         }
         3 => {
-            if let Some(tabs) = value
-                .get_mut("tabs")
-                .and_then(serde_json::Value::as_array_mut)
-            {
-                for tab in tabs {
-                    let panels = tab
-                        .get_mut("panels")
-                        .and_then(serde_json::Value::as_array_mut);
-                    for panel in panels.into_iter().flatten() {
-                        if let Some(object) = panel.as_object_mut() {
-                            object.entry("x_label").or_insert(serde_json::Value::Null);
-                            object.entry("y_label").or_insert(serde_json::Value::Null);
-                            object
-                                .entry("time_window")
-                                .or_insert(serde_json::Value::Null);
-                        }
-                    }
-                }
-            }
+            default_panel_fields(&mut value, &["x_label", "y_label", "time_window"]);
             value["schema_version"] = serde_json::json!(4);
             migrate(4, value)
         }
         4 => {
-            add_panel_x_ranges(&mut value);
+            default_panel_fields(&mut value, &["x_range"]);
             value["schema_version"] = serde_json::json!(5);
             migrate(5, value)
         }
@@ -175,7 +157,14 @@ pub enum SessionError {
     Json(#[from] serde_json::Error),
 }
 
-fn add_panel_x_ranges(value: &mut serde_json::Value) {
+/// Runs `visit` over every panel object across every tab.
+///
+/// Most migrations only widen panels, so the traversal lives here once rather
+/// than being re-inlined by each new arm.
+fn for_each_panel(
+    value: &mut serde_json::Value,
+    mut visit: impl FnMut(&mut serde_json::Map<String, serde_json::Value>),
+) {
     let Some(tabs) = value
         .get_mut("tabs")
         .and_then(serde_json::Value::as_array_mut)
@@ -188,10 +177,19 @@ fn add_panel_x_ranges(value: &mut serde_json::Value) {
             .and_then(serde_json::Value::as_array_mut);
         for panel in panels.into_iter().flatten() {
             if let Some(object) = panel.as_object_mut() {
-                object.entry("x_range").or_insert(serde_json::Value::Null);
+                visit(object);
             }
         }
     }
+}
+
+/// Adds each missing panel field as null, leaving authored values alone.
+fn default_panel_fields(value: &mut serde_json::Value, fields: &[&str]) {
+    for_each_panel(value, |panel| {
+        for field in fields {
+            panel.entry(*field).or_insert(serde_json::Value::Null);
+        }
+    });
 }
 
 #[cfg(test)]

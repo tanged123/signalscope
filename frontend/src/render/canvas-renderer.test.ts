@@ -100,6 +100,19 @@ function recordingContext(charWidth = 6): {
     measureText(text: string): TextMetrics {
       return { width: text.length * charWidth } as TextMetrics;
     },
+    createLinearGradient(
+      x0: number,
+      y0: number,
+      x1: number,
+      y1: number,
+    ): CanvasGradient {
+      push("createLinearGradient", x0, y0, x1, y1);
+      return {
+        addColorStop(offset: number, color: string): void {
+          push("addColorStop", offset, color);
+        },
+      } as unknown as CanvasGradient;
+    },
   };
   return { calls, context: stub as unknown as CanvasRenderingContext2D };
 }
@@ -415,6 +428,7 @@ describe("render", () => {
       plot: { x: 0, y: 0, width: 640, height: 360 },
       xRange: { min: 0, max: 10 },
       yRange: { min: 1, max: 5 },
+      xScale: "linear",
     });
   });
 
