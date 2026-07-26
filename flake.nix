@@ -35,6 +35,10 @@
             enable = true;
             edition = "2024";
           };
+          programs.shfmt = {
+            enable = true;
+            indent_size = 2;
+          };
           programs.taplo.enable = true;
         };
 
@@ -61,8 +65,11 @@
           packages =
             with pkgs;
             [
+              actionlint
               cargo
+              cargo-deny
               cargo-llvm-cov
+              cargo-machete
               cargo-tauri
               clippy
               llvmPackages.llvm
@@ -71,7 +78,10 @@
               pkg-config
               rustc
               rustfmt
+              shellcheck
               treefmtEval.config.build.wrapper
+              typos
+              zizmor
             ]
             ++ linuxTauriPackages;
 

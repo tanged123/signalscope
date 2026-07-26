@@ -27,24 +27,24 @@ fi
 ensure_dev_shell "$@"
 
 case "$mode" in
-  native)
-    shift || true
-    cd shell/src-tauri
-    if [ "$(uname -s)" = "Linux" ]; then
-      exec cargo tauri build --bundles deb,rpm "$@"
-    fi
-    exec cargo tauri build "$@"
-    ;;
-  web)
-    shift || true
-    exec pnpm build "$@"
-    ;;
-  -h | --help | help)
-    show_help
-    ;;
-  *)
-    echo "Unknown build mode: $mode" >&2
-    show_help >&2
-    exit 2
-    ;;
+native)
+  shift || true
+  cd shell/src-tauri
+  if [ "$(uname -s)" = "Linux" ]; then
+    exec cargo tauri build --bundles deb,rpm "$@"
+  fi
+  exec cargo tauri build "$@"
+  ;;
+web)
+  shift || true
+  exec pnpm build "$@"
+  ;;
+-h | --help | help)
+  show_help
+  ;;
+*)
+  echo "Unknown build mode: $mode" >&2
+  show_help >&2
+  exit 2
+  ;;
 esac

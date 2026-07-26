@@ -21,24 +21,42 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: ./scripts/version.sh check
       - if: github.event_name == 'pull_request'
-        run: ./scripts/version.sh check-pr "${{ github.event.pull_request.base.sha }}"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: ./scripts/version.sh check-pr "$BASE_SHA"
 
   flake:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           install-frontend: "false"
       - run: ./scripts/ci.sh flake
 
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: ./scripts/ci.sh quality
+
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -49,6 +67,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -62,6 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -69,19 +91,42 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: coverage
       - run: ./scripts/coverage.sh
-      - uses: codecov/codecov-action@v5
+      - if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
           files: ./build/coverage/rust.lcov,./build/coverage/frontend/lcov.info
           version: v11.2.7
           fail_ci_if_error: true
+
+  ci-ok:
+    if: always()
+    needs: [version, flake, quality, rust, frontend, e2e, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - env:
+          VERSION_RESULT: ${{ needs.version.result }}
+          FLAKE_RESULT: ${{ needs.flake.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: ./scripts/check-ci-results.sh
 
   build:
     if: github.event_name != 'pull_request'
@@ -99,6 +144,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -115,6 +162,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/cargo-cache
         with:
           target-key: appimage
@@ -128,14 +177,15 @@ jobs:
 
   tag:
     if: github.ref == 'refs/heads/main'
-    needs: [version, flake, rust, frontend, e2e, build, appimage]
+    needs: [version, flake, quality, rust, frontend, e2e, build, appimage]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
       tag: ${{ steps.release-tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      # The release job needs the checkout credential to push its tag.
+      - uses: actions/checkout@v4 # zizmor: ignore[artipacked]
         with:
           fetch-depth: 0
       - id: release-tag
@@ -154,9 +204,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: release-assets
           merge-multiple: true
-      - run: ./scripts/release.sh publish "${{ needs.tag.outputs.tag }}" release-assets
+      - env:
+          RELEASE_TAG: ${{ needs.tag.outputs.tag }}
+        run: ./scripts/release.sh publish "$RELEASE_TAG" release-assets

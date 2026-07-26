@@ -1909,7 +1909,7 @@ function markerAt(
   return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
 }
 
-export function axisEditZone(
+function axisEditZone(
   layout: PlotLayout,
   axisStyle: AxisStyle,
   px: number,

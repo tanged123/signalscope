@@ -17,12 +17,12 @@ import { visibleStats } from "./stats";
 import { lerpSample, type XyTrace } from "./xy";
 import { nearestXyPoint } from "./xy-hit";
 
-export interface PlotPoint {
+interface PlotPoint {
   x: number;
   y: number;
 }
 
-export interface PlotFrame {
+interface PlotFrame {
   kind: "tiles" | "paths" | "empty";
 }
 
@@ -35,7 +35,7 @@ export interface PlotInteractionPolicy {
   windowNote: string | null;
 }
 
-export interface PlotReadingRow {
+interface PlotReadingRow {
   path: string;
   label: string;
   value: number;
@@ -69,19 +69,19 @@ export interface ResolvedAnnotation {
   colorValue: number | null;
 }
 
-export interface PlotMarker {
+interface PlotMarker {
   x: number;
   y: number;
   colorIndex: number;
 }
 
-export interface PlotStat {
+interface PlotStat {
   label: string;
   value: number | null;
   unit: string | null;
 }
 
-export interface PlotStatGroup {
+interface PlotStatGroup {
   key: string;
   label: string;
   colorIndex: number | null;
@@ -114,7 +114,7 @@ export interface PreparedPlot {
   delta(resolved: readonly ResolvedAnnotation[]): PlotDelta | null;
 }
 
-export interface PreparedSeries {
+interface PreparedSeries {
   path: string;
   colorIndex: number;
 }

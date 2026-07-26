@@ -6,4 +6,3 @@ if [ "$#" -gt 0 ]; then
 fi
 
 exec nix develop
-

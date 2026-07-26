@@ -51,10 +51,14 @@ Canonical commands:
 ./scripts/release.sh version            validate release metadata
 ./scripts/release.sh tag                create and push an annotated release tag
 ./scripts/release.sh publish <tag> <dir> publish staged release assets
-./scripts/ci.sh format|rust|frontend|e2e|build|appimage
+./scripts/ci.sh format|quality|rust|frontend|e2e|build|appimage
 ./scripts/ci.sh all                   complete local quality gate
 ./scripts/ci.sh flake                 flake check (includes formatting)
 ```
+
+`quality_checks()` in `scripts/lib.sh` is the single source of truth for the
+deterministic quality gate. Extend that function and its matching `quality` job
+rather than adding parallel ad-hoc workflow commands.
 
 Run `./scripts/setup.sh` before frontend work when dependencies are absent.
 The Nix flake supplies the normal pinned toolchain. AppImage packaging is the
