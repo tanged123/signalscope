@@ -35,6 +35,10 @@
             enable = true;
             edition = "2024";
           };
+          programs.shfmt = {
+            enable = true;
+            indent_size = 2;
+          };
           programs.taplo.enable = true;
         };
 

@@ -27,16 +27,16 @@ EOF
 }
 
 case "$mode" in
-  -h | --help | help)
-    show_help
-    exit 0
-    ;;
-  flake)
-    exec nix flake check
-    ;;
-  appimage)
-    exec "$signalscope_scripts_dir/build-appimage.sh"
-    ;;
+-h | --help | help)
+  show_help
+  exit 0
+  ;;
+flake)
+  exec nix flake check
+  ;;
+appimage)
+  exec "$signalscope_scripts_dir/build-appimage.sh"
+  ;;
 esac
 
 ensure_dev_shell "$@"
@@ -50,32 +50,32 @@ check_e2e() {
 }
 
 case "$mode" in
-  all)
-    check_format
-    rust_checks
-    frontend_checks
-    artifact_checks
-    check_e2e
-    ;;
-  format)
-    check_format
-    ;;
-  rust)
-    rust_checks
-    ;;
-  frontend)
-    frontend_checks
-    artifact_checks
-    ;;
-  e2e)
-    check_e2e
-    ;;
-  build)
-    exec "$signalscope_scripts_dir/build.sh" native
-    ;;
-  *)
-    echo "Unknown CI mode: $mode" >&2
-    show_help >&2
-    exit 2
-    ;;
+all)
+  check_format
+  rust_checks
+  frontend_checks
+  artifact_checks
+  check_e2e
+  ;;
+format)
+  check_format
+  ;;
+rust)
+  rust_checks
+  ;;
+frontend)
+  frontend_checks
+  artifact_checks
+  ;;
+e2e)
+  check_e2e
+  ;;
+build)
+  exec "$signalscope_scripts_dir/build.sh" native
+  ;;
+*)
+  echo "Unknown CI mode: $mode" >&2
+  show_help >&2
+  exit 2
+  ;;
 esac
