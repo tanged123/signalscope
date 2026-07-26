@@ -1,4 +1,5 @@
 /.direnv/
+/.agtx/
 /build/
 /target/
 /result
