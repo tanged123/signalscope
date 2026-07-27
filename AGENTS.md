@@ -25,6 +25,27 @@ tests, and the existing scripts. Do not overwrite or reset unrelated changes.
 If an instruction or design requirement is ambiguous, state the ambiguity and
 make a small, explicit proposal before expanding scope.
 
+## Brevity
+
+Prefer the shortest version that is still correct and clear. Verbosity is a
+defect, not a style preference.
+
+- Code: no speculative abstraction, defensive scaffolding, or wrapper layers
+  nobody asked for. Delete dead code; do not comment it out or deprecate it.
+- Comments: explain why, never what the line already says. Most code needs
+  none.
+- Program output: quiet by default. No progress chatter, banners, decorative
+  separators, or emoji in CLI, script, and log output.
+- Chat and handoff notes: lead with the answer. No preamble, no restating the
+  diff in prose, no recap of what the reader can already see. Report what
+  changed, what you ran, and what is still open.
+- Docs and ADRs: record the decision and its consequences, not the
+  deliberation that produced it.
+- Commits: a conventional subject plus the why. Not a line-by-line changelog.
+
+If a sentence, comment, helper, or paragraph can go without losing
+information, cut it.
+
 ## Command and workflow policy
 
 The `scripts/` directory is the repository's public developer and CI API. Use
@@ -87,10 +108,9 @@ come from scripts.
 
 Before handoff, run the narrowest relevant script and then the broader gate
 proportional to risk. At minimum, run `./scripts/format.sh` plus the affected
-test suite;
-for cross-layer changes run `./scripts/ci.sh all` or explain why a narrower
-check is sufficient. Report commands and results. Do not claim a GUI or
-platform build was tested if it was not.
+test suite; for cross-layer changes run `./scripts/ci.sh all` or explain why a
+narrower check is sufficient. Report commands and results. Do not claim a GUI
+or platform build was tested if it was not.
 
 Install the repository hook with `./scripts/install-hooks.sh`. Do not use a
 blanket `git add -A` or silently stage unrelated work. Review staged and
