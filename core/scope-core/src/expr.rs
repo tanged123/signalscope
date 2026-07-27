@@ -1,6 +1,12 @@
 //! MATLAB-dialect expression language for derived signals (ADR 0008).
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use thiserror::Error;
+
+use crate::compute;
+use crate::store::SignalStore;
 
 /// Every way an expression can fail to parse or evaluate. Spans are byte
 /// offsets into the source so the formula bar can underline the culprit.
@@ -496,9 +502,362 @@ impl Parser<'_> {
     }
 }
 
+/// Every signal path the expression names, in source order, without repeats.
+/// The first entry supplies the base timebase.
+#[must_use]
+pub fn references(expr: &Expr) -> Vec<String> {
+    let mut found = Vec::new();
+    collect_references(expr, &mut found);
+    found
+}
+
+fn collect_references(expr: &Expr, found: &mut Vec<String>) {
+    match expr {
+        Expr::Signal(path) => {
+            if !found.iter().any(|existing| existing == path) {
+                found.push(path.clone());
+            }
+        }
+        Expr::Unary { rhs, .. } => collect_references(rhs, found),
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_references(lhs, found);
+            collect_references(rhs, found);
+        }
+        Expr::Call { args, .. } => {
+            for arg in args {
+                collect_references(arg, found);
+            }
+        }
+        Expr::Number(_) | Expr::Time => {}
+    }
+}
+
+/// A materialized derived signal on its base timebase.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Evaluated {
+    pub time: Arc<[f64]>,
+    pub values: Vec<f64>,
+}
+
+struct Context {
+    time: Arc<[f64]>,
+    /// Every reference resampled onto `time`.
+    resolved: BTreeMap<String, Vec<f64>>,
+    /// Whole-signal results, keyed by the call node's id.
+    whole: BTreeMap<usize, Vec<f64>>,
+}
+
+/// Evaluates `expr` against `store`.
+///
+/// # Errors
+///
+/// Returns [`ExprError::NoReference`] when the expression names no signal,
+/// [`ExprError::UnknownSignal`] when a named signal is absent, and
+/// [`ExprError::BadWindow`] when `movmean` lacks a literal window.
+pub fn evaluate(expr: &Expr, store: &SignalStore) -> Result<Evaluated, ExprError> {
+    let paths = references(expr);
+    let base_path = paths.first().ok_or(ExprError::NoReference)?;
+    let base = store
+        .signal_by_path(base_path)
+        .ok_or_else(|| ExprError::UnknownSignal(base_path.clone()))?;
+    let time = base.time_shared();
+
+    let mut resolved = BTreeMap::new();
+    for path in &paths {
+        let signal = store
+            .signal_by_path(path)
+            .ok_or_else(|| ExprError::UnknownSignal(path.clone()))?;
+        let values = if Arc::ptr_eq(&signal.time_shared(), &time) {
+            signal.values().to_vec()
+        } else {
+            time.iter()
+                .map(|query| compute::lerp_at(signal.time(), signal.values(), *query))
+                .collect()
+        };
+        resolved.insert(path.clone(), values);
+    }
+
+    let mut context = Context {
+        time,
+        resolved,
+        whole: BTreeMap::new(),
+    };
+    materialize_whole(expr, &mut context)?;
+    let values = materialize(expr, &context);
+    Ok(Evaluated {
+        time: context.time,
+        values,
+    })
+}
+
+/// Fills `context.whole` depth-first so an inner whole-signal op is ready
+/// before the op that contains it materializes its argument.
+fn materialize_whole(expr: &Expr, context: &mut Context) -> Result<(), ExprError> {
+    match expr {
+        Expr::Unary { rhs, .. } => materialize_whole(rhs, context),
+        Expr::Binary { lhs, rhs, .. } => {
+            materialize_whole(lhs, context)?;
+            materialize_whole(rhs, context)
+        }
+        Expr::Call { id, name, args, .. } => {
+            for arg in args {
+                materialize_whole(arg, context)?;
+            }
+            let output = match name.as_str() {
+                "gradient" => {
+                    let input = materialize(&args[0], context);
+                    compute::gradient(&context.time, &input)
+                }
+                "cumtrapz" => {
+                    let input = materialize(&args[0], context);
+                    compute::cumtrapz(&context.time, &input)
+                }
+                "movmean" => {
+                    let Expr::Number(window) = &args[1] else {
+                        return Err(ExprError::BadWindow(name.clone()));
+                    };
+                    if !window.is_finite() || *window < 1.0 || window.fract() != 0.0 {
+                        return Err(ExprError::BadWindow(name.clone()));
+                    }
+                    let input = materialize(&args[0], context);
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    compute::movmean(&input, *window as usize)
+                }
+                _ => return Ok(()),
+            };
+            context.whole.insert(*id, output);
+            Ok(())
+        }
+        Expr::Number(_) | Expr::Time | Expr::Signal(_) => Ok(()),
+    }
+}
+
+fn materialize(expr: &Expr, context: &Context) -> Vec<f64> {
+    (0..context.time.len())
+        .map(|index| scalar(expr, index, context))
+        .collect()
+}
+
+fn scalar(expr: &Expr, index: usize, context: &Context) -> f64 {
+    match expr {
+        Expr::Number(value) => *value,
+        Expr::Time => context.time[index],
+        Expr::Signal(path) => context
+            .resolved
+            .get(path)
+            .and_then(|values| values.get(index).copied())
+            .unwrap_or(f64::NAN),
+        Expr::Unary { op, rhs } => {
+            let value = scalar(rhs, index, context);
+            match op {
+                UnaryOp::Neg => -value,
+                UnaryOp::Pos => value,
+                UnaryOp::Not => f64::from(u8::from(value == 0.0)),
+            }
+        }
+        Expr::Binary { op, lhs, rhs } => {
+            let left = scalar(lhs, index, context);
+            let right = scalar(rhs, index, context);
+            binary(*op, left, right)
+        }
+        Expr::Call { id, name, args, .. } => {
+            if let Some(values) = context.whole.get(id) {
+                return values.get(index).copied().unwrap_or(f64::NAN);
+            }
+            let first = scalar(&args[0], index, context);
+            let second = args
+                .get(1)
+                .map_or(f64::NAN, |arg| scalar(arg, index, context));
+            call(name, first, second)
+        }
+    }
+}
+
+fn truth(value: bool) -> f64 {
+    if value { 1.0 } else { 0.0 }
+}
+
+#[allow(clippy::float_cmp)]
+fn binary(op: BinaryOp, left: f64, right: f64) -> f64 {
+    match op {
+        BinaryOp::Add => left + right,
+        BinaryOp::Sub => left - right,
+        BinaryOp::Mul => left * right,
+        BinaryOp::Div => left / right,
+        BinaryOp::Pow => left.powf(right),
+        BinaryOp::Lt => truth(left < right),
+        BinaryOp::Le => truth(left <= right),
+        BinaryOp::Gt => truth(left > right),
+        BinaryOp::Ge => truth(left >= right),
+        BinaryOp::Eq => truth(left == right),
+        BinaryOp::Ne => truth(left != right),
+        BinaryOp::And | BinaryOp::AndAnd => truth(left != 0.0 && right != 0.0),
+        BinaryOp::Or | BinaryOp::OrOr => truth(left != 0.0 || right != 0.0),
+    }
+}
+
+#[allow(clippy::float_cmp)]
+fn call(name: &str, first: f64, second: f64) -> f64 {
+    match name {
+        "abs" => first.abs(),
+        "sqrt" => first.sqrt(),
+        "exp" => first.exp(),
+        "log" => first.ln(),
+        "log2" => first.log2(),
+        "log10" => first.log10(),
+        "sin" => first.sin(),
+        "cos" => first.cos(),
+        "tan" => first.tan(),
+        "asin" => first.asin(),
+        "acos" => first.acos(),
+        "atan" => first.atan(),
+        "atan2" => first.atan2(second),
+        "sinh" => first.sinh(),
+        "cosh" => first.cosh(),
+        "tanh" => first.tanh(),
+        "hypot" => first.hypot(second),
+        "floor" => first.floor(),
+        "ceil" => first.ceil(),
+        "round" => first.round(),
+        "fix" => first.trunc(),
+        "sign" => {
+            if first == 0.0 {
+                0.0
+            } else {
+                first.signum()
+            }
+        }
+        "mod" => first.rem_euclid(second),
+        "rem" => first % second,
+        "min" => first.min(second),
+        "max" => first.max(second),
+        "power" => first.powf(second),
+        _ => f64::NAN,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::SignalStore;
+    use std::sync::Arc;
+
+    fn store_with(entries: &[(&str, &[f64], &[f64])]) -> SignalStore {
+        let mut store = SignalStore::new();
+        let source = store.register_source("test");
+        for (path, time, values) in entries {
+            let time: Arc<[f64]> = Arc::from(time.to_vec());
+            store
+                .insert_signal(source, *path, None, time, values.to_vec())
+                .expect("inserts");
+        }
+        store
+    }
+
+    fn eval(src: &str, store: &SignalStore) -> Vec<f64> {
+        evaluate(&parse(src).expect("parses"), store)
+            .expect("evaluates")
+            .values
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn evaluates_arithmetic_over_one_signal() {
+        let store = store_with(&[("a/x", &[0.0, 1.0, 2.0], &[3.0, 4.0, 5.0])]);
+        assert_eq!(eval("'a/x' * 2 + 1", &store), vec![7.0, 9.0, 11.0]);
+        assert_eq!(eval("-'a/x'^2", &store), vec![-9.0, -16.0, -25.0]);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn binds_t_to_the_sample_time() {
+        let store = store_with(&[("a/x", &[0.0, 5.0, 10.0], &[1.0, 1.0, 1.0])]);
+        assert_eq!(eval("'a/x' .* (t >= 5)", &store), vec![0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn comparisons_yield_one_or_zero_and_nan_compares_false() {
+        let store = store_with(&[("a/x", &[0.0, 1.0], &[f64::NAN, 3.0])]);
+        assert_eq!(eval("'a/x' > 1", &store), vec![0.0, 1.0]);
+        assert_eq!(eval("'a/x' == 'a/x'", &store), vec![0.0, 1.0]);
+        assert_eq!(eval("'a/x' ~= 'a/x'", &store), vec![1.0, 0.0]);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn resamples_later_references_onto_the_first_timebase() {
+        let store = store_with(&[
+            ("a/x", &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]),
+            ("a/y", &[0.0, 2.0], &[0.0, 20.0]),
+        ]);
+        assert_eq!(eval("'a/x' + 'a/y'", &store), vec![0.0, 10.0, 20.0]);
+    }
+
+    #[test]
+    fn out_of_range_resampling_is_nan() {
+        let store = store_with(&[
+            ("a/x", &[0.0, 1.0, 2.0], &[0.0, 0.0, 0.0]),
+            ("a/y", &[0.0, 1.0], &[5.0, 5.0]),
+        ]);
+        let values = eval("'a/x' + 'a/y'", &store);
+        assert!(values[2].is_nan(), "past a/y's last sample");
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn whole_signal_ops_accept_nested_expressions() {
+        let store = store_with(&[
+            ("a/x", &[0.0, 1.0, 2.0], &[3.0, 3.0, 3.0]),
+            ("a/y", &[0.0, 1.0, 2.0], &[4.0, 4.0, 4.0]),
+        ]);
+        assert_eq!(eval("hypot('a/x', 'a/y')", &store), vec![5.0, 5.0, 5.0]);
+        assert_eq!(
+            eval("gradient(hypot('a/x', 'a/y'))", &store),
+            vec![0.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn movmean_takes_a_literal_window() {
+        let store = store_with(&[("a/x", &[0.0, 1.0, 2.0], &[0.0, 3.0, 0.0])]);
+        assert_eq!(eval("movmean('a/x', 3)", &store), vec![1.5, 1.0, 1.5]);
+        let error = evaluate(&parse("movmean('a/x', 'a/x')").unwrap(), &store)
+            .expect_err("needs a literal");
+        assert_eq!(error, ExprError::BadWindow("movmean".into()));
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn sign_returns_zero_for_both_signed_zeros() {
+        let store = store_with(&[("a/x", &[0.0, 1.0], &[-0.0, 0.0])]);
+        assert_eq!(eval("sign('a/x')", &store), vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn rejects_an_expression_with_no_signal_reference() {
+        let store = store_with(&[("a/x", &[0.0], &[0.0])]);
+        assert_eq!(
+            evaluate(&parse("1 + 2").unwrap(), &store).unwrap_err(),
+            ExprError::NoReference
+        );
+    }
+
+    #[test]
+    fn rejects_an_unknown_signal() {
+        let store = store_with(&[("a/x", &[0.0], &[0.0])]);
+        assert_eq!(
+            evaluate(&parse("'a/missing' + 1").unwrap(), &store).unwrap_err(),
+            ExprError::UnknownSignal("a/missing".into())
+        );
+    }
+
+    #[test]
+    fn references_are_reported_in_source_order_without_duplicates() {
+        let expr = parse("'b/two' + 'a/one' + 'b/two'").unwrap();
+        assert_eq!(references(&expr), vec!["b/two", "a/one"]);
+    }
 
     /// Renders the tree in fully parenthesized prefix form so precedence
     /// assertions read as the shape they mean.
