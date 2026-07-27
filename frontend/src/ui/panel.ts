@@ -71,7 +71,6 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
 ];
 
 const XY_HOVER_RADIUS = 40;
-const TOUCH_CURSOR_RADIUS = 48;
 
 export interface PanelCallbacks {
   onFocus(id: string): void;
@@ -186,13 +185,6 @@ export class PanelView {
       },
       plotClick: (x, y) => {
         this.plotClick(x, y);
-      },
-      pinAt: (x, y, radius) => {
-        this.pinAt(x, y, radius);
-      },
-      removeAt: (x, y, radius) => this.removeAt(x, y, radius),
-      publishTouchCursor: (event) => {
-        this.publishTouchCursor(event);
       },
       setGesture: (hint) => {
         this.callbacks.onGesture(this.id, hint);
@@ -344,9 +336,7 @@ export class PanelView {
       else this.callbacks.onDropSignal(this.id, path);
     });
     this.overlay.addEventListener("pointermove", (event) => {
-      if (event.pointerType === "touch" || this.interactions.isDragging()) {
-        return;
-      }
+      if (this.interactions.isDragging()) return;
       const layout = this.renderer.lastLayout();
       const inside =
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
@@ -933,29 +923,6 @@ export class PanelView {
     if (hit !== null && hit !== undefined) {
       this.callbacks.onPinAnnotation(this.id, hit);
     }
-  }
-
-  private publishTouchCursor(event: PointerEvent): void {
-    const layout = this.renderer.lastLayout();
-    if (layout === null) return;
-    if (!insidePlot(layout, event.offsetX, event.offsetY)) {
-      this.callbacks.onCursor(this.id, null, null);
-      return;
-    }
-    const cursor = this.cursorAt(
-      layout,
-      event.offsetX,
-      event.offsetY,
-      TOUCH_CURSOR_RADIUS,
-    );
-    const rect = this.element.getBoundingClientRect();
-    this.callbacks.onCursor(
-      this.id,
-      cursor,
-      // Dock at the panel's top edge so the finger does not cover the
-      // readout (prototype behaviour).
-      cursor === null ? null : { x: rect.left + rect.width / 2, y: rect.top },
-    );
   }
 
   private cursorAt(
