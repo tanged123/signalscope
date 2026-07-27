@@ -127,7 +127,7 @@ fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
                     index += 1;
                 }
                 if matches!(bytes.get(index), Some(b'e' | b'E'))
-                    && matches!(bytes.get(index + 1), Some(b'0'..=b'9') | Some(b'+' | b'-'))
+                    && matches!(bytes.get(index + 1), Some(b'0'..=b'9' | b'+' | b'-'))
                 {
                     index += 2;
                     while index < bytes.len() && bytes[index].is_ascii_digit() {
@@ -157,35 +157,11 @@ fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
                 });
             }
             _ => {
-                let (token, width) = match (byte, bytes.get(index + 1)) {
-                    (b'.', Some(b'*')) => (Token::Star, 2),
-                    (b'.', Some(b'/')) => (Token::Slash, 2),
-                    (b'.', Some(b'^')) => (Token::Caret, 2),
-                    (b'~', Some(b'=')) => (Token::Ne, 2),
-                    (b'<', Some(b'=')) => (Token::Le, 2),
-                    (b'>', Some(b'=')) => (Token::Ge, 2),
-                    (b'=', Some(b'=')) => (Token::EqEq, 2),
-                    (b'&', Some(b'&')) => (Token::AndAnd, 2),
-                    (b'|', Some(b'|')) => (Token::OrOr, 2),
-                    (b'(', _) => (Token::LParen, 1),
-                    (b')', _) => (Token::RParen, 1),
-                    (b',', _) => (Token::Comma, 1),
-                    (b'+', _) => (Token::Plus, 1),
-                    (b'-', _) => (Token::Minus, 1),
-                    (b'*', _) => (Token::Star, 1),
-                    (b'/', _) => (Token::Slash, 1),
-                    (b'^', _) => (Token::Caret, 1),
-                    (b'<', _) => (Token::Lt, 1),
-                    (b'>', _) => (Token::Gt, 1),
-                    (b'&', _) => (Token::And, 1),
-                    (b'|', _) => (Token::Or, 1),
-                    (b'~', _) => (Token::Not, 1),
-                    _ => {
-                        return Err(ExprError::UnexpectedCharacter {
-                            character: src[index..].chars().next().unwrap_or('?'),
-                            at: index,
-                        });
-                    }
+                let Some((token, width)) = operator(byte, bytes.get(index + 1)) else {
+                    return Err(ExprError::UnexpectedCharacter {
+                        character: src[index..].chars().next().unwrap_or('?'),
+                        at: index,
+                    });
                 };
                 index += width;
                 tokens.push(Spanned {
@@ -197,6 +173,34 @@ fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
         }
     }
     Ok(tokens)
+}
+
+fn operator(byte: u8, next: Option<&u8>) -> Option<(Token, usize)> {
+    Some(match (byte, next) {
+        (b'.', Some(b'*')) => (Token::Star, 2),
+        (b'.', Some(b'/')) => (Token::Slash, 2),
+        (b'.', Some(b'^')) => (Token::Caret, 2),
+        (b'~', Some(b'=')) => (Token::Ne, 2),
+        (b'<', Some(b'=')) => (Token::Le, 2),
+        (b'>', Some(b'=')) => (Token::Ge, 2),
+        (b'=', Some(b'=')) => (Token::EqEq, 2),
+        (b'&', Some(b'&')) => (Token::AndAnd, 2),
+        (b'|', Some(b'|')) => (Token::OrOr, 2),
+        (b'(', _) => (Token::LParen, 1),
+        (b')', _) => (Token::RParen, 1),
+        (b',', _) => (Token::Comma, 1),
+        (b'+', _) => (Token::Plus, 1),
+        (b'-', _) => (Token::Minus, 1),
+        (b'*', _) => (Token::Star, 1),
+        (b'/', _) => (Token::Slash, 1),
+        (b'^', _) => (Token::Caret, 1),
+        (b'<', _) => (Token::Lt, 1),
+        (b'>', _) => (Token::Gt, 1),
+        (b'&', _) => (Token::And, 1),
+        (b'|', _) => (Token::Or, 1),
+        (b'~', _) => (Token::Not, 1),
+        _ => return None,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

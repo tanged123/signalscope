@@ -1,5 +1,5 @@
 {
-  "protocol_version": 4,
+  "protocol_version": 5,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -131,6 +131,19 @@
         "fraction": "f64",
         "response": "IngestResponse?",
         "error": "string?"
+      }
+    },
+    "DerivedRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "expr": "string"
+      }
+    },
+    "RemoveSignalRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string"
       }
     }
   }

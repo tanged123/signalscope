@@ -6,15 +6,15 @@ use std::{
 };
 
 use scope_core::{
-    cache, compute,
+    cache, compute, expr,
     ingest::SUPPORTED_FORMATS,
     pyramid::Pyramid,
-    store::{Signal, SignalId, SignalStore, Source},
+    store::{Signal, SignalId, SignalStore, Source, SourceId},
 };
 use scope_protocol::{
-    Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState, IngestStatus,
-    SampleRequest, SampleResponse, SampleSeries, SignalSummary, SignalTile, SourceSummary,
-    TileRequest, TileResponse,
+    DerivedRequest, Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState,
+    IngestStatus, RemoveSignalRequest, SampleRequest, SampleResponse, SampleSeries, SignalSummary,
+    SignalTile, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -23,6 +23,7 @@ use tauri_plugin_dialog::DialogExt;
 struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
+    derived_source: Option<SourceId>,
 }
 
 #[derive(Default)]
@@ -106,7 +107,9 @@ fn last_progress(app: &AppHandle, job_id: u64) -> (IngestStage, f64) {
 fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<IngestResponse, String> {
     let state = app.state::<Mutex<DataState>>();
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    let DataState { store, pyramids } = &mut *data;
+    let DataState {
+        store, pyramids, ..
+    } = &mut *data;
 
     let mut on_progress = |stage, fraction| set_job(app, job_id, running(stage, fraction));
     let outcome =
@@ -300,6 +303,69 @@ fn query_samples(
     }))
 }
 
+const DERIVED_PREFIX: &str = "derived/";
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn create_derived(
+    request: Envelope<DerivedRequest>,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<SignalSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let path = if request.path.starts_with(DERIVED_PREFIX) {
+        request.path
+    } else {
+        format!("{DERIVED_PREFIX}{}", request.path)
+    };
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+
+    let parsed = expr::parse(&request.expr).map_err(|error| error.to_string())?;
+    let evaluated = expr::evaluate(&parsed, &data.store).map_err(|error| error.to_string())?;
+
+    let source_id = if let Some(id) = data.derived_source {
+        id
+    } else {
+        let id = data.store.register_source(DERIVED_PREFIX);
+        data.derived_source = Some(id);
+        id
+    };
+    if let Some(previous) = data.store.remove_signal(&path) {
+        data.pyramids.remove(&previous);
+    }
+    let signal_id = data
+        .store
+        .insert_signal(source_id, path, None, evaluated.time, evaluated.values)
+        .map_err(|error| error.to_string())?;
+    let signal = data
+        .store
+        .signal(signal_id)
+        .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
+    let pyramid = Pyramid::from_signal(signal);
+    let summary = signal_summary(signal);
+    data.pyramids.insert(signal_id, pyramid);
+    Ok(Envelope::new(summary))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn remove_signal(
+    request: Envelope<RemoveSignalRequest>,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    if !request.path.starts_with(DERIVED_PREFIX) {
+        return Err(format!(
+            "only derived signals can be removed individually: {}",
+            request.path
+        ));
+    }
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    if let Some(id) = data.store.remove_signal(&request.path) {
+        data.pyramids.remove(&id);
+    }
+    Ok(Envelope::new(()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the native `SignalScope` application.
 ///
@@ -318,7 +384,9 @@ pub fn run() {
             list_sources,
             list_signals,
             query_tiles,
-            query_samples
+            query_samples,
+            create_derived,
+            remove_signal
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");

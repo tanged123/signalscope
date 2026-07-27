@@ -61,7 +61,21 @@ describe("TauriPlane.querySamples", () => {
     const invoke = <T>(): Promise<T> =>
       Promise.resolve(
         JSON.parse(
-          '{"protocol_version":4,"payload":{"request_id":"samples-2","series":[{"signal_id":"7","signal_path":"vehicle/speed","unit":"m/s","time":[0,1,2],"values":[0,null,2],"stride":1}]}}',
+          JSON.stringify(
+            seal({
+              request_id: "samples-2",
+              series: [
+                {
+                  signal_id: "7",
+                  signal_path: "vehicle/speed",
+                  unit: "m/s",
+                  time: [0, 1, 2],
+                  values: [0, Number.NaN, 2],
+                  stride: 1,
+                },
+              ],
+            }),
+          ),
         ) as T,
       );
     const response = await new TauriPlane(invoke).querySamples({
