@@ -63,7 +63,7 @@ Canonical commands:
 ./scripts/test.sh                     quick Rust + frontend checks
 ./scripts/test.sh core|frontend|e2e|full
 ./scripts/format.sh                   apply treefmt formatting in place
-./scripts/format.sh --check           report unformatted files; writes nothing
+./scripts/format.sh --check           check an isolated copy; writes nothing
 ./scripts/build.sh web|native         frontend or native bundles
 ./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
 ./scripts/build.sh appimage           Ubuntu/FHS AppImage build

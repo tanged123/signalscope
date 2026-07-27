@@ -14,7 +14,7 @@ Formats the whole repository with treefmt — the same formatter behind `nix fmt
 the flake gate, and the pre-commit hook.
 
   (no arguments)  rewrite unformatted files in place
-  --check         report unformatted files and exit non-zero; writes nothing
+  --check         check an isolated copy and exit non-zero; writes nothing
 
 treefmt covers Rust, TypeScript, Nix, shell, TOML, and Markdown. Documentation,
 ADRs, specs, and plans are formatted like source. `.prettierignore` lists the
@@ -38,7 +38,12 @@ write)
   exec treefmt
   ;;
 --check | check)
-  exec treefmt --fail-on-change
+  check_root="$(mktemp -d)"
+  trap 'rm -rf -- "$check_root"' EXIT
+  git ls-files --cached --others --exclude-standard -z |
+    tar --null --files-from=- -cf - |
+    tar -xf - -C "$check_root"
+  treefmt -C "$check_root" --walk filesystem --fail-on-change
   ;;
 *)
   echo "Unknown format mode: $mode" >&2
