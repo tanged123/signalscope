@@ -79,6 +79,16 @@ function cargoWorkspaceVersion(text) {
   return match[1];
 }
 
+function workspaceDependencyVersions(text, packageNames) {
+  const section = /\[workspace\.dependencies\]([\s\S]*?)(?=\n\[|$)/.exec(text);
+  const versions = new Map();
+  for (const line of section?.[1].split("\n") ?? []) {
+    const match = /^([\w-]+)\s*=\s*\{[^}]*\bversion\s*=\s*"([^"]+)"/.exec(line);
+    if (match && packageNames.has(match[1])) versions.set(match[1], match[2]);
+  }
+  return versions;
+}
+
 function lockVersions(text, packageNames) {
   const versions = new Map();
   let packageName = null;
@@ -114,6 +124,12 @@ async function readReleaseState(packageNames) {
     ["shell/src-tauri/tauri.conf.json", JSON.parse(tauriText).version],
     ["frontend/src/ui/app-shell.ts About", aboutVersion(aboutText)],
   ]);
+  for (const [name, version] of workspaceDependencyVersions(
+    cargoText,
+    packageNames,
+  )) {
+    versions.set(`Cargo.toml dependency ${name}`, version);
+  }
   for (const [name, version] of lockVersions(lockText, packageNames)) {
     versions.set(`Cargo.lock ${name}`, version);
   }
@@ -137,7 +153,7 @@ function assertConsistent(versions) {
   return expected;
 }
 
-async function setCargoVersion(text, version) {
+async function setCargoVersion(text, version, packageNames) {
   let inSection = false;
   let replaced = false;
   const lines = text.split("\n").map((line) => {
@@ -149,6 +165,12 @@ async function setCargoVersion(text, version) {
     if (inSection && /^version\s*=/.test(line)) {
       replaced = true;
       return `version = "${version}"`;
+    }
+    const dependency = /^([\w-]+)\s*=\s*\{[^}]*\bversion\s*=\s*"[^"]+"/.exec(
+      line,
+    );
+    if (dependency && packageNames.has(dependency[1])) {
+      return line.replace(/\bversion\s*=\s*"[^"]+"/, `version = "${version}"`);
     }
     return line;
   });
@@ -206,7 +228,10 @@ async function setVersion(version, packageNames) {
       Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
     );
   await Promise.all([
-    writeFile(releaseFiles.cargo, await setCargoVersion(cargoText, version)),
+    writeFile(
+      releaseFiles.cargo,
+      await setCargoVersion(cargoText, version, packageNames),
+    ),
     writeFile(
       releaseFiles.lock,
       setLockVersions(lockText, version, packageNames),
