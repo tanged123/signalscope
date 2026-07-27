@@ -1014,6 +1014,13 @@ button {
   color: var(--fg-4);
 }
 
+.formula-error {
+  padding-right: 8px;
+  color: var(--status-error);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
 .status-bar {
   grid-area: status;
   display: flex;

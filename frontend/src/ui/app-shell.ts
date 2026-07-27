@@ -5,6 +5,7 @@ import {
   type Command,
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
+import { parseFormulaInput } from "../app/formula";
 import { runIngest } from "../app/ingest";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
@@ -62,6 +63,9 @@ export class AppShell {
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
+  private formulaHistory: string[] = [];
+  private formulaHistoryIndex = 0;
+  private derivedCounter = 0;
 
   constructor(
     private readonly root: HTMLElement,
@@ -71,6 +75,9 @@ export class AppShell {
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
     this.restoreTheme();
+    if (this.plane.derived === null) {
+      required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
+    }
     this.workspaceTabs = new WorkspaceTabsView(
       required(this.root, ".workspace-tabs"),
       {
@@ -754,18 +761,28 @@ export class AppShell {
       this.commands.run("cycle-cursor-mode");
     });
     const formula = required<HTMLFormElement>(this.root, ".formula-bar");
+    const formulaInput = required<HTMLInputElement>(formula, ".formula-input");
     formula.addEventListener("submit", (event) => {
       event.preventDefault();
+      void this.submitFormula(formulaInput);
     });
-    required<HTMLInputElement>(formula, ".formula-input").addEventListener(
-      "keydown",
-      (event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          this.setFormulaOpen(false);
-        }
-      },
-    );
+    formulaInput.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.setFormulaOpen(false);
+        return;
+      }
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      if (this.formulaHistory.length === 0) return;
+      event.preventDefault();
+      const step = event.key === "ArrowUp" ? -1 : 1;
+      this.formulaHistoryIndex = clampIndex(
+        this.formulaHistoryIndex + step,
+        this.formulaHistory.length,
+      );
+      formulaInput.value =
+        this.formulaHistory[this.formulaHistoryIndex] ?? formulaInput.value;
+    });
     required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
       "input",
       (event) => {
@@ -870,6 +887,45 @@ export class AppShell {
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
     this.syncCursorMode();
     void this.refreshTiles();
+  }
+
+  /** Creates the derived signal described by the bar, or reports why not. */
+  private async submitFormula(input: HTMLInputElement): Promise<void> {
+    const error = required<HTMLElement>(this.root, ".formula-error");
+    this.derivedCounter += 1;
+    const parsed = parseFormulaInput(input.value, this.derivedCounter);
+    if (parsed === null) {
+      this.derivedCounter -= 1;
+      return;
+    }
+    try {
+      await this.createDerived(parsed.path, parsed.expr);
+      this.formulaHistory.push(input.value.trim());
+      this.formulaHistoryIndex = this.formulaHistory.length;
+      input.value = "";
+      error.hidden = true;
+      error.textContent = "";
+    } catch (failure: unknown) {
+      this.derivedCounter -= 1;
+      error.textContent =
+        failure instanceof Error ? failure.message : String(failure);
+      error.hidden = false;
+    }
+  }
+
+  /**
+   * Creates a derived signal, records its definition in the session, and
+   * plots it on the focused panel. Task 16's session replay calls this too.
+   */
+  async createDerived(path: string, expr: string): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) throw new Error("This snapshot cannot create signals");
+    const summary = await port.create(path, expr);
+    this.workspace.addDerived(summary.path, expr);
+    await this.reloadSignals();
+    const focused = this.workspace.focusedPanelId();
+    if (focused !== null) this.workspace.addSeries(focused, summary.path);
+    this.afterLayoutChange();
   }
 
   private showModeHelp(text: string): void {
@@ -1439,6 +1495,11 @@ export class AppShell {
   }
 }
 
+/** Keeps a history cursor inside `[0, length]`; `length` means "new entry". */
+function clampIndex(index: number, length: number): number {
+  return Math.min(Math.max(index, 0), length);
+}
+
 /** Explains why a listed command cannot run, or nothing when it can. */
 function unavailableReason(command: Command): { unavailable?: string } {
   if (command.status === "planned") {
@@ -1509,7 +1570,8 @@ function shellMarkup(): string {
 
     <form class="formula-bar" id="formula-editor">
       <span class="formula-mark">ƒx</span>
-      <input class="formula-input" aria-label="Derived signal formula" placeholder='derived/name = Math.hypot($("signal/x"), $("signal/y"))' spellcheck="false" />
+      <input class="formula-input" aria-label="Derived signal formula" placeholder="derived/speed = hypot('imu/vx', 'imu/vy')" spellcheck="false" />
+      <span class="formula-error" role="alert" hidden></span>
     </form>
     <div class="plot-tip" hidden></div>
 
