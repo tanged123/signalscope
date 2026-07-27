@@ -71,7 +71,8 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
 /// version and falls through to the next; the current version deserializes
 /// directly. To add v(N+1): bump `schema_version` in
 /// `protocol/schema/scope-session.json`, regenerate, then add an arm here
-/// that rewrites a vN `value` into vN+1 shape and recurses.
+/// that rewrites a vN `value` into vN+1 shape and recurses. Additive optional
+/// fields need no rung; only new required fields do.
 fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, SessionError> {
     match version {
         1 => {
@@ -133,15 +134,12 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             object.insert("schema_version".into(), serde_json::json!(3));
             migrate(3, value)
         }
-        3 => {
-            default_panel_fields(&mut value, &["x_label", "y_label", "time_window"]);
-            value["schema_version"] = serde_json::json!(4);
-            migrate(4, value)
-        }
-        4 => {
-            default_panel_fields(&mut value, &["x_range"]);
-            value["schema_version"] = serde_json::json!(5);
-            migrate(5, value)
+        3 | 4 | 7 => {
+            // Purely additive optional panel fields; #[serde(default)] restores
+            // absent fields, so no rewrite is needed.
+            let next = version + 1;
+            value["schema_version"] = serde_json::json!(next);
+            migrate(next, value)
         }
         5 => {
             migrate_v5_annotations(&mut value);
@@ -152,11 +150,6 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             default_tab_cursor_modes(&mut value);
             value["schema_version"] = serde_json::json!(7);
             migrate(7, value)
-        }
-        7 => {
-            default_panel_fields(&mut value, &["c_label"]);
-            value["schema_version"] = serde_json::json!(8);
-            migrate(8, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
@@ -197,15 +190,6 @@ fn for_each_panel(
             }
         }
     }
-}
-
-/// Adds each missing panel field as null, leaving authored values alone.
-fn default_panel_fields(value: &mut serde_json::Value, fields: &[&str]) {
-    for_each_panel(value, |panel| {
-        for field in fields {
-            panel.entry(*field).or_insert(serde_json::Value::Null);
-        }
-    });
 }
 
 /// Defaults the v7 workspace cursor state without disturbing authored fields.
