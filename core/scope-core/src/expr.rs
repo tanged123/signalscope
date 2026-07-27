@@ -101,14 +101,27 @@ fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
             b'\'' | b'"' => {
                 let quote = byte;
                 index += 1;
-                let text_start = index;
-                while index < bytes.len() && bytes[index] != quote {
-                    index += 1;
+                let mut name = String::new();
+                while index < bytes.len() {
+                    if bytes[index] != quote {
+                        let character = src[index..]
+                            .chars()
+                            .next()
+                            .expect("index stays on a character boundary");
+                        name.push(character);
+                        index += character.len_utf8();
+                        continue;
+                    }
+                    if bytes.get(index + 1) == Some(&quote) {
+                        name.push(char::from(quote));
+                        index += 2;
+                        continue;
+                    }
+                    break;
                 }
                 if index >= bytes.len() {
                     return Err(ExprError::UnterminatedString { start });
                 }
-                let name = src[text_start..index].to_owned();
                 index += 1;
                 if name.is_empty() {
                     return Err(ExprError::EmptySignal { start });
@@ -993,6 +1006,37 @@ mod tests {
                 Token::Signal("c/d".into()),
             ]
         );
+    }
+
+    #[test]
+    fn doubled_delimiters_escape_quotes_in_signal_references() {
+        let tokens = tokenize(r#"'pilot''s/"pitch"' + "pilot's/""pitch""""#).expect("tokenizes");
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|entry| entry.token.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                Token::Signal(r#"pilot's/"pitch""#.into()),
+                Token::Plus,
+                Token::Signal(r#"pilot's/"pitch""#.into()),
+            ]
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn evaluates_a_signal_whose_path_contains_both_quote_styles() {
+        let store = store_with(&[(r#"pilot's/"pitch""#, &[0.0, 1.0], &[2.0, 3.0])]);
+        assert_eq!(eval(r#"'pilot''s/"pitch"' * 2"#, &store), vec![4.0, 6.0]);
+    }
+
+    #[test]
+    fn doubled_delimiters_do_not_hide_an_unterminated_reference() {
+        assert!(matches!(
+            tokenize("'pilot''s/path").expect_err("unterminated"),
+            ExprError::UnterminatedString { start: 0 }
+        ));
     }
 
     #[test]
