@@ -33,7 +33,7 @@ git checkout -b pre-phase3-simplification
 - Delete (from index only): `Screenshot 2026-07-26 185157.png`
 - Modify: `.gitignore`
 
-A WSL screenshot was accidentally committed at repo root in `d949e44`. `.gitignore` covers PNGs in every build directory but not the root, which is where screenshots land.
+A WSL screenshot was accidentally committed at repo root in `d949e44`. `.gitignore` covers PNG files in every build directory but not the root, which is where screenshots land.
 
 - [ ] **Step 1: Untrack the file (keep it on disk)**
 
