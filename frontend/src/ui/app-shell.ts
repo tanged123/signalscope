@@ -5,7 +5,6 @@ import {
   type Command,
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
-import { parseFormulaInput } from "../app/formula";
 import { runIngest } from "../app/ingest";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
@@ -32,6 +31,7 @@ import {
   type PaletteMode,
 } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
+import { FormulaBar, formulaBarMarkup } from "./formula-bar";
 import type { QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
@@ -60,6 +60,7 @@ export class AppShell {
   private workspaceTabs: WorkspaceTabsView | null = null;
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
+  private formulaBar: FormulaBar | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
@@ -70,9 +71,6 @@ export class AppShell {
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
-  private formulaHistory: string[] = [];
-  private formulaHistoryIndex = 0;
-  private derivedCounter = 0;
 
   constructor(
     private readonly root: HTMLElement,
@@ -264,6 +262,12 @@ export class AppShell {
     this.palette = new CommandPalette(this.root, (mode) =>
       this.paletteEntries(mode),
     );
+    this.formulaBar = new FormulaBar(required(this.root, ".formula-bar"), {
+      onCreate: (path, expression) => this.createDerived(path, expression),
+      onClose: () => {
+        this.setFormulaOpen(false);
+      },
+    });
     this.registerCommands();
     void new AppMenu(
       required<HTMLButtonElement>(this.root, ".menu-button"),
@@ -773,29 +777,6 @@ export class AppShell {
     required(this.root, ".cursor-toggle").addEventListener("click", () => {
       this.commands.run("cycle-cursor-mode");
     });
-    const formula = required<HTMLFormElement>(this.root, ".formula-bar");
-    const formulaInput = required<HTMLInputElement>(formula, ".formula-input");
-    formula.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void this.submitFormula(formulaInput);
-    });
-    formulaInput.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        this.setFormulaOpen(false);
-        return;
-      }
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      if (this.formulaHistory.length === 0) return;
-      event.preventDefault();
-      const step = event.key === "ArrowUp" ? -1 : 1;
-      this.formulaHistoryIndex = clampIndex(
-        this.formulaHistoryIndex + step,
-        this.formulaHistory.length,
-      );
-      formulaInput.value =
-        this.formulaHistory[this.formulaHistoryIndex] ?? formulaInput.value;
-    });
     required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
       "input",
       (event) => {
@@ -902,30 +883,6 @@ export class AppShell {
     void this.refreshTiles();
   }
 
-  /** Creates the derived signal described by the bar, or reports why not. */
-  private async submitFormula(input: HTMLInputElement): Promise<void> {
-    const error = required<HTMLElement>(this.root, ".formula-error");
-    this.derivedCounter += 1;
-    const parsed = parseFormulaInput(input.value, this.derivedCounter);
-    if (parsed === null) {
-      this.derivedCounter -= 1;
-      return;
-    }
-    try {
-      await this.createDerived(parsed.path, parsed.expr);
-      this.formulaHistory.push(input.value.trim());
-      this.formulaHistoryIndex = this.formulaHistory.length;
-      input.value = "";
-      error.hidden = true;
-      error.textContent = "";
-    } catch (failure: unknown) {
-      this.derivedCounter -= 1;
-      error.textContent =
-        failure instanceof Error ? failure.message : String(failure);
-      error.hidden = false;
-    }
-  }
-
   /**
    * Creates a derived signal, records its definition in the session, and
    * plots it on the focused panel. Task 16's session replay calls this too.
@@ -982,6 +939,7 @@ export class AppShell {
       this.signals.map((summary) => [summary.path, summary]),
     );
     this.tree?.setSignals(this.signals.map((summary) => summary.path));
+    this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.tree?.setFavorites(this.workspace.favorites());
     this.updateStatus();
   }
@@ -1514,15 +1472,10 @@ export class AppShell {
   private setFormulaOpen(open: boolean): void {
     const workbench = required(this.root, ".workbench");
     const button = required<HTMLButtonElement>(this.root, ".formula-toggle");
-    const input = required<HTMLInputElement>(this.root, ".formula-input");
     workbench.classList.toggle("formula-collapsed", !open);
     button.classList.toggle("active", open);
     button.ariaExpanded = String(open);
-    if (open) {
-      input.focus();
-    } else {
-      input.blur();
-    }
+    this.formulaBar?.setOpen(open);
   }
 
   private reportError(error: unknown): void {
@@ -1530,11 +1483,6 @@ export class AppShell {
     required(this.root, ".render-ms").textContent = `error: ${message}`;
     console.error(error);
   }
-}
-
-/** Keeps a history cursor inside `[0, length]`; `length` means "new entry". */
-function clampIndex(index: number, length: number): number {
-  return Math.min(Math.max(index, 0), length);
 }
 
 /** The derived name and expression a legend quick transform produces. */
@@ -1617,11 +1565,7 @@ function shellMarkup(): string {
 
     <div class="mode-help" role="status" hidden></div>
 
-    <form class="formula-bar" id="formula-editor">
-      <span class="formula-mark">ƒx</span>
-      <input class="formula-input" aria-label="Derived signal formula" placeholder="derived/speed = hypot('imu/vx', 'imu/vy')" spellcheck="false" />
-      <span class="formula-error" role="alert" hidden></span>
-    </form>
+    ${formulaBarMarkup()}
     <div class="plot-tip" hidden></div>
 
     <footer class="status-bar">

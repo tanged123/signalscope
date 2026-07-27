@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import type { PanelView as PanelViewClass } from "../../src/ui/panel";
+import type { FormulaBar as FormulaBarClass } from "../../src/ui/formula-bar";
 
 test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await page.goto("/");
@@ -251,6 +252,50 @@ test("panel legend keeps controls visible and exposes overflow", async ({
   );
   await page.keyboard.press("Escape");
   await expect(panel.locator(".legend-overflow-menu")).toBeHidden();
+});
+
+test("formula component creates and recalls accepted formulas", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/src/ui/formula-bar.ts";
+    const { FormulaBar, formulaBarMarkup } = (await import(
+      /* @vite-ignore */ modulePath
+    )) as {
+      FormulaBar: typeof FormulaBarClass;
+      formulaBarMarkup: () => string;
+    };
+    const host = document.createElement("div");
+    host.id = "formula-probe";
+    host.innerHTML = formulaBarMarkup();
+    document.body.replaceChildren(host);
+    const form = host.querySelector<HTMLFormElement>(".formula-bar");
+    if (form === null)
+      throw new Error("Formula bar markup is missing its form");
+    const bar = new FormulaBar(form, {
+      onCreate: (path, expression) => {
+        host.dataset.created = `${path}|${expression}`;
+        return Promise.resolve();
+      },
+      onClose: () => {
+        host.dataset.closed = "true";
+      },
+    });
+    bar.setOpen(true);
+  });
+
+  const host = page.locator("#formula-probe");
+  const input = host.locator(".formula-input");
+  await input.fill("derived/double = 'demo/x' * 2");
+  await input.press("Enter");
+  await expect(host).toHaveAttribute(
+    "data-created",
+    "derived/double|'demo/x' * 2",
+  );
+  await expect(input).toHaveValue("");
+  await input.press("ArrowUp");
+  await expect(input).toHaveValue("derived/double = 'demo/x' * 2");
 });
 
 test("formula editor hides when the data plane cannot derive", async ({
