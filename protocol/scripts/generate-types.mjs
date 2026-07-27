@@ -184,6 +184,11 @@ function emitObject(rust, typeScript, name, definition) {
   typeScript.push(`export interface ${name} {`);
   for (const [field, type] of Object.entries(definition.fields)) {
     const rustField = snakeCase(field);
+    if (type.includes("u64") && type !== "u64" && type !== "u64[]") {
+      throw new Error(
+        `${name}.${field}: unsupported u64 form "${type}" — only "u64" and "u64[]" carry the string serde attributes`,
+      );
+    }
     if (type.endsWith("?")) rust.push("    #[serde(default)]");
     if (type === "u64") {
       rust.push('    #[serde(with = "u64_string")]');
