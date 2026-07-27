@@ -19,9 +19,10 @@ ensure_dev_shell() {
 
 # Check groups shared by ci.sh and test.sh so local test runs and CI gates
 # cannot drift apart.
+# Type checking runs once inside artifact_checks' build (tsc --noEmit &&
+# vite build); every gate that runs frontend_checks also runs artifact_checks.
 frontend_checks() {
   pnpm lint
-  pnpm typecheck
   pnpm codegen:check
   pnpm test
 }
