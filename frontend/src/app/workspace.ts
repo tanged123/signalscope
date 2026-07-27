@@ -2,6 +2,7 @@ import type {
   Annotation,
   DashStyle,
   LayoutRow,
+  LinkedTime,
   PanelMode,
   PanelState,
   Session,
@@ -59,6 +60,27 @@ export class WorkspaceModel {
 
   setTheme(theme: Session["theme"]): void {
     this.session.theme = theme;
+  }
+
+  linkedTime(): Readonly<LinkedTime> {
+    return { ...this.session.linked_time };
+  }
+
+  setLinked(linked: boolean): void {
+    this.session.linked_time.linked = linked;
+  }
+
+  setLinkedWindow(t0: number, t1: number): void {
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) {
+      throw new Error("Time window must be finite and increasing");
+    }
+    this.session.linked_time.t0 = t0;
+    this.session.linked_time.t1 = t1;
+  }
+
+  setCursorT(cursorT: number | null): void {
+    this.session.linked_time.cursorT =
+      cursorT !== null && Number.isFinite(cursorT) ? cursorT : null;
   }
 
   panels(): readonly PanelState[] {

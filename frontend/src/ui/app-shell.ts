@@ -6,7 +6,6 @@ import {
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
-import { LinkedTimeModel } from "../app/linked-time";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
 import {
@@ -45,7 +44,6 @@ const THEME_STORAGE_KEY = "signalscope.theme";
 const SAMPLE_CAP = 8192;
 
 export class AppShell {
-  private readonly time = new LinkedTimeModel();
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
   private signals: SignalSummary[] = [];
@@ -851,13 +849,13 @@ export class AppShell {
       ),
     );
     if (extent === null) return;
-    this.time.setWindow(extent.t0, extent.t1);
+    this.workspace.setLinkedWindow(extent.t0, extent.t1);
     this.renderWindowReadout();
   }
 
-  /** Renders the status-bar window readout from the linked-time model. */
+  /** Renders the status-bar window readout from the session's linked time. */
   private renderWindowReadout(): void {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     required(this.root, ".window-readout").textContent =
       `window ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
   }
@@ -986,7 +984,7 @@ export class AppShell {
   }
 
   private renderTiles(): void {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     const elapsed =
       this.workspaceView?.renderData(
         this.tilesByPanel,
@@ -1005,8 +1003,8 @@ export class AppShell {
     if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return;
-    if (this.time.snapshot().linked && panel.mode === "time") {
-      this.time.setWindow(t0, t1);
+    if (this.workspace.linkedTime().linked && panel.mode === "time") {
+      this.workspace.setLinkedWindow(t0, t1);
       this.renderWindowReadout();
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
@@ -1028,7 +1026,7 @@ export class AppShell {
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     if (state.linked && panel.mode === "time") {
       return { t0: state.t0, t1: state.t1 };
     }
@@ -1116,8 +1114,8 @@ export class AppShell {
       return;
     }
     const cursorT = cursor?.link === "time" ? cursor.x : null;
-    this.time.setCursor(cursorT);
-    const state = this.time.snapshot();
+    this.workspace.setCursorT(cursorT);
+    const state = this.workspace.linkedTime();
     this.workspaceView?.setCursor(state.cursorT);
     this.renderCursorTime();
     this.renderTooltip(
@@ -1148,7 +1146,7 @@ export class AppShell {
     button.title = `Cursor mode: ${mode} — cycle (C)`;
     if (mode !== "track") this.hideTooltip();
     if (mode === "none") {
-      this.time.setCursor(null);
+      this.workspace.setCursorT(null);
       this.workspaceView?.clearCursors();
       this.renderCursorTime();
       this.scheduleLiveValues(null);
@@ -1217,7 +1215,7 @@ export class AppShell {
   }
 
   private renderCursorTime(localHeading?: string): void {
-    const cursorT = this.time.snapshot().cursorT;
+    const cursorT = this.workspace.linkedTime().cursorT;
     required(this.root, ".cursor-time").textContent =
       localHeading ??
       (cursorT === null ? "t —" : `t ${formatCursorTime(cursorT)}`);
@@ -1285,7 +1283,7 @@ export class AppShell {
   }
 
   private toggleLinked(): void {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     const linked = !state.linked;
     if (!linked) {
       for (const panel of this.workspace.panels()) {
@@ -1294,7 +1292,7 @@ export class AppShell {
         }
       }
     }
-    this.time.setLinked(linked);
+    this.workspace.setLinked(linked);
     required(this.root, ".linked-toggle").classList.toggle("active", linked);
     void this.refreshTiles();
   }

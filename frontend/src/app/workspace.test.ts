@@ -10,6 +10,34 @@ function widths(model: WorkspaceModel, rowIndex: number): number[] {
   return model.layout()[rowIndex]?.panels.map((cell) => cell.width) ?? [];
 }
 
+describe("linked time", () => {
+  it("serializes linked-time changes into the session", () => {
+    const model = new WorkspaceModel();
+    model.setLinked(false);
+    model.setLinkedWindow(5, 15);
+    model.setCursorT(12.5);
+    expect(model.snapshot().linked_time).toEqual({
+      t0: 5,
+      t1: 15,
+      linked: false,
+      cursorT: 12.5,
+      mode: "fixed",
+      paused: false,
+    });
+  });
+
+  it("rejects a non-increasing window", () => {
+    const model = new WorkspaceModel();
+    expect(() => model.setLinkedWindow(3, 3)).toThrow("finite and increasing");
+  });
+
+  it("clears non-finite cursor times", () => {
+    const model = new WorkspaceModel();
+    model.setCursorT(Number.NaN);
+    expect(model.snapshot().linked_time.cursorT).toBeNull();
+  });
+});
+
 describe("WorkspaceModel", () => {
   it("stores cursor mode independently for each workspace", () => {
     const model = new WorkspaceModel();
