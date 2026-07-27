@@ -38,6 +38,8 @@ const LANGUAGE = [
   ["sinh", "hyperbolic sine", "sinh()", 5],
   ["cosh", "hyperbolic cosine", "cosh()", 5],
   ["tanh", "hyperbolic tangent", "tanh()", 5],
+  ["rad2deg", "radians to degrees", "rad2deg()", 8],
+  ["deg2rad", "degrees to radians", "deg2rad()", 8],
   ["hypot", "Euclidean magnitude", "hypot(, )", 6],
   ["floor", "round toward negative infinity", "floor()", 6],
   ["ceil", "round toward positive infinity", "ceil()", 5],

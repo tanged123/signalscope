@@ -54,7 +54,8 @@ derived/speed = hypot('demo_flight/velocity_body/x_mps', 'demo_flight/velocity_b
 
 Press `?` in the bar for syntax help or `Ctrl+Space` for context-sensitive
 function and signal completion. Enter creates, Up/Down recalls accepted
-formulas, and Escape closes the bar.
+formulas, and Escape closes the bar. Angle conversions use `rad2deg(x)` and
+`deg2rad(x)`.
 
 ### Supported input files
 

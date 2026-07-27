@@ -94,6 +94,30 @@ describe("formulaCompletions", () => {
     });
   });
 
+  it("offers radian and degree conversion functions", () => {
+    const context = {
+      source: "language" as const,
+      query: "rad2",
+      start: 12,
+      end: 16,
+    };
+    expect(formulaCompletions(context, [])[0]).toMatchObject({
+      label: "rad2deg",
+      detail: "radians to degrees",
+      replacement: "rad2deg()",
+      caretOffset: 8,
+    });
+
+    expect(
+      formulaCompletions({ ...context, query: "deg2" }, [])[0],
+    ).toMatchObject({
+      label: "deg2rad",
+      detail: "degrees to radians",
+      replacement: "deg2rad()",
+      caretOffset: 8,
+    });
+  });
+
   it("replaces an existing closing delimiter with a quoted signal path", () => {
     const context = completionContext("derived/x = 'old' + 1", 13, false);
     if (context === null) throw new Error("expected signal context");

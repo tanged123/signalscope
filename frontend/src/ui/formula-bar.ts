@@ -309,7 +309,7 @@ export function formulaBarMarkup(): string {
       <span>Signals use quoted full paths. Drag from the tree to insert.</span>
       <code class="formula-help-example"></code>
       <code>gradient(x) · cumtrapz(x) · movmean(x, 51)</code>
-      <code>abs(x) · hypot(x, y)</code>
+      <code>abs(x) · hypot(x, y) · rad2deg(x) · deg2rad(x)</code>
       <span>↵ create · ↑/↓ history · esc close · ctrl+space complete</span>
     </div>
     <div class="formula-completions" id="formula-completions" role="listbox" aria-label="Formula suggestions" hidden></div>

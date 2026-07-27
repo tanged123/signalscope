@@ -292,6 +292,8 @@ pub(crate) const SCALAR_FUNCTIONS: &[(&str, usize)] = &[
     ("sinh", 1),
     ("cosh", 1),
     ("tanh", 1),
+    ("rad2deg", 1),
+    ("deg2rad", 1),
     ("hypot", 2),
     ("floor", 1),
     ("ceil", 1),
@@ -739,6 +741,8 @@ fn call(name: &str, first: f64, second: f64) -> f64 {
         "sinh" => first.sinh(),
         "cosh" => first.cosh(),
         "tanh" => first.tanh(),
+        "rad2deg" => first.to_degrees(),
+        "deg2rad" => first.to_radians(),
         "hypot" => first.hypot(second),
         "floor" => first.floor(),
         "ceil" => first.ceil(),
@@ -857,6 +861,25 @@ mod tests {
     fn sign_returns_zero_for_both_signed_zeros() {
         let store = store_with(&[("a/x", &[0.0, 1.0], &[-0.0, 0.0])]);
         assert_eq!(eval("sign('a/x')", &store), vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn converts_between_radians_and_degrees() {
+        let store = store_with(&[(
+            "a/x",
+            &[0.0, 1.0, 2.0],
+            &[0.0, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2],
+        )]);
+        let degrees = eval("rad2deg('a/x')", &store);
+        assert!((degrees[0] - 0.0).abs() < f64::EPSILON);
+        assert!((degrees[1] - 180.0).abs() < f64::EPSILON);
+        assert!((degrees[2] + 90.0).abs() < f64::EPSILON);
+
+        let store = store_with(&[("a/x", &[0.0, 1.0, 2.0], &[0.0, 180.0, -90.0])]);
+        let radians = eval("deg2rad('a/x')", &store);
+        assert!((radians[0] - 0.0).abs() < f64::EPSILON);
+        assert!((radians[1] - std::f64::consts::PI).abs() < f64::EPSILON);
+        assert!((radians[2] + std::f64::consts::FRAC_PI_2).abs() < f64::EPSILON);
     }
 
     #[test]
