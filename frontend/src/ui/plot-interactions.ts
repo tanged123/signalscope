@@ -41,8 +41,8 @@ export interface PlotInteractionHost {
   publishTouchCursor(event: PointerEvent): void;
   setGesture(hint: string | null): void;
   setBox(box: InteractionBox | null): void;
-  axisEditZone(x: number, y: number): "x" | "y" | null;
-  beginAxisEdit(axis: "x" | "y"): void;
+  axisEditZone(x: number, y: number): "x" | "y" | "c" | null;
+  beginAxisEdit(axis: "x" | "y" | "c"): void;
 }
 
 const TOUCH = {

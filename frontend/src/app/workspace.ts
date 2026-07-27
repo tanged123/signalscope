@@ -323,11 +323,12 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.title = title;
   }
 
-  setAxisLabel(id: string, axis: "x" | "y", label: string | null): void {
+  setAxisLabel(id: string, axis: "x" | "y" | "c", label: string | null): void {
     const panel = this.panel(id);
     if (panel === undefined) return;
     if (axis === "x") panel.x_label = label;
-    else panel.y_label = label;
+    else if (axis === "y") panel.y_label = label;
+    else panel.c_label = label;
   }
 
   setPanelTimeWindow(
@@ -500,6 +501,7 @@ export class WorkspaceModel {
       x_range: null,
       x_label: null,
       y_label: null,
+      c_label: null,
       time_window: null,
       annotations: [],
       show_stats: false,

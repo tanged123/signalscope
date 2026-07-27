@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 7;
+pub const SESSION_SCHEMA_VERSION: u32 = 8;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -111,6 +111,8 @@ pub struct PanelState {
     pub x_label: Option<String>,
     #[serde(default)]
     pub y_label: Option<String>,
+    #[serde(default)]
+    pub c_label: Option<String>,
     #[serde(default)]
     pub time_window: Option<[f64; 2]>,
     pub annotations: Vec<Annotation>,

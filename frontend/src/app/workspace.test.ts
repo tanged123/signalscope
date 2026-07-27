@@ -264,13 +264,17 @@ describe("WorkspaceModel", () => {
     const panel = model.addPanelRow();
     model.renamePanel(panel.id, "Body velocity");
     model.setAxisLabel(panel.id, "y", "velocity (m/s)");
+    model.setAxisLabel(panel.id, "c", "flight phase");
     model.setPanelTimeWindow(panel.id, [2, 8]);
     expect(model.panel(panel.id)).toMatchObject({
       title: "Body velocity",
       x_label: null,
       y_label: "velocity (m/s)",
+      c_label: "flight phase",
       time_window: [2, 8],
     });
+    model.setAxisLabel(panel.id, "c", null);
+    expect(model.panel(panel.id)?.c_label).toBeNull();
     model.setPanelTimeWindow(panel.id, null);
     expect(model.panel(panel.id)?.time_window).toBeNull();
   });
@@ -431,6 +435,7 @@ describe("WorkspaceModel", () => {
       x_range: null,
       x_label: null,
       y_label: null,
+      c_label: null,
       time_window: null,
       annotations: [],
       show_stats: false,

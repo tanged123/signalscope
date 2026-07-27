@@ -153,6 +153,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(7);
             migrate(7, value)
         }
+        7 => {
+            default_panel_fields(&mut value, &["c_label"]);
+            value["schema_version"] = serde_json::json!(8);
+            migrate(8, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -276,6 +281,7 @@ mod tests {
                     x_range: None,
                     x_label: None,
                     y_label: None,
+                    c_label: None,
                     time_window: None,
                     annotations: Vec::new(),
                     show_stats: false,
@@ -449,6 +455,36 @@ mod tests {
         .to_string();
         let session = from_json(&json).expect("v6 session migrates");
         assert_eq!(session.tabs[0].cursor_mode, CursorMode::None);
+    }
+
+    #[test]
+    fn v7_panels_gain_a_default_color_axis_label() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 7,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "cursor_mode": "none",
+                "focused_panel_id": "panel-1",
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "xy",
+                    "axis_style": "gutter", "x_signal": "demo/x", "color_signal": "time",
+                    "series": [], "y_range": null, "x_range": null,
+                    "x_label": null, "y_label": null, "time_window": null,
+                    "annotations": [], "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v7 session migrates");
+        assert_eq!(session.tabs[0].panels[0].c_label, None);
     }
 
     #[test]

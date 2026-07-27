@@ -859,6 +859,11 @@ button {
   transform: translateX(-50%);
 }
 
+.axis-label-editor-c {
+  top: 45%;
+  right: 4px;
+}
+
 .plot-tip {
   position: fixed;
   z-index: 8;

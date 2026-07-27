@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -72,6 +72,7 @@
         "x_range": "f64[2]?",
         "x_label": "string?",
         "y_label": "string?",
+        "c_label": "string?",
         "time_window": "f64[2]?",
         "annotations": "Annotation[]",
         "show_stats": "bool"

@@ -235,6 +235,25 @@ test.describe("panel modes", () => {
     await page.keyboard.press("Enter");
     await expect(chip).toContainText("time");
 
+    const overlay = panel.locator(".overlay-canvas");
+    const box = await overlay.boundingBox();
+    expect(box).not.toBeNull();
+    if (box !== null) {
+      const colorLabel = { x: box.width - 48, y: box.height / 2 };
+      await overlay.dblclick({ position: colorLabel });
+      const editor = panel.getByLabel("Color axis name");
+      await expect(editor).toBeVisible();
+      await editor.fill("flight phase");
+      await page.keyboard.press("Enter");
+      await overlay.dblclick({ position: colorLabel });
+      await expect(editor).toHaveValue("flight phase");
+      await editor.fill("");
+      await page.keyboard.press("Enter");
+      await overlay.dblclick({ position: colorLabel });
+      await expect(editor).toHaveValue("");
+      await page.keyboard.press("Escape");
+    }
+
     await chip.click();
     await expect(chip).toContainText("none");
 

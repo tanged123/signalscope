@@ -102,7 +102,11 @@ export interface PanelCallbacks {
   onToggleStats(id: string): void;
   onToggleAxisStyle(id: string): void;
   onRenameTitle(id: string, title: string): void;
-  onEditAxisLabel(id: string, axis: "x" | "y", label: string | null): void;
+  onEditAxisLabel(
+    id: string,
+    axis: "x" | "y" | "c",
+    label: string | null,
+  ): void;
   onSetSeriesStyle(
     id: string,
     path: string,
@@ -202,7 +206,13 @@ export class PanelView {
         const state = this.lastState;
         return layout === null || state === null
           ? null
-          : axisEditZone(layout, state.axis_style, x, y);
+          : axisEditZone(
+              layout,
+              state.axis_style,
+              x,
+              y,
+              state.color_signal !== null,
+            );
       },
       beginAxisEdit: (axis) => {
         this.beginAxisEdit(axis);
@@ -646,12 +656,13 @@ export class PanelView {
               min: colorDomainMin,
               max: colorDomainMax,
               label:
-                state.color_signal === "time"
+                state.c_label ??
+                (state.color_signal === "time"
                   ? "t (s)"
                   : axisName(
                       state.color_signal ?? "",
                       colorSeries === "time" ? null : colorSeries.unit,
-                    ),
+                    )),
             },
           }
         : {}),
@@ -1233,7 +1244,7 @@ export class PanelView {
     selection?.addRange(range);
   }
 
-  private beginAxisEdit(axis: "x" | "y"): void {
+  private beginAxisEdit(axis: "x" | "y" | "c"): void {
     const wrap = required<HTMLElement>(this.element, ".plot-wrap");
     if (wrap.querySelector(".axis-label-editor") !== null) return;
     const state = this.lastState;
@@ -1241,10 +1252,20 @@ export class PanelView {
     input.className = `axis-label-editor axis-label-editor-${axis}`;
     input.setAttribute(
       "aria-label",
-      axis === "x" ? "X axis name" : "Y axis name",
+      axis === "x"
+        ? "X axis name"
+        : axis === "y"
+          ? "Y axis name"
+          : "Color axis name",
     );
-    input.value = (axis === "x" ? state?.x_label : state?.y_label) ?? "";
-    input.placeholder = axis === "x" ? "time (s)" : "value";
+    input.value =
+      (axis === "x"
+        ? state?.x_label
+        : axis === "y"
+          ? state?.y_label
+          : state?.c_label) ?? "";
+    input.placeholder =
+      axis === "x" ? "time (s)" : axis === "y" ? "value" : "color";
     let cancelled = false;
     input.addEventListener("keydown", (event) => {
       event.stopPropagation();
@@ -1569,8 +1590,17 @@ function axisEditZone(
   axisStyle: AxisStyle,
   px: number,
   py: number,
-): "x" | "y" | null {
+  hasColorbar: boolean,
+): "x" | "y" | "c" | null {
   const { plot } = layout;
+  if (
+    hasColorbar &&
+    px > plot.x + plot.width &&
+    py >= plot.y &&
+    py <= plot.y + plot.height
+  ) {
+    return "c";
+  }
   if (axisStyle === "inline") {
     if (px <= plot.x + 90 && py <= plot.y + 18) return "y";
     if (px >= plot.x + plot.width - 90 && py >= plot.y + plot.height - 18) {
