@@ -72,6 +72,7 @@ ls frontend/src/ui/plot-interactions.ts 2>/dev/null \
 | `AGENTS.md`                               | modify: `:164`, `:180` | rules stop mandating mobile gestures and mobile e2e |
 | `frontend/tests/e2e/touch.spec.ts`        | delete                 | —                                                   |
 | `frontend/playwright.config.ts`           | modify: `projects`     | desktop project only                                |
+| `scripts/ci.sh`                           | modify: `:23`          | help text stops naming the mobile project           |
 | `frontend/tests/e2e/interactions.spec.ts` | modify                 | 4 `isMobile` guards removed                         |
 | `frontend/tests/e2e/modes.spec.ts`        | modify                 | 10 `isMobile` guards removed                        |
 | `frontend/tests/e2e/workbench.spec.ts`    | modify                 | 3 `isMobile` guards removed                         |
@@ -355,12 +356,30 @@ Remove them like the others.
 Some tests destructure fixtures beyond `page` (for example `isMobile` alongside
 others). Remove only `isMobile`; leave the rest.
 
-- [ ] **Step 5: Verify no `isMobile` reference survives**
+- [ ] **Step 5: Update the CI help text**
 
-Run: `grep -rn "isMobile" frontend/tests/`
-Expected: no output.
+`scripts/ci.sh:23` names the project being deleted:
 
-- [ ] **Step 6: Verify no test was accidentally deleted**
+```text
+  e2e       Playwright desktop and mobile-review smoke tests.
+```
+
+Replace with:
+
+```text
+  e2e       Playwright desktop smoke tests.
+```
+
+- [ ] **Step 6: Verify no `isMobile` or mobile-project reference survives**
+
+```bash
+grep -rn "isMobile" frontend/tests/
+grep -rn "mobile" frontend/playwright.config.ts scripts/ci.sh
+```
+
+Expected: no output from either.
+
+- [ ] **Step 7: Verify no test was accidentally deleted**
 
 Run: `grep -rc "^\s*test(" frontend/tests/e2e/*.spec.ts`
 
@@ -368,7 +387,7 @@ Compare against `git stash`-ed counts if unsure. Only `touch.spec.ts`'s single
 test should be gone; every other spec keeps its full test count. Removing a
 guard must not remove its test.
 
-- [ ] **Step 7: Run the suite**
+- [ ] **Step 8: Run the suite**
 
 Run: `./scripts/test.sh e2e`
 Expected: PASS, with every previously mobile-skipped test now actually running
@@ -379,15 +398,15 @@ they ran once, not twice. If a test now fails, it is because removing its
 guard exposed a genuine desktop problem — investigate rather than
 reinstating the guard.
 
-- [ ] **Step 8: Lint**
+- [ ] **Step 9: Lint**
 
 Run: `cd frontend && pnpm lint`
 Expected: PASS. Catches an unused fixture left behind in Step 4.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add -A frontend/tests/e2e frontend/playwright.config.ts
+git add -A frontend/tests/e2e frontend/playwright.config.ts scripts/ci.sh
 git commit -m "test(e2e): drop the mobile project and touch spec
 
 Removes touch.spec.ts, the mobile-review Playwright project, and the 17
