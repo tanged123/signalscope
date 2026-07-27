@@ -4,7 +4,7 @@ import {
   type FormulaEdit,
 } from "./formula";
 
-export type CompletionKind = "function" | "constant" | "time" | "signal";
+type CompletionKind = "function" | "constant" | "time" | "signal";
 
 export interface CompletionContext {
   source: "language" | "signal";
