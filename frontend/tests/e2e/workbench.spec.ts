@@ -285,11 +285,49 @@ test("formula component creates and recalls accepted formulas", async ({
         host.dataset.closed = "true";
       },
     });
+    bar.setSignals([
+      "demo_flight/attitude/pitch_deg",
+      "demo_flight/attitude/roll_deg",
+    ]);
     bar.setOpen(true);
   });
 
   const host = page.locator("#formula-probe");
   const input = host.locator(".formula-input");
+  await input.fill("derived/rate = gra");
+  await expect(host.locator(".formula-completions")).toBeVisible();
+  await expect(
+    host.getByRole("option", { name: /gradient.*time derivative/ }),
+  ).toBeVisible();
+  await input.press("Enter");
+  await expect(input).toHaveValue("derived/rate = gradient()");
+  await expect(input).toBeFocused();
+
+  await input.fill("derived/rate = 'pitch");
+  await expect(
+    host.getByRole("option", {
+      name: /demo_flight\/attitude\/pitch_deg/,
+    }),
+  ).toBeVisible();
+  await input.press("Tab");
+  await expect(input).toHaveValue(
+    "derived/rate = 'demo_flight/attitude/pitch_deg'",
+  );
+
+  await input.fill("derived/root = sq");
+  await host.getByRole("option", { name: /sqrt.*square root/ }).click();
+  await expect(input).toHaveValue("derived/root = sqrt()");
+  await expect(input).toBeFocused();
+
+  await input.fill("derived/x = ");
+  await input.press("Control+Space");
+  await expect(host.locator(".formula-completions")).toBeVisible();
+  await input.press("Escape");
+  await expect(host.locator(".formula-completions")).toBeHidden();
+  await expect(host).not.toHaveAttribute("data-closed", "true");
+  await input.press("Escape");
+  await expect(host).toHaveAttribute("data-closed", "true");
+
   await input.fill("derived/double = 'demo/x' * 2");
   await input.press("Enter");
   await expect(host).toHaveAttribute(

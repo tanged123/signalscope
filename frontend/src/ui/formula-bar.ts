@@ -3,6 +3,13 @@ import {
   parseFormulaInput,
   quoteSignalPath,
 } from "../app/formula";
+import {
+  applyCompletion,
+  completionContext,
+  formulaCompletions,
+  type CompletionContext,
+  type FormulaCompletion,
+} from "../app/formula-completion";
 import { required } from "./dom";
 import { SIGNAL_DRAG_TYPE } from "./panel";
 
@@ -38,10 +45,14 @@ export class FormulaBar {
   private readonly helpButton: HTMLButtonElement;
   private readonly helpPopover: HTMLElement;
   private readonly helpExample: HTMLElement;
+  private readonly completionList: HTMLElement;
   private signals: readonly string[] = [];
   private history: string[] = [];
   private historyIndex = 0;
   private derivedCounter = 0;
+  private completionContext: CompletionContext | null = null;
+  private completions: FormulaCompletion[] = [];
+  private completionIndex = 0;
 
   constructor(
     element: HTMLFormElement,
@@ -53,12 +64,16 @@ export class FormulaBar {
     this.helpButton = required(element, ".formula-help-button");
     this.helpPopover = required(element, ".formula-help-popover");
     this.helpExample = required(element, ".formula-help-example");
+    this.completionList = required(element, ".formula-completions");
     element.addEventListener("submit", (event) => {
       event.preventDefault();
       void this.submit();
     });
     this.input.addEventListener("keydown", (event) => {
       this.onKeyDown(event);
+    });
+    this.input.addEventListener("input", () => {
+      this.refreshCompletions(false);
     });
     this.helpButton.addEventListener("click", () => {
       this.toggleHelp();
@@ -96,6 +111,7 @@ export class FormulaBar {
       if (!helpWasSeen()) this.openHelp();
       this.input.focus();
     } else {
+      this.clearCompletions();
       this.closeHelp();
       this.input.blur();
     }
@@ -107,6 +123,32 @@ export class FormulaBar {
   }
 
   private onKeyDown(event: KeyboardEvent): void {
+    if (event.ctrlKey && event.code === "Space") {
+      event.preventDefault();
+      this.refreshCompletions(true);
+      return;
+    }
+    if (this.completions.length > 0) {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        const step = event.key === "ArrowUp" ? -1 : 1;
+        this.completionIndex =
+          (this.completionIndex + step + this.completions.length) %
+          this.completions.length;
+        this.renderCompletions();
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        this.acceptCompletion();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.clearCompletions();
+        return;
+      }
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       if (!this.helpPopover.hidden) {
@@ -159,6 +201,7 @@ export class FormulaBar {
   }
 
   private openHelp(): void {
+    this.clearCompletions();
     this.helpPopover.hidden = false;
     this.helpButton.setAttribute("aria-expanded", "true");
   }
@@ -167,6 +210,77 @@ export class FormulaBar {
     this.helpPopover.hidden = true;
     this.helpButton.setAttribute("aria-expanded", "false");
     rememberHelp();
+  }
+
+  private refreshCompletions(manual: boolean): void {
+    const caret = this.input.selectionStart ?? this.input.value.length;
+    const context = completionContext(this.input.value, caret, manual);
+    const completions =
+      context === null ? [] : formulaCompletions(context, this.signals);
+    if (context === null || completions.length === 0) {
+      this.clearCompletions();
+      return;
+    }
+    this.closeHelp();
+    this.completionContext = context;
+    this.completions = completions;
+    this.completionIndex = 0;
+    this.renderCompletions();
+  }
+
+  private renderCompletions(): void {
+    const options = this.completions.map((completion, index) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "formula-completion";
+      option.id = `formula-completion-${String(index)}`;
+      option.tabIndex = -1;
+      option.setAttribute("role", "option");
+      option.setAttribute(
+        "aria-selected",
+        String(index === this.completionIndex),
+      );
+
+      const label = document.createElement("code");
+      label.textContent = completion.label;
+      const detail = document.createElement("span");
+      detail.textContent = completion.detail;
+      option.append(label, detail);
+      option.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        this.completionIndex = index;
+        this.acceptCompletion();
+      });
+      return option;
+    });
+    this.completionList.replaceChildren(...options);
+    this.completionList.hidden = false;
+    this.input.setAttribute("aria-expanded", "true");
+    this.input.setAttribute(
+      "aria-activedescendant",
+      `formula-completion-${String(this.completionIndex)}`,
+    );
+  }
+
+  private clearCompletions(): void {
+    this.completionContext = null;
+    this.completions = [];
+    this.completionIndex = 0;
+    this.completionList.replaceChildren();
+    this.completionList.hidden = true;
+    this.input.setAttribute("aria-expanded", "false");
+    this.input.removeAttribute("aria-activedescendant");
+  }
+
+  private acceptCompletion(): void {
+    const context = this.completionContext;
+    const completion = this.completions[this.completionIndex];
+    if (context === null || completion === undefined) return;
+    const edit = applyCompletion(this.input.value, context, completion);
+    this.input.value = edit.text;
+    this.clearCompletions();
+    this.input.focus();
+    this.input.setSelectionRange(edit.caret, edit.caret);
   }
 
   private renderHelpExample(): void {
@@ -185,7 +299,7 @@ function clampIndex(index: number, length: number): number {
 export function formulaBarMarkup(): string {
   return `<form class="formula-bar" id="formula-editor">
     <span class="formula-mark">ƒx</span>
-    <input class="formula-input" aria-label="Derived signal formula" placeholder="derived/name = expression · drop signals here" spellcheck="false" />
+    <input class="formula-input" role="combobox" aria-label="Derived signal formula" aria-autocomplete="list" aria-controls="formula-completions" aria-expanded="false" placeholder="derived/name = expression · drop signals here" spellcheck="false" />
     <span class="formula-error" role="alert" hidden></span>
     <span class="formula-error-guidance" hidden>Signal references use quoted full paths. Drag from the tree to insert.</span>
     <button type="button" class="formula-help-button" aria-label="Formula help" aria-controls="formula-help" aria-expanded="false">?</button>
@@ -198,5 +312,6 @@ export function formulaBarMarkup(): string {
       <code>abs(x) · hypot(x, y)</code>
       <span>↵ create · ↑/↓ history · esc close · ctrl+space complete</span>
     </div>
+    <div class="formula-completions" id="formula-completions" role="listbox" aria-label="Formula suggestions" hidden></div>
   </form>`;
 }
