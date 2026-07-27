@@ -193,8 +193,9 @@ impl SignalStore {
     ///
     /// The store's mutating surface is insert-only (`register_source`,
     /// `insert_signal`), so rolling back insertions restores the exact prior
-    /// state, including point counts on pre-existing sources. Any future
-    /// in-place mutation must extend this rollback.
+    /// state, including point counts on pre-existing sources. `remove_signal`
+    /// is the one mutation that is not covered and must never be called inside
+    /// `f`; any other future in-place mutation must extend this rollback.
     ///
     /// # Errors
     ///
@@ -221,6 +222,22 @@ impl SignalStore {
             self.next_signal_id = signal_watermark;
         }
         result
+    }
+
+    /// Removes the signal at `path`, freeing the path for reuse and
+    /// decrementing its source's point count.
+    ///
+    /// This is **not** transactional: [`SignalStore::transaction`] rolls back
+    /// insertions by id watermark and cannot restore a removed signal. Never
+    /// call this inside a transaction closure. Derived signals — the only
+    /// caller — are recreated from their expression instead.
+    pub fn remove_signal(&mut self, path: &str) -> Option<SignalId> {
+        let id = self.signal_paths.remove(path)?;
+        let signal = self.signals.remove(&id)?;
+        if let Some(source) = self.sources.get_mut(&signal.source_id) {
+            source.point_count = source.point_count.saturating_sub(signal.len());
+        }
+        Some(id)
     }
 
     #[must_use]
@@ -263,6 +280,30 @@ pub enum StoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removing_a_signal_frees_its_path_and_updates_the_source_count() {
+        let mut store = SignalStore::new();
+        let source = store.register_source("test");
+        let time: Arc<[f64]> = Arc::from(vec![0.0, 1.0]);
+        store
+            .insert_signal(source, "a/x", None, Arc::clone(&time), vec![1.0, 2.0])
+            .expect("inserts");
+        let before = store.sources().next().expect("source").point_count;
+
+        let removed = store.remove_signal("a/x").expect("removes");
+        assert!(store.signal(removed).is_none());
+        assert!(store.signal_by_path("a/x").is_none());
+        assert_eq!(
+            store.sources().next().expect("source").point_count,
+            before - 2
+        );
+        assert!(store.remove_signal("a/x").is_none());
+
+        store
+            .insert_signal(source, "a/x", None, time, vec![3.0, 4.0])
+            .expect("path is free again");
+    }
 
     #[test]
     fn registers_source_and_signal() {
