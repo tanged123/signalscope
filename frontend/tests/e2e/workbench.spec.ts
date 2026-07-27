@@ -274,9 +274,11 @@ test("formula component creates and recalls accepted formulas", async ({
     if (form === null)
       throw new Error("Formula bar markup is missing its form");
     const bar = new FormulaBar(form, {
-      onCreate: (path, expression) => {
+      onCreate: async (path, expression) => {
+        if (path === "derived/bad") {
+          throw new Error('unknown signal "missing/path"');
+        }
         host.dataset.created = `${path}|${expression}`;
-        return Promise.resolve();
       },
       onClose: () => {
         host.dataset.closed = "true";
@@ -296,6 +298,72 @@ test("formula component creates and recalls accepted formulas", async ({
   await expect(input).toHaveValue("");
   await input.press("ArrowUp");
   await expect(input).toHaveValue("derived/double = 'demo/x' * 2");
+
+  await input.fill("derived/bad = 'missing/path'");
+  await input.press("Enter");
+  await expect(host.locator(".formula-error")).toContainText("unknown signal");
+  await expect(host.locator(".formula-error-guidance")).toHaveText(
+    "Signal references use quoted full paths. Drag from the tree to insert.",
+  );
+  await expect(input).toHaveValue("derived/bad = 'missing/path'");
+
+  await input.fill("derived/recovered = 'demo/x'");
+  await input.press("Enter");
+  await expect(host.locator(".formula-error")).toBeHidden();
+  await expect(host.locator(".formula-error-guidance")).toBeHidden();
+  await expect(host.locator(".formula-error-guidance")).toBeEmpty();
+});
+
+test("formula help teaches real paths once and remains available", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    localStorage.removeItem("signalscope.formulaHelpSeen");
+    const modulePath = "/src/ui/formula-bar.ts";
+    const { FormulaBar, formulaBarMarkup } = (await import(
+      /* @vite-ignore */ modulePath
+    )) as {
+      FormulaBar: typeof FormulaBarClass;
+      formulaBarMarkup: () => string;
+    };
+    const host = document.createElement("div");
+    host.id = "formula-help-probe";
+    host.innerHTML = formulaBarMarkup();
+    document.body.replaceChildren(host);
+    const bar = new FormulaBar(
+      host.querySelector<HTMLFormElement>(".formula-bar")!,
+      {
+        onCreate: async () => {},
+        onClose: () => {},
+      },
+    );
+    bar.setSignals(["demo_flight/attitude/pitch_deg"]);
+    bar.setOpen(true);
+  });
+
+  const host = page.locator("#formula-help-probe");
+  const help = host.locator(".formula-help-popover");
+  await expect(help).toBeVisible();
+  await expect(help.locator(".formula-help-example")).toContainText(
+    "'demo_flight/attitude/pitch_deg'",
+  );
+  const button = host.getByRole("button", { name: "Formula help" });
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  await button.click();
+  await expect(help).toBeHidden();
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("signalscope.formulaHelpSeen")),
+    )
+    .toBe("1");
+  await button.click();
+  await expect(help).toBeVisible();
+  await button.focus();
+  await page.keyboard.press("Escape");
+  await expect(help).toBeHidden();
+  await button.press("Enter");
+  await expect(help).toBeVisible();
 });
 
 test("formula editor hides when the data plane cannot derive", async ({

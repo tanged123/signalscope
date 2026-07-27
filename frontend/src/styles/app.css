@@ -1005,6 +1005,7 @@ button {
 
 .formula-bar {
   grid-area: formula;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1042,6 +1043,52 @@ button {
   color: var(--status-error);
   font-family: var(--font-mono);
   font-size: 10.5px;
+}
+
+.formula-help-button {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+  font: 10.5px var(--font-mono);
+}
+
+.formula-help-button:hover,
+.formula-help-button[aria-expanded="true"] {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.formula-help-popover {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 4px);
+  z-index: 6;
+  display: grid;
+  width: 360px;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-3);
+  font-size: 10.5px;
+}
+
+.formula-help-popover code {
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+}
+
+.formula-help-popover[hidden],
+.formula-error-guidance[hidden] {
+  display: none;
+}
+
+.formula-error-guidance {
+  color: var(--fg-3);
+  font-size: 10px;
 }
 
 .status-bar {
