@@ -8,9 +8,7 @@ test.describe("desktop plot interactions", () => {
 
   test("cursor readout, tooltip, linked zoom and stats update", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const panel = page.locator(".panel").first();
     const overlay = panel.locator(".overlay-canvas");
     await overlay.hover({ position: { x: 300, y: 120 } });
@@ -57,9 +55,7 @@ test.describe("desktop plot interactions", () => {
 
   test("the status-bar cursor button cycles the same three modes as C", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const button = page.locator(".cursor-toggle");
     const readout = page.locator(".cursor-mode");
     await expect(button).toBeEnabled();
@@ -90,9 +86,7 @@ test.describe("desktop plot interactions", () => {
 
   test("directional zoom and double-click fit round-trip the window", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const readout = page.locator(".window-readout");
     const fitted = await readout.textContent();
     const overlay = page.locator(".overlay-canvas").first();
@@ -117,9 +111,7 @@ test.describe("desktop plot interactions", () => {
 
   test("title editing, inline axes and legend inspector are keyboard reachable", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const panel = page.locator(".panel").first();
     const title = panel.locator(".panel-title");
     await title.dblclick();

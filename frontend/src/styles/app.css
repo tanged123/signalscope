@@ -605,10 +605,6 @@ button {
   white-space: nowrap;
 }
 
-.legend-menu {
-  color: var(--fg-4);
-}
-
 .legend-overflow {
   min-width: 30px;
   flex: none;
@@ -723,20 +719,6 @@ button {
   /* Without this the browser claims every drag for scrolling and no
      gesture ever reaches the handlers. */
   touch-action: none;
-}
-
-/* Coarse pointers need larger targets; the spec's 26px header stays. */
-@media (hover: none) {
-  .panel-action,
-  .mode-pill,
-  .legend-chip-body,
-  .legend-chip-caret {
-    padding: 6px 9px;
-  }
-
-  .axis-chip {
-    padding: 4px 10px;
-  }
 }
 
 .panel-axis-toggle {
@@ -857,6 +839,11 @@ button {
   bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
+}
+
+.axis-label-editor-c {
+  top: 45%;
+  right: 4px;
 }
 
 .plot-tip {
@@ -1327,7 +1314,7 @@ button {
   width: min(560px, 90vw);
   border: 1px solid var(--border-strong);
   background: var(--surface-1);
-  box-shadow: 0 8px 30px rgb(0 0 0 / 35%);
+  box-shadow: var(--elev-3);
 }
 
 .palette-input {

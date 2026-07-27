@@ -74,17 +74,27 @@ async function trajectoryPoints(
   );
 }
 
+async function histogramBinStart(
+  overlay: Locator,
+  readout: Locator,
+): Promise<number> {
+  await overlay.hover({ position: { x: 250, y: 120 } });
+  await expect(readout).toContainText("bin");
+  const text = (await readout.textContent()) ?? "";
+  const match = /bin\s+([−+\d.e]+)/.exec(text);
+  if (match?.[1] === undefined) {
+    throw new Error(`could not parse histogram interval from "${text}"`);
+  }
+  return Number(match[1].replace("−", "-"));
+}
+
 test.describe("panel modes", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await expect(page.locator(".panel").first()).toBeVisible();
   });
 
-  test("XY mode adopts the first series as the x axis", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("XY mode adopts the first series as the x axis", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await expect(panel.locator(".legend-chip")).toHaveCount(2);
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
@@ -105,11 +115,7 @@ test.describe("panel modes", () => {
     await expect(panel.locator(".legend-chip")).toHaveCount(2);
   });
 
-  test("the x chip and the palette both reach XY mode", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("the x chip and the palette both reach XY mode", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".legend-chip-caret").first().click();
     await panel.locator(".inspector-action", { hasText: "use as X" }).click();
@@ -137,9 +143,7 @@ test.describe("panel modes", () => {
 
   test("XY zoom stays panel-local and the cursor rings the trajectory", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     const readout = page.locator(".window-readout");
@@ -182,11 +186,7 @@ test.describe("panel modes", () => {
     await expect(tip).toBeHidden();
   });
 
-  test("XY datatips pin, list, and show a delta", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("XY datatips pin, list, and show a delta", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     const overlay = panel.locator(".overlay-canvas");
@@ -206,11 +206,7 @@ test.describe("panel modes", () => {
     await expect(list.locator(".annotation-row")).toHaveCount(2);
   });
 
-  test("the colour channel is assignable and clearable", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("the colour channel is assignable and clearable", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     const chip = panel.locator(".c-chip");
@@ -220,6 +216,40 @@ test.describe("panel modes", () => {
     await page.keyboard.type("set color signal");
     await page.keyboard.press("Enter");
     await expect(chip).toContainText("time");
+
+    const overlay = panel.locator(".overlay-canvas");
+    const box = await overlay.boundingBox();
+    expect(box).not.toBeNull();
+    if (box !== null) {
+      const colorLabel = { x: box.width - 48, y: box.height / 2 };
+      await overlay.dblclick({ position: colorLabel });
+      const editor = panel.getByLabel("Color axis name");
+      await expect(editor).toBeVisible();
+      await editor.fill("flight phase");
+      await page.keyboard.press("Enter");
+      await overlay.dblclick({ position: colorLabel });
+      await expect(editor).toHaveValue("flight phase");
+      await editor.fill("");
+      await page.keyboard.press("Enter");
+      await overlay.dblclick({ position: colorLabel });
+      await expect(editor).toHaveValue("");
+      await page.keyboard.press("Escape");
+    }
+
+    await page.keyboard.press("ControlOrMeta+Shift+p");
+    await page.locator(".palette-input").fill("edit color axis label");
+    await page.keyboard.press("Enter");
+    await expect(panel.getByLabel("Color axis name")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await panel.locator(".mode-pill", { hasText: "FFT" }).click();
+    await page.keyboard.press("ControlOrMeta+Shift+p");
+    await page.locator(".palette-input").fill("edit color axis label");
+    await expect(
+      page.locator(".palette-row", { hasText: "edit color axis label" }),
+    ).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await panel.locator(".mode-pill", { hasText: "XY" }).click();
 
     await chip.click();
     await expect(chip).toContainText("none");
@@ -248,11 +278,7 @@ test.describe("panel modes", () => {
     await expect(chip).toContainText("none");
   });
 
-  test("FFT mode announces its window and zooms locally", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("FFT mode announces its window and zooms locally", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "FFT" }).click();
     await expect(panel.locator(".panel-mode-note")).toHaveText(
@@ -279,9 +305,7 @@ test.describe("panel modes", () => {
 
   test("histogram mode draws a distribution of the visible window", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "H" }).click();
     await expect(panel.locator(".mode-pill.active")).toHaveText("H");
@@ -305,15 +329,43 @@ test.describe("panel modes", () => {
     );
   });
 
+  test("histogram zoom, pan, and fit move only its viewport", async ({
+    page,
+  }) => {
+    const panel = page.locator(".panel").first();
+    await panel.locator(".mode-pill", { hasText: "H" }).click();
+    await page.keyboard.press("c");
+    const overlay = panel.locator(".overlay-canvas");
+    const readout = page.locator(".cursor-time");
+    const fitted = await histogramBinStart(overlay, readout);
+
+    await overlay.hover({ position: { x: 400, y: 120 } });
+    await page.mouse.wheel(0, -240);
+    const zoomed = await histogramBinStart(overlay, readout);
+    expect(zoomed).not.toBeCloseTo(fitted, 4);
+
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("overlay not laid out");
+    await page.keyboard.down("Control");
+    await page.mouse.move(box.x + 250, box.y + 120);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 330, box.y + 120, { steps: 6 });
+    await page.mouse.up();
+    await page.keyboard.up("Control");
+    const panned = await histogramBinStart(overlay, readout);
+    expect(panned).toBeLessThan(zoomed);
+
+    await overlay.dblclick({ position: { x: 250, y: 120 } });
+    expect(await histogramBinStart(overlay, readout)).toBeCloseTo(fitted, 4);
+  });
+
   for (const mode of [
     { pill: "FFT", delta: "Δf", stats: "peak f" },
     { pill: "H", delta: "Δvalue", stats: "bins" },
   ]) {
     test(`${mode.pill} supports retained annotations, deltas, and native stats`, async ({
       page,
-      isMobile,
     }) => {
-      test.skip(isMobile, "desktop interaction");
       const panel = page.locator(".panel").first();
       await panel.locator(".mode-pill", { hasText: mode.pill }).click();
       await panel.locator(".panel-stats-toggle").click();
@@ -350,9 +402,7 @@ test.describe("panel modes", () => {
 
   test("the application menu stats command reaches every panel", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     await page.keyboard.press("n");
     await expect(page.locator(".panel")).toHaveCount(2);
     // A panel with nothing plotted has no statistics to show, so the new panel
@@ -385,8 +435,7 @@ test.describe("panel modes", () => {
     await expect(stats.last()).toBeHidden();
   });
 
-  test("mode help preserves the render metric", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("mode help preserves the render metric", async ({ page }) => {
     const renderMetric = page.locator(".render-ms");
     const before = await renderMetric.textContent();
     await page.keyboard.press("ControlOrMeta+Shift+p");

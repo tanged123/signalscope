@@ -119,13 +119,7 @@ jobs:
         with:
           persist-credentials: false
       - env:
-          VERSION_RESULT: ${{ needs.version.result }}
-          FLAKE_RESULT: ${{ needs.flake.result }}
-          QUALITY_RESULT: ${{ needs.quality.result }}
-          RUST_RESULT: ${{ needs.rust.result }}
-          FRONTEND_RESULT: ${{ needs.frontend.result }}
-          E2E_RESULT: ${{ needs.e2e.result }}
-          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: ./scripts/check-ci-results.sh
 
   build:

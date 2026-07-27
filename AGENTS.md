@@ -25,6 +25,27 @@ tests, and the existing scripts. Do not overwrite or reset unrelated changes.
 If an instruction or design requirement is ambiguous, state the ambiguity and
 make a small, explicit proposal before expanding scope.
 
+## Brevity
+
+Prefer the shortest version that is still correct and clear. Verbosity is a
+defect, not a style preference.
+
+- Code: no speculative abstraction, defensive scaffolding, or wrapper layers
+  nobody asked for. Delete dead code; do not comment it out or deprecate it.
+- Comments: explain why, never what the line already says. Most code needs
+  none.
+- Program output: quiet by default. No progress chatter, banners, decorative
+  separators, or emoji in CLI, script, and log output.
+- Chat and handoff notes: lead with the answer. No preamble, no restating the
+  diff in prose, no recap of what the reader can already see. Report what
+  changed, what you ran, and what is still open.
+- Docs and ADRs: record the decision and its consequences, not the
+  deliberation that produced it.
+- Commits: a conventional subject plus the why. Not a line-by-line changelog.
+
+If a sentence, comment, helper, or paragraph can go without losing
+information, cut it.
+
 ## Command and workflow policy
 
 The `scripts/` directory is the repository's public developer and CI API. Use
@@ -41,6 +62,8 @@ Canonical commands:
 ./scripts/run.sh native               Tauri development host
 ./scripts/test.sh                     quick Rust + frontend checks
 ./scripts/test.sh core|frontend|e2e|full
+./scripts/format.sh                   apply treefmt formatting in place
+./scripts/format.sh --check           check an isolated copy; writes nothing
 ./scripts/build.sh web|native         frontend or native bundles
 ./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
 ./scripts/build.sh appimage           Ubuntu/FHS AppImage build
@@ -60,6 +83,17 @@ Canonical commands:
 deterministic quality gate. Extend that function and its matching `quality` job
 rather than adding parallel ad-hoc workflow commands.
 
+treefmt, reachable as `nix fmt`, is the repository's only formatter. It covers
+Rust, TypeScript, Nix, shell, TOML, **and Markdown** — documentation, ADRs,
+specs, and plans are formatted exactly like source, and `.prettierignore` lists
+the few exclusions. When the format gate fails, run `./scripts/format.sh` and
+commit the result. Never hand-format to match the tool, and never move, delete,
+or stash tracked files to make a gate pass.
+
+The pre-commit hook formats staged files but does not stage the result, so a
+commit can still carry unformatted content. Run `./scripts/format.sh` before
+staging rather than relying on the hook.
+
 Run `./scripts/setup.sh` before frontend work when dependencies are absent.
 The Nix flake supplies the normal pinned toolchain. AppImage packaging is the
 intentional exception: run it outside the Nix shell on Ubuntu/FHS using the
@@ -73,10 +107,10 @@ or publish releases may remain native actions; their build inputs must still
 come from scripts.
 
 Before handoff, run the narrowest relevant script and then the broader gate
-proportional to risk. At minimum, run formatting plus the affected test suite;
-for cross-layer changes run `./scripts/ci.sh all` or explain why a narrower
-check is sufficient. Report commands and results. Do not claim a GUI or
-platform build was tested if it was not.
+proportional to risk. At minimum, run `./scripts/format.sh` plus the affected
+test suite; for cross-layer changes run `./scripts/ci.sh all` or explain why a
+narrower check is sufficient. Report commands and results. Do not claim a GUI
+or platform build was tested if it was not.
 
 Install the repository hook with `./scripts/install-hooks.sh`. Do not use a
 blanket `git add -A` or silently stage unrelated work. Review staged and
@@ -161,8 +195,9 @@ Match the Final Spec rather than generic dashboard patterns:
   identity must not depend on color alone. Status colors are reserved.
 - Every plot owns complete labeled axes. Preserve gutter/inline axis semantics,
   linked time, per-panel state, and serialized axis choices.
-- Preserve keyboard paths for pointer actions and the specified desktop/mobile
+- Preserve keyboard paths for pointer actions and the specified desktop
   gestures. Right-click must never be the only way to perform an action.
+  Touch input is out of scope per ADR 0021.
 - Keep the renderer deterministic from tiles, viewport, and tokens so snapshot
   and workbench output stay pixel- and behavior-aligned.
 - Avoid adding runtime dependencies to the snapshot frontend. The exported
@@ -177,8 +212,8 @@ Add tests with behavior changes, not only compilation checks:
   round-trips and migrations.
 - TypeScript: expression and linked-time units, renderer behavior where
   practical, snapshot/no-network/size checks.
-- Playwright: desktop and mobile-emulation interactions when changing input,
-  gestures, layout, or export behavior.
+- Playwright: desktop interactions when changing input, gestures, layout, or
+  export behavior.
 - Keep generated protocol outputs synchronized and run the artifact checks for
   snapshot changes.
 

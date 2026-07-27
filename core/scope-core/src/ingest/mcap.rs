@@ -129,7 +129,6 @@ impl Decoder for McapDecoder {
         progress(1.0);
         Ok(IngestSummary {
             source_id,
-            source_path: path.to_owned(),
             row_count,
             signals,
         })

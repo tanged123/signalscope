@@ -70,6 +70,10 @@ test("time capabilities link cursors and expose raw visible statistics", () => {
 
   expect(plot.domain).toBe("time");
   expect(plot.interaction.cursorLink).toBe("time");
+  expect(plot.autoRanges()).toEqual({
+    x: [0, 5],
+    y: [1.88, 4.12],
+  });
   expect(plot.cursorAt(layout, { x: 50, y: 50 }, 12)?.x).toBeCloseTo(5);
   expect(plot.resolveAnnotation(annotation("time", 2.5, 3))).toMatchObject({
     x: 2.5,
@@ -96,10 +100,16 @@ test("XY capabilities share time anchors and report X, Y and C statistics", () =
       },
     ],
     color: { path: "demo/c" },
+    window: { t0: 0, t1: 2 },
   });
 
   expect(plot.domain).toBe("time");
   expect(plot.interaction.cursorLink).toBe("time");
+  const automatic = plot.autoRanges();
+  expect(automatic.x?.[0]).toBeCloseTo(0.76);
+  expect(automatic.x?.[1]).toBeCloseTo(5.24);
+  expect(automatic.y?.[0]).toBeCloseTo(1.64);
+  expect(automatic.y?.[1]).toBeCloseTo(8.36);
   expect(plot.resolveAnnotation(annotation("time", 1, 4))).toMatchObject({
     x: 3,
     y: 4,
@@ -135,6 +145,7 @@ test("XY capabilities sample colour on the focused trace's timebase", () => {
       },
     ],
     color: { path: "demo/c" },
+    window: { t0: 0, t1: 3 },
   });
 
   const cursor = plot.cursorAt(layout, { x: 70, y: 30 }, 5);
@@ -176,6 +187,7 @@ test("FFT capabilities retain frequency anchors and follow recomputed spectra", 
   });
 
   expect(first.interaction.cursorLink).toBe("local");
+  expect(first.autoRanges()).toEqual({ x: [1, 3], y: [-90, 3] });
   expect(first.resolveAnnotation(pin)?.y).toBe(-3);
   expect(recomputed.resolveAnnotation(pin)?.y).toBe(-6);
   expect(recomputed.stats()[0]?.items).toEqual([
@@ -207,6 +219,7 @@ test("histogram capabilities retain source anchors and resolve current bins", ()
   const resolved = plot.resolveAnnotation(annotation("distribution", 7, 4));
 
   expect(plot.interaction.cursorLink).toBe("local");
+  expect(plot.autoRanges()).toEqual({ x: [0, 10], y: [0, 4.24] });
   expect(resolved).toMatchObject({ x: 7.5, y: 4 });
   expect(plot.stats()[0]?.items).toEqual([
     { label: "min", value: 1, unit: null },
@@ -230,4 +243,29 @@ test("histogram capabilities retain source anchors and resolve current bins", ()
     pinnedValue: 4,
   });
   expect(plot.resolveAnnotation(annotation("frequency", 7, 4))).toBeNull();
+});
+
+test("all plot adapters report unavailable automatic ranges without finite data", () => {
+  expect(
+    prepareTimePlot({
+      series: [],
+      window: { t0: 0, t1: 5 },
+    }).autoRanges(),
+  ).toEqual({ x: null, y: null });
+  expect(
+    prepareXyPlot({
+      x: { path: "demo/x", values: [] },
+      series: [],
+      color: null,
+      window: { t0: 0, t1: 5 },
+    }).autoRanges(),
+  ).toEqual({ x: null, y: null });
+  expect(prepareFftPlot({ series: [] }).autoRanges()).toEqual({
+    x: null,
+    y: null,
+  });
+  expect(prepareHistogramPlot({ edges: [], series: [] }).autoRanges()).toEqual({
+    x: null,
+    y: null,
+  });
 });

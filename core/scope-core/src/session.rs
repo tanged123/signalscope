@@ -25,6 +25,7 @@ impl Default for Session {
                 title: DEFAULT_TAB_TITLE.into(),
                 cursor_mode: CursorMode::None,
                 focused_panel_id: None,
+                maximized_panel_id: None,
                 panels: Vec::new(),
                 layout: Vec::new(),
             }],
@@ -71,7 +72,8 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
 /// version and falls through to the next; the current version deserializes
 /// directly. To add v(N+1): bump `schema_version` in
 /// `protocol/schema/scope-session.json`, regenerate, then add an arm here
-/// that rewrites a vN `value` into vN+1 shape and recurses.
+/// that rewrites a vN `value` into vN+1 shape and recurses. Additive optional
+/// fields need no rung; only new required fields do.
 fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, SessionError> {
     match version {
         1 => {
@@ -133,15 +135,12 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             object.insert("schema_version".into(), serde_json::json!(3));
             migrate(3, value)
         }
-        3 => {
-            default_panel_fields(&mut value, &["x_label", "y_label", "time_window"]);
-            value["schema_version"] = serde_json::json!(4);
-            migrate(4, value)
-        }
-        4 => {
-            default_panel_fields(&mut value, &["x_range"]);
-            value["schema_version"] = serde_json::json!(5);
-            migrate(5, value)
+        3 | 4 | 7 => {
+            // Purely additive optional panel fields; #[serde(default)] restores
+            // absent fields, so no rewrite is needed.
+            let next = version + 1;
+            value["schema_version"] = serde_json::json!(next);
+            migrate(next, value)
         }
         5 => {
             migrate_v5_annotations(&mut value);
@@ -152,6 +151,20 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             default_tab_cursor_modes(&mut value);
             value["schema_version"] = serde_json::json!(7);
             migrate(7, value)
+        }
+        8 => {
+            for_each_panel(&mut value, |panel| {
+                let by_time = panel
+                    .get("color_signal")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("time");
+                if by_time {
+                    panel.insert("color_signal".into(), serde_json::Value::Null);
+                }
+                panel.insert("color_by_time".into(), serde_json::json!(by_time));
+            });
+            value["schema_version"] = serde_json::json!(9);
+            migrate(9, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
@@ -192,15 +205,6 @@ fn for_each_panel(
             }
         }
     }
-}
-
-/// Adds each missing panel field as null, leaving authored values alone.
-fn default_panel_fields(value: &mut serde_json::Value, fields: &[&str]) {
-    for_each_panel(value, |panel| {
-        for field in fields {
-            panel.entry(*field).or_insert(serde_json::Value::Null);
-        }
-    });
 }
 
 /// Defaults the v7 workspace cursor state without disturbing authored fields.
@@ -258,6 +262,7 @@ mod tests {
                 title: "Flight review".into(),
                 cursor_mode: CursorMode::None,
                 focused_panel_id: Some("panel-a".into()),
+                maximized_panel_id: None,
                 panels: vec![PanelState {
                     id: "panel-a".into(),
                     title: "Body velocity".into(),
@@ -265,6 +270,7 @@ mod tests {
                     axis_style: AxisStyle::Gutter,
                     x_signal: None,
                     color_signal: None,
+                    color_by_time: false,
                     series: vec![SeriesState {
                         path: "rocket/velocity_body/x".into(),
                         color_slot: 1,
@@ -276,6 +282,7 @@ mod tests {
                     x_range: None,
                     x_label: None,
                     y_label: None,
+                    c_label: None,
                     time_window: None,
                     annotations: Vec::new(),
                     show_stats: false,
@@ -449,6 +456,67 @@ mod tests {
         .to_string();
         let session = from_json(&json).expect("v6 session migrates");
         assert_eq!(session.tabs[0].cursor_mode, CursorMode::None);
+    }
+
+    #[test]
+    fn v7_panels_gain_a_default_color_axis_label() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 7,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "cursor_mode": "none",
+                "focused_panel_id": "panel-1",
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "xy",
+                    "axis_style": "gutter", "x_signal": "demo/x", "color_signal": "time",
+                    "series": [], "y_range": null, "x_range": null,
+                    "x_label": null, "y_label": null, "time_window": null,
+                    "annotations": [], "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v7 session migrates");
+        assert_eq!(session.tabs[0].panels[0].c_label, None);
+    }
+
+    #[test]
+    fn v8_time_colour_sentinel_becomes_a_flag() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 8,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null,
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "xy",
+                    "axis_style": "gutter", "x_signal": "demo/x", "color_signal": "time",
+                    "series": [], "y_range": null, "x_range": null,
+                    "x_label": null, "y_label": null, "c_label": null,
+                    "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v8 session migrates");
+        let panel = &session.tabs[0].panels[0];
+        assert!(panel.color_by_time);
+        assert_eq!(panel.color_signal, None);
+        assert_eq!(session.tabs[0].maximized_panel_id, None);
     }
 
     #[test]

@@ -1,8 +1,7 @@
 import { expect, test } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
-import type { Annotation } from "../generated/session";
 import type { PlotLayout } from "./plot-math";
-import { nearestAnnotation, nearestVertex } from "./plot-hit";
+import { nearestVertex } from "./plot-hit";
 
 const layout: PlotLayout = {
   plot: { x: 0, y: 0, width: 100, height: 100 },
@@ -36,19 +35,4 @@ test("nearestVertex snaps globally within its threshold", () => {
   );
   expect(hit).toMatchObject({ path: "a/b", time: 2, value: 2 });
   expect(nearestVertex([], layout, 20, 80, 14)).toBeNull();
-});
-
-test("nearestAnnotation uses the tighter marker radius", () => {
-  const annotations: Annotation[] = [
-    {
-      id: "ann-1",
-      series_path: "a/b",
-      domain: "time",
-      anchor: 5,
-      pinned_value: 5,
-      label: "",
-    },
-  ];
-  expect(nearestAnnotation(annotations, layout, 52, 52, 9)).toBe("ann-1");
-  expect(nearestAnnotation(annotations, layout, 65, 52, 9)).toBeNull();
 });

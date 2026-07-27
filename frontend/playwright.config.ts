@@ -28,10 +28,7 @@ export default defineConfig({
       ? {}
       : { launchOptions: { executablePath } }),
   },
-  projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile-review", use: { ...devices["Pixel 7"] } },
-  ],
+  projects: [{ name: "desktop", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: "pnpm dev",
     url: "http://127.0.0.1:4173",

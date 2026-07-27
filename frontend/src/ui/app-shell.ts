@@ -6,7 +6,6 @@ import {
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
-import { LinkedTimeModel } from "../app/linked-time";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
 import {
@@ -45,7 +44,6 @@ const THEME_STORAGE_KEY = "signalscope.theme";
 const SAMPLE_CAP = 8192;
 
 export class AppShell {
-  private readonly time = new LinkedTimeModel();
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
   private signals: SignalSummary[] = [];
@@ -56,6 +54,7 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
+  private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
   private renderScheduled = false;
@@ -469,6 +468,21 @@ export class AppShell {
         this.workspace.toggleAxisStyle(id);
       },
     );
+    for (const [axis, title] of [
+      ["x", "Panel: edit X axis label"],
+      ["y", "Panel: edit Y axis label"],
+      ["c", "Panel: edit color axis label"],
+    ] as const) {
+      this.registerFocusedPanelCommand(
+        `edit-${axis}-axis-label`,
+        title,
+        (id) => {
+          this.workspaceView?.beginAxisEdit(id, axis);
+        },
+        undefined,
+        (id) => this.workspaceView?.canEditAxis(id, axis) ?? false,
+      );
+    }
     this.registerFocusedPanelCommand(
       "close-panel",
       "Close current panel",
@@ -576,7 +590,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.3.2");
+        this.showModeHelp("SignalScope 0.5.0");
       },
     });
     for (const planned of [
@@ -622,12 +636,16 @@ export class AppShell {
     title: string,
     act: (panelId: string) => void,
     keys?: string,
+    enabled?: (panelId: string) => boolean,
   ): void {
     this.commands.register({
       id,
       title,
       ...(keys === undefined ? {} : { keys }),
-      enabled: () => this.workspace.focusedPanelId() !== null,
+      enabled: () => {
+        const panelId = this.workspace.focusedPanelId();
+        return panelId !== null && (enabled?.(panelId) ?? true);
+      },
       run: () => {
         const panelId = this.workspace.focusedPanelId();
         if (panelId !== null) {
@@ -696,7 +714,7 @@ export class AppShell {
               title: "Panel: set color signal (c:)… time",
               hint: "colour by time",
               run: () => {
-                this.workspace.setColorSignal(focused, "time");
+                this.workspace.setColorByTime(focused);
                 this.afterLayoutChange();
               },
             },
@@ -832,13 +850,13 @@ export class AppShell {
       ),
     );
     if (extent === null) return;
-    this.time.setWindow(extent.t0, extent.t1);
+    this.workspace.setLinkedWindow(extent.t0, extent.t1);
     this.renderWindowReadout();
   }
 
-  /** Renders the status-bar window readout from the linked-time model. */
+  /** Renders the status-bar window readout from the session's linked time. */
   private renderWindowReadout(): void {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     required(this.root, ".window-readout").textContent =
       `window ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
   }
@@ -883,9 +901,11 @@ export class AppShell {
     );
     const nextTiles = new Map<string, TileResponse>();
     const nextSamples = new Map<string, SampleResponse>();
+    const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
-        const ids = this.panelSignalIds(panel);
+        const { ids, missing } = this.panelSignalIds(panel);
+        nextMissing.set(panel.id, missing);
         if (ids.length === 0) return;
         const window = this.effectiveWindow(panel);
         try {
@@ -934,6 +954,7 @@ export class AppShell {
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
     this.samplesByPanel = nextSamples;
+    this.missingByPanel = nextMissing;
     this.renderTiles();
   }
 
@@ -941,19 +962,23 @@ export class AppShell {
    * Signal ids a panel needs: its series, plus the XY x signal and the
    * colour channel, which are axes rather than plotted series.
    */
-  private panelSignalIds(panel: PanelState): string[] {
+  private panelSignalIds(panel: PanelState): {
+    ids: string[];
+    missing: string[];
+  } {
     const paths = panel.series.map((series) => series.path);
     if (panel.mode === "xy") {
       if (panel.x_signal !== null) paths.unshift(panel.x_signal);
       if (panel.color_signal !== null) paths.push(panel.color_signal);
     }
-    return [
-      ...new Set(
-        paths
-          .map((path) => this.signalsByPath.get(path)?.signal_id)
-          .filter((id): id is string => id !== undefined),
-      ),
-    ];
+    const ids: string[] = [];
+    const missing: string[] = [];
+    for (const path of new Set(paths)) {
+      const id = this.signalsByPath.get(path)?.signal_id;
+      if (id === undefined) missing.push(path);
+      else ids.push(id);
+    }
+    return { ids, missing };
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
@@ -967,7 +992,7 @@ export class AppShell {
   }
 
   private renderTiles(): void {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     const elapsed =
       this.workspaceView?.renderData(
         this.tilesByPanel,
@@ -978,6 +1003,7 @@ export class AppShell {
             ? { t0: state.t0, t1: state.t1 }
             : this.effectiveWindow(panel);
         },
+        (panelId) => this.missingByPanel.get(panelId) ?? [],
       ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
@@ -986,8 +1012,8 @@ export class AppShell {
     if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return;
-    if (this.time.snapshot().linked && panel.mode === "time") {
-      this.time.setWindow(t0, t1);
+    if (this.workspace.linkedTime().linked && panel.mode === "time") {
+      this.workspace.setLinkedWindow(t0, t1);
       this.renderWindowReadout();
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
@@ -1009,7 +1035,7 @@ export class AppShell {
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     if (state.linked && panel.mode === "time") {
       return { t0: state.t0, t1: state.t1 };
     }
@@ -1097,8 +1123,8 @@ export class AppShell {
       return;
     }
     const cursorT = cursor?.link === "time" ? cursor.x : null;
-    this.time.setCursor(cursorT);
-    const state = this.time.snapshot();
+    this.workspace.setCursorT(cursorT);
+    const state = this.workspace.linkedTime();
     this.workspaceView?.setCursor(state.cursorT);
     this.renderCursorTime();
     this.renderTooltip(
@@ -1129,7 +1155,7 @@ export class AppShell {
     button.title = `Cursor mode: ${mode} — cycle (C)`;
     if (mode !== "track") this.hideTooltip();
     if (mode === "none") {
-      this.time.setCursor(null);
+      this.workspace.setCursorT(null);
       this.workspaceView?.clearCursors();
       this.renderCursorTime();
       this.scheduleLiveValues(null);
@@ -1198,7 +1224,7 @@ export class AppShell {
   }
 
   private renderCursorTime(localHeading?: string): void {
-    const cursorT = this.time.snapshot().cursorT;
+    const cursorT = this.workspace.linkedTime().cursorT;
     required(this.root, ".cursor-time").textContent =
       localHeading ??
       (cursorT === null ? "t —" : `t ${formatCursorTime(cursorT)}`);
@@ -1266,7 +1292,7 @@ export class AppShell {
   }
 
   private toggleLinked(): void {
-    const state = this.time.snapshot();
+    const state = this.workspace.linkedTime();
     const linked = !state.linked;
     if (!linked) {
       for (const panel of this.workspace.panels()) {
@@ -1275,7 +1301,7 @@ export class AppShell {
         }
       }
     }
-    this.time.setLinked(linked);
+    this.workspace.setLinked(linked);
     required(this.root, ".linked-toggle").classList.toggle("active", linked);
     void this.refreshTiles();
   }

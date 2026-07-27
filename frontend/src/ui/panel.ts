@@ -10,24 +10,14 @@ import {
   clamp,
   formatValue,
   insidePlot,
-  invertX,
-  invertY,
-  panRange,
-  panScaledRange,
-  pinchRange,
-  pinchScaledRange,
   projectX,
   projectY,
   valueAtTime,
-  wheelZoomFactor,
-  zoomDragMode,
-  zoomRange,
-  zoomScaledRange,
   type PlotLayout,
   type Range,
-  type ZoomDragMode,
 } from "../app/plot-math";
 import { histogram } from "../app/histogram";
+import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
   prepareFftPlot,
@@ -41,7 +31,7 @@ import {
   type ResolvedAnnotation,
 } from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
-import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
+import { lerpSample, pairSamples, type XyTrace } from "../app/xy";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
@@ -58,6 +48,10 @@ import {
 } from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
 import { required, signalLabel } from "./dom";
+import {
+  PlotInteractionController,
+  type InteractionBox,
+} from "./plot-interactions";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
@@ -77,18 +71,6 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
 ];
 
 const XY_HOVER_RADIUS = 40;
-const TOUCH = {
-  /** Movement that promotes a tap to a pan. */
-  panSlop: 9,
-  /** Finger separation below which an axis pans instead of zooming. */
-  pinchSeparation: 40,
-  longPressMs: 430,
-  longPressRadius: 28,
-  tapRemoveRadius: 16,
-  tapCursorRadius: 48,
-  doubleTapMs: 320,
-  doubleTapRadius: 26,
-} as const;
 
 export interface PanelCallbacks {
   onFocus(id: string): void;
@@ -119,7 +101,11 @@ export interface PanelCallbacks {
   onToggleStats(id: string): void;
   onToggleAxisStyle(id: string): void;
   onRenameTitle(id: string, title: string): void;
-  onEditAxisLabel(id: string, axis: "x" | "y", label: string | null): void;
+  onEditAxisLabel(
+    id: string,
+    axis: "x" | "y" | "c",
+    label: string | null,
+  ): void;
   onSetSeriesStyle(
     id: string,
     path: string,
@@ -144,6 +130,7 @@ export class PanelView {
   private readonly canvas: HTMLCanvasElement;
   private readonly overlay: HTMLCanvasElement;
   private readonly overlayRenderer: OverlayRenderer;
+  private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
   private legendChips: HTMLElement[] = [];
   private lastState: PanelState | null = null;
@@ -167,23 +154,11 @@ export class PanelView {
   }[] = [];
   private cursorT: number | null = null;
   private cursorMode: CursorMode = "none";
-  private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
-  private dragging = false;
+  private box: InteractionBox | null = null;
   private emphasizePath: string | null = null;
   private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
-  private readonly touchPoints = new Map<number, { x: number; y: number }>();
-  private touchMode: "tap" | "pan" | "pinch" | "dead" | null = null;
-  private touchStart: { x: number; y: number } | null = null;
-  private touchStartRanges: { x: Range; y: Range } | null = null;
-  private pinchAnchors: {
-    xA: number;
-    xB: number;
-    yA: number;
-    yB: number;
-  } | null = null;
-  private longPressTimer: number | null = null;
-  private lastTap = { time: 0, x: 0, y: 0 };
+  private hasColorbar = false;
 
   constructor(
     private readonly id: string,
@@ -198,6 +173,44 @@ export class PanelView {
     this.renderer = new CanvasRenderer(this.canvas);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
+    this.interactions = new PlotInteractionController(this.overlay, {
+      layout: () => this.renderer.lastLayout(),
+      applyXRange: (min, max) => {
+        this.applyXRange(min, max);
+      },
+      applyYRange: (min, max) => {
+        this.callbacks.onYRange(this.id, [min, max]);
+      },
+      fitView: () => {
+        this.callbacks.onFitView(this.id);
+      },
+      plotClick: (x, y) => {
+        this.plotClick(x, y);
+      },
+      setGesture: (hint) => {
+        this.callbacks.onGesture(this.id, hint);
+      },
+      setBox: (box) => {
+        this.box = box;
+        this.drawOverlay();
+      },
+      axisEditZone: (x, y) => {
+        const layout = this.renderer.lastLayout();
+        const state = this.lastState;
+        return layout === null || state === null
+          ? null
+          : axisEditZone(
+              layout,
+              state.axis_style,
+              x,
+              y,
+              state.mode === "xy" && this.hasColorbar,
+            );
+      },
+      beginAxisEdit: (axis) => {
+        this.beginAxisEdit(axis);
+      },
+    });
     new ResizeObserver(() => {
       this.layoutLegend();
     }).observe(required(this.element, ".panel-header"));
@@ -324,7 +337,7 @@ export class PanelView {
       else this.callbacks.onDropSignal(this.id, path);
     });
     this.overlay.addEventListener("pointermove", (event) => {
-      if (event.pointerType === "touch" || this.dragging) return;
+      if (this.interactions.isDragging()) return;
       const layout = this.renderer.lastLayout();
       const inside =
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
@@ -339,94 +352,12 @@ export class PanelView {
       );
     });
     this.overlay.addEventListener("pointerleave", () => {
-      if (!this.dragging) this.callbacks.onCursor(this.id, null, null);
+      if (!this.interactions.isDragging()) {
+        this.callbacks.onCursor(this.id, null, null);
+      }
     });
     this.overlay.addEventListener("contextmenu", (event) => {
       event.preventDefault();
-    });
-    this.overlay.addEventListener(
-      "wheel",
-      (event) => {
-        const layout = this.renderer.lastLayout();
-        if (layout === null || !this.interactiveMode()) return;
-        event.preventDefault();
-        const factor = wheelZoomFactor(event.deltaY);
-        const pivotY = invertY(
-          layout,
-          clamp(
-            event.offsetY,
-            layout.plot.y,
-            layout.plot.y + layout.plot.height,
-          ),
-        );
-        const nextY = zoomRange(layout.yRange, factor, pivotY);
-        const pivotX = invertX(
-          layout,
-          clamp(
-            event.offsetX,
-            layout.plot.x,
-            layout.plot.x + layout.plot.width,
-          ),
-        );
-        const nextX = zoomScaledRange(
-          layout.xRange,
-          factor,
-          pivotX,
-          layout.xScale,
-        );
-        if (event.shiftKey) {
-          this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
-        } else if (event.altKey) {
-          this.applyXRange(nextX.min, nextX.max);
-        } else {
-          this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
-          this.applyXRange(nextX.min, nextX.max);
-        }
-      },
-      { passive: false },
-    );
-    this.overlay.addEventListener("pointerdown", (event) => {
-      const layout = this.renderer.lastLayout();
-      if (layout === null || !this.interactiveMode()) return;
-      if (event.pointerType === "touch") {
-        this.beginTouch(event, layout);
-        return;
-      }
-      const isPan =
-        event.button === 1 ||
-        event.button === 2 ||
-        (event.button === 0 && (event.ctrlKey || event.metaKey));
-      if (isPan) {
-        event.preventDefault();
-        this.beginPan(event, layout);
-      } else if (event.button === 0) {
-        this.beginBoxOrClick(event, layout);
-      }
-    });
-    this.overlay.addEventListener("pointermove", (event) => {
-      if (event.pointerType === "touch") this.moveTouch(event);
-    });
-    this.overlay.addEventListener("pointerup", (event) => {
-      if (event.pointerType === "touch") this.endTouch(event);
-    });
-    this.overlay.addEventListener("pointercancel", (event) => {
-      if (event.pointerType === "touch") this.endTouch(event);
-    });
-    this.overlay.addEventListener("dblclick", (event) => {
-      const layout = this.renderer.lastLayout();
-      const state = this.lastState;
-      if (layout === null || state === null || !this.interactiveMode()) return;
-      const zone = axisEditZone(
-        layout,
-        state.axis_style,
-        event.offsetX,
-        event.offsetY,
-      );
-      if (zone !== null) {
-        this.beginAxisEdit(zone);
-      } else if (insidePlot(layout, event.offsetX, event.offsetY)) {
-        this.callbacks.onFitView(this.id);
-      }
     });
   }
 
@@ -455,15 +386,16 @@ export class PanelView {
       cChip.replaceChildren(
         chipPrefix("c:"),
         document.createTextNode(
-          state.color_signal === null
-            ? "none"
-            : state.color_signal === "time"
-              ? "time"
+          state.color_by_time
+            ? "time"
+            : state.color_signal === null
+              ? "none"
               : signalLabel(state.color_signal),
         ),
       );
-      cChip.title =
-        state.color_signal === null
+      cChip.title = state.color_by_time
+        ? "Colour channel: time — click to clear"
+        : state.color_signal === null
           ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
@@ -512,6 +444,7 @@ export class PanelView {
     tiles: TileResponse | null,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
+    missing: readonly string[] = [],
   ): number {
     this.lastState = state;
     this.lastTiles = tiles;
@@ -519,11 +452,18 @@ export class PanelView {
     this.lastWindow = { ...window };
     this.preparedPlot = null;
     this.domainSeries = [];
+    this.hasColorbar = false;
     const elapsed = this.renderForMode(state, tiles, samples, window);
+    this.interactions.setPolicy(
+      (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
+    );
     this.renderStats();
     const annotations = this.resolvedAnnotations(state);
     this.renderAnnotationList(state, annotations);
     this.drawOverlay(annotations);
+    if (missing.length > 0) {
+      this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
+    }
     return elapsed;
   }
 
@@ -561,11 +501,13 @@ export class PanelView {
       window,
     });
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
-    const yRange = this.yAxis.resolve(
+    const ranges = this.resolvePlotRanges(
+      state,
+      this.preparedPlot,
+      window,
       seriesKey,
-      () => tiles.series.flatMap((tile) => tile.bins),
-      state.y_range,
     );
+    if (ranges === null) return 0;
     const options: RenderOptions = {
       xLabel: state.x_label ?? "time (s)",
       yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
@@ -575,7 +517,7 @@ export class PanelView {
       dashes: shown.map(
         (tile) => bySeries.get(tile.signal_path)?.dash ?? "solid",
       ),
-      yRange,
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       widths: shown.map((tile) => bySeries.get(tile.signal_path)?.width ?? 1.4),
       ...(this.emphasizePath !== null &&
@@ -587,11 +529,7 @@ export class PanelView {
           }
         : {}),
     };
-    return this.renderer.render(
-      response,
-      { min: window.t0, max: window.t1 },
-      options,
-    );
+    return this.renderer.render(response, ranges.x, options);
   }
 
   private renderXy(
@@ -621,10 +559,10 @@ export class PanelView {
     }
     if (this.xyTraces.length === 0) return 0;
     const colorSeries: "time" | SampleResponse["series"][number] | null =
-      state.color_signal === null
-        ? null
-        : state.color_signal === "time"
-          ? "time"
+      state.color_by_time
+        ? "time"
+        : state.color_signal === null
+          ? null
           : (byPath.get(state.color_signal) ?? null);
     const colorFor = (trace: XyTrace): number[] | null => {
       if (colorSeries === null) return null;
@@ -647,6 +585,7 @@ export class PanelView {
       colorSeries !== null &&
       Number.isFinite(colorMin) &&
       Number.isFinite(colorMax);
+    this.hasColorbar = hasColor;
     const colorPadding =
       hasColor && colorMin === colorMax
         ? Math.max(1, Math.abs(colorMin) * 0.05)
@@ -654,12 +593,22 @@ export class PanelView {
     const colorDomainMin = colorMin - colorPadding;
     const colorDomainMax = colorMax + colorPadding;
     const colorSpan = colorDomainMax - colorDomainMin;
-    const traces = this.xyTraces.map((entry) => entry.trace);
-    const xRange =
-      state.x_range ?? traceExtent(traces, "x", window.t0, window.t1);
-    const yRange =
-      state.y_range ?? traceExtent(traces, "y", window.t0, window.t1);
-    if (xRange === null || yRange === null) return 0;
+    this.preparedPlot = prepareXyPlot({
+      x: { path: state.x_signal, values: xSeries.values },
+      series: this.xyTraces.map((entry, index) => ({
+        ...entry,
+        colorValues: colorColumns[index] ?? null,
+      })),
+      color:
+        colorSeries === null
+          ? null
+          : {
+              path: state.color_by_time ? "time" : (state.color_signal ?? ""),
+            },
+      window,
+    });
+    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
+    if (ranges === null) return 0;
     const paths: PlotPath[] = [];
     for (const entry of this.xyTraces) {
       // Whole trajectory dimmed underneath, the windowed part lit on top.
@@ -696,8 +645,8 @@ export class PanelView {
             .filter((series) => series.visible)
             .map((series) => byPath.get(series.path)?.unit ?? null),
         ),
-      xRange: [xRange[0], xRange[1]],
-      yRange: [yRange[0], yRange[1]],
+      xRange: [ranges.x.min, ranges.x.max],
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       ...(hasColor
         ? {
@@ -705,29 +654,14 @@ export class PanelView {
               min: colorDomainMin,
               max: colorDomainMax,
               label:
-                state.color_signal === "time"
+                state.c_label ??
+                (colorSeries === "time"
                   ? "t (s)"
-                  : axisName(
-                      state.color_signal ?? "",
-                      colorSeries === "time" ? null : colorSeries.unit,
-                    ),
+                  : axisName(state.color_signal ?? "", colorSeries.unit)),
             },
           }
         : {}),
     };
-    this.preparedPlot = prepareXyPlot({
-      x: { path: state.x_signal, values: xSeries.values },
-      series: this.xyTraces.map((entry, index) => ({
-        ...entry,
-        colorValues: colorColumns[index] ?? null,
-      })),
-      color:
-        colorSeries === null
-          ? null
-          : {
-              path: state.color_signal ?? "time",
-            },
-    });
     return this.renderer.renderPaths(paths, options);
   }
 
@@ -741,8 +675,6 @@ export class PanelView {
       samples.series.map((series) => [series.signal_path, series]),
     );
     const paths: PlotPath[] = [];
-    let minFrequency = Number.POSITIVE_INFINITY;
-    let maxFrequency = 0;
     for (const series of state.series) {
       if (!series.visible) continue;
       const source = byPath.get(series.path);
@@ -766,11 +698,6 @@ export class PanelView {
         dash: style.dash,
         width: series.width,
       });
-      minFrequency = Math.min(minFrequency, result.frequency[0] ?? 1);
-      maxFrequency = Math.max(
-        maxFrequency,
-        result.frequency[result.frequency.length - 1] ?? 1,
-      );
     }
     this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
     this.preparedPlot = prepareFftPlot({
@@ -782,13 +709,13 @@ export class PanelView {
       })),
     });
     if (paths.length === 0) return 0;
-    const xRange = state.x_range ?? [minFrequency, maxFrequency];
-    const yRange = state.y_range ?? [-90, 3];
+    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
+    if (ranges === null) return 0;
     return this.renderer.renderPaths(paths, {
       xLabel: state.x_label ?? "frequency (Hz), log",
       yLabel: state.y_label ?? "amplitude (dB)",
-      xRange: [xRange[0], xRange[1]],
-      yRange: [yRange[0], yRange[1]],
+      xRange: [ranges.x.min, ranges.x.max],
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       xScale: "log",
     });
@@ -818,7 +745,6 @@ export class PanelView {
     this.setModeEmpty(binned === null, "No values in view.");
     if (binned === null) return 0;
     const edges = binned.edges;
-    let peak = 0;
     const histogramSeries: {
       path: string;
       colorIndex: number;
@@ -832,7 +758,6 @@ export class PanelView {
       // distribution rather than a line chart.
       points.push(edges[0] ?? 0, 0);
       counts.forEach((count, bin) => {
-        peak = Math.max(peak, count);
         points.push(edges[bin] ?? 0, count, edges[bin + 1] ?? 0, count);
       });
       points.push(edges[edges.length - 1] ?? 0, 0);
@@ -860,16 +785,39 @@ export class PanelView {
       edges,
       series: histogramSeries,
     });
+    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
+    if (ranges === null) return 0;
     const units = visible.map(
       (series) => byPath.get(series.path)?.unit ?? null,
     );
     return this.renderer.renderPaths(paths, {
       xLabel: state.x_label ?? yLabel(units),
       yLabel: state.y_label ?? "sample count",
-      xRange: [edges[0] ?? 0, edges[edges.length - 1] ?? 1],
-      yRange: [0, Math.max(1, peak) * 1.06],
+      xRange: [ranges.x.min, ranges.x.max],
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
     });
+  }
+
+  private resolvePlotRanges(
+    state: PanelState,
+    plot: PreparedPlot,
+    window: { t0: number; t1: number },
+    seriesKey = "",
+  ): { x: Range; y: Range } | null {
+    const automatic = plot.autoRanges();
+    const stickyY = plot.interaction.stickyAutoY
+      ? this.yAxis.resolve(seriesKey, () => automatic.y, state.y_range)
+      : automatic.y;
+    return resolveRanges(
+      plot.interaction,
+      {
+        x: state.x_range,
+        y: plot.interaction.stickyAutoY ? null : state.y_range,
+      },
+      { x: automatic.x, y: stickyY },
+      window,
+    );
   }
 
   /**
@@ -982,195 +930,6 @@ export class PanelView {
     }
   }
 
-  private beginTouch(event: PointerEvent, layout: PlotLayout): void {
-    this.overlay.setPointerCapture(event.pointerId);
-    this.touchPoints.set(event.pointerId, {
-      x: event.offsetX,
-      y: event.offsetY,
-    });
-    if (this.touchPoints.size === 2) {
-      this.clearLongPress();
-      this.box = null;
-      this.drawOverlay();
-      const [first, second] = [...this.touchPoints.values()];
-      if (first === undefined || second === undefined) return;
-      // Anchors are captured in data space so both stay under their finger.
-      this.pinchAnchors = {
-        xA: invertX(layout, first.x),
-        xB: invertX(layout, second.x),
-        yA: invertY(layout, first.y),
-        yB: invertY(layout, second.y),
-      };
-      this.touchMode = "pinch";
-      return;
-    }
-    if (this.touchPoints.size > 2) {
-      this.touchMode = "dead";
-      return;
-    }
-    this.touchStart = { x: event.offsetX, y: event.offsetY };
-    this.touchStartRanges = {
-      x: { ...layout.xRange },
-      y: { ...layout.yRange },
-    };
-    this.touchMode = "tap";
-    this.longPressTimer = window.setTimeout(() => {
-      this.longPressTimer = null;
-      if (this.touchMode !== "tap" || this.touchStart === null) return;
-      this.pinAt(this.touchStart.x, this.touchStart.y, TOUCH.longPressRadius);
-      const vibrate = (navigator as { vibrate?: Navigator["vibrate"] }).vibrate;
-      vibrate?.call(navigator, [8]);
-      this.touchMode = "dead";
-    }, TOUCH.longPressMs);
-  }
-
-  private moveTouch(event: PointerEvent): void {
-    const layout = this.renderer.lastLayout();
-    if (
-      layout === null ||
-      this.touchMode === null ||
-      this.touchMode === "dead"
-    ) {
-      return;
-    }
-    const point = this.touchPoints.get(event.pointerId);
-    if (point === undefined) return;
-    point.x = event.offsetX;
-    point.y = event.offsetY;
-    if (this.touchMode === "pinch") {
-      this.applyPinch(layout);
-      return;
-    }
-    const start = this.touchStart;
-    const ranges = this.touchStartRanges;
-    if (start === null || ranges === null) return;
-    if (
-      this.touchMode === "tap" &&
-      Math.hypot(event.offsetX - start.x, event.offsetY - start.y) >
-        TOUCH.panSlop
-    ) {
-      this.clearLongPress();
-      this.touchMode = "pan";
-    }
-    if (this.touchMode !== "pan") return;
-    this.panFrom(layout, ranges, start, {
-      x: event.offsetX,
-      y: event.offsetY,
-    });
-  }
-
-  /** Pans both axes so the data under `from` follows the pointer to `to`. */
-  private panFrom(
-    layout: PlotLayout,
-    ranges: { x: Range; y: Range },
-    from: { x: number; y: number },
-    to: { x: number; y: number },
-  ): void {
-    const nextX = panScaledRange(
-      ranges.x,
-      (from.x - to.x) / layout.plot.width,
-      layout.xScale,
-    );
-    const nextY = panRange(
-      ranges.y,
-      ((to.y - from.y) / layout.plot.height) * (ranges.y.max - ranges.y.min),
-    );
-    this.applyXRange(nextX.min, nextX.max);
-    this.callbacks.onYRange(this.id, [nextY.min, nextY.max]);
-  }
-
-  private applyPinch(layout: PlotLayout): void {
-    const anchors = this.pinchAnchors;
-    const [first, second] = [...this.touchPoints.values()];
-    if (anchors === null || first === undefined || second === undefined) return;
-    const { plot } = layout;
-    if (Math.abs(first.x - second.x) > TOUCH.pinchSeparation) {
-      const next = pinchScaledRange(
-        anchors.xA,
-        anchors.xB,
-        first.x,
-        second.x,
-        plot.x,
-        plot.x + plot.width,
-        layout.xScale,
-      );
-      if (next !== null) this.applyXRange(next.min, next.max);
-    }
-    if (Math.abs(first.y - second.y) > TOUCH.pinchSeparation) {
-      const next = pinchRange(
-        anchors.yA,
-        anchors.yB,
-        first.y,
-        second.y,
-        plot.y,
-        plot.y + plot.height,
-      );
-      if (next !== null) this.callbacks.onYRange(this.id, [next.min, next.max]);
-    }
-  }
-
-  private endTouch(event: PointerEvent): void {
-    this.touchPoints.delete(event.pointerId);
-    if (this.touchMode === "pinch" && this.touchPoints.size < 2) {
-      this.touchMode = this.touchPoints.size === 0 ? null : "dead";
-      this.pinchAnchors = null;
-      return;
-    }
-    if (this.touchMode !== "tap") {
-      if (this.touchPoints.size === 0) this.touchMode = null;
-      return;
-    }
-    this.clearLongPress();
-    this.touchMode = null;
-    const now = performance.now();
-    if (
-      now - this.lastTap.time < TOUCH.doubleTapMs &&
-      Math.hypot(
-        event.offsetX - this.lastTap.x,
-        event.offsetY - this.lastTap.y,
-      ) < TOUCH.doubleTapRadius
-    ) {
-      this.lastTap = { time: 0, x: 0, y: 0 };
-      this.callbacks.onFitView(this.id);
-      return;
-    }
-    this.lastTap = { time: now, x: event.offsetX, y: event.offsetY };
-    if (this.removeAt(event.offsetX, event.offsetY, TOUCH.tapRemoveRadius)) {
-      return;
-    }
-    this.publishTouchCursor(event);
-  }
-
-  private clearLongPress(): void {
-    if (this.longPressTimer !== null) {
-      window.clearTimeout(this.longPressTimer);
-      this.longPressTimer = null;
-    }
-  }
-
-  private publishTouchCursor(event: PointerEvent): void {
-    const layout = this.renderer.lastLayout();
-    if (layout === null) return;
-    if (!insidePlot(layout, event.offsetX, event.offsetY)) {
-      this.callbacks.onCursor(this.id, null, null);
-      return;
-    }
-    const cursor = this.cursorAt(
-      layout,
-      event.offsetX,
-      event.offsetY,
-      TOUCH.tapCursorRadius,
-    );
-    const rect = this.element.getBoundingClientRect();
-    this.callbacks.onCursor(
-      this.id,
-      cursor,
-      // Dock at the panel's top edge so the finger does not cover the
-      // readout (prototype behaviour).
-      cursor === null ? null : { x: rect.left + rect.width / 2, y: rect.top },
-    );
-  }
-
   private cursorAt(
     layout: PlotLayout,
     offsetX: number,
@@ -1274,128 +1033,6 @@ export class PanelView {
         },
       ];
     });
-  }
-
-  private beginPan(down: PointerEvent, layout: PlotLayout): void {
-    this.dragging = true;
-    this.callbacks.onGesture(this.id, "drag: pan");
-    this.overlay.setPointerCapture(down.pointerId);
-    const startX = { ...layout.xRange };
-    const startY = { ...layout.yRange };
-    const move = (event: PointerEvent): void => {
-      this.panFrom(
-        layout,
-        { x: startX, y: startY },
-        { x: down.offsetX, y: down.offsetY },
-        { x: event.offsetX, y: event.offsetY },
-      );
-    };
-    const finish = (): void => {
-      this.overlay.removeEventListener("pointermove", move);
-      this.overlay.removeEventListener("pointerup", finish);
-      this.overlay.removeEventListener("pointercancel", finish);
-      this.dragging = false;
-      this.callbacks.onGesture(this.id, null);
-    };
-    this.overlay.addEventListener("pointermove", move);
-    this.overlay.addEventListener("pointerup", finish);
-    this.overlay.addEventListener("pointercancel", finish);
-  }
-
-  private beginBoxOrClick(down: PointerEvent, layout: PlotLayout): void {
-    const start = { x: down.offsetX, y: down.offsetY };
-    let promoted = false;
-    // Which axes the drag chose, kept from `move` so `finish` need not
-    // recover it by comparing the box against the plot bounds.
-    let dragMode: ZoomDragMode = "xy";
-    const clampX = (value: number): number =>
-      clamp(value, layout.plot.x, layout.plot.x + layout.plot.width);
-    const clampY = (value: number): number =>
-      clamp(value, layout.plot.y, layout.plot.y + layout.plot.height);
-    const move = (event: PointerEvent): void => {
-      if (
-        !promoted &&
-        Math.hypot(event.offsetX - start.x, event.offsetY - start.y) <= 4
-      ) {
-        return;
-      }
-      if (!promoted) {
-        promoted = true;
-        this.dragging = true;
-        this.overlay.setPointerCapture(down.pointerId);
-      }
-      dragMode = zoomDragMode(event.offsetX - start.x, event.offsetY - start.y);
-      this.callbacks.onGesture(
-        this.id,
-        dragMode === "xy"
-          ? "drag: zoom"
-          : `drag: zoom ${dragMode.toUpperCase()}`,
-      );
-      // An axis the drag excluded spans the whole plot, so the marquee reads
-      // as a band rather than a rectangle.
-      const spansX = dragMode !== "y";
-      const spansY = dragMode !== "x";
-      this.box = {
-        x0: spansX ? clampX(start.x) : layout.plot.x,
-        y0: spansY ? clampY(start.y) : layout.plot.y,
-        x1: spansX ? clampX(event.offsetX) : layout.plot.x + layout.plot.width,
-        y1: spansY ? clampY(event.offsetY) : layout.plot.y + layout.plot.height,
-      };
-      this.drawOverlay();
-    };
-    const finish = (event: PointerEvent): void => {
-      cleanup();
-      const box = this.box;
-      this.box = null;
-      this.drawOverlay();
-      if (!promoted) {
-        this.plotClick(event.offsetX, event.offsetY);
-        return;
-      }
-      if (box === null) return;
-      // Each axis the drag chose must clear the 6px dead zone on its own.
-      const zoomX = dragMode !== "y";
-      const zoomY = dragMode !== "x";
-      if (zoomX && Math.abs(box.x1 - box.x0) <= 6) return;
-      if (zoomY && Math.abs(box.y1 - box.y0) <= 6) return;
-      if (zoomY) {
-        this.callbacks.onYRange(this.id, [
-          invertY(layout, Math.max(box.y0, box.y1)),
-          invertY(layout, Math.min(box.y0, box.y1)),
-        ]);
-      }
-      if (zoomX) {
-        this.applyXRange(
-          invertX(layout, Math.min(box.x0, box.x1)),
-          invertX(layout, Math.max(box.x0, box.x1)),
-        );
-      }
-    };
-    const cancel = (): void => {
-      cleanup();
-      this.box = null;
-      this.drawOverlay();
-    };
-    const cleanup = (): void => {
-      this.overlay.removeEventListener("pointermove", move);
-      this.overlay.removeEventListener("pointerup", finish);
-      this.overlay.removeEventListener("pointercancel", cancel);
-      this.dragging = false;
-      this.callbacks.onGesture(this.id, null);
-    };
-    this.overlay.addEventListener("pointermove", move);
-    this.overlay.addEventListener("pointerup", finish);
-    this.overlay.addEventListener("pointercancel", cancel);
-  }
-
-  private interactiveMode(): boolean {
-    const interaction = this.preparedPlot?.interaction;
-    if (interaction === undefined) return false;
-    return (
-      interaction.pan.size !== 0 ||
-      interaction.zoom.size !== 0 ||
-      interaction.fit
-    );
   }
 
   /**
@@ -1579,7 +1216,12 @@ export class PanelView {
     selection?.addRange(range);
   }
 
-  private beginAxisEdit(axis: "x" | "y"): void {
+  canEditAxis(axis: "x" | "y" | "c"): boolean {
+    return axis !== "c" || (this.lastState?.mode === "xy" && this.hasColorbar);
+  }
+
+  beginAxisEdit(axis: "x" | "y" | "c"): void {
+    if (!this.canEditAxis(axis)) return;
     const wrap = required<HTMLElement>(this.element, ".plot-wrap");
     if (wrap.querySelector(".axis-label-editor") !== null) return;
     const state = this.lastState;
@@ -1587,10 +1229,20 @@ export class PanelView {
     input.className = `axis-label-editor axis-label-editor-${axis}`;
     input.setAttribute(
       "aria-label",
-      axis === "x" ? "X axis name" : "Y axis name",
+      axis === "x"
+        ? "X axis name"
+        : axis === "y"
+          ? "Y axis name"
+          : "Color axis name",
     );
-    input.value = (axis === "x" ? state?.x_label : state?.y_label) ?? "";
-    input.placeholder = axis === "x" ? "time (s)" : "value";
+    input.value =
+      (axis === "x"
+        ? state?.x_label
+        : axis === "y"
+          ? state?.y_label
+          : state?.c_label) ?? "";
+    input.placeholder =
+      axis === "x" ? "time (s)" : axis === "y" ? "value" : "color";
     let cancelled = false;
     input.addEventListener("keydown", (event) => {
       event.stopPropagation();
@@ -1915,8 +1567,17 @@ function axisEditZone(
   axisStyle: AxisStyle,
   px: number,
   py: number,
-): "x" | "y" | null {
+  hasColorbar: boolean,
+): "x" | "y" | "c" | null {
   const { plot } = layout;
+  if (
+    hasColorbar &&
+    px > plot.x + plot.width &&
+    py >= plot.y &&
+    py <= plot.y + plot.height
+  ) {
+    return "c";
+  }
   if (axisStyle === "inline") {
     if (px <= plot.x + 90 && py <= plot.y + 18) return "y";
     if (px >= plot.x + plot.width - 90 && py >= plot.y + plot.height - 18) {

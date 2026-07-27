@@ -1,5 +1,4 @@
 /.direnv/
-/.agtx/
 /build/
 /target/
 /result
@@ -11,4 +10,9 @@
 *.log
 .DS_Store
 *.sspyr
-*.png
+/build/**/*.png
+/frontend/dist/**/*.png
+/frontend/playwright-report/**/*.png
+/frontend/test-results/**/*.png
+/shell/src-tauri/gen/**/*.png
+/Screenshot*.png

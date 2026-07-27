@@ -10,6 +10,34 @@ function widths(model: WorkspaceModel, rowIndex: number): number[] {
   return model.layout()[rowIndex]?.panels.map((cell) => cell.width) ?? [];
 }
 
+describe("linked time", () => {
+  it("serializes linked-time changes into the session", () => {
+    const model = new WorkspaceModel();
+    model.setLinked(false);
+    model.setLinkedWindow(5, 15);
+    model.setCursorT(12.5);
+    expect(model.snapshot().linked_time).toEqual({
+      t0: 5,
+      t1: 15,
+      linked: false,
+      cursorT: 12.5,
+      mode: "fixed",
+      paused: false,
+    });
+  });
+
+  it("rejects a non-increasing window", () => {
+    const model = new WorkspaceModel();
+    expect(() => model.setLinkedWindow(3, 3)).toThrow("finite and increasing");
+  });
+
+  it("clears non-finite cursor times", () => {
+    const model = new WorkspaceModel();
+    model.setCursorT(Number.NaN);
+    expect(model.snapshot().linked_time.cursorT).toBeNull();
+  });
+});
+
 describe("WorkspaceModel", () => {
   it("stores cursor mode independently for each workspace", () => {
     const model = new WorkspaceModel();
@@ -198,6 +226,17 @@ describe("WorkspaceModel", () => {
     expect(slots).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
+  it("colour-by-time replaces the colour signal", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setColorSignal(panel.id, "demo/speed");
+    model.setColorByTime(panel.id);
+    expect(model.panel(panel.id)?.color_by_time).toBe(true);
+    expect(model.panel(panel.id)?.color_signal).toBeNull();
+    model.setColorSignal(panel.id, null);
+    expect(model.panel(panel.id)?.color_by_time).toBe(false);
+  });
+
   it("keeps the user dash default solid and writes the spec width", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -264,13 +303,17 @@ describe("WorkspaceModel", () => {
     const panel = model.addPanelRow();
     model.renamePanel(panel.id, "Body velocity");
     model.setAxisLabel(panel.id, "y", "velocity (m/s)");
+    model.setAxisLabel(panel.id, "c", "flight phase");
     model.setPanelTimeWindow(panel.id, [2, 8]);
     expect(model.panel(panel.id)).toMatchObject({
       title: "Body velocity",
       x_label: null,
       y_label: "velocity (m/s)",
+      c_label: "flight phase",
       time_window: [2, 8],
     });
+    model.setAxisLabel(panel.id, "c", null);
+    expect(model.panel(panel.id)?.c_label).toBeNull();
     model.setPanelTimeWindow(panel.id, null);
     expect(model.panel(panel.id)?.time_window).toBeNull();
   });
@@ -395,6 +438,15 @@ describe("WorkspaceModel", () => {
     expect(model.maximizedPanelId()).toBeNull();
   });
 
+  it("keeps the maximized panel in the session snapshot", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.toggleMaximize(panel.id);
+    expect(model.snapshot().tabs[0]?.maximized_panel_id).toBe(panel.id);
+    model.toggleMaximize(panel.id);
+    expect(model.snapshot().tabs[0]?.maximized_panel_id).toBeNull();
+  });
+
   it("restores the layout before adding or splitting panels", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
@@ -426,11 +478,13 @@ describe("WorkspaceModel", () => {
       axis_style: "gutter",
       x_signal: null,
       color_signal: null,
+      color_by_time: false,
       series: [],
       y_range: null,
       x_range: null,
       x_label: null,
       y_label: null,
+      c_label: null,
       time_window: null,
       annotations: [],
       show_stats: false,

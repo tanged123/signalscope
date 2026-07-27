@@ -67,29 +67,6 @@ pub fn smooth(values: &[f64], window: usize) -> Vec<f64> {
         .collect()
 }
 
-/// Linearly interpolates a value at `query`.
-///
-/// # Panics
-///
-/// Panics when `time` and `values` have different lengths.
-#[must_use]
-pub fn lerp_at(time: &[f64], values: &[f64], query: f64) -> f64 {
-    assert_eq!(time.len(), values.len(), "time/value lengths differ");
-    if time.is_empty() || query < time[0] || query > time[time.len() - 1] {
-        return f64::NAN;
-    }
-    match time.binary_search_by(|value| value.total_cmp(&query)) {
-        Ok(index) => values[index],
-        Err(0) => values[0],
-        Err(index) if index == time.len() => values[index - 1],
-        Err(index) => {
-            let left = index - 1;
-            let fraction = (query - time[left]) / (time[index] - time[left]);
-            values[left] + (values[index] - values[left]) * fraction
-        }
-    }
-}
-
 /// A decimated slice of a signal restricted to a time window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SampleSlice {
@@ -168,7 +145,6 @@ mod tests {
 
         assert_eq!(derivative(&time, &values), [2.0, 2.0, 2.0]);
         assert_eq!(integrate(&time, &values), [0.0, 1.0, 4.0]);
-        assert_eq!(lerp_at(&time, &values, 0.5), 1.0);
     }
 
     #[test]

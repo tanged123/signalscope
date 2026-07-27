@@ -17,7 +17,6 @@ export class WorkspaceTabsView {
     const tabElements = tabs.map((tab) => {
       const item = document.createElement("div");
       item.className = `workspace-tab ${tab.id === activeId ? "active" : ""}`;
-      item.dataset.tabId = tab.id;
 
       const select = document.createElement("button");
       select.className = "workspace-tab-select";

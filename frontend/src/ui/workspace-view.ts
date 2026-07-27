@@ -110,6 +110,7 @@ export class WorkspaceView {
     tilesByPanel: ReadonlyMap<string, TileResponse>,
     samplesByPanel: ReadonlyMap<string, SampleResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
+    missingFor: (panelId: string) => readonly string[],
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -123,6 +124,7 @@ export class WorkspaceView {
             tilesByPanel.get(panel.id) ?? null,
             samplesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
+            missingFor(panel.id),
           ) ?? 0;
     }
     return total;
@@ -151,6 +153,14 @@ export class WorkspaceView {
 
   resetYAxis(id: string): void {
     this.views.get(id)?.resetYAxis();
+  }
+
+  canEditAxis(id: string, axis: "x" | "y" | "c"): boolean {
+    return this.views.get(id)?.canEditAxis(axis) ?? false;
+  }
+
+  beginAxisEdit(id: string, axis: "x" | "y" | "c"): void {
+    this.views.get(id)?.beginAxisEdit(axis);
   }
 
   /** The rendered plot width of a panel in CSS pixels, 0 when unmounted. */

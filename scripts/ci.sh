@@ -13,13 +13,14 @@ Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|build|appimag
 Each named mode matches the GitHub Actions job with the same name:
 
   flake     nix flake check; includes the treefmt formatting gate.
-  format    treefmt --fail-on-change (fast local shortcut for the flake gate).
+  format    read-only formatting check in an isolated copy (fast local shortcut
+            for the flake gate). Run ./scripts/format.sh with no arguments to fix.
   quality   Deterministic dependency, shell, workflow, spelling, and unused-code
             checks. RustSec advisory checks need network access on a cold cache.
   rust      cargo clippy plus the full cargo test suite.
   frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
             snapshot artifact checks.
-  e2e       Playwright desktop and mobile-review smoke tests.
+  e2e       Playwright desktop smoke tests.
   build     Native Tauri bundles via ./scripts/build.sh native.
   appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
 
@@ -43,8 +44,8 @@ esac
 
 ensure_dev_shell "$@"
 
-check_format() {
-  treefmt --fail-on-change
+check_format_read_only() {
+  "$signalscope_scripts_dir/format.sh" --check
 }
 
 check_e2e() {
@@ -53,7 +54,7 @@ check_e2e() {
 
 case "$mode" in
 all)
-  check_format
+  check_format_read_only
   quality_checks
   rust_checks
   frontend_checks
@@ -61,7 +62,7 @@ all)
   check_e2e
   ;;
 format)
-  check_format
+  check_format_read_only
   ;;
 quality)
   quality_checks

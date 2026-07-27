@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 9,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -67,11 +67,13 @@
         "axis_style": "AxisStyle",
         "x_signal": "string?",
         "color_signal": "string?",
+        "color_by_time": "bool",
         "series": "SeriesState[]",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
         "x_label": "string?",
         "y_label": "string?",
+        "c_label": "string?",
         "time_window": "f64[2]?",
         "annotations": "Annotation[]",
         "show_stats": "bool"
@@ -98,6 +100,7 @@
         "title": "string",
         "cursor_mode": "CursorMode",
         "focused_panel_id": "string?",
+        "maximized_panel_id": "string?",
         "panels": "PanelState[]",
         "layout": "LayoutRow[]"
       }

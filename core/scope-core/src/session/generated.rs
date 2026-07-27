@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 7;
+pub const SESSION_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -102,6 +102,7 @@ pub struct PanelState {
     pub x_signal: Option<String>,
     #[serde(default)]
     pub color_signal: Option<String>,
+    pub color_by_time: bool,
     pub series: Vec<SeriesState>,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
@@ -111,6 +112,8 @@ pub struct PanelState {
     pub x_label: Option<String>,
     #[serde(default)]
     pub y_label: Option<String>,
+    #[serde(default)]
+    pub c_label: Option<String>,
     #[serde(default)]
     pub time_window: Option<[f64; 2]>,
     pub annotations: Vec<Annotation>,
@@ -136,6 +139,8 @@ pub struct WorkspaceTab {
     pub cursor_mode: CursorMode,
     #[serde(default)]
     pub focused_panel_id: Option<String>,
+    #[serde(default)]
+    pub maximized_panel_id: Option<String>,
     pub panels: Vec<PanelState>,
     pub layout: Vec<LayoutRow>,
 }

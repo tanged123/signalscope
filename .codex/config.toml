@@ -1,3 +1,0 @@
-[mcp_servers.agtx]
-command = "agtx"
-args = ["mcp-serve", "."]

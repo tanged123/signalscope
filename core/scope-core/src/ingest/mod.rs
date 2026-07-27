@@ -6,11 +6,7 @@ mod mcap;
 pub use self::csv::CsvDecoder;
 pub use self::mcap::McapDecoder;
 
-use std::{
-    fs::File,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::{fs::File, io::Read, path::Path};
 
 use crate::store::{SignalId, SignalStore, SourceId, StoreError};
 use thiserror::Error;
@@ -18,7 +14,6 @@ use thiserror::Error;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IngestSummary {
     pub source_id: SourceId,
-    pub source_path: PathBuf,
     pub row_count: usize,
     pub signals: Vec<SignalId>,
 }

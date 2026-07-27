@@ -17,21 +17,14 @@ expect_status() {
 }
 
 check_ci_results() {
-  env \
-    VERSION_RESULT="${1:-success}" \
-    FLAKE_RESULT="${2:-success}" \
-    QUALITY_RESULT="${3:-success}" \
-    RUST_RESULT="${4:-success}" \
-    FRONTEND_RESULT="${5:-success}" \
-    E2E_RESULT="${6:-success}" \
-    COVERAGE_RESULT="${7:-success}" \
-    "$script_dir/check-ci-results.sh"
+  env NEEDS_JSON="$1" "$script_dir/check-ci-results.sh"
 }
 
-expect_status 0 check_ci_results
-expect_status 0 check_ci_results success skipped
-expect_status 1 check_ci_results success success failure
-expect_status 1 check_ci_results success success success cancelled
+expect_status 0 check_ci_results '{"version":{"result":"success"},"flake":{"result":"success"}}'
+expect_status 0 check_ci_results '{"version":{"result":"success"},"flake":{"result":"skipped"}}'
+expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"result":"failure"}}'
+expect_status 1 check_ci_results '{"version":{"result":"cancelled"},"flake":{"result":"success"}}'
+expect_status 1 check_ci_results ''
 
 asset_dir="$(mktemp -d)"
 trap 'rmdir "$asset_dir"' EXIT

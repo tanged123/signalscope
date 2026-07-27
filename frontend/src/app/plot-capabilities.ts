@@ -8,22 +8,19 @@ import { nearestVertex } from "./plot-hit";
 import {
   formatValue,
   invertX,
+  paddedExtent,
   projectX,
   projectY,
   valueAtTime,
   type PlotLayout,
 } from "./plot-math";
 import { visibleStats } from "./stats";
-import { lerpSample, type XyTrace } from "./xy";
+import { lerpSample, traceExtent, type XyTrace } from "./xy";
 import { nearestXyPoint } from "./xy-hit";
 
 interface PlotPoint {
   x: number;
   y: number;
-}
-
-interface PlotFrame {
-  kind: "tiles" | "paths" | "empty";
 }
 
 export interface PlotInteractionPolicy {
@@ -32,6 +29,7 @@ export interface PlotInteractionPolicy {
   pan: ReadonlySet<"x" | "y">;
   zoom: ReadonlySet<"x" | "y" | "box">;
   fit: boolean;
+  stickyAutoY: boolean;
   windowNote: string | null;
 }
 
@@ -44,13 +42,11 @@ interface PlotReadingRow {
 }
 
 export interface PlotCursor {
-  domain: AnnotationDomain;
   x: number;
   heading: string;
   rows: readonly PlotReadingRow[];
   markers: readonly PlotMarker[];
   link: "time" | "local";
-  interval: readonly [number, number] | null;
 }
 
 export interface AnnotationAnchor {
@@ -82,9 +78,7 @@ interface PlotStat {
 }
 
 interface PlotStatGroup {
-  key: string;
   label: string;
-  colorIndex: number | null;
   items: readonly PlotStat[];
 }
 
@@ -95,10 +89,12 @@ export interface PlotDelta {
 }
 
 export interface PreparedPlot {
-  readonly mode: PanelMode;
   readonly domain: AnnotationDomain;
-  readonly frame: PlotFrame;
   readonly interaction: PlotInteractionPolicy;
+  autoRanges(): {
+    x: readonly [number, number] | null;
+    y: readonly [number, number] | null;
+  };
   cursorAt(
     layout: PlotLayout,
     point: PlotPoint,
@@ -131,6 +127,7 @@ export interface XyPlotInput {
     colorValues: readonly number[] | null;
   })[];
   color: { path: string } | null;
+  window: { t0: number; t1: number };
 }
 
 export interface FftPlotInput {
@@ -155,6 +152,7 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
     pan: new Set(["x", "y"]),
     zoom: new Set(["x", "y", "box"]),
     fit: true,
+    stickyAutoY: true,
     windowNote: null,
   },
   xy: {
@@ -163,6 +161,7 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
     pan: new Set(["x", "y"]),
     zoom: new Set(["x", "y", "box"]),
     fit: true,
+    stickyAutoY: false,
     windowNote: null,
   },
   fft: {
@@ -171,14 +170,16 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
     pan: new Set(["x", "y"]),
     zoom: new Set(["x", "y", "box"]),
     fit: true,
+    stickyAutoY: false,
     windowNote: "window: visible t",
   },
   histogram: {
     xAxis: "local",
     cursorLink: "local",
-    pan: new Set(),
-    zoom: new Set(),
+    pan: new Set(["x", "y"]),
+    zoom: new Set(["x", "y", "box"]),
     fit: true,
+    stickyAutoY: false,
     windowNote: "window: visible t",
   },
 };
@@ -199,10 +200,14 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
     return resolved(annotation, annotation.anchor, y, series.colorIndex);
   };
   return {
-    mode: "time",
     domain: "time",
-    frame: { kind: "tiles" },
     interaction: POLICIES.time,
+    autoRanges() {
+      const y = timeAutoYRange(input.series.flatMap((series) => series.bins));
+      return y === null
+        ? { x: null, y: null }
+        : { x: [input.window.t0, input.window.t1], y };
+    },
     cursorAt(layout, point) {
       const x = invertX(layout, point.x);
       const rows = input.series.flatMap((series) => {
@@ -211,7 +216,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
           ? []
           : [reading(series.path, value, null, series.colorIndex)];
       });
-      return cursor("time", x, `t = ${formatValue(x)} s`, rows, "time");
+      return cursor(x, `t = ${formatValue(x)} s`, rows, "time");
     },
     annotationAt(layout, point, radius) {
       const hit = nearestVertex(
@@ -241,7 +246,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
           input.window.t0,
           input.window.t1,
         );
-        return statsGroup(series.path, series.path, series.colorIndex, [
+        return statsGroup(series.path, [
           stat("min", stats.min),
           stat("max", stats.max),
           stat("mean", stats.mean),
@@ -285,10 +290,14 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
     };
   };
   return {
-    mode: "xy",
     domain: "time",
-    frame: { kind: "paths" },
     interaction: POLICIES.xy,
+    autoRanges() {
+      const traces = input.series.map((series) => series.trace);
+      const x = traceExtent(traces, "x", input.window.t0, input.window.t1);
+      const y = traceExtent(traces, "y", input.window.t0, input.window.t1);
+      return x === null || y === null ? { x: null, y: null } : { x, y };
+    },
     cursorAt(layout, point, radius) {
       const hit = nearestXyPoint(
         input.series,
@@ -334,13 +343,7 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
           ),
         );
       }
-      return cursor(
-        "time",
-        hit.time,
-        `t = ${formatValue(hit.time)} s`,
-        rows,
-        "time",
-      );
+      return cursor(hit.time, `t = ${formatValue(hit.time)} s`, rows, "time");
     },
     annotationAt(layout, point, radius) {
       const hit = nearestXyPoint(
@@ -363,17 +366,10 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
     stats() {
       const xStats = numericStats(input.x.values);
       const groups = [
-        statsGroup(
-          input.x.path,
-          `x · ${input.x.path}`,
-          null,
-          statItems(xStats),
-        ),
+        statsGroup(`x · ${input.x.path}`, statItems(xStats)),
         ...input.series.map((series) =>
           statsGroup(
-            series.path,
             `y · ${series.path}`,
-            series.colorIndex,
             statItems(numericStats(series.trace.y)),
           ),
         ),
@@ -383,7 +379,7 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
           input.series.flatMap((series) => series.colorValues ?? []),
         );
         groups.push(
-          statsGroup(input.color.path, `c · ${input.color.path}`, null, [
+          statsGroup(`c · ${input.color.path}`, [
             stat("min", colorStats.min),
             stat("max", colorStats.max),
           ]),
@@ -425,10 +421,30 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
       : null;
   };
   return {
-    mode: "fft",
     domain: "frequency",
-    frame: { kind: "paths" },
     interaction: POLICIES.fft,
+    autoRanges() {
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (const series of input.series) {
+        const count = Math.min(
+          series.frequency.length,
+          series.amplitudeDb.length,
+        );
+        for (let index = 0; index < count; index += 1) {
+          const frequency = series.frequency[index] ?? Number.NaN;
+          const amplitude = series.amplitudeDb[index] ?? Number.NaN;
+          if (!Number.isFinite(frequency) || !Number.isFinite(amplitude)) {
+            continue;
+          }
+          min = Math.min(min, frequency);
+          max = Math.max(max, frequency);
+        }
+      }
+      return Number.isFinite(min) && Number.isFinite(max) && min < max
+        ? { x: [min, max], y: [-90, 3] }
+        : { x: null, y: null };
+    },
     cursorAt(layout, point) {
       const x = invertX(layout, point.x);
       const rows = input.series.map((series) =>
@@ -439,7 +455,7 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
           series.colorIndex,
         ),
       );
-      return cursor("frequency", x, `f = ${formatValue(x)} Hz`, rows, "local");
+      return cursor(x, `f = ${formatValue(x)} Hz`, rows, "local");
     },
     annotationAt(layout, point, radius) {
       return transformedHit(
@@ -468,7 +484,7 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
         });
         const first = series.frequency[0] ?? null;
         const last = series.frequency[series.frequency.length - 1] ?? null;
-        return statsGroup(series.path, series.path, series.colorIndex, [
+        return statsGroup(series.path, [
           stat(
             "peak f",
             peakIndex < 0 ? null : series.frequency[peakIndex],
@@ -524,10 +540,26 @@ export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
     return resolved(annotation, (low + high) / 2, y, series.colorIndex);
   };
   return {
-    mode: "histogram",
     domain: "distribution",
-    frame: { kind: "paths" },
     interaction: POLICIES.histogram,
+    autoRanges() {
+      const first = input.edges[0];
+      const last = input.edges[input.edges.length - 1];
+      let peak = Number.NEGATIVE_INFINITY;
+      for (const series of input.series) {
+        for (const count of series.counts) {
+          if (Number.isFinite(count)) peak = Math.max(peak, count);
+        }
+      }
+      return first !== undefined &&
+        last !== undefined &&
+        Number.isFinite(first) &&
+        Number.isFinite(last) &&
+        first < last &&
+        Number.isFinite(peak)
+        ? { x: [first, last], y: [0, Math.max(1, peak) * 1.06] }
+        : { x: null, y: null };
+    },
     cursorAt(layout, point) {
       const x = invertX(layout, point.x);
       const bin = binAt(x);
@@ -543,12 +575,10 @@ export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
         ),
       );
       return cursor(
-        "distribution",
         x,
         `bin ${formatValue(low)} – ${formatValue(high)}`,
         rows,
         "local",
-        [low, high],
       );
     },
     annotationAt(layout, point, radius) {
@@ -574,7 +604,7 @@ export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
     resolveAnnotation: resolve,
     stats() {
       return input.series.map((series) =>
-        statsGroup(series.path, series.path, series.colorIndex, [
+        statsGroup(series.path, [
           ...statItems(numericStats(series.sourceValues)),
           stat("bins", Math.max(0, input.edges.length - 1)),
         ]),
@@ -597,15 +627,12 @@ export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
 }
 
 function cursor(
-  domain: AnnotationDomain,
   x: number,
   heading: string,
   rows: readonly PlotReadingRow[],
   link: "time" | "local",
-  interval: readonly [number, number] | null = null,
 ): PlotCursor {
   return {
-    domain,
     x,
     heading,
     rows,
@@ -615,7 +642,6 @@ function cursor(
       colorIndex: row.colorIndex,
     })),
     link,
-    interval,
   };
 }
 
@@ -712,6 +738,22 @@ function numericStats(values: readonly number[]): {
   };
 }
 
+function timeAutoYRange(
+  bins: readonly { min: number | null; max: number | null }[],
+): [number, number] | null {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const bin of bins) {
+    if (bin.min !== null && Number.isFinite(bin.min)) {
+      min = Math.min(min, bin.min);
+    }
+    if (bin.max !== null && Number.isFinite(bin.max)) {
+      max = Math.max(max, bin.max);
+    }
+  }
+  return paddedExtent(min, max);
+}
+
 function statItems(summary: ReturnType<typeof numericStats>): PlotStat[] {
   return [
     stat("min", summary.min),
@@ -730,13 +772,8 @@ function stat(
   return { label, value: value ?? null, unit };
 }
 
-function statsGroup(
-  key: string,
-  label: string,
-  colorIndex: number | null,
-  items: readonly PlotStat[],
-): PlotStatGroup {
-  return { key, label, colorIndex, items };
+function statsGroup(label: string, items: readonly PlotStat[]): PlotStatGroup {
+  return { label, items };
 }
 
 function lastTwo(

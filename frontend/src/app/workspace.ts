@@ -2,6 +2,7 @@ import type {
   Annotation,
   DashStyle,
   LayoutRow,
+  LinkedTime,
   PanelMode,
   PanelState,
   Session,
@@ -32,7 +33,6 @@ export function emptySession(): Session {
 
 export class WorkspaceModel {
   private readonly session: Session;
-  private maximized: string | null = null;
   private nextPanelNumber: number;
   private nextTabNumber: number;
 
@@ -59,6 +59,27 @@ export class WorkspaceModel {
 
   setTheme(theme: Session["theme"]): void {
     this.session.theme = theme;
+  }
+
+  linkedTime(): Readonly<LinkedTime> {
+    return { ...this.session.linked_time };
+  }
+
+  setLinked(linked: boolean): void {
+    this.session.linked_time.linked = linked;
+  }
+
+  setLinkedWindow(t0: number, t1: number): void {
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) {
+      throw new Error("Time window must be finite and increasing");
+    }
+    this.session.linked_time.t0 = t0;
+    this.session.linked_time.t1 = t1;
+  }
+
+  setCursorT(cursorT: number | null): void {
+    this.session.linked_time.cursorT =
+      cursorT !== null && Number.isFinite(cursorT) ? cursorT : null;
   }
 
   panels(): readonly PanelState[] {
@@ -97,14 +118,13 @@ export class WorkspaceModel {
     this.nextTabNumber += 1;
     this.session.tabs.push(tab);
     this.session.active_tab_id = tab.id;
-    this.maximized = null;
     return tab;
   }
 
   selectTab(id: string): boolean {
     if (!this.session.tabs.some((tab) => tab.id === id)) return false;
     this.session.active_tab_id = id;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     return true;
   }
 
@@ -119,7 +139,7 @@ export class WorkspaceModel {
       if (replacement !== undefined) {
         this.session.active_tab_id = replacement.id;
       }
-      this.maximized = null;
+      this.activeTab().maximized_panel_id = null;
     }
   }
 
@@ -140,7 +160,7 @@ export class WorkspaceModel {
   }
 
   maximizedPanelId(): string | null {
-    return this.maximized;
+    return this.activeTab().maximized_panel_id;
   }
 
   panel(id: string): PanelState | undefined {
@@ -156,7 +176,7 @@ export class WorkspaceModel {
   }
 
   addPanelRow(): PanelState {
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel();
     this.appendRow(panel.id);
     this.activeTab().focused_panel_id = panel.id;
@@ -170,7 +190,7 @@ export class WorkspaceModel {
     const cell = row?.panels[location.cellIndex];
     if (row === undefined || cell === undefined) return null;
     if (cell.width < MIN_FRACTION * 2) return null;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel();
     const width = cell.width / 2;
     cell.width = width;
@@ -188,7 +208,7 @@ export class WorkspaceModel {
     const row = this.activeTab().layout[location.rowIndex];
     if (row === undefined) return null;
     if (row.height < MIN_FRACTION * 2) return null;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel();
     const height = row.height / 2;
     row.height = height;
@@ -206,7 +226,7 @@ export class WorkspaceModel {
     this.detachCell(location);
     const tab = this.activeTab();
     tab.panels = tab.panels.filter((panel) => panel.id !== id);
-    if (this.maximized === id) this.maximized = null;
+    if (tab.maximized_panel_id === id) tab.maximized_panel_id = null;
     if (tab.focused_panel_id === id) {
       tab.focused_panel_id = tab.panels[0]?.id ?? null;
     }
@@ -217,8 +237,8 @@ export class WorkspaceModel {
   }
 
   toggleMaximize(id: string): void {
-    if (this.maximized === id) {
-      this.maximized = null;
+    if (this.activeTab().maximized_panel_id === id) {
+      this.activeTab().maximized_panel_id = null;
     } else {
       this.maximizePanel(id);
     }
@@ -226,12 +246,12 @@ export class WorkspaceModel {
 
   maximizePanel(id: string): void {
     if (this.panel(id) === undefined) return;
-    this.maximized = id;
+    this.activeTab().maximized_panel_id = id;
     this.activeTab().focused_panel_id = id;
   }
 
   restoreGrid(): void {
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
   }
 
   setMode(id: string, mode: PanelMode): void {
@@ -267,7 +287,16 @@ export class WorkspaceModel {
 
   setColorSignal(id: string, path: string | null): void {
     const panel = this.panel(id);
-    if (panel !== undefined) panel.color_signal = path;
+    if (panel === undefined) return;
+    panel.color_signal = path;
+    panel.color_by_time = false;
+  }
+
+  setColorByTime(id: string): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    panel.color_signal = null;
+    panel.color_by_time = true;
   }
 
   addSeries(panelId: string, path: string): boolean {
@@ -323,11 +352,12 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.title = title;
   }
 
-  setAxisLabel(id: string, axis: "x" | "y", label: string | null): void {
+  setAxisLabel(id: string, axis: "x" | "y" | "c", label: string | null): void {
     const panel = this.panel(id);
     if (panel === undefined) return;
     if (axis === "x") panel.x_label = label;
-    else panel.y_label = label;
+    else if (axis === "y") panel.y_label = label;
+    else panel.c_label = label;
   }
 
   setPanelTimeWindow(
@@ -419,7 +449,7 @@ export class WorkspaceModel {
   movePanel(id: string, targetRowIndex: number, targetCellIndex: number): void {
     const location = this.locate(id);
     if (location === null) return;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const removedRow = this.detachCell(location);
     let rowIndex = targetRowIndex;
     if (removedRow && location.rowIndex < rowIndex) rowIndex -= 1;
@@ -495,11 +525,13 @@ export class WorkspaceModel {
       axis_style: "gutter",
       x_signal: null,
       color_signal: null,
+      color_by_time: false,
       series: [],
       y_range: null,
       x_range: null,
       x_label: null,
       y_label: null,
+      c_label: null,
       time_window: null,
       annotations: [],
       show_stats: false,
@@ -531,6 +563,7 @@ function createWorkspaceTab(number: number): WorkspaceTab {
     title: `Workspace ${String(number)}`,
     cursor_mode: "none",
     focused_panel_id: null,
+    maximized_panel_id: null,
     panels: [],
     layout: [],
   };

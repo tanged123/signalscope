@@ -126,6 +126,21 @@ test("command palette runs workspace-scoped panel commands", async ({
   await expect(page.locator(".palette-overlay")).toBeHidden();
 });
 
+test("command palette edits focused-panel axis labels", async ({ page }) => {
+  await page.goto("/");
+  const panel = page.locator(".panel").first();
+  for (const [query, label] of [
+    ["edit X axis label", "X axis name"],
+    ["edit Y axis label", "Y axis name"],
+  ] as const) {
+    await page.keyboard.press("ControlOrMeta+Shift+p");
+    await page.locator(".palette-input").fill(query);
+    await page.keyboard.press("Enter");
+    await expect(panel.getByLabel(label)).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+});
+
 test("panel legend keeps controls visible and exposes overflow", async ({
   page,
 }) => {
@@ -179,6 +194,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
         axis_style: "gutter",
         x_signal: null,
         color_signal: null,
+        color_by_time: false,
         series: Array.from({ length: 40 }, (_, index) => ({
           path: `monte_carlo/run_${String(index + 1)}`,
           color_slot: index + 1,
@@ -190,6 +206,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
         x_range: null,
         x_label: null,
         y_label: null,
+        c_label: null,
         time_window: null,
         annotations: [],
         show_stats: false,
@@ -254,9 +271,7 @@ test("formula editor is transient with pointer and keyboard paths", async ({
 
 test("signal tree toggles and collapses through its resize edge", async ({
   page,
-  isMobile,
 }) => {
-  test.skip(isMobile, "the signal tree is hidden at the mobile breakpoint");
   await page.goto("/");
   const tree = page.locator(".signal-tree");
   const workspace = page.locator(".workspace");
@@ -301,11 +316,7 @@ test("signal tree toggles and collapses through its resize edge", async ({
   expect(Number(await seam.getAttribute("aria-valuenow"))).toBeGreaterThan(220);
 });
 
-test("tree filters, favorites, and drag-to-plot", async ({
-  page,
-  isMobile,
-}) => {
-  test.skip(isMobile, "the signal tree is hidden on the mobile breakpoint");
+test("tree filters, favorites, and drag-to-plot", async ({ page }) => {
   await page.goto("/");
 
   await page.keyboard.press("/");
@@ -367,8 +378,7 @@ test("tree filters, favorites, and drag-to-plot", async ({
   await expect(target).not.toHaveClass(/drop-target/);
 });
 
-test("seam drag resizes panel rows", async ({ page, isMobile }) => {
-  test.skip(isMobile, "seam drags are desktop pointer interactions");
+test("seam drag resizes panel rows", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("n");
 
