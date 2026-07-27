@@ -59,3 +59,11 @@ interaction decision.
 Session schema version 9 stores the maximized panel per workspace and separates
 XY colour-by-time from signal paths. The v8-to-v9 migration converts the
 `color_signal: "time"` sentinel into `color_by_time: true`.
+
+## Amendment (2026-07-27, derived signals and sources)
+
+Session schema version 10 adds `derived` — ordered `{path, expr}` definitions —
+and `source_paths`. Both are required arrays, so the v9-to-v10 migration
+initializes each as empty rather than relying on `#[serde(default)]`. Sessions
+still contain no samples: a derived signal is restored by re-evaluating its
+expression after its sources are re-ingested.
