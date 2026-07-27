@@ -255,9 +255,7 @@ test("formula editor is transient with pointer and keyboard paths", async ({
 
 test("signal tree toggles and collapses through its resize edge", async ({
   page,
-  isMobile,
 }) => {
-  test.skip(isMobile, "the signal tree is hidden at the mobile breakpoint");
   await page.goto("/");
   const tree = page.locator(".signal-tree");
   const workspace = page.locator(".workspace");
@@ -302,11 +300,7 @@ test("signal tree toggles and collapses through its resize edge", async ({
   expect(Number(await seam.getAttribute("aria-valuenow"))).toBeGreaterThan(220);
 });
 
-test("tree filters, favorites, and drag-to-plot", async ({
-  page,
-  isMobile,
-}) => {
-  test.skip(isMobile, "the signal tree is hidden on the mobile breakpoint");
+test("tree filters, favorites, and drag-to-plot", async ({ page }) => {
   await page.goto("/");
 
   await page.keyboard.press("/");
@@ -368,8 +362,7 @@ test("tree filters, favorites, and drag-to-plot", async ({
   await expect(target).not.toHaveClass(/drop-target/);
 });
 
-test("seam drag resizes panel rows", async ({ page, isMobile }) => {
-  test.skip(isMobile, "seam drags are desktop pointer interactions");
+test("seam drag resizes panel rows", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("n");
 

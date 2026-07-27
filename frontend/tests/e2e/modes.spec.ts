@@ -94,11 +94,7 @@ test.describe("panel modes", () => {
     await expect(page.locator(".panel").first()).toBeVisible();
   });
 
-  test("XY mode adopts the first series as the x axis", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("XY mode adopts the first series as the x axis", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await expect(panel.locator(".legend-chip")).toHaveCount(2);
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
@@ -119,11 +115,7 @@ test.describe("panel modes", () => {
     await expect(panel.locator(".legend-chip")).toHaveCount(2);
   });
 
-  test("the x chip and the palette both reach XY mode", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("the x chip and the palette both reach XY mode", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".legend-chip-caret").first().click();
     await panel.locator(".inspector-action", { hasText: "use as X" }).click();
@@ -151,9 +143,7 @@ test.describe("panel modes", () => {
 
   test("XY zoom stays panel-local and the cursor rings the trajectory", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     const readout = page.locator(".window-readout");
@@ -196,11 +186,7 @@ test.describe("panel modes", () => {
     await expect(tip).toBeHidden();
   });
 
-  test("XY datatips pin, list, and show a delta", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("XY datatips pin, list, and show a delta", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     const overlay = panel.locator(".overlay-canvas");
@@ -220,11 +206,7 @@ test.describe("panel modes", () => {
     await expect(list.locator(".annotation-row")).toHaveCount(2);
   });
 
-  test("the colour channel is assignable and clearable", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("the colour channel is assignable and clearable", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     const chip = panel.locator(".c-chip");
@@ -281,11 +263,7 @@ test.describe("panel modes", () => {
     await expect(chip).toContainText("none");
   });
 
-  test("FFT mode announces its window and zooms locally", async ({
-    page,
-    isMobile,
-  }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("FFT mode announces its window and zooms locally", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "FFT" }).click();
     await expect(panel.locator(".panel-mode-note")).toHaveText(
@@ -312,9 +290,7 @@ test.describe("panel modes", () => {
 
   test("histogram mode draws a distribution of the visible window", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "H" }).click();
     await expect(panel.locator(".mode-pill.active")).toHaveText("H");
@@ -340,9 +316,7 @@ test.describe("panel modes", () => {
 
   test("histogram zoom, pan, and fit move only its viewport", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "H" }).click();
     await page.keyboard.press("c");
@@ -376,9 +350,7 @@ test.describe("panel modes", () => {
   ]) {
     test(`${mode.pill} supports retained annotations, deltas, and native stats`, async ({
       page,
-      isMobile,
     }) => {
-      test.skip(isMobile, "desktop interaction");
       const panel = page.locator(".panel").first();
       await panel.locator(".mode-pill", { hasText: mode.pill }).click();
       await panel.locator(".panel-stats-toggle").click();
@@ -415,9 +387,7 @@ test.describe("panel modes", () => {
 
   test("the application menu stats command reaches every panel", async ({
     page,
-    isMobile,
   }) => {
-    test.skip(isMobile, "desktop interaction");
     await page.keyboard.press("n");
     await expect(page.locator(".panel")).toHaveCount(2);
     // A panel with nothing plotted has no statistics to show, so the new panel
@@ -450,8 +420,7 @@ test.describe("panel modes", () => {
     await expect(stats.last()).toBeHidden();
   });
 
-  test("mode help preserves the render metric", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop interaction");
+  test("mode help preserves the render metric", async ({ page }) => {
     const renderMetric = page.locator(".render-ms");
     const before = await renderMetric.textContent();
     await page.keyboard.press("ControlOrMeta+Shift+p");

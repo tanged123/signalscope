@@ -20,7 +20,7 @@ Each named mode matches the GitHub Actions job with the same name:
   rust      cargo clippy plus the full cargo test suite.
   frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
             snapshot artifact checks.
-  e2e       Playwright desktop and mobile-review smoke tests.
+  e2e       Playwright desktop smoke tests.
   build     Native Tauri bundles via ./scripts/build.sh native.
   appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
 
