@@ -469,6 +469,21 @@ export class AppShell {
         this.workspace.toggleAxisStyle(id);
       },
     );
+    for (const [axis, title] of [
+      ["x", "Panel: edit X axis label"],
+      ["y", "Panel: edit Y axis label"],
+      ["c", "Panel: edit color axis label"],
+    ] as const) {
+      this.registerFocusedPanelCommand(
+        `edit-${axis}-axis-label`,
+        title,
+        (id) => {
+          this.workspaceView?.beginAxisEdit(id, axis);
+        },
+        undefined,
+        (id) => this.workspaceView?.canEditAxis(id, axis) ?? false,
+      );
+    }
     this.registerFocusedPanelCommand(
       "close-panel",
       "Close current panel",
@@ -622,12 +637,16 @@ export class AppShell {
     title: string,
     act: (panelId: string) => void,
     keys?: string,
+    enabled?: (panelId: string) => boolean,
   ): void {
     this.commands.register({
       id,
       title,
       ...(keys === undefined ? {} : { keys }),
-      enabled: () => this.workspace.focusedPanelId() !== null,
+      enabled: () => {
+        const panelId = this.workspace.focusedPanelId();
+        return panelId !== null && (enabled?.(panelId) ?? true);
+      },
       run: () => {
         const panelId = this.workspace.focusedPanelId();
         if (panelId !== null) {

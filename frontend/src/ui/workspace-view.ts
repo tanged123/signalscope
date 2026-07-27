@@ -153,6 +153,14 @@ export class WorkspaceView {
     this.views.get(id)?.resetYAxis();
   }
 
+  canEditAxis(id: string, axis: "x" | "y" | "c"): boolean {
+    return this.views.get(id)?.canEditAxis(axis) ?? false;
+  }
+
+  beginAxisEdit(id: string, axis: "x" | "y" | "c"): void {
+    this.views.get(id)?.beginAxisEdit(axis);
+  }
+
   /** The rendered plot width of a panel in CSS pixels, 0 when unmounted. */
   panelWidth(id: string): number {
     return this.views.get(id)?.plotWidth() ?? 0;

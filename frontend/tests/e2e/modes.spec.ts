@@ -236,6 +236,21 @@ test.describe("panel modes", () => {
       await page.keyboard.press("Escape");
     }
 
+    await page.keyboard.press("ControlOrMeta+Shift+p");
+    await page.locator(".palette-input").fill("edit color axis label");
+    await page.keyboard.press("Enter");
+    await expect(panel.getByLabel("Color axis name")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await panel.locator(".mode-pill", { hasText: "FFT" }).click();
+    await page.keyboard.press("ControlOrMeta+Shift+p");
+    await page.locator(".palette-input").fill("edit color axis label");
+    await expect(
+      page.locator(".palette-row", { hasText: "edit color axis label" }),
+    ).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await panel.locator(".mode-pill", { hasText: "XY" }).click();
+
     await chip.click();
     await expect(chip).toContainText("none");
 

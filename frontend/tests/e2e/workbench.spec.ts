@@ -126,6 +126,21 @@ test("command palette runs workspace-scoped panel commands", async ({
   await expect(page.locator(".palette-overlay")).toBeHidden();
 });
 
+test("command palette edits focused-panel axis labels", async ({ page }) => {
+  await page.goto("/");
+  const panel = page.locator(".panel").first();
+  for (const [query, label] of [
+    ["edit X axis label", "X axis name"],
+    ["edit Y axis label", "Y axis name"],
+  ] as const) {
+    await page.keyboard.press("ControlOrMeta+Shift+p");
+    await page.locator(".palette-input").fill(query);
+    await page.keyboard.press("Enter");
+    await expect(panel.getByLabel(label)).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+});
+
 test("panel legend keeps controls visible and exposes overflow", async ({
   page,
 }) => {

@@ -158,6 +158,7 @@ export class PanelView {
   private emphasizePath: string | null = null;
   private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
+  private hasColorbar = false;
 
   constructor(
     private readonly id: string,
@@ -203,7 +204,7 @@ export class PanelView {
               state.axis_style,
               x,
               y,
-              state.color_signal !== null,
+              state.mode === "xy" && this.hasColorbar,
             );
       },
       beginAxisEdit: (axis) => {
@@ -449,6 +450,7 @@ export class PanelView {
     this.lastWindow = { ...window };
     this.preparedPlot = null;
     this.domainSeries = [];
+    this.hasColorbar = false;
     const elapsed = this.renderForMode(state, tiles, samples, window);
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
@@ -578,6 +580,7 @@ export class PanelView {
       colorSeries !== null &&
       Number.isFinite(colorMin) &&
       Number.isFinite(colorMax);
+    this.hasColorbar = hasColor;
     const colorPadding =
       hasColor && colorMin === colorMax
         ? Math.max(1, Math.abs(colorMin) * 0.05)
@@ -1211,7 +1214,12 @@ export class PanelView {
     selection?.addRange(range);
   }
 
-  private beginAxisEdit(axis: "x" | "y" | "c"): void {
+  canEditAxis(axis: "x" | "y" | "c"): boolean {
+    return axis !== "c" || (this.lastState?.mode === "xy" && this.hasColorbar);
+  }
+
+  beginAxisEdit(axis: "x" | "y" | "c"): void {
+    if (!this.canEditAxis(axis)) return;
     const wrap = required<HTMLElement>(this.element, ".plot-wrap");
     if (wrap.querySelector(".axis-label-editor") !== null) return;
     const state = this.lastState;
