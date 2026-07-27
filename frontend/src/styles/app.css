@@ -725,20 +725,6 @@ button {
   touch-action: none;
 }
 
-/* Coarse pointers need larger targets; the spec's 26px header stays. */
-@media (hover: none) {
-  .panel-action,
-  .mode-pill,
-  .legend-chip-body,
-  .legend-chip-caret {
-    padding: 6px 9px;
-  }
-
-  .axis-chip {
-    padding: 4px 10px;
-  }
-}
-
 .panel-axis-toggle {
   color: var(--fg-4);
   font-size: 10px;
