@@ -166,57 +166,6 @@ export function panScaledRange(
   return { min: 10 ** next.min, max: 10 ** next.max };
 }
 
-/**
- * The axis range that keeps two data anchors under two fingers.
- *
- * Solves the affine map `data = slope · pixel + intercept` through both
- * (pixel, anchor) pairs and evaluates it at the plot's edges, so a pinch is
- * zoom and pan in one continuous gesture. Null when the pinch is degenerate
- * (equal anchors, coincident fingers, or an inverted result).
- */
-export function pinchRange(
-  anchorA: number,
-  anchorB: number,
-  pixelA: number,
-  pixelB: number,
-  edgeLow: number,
-  edgeHigh: number,
-): Range | null {
-  if (anchorA === anchorB || pixelA === pixelB) return null;
-  const slope = (anchorB - anchorA) / (pixelB - pixelA);
-  const intercept = anchorA - slope * pixelA;
-  const first = slope * edgeLow + intercept;
-  const second = slope * edgeHigh + intercept;
-  const min = Math.min(first, second);
-  const max = Math.max(first, second);
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
-    return null;
-  }
-  return { min, max };
-}
-
-/** Pinch range in linear or log10 coordinates. */
-export function pinchScaledRange(
-  anchorA: number,
-  anchorB: number,
-  pixelA: number,
-  pixelB: number,
-  edgeLow: number,
-  edgeHigh: number,
-  scale: AxisScale = "linear",
-): Range | null {
-  const next = pinchRange(
-    scale === "log" ? logSpace(anchorA) : anchorA,
-    scale === "log" ? logSpace(anchorB) : anchorB,
-    pixelA,
-    pixelB,
-    edgeLow,
-    edgeHigh,
-  );
-  if (next === null || scale !== "log") return next;
-  return { min: 10 ** next.min, max: 10 ** next.max };
-}
-
 export type ZoomDragMode = "x" | "y" | "xy";
 
 /** Axis-only for thin/extreme drags; ordinary rectangles retain box zoom. */

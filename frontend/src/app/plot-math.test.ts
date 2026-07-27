@@ -7,8 +7,6 @@ import {
   logTicks,
   panScaledRange,
   panRange,
-  pinchRange,
-  pinchScaledRange,
   projectX,
   valueAtTime,
   wheelZoomFactor,
@@ -61,25 +59,10 @@ test("projection inversion, zoom and pan preserve plot ranges", () => {
   expect(wheelZoomFactor(240)).toBeGreaterThan(1);
 });
 
-test("pins both pinch anchors under their fingers", () => {
-  // Anchors 10 and 20 are held at pixels 100 and 300 inside a plot
-  // spanning pixels 0…400, so the visible range becomes 5…25.
-  expect(pinchRange(10, 20, 100, 300, 0, 400)).toEqual({ min: 5, max: 25 });
-});
-
-test("refuses a degenerate pinch", () => {
-  expect(pinchRange(10, 10, 100, 300, 0, 400)).toBeNull();
-  expect(pinchRange(10, 20, 100, 100, 0, 400)).toBeNull();
-});
-
-test("zooms and pinches log axes in decade space", () => {
+test("zooms log axes in decade space", () => {
   const zoomed = zoomScaledRange({ min: 1, max: 1000 }, 0.5, 10, "log");
   expect(zoomed.min).toBeCloseTo(Math.sqrt(10));
   expect(zoomed.max).toBeCloseTo(100);
-  const pinched = pinchScaledRange(10, 100, 100, 300, 0, 400, "log");
-  expect(pinched).not.toBeNull();
-  expect(pinched?.min ?? 0).toBeCloseTo(Math.sqrt(10));
-  expect(pinched?.max ?? 0).toBeCloseTo(Math.sqrt(100_000));
 });
 
 test("pans log axes in decade space", () => {
