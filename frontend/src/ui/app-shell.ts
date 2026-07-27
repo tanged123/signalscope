@@ -858,6 +858,7 @@ export class AppShell {
               : "…";
           progress.textContent = `${name} · ${status.stage} ${percent}`;
         });
+        this.workspace.addSourcePath(path);
       }
       await this.reloadSignals();
       this.afterLayoutChange();
@@ -935,15 +936,7 @@ export class AppShell {
 
   /** Restores the autosaved session, if any, before the first render. */
   private async restoreSession(): Promise<void> {
-    const port = this.plane.session;
-    if (port === null) return;
-    try {
-      const loaded = await port.load(null);
-      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
-      this.workspacePath = loaded.path;
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
+    await this.loadSession(null);
   }
 
   /** Saves to `path`, or asks for one when null. */
@@ -974,20 +967,62 @@ export class AppShell {
     }
   }
 
-  /** Loads session state. Task 16 expands this into source/derived replay. */
+  /**
+   * Replaces the current session, re-ingests its sources, and replays its
+   * derived definitions in order. Definitions whose references are missing
+   * stay recorded; their panels show the unresolved-signal empty state.
+   */
   async loadSession(path: string | null): Promise<void> {
     const port = this.plane.session;
     if (port === null) return;
+    const progress = required<HTMLElement>(this.root, ".ingest-progress");
     try {
       const loaded = await port.load(path);
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
       this.workspacePath = loaded.path;
       this.dirty = false;
-      this.restoreTheme();
-      this.renderWorkspaceName();
+      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspaceView?.invalidateTheme();
+
+      const ingestPort = this.plane.ingest;
+      if (ingestPort !== null) {
+        progress.hidden = false;
+        for (const source of this.workspace.sourcePaths()) {
+          const name = basename(source);
+          try {
+            await runIngest(ingestPort, source, (status) => {
+              const percent =
+                status.fraction > 0
+                  ? `${String(Math.round(status.fraction * 100))}%`
+                  : "…";
+              progress.textContent = `${name} · ${status.stage} ${percent}`;
+            });
+          } catch {
+            progress.textContent = `${name} · unavailable`;
+          }
+        }
+      }
+      await this.reloadSignals();
+
+      const derivedPort = this.plane.derived;
+      if (derivedPort !== null) {
+        for (const definition of [...this.workspace.derived()]) {
+          try {
+            await derivedPort.create(definition.path, definition.expr);
+          } catch {
+            // Unresolved definitions stay recorded for a later source retry.
+          }
+        }
+        await this.reloadSignals();
+      }
+
       this.afterLayoutChange();
+      this.dirty = false;
+      this.renderWorkspaceName();
     } catch (error: unknown) {
       this.reportError(error);
+    } finally {
+      progress.hidden = true;
     }
   }
 
