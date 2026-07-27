@@ -268,6 +268,7 @@ test("formula component creates and recalls accepted formulas", async ({
     };
     const host = document.createElement("div");
     host.id = "formula-probe";
+    host.style.paddingTop = "300px";
     host.innerHTML = formulaBarMarkup();
     document.body.replaceChildren(host);
     const form = host.querySelector<HTMLFormElement>(".formula-bar");
@@ -317,6 +318,36 @@ test("formula component creates and recalls accepted formulas", async ({
   await input.fill("derived/root = sq");
   await host.getByRole("option", { name: /sqrt.*square root/ }).click();
   await expect(input).toHaveValue("derived/root = sqrt()");
+  await expect(input).toBeFocused();
+
+  await input.fill("derived/x = atan");
+  await input.press("ArrowDown");
+  await expect(
+    host.getByRole("option", { name: /atan2.*two-argument arctangent/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveAttribute(
+    "aria-activedescendant",
+    "formula-completion-1",
+  );
+  await input.press("ArrowUp");
+  await expect(
+    host.getByRole("option", { name: /atan.*inverse tangent/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveAttribute(
+    "aria-activedescendant",
+    "formula-completion-0",
+  );
+  await input.press("ArrowUp");
+  await expect(
+    host.getByRole("option", { name: /atan2.*two-argument arctangent/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveAttribute(
+    "aria-activedescendant",
+    "formula-completion-1",
+  );
+  await input.press("Enter");
+  await expect(input).toHaveValue("derived/x = atan2(, )");
+  await expect(input).toHaveJSProperty("selectionStart", 18);
   await expect(input).toBeFocused();
 
   await input.fill("derived/x = ");
