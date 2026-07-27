@@ -55,6 +55,39 @@ test.describe("desktop plot interactions", () => {
     expect(metricGaps.every((gap) => gap >= 8)).toBe(true);
   });
 
+  test("the status-bar cursor button cycles the same three modes as C", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const button = page.locator(".cursor-toggle");
+    const readout = page.locator(".cursor-mode");
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveAttribute("aria-pressed", "false");
+    await expect(button).not.toHaveClass(/active/);
+    await expect(button).toHaveAttribute("title", /none/);
+
+    await button.click();
+    await expect(readout).toHaveText("cursor: track");
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+    await expect(button).toHaveClass(/active/);
+    await expect(button).toHaveAttribute("title", /track/);
+
+    await button.click();
+    await expect(readout).toHaveText("cursor: measure");
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+
+    await button.click();
+    await expect(readout).toBeEmpty();
+    await expect(button).toHaveAttribute("aria-pressed", "false");
+    await expect(button).not.toHaveClass(/active/);
+
+    // The keyboard path drives the same state, so the button follows it.
+    await page.keyboard.press("c");
+    await expect(readout).toHaveText("cursor: track");
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+  });
+
   test("directional zoom and double-click fit round-trip the window", async ({
     page,
     isMobile,

@@ -732,6 +732,9 @@ export class AppShell {
     required(this.root, ".formula-toggle").addEventListener("click", () => {
       this.commands.run("toggle-formula");
     });
+    required(this.root, ".cursor-toggle").addEventListener("click", () => {
+      this.commands.run("cycle-cursor-mode");
+    });
     const formula = required<HTMLFormElement>(this.root, ".formula-bar");
     formula.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1118,6 +1121,12 @@ export class AppShell {
     const mode = this.workspace.cursorMode();
     required(this.root, ".cursor-mode").textContent =
       mode === "none" ? "" : `cursor: ${mode}`;
+    // The dock button cycles the same three states as `C`, so it reads as
+    // pressed for every mode that puts a cursor on the plots.
+    const button = required<HTMLButtonElement>(this.root, ".cursor-toggle");
+    button.classList.toggle("active", mode !== "none");
+    button.ariaPressed = String(mode !== "none");
+    button.title = `Cursor mode: ${mode} — cycle (C)`;
     if (mode !== "track") this.hideTooltip();
     if (mode === "none") {
       this.time.setCursor(null);
@@ -1482,7 +1491,7 @@ function shellMarkup(): string {
       <span class="dock-toggles">
         <button class="status-button active tree-toggle" title="Hide signal tree" aria-controls="signal-tree" aria-expanded="true">▤</button>
         <button class="status-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span></button>
-        <button class="status-button planned" aria-disabled="true" title="Cursor readout dock — ${PLANNED_TITLE}">⌖</button>
+        <button class="status-button cursor-toggle" title="Cursor mode: none — cycle (C)" aria-pressed="false">┼</button>
       </span>
       <span class="status-separator"></span>
       <span class="source-truth">
@@ -1496,10 +1505,10 @@ function shellMarkup(): string {
       <span class="cursor-mode"></span>
       <span class="status-separator"></span>
       <span class="time-cluster">
-        <button class="status-button active linked-toggle">⛓ linked</button>
+        <button class="status-button active linked-toggle">⇄ linked</button>
         <span class="cursor-time">t —</span>
         <span class="window-readout"></span>
-        <button class="follow-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">⏸ FOLLOW</button>
+        <button class="follow-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">‖ FOLLOW</button>
       </span>
       <span class="status-separator"></span>
       <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
