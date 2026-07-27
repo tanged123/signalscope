@@ -444,6 +444,7 @@ export class PanelView {
     tiles: TileResponse | null,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
+    missing: readonly string[] = [],
   ): number {
     this.lastState = state;
     this.lastTiles = tiles;
@@ -460,6 +461,9 @@ export class PanelView {
     const annotations = this.resolvedAnnotations(state);
     this.renderAnnotationList(state, annotations);
     this.drawOverlay(annotations);
+    if (missing.length > 0) {
+      this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
+    }
     return elapsed;
   }
 

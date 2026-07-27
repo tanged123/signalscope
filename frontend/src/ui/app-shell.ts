@@ -54,6 +54,7 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
+  private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
   private renderScheduled = false;
@@ -900,9 +901,11 @@ export class AppShell {
     );
     const nextTiles = new Map<string, TileResponse>();
     const nextSamples = new Map<string, SampleResponse>();
+    const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
-        const ids = this.panelSignalIds(panel);
+        const { ids, missing } = this.panelSignalIds(panel);
+        nextMissing.set(panel.id, missing);
         if (ids.length === 0) return;
         const window = this.effectiveWindow(panel);
         try {
@@ -951,6 +954,7 @@ export class AppShell {
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
     this.samplesByPanel = nextSamples;
+    this.missingByPanel = nextMissing;
     this.renderTiles();
   }
 
@@ -958,19 +962,23 @@ export class AppShell {
    * Signal ids a panel needs: its series, plus the XY x signal and the
    * colour channel, which are axes rather than plotted series.
    */
-  private panelSignalIds(panel: PanelState): string[] {
+  private panelSignalIds(panel: PanelState): {
+    ids: string[];
+    missing: string[];
+  } {
     const paths = panel.series.map((series) => series.path);
     if (panel.mode === "xy") {
       if (panel.x_signal !== null) paths.unshift(panel.x_signal);
       if (panel.color_signal !== null) paths.push(panel.color_signal);
     }
-    return [
-      ...new Set(
-        paths
-          .map((path) => this.signalsByPath.get(path)?.signal_id)
-          .filter((id): id is string => id !== undefined),
-      ),
-    ];
+    const ids: string[] = [];
+    const missing: string[] = [];
+    for (const path of new Set(paths)) {
+      const id = this.signalsByPath.get(path)?.signal_id;
+      if (id === undefined) missing.push(path);
+      else ids.push(id);
+    }
+    return { ids, missing };
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
@@ -995,6 +1003,7 @@ export class AppShell {
             ? { t0: state.t0, t1: state.t1 }
             : this.effectiveWindow(panel);
         },
+        (panelId) => this.missingByPanel.get(panelId) ?? [],
       ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
