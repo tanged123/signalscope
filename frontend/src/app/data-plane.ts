@@ -4,9 +4,14 @@ import {
   type IngestJob,
   type IngestRequest,
   type IngestStatus,
+  type LoadedSession,
+  type LoadSessionRequest,
+  type PickSessionRequest,
   type RemoveSignalRequest,
   type SampleRequest,
   type SampleResponse,
+  type SaveSessionRequest,
+  type SessionDialogMode,
   type SignalSummary,
   type SourceSummary,
   type TileRequest,
@@ -27,10 +32,17 @@ export interface DerivedPort {
   remove(path: string): Promise<void>;
 }
 
+export interface SessionPort {
+  save(sessionJson: string, path: string | null): Promise<string>;
+  load(path: string | null): Promise<LoadedSession>;
+  pick(mode: SessionDialogMode): Promise<string | null>;
+}
+
 export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
+  readonly session: SessionPort | null;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
@@ -60,6 +72,8 @@ export class TauriPlane implements DataPlane {
   readonly ingest: IngestPort;
 
   readonly derived: DerivedPort;
+
+  readonly session: SessionPort;
 
   constructor(private readonly invoke: TauriInternals["invoke"]) {
     this.ingest = {
@@ -92,6 +106,29 @@ export class TauriPlane implements DataPlane {
           }),
         );
       },
+    };
+    this.session = {
+      save: async (sessionJson: string, path: string | null) =>
+        open(
+          await this.invoke<Envelope<string>>("save_session", {
+            request: seal<SaveSessionRequest>({
+              session_json: sessionJson,
+              path,
+            }),
+          }),
+        ),
+      load: async (path: string | null) =>
+        open(
+          await this.invoke<Envelope<LoadedSession>>("load_session", {
+            request: seal<LoadSessionRequest>({ path }),
+          }),
+        ),
+      pick: async (mode: SessionDialogMode) =>
+        open(
+          await this.invoke<Envelope<string | null>>("pick_session_path", {
+            request: seal<PickSessionRequest>({ mode }),
+          }),
+        ),
     };
   }
 
@@ -139,6 +176,8 @@ export class BakedPlane implements DataPlane {
   readonly ingest = null;
 
   readonly derived = null;
+
+  readonly session = null;
 
   private readonly payload: BakedManifest["payload"];
 

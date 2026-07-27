@@ -73,6 +73,16 @@ describe("derived definitions", () => {
 });
 
 describe("WorkspaceModel", () => {
+  it("replaces the whole session", () => {
+    const model = new WorkspaceModel();
+    const loaded = emptySession();
+    loaded.theme = "light";
+    loaded.derived = [{ path: "derived/x", expr: "'a/y'" }];
+    model.replace(loaded);
+    expect(model.theme()).toBe("light");
+    expect(model.snapshot().derived).toHaveLength(1);
+  });
+
   it("stores cursor mode independently for each workspace", () => {
     const model = new WorkspaceModel();
     expect(model.cursorMode()).toBe("none");

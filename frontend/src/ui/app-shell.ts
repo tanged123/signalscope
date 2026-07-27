@@ -23,7 +23,7 @@ import type {
   CursorMode,
   PanelMode,
   PanelState,
-  Theme,
+  Session,
 } from "../generated/session";
 import {
   CommandPalette,
@@ -41,7 +41,7 @@ import { AppMenu } from "./app-menu";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
-const THEME_STORAGE_KEY = "signalscope.theme";
+const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
 const QUICK_SUFFIX: Record<QuickTransform, string> = {
@@ -71,6 +71,7 @@ export class AppShell {
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
+  private autosaveTimer: number | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -79,6 +80,7 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    await this.restoreSession();
     this.restoreTheme();
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
@@ -881,6 +883,33 @@ export class AppShell {
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
     this.syncCursorMode();
     void this.refreshTiles();
+    this.scheduleAutosave();
+  }
+
+  /** Coalesces rapid state changes into one write. */
+  scheduleAutosave(): void {
+    if (this.plane.session === null) return;
+    if (this.autosaveTimer !== null) window.clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = window.setTimeout(() => {
+      this.autosaveTimer = null;
+      void this.plane.session
+        ?.save(JSON.stringify(this.workspace.snapshot()), null)
+        .catch((error: unknown) => {
+          this.reportError(error);
+        });
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  /** Restores the autosaved session, if any, before the first render. */
+  private async restoreSession(): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const loaded = await port.load(null);
+      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
   }
 
   /**
@@ -1362,16 +1391,14 @@ export class AppShell {
     const theme = documentRoot.dataset.theme === "light" ? "dark" : "light";
     documentRoot.dataset.theme = theme;
     this.workspace.setTheme(theme);
-    storeTheme(theme);
+    this.scheduleAutosave();
     this.workspaceView?.invalidateTheme();
     this.renderTiles();
   }
 
+  /** Applies the session's theme. The session is the only durable store. */
   private restoreTheme(): void {
-    const stored = storedTheme();
-    const theme = stored ?? this.workspace.theme();
-    document.documentElement.dataset.theme = theme;
-    this.workspace.setTheme(theme);
+    document.documentElement.dataset.theme = this.workspace.theme();
   }
 
   private toggleSignalTree(): void {
@@ -1505,28 +1532,6 @@ function unavailableReason(command: Command): { unavailable?: string } {
   return (command.enabled?.() ?? true)
     ? {}
     : { unavailable: "unavailable in this context" };
-}
-
-/**
- * Reads the persisted theme. The self-contained snapshot opens from `file://`,
- * where `localStorage` access can throw, so storage failures degrade to the
- * session's own theme instead of aborting the boot.
- */
-function storedTheme(): Theme | null {
-  try {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === "dark" || stored === "light" ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeTheme(theme: Theme): void {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-  } catch {
-    // A snapshot opened without storage still switches theme for this session.
-  }
 }
 
 function shellMarkup(): string {
