@@ -2972,6 +2972,7 @@ version = "0.6.0"
 dependencies = [
  "scope-core",
  "scope-protocol",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
