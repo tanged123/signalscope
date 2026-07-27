@@ -68,6 +68,8 @@
   --tree-row-height: 22px;
   --dur-quick: 80ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --elev-2: 0 0 0 1px var(--border-strong), 0 4px 16px rgb(0 0 0 / 50%);
+  --elev-3: 0 0 0 1px var(--border-strong), 0 8px 32px rgb(0 0 0 / 60%);
 }
 
 :root[data-theme="light"] {

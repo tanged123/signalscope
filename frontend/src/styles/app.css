@@ -1314,7 +1314,7 @@ button {
   width: min(560px, 90vw);
   border: 1px solid var(--border-strong);
   background: var(--surface-1);
-  box-shadow: 0 8px 30px rgb(0 0 0 / 35%);
+  box-shadow: var(--elev-3);
 }
 
 .palette-input {
