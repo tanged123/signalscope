@@ -25,6 +25,7 @@ impl Default for Session {
                 title: DEFAULT_TAB_TITLE.into(),
                 cursor_mode: CursorMode::None,
                 focused_panel_id: None,
+                maximized_panel_id: None,
                 panels: Vec::new(),
                 layout: Vec::new(),
             }],
@@ -151,6 +152,20 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(7);
             migrate(7, value)
         }
+        8 => {
+            for_each_panel(&mut value, |panel| {
+                let by_time = panel
+                    .get("color_signal")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("time");
+                if by_time {
+                    panel.insert("color_signal".into(), serde_json::Value::Null);
+                }
+                panel.insert("color_by_time".into(), serde_json::json!(by_time));
+            });
+            value["schema_version"] = serde_json::json!(9);
+            migrate(9, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -247,6 +262,7 @@ mod tests {
                 title: "Flight review".into(),
                 cursor_mode: CursorMode::None,
                 focused_panel_id: Some("panel-a".into()),
+                maximized_panel_id: None,
                 panels: vec![PanelState {
                     id: "panel-a".into(),
                     title: "Body velocity".into(),
@@ -254,6 +270,7 @@ mod tests {
                     axis_style: AxisStyle::Gutter,
                     x_signal: None,
                     color_signal: None,
+                    color_by_time: false,
                     series: vec![SeriesState {
                         path: "rocket/velocity_body/x".into(),
                         color_slot: 1,
@@ -469,6 +486,37 @@ mod tests {
         .to_string();
         let session = from_json(&json).expect("v7 session migrates");
         assert_eq!(session.tabs[0].panels[0].c_label, None);
+    }
+
+    #[test]
+    fn v8_time_colour_sentinel_becomes_a_flag() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 8,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null,
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "xy",
+                    "axis_style": "gutter", "x_signal": "demo/x", "color_signal": "time",
+                    "series": [], "y_range": null, "x_range": null,
+                    "x_label": null, "y_label": null, "c_label": null,
+                    "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v8 session migrates");
+        let panel = &session.tabs[0].panels[0];
+        assert!(panel.color_by_time);
+        assert_eq!(panel.color_signal, None);
+        assert_eq!(session.tabs[0].maximized_panel_id, None);
     }
 
     #[test]

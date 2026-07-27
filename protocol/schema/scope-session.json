@@ -1,5 +1,5 @@
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -67,6 +67,7 @@
         "axis_style": "AxisStyle",
         "x_signal": "string?",
         "color_signal": "string?",
+        "color_by_time": "bool",
         "series": "SeriesState[]",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
@@ -99,6 +100,7 @@
         "title": "string",
         "cursor_mode": "CursorMode",
         "focused_panel_id": "string?",
+        "maximized_panel_id": "string?",
         "panels": "PanelState[]",
         "layout": "LayoutRow[]"
       }

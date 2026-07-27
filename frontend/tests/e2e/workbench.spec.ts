@@ -194,6 +194,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
         axis_style: "gutter",
         x_signal: null,
         color_signal: null,
+        color_by_time: false,
         series: Array.from({ length: 40 }, (_, index) => ({
           path: `monte_carlo/run_${String(index + 1)}`,
           color_slot: index + 1,

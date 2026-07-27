@@ -458,6 +458,7 @@ describe("WorkspaceModel", () => {
       axis_style: "gutter",
       x_signal: null,
       color_signal: null,
+      color_by_time: false,
       series: [],
       y_range: null,
       x_range: null,

@@ -53,3 +53,9 @@ Session schema version 7 adds `cursor_mode` to each workspace tab. The
 v6-to-v7 migration initializes every tab to `none`; `track` and `measure`
 remain independent as users switch workspaces. See ADR 0020 for the chrome and
 interaction decision.
+
+## Amendment (2026-07-27, durable workspace state)
+
+Session schema version 9 stores the maximized panel per workspace and separates
+XY colour-by-time from signal paths. The v8-to-v9 migration converts the
+`color_signal: "time"` sentinel into `color_by_time: true`.

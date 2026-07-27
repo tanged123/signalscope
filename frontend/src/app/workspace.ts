@@ -518,6 +518,7 @@ export class WorkspaceModel {
       axis_style: "gutter",
       x_signal: null,
       color_signal: null,
+      color_by_time: false,
       series: [],
       y_range: null,
       x_range: null,
@@ -555,6 +556,7 @@ function createWorkspaceTab(number: number): WorkspaceTab {
     title: `Workspace ${String(number)}`,
     cursor_mode: "none",
     focused_panel_id: null,
+    maximized_panel_id: null,
     panels: [],
     layout: [],
   };
