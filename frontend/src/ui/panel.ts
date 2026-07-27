@@ -72,6 +72,8 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
 
 const XY_HOVER_RADIUS = 40;
 
+export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
+
 export interface PanelCallbacks {
   onFocus(id: string): void;
   onClose(id: string): void;
@@ -112,6 +114,7 @@ export interface PanelCallbacks {
     style: { color_slot: number; dash: DashStyle; width: number },
   ): void;
   onRemoveSeries(id: string, path: string): void;
+  onQuickTransform(id: string, path: string, kind: QuickTransform): void;
 }
 
 export function hasDragType(event: DragEvent, type: string): boolean {
@@ -1432,6 +1435,23 @@ export class PanelView {
       });
     });
     dashes.append(width);
+    const transforms = document.createElement("div");
+    transforms.className = "inspector-transforms";
+    for (const [label, kind] of [
+      ["d/dt", "gradient"],
+      ["∫dt", "cumtrapz"],
+      ["smooth", "movmean"],
+      ["|x|", "abs"],
+    ] as const) {
+      const button = document.createElement("button");
+      button.className = "inspector-transform";
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        this.closeInspector();
+        this.callbacks.onQuickTransform(this.id, path, kind);
+      });
+      transforms.append(button);
+    }
     const useAsX = document.createElement("button");
     useAsX.className = "inspector-action";
     useAsX.textContent = "use as X";
@@ -1446,7 +1466,7 @@ export class PanelView {
       this.closeInspector();
       this.callbacks.onRemoveSeries(this.id, path);
     });
-    popover.append(pathRow, slots, dashes, useAsX, remove);
+    popover.append(pathRow, slots, dashes, transforms, useAsX, remove);
     this.element.append(popover);
     const panelRect = this.element.getBoundingClientRect();
     popover.style.left = `${String(

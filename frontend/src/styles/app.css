@@ -944,6 +944,29 @@ button {
   margin-bottom: 6px;
 }
 
+.inspector-transforms {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.inspector-transform {
+  flex: 1;
+  padding: 2px 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.inspector-transform:hover {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
 .inspector-dash,
 .inspector-remove {
   padding: 1px 6px;

@@ -184,6 +184,9 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onEditAxisLabel: () => {},
       onSetSeriesStyle: () => {},
       onRemoveSeries: () => {},
+      onQuickTransform: (id, path, kind) => {
+        host.dataset.quickTransform = `${id}:${path}:${kind}`;
+      },
     });
     host.appendChild(view.element);
     view.update(
@@ -224,6 +227,12 @@ test("panel legend keeps controls visible and exposes overflow", async ({
   );
   expect(wideVisible + wideOverflow).toBe(40);
   await expect(panel.locator(".panel-actions")).toBeVisible();
+  await headerChips.first().locator(".legend-chip-caret").click();
+  await panel.getByRole("button", { name: "d/dt" }).click();
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-quick-transform",
+    "legend-probe-panel:monte_carlo/run_1:gradient",
+  );
 
   await page.locator("#legend-probe").evaluate((host) => {
     host.style.width = "520px";
@@ -244,29 +253,12 @@ test("panel legend keeps controls visible and exposes overflow", async ({
   await expect(panel.locator(".legend-overflow-menu")).toBeHidden();
 });
 
-test("formula editor is transient with pointer and keyboard paths", async ({
+test("formula editor hides when the data plane cannot derive", async ({
   page,
 }) => {
   await page.goto("/");
-  const editor = page.locator(".formula-bar");
-  const input = page.locator(".formula-input");
-  const toggle = page.locator(".formula-toggle");
-
-  await expect(editor).toBeHidden();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-
-  await toggle.click();
-  await expect(editor).toBeVisible();
-  await expect(input).toBeFocused();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
-
-  await page.keyboard.press("Escape");
-  await expect(editor).toBeHidden();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-
-  await page.keyboard.press("e");
-  await expect(editor).toBeVisible();
-  await expect(input).toBeFocused();
+  await expect(page.locator(".formula-bar")).toBeHidden();
+  await expect(page.locator(".formula-toggle")).toBeHidden();
 });
 
 test("signal tree toggles and collapses through its resize edge", async ({

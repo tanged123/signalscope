@@ -32,6 +32,7 @@ import {
   type PaletteMode,
 } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
+import type { QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
@@ -43,6 +44,12 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const THEME_STORAGE_KEY = "signalscope.theme";
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
+const QUICK_SUFFIX: Record<QuickTransform, string> = {
+  gradient: "dot",
+  cumtrapz: "int",
+  movmean: "avg",
+  abs: "abs",
+};
 
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
@@ -213,6 +220,9 @@ export class AppShell {
           this.workspace.removeSeries(id, path);
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
+        },
+        onQuickTransform: (_id, path, kind) => {
+          void this.applyQuickTransform(path, kind);
         },
         onLayoutChanged: () => {
           void this.refreshTiles();
@@ -944,6 +954,17 @@ export class AppShell {
     }
   }
 
+  private async applyQuickTransform(
+    path: string,
+    kind: QuickTransform,
+  ): Promise<void> {
+    try {
+      await this.createDerived(...quickTransform(path, kind));
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
   private showModeHelp(text: string): void {
     const help = required<HTMLElement>(this.root, ".mode-help");
     help.textContent = text;
@@ -1514,6 +1535,18 @@ export class AppShell {
 /** Keeps a history cursor inside `[0, length]`; `length` means "new entry". */
 function clampIndex(index: number, length: number): number {
   return Math.min(Math.max(index, 0), length);
+}
+
+/** The derived name and expression a legend quick transform produces. */
+function quickTransform(
+  path: string,
+  kind: QuickTransform,
+): [path: string, expr: string] {
+  const short = path.split("/").pop() ?? path;
+  const name = `derived/${short}_${QUICK_SUFFIX[kind]}`;
+  const expr =
+    kind === "movmean" ? `movmean('${path}', 51)` : `${kind}('${path}')`;
+  return [name, expr];
 }
 
 /** Explains why a listed command cannot run, or nothing when it can. */
