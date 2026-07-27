@@ -32,3 +32,29 @@ export function parseFormulaInput(
   if (path === "" || expr === "") return null;
   return { path, expr };
 }
+
+export interface FormulaEdit {
+  text: string;
+  caret: number;
+}
+
+/** Quotes a signal path using the expression dialect's MATLAB-style escape. */
+export function quoteSignalPath(path: string): string {
+  return `'${path.replaceAll("'", "''")}'`;
+}
+
+/** Replaces `[start, end)` with one quoted signal reference. */
+export function insertSignalReference(
+  text: string,
+  path: string,
+  start: number,
+  end: number,
+): FormulaEdit {
+  const from = Math.min(Math.max(start, 0), text.length);
+  const to = Math.min(Math.max(end, from), text.length);
+  const reference = quoteSignalPath(path);
+  return {
+    text: `${text.slice(0, from)}${reference}${text.slice(to)}`,
+    caret: from + reference.length,
+  };
+}
