@@ -53,7 +53,9 @@ that were never read, so it appears inert.
 `interactiveMode()`, which collapses them into a single boolean:
 
 ```ts
-return interaction.pan.size !== 0 || interaction.zoom.size !== 0 || interaction.fit;
+return (
+  interaction.pan.size !== 0 || interaction.zoom.size !== 0 || interaction.fit
+);
 ```
 
 The histogram's empty `pan` and `zoom` sets therefore gate nothing, and no mode
@@ -92,13 +94,14 @@ export interface PlotInteractionPolicy {
   pan: ReadonlySet<"x" | "y">;
   zoom: ReadonlySet<"x" | "y" | "box">;
   fit: boolean;
-  stickyAutoY: boolean;   // NEW
+  stickyAutoY: boolean; // NEW
   windowNote: string | null;
 }
 
 export interface PreparedPlot {
   // ...existing members
-  autoRanges(): {         // NEW
+  autoRanges(): {
+    // NEW
     x: readonly [number, number] | null;
     y: readonly [number, number] | null;
   };
@@ -114,12 +117,12 @@ All four adapters can compute it from data they already hold, with one
 addition: `XyPlotInput` gains a `window` field so the XY adapter can call
 `traceExtent`.
 
-| adapter | `autoRanges().x` | `autoRanges().y` |
-|---|---|---|
-| time | `[window.t0, window.t1]` | `autoYRange(bins)` |
-| xy | `traceExtent(traces, "x", window)` | `traceExtent(traces, "y", window)` |
-| fft | `[minFrequency, maxFrequency]` | `[-90, 3]` |
-| histogram | `[edges[0], edges.at(-1)]` | `[0, max(1, peak) * 1.06]` |
+| adapter   | `autoRanges().x`                   | `autoRanges().y`                   |
+| --------- | ---------------------------------- | ---------------------------------- |
+| time      | `[window.t0, window.t1]`           | `autoYRange(bins)`                 |
+| xy        | `traceExtent(traces, "x", window)` | `traceExtent(traces, "y", window)` |
+| fft       | `[minFrequency, maxFrequency]`     | `[-90, 3]`                         |
+| histogram | `[edges[0], edges.at(-1)]`         | `[0, max(1, peak) * 1.06]`         |
 
 Each returns `{x: null, y: null}` when no finite data is present.
 
@@ -131,12 +134,27 @@ outlives the per-frame adapter; only the extent computation moves.
 ### 2. `app/plot-gestures.ts` — new, pure, no DOM
 
 ```ts
-export function wheelAxes(policy, mod: {shift: boolean; alt: boolean}): {x: boolean; y: boolean}
-export function panAxes(policy): {x: boolean; y: boolean}
-export function boxZoomAxes(policy, mode: ZoomDragMode): {x: boolean; y: boolean}
-export function dragIntent(policy, button, mod): "pan" | "box" | "click" | "none"
-export function allowsFit(policy): boolean
-export function resolveRanges(policy, stored, auto, window): {x: Range; y: Range} | null
+export function wheelAxes(
+  policy,
+  mod: { shift: boolean; alt: boolean },
+): { x: boolean; y: boolean };
+export function panAxes(policy): { x: boolean; y: boolean };
+export function boxZoomAxes(
+  policy,
+  mode: ZoomDragMode,
+): { x: boolean; y: boolean };
+export function dragIntent(
+  policy,
+  button,
+  mod,
+): "pan" | "box" | "click" | "none";
+export function allowsFit(policy): boolean;
+export function resolveRanges(
+  policy,
+  stored,
+  auto,
+  window,
+): { x: Range; y: Range } | null;
 ```
 
 This layer holds every policy decision and nothing else. It sits beside
@@ -182,8 +200,8 @@ interface PlotInteractionHost {
 
 class PlotInteractionController {
   constructor(overlay: HTMLCanvasElement, host: PlotInteractionHost);
-  setPolicy(policy: PlotInteractionPolicy | null): void;   // per render pass
-  isDragging(): boolean;                                   // for the hover handler
+  setPolicy(policy: PlotInteractionPolicy | null): void; // per render pass
+  isDragging(): boolean; // for the hover handler
 }
 ```
 
@@ -207,21 +225,21 @@ and `setBox` replaces the direct `this.box` write feeding `drawOverlay`.
 The gates the controller applies. Bindings themselves are unchanged from
 today's desktop and touch behavior.
 
-| gesture | effect | gated by |
-|---|---|---|
-| wheel | zoom x and y | `zoom.has("x")`, `zoom.has("y")`, independently |
-| shift + wheel | zoom y | `zoom.has("y")` |
-| alt + wheel | zoom x | `zoom.has("x")` |
-| middle, right, or ctrl + left drag | pan | `pan.has("x")`, `pan.has("y")` |
-| left drag marquee | box zoom | `zoom.has("box")`, then `zoomDragMode` intersected with `zoom` |
-| left click, unpromoted | pin or remove annotation | ungated |
-| double-click inside plot | fit | `policy.fit` |
-| double-click on axis zone | label edit | ungated |
-| one-finger drag | pan | `pan` |
-| pinch | zoom per axis | `zoom` |
-| long press | pin annotation | ungated |
-| tap | cursor, or remove annotation | ungated |
-| double tap | fit | `policy.fit` |
+| gesture                            | effect                       | gated by                                                       |
+| ---------------------------------- | ---------------------------- | -------------------------------------------------------------- |
+| wheel                              | zoom x and y                 | `zoom.has("x")`, `zoom.has("y")`, independently                |
+| shift + wheel                      | zoom y                       | `zoom.has("y")`                                                |
+| alt + wheel                        | zoom x                       | `zoom.has("x")`                                                |
+| middle, right, or ctrl + left drag | pan                          | `pan.has("x")`, `pan.has("y")`                                 |
+| left drag marquee                  | box zoom                     | `zoom.has("box")`, then `zoomDragMode` intersected with `zoom` |
+| left click, unpromoted             | pin or remove annotation     | ungated                                                        |
+| double-click inside plot           | fit                          | `policy.fit`                                                   |
+| double-click on axis zone          | label edit                   | ungated                                                        |
+| one-finger drag                    | pan                          | `pan`                                                          |
+| pinch                              | zoom per axis                | `zoom`                                                         |
+| long press                         | pin annotation               | ungated                                                        |
+| tap                                | cursor, or remove annotation | ungated                                                        |
+| double tap                         | fit                          | `policy.fit`                                                   |
 
 **Fall-through invariant.** When a gated axis set resolves empty, the gesture
 must become a no-op that still yields to the next interpretation. A policy
@@ -230,12 +248,12 @@ the easiest property to break during extraction and is tested directly.
 
 ### Policy table after this change
 
-| mode | pan | zoom | fit | stickyAutoY |
-|---|---|---|---|---|
-| time | `{x, y}` | `{x, y, box}` | yes | **yes** |
-| xy | `{x, y}` | `{x, y, box}` | yes | no |
-| fft | `{x, y}` | `{x, y, box}` | yes | no |
-| histogram | **`{x, y}`** | **`{x, y, box}`** | yes | no |
+| mode      | pan          | zoom              | fit | stickyAutoY |
+| --------- | ------------ | ----------------- | --- | ----------- |
+| time      | `{x, y}`     | `{x, y, box}`     | yes | **yes**     |
+| xy        | `{x, y}`     | `{x, y, box}`     | yes | no          |
+| fft       | `{x, y}`     | `{x, y, box}`     | yes | no          |
+| histogram | **`{x, y}`** | **`{x, y, box}`** | yes | no          |
 
 `windowNote` and `cursorLink` are unchanged for every mode.
 
