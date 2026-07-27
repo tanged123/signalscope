@@ -183,12 +183,11 @@ git commit -m "refactor(core): delete dead pyramid, ingest, and compute items"
 All verified reader-free by repo-wide grep. The typechecker is the safety net: after each deletion `pnpm` typecheck (via the frontend suite) must stay green; if it flags a reader, keep that member (see Global Constraints).
 
 - [ ] **Step 1: Prune `plot-capabilities.ts`**
-
   - Delete the `PlotFrame` interface (lines 26-28) and the `readonly frame: PlotFrame;` member of `PreparedPlot` (line 102).
   - Delete the `readonly mode: PanelMode;` member of `PreparedPlot` (line 100). Keep `readonly domain` — it is live (`panel.ts` and the tests read `plot.domain`).
   - In each of the four factory return objects, delete the `mode:` and `frame:` properties (time `:213-215`, xy `:305-307`, fft `:451-453`, histogram `:572-574`). If `PanelMode` becomes an unused import, remove it.
   - In `PlotCursor`, delete the `domain` and `interval` members. Change the `cursor()` helper (line 662) to `cursor(x, heading, rows, link)` — drop the `domain` first parameter and the trailing `interval` parameter and their uses in the returned object. Update the four call sites: time `cursor("time", x, ...)` → `cursor(x, ...)`; xy `cursor("time", hit.time, ...)` → `cursor(hit.time, ...)`; fft `cursor("frequency", x, ...)` → `cursor(x, ...)`; histogram — drop both `"distribution"` and the final `[low, high]` argument.
-  - In `PlotStatGroup`, delete `key` and `colorIndex`. Change `statsGroup(key, label, colorIndex, items)` (line 812) to `statsGroup(label, items)` and update every call site: time `:261` → `statsGroup(series.path, [...])`; xy `:389` → `statsGroup(\`x · ${input.x.path}\`, statItems(xStats))`, `:396` → `statsGroup(\`y · ${series.path}\`, statItems(...))`, `:409` → `statsGroup(\`c · ${input.color.path}\`, [...])`; fft `:516` → `statsGroup(series.path, [...])`; histogram `:640` → `statsGroup(series.path, [...])`.
+  - In `PlotStatGroup`, delete `key` and `colorIndex`. Change `statsGroup(key, label, colorIndex, items)` (line 812) to `statsGroup(label, items)` and update every call site: time `:261` → `statsGroup(series.path, [...])`; xy `:389` → `statsGroup(\`x · ${input.x.path}\`, statItems(xStats))`, `:396`→`statsGroup(\`y · ${series.path}\`, statItems(...))`, `:409`→`statsGroup(\`c · ${input.color.path}\`, [...])`; fft `:516`→`statsGroup(series.path, [...])`; histogram `:640`→`statsGroup(series.path, [...])`.
 
 - [ ] **Step 2: Delete `CommandRegistry.list()`**
 
@@ -199,7 +198,6 @@ Remove the `list()` method from `commands.ts` (lines 23-28). In `commands.test.t
 Remove the function from `plot-hit.ts` (lines 49-69, including its doc comment). In `plot-hit.test.ts` remove `nearestAnnotation` from the import and delete the `test("nearestAnnotation uses the tighter marker radius", ...)` block. If the test file's `annotations` fixture is now unused, delete it too.
 
 - [ ] **Step 4: Delete write-only dataset attributes and CSS**
-
   - `signal-tree.ts:116`: delete `button.dataset.groupPath = row.path;`
   - `workspace-tabs.ts:20`: delete `item.dataset.tabId = tab.id;`
   - `app.css:608-611`: delete the `.legend-menu { color: var(--fg-4); }` rule (the real class is `.legend-overflow-menu`; a bare `.legend-menu` element is never created).
@@ -377,9 +375,9 @@ fi
 In `.github/workflows/ci.yml`, in the `ci-ok` job replace the seven-variable `env:` block on the run step with:
 
 ```yaml
-      - env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: ./scripts/check-ci-results.sh
+- env:
+    NEEDS_JSON: ${{ toJSON(needs) }}
+  run: ./scripts/check-ci-results.sh
 ```
 
 The `needs: [version, flake, quality, rust, frontend, e2e, coverage]` list is unchanged and is now the single source of truth.
@@ -415,8 +413,8 @@ git commit -m "build(ci): fail the results gate closed via the needs JSON"
 In `tokens.css`, after `--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);` add (values copied from the handoff; do NOT add the unused `--elev-0`/`--elev-1`):
 
 ```css
-  --elev-2: 0 0 0 1px var(--border-strong), 0 4px 16px rgb(0 0 0 / 50%);
-  --elev-3: 0 0 0 1px var(--border-strong), 0 8px 32px rgb(0 0 0 / 60%);
+--elev-2: 0 0 0 1px var(--border-strong), 0 4px 16px rgb(0 0 0 / 50%);
+--elev-3: 0 0 0 1px var(--border-strong), 0 8px 32px rgb(0 0 0 / 60%);
 ```
 
 No light-theme override is needed: the ring color comes from `--border-strong`, which the light block already swaps.
@@ -717,14 +715,14 @@ Behavior stays exactly as today: any tab switch or layout change restores the gr
 In `workspace.test.ts`:
 
 ```ts
-  it("keeps the maximized panel in the session snapshot", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    model.toggleMaximize(panel.id);
-    expect(model.snapshot().tabs[0]?.maximized_panel_id).toBe(panel.id);
-    model.toggleMaximize(panel.id);
-    expect(model.snapshot().tabs[0]?.maximized_panel_id).toBeNull();
-  });
+it("keeps the maximized panel in the session snapshot", () => {
+  const model = new WorkspaceModel();
+  const panel = model.addPanelRow();
+  model.toggleMaximize(panel.id);
+  expect(model.snapshot().tabs[0]?.maximized_panel_id).toBe(panel.id);
+  model.toggleMaximize(panel.id);
+  expect(model.snapshot().tabs[0]?.maximized_panel_id).toBeNull();
+});
 ```
 
 - [ ] **Step 2: Run to verify failure** — `./scripts/test.sh frontend` → the new test fails (`maximized_panel_id` stays `null`).
@@ -776,16 +774,16 @@ The magic string survives `panelSignalIds` today only because `signalsByPath.get
 In `workspace.test.ts`:
 
 ```ts
-  it("colour-by-time replaces the colour signal", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    model.setColorSignal(panel.id, "demo/speed");
-    model.setColorByTime(panel.id);
-    expect(model.panel(panel.id)?.color_by_time).toBe(true);
-    expect(model.panel(panel.id)?.color_signal).toBeNull();
-    model.setColorSignal(panel.id, null);
-    expect(model.panel(panel.id)?.color_by_time).toBe(false);
-  });
+it("colour-by-time replaces the colour signal", () => {
+  const model = new WorkspaceModel();
+  const panel = model.addPanelRow();
+  model.setColorSignal(panel.id, "demo/speed");
+  model.setColorByTime(panel.id);
+  expect(model.panel(panel.id)?.color_by_time).toBe(true);
+  expect(model.panel(panel.id)?.color_signal).toBeNull();
+  model.setColorSignal(panel.id, null);
+  expect(model.panel(panel.id)?.color_by_time).toBe(false);
+});
 ```
 
 - [ ] **Step 2: Run to verify failure** — `./scripts/test.sh frontend` → `setColorByTime` does not exist.
@@ -819,32 +817,32 @@ In `app-shell.ts:718`, the "… time" entry's `run`: replace `this.workspace.set
 - c-chip text and title (~385-399):
 
 ```ts
-      cChip.replaceChildren(
-        chipPrefix("c:"),
-        document.createTextNode(
-          state.color_by_time
-            ? "time"
-            : state.color_signal === null
-              ? "none"
-              : signalLabel(state.color_signal),
-        ),
-      );
-      cChip.title = state.color_by_time
-        ? "Colour channel: time — click to clear"
-        : state.color_signal === null
-          ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
-          : `Colour channel: ${state.color_signal} — click to clear`;
+cChip.replaceChildren(
+  chipPrefix("c:"),
+  document.createTextNode(
+    state.color_by_time
+      ? "time"
+      : state.color_signal === null
+        ? "none"
+        : signalLabel(state.color_signal),
+  ),
+);
+cChip.title = state.color_by_time
+  ? "Colour channel: time — click to clear"
+  : state.color_signal === null
+    ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
+    : `Colour channel: ${state.color_signal} — click to clear`;
 ```
 
 - `renderXy` colour source (~556-561):
 
 ```ts
-    const colorSeries: "time" | SampleResponse["series"][number] | null =
-      state.color_by_time
-        ? "time"
-        : state.color_signal === null
-          ? null
-          : (byPath.get(state.color_signal) ?? null);
+const colorSeries: "time" | SampleResponse["series"][number] | null =
+  state.color_by_time
+    ? "time"
+    : state.color_signal === null
+      ? null
+      : (byPath.get(state.color_signal) ?? null);
 ```
 
 - `prepareXyPlot` colour input (~597-602):
@@ -940,9 +938,9 @@ Replace `panelSignalIds` in `app-shell.ts` (keep its doc comment):
 In `AppShell` add the field `private missingByPanel = new Map<string, string[]>();` next to `samplesByPanel`. In `refreshTiles`, add `const nextMissing = new Map<string, string[]>();` beside `nextTiles`/`nextSamples`; change the loop head to:
 
 ```ts
-        const { ids, missing } = this.panelSignalIds(panel);
-        nextMissing.set(panel.id, missing);
-        if (ids.length === 0) return;
+const { ids, missing } = this.panelSignalIds(panel);
+nextMissing.set(panel.id, missing);
+if (ids.length === 0) return;
 ```
 
 (and use `ids` where `ids` was used before). After the `refreshToken` check, add `this.missingByPanel = nextMissing;` beside the other two assignments.
@@ -954,9 +952,9 @@ In `AppShell` add the field `private missingByPanel = new Map<string, string[]>(
 - `panel.ts` `renderData`: add the parameter `missing: readonly string[] = []` and, after `this.drawOverlay(annotations);`, add:
 
 ```ts
-    if (missing.length > 0) {
-      this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
-    }
+if (missing.length > 0) {
+  this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
+}
 ```
 
 - [ ] **Step 4: Run to verify**
