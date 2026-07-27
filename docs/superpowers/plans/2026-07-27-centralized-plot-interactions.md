@@ -23,6 +23,7 @@
 ### Task 1: Adapter-owned automatic ranges and shared range resolution
 
 **Files:**
+
 - Create: `frontend/src/app/plot-gestures.ts`
 - Create: `frontend/src/app/plot-gestures.test.ts`
 - Modify: `frontend/src/app/plot-capabilities.ts`
@@ -32,6 +33,7 @@
 - Modify: `frontend/src/ui/panel.ts`
 
 **Interfaces:**
+
 - Produces: `PreparedPlot.autoRanges(): { x: readonly [number, number] | null; y: readonly [number, number] | null }`.
 - Produces: `PlotInteractionPolicy.stickyAutoY: boolean`.
 - Produces: `resolveRanges(policy, stored, auto, window): { x: Range; y: Range } | null`.
@@ -83,10 +85,16 @@ Change existing fixtures to return ranges and add:
 it("does not compute automatic range when serialized range is usable", () => {
   const policy = new YAxisPolicy();
   let calls = 0;
-  expect(policy.resolve("a", () => {
-    calls += 1;
-    return [-1, 1];
-  }, [-100, 300])).toEqual([-100, 300]);
+  expect(
+    policy.resolve(
+      "a",
+      () => {
+        calls += 1;
+        return [-1, 1];
+      },
+      [-100, 300],
+    ),
+  ).toEqual([-100, 300]);
   expect(calls).toBe(0);
 });
 ```
@@ -119,11 +127,17 @@ resolve(
 In `plot-gestures.test.ts`, cover histogram stored ranges, stored-over-auto, linked-time x, sticky vs non-sticky y, and missing ranges. Use a real `YAxisPolicy` callback for sticky behavior:
 
 ```ts
-expect(resolveRanges(histogramPolicy, {
-  x: [2, 4],
-  y: [1, 3],
-}, { x: [0, 10], y: [0, 8] }, { t0: 20, t1: 30 }))
-  .toEqual({ x: { min: 2, max: 4 }, y: { min: 1, max: 3 } });
+expect(
+  resolveRanges(
+    histogramPolicy,
+    {
+      x: [2, 4],
+      y: [1, 3],
+    },
+    { x: [0, 10], y: [0, 8] },
+    { t0: 20, t1: 30 },
+  ),
+).toEqual({ x: { min: 2, max: 4 }, y: { min: 1, max: 3 } });
 ```
 
 - [ ] **Step 8: Run the focused test and verify RED**
@@ -149,10 +163,12 @@ git commit -m "feat: centralize plot range resolution"
 ### Task 2: Pure gesture policy resolvers
 
 **Files:**
+
 - Modify: `frontend/src/app/plot-gestures.ts`
 - Modify: `frontend/src/app/plot-gestures.test.ts`
 
 **Interfaces:**
+
 - Produces: `wheelAxes`, `panAxes`, `boxZoomAxes`, `dragIntent`, and `allowsFit`.
 - Consumes: `PlotInteractionPolicy` and `ZoomDragMode`.
 
@@ -166,8 +182,9 @@ expect(wheelAxes(yOnly, { shift: false, alt: false })).toEqual({
   y: true,
 });
 expect(boxZoomAxes(boxAndY, "xy")).toEqual({ x: false, y: true });
-expect(dragIntent(noViewControls, 0, { ctrl: false, meta: false }))
-  .toBe("click");
+expect(dragIntent(noViewControls, 0, { ctrl: false, meta: false })).toBe(
+  "click",
+);
 ```
 
 Add a real-policy regression asserting histogram exposes x/y pan and x/y/box zoom after Task 4.
@@ -195,10 +212,12 @@ git commit -m "feat: enforce plot gesture policies"
 ### Task 3: Extract the DOM interaction controller
 
 **Files:**
+
 - Create: `frontend/src/ui/plot-interactions.ts`
 - Modify: `frontend/src/ui/panel.ts`
 
 **Interfaces:**
+
 - Produces: `PlotInteractionController` with `setPolicy(policy)` and `isDragging()`.
 - Consumes: `PlotInteractionHost` methods declared in the approved design.
 
@@ -234,6 +253,7 @@ git commit -m "refactor: extract plot interaction controller"
 ### Task 4: Enable and prove histogram viewport interactions
 
 **Files:**
+
 - Modify: `frontend/src/app/plot-capabilities.ts`
 - Modify: `frontend/src/app/plot-gestures.test.ts`
 - Modify: `frontend/tests/e2e/modes.spec.ts`
@@ -241,6 +261,7 @@ git commit -m "refactor: extract plot interaction controller"
 - Modify: `docs/adr/0018-histogram-semantics.md`
 
 **Interfaces:**
+
 - Changes histogram policy to pan `{x,y}`, zoom `{x,y,box}`, fit true, sticky-auto-y false.
 
 - [ ] **Step 1: Write failing desktop histogram viewport test**
@@ -280,6 +301,7 @@ git commit -m "feat: add histogram viewport interactions"
 ### Task 5: Final quality gate and synchronized minor version
 
 **Files:**
+
 - Modify through script: workspace manifests and lockfiles reported by `./scripts/version.sh bump minor`
 
 - [ ] **Step 1: Review staged and unstaged scope**

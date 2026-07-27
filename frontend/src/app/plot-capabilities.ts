@@ -8,13 +8,14 @@ import { nearestVertex } from "./plot-hit";
 import {
   formatValue,
   invertX,
+  paddedExtent,
   projectX,
   projectY,
   valueAtTime,
   type PlotLayout,
 } from "./plot-math";
 import { visibleStats } from "./stats";
-import { lerpSample, type XyTrace } from "./xy";
+import { lerpSample, traceExtent, type XyTrace } from "./xy";
 import { nearestXyPoint } from "./xy-hit";
 
 interface PlotPoint {
@@ -32,6 +33,7 @@ export interface PlotInteractionPolicy {
   pan: ReadonlySet<"x" | "y">;
   zoom: ReadonlySet<"x" | "y" | "box">;
   fit: boolean;
+  stickyAutoY: boolean;
   windowNote: string | null;
 }
 
@@ -99,6 +101,10 @@ export interface PreparedPlot {
   readonly domain: AnnotationDomain;
   readonly frame: PlotFrame;
   readonly interaction: PlotInteractionPolicy;
+  autoRanges(): {
+    x: readonly [number, number] | null;
+    y: readonly [number, number] | null;
+  };
   cursorAt(
     layout: PlotLayout,
     point: PlotPoint,
@@ -131,6 +137,7 @@ export interface XyPlotInput {
     colorValues: readonly number[] | null;
   })[];
   color: { path: string } | null;
+  window: { t0: number; t1: number };
 }
 
 export interface FftPlotInput {
@@ -155,6 +162,7 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
     pan: new Set(["x", "y"]),
     zoom: new Set(["x", "y", "box"]),
     fit: true,
+    stickyAutoY: true,
     windowNote: null,
   },
   xy: {
@@ -163,6 +171,7 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
     pan: new Set(["x", "y"]),
     zoom: new Set(["x", "y", "box"]),
     fit: true,
+    stickyAutoY: false,
     windowNote: null,
   },
   fft: {
@@ -171,6 +180,7 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
     pan: new Set(["x", "y"]),
     zoom: new Set(["x", "y", "box"]),
     fit: true,
+    stickyAutoY: false,
     windowNote: "window: visible t",
   },
   histogram: {
@@ -179,6 +189,7 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
     pan: new Set(),
     zoom: new Set(),
     fit: true,
+    stickyAutoY: false,
     windowNote: "window: visible t",
   },
 };
@@ -203,6 +214,12 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
     domain: "time",
     frame: { kind: "tiles" },
     interaction: POLICIES.time,
+    autoRanges() {
+      const y = timeAutoYRange(input.series.flatMap((series) => series.bins));
+      return y === null
+        ? { x: null, y: null }
+        : { x: [input.window.t0, input.window.t1], y };
+    },
     cursorAt(layout, point) {
       const x = invertX(layout, point.x);
       const rows = input.series.flatMap((series) => {
@@ -289,6 +306,12 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
     domain: "time",
     frame: { kind: "paths" },
     interaction: POLICIES.xy,
+    autoRanges() {
+      const traces = input.series.map((series) => series.trace);
+      const x = traceExtent(traces, "x", input.window.t0, input.window.t1);
+      const y = traceExtent(traces, "y", input.window.t0, input.window.t1);
+      return x === null || y === null ? { x: null, y: null } : { x, y };
+    },
     cursorAt(layout, point, radius) {
       const hit = nearestXyPoint(
         input.series,
@@ -429,6 +452,28 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
     domain: "frequency",
     frame: { kind: "paths" },
     interaction: POLICIES.fft,
+    autoRanges() {
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (const series of input.series) {
+        const count = Math.min(
+          series.frequency.length,
+          series.amplitudeDb.length,
+        );
+        for (let index = 0; index < count; index += 1) {
+          const frequency = series.frequency[index] ?? Number.NaN;
+          const amplitude = series.amplitudeDb[index] ?? Number.NaN;
+          if (!Number.isFinite(frequency) || !Number.isFinite(amplitude)) {
+            continue;
+          }
+          min = Math.min(min, frequency);
+          max = Math.max(max, frequency);
+        }
+      }
+      return Number.isFinite(min) && Number.isFinite(max) && min < max
+        ? { x: [min, max], y: [-90, 3] }
+        : { x: null, y: null };
+    },
     cursorAt(layout, point) {
       const x = invertX(layout, point.x);
       const rows = input.series.map((series) =>
@@ -528,6 +573,24 @@ export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
     domain: "distribution",
     frame: { kind: "paths" },
     interaction: POLICIES.histogram,
+    autoRanges() {
+      const first = input.edges[0];
+      const last = input.edges[input.edges.length - 1];
+      let peak = Number.NEGATIVE_INFINITY;
+      for (const series of input.series) {
+        for (const count of series.counts) {
+          if (Number.isFinite(count)) peak = Math.max(peak, count);
+        }
+      }
+      return first !== undefined &&
+        last !== undefined &&
+        Number.isFinite(first) &&
+        Number.isFinite(last) &&
+        first < last &&
+        Number.isFinite(peak)
+        ? { x: [first, last], y: [0, Math.max(1, peak) * 1.06] }
+        : { x: null, y: null };
+    },
     cursorAt(layout, point) {
       const x = invertX(layout, point.x);
       const bin = binAt(x);
@@ -710,6 +773,22 @@ function numericStats(values: readonly number[]): {
     rms: count === 0 ? null : Math.sqrt(sumSq / count),
     count,
   };
+}
+
+function timeAutoYRange(
+  bins: readonly { min: number | null; max: number | null }[],
+): [number, number] | null {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const bin of bins) {
+    if (bin.min !== null && Number.isFinite(bin.min)) {
+      min = Math.min(min, bin.min);
+    }
+    if (bin.max !== null && Number.isFinite(bin.max)) {
+      max = Math.max(max, bin.max);
+    }
+  }
+  return paddedExtent(min, max);
 }
 
 function statItems(summary: ReturnType<typeof numericStats>): PlotStat[] {

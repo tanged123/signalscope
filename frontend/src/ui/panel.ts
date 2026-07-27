@@ -28,6 +28,7 @@ import {
   type ZoomDragMode,
 } from "../app/plot-math";
 import { histogram } from "../app/histogram";
+import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
   prepareFftPlot,
@@ -41,7 +42,7 @@ import {
   type ResolvedAnnotation,
 } from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
-import { lerpSample, pairSamples, traceExtent, type XyTrace } from "../app/xy";
+import { lerpSample, pairSamples, type XyTrace } from "../app/xy";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
@@ -561,11 +562,13 @@ export class PanelView {
       window,
     });
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
-    const yRange = this.yAxis.resolve(
+    const ranges = this.resolvePlotRanges(
+      state,
+      this.preparedPlot,
+      window,
       seriesKey,
-      () => tiles.series.flatMap((tile) => tile.bins),
-      state.y_range,
     );
+    if (ranges === null) return 0;
     const options: RenderOptions = {
       xLabel: state.x_label ?? "time (s)",
       yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
@@ -575,7 +578,7 @@ export class PanelView {
       dashes: shown.map(
         (tile) => bySeries.get(tile.signal_path)?.dash ?? "solid",
       ),
-      yRange,
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       widths: shown.map((tile) => bySeries.get(tile.signal_path)?.width ?? 1.4),
       ...(this.emphasizePath !== null &&
@@ -587,11 +590,7 @@ export class PanelView {
           }
         : {}),
     };
-    return this.renderer.render(
-      response,
-      { min: window.t0, max: window.t1 },
-      options,
-    );
+    return this.renderer.render(response, ranges.x, options);
   }
 
   private renderXy(
@@ -654,12 +653,22 @@ export class PanelView {
     const colorDomainMin = colorMin - colorPadding;
     const colorDomainMax = colorMax + colorPadding;
     const colorSpan = colorDomainMax - colorDomainMin;
-    const traces = this.xyTraces.map((entry) => entry.trace);
-    const xRange =
-      state.x_range ?? traceExtent(traces, "x", window.t0, window.t1);
-    const yRange =
-      state.y_range ?? traceExtent(traces, "y", window.t0, window.t1);
-    if (xRange === null || yRange === null) return 0;
+    this.preparedPlot = prepareXyPlot({
+      x: { path: state.x_signal, values: xSeries.values },
+      series: this.xyTraces.map((entry, index) => ({
+        ...entry,
+        colorValues: colorColumns[index] ?? null,
+      })),
+      color:
+        colorSeries === null
+          ? null
+          : {
+              path: state.color_signal ?? "time",
+            },
+      window,
+    });
+    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
+    if (ranges === null) return 0;
     const paths: PlotPath[] = [];
     for (const entry of this.xyTraces) {
       // Whole trajectory dimmed underneath, the windowed part lit on top.
@@ -696,8 +705,8 @@ export class PanelView {
             .filter((series) => series.visible)
             .map((series) => byPath.get(series.path)?.unit ?? null),
         ),
-      xRange: [xRange[0], xRange[1]],
-      yRange: [yRange[0], yRange[1]],
+      xRange: [ranges.x.min, ranges.x.max],
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       ...(hasColor
         ? {
@@ -715,19 +724,6 @@ export class PanelView {
           }
         : {}),
     };
-    this.preparedPlot = prepareXyPlot({
-      x: { path: state.x_signal, values: xSeries.values },
-      series: this.xyTraces.map((entry, index) => ({
-        ...entry,
-        colorValues: colorColumns[index] ?? null,
-      })),
-      color:
-        colorSeries === null
-          ? null
-          : {
-              path: state.color_signal ?? "time",
-            },
-    });
     return this.renderer.renderPaths(paths, options);
   }
 
@@ -741,8 +737,6 @@ export class PanelView {
       samples.series.map((series) => [series.signal_path, series]),
     );
     const paths: PlotPath[] = [];
-    let minFrequency = Number.POSITIVE_INFINITY;
-    let maxFrequency = 0;
     for (const series of state.series) {
       if (!series.visible) continue;
       const source = byPath.get(series.path);
@@ -766,11 +760,6 @@ export class PanelView {
         dash: style.dash,
         width: series.width,
       });
-      minFrequency = Math.min(minFrequency, result.frequency[0] ?? 1);
-      maxFrequency = Math.max(
-        maxFrequency,
-        result.frequency[result.frequency.length - 1] ?? 1,
-      );
     }
     this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
     this.preparedPlot = prepareFftPlot({
@@ -782,13 +771,13 @@ export class PanelView {
       })),
     });
     if (paths.length === 0) return 0;
-    const xRange = state.x_range ?? [minFrequency, maxFrequency];
-    const yRange = state.y_range ?? [-90, 3];
+    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
+    if (ranges === null) return 0;
     return this.renderer.renderPaths(paths, {
       xLabel: state.x_label ?? "frequency (Hz), log",
       yLabel: state.y_label ?? "amplitude (dB)",
-      xRange: [xRange[0], xRange[1]],
-      yRange: [yRange[0], yRange[1]],
+      xRange: [ranges.x.min, ranges.x.max],
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       xScale: "log",
     });
@@ -818,7 +807,6 @@ export class PanelView {
     this.setModeEmpty(binned === null, "No values in view.");
     if (binned === null) return 0;
     const edges = binned.edges;
-    let peak = 0;
     const histogramSeries: {
       path: string;
       colorIndex: number;
@@ -832,7 +820,6 @@ export class PanelView {
       // distribution rather than a line chart.
       points.push(edges[0] ?? 0, 0);
       counts.forEach((count, bin) => {
-        peak = Math.max(peak, count);
         points.push(edges[bin] ?? 0, count, edges[bin + 1] ?? 0, count);
       });
       points.push(edges[edges.length - 1] ?? 0, 0);
@@ -860,16 +847,39 @@ export class PanelView {
       edges,
       series: histogramSeries,
     });
+    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
+    if (ranges === null) return 0;
     const units = visible.map(
       (series) => byPath.get(series.path)?.unit ?? null,
     );
     return this.renderer.renderPaths(paths, {
       xLabel: state.x_label ?? yLabel(units),
       yLabel: state.y_label ?? "sample count",
-      xRange: [edges[0] ?? 0, edges[edges.length - 1] ?? 1],
-      yRange: [0, Math.max(1, peak) * 1.06],
+      xRange: [ranges.x.min, ranges.x.max],
+      yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
     });
+  }
+
+  private resolvePlotRanges(
+    state: PanelState,
+    plot: PreparedPlot,
+    window: { t0: number; t1: number },
+    seriesKey = "",
+  ): { x: Range; y: Range } | null {
+    const automatic = plot.autoRanges();
+    const stickyY = plot.interaction.stickyAutoY
+      ? this.yAxis.resolve(seriesKey, () => automatic.y, state.y_range)
+      : automatic.y;
+    return resolveRanges(
+      plot.interaction,
+      {
+        x: state.x_range,
+        y: plot.interaction.stickyAutoY ? null : state.y_range,
+      },
+      { x: automatic.x, y: stickyY },
+      window,
+    );
   }
 
   /**
