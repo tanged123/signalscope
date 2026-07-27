@@ -213,6 +213,7 @@ button {
 }
 
 .planned,
+.follow-slot,
 .app-menu-item[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1112,7 +1113,6 @@ button {
   padding: 0;
   color: var(--fg-4);
   font: 10px var(--font-mono);
-  cursor: not-allowed;
 }
 
 .palette-hints {

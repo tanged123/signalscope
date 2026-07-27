@@ -1,3 +1,4 @@
+import { formatCombo } from "../app/commands";
 import type { SampleResponse, TileResponse } from "../generated/protocol";
 import type {
   AxisStyle,
@@ -463,7 +464,7 @@ export class PanelView {
       );
       cChip.title =
         state.color_signal === null
-          ? "Drop a signal here to assign colour, or use ⌘⇧P → set color signal"
+          ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
     const note = required<HTMLElement>(this.element, ".panel-mode-note");

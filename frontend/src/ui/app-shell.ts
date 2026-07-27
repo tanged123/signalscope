@@ -313,7 +313,7 @@ export class AppShell {
     });
     this.commands.register({
       id: "split-panel-down",
-      title: "New Panel",
+      title: "New panel",
       keys: "n",
       section: "workspace",
       group: "new",
@@ -546,7 +546,7 @@ export class AppShell {
     });
     this.commands.register({
       id: "command-palette",
-      title: "Command List",
+      title: "Command list",
       keys: "mod+shift+p",
       section: "help",
       group: "commands",
@@ -576,7 +576,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.4.0");
+        this.showModeHelp("SignalScope 0.3.2");
       },
     });
     for (const planned of [
@@ -1482,7 +1482,7 @@ function shellMarkup(): string {
       <span class="dock-toggles">
         <button class="status-button active tree-toggle" title="Hide signal tree" aria-controls="signal-tree" aria-expanded="true">▤</button>
         <button class="status-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span></button>
-        <button class="status-button planned" aria-disabled="true" title="${PLANNED_TITLE}">⌖</button>
+        <button class="status-button planned" aria-disabled="true" title="Cursor readout dock — ${PLANNED_TITLE}">⌖</button>
       </span>
       <span class="status-separator"></span>
       <span class="source-truth">
@@ -1499,10 +1499,10 @@ function shellMarkup(): string {
         <button class="status-button active linked-toggle">⛓ linked</button>
         <span class="cursor-time">t —</span>
         <span class="window-readout"></span>
-        <button class="follow-slot" disabled>⏸ FOLLOW</button>
+        <button class="follow-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">⏸ FOLLOW</button>
       </span>
       <span class="status-separator"></span>
-      <span class="palette-hints"><span>⌘P <i>signals</i></span><span>⌘⇧P <i>commands</i></span></span>
+      <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
     </footer>
   </main>`;
 }

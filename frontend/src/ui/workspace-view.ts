@@ -1,3 +1,4 @@
+import { formatCombo } from "../app/commands";
 import type { WorkspaceModel } from "../app/workspace";
 import type { SampleResponse, TileResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
@@ -323,12 +324,13 @@ function emptyState(hasSignals: boolean): HTMLElement {
   headline.className = "empty-headline";
   const hint = document.createElement("div");
   hint.className = "empty-hint";
+  const commands = `${formatCombo("mod+shift+p")} commands`;
   if (hasSignals) {
     headline.textContent = "No panels open.";
-    hint.textContent = "New panel (N) · drag a signal here · ⌘⇧P commands";
+    hint.textContent = `New panel (N) · drag a signal here · ${commands}`;
   } else {
     headline.textContent = "No data loaded.";
-    hint.textContent = "Open CSV / MCAP (O) · ⌘⇧P commands";
+    hint.textContent = `Open CSV / MCAP (O) · ${commands}`;
   }
   empty.append(headline, hint);
   return empty;

@@ -71,12 +71,29 @@ function comboFor(event: KeyboardEvent): string | null {
   return key;
 }
 
-/** Display form of a `comboFor` combo, e.g. "mod+p" → "⌘P". */
+/**
+ * `comboFor` accepts either metaKey or ctrlKey for `mod`, so the label has to
+ * follow the platform the user is actually on: ⌘ on Apple hardware, Ctrl
+ * everywhere else. The trailing "+" keeps "Ctrl+⇧P" legible next to "⌘⇧P".
+ */
+function modLabel(): string {
+  const nav = globalThis.navigator as
+    | (Navigator & { userAgentData?: { platform?: string } })
+    | undefined;
+  // `userAgentData` is Chromium-only; the Tauri shell runs WebKit on macOS, so
+  // the user-agent string is the portable signal. `navigator.platform` is
+  // deprecated and unavailable here.
+  const platform = nav?.userAgentData?.platform ?? nav?.userAgent ?? "";
+  return /mac|iphone|ipad|ipod/i.test(platform) ? "⌘" : "Ctrl+";
+}
+
+/** Display form of a `comboFor` combo, e.g. "mod+p" → "⌘P" or "Ctrl+P". */
 export function formatCombo(keys: string): string {
+  const mod = modLabel();
   return keys
     .split("+")
     .map((part) =>
-      part === "mod" ? "⌘" : part === "shift" ? "⇧" : part.toUpperCase(),
+      part === "mod" ? mod : part === "shift" ? "⇧" : part.toUpperCase(),
     )
     .join("");
 }

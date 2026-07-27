@@ -353,12 +353,25 @@ test.describe("panel modes", () => {
     isMobile,
   }) => {
     test.skip(isMobile, "desktop interaction");
+    await page.keyboard.press("n");
+    await expect(page.locator(".panel")).toHaveCount(2);
+    // A panel with nothing plotted has no statistics to show, so the new panel
+    // needs a signal before the strip can prove the command reached it.
+    const second = page.locator(".panel").last();
+    await page.locator(".tree-scroll .tree-leaf").first().focus();
+    await page.keyboard.press("Enter");
+    await expect(second.locator(".legend-chip")).toHaveCount(1);
+    const stats = page.locator(".panel-stats");
+
     await page.locator(".menu-button").click();
     const toggle = page.locator(".app-menu-item", {
       hasText: "Toggle statistics",
     });
     await toggle.click();
-    await expect(page.locator(".panel-stats").first()).toBeVisible();
+    await expect(stats).toHaveCount(2);
+    await expect(stats.first()).toBeVisible();
+    await expect(stats.last()).toBeVisible();
+
     await page.locator(".menu-button").click();
     await expect(
       page
@@ -368,7 +381,8 @@ test.describe("panel modes", () => {
     await page
       .locator(".app-menu-item", { hasText: "Toggle statistics" })
       .click();
-    await expect(page.locator(".panel-stats").first()).toBeHidden();
+    await expect(stats.first()).toBeHidden();
+    await expect(stats.last()).toBeHidden();
   });
 
   test("mode help preserves the render metric", async ({ page, isMobile }) => {

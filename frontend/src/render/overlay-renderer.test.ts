@@ -273,3 +273,81 @@ test("clips overlay furniture and keeps edge labels inside the plot", () => {
     expect(y + height).toBeLessThanOrEqual(layout.plot.y + layout.plot.height);
   }
 });
+
+test("truncates badge text that cannot fit the plot and keeps plates inside", () => {
+  const plates: number[][] = [];
+  const texts: string[] = [];
+  const context = new Proxy(
+    {
+      measureText: (text: string) => ({ width: text.length * 6 }),
+    },
+    {
+      get(target, property) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+        if (property in target) return Reflect.get(target, property);
+        return (...args: unknown[]) => {
+          if (property === "fillRect") {
+            plates.push(
+              args.filter((arg): arg is number => typeof arg === "number"),
+            );
+          }
+          if (property === "fillText" && typeof args[0] === "string") {
+            texts.push(args[0]);
+          }
+        };
+      },
+      set() {
+        return true;
+      },
+    },
+  ) as unknown as CanvasRenderingContext2D;
+  const canvas = {
+    clientWidth: 200,
+    clientHeight: 120,
+    width: 0,
+    height: 0,
+    getContext: () => context,
+  } as unknown as HTMLCanvasElement;
+  // A plot only 90px wide fits 15 glyphs at the stub's 6px advance, so both
+  // badges have to clip rather than paint past the right edge.
+  const layout: PlotLayout = {
+    plot: { x: 10, y: 6, width: 90, height: 60 },
+    xRange: { min: 0, max: 60 },
+    yRange: { min: -200, max: 200 },
+  };
+  const renderer = new OverlayRenderer(canvas);
+  renderer.setPalette(palette);
+  renderer.draw(layout, {
+    cursorT: null,
+    cursorMode: "none",
+    cursorPoints: [],
+    xyMarkers: [],
+    box: null,
+    annotations: [
+      {
+        x: 55,
+        y: 190,
+        colorIndex: 0,
+        label: "a very long annotation label that will never fit",
+      },
+    ],
+    delta: {
+      label: "Δx 30.0000 · Δy 50.0000 · Δc 4.0000",
+      first: { x: 10, y: 100 },
+      second: { x: 40, y: 150 },
+    },
+  });
+
+  expect(texts).toHaveLength(2);
+  for (const text of texts) {
+    expect(text.endsWith("…")).toBe(true);
+    expect(text.length * 6).toBeLessThanOrEqual(layout.plot.width);
+  }
+  expect(plates.length).toBeGreaterThan(0);
+  for (const [x = 0, y = 0, width = 0, height = 0] of plates) {
+    expect(x).toBeGreaterThanOrEqual(layout.plot.x);
+    expect(y).toBeGreaterThanOrEqual(layout.plot.y);
+    expect(x + width).toBeLessThanOrEqual(layout.plot.x + layout.plot.width);
+    expect(y + height).toBeLessThanOrEqual(layout.plot.y + layout.plot.height);
+  }
+});

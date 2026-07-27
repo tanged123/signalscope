@@ -8,6 +8,12 @@ import type { CursorMode as SessionCursorMode } from "../generated/session";
 import { SERIES_TOKENS } from "./canvas-renderer";
 import { CanvasSurface } from "./surface";
 
+/** Badge plate geometry, shared by the measure and annotation overlays. */
+const ANNOTATION_PAD = 7;
+const ANNOTATION_HEIGHT = 16;
+const DELTA_PAD = 8;
+const DELTA_HEIGHT = 18;
+
 export interface OverlayPalette {
   amber: string;
   amberFill: string;
@@ -228,16 +234,27 @@ export class OverlayRenderer {
       context.arc(x, y, 3.5, 0, Math.PI * 2);
       context.fill();
       context.stroke();
-      const text = `${marker(index)} ${annotation.label}`;
-      const textWidth = context.measureText(text).width;
-      const plateWidth = textWidth + 14;
+      const text = fitText(
+        context,
+        `${marker(index)} ${annotation.label}`,
+        layout.plot.width - ANNOTATION_PAD * 2,
+      );
+      const plateWidth = context.measureText(text).width + ANNOTATION_PAD * 2;
       const right = layout.plot.x + layout.plot.width;
-      const plateX = x + 7 + plateWidth > right ? x - plateWidth - 7 : x + 7;
-      const plateY = y - 20 < layout.plot.y ? y + 4 : y - 20;
+      const bottom = layout.plot.y + layout.plot.height;
+      const preferredX =
+        x + 7 + plateWidth > right ? x - plateWidth - 7 : x + 7;
+      const plateX = clampToBand(preferredX, layout.plot.x, right, plateWidth);
+      const plateY = clampToBand(
+        y - 20 < layout.plot.y ? y + 4 : y - 20,
+        layout.plot.y,
+        bottom,
+        ANNOTATION_HEIGHT,
+      );
       context.fillStyle = palette.surface2;
-      context.fillRect(plateX, plateY, plateWidth, 16);
+      context.fillRect(plateX, plateY, plateWidth, ANNOTATION_HEIGHT);
       context.fillStyle = palette.fg1;
-      context.fillText(text, plateX + 7, plateY + 12);
+      context.fillText(text, plateX + ANNOTATION_PAD, plateY + 12);
     });
     if (state.delta !== null) {
       this.drawDelta(context, layout, state.delta, palette);
@@ -267,29 +284,38 @@ export class OverlayRenderer {
     );
     context.stroke();
     context.restore();
-    const text = delta.label;
     context.save();
     context.font = `10px ${palette.fontMono}`;
-    const textWidth = context.measureText(text).width;
-    const width = Math.min(textWidth + 16, layout.plot.width);
-    const x = Math.max(
-      layout.plot.x,
-      layout.plot.x + layout.plot.width - width - 8,
+    const text = fitText(
+      context,
+      delta.label,
+      layout.plot.width - DELTA_PAD * 2,
     );
-    const y = Math.max(
+    const width = context.measureText(text).width + DELTA_PAD * 2;
+    const right = layout.plot.x + layout.plot.width;
+    const bottom = layout.plot.y + layout.plot.height;
+    const x = clampToBand(right - width - 8, layout.plot.x, right, width);
+    const y = clampToBand(
+      layout.plot.y + 6,
       layout.plot.y,
-      Math.min(layout.plot.y + 6, layout.plot.y + layout.plot.height - 18),
+      bottom,
+      DELTA_HEIGHT,
     );
     context.fillStyle = palette.surface2;
-    context.fillRect(x, y, width, 18);
+    context.fillRect(x, y, width, DELTA_HEIGHT);
     context.strokeStyle = palette.amber;
     context.globalAlpha = 0.4;
     context.lineWidth = 1;
     context.setLineDash([]);
-    context.strokeRect(x + 0.5, y + 0.5, Math.max(0, width - 1), 17);
+    context.strokeRect(
+      x + 0.5,
+      y + 0.5,
+      Math.max(0, width - 1),
+      DELTA_HEIGHT - 1,
+    );
     context.globalAlpha = 1;
     context.fillStyle = palette.amber;
-    context.fillText(text, x + 8, y + 13);
+    context.fillText(text, x + DELTA_PAD, y + 13);
     context.restore();
   }
 
@@ -311,6 +337,41 @@ export class OverlayRenderer {
     };
     return this.palette;
   }
+}
+
+/**
+ * Longest prefix of `text` that fits `maxWidth`, closed with an ellipsis when
+ * it is clipped. Annotation labels come from user data, so a long one would
+ * otherwise paint a badge wider than the plot it belongs to.
+ */
+function fitText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string {
+  if (maxWidth <= 0) return "";
+  if (context.measureText(text).width <= maxWidth) return text;
+  let end = text.length - 1;
+  while (end > 0) {
+    const candidate = `${text.slice(0, end)}…`;
+    if (context.measureText(candidate).width <= maxWidth) return candidate;
+    end -= 1;
+  }
+  return "…";
+}
+
+/**
+ * Start coordinate for a `span`-long badge placed at `preferred`, kept inside
+ * `[low, high]`. When the span exceeds the band the low edge wins, so the badge
+ * clips outward rather than drifting off the opposite side of the plot.
+ */
+function clampToBand(
+  preferred: number,
+  low: number,
+  high: number,
+  span: number,
+): number {
+  return Math.max(low, Math.min(preferred, high - span));
 }
 
 /** Annotation badge glyph: circled digits ①–⑳, then parenthesised numbers. */

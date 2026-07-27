@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CommandRegistry, type Command } from "./commands";
+import { CommandRegistry, formatCombo, type Command } from "./commands";
 
 function key(
   keyValue: string,
@@ -91,6 +91,44 @@ describe("CommandRegistry", () => {
     registry.register(command({ id: "on" }));
     registry.register(command({ id: "off", enabled: () => false }));
     expect(registry.list().map((entry) => entry.id)).toEqual(["on"]);
+  });
+});
+
+describe("formatCombo", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("spells mod as ⌘ on Apple platforms", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    });
+    expect(formatCombo("mod+p")).toBe("⌘P");
+    expect(formatCombo("mod+shift+p")).toBe("⌘⇧P");
+  });
+
+  it("spells mod as Ctrl everywhere else", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    });
+    expect(formatCombo("mod+p")).toBe("Ctrl+P");
+    expect(formatCombo("mod+shift+p")).toBe("Ctrl+⇧P");
+  });
+
+  it("prefers userAgentData over the user-agent string", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      userAgentData: { platform: "macOS" },
+    });
+    expect(formatCombo("mod+k")).toBe("⌘K");
+  });
+
+  it("formats unmodified and shifted keys unchanged", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (X11; Linux x86_64)",
+    });
+    expect(formatCombo("o")).toBe("O");
+    expect(formatCombo("shift+enter")).toBe("⇧ENTER");
   });
 
   it("lists planned commands for menus but never runs them", () => {

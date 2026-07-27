@@ -97,7 +97,11 @@ export class AppMenu {
   private item(command: Command): HTMLButtonElement {
     const item = document.createElement("button");
     item.className = "app-menu-item";
-    item.role = "menuitem";
+    // A command with a `checked` predicate is a toggle, so it needs the
+    // checkable role for assistive tech to announce the ✓ glyph as state.
+    const checkable = command.checked !== undefined;
+    item.role = checkable ? "menuitemcheckbox" : "menuitem";
+    if (checkable) item.ariaChecked = String(command.checked?.() === true);
     const planned = command.status === "planned";
     const enabled = command.enabled?.() ?? true;
     item.ariaDisabled = String(planned || !enabled);
@@ -126,7 +130,9 @@ export class AppMenu {
 
   private items(): HTMLButtonElement[] {
     return [
-      ...this.popover.querySelectorAll<HTMLButtonElement>("[role=menuitem]"),
+      ...this.popover.querySelectorAll<HTMLButtonElement>(
+        "[role=menuitem],[role=menuitemcheckbox]",
+      ),
     ];
   }
 
@@ -152,8 +158,10 @@ export class AppMenu {
       return;
     } else if (event.key === "Tab") {
       // Tab leaves the menu, so the popover must not linger over whatever the
-      // focus moved to. The browser keeps its own focus order.
-      this.close(false);
+      // focus moved to. Focus returns to the trigger first so the browser
+      // resumes sequential navigation from the menu button rather than from a
+      // hidden item, which would drop focus to the document.
+      this.close(true);
       return;
     }
     if (next !== null) {

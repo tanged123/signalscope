@@ -31,8 +31,13 @@ test("shared presentation plane renders the demo workspace", async ({
   await expect(page.locator(".open-files")).toHaveCount(0);
   await expect(page.locator(".cursor-mode")).toBeEmpty();
   await expect(page.locator(".plot-tip")).toBeHidden();
+  // The mod glyph follows the platform running the browser, so the expectation
+  // is derived the same way rather than pinned to a macOS-only "⌘".
+  const mod = await page.evaluate(() =>
+    /mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘" : "Ctrl+",
+  );
   await expect(page.locator(".palette-hints")).toHaveText(
-    "⌘P signals⌘⇧P commands",
+    `${mod}P signals${mod}⇧P commands`,
   );
 });
 
@@ -103,6 +108,10 @@ test("tabbing out of the application menu dismisses it", async ({ page }) => {
     "aria-expanded",
     "false",
   );
+  // Focus returns to the trigger before Tab's default action runs, so the
+  // browser resumes from the menu button instead of dropping focus to the body.
+  await expect(page.locator(".menu-button")).not.toBeFocused();
+  await expect(page.locator("body")).not.toBeFocused();
 });
 
 test("the palette disables commands the current build cannot run", async ({
