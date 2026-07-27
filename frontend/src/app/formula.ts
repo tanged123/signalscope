@@ -12,17 +12,7 @@ export function parseFormulaInput(
   const trimmed = text.trim();
   if (trimmed === "") return null;
 
-  let separator = -1;
-  for (let index = 0; index < trimmed.length; index += 1) {
-    if (trimmed[index] !== "=") continue;
-    if (trimmed[index + 1] === "=") {
-      index += 1;
-      continue;
-    }
-    if (["=", "~", "<", ">"].includes(trimmed[index - 1] ?? "")) continue;
-    separator = index;
-    break;
-  }
+  const separator = formulaAssignmentSeparator(trimmed);
 
   if (separator === -1) {
     return { path: `derived/expr_${String(fallbackIndex)}`, expr: trimmed };
@@ -31,6 +21,34 @@ export function parseFormulaInput(
   const expr = trimmed.slice(separator + 1).trim();
   if (path === "" || expr === "") return null;
   return { path, expr };
+}
+
+export function formulaAssignmentSeparator(text: string): number {
+  let quote: "'" | '"' | null = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quote !== null) {
+      if (character !== quote) continue;
+      if (text[index + 1] === quote) {
+        index += 1;
+        continue;
+      }
+      quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (text[index] !== "=") continue;
+    if (text[index + 1] === "=") {
+      index += 1;
+      continue;
+    }
+    if (["=", "~", "<", ">"].includes(text[index - 1] ?? "")) continue;
+    return index;
+  }
+  return -1;
 }
 
 export interface FormulaEdit {

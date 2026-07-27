@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formulaAssignmentSeparator,
   insertSignalReference,
   parseFormulaInput,
   quoteSignalPath,
@@ -19,6 +20,9 @@ describe("parseFormulaInput", () => {
       path: "derived/eq",
       expr: "'a/x' == 2",
     });
+    expect(formulaAssignmentSeparator("derived/x = 'a/x' == 2")).toBe(10);
+    expect(formulaAssignmentSeparator("'a/x' >= 2")).toBe(-1);
+    expect(formulaAssignmentSeparator("'a=x' * 2")).toBe(-1);
   });
 
   it("generates a name when none is given", () => {
