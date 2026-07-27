@@ -15,3 +15,4 @@
 /frontend/playwright-report/**/*.png
 /frontend/test-results/**/*.png
 /shell/src-tauri/gen/**/*.png
+/Screenshot*.png
