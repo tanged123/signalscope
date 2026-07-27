@@ -295,6 +295,38 @@ fn migrate_v5_annotations(value: &mut serde_json::Value) {
 mod tests {
     use super::*;
 
+    const SESSION_FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../protocol/testdata/session-conformance.json"
+    );
+
+    #[test]
+    fn session_conformance_fixture_matches_rust() {
+        let session = Session {
+            derived: vec![DerivedSignal {
+                path: "derived/speed".into(),
+                expr: "hypot('imu/vx', 'imu/vy')".into(),
+            }],
+            source_paths: vec!["/data/run.csv".into()],
+            favorites: vec!["imu/vx".into()],
+            ..Session::default()
+        };
+        let current = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&session).expect("serializes")
+        );
+        if std::env::var("REGENERATE_FIXTURES").is_ok() {
+            std::fs::write(SESSION_FIXTURE_PATH, &current).expect("write fixture");
+            return;
+        }
+        let stored = std::fs::read_to_string(SESSION_FIXTURE_PATH).expect("read fixture");
+        assert_eq!(
+            from_json(&stored).expect("the fixture is a loadable session"),
+            session,
+            "regenerate with REGENERATE_FIXTURES=1"
+        );
+    }
+
     #[test]
     fn saving_and_loading_round_trips_through_a_file() {
         let directory = tempfile::tempdir().expect("temp dir");
