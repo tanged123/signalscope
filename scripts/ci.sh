@@ -13,7 +13,8 @@ Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|build|appimag
 Each named mode matches the GitHub Actions job with the same name:
 
   flake     nix flake check; includes the treefmt formatting gate.
-  format    treefmt --fail-on-change (fast local shortcut for the flake gate).
+  format    ./scripts/format.sh --check (fast local shortcut for the flake
+            gate). Run ./scripts/format.sh with no arguments to fix.
   quality   Deterministic dependency, shell, workflow, spelling, and unused-code
             checks. RustSec advisory checks need network access on a cold cache.
   rust      cargo clippy plus the full cargo test suite.
@@ -44,7 +45,7 @@ esac
 ensure_dev_shell "$@"
 
 check_format() {
-  treefmt --fail-on-change
+  "$signalscope_scripts_dir/format.sh" --check
 }
 
 check_e2e() {

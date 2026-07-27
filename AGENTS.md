@@ -41,6 +41,8 @@ Canonical commands:
 ./scripts/run.sh native               Tauri development host
 ./scripts/test.sh                     quick Rust + frontend checks
 ./scripts/test.sh core|frontend|e2e|full
+./scripts/format.sh                   apply treefmt formatting in place
+./scripts/format.sh --check           report unformatted files; writes nothing
 ./scripts/build.sh web|native         frontend or native bundles
 ./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
 ./scripts/build.sh appimage           Ubuntu/FHS AppImage build
@@ -60,6 +62,17 @@ Canonical commands:
 deterministic quality gate. Extend that function and its matching `quality` job
 rather than adding parallel ad-hoc workflow commands.
 
+treefmt, reachable as `nix fmt`, is the repository's only formatter. It covers
+Rust, TypeScript, Nix, shell, TOML, **and Markdown** — documentation, ADRs,
+specs, and plans are formatted exactly like source, and `.prettierignore` lists
+the few exclusions. When the format gate fails, run `./scripts/format.sh` and
+commit the result. Never hand-format to match the tool, and never move, delete,
+or stash tracked files to make a gate pass.
+
+The pre-commit hook formats staged files but does not stage the result, so a
+commit can still carry unformatted content. Run `./scripts/format.sh` before
+staging rather than relying on the hook.
+
 Run `./scripts/setup.sh` before frontend work when dependencies are absent.
 The Nix flake supplies the normal pinned toolchain. AppImage packaging is the
 intentional exception: run it outside the Nix shell on Ubuntu/FHS using the
@@ -73,7 +86,8 @@ or publish releases may remain native actions; their build inputs must still
 come from scripts.
 
 Before handoff, run the narrowest relevant script and then the broader gate
-proportional to risk. At minimum, run formatting plus the affected test suite;
+proportional to risk. At minimum, run `./scripts/format.sh` plus the affected
+test suite;
 for cross-layer changes run `./scripts/ci.sh all` or explain why a narrower
 check is sufficient. Report commands and results. Do not claim a GUI or
 platform build was tested if it was not.
