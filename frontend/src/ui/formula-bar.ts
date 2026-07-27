@@ -59,9 +59,7 @@ export class FormulaBar {
       this.toggleHelp();
     });
     this.helpButton.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || this.helpPopover.hidden) return;
-      event.preventDefault();
-      this.closeHelp();
+      if (event.key === "Escape") this.onKeyDown(event);
     });
   }
 

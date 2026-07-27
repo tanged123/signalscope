@@ -335,7 +335,9 @@ test("formula help teaches real paths once and remains available", async ({
       host.querySelector<HTMLFormElement>(".formula-bar")!,
       {
         onCreate: async () => {},
-        onClose: () => {},
+        onClose: () => {
+          host.dataset.closed = "true";
+        },
       },
     );
     bar.setSignals(["demo_flight/attitude/pitch_deg"]);
@@ -362,6 +364,9 @@ test("formula help teaches real paths once and remains available", async ({
   await button.focus();
   await page.keyboard.press("Escape");
   await expect(help).toBeHidden();
+  await expect(host).not.toHaveAttribute("data-closed", "true");
+  await page.keyboard.press("Escape");
+  await expect(host).toHaveAttribute("data-closed", "true");
   await button.press("Enter");
   await expect(help).toBeVisible();
 });
