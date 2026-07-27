@@ -1,8 +1,10 @@
 import {
+  type DerivedRequest,
   type EnvelopeBin,
   type IngestJob,
   type IngestRequest,
   type IngestStatus,
+  type RemoveSignalRequest,
   type SampleRequest,
   type SampleResponse,
   type SignalSummary,
@@ -20,9 +22,15 @@ export interface IngestPort {
   status(jobId: string): Promise<IngestStatus>;
 }
 
+export interface DerivedPort {
+  create(path: string, expr: string): Promise<SignalSummary>;
+  remove(path: string): Promise<void>;
+}
+
 export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
+  readonly derived: DerivedPort | null;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
@@ -51,6 +59,8 @@ export class TauriPlane implements DataPlane {
 
   readonly ingest: IngestPort;
 
+  readonly derived: DerivedPort;
+
   constructor(private readonly invoke: TauriInternals["invoke"]) {
     this.ingest = {
       pickSources: async () =>
@@ -67,6 +77,21 @@ export class TauriPlane implements DataPlane {
             request: seal<IngestJob>({ job_id: jobId }),
           }),
         ),
+    };
+    this.derived = {
+      create: async (path: string, expr: string) =>
+        open(
+          await this.invoke<Envelope<SignalSummary>>("create_derived", {
+            request: seal<DerivedRequest>({ path, expr }),
+          }),
+        ),
+      remove: async (path: string) => {
+        open(
+          await this.invoke<Envelope<null>>("remove_signal", {
+            request: seal<RemoveSignalRequest>({ path }),
+          }),
+        );
+      },
     };
   }
 
@@ -112,6 +137,8 @@ export class BakedPlane implements DataPlane {
   readonly sourceLabel = "baked demo source";
 
   readonly ingest = null;
+
+  readonly derived = null;
 
   private readonly payload: BakedManifest["payload"];
 

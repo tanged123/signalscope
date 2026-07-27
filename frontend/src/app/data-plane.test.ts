@@ -88,3 +88,40 @@ describe("TauriPlane.querySamples", () => {
     expect(Number.isNaN(response.series[0]?.values[1])).toBe(true);
   });
 });
+
+describe("derived port", () => {
+  it("creates a derived signal through the native plane", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(
+        seal({
+          signal_id: "7",
+          path: "derived/speed",
+          unit: null,
+          point_count: "3",
+          t_min: 0,
+          t_max: 2,
+        }) as never,
+      );
+    });
+    const summary = await plane.derived.create("derived/speed", "'a/x' * 2");
+    expect(summary.path).toBe("derived/speed");
+    expect(calls[0]?.command).toBe("create_derived");
+  });
+
+  it("removes a derived signal through the native plane", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(seal(null) as never);
+    });
+    await plane.derived.remove("derived/speed");
+    expect(calls[0]?.command).toBe("remove_signal");
+  });
+
+  it("has no derived port in a snapshot", () => {
+    const plane = new BakedPlane(seal({ signals: [] }));
+    expect(plane.derived).toBeNull();
+  });
+});
