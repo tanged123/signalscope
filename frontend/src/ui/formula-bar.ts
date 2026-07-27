@@ -1,5 +1,10 @@
-import { parseFormulaInput, quoteSignalPath } from "../app/formula";
+import {
+  insertSignalReference,
+  parseFormulaInput,
+  quoteSignalPath,
+} from "../app/formula";
 import { required } from "./dom";
+import { SIGNAL_DRAG_TYPE } from "./panel";
 
 const HELP_SEEN_KEY = "signalscope.formulaHelpSeen";
 const ERROR_GUIDANCE =
@@ -60,6 +65,29 @@ export class FormulaBar {
     });
     this.helpButton.addEventListener("keydown", (event) => {
       if (event.key === "Escape") this.onKeyDown(event);
+    });
+    element.addEventListener("dragover", (event) => {
+      if (event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) !== true) return;
+      event.preventDefault();
+      element.classList.add("drop-target");
+    });
+    element.addEventListener("dragleave", (event) => {
+      if (!element.contains(event.relatedTarget as Node | null)) {
+        element.classList.remove("drop-target");
+      }
+    });
+    element.addEventListener("drop", (event) => {
+      const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
+      element.classList.remove("drop-target");
+      if (path === undefined || path === "") return;
+      event.preventDefault();
+      const start = this.input.selectionStart ?? this.input.value.length;
+      const end = this.input.selectionEnd ?? start;
+      const edit = insertSignalReference(this.input.value, path, start, end);
+      this.input.value = edit.text;
+      this.input.focus();
+      this.input.setSelectionRange(edit.caret, edit.caret);
+      this.input.dispatchEvent(new Event("input", { bubbles: true }));
     });
   }
 

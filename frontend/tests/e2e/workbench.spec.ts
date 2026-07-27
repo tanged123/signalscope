@@ -274,11 +274,12 @@ test("formula component creates and recalls accepted formulas", async ({
     if (form === null)
       throw new Error("Formula bar markup is missing its form");
     const bar = new FormulaBar(form, {
-      onCreate: async (path, expression) => {
+      onCreate: (path, expression) => {
         if (path === "derived/bad") {
-          throw new Error('unknown signal "missing/path"');
+          return Promise.reject(new Error('unknown signal "missing/path"'));
         }
         host.dataset.created = `${path}|${expression}`;
+        return Promise.resolve();
       },
       onClose: () => {
         host.dataset.closed = "true";
@@ -331,15 +332,15 @@ test("formula help teaches real paths once and remains available", async ({
     host.id = "formula-help-probe";
     host.innerHTML = formulaBarMarkup();
     document.body.replaceChildren(host);
-    const bar = new FormulaBar(
-      host.querySelector<HTMLFormElement>(".formula-bar")!,
-      {
-        onCreate: async () => {},
-        onClose: () => {
-          host.dataset.closed = "true";
-        },
+    const form = host.querySelector<HTMLFormElement>(".formula-bar");
+    if (form === null)
+      throw new Error("Formula bar markup is missing its form");
+    const bar = new FormulaBar(form, {
+      onCreate: () => Promise.resolve(),
+      onClose: () => {
+        host.dataset.closed = "true";
       },
-    );
+    });
     bar.setSignals(["demo_flight/attitude/pitch_deg"]);
     bar.setOpen(true);
   });
@@ -365,6 +366,47 @@ test("formula help teaches real paths once and remains available", async ({
   await page.keyboard.press("Escape");
   await expect(help).toBeHidden();
   await expect(host).not.toHaveAttribute("data-closed", "true");
+
+  const input = host.locator(".formula-input");
+  await input.fill("derived/sum = hypot(, )");
+  await input.evaluate((element: HTMLInputElement) => {
+    element.setSelectionRange(20, 20);
+  });
+  const firstTransfer = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.setData(
+      "application/x-signalscope-signal",
+      "demo_flight/attitude/pitch_deg",
+    );
+    return transfer;
+  });
+  const bar = host.locator(".formula-bar");
+  await bar.dispatchEvent("dragover", { dataTransfer: firstTransfer });
+  await expect(bar).toHaveClass(/drop-target/);
+  await bar.dispatchEvent("drop", { dataTransfer: firstTransfer });
+  await expect(input).toHaveValue(
+    "derived/sum = hypot('demo_flight/attitude/pitch_deg', )",
+  );
+  await expect(input).toBeFocused();
+  await expect(bar).not.toHaveClass(/drop-target/);
+
+  await input.evaluate((element: HTMLInputElement) => {
+    const close = element.value.lastIndexOf(")");
+    element.setSelectionRange(close, close);
+  });
+  const secondTransfer = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.setData(
+      "application/x-signalscope-signal",
+      "demo_flight/attitude/roll_deg",
+    );
+    return transfer;
+  });
+  await bar.dispatchEvent("drop", { dataTransfer: secondTransfer });
+  await expect(input).toHaveValue(
+    "derived/sum = hypot('demo_flight/attitude/pitch_deg', 'demo_flight/attitude/roll_deg')",
+  );
+
   await page.keyboard.press("Escape");
   await expect(host).toHaveAttribute("data-closed", "true");
   await button.press("Enter");

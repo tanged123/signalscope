@@ -1014,6 +1014,12 @@ button {
   border-width: 1px 0 0;
 }
 
+.formula-bar.drop-target {
+  outline: 1px solid var(--amber-7);
+  outline-offset: -1px;
+  background: var(--amber-3);
+}
+
 .formula-mark {
   color: var(--amber-7);
   font: 11px var(--font-mono);
