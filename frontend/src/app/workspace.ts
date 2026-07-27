@@ -33,7 +33,6 @@ export function emptySession(): Session {
 
 export class WorkspaceModel {
   private readonly session: Session;
-  private maximized: string | null = null;
   private nextPanelNumber: number;
   private nextTabNumber: number;
 
@@ -119,14 +118,13 @@ export class WorkspaceModel {
     this.nextTabNumber += 1;
     this.session.tabs.push(tab);
     this.session.active_tab_id = tab.id;
-    this.maximized = null;
     return tab;
   }
 
   selectTab(id: string): boolean {
     if (!this.session.tabs.some((tab) => tab.id === id)) return false;
     this.session.active_tab_id = id;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     return true;
   }
 
@@ -141,7 +139,7 @@ export class WorkspaceModel {
       if (replacement !== undefined) {
         this.session.active_tab_id = replacement.id;
       }
-      this.maximized = null;
+      this.activeTab().maximized_panel_id = null;
     }
   }
 
@@ -162,7 +160,7 @@ export class WorkspaceModel {
   }
 
   maximizedPanelId(): string | null {
-    return this.maximized;
+    return this.activeTab().maximized_panel_id;
   }
 
   panel(id: string): PanelState | undefined {
@@ -178,7 +176,7 @@ export class WorkspaceModel {
   }
 
   addPanelRow(): PanelState {
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel();
     this.appendRow(panel.id);
     this.activeTab().focused_panel_id = panel.id;
@@ -192,7 +190,7 @@ export class WorkspaceModel {
     const cell = row?.panels[location.cellIndex];
     if (row === undefined || cell === undefined) return null;
     if (cell.width < MIN_FRACTION * 2) return null;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel();
     const width = cell.width / 2;
     cell.width = width;
@@ -210,7 +208,7 @@ export class WorkspaceModel {
     const row = this.activeTab().layout[location.rowIndex];
     if (row === undefined) return null;
     if (row.height < MIN_FRACTION * 2) return null;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel();
     const height = row.height / 2;
     row.height = height;
@@ -228,7 +226,7 @@ export class WorkspaceModel {
     this.detachCell(location);
     const tab = this.activeTab();
     tab.panels = tab.panels.filter((panel) => panel.id !== id);
-    if (this.maximized === id) this.maximized = null;
+    if (tab.maximized_panel_id === id) tab.maximized_panel_id = null;
     if (tab.focused_panel_id === id) {
       tab.focused_panel_id = tab.panels[0]?.id ?? null;
     }
@@ -239,8 +237,8 @@ export class WorkspaceModel {
   }
 
   toggleMaximize(id: string): void {
-    if (this.maximized === id) {
-      this.maximized = null;
+    if (this.activeTab().maximized_panel_id === id) {
+      this.activeTab().maximized_panel_id = null;
     } else {
       this.maximizePanel(id);
     }
@@ -248,12 +246,12 @@ export class WorkspaceModel {
 
   maximizePanel(id: string): void {
     if (this.panel(id) === undefined) return;
-    this.maximized = id;
+    this.activeTab().maximized_panel_id = id;
     this.activeTab().focused_panel_id = id;
   }
 
   restoreGrid(): void {
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
   }
 
   setMode(id: string, mode: PanelMode): void {
@@ -442,7 +440,7 @@ export class WorkspaceModel {
   movePanel(id: string, targetRowIndex: number, targetCellIndex: number): void {
     const location = this.locate(id);
     if (location === null) return;
-    this.maximized = null;
+    this.activeTab().maximized_panel_id = null;
     const removedRow = this.detachCell(location);
     let rowIndex = targetRowIndex;
     if (removedRow && location.rowIndex < rowIndex) rowIndex -= 1;

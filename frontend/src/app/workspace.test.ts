@@ -427,6 +427,15 @@ describe("WorkspaceModel", () => {
     expect(model.maximizedPanelId()).toBeNull();
   });
 
+  it("keeps the maximized panel in the session snapshot", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.toggleMaximize(panel.id);
+    expect(model.snapshot().tabs[0]?.maximized_panel_id).toBe(panel.id);
+    model.toggleMaximize(panel.id);
+    expect(model.snapshot().tabs[0]?.maximized_panel_id).toBeNull();
+  });
+
   it("restores the layout before adding or splitting panels", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
