@@ -44,16 +44,16 @@ rather than `frontend/src/ui/panel.ts`.
 **If that PR has not landed**, the same code sits in `panel.ts` at these
 pre-refactor locations, and Task 3 applies there instead:
 
-| symbol | pre-refactor location |
-| --- | --- |
-| touch state fields | `panel.ts:175-186` |
-| `TOUCH` constant | `panel.ts:79-91` |
-| `beginTouch` | `panel.ts:985-1025` |
-| `moveTouch` | `panel.ts:1027-1060` |
-| `applyPinch` | `panel.ts:1082-1109` |
-| `endTouch` | `panel.ts:1112-1142` |
-| `clearLongPress` | `panel.ts:1144-1149` |
-| `publishTouchCursor` | `panel.ts:1151-1172` |
+| symbol                 | pre-refactor location              |
+| ---------------------- | ---------------------------------- |
+| touch state fields     | `panel.ts:175-186`                 |
+| `TOUCH` constant       | `panel.ts:79-91`                   |
+| `beginTouch`           | `panel.ts:985-1025`                |
+| `moveTouch`            | `panel.ts:1027-1060`               |
+| `applyPinch`           | `panel.ts:1082-1109`               |
+| `endTouch`             | `panel.ts:1112-1142`               |
+| `clearLongPress`       | `panel.ts:1144-1149`               |
+| `publishTouchCursor`   | `panel.ts:1151-1172`               |
 | `pointerType` branches | `panel.ts:327, 391, 407, 410, 413` |
 
 Verify which layout is present before starting:
@@ -65,38 +65,40 @@ ls frontend/src/ui/plot-interactions.ts 2>/dev/null \
 
 ## File Structure
 
-| file | change | responsibility after |
-| --- | --- | --- |
-| `docs/adr/0021-desktop-only-input.md` | create | records the posture decision and its reversal path |
-| `docs/adr/README.md` | modify | index entry 21 |
-| `AGENTS.md` | modify: `:164`, `:180` | rules stop mandating mobile gestures and mobile e2e |
-| `frontend/tests/e2e/touch.spec.ts` | delete | — |
-| `frontend/playwright.config.ts` | modify: `projects` | desktop project only |
-| `frontend/tests/e2e/interactions.spec.ts` | modify | 4 `isMobile` guards removed |
-| `frontend/tests/e2e/modes.spec.ts` | modify | 10 `isMobile` guards removed |
-| `frontend/tests/e2e/workbench.spec.ts` | modify | 3 `isMobile` guards removed |
-| `frontend/src/ui/plot-interactions.ts` | modify | pointer gestures only; no touch state |
-| `frontend/src/ui/panel.ts` | modify | `pinAt`/`removeAt` become private again |
-| `frontend/src/app/plot-math.ts` | modify: `:170-215` | pan/zoom math without pinch |
-| `frontend/src/app/plot-math.test.ts` | modify | pinch cases removed |
-| `frontend/src/styles/app.css` | modify: `:728-741` | no coarse-pointer block |
+| file                                      | change                 | responsibility after                                |
+| ----------------------------------------- | ---------------------- | --------------------------------------------------- |
+| `docs/adr/0021-desktop-only-input.md`     | create                 | records the posture decision and its reversal path  |
+| `docs/adr/README.md`                      | modify                 | index entry 21                                      |
+| `AGENTS.md`                               | modify: `:164`, `:180` | rules stop mandating mobile gestures and mobile e2e |
+| `frontend/tests/e2e/touch.spec.ts`        | delete                 | —                                                   |
+| `frontend/playwright.config.ts`           | modify: `projects`     | desktop project only                                |
+| `frontend/tests/e2e/interactions.spec.ts` | modify                 | 4 `isMobile` guards removed                         |
+| `frontend/tests/e2e/modes.spec.ts`        | modify                 | 10 `isMobile` guards removed                        |
+| `frontend/tests/e2e/workbench.spec.ts`    | modify                 | 3 `isMobile` guards removed                         |
+| `frontend/src/ui/plot-interactions.ts`    | modify                 | pointer gestures only; no touch state               |
+| `frontend/src/ui/panel.ts`                | modify                 | `pinAt`/`removeAt` become private again             |
+| `frontend/src/app/plot-math.ts`           | modify: `:170-215`     | pan/zoom math without pinch                         |
+| `frontend/src/app/plot-math.test.ts`      | modify                 | pinch cases removed                                 |
+| `frontend/src/styles/app.css`             | modify: `:728-741`     | no coarse-pointer block                             |
 
 ---
 
 ### Task 1: Record the decision
 
 **Files:**
+
 - Create: `docs/adr/0021-desktop-only-input.md`
 - Modify: `docs/adr/README.md`
 - Modify: `AGENTS.md:164`, `AGENTS.md:180`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: the ADR that Tasks 2-6 cite in their commit messages, and the
   amended `AGENTS.md` rules that make those deletions compliant rather than
   violations.
 
-This task is first because `AGENTS.md:164` and `:180` currently *require* what
+This task is first because `AGENTS.md:164` and `:180` currently _require_ what
 the later tasks delete. Removing the code before amending the rules would leave
 the repository self-contradicting at every intermediate commit.
 
@@ -254,6 +256,7 @@ mobile gestures and mobile-emulation e2e."
 ### Task 2: Remove the touch tests and the mobile Playwright project
 
 **Files:**
+
 - Delete: `frontend/tests/e2e/touch.spec.ts`
 - Modify: `frontend/playwright.config.ts` (the `projects` array)
 - Modify: `frontend/tests/e2e/interactions.spec.ts` (lines 11, 13, 60, 62, 93, 95, 120, 122)
@@ -261,6 +264,7 @@ mobile gestures and mobile-emulation e2e."
 - Modify: `frontend/tests/e2e/workbench.spec.ts` (lines 257, 259, 306, 308, 370, 371)
 
 **Interfaces:**
+
 - Consumes: ADR 0021 from Task 1.
 - Produces: an e2e suite with a single `desktop` project and no `isMobile`
   fixture usage. Task 3 relies on `touch.spec.ts` being gone, since it is the
@@ -398,10 +402,12 @@ Refs ADR 0021."
 ### Task 3: Remove touch handling from the interaction controller
 
 **Files:**
+
 - Modify: `frontend/src/ui/plot-interactions.ts`
 - Modify: `frontend/src/ui/panel.ts`
 
 **Interfaces:**
+
 - Consumes: `PlotInteractionController` and `PlotInteractionHost` from the
   centralized-plot-interactions PR. Consumes Task 2's removal of
   `touch.spec.ts`.
@@ -577,10 +583,12 @@ Refs ADR 0021."
 ### Task 4: Remove the pinch range math
 
 **Files:**
+
 - Modify: `frontend/src/app/plot-math.ts:170-215`
 - Modify: `frontend/src/app/plot-math.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 3's removal of the only production callers.
 - Produces: a `plot-math` module exporting no pinch functions.
 
@@ -680,9 +688,11 @@ Refs ADR 0021."
 ### Task 5: Remove the coarse-pointer stylesheet block
 
 **Files:**
+
 - Modify: `frontend/src/styles/app.css:728-741`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: nothing consumed downstream.
 
@@ -747,9 +757,11 @@ Refs ADR 0021."
 ### Task 6: Full gate and version bump
 
 **Files:**
+
 - Modify: version manifests, via `./scripts/version.sh`
 
 **Interfaces:**
+
 - Consumes: Tasks 1-5.
 - Produces: the PR's final commit.
 
@@ -898,7 +910,7 @@ export function reduce(
 
 Two properties matter. Time enters as `at` on the event rather than a
 `performance.now()` call inside, so double-tap windows are testable without
-fake timers. Timers are *requested* via `startLongPress` and fire back in as
+fake timers. Timers are _requested_ via `startLongPress` and fire back in as
 `longPressElapsed`, so the reducer holds no handles and every transition is
 reachable from a plain function call.
 
