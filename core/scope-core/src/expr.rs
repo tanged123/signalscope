@@ -99,38 +99,9 @@ fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
                 }
             }
             b'\'' | b'"' => {
-                let quote = byte;
-                index += 1;
-                let mut name = String::new();
-                while index < bytes.len() {
-                    if bytes[index] != quote {
-                        let character = src[index..]
-                            .chars()
-                            .next()
-                            .expect("index stays on a character boundary");
-                        name.push(character);
-                        index += character.len_utf8();
-                        continue;
-                    }
-                    if bytes.get(index + 1) == Some(&quote) {
-                        name.push(char::from(quote));
-                        index += 2;
-                        continue;
-                    }
-                    break;
-                }
-                if index >= bytes.len() {
-                    return Err(ExprError::UnterminatedString { start });
-                }
-                index += 1;
-                if name.is_empty() {
-                    return Err(ExprError::EmptySignal { start });
-                }
-                tokens.push(Spanned {
-                    token: Token::Signal(name),
-                    start,
-                    end: index,
-                });
+                let signal = quoted_signal(src, start)?;
+                index = signal.end;
+                tokens.push(signal);
             }
             b'0'..=b'9' | b'.'
                 if byte != b'.' || matches!(bytes.get(index + 1), Some(b'0'..=b'9')) =>
@@ -186,6 +157,42 @@ fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
         }
     }
     Ok(tokens)
+}
+
+fn quoted_signal(src: &str, start: usize) -> Result<Spanned, ExprError> {
+    let bytes = src.as_bytes();
+    let quote = bytes[start];
+    let mut index = start + 1;
+    let mut name = String::new();
+    while index < bytes.len() {
+        if bytes[index] != quote {
+            let character = src[index..]
+                .chars()
+                .next()
+                .expect("index stays on a character boundary");
+            name.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+        if bytes.get(index + 1) == Some(&quote) {
+            name.push(char::from(quote));
+            index += 2;
+            continue;
+        }
+        break;
+    }
+    if index >= bytes.len() {
+        return Err(ExprError::UnterminatedString { start });
+    }
+    index += 1;
+    if name.is_empty() {
+        return Err(ExprError::EmptySignal { start });
+    }
+    Ok(Spanned {
+        token: Token::Signal(name),
+        start,
+        end: index,
+    })
 }
 
 fn operator(byte: u8, next: Option<&u8>) -> Option<(Token, usize)> {
