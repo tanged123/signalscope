@@ -44,7 +44,6 @@ pub enum ExprError {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
 enum Token {
     Number(f64),
     Signal(String),
@@ -71,14 +70,12 @@ enum Token {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
 struct Spanned {
     token: Token,
     start: usize,
     end: usize,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
     let bytes = src.as_bytes();
     let mut tokens = Vec::new();
@@ -196,9 +193,428 @@ fn tokenize(src: &str) -> Result<Vec<Spanned>, ExprError> {
     Ok(tokens)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+    Pos,
+    Not,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinaryOp {
+    OrOr,
+    AndAnd,
+    Or,
+    And,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+}
+
+/// A parsed expression. `Call` nodes carry a unique `id` so the evaluator can
+/// memoize the whole-signal operations without re-walking the tree.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Expr {
+    Number(f64),
+    Time,
+    Signal(String),
+    Unary {
+        op: UnaryOp,
+        rhs: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    Call {
+        id: usize,
+        name: String,
+        args: Vec<Expr>,
+        start: usize,
+        end: usize,
+    },
+}
+
+/// Per-sample scalar functions and their arity.
+pub(crate) const SCALAR_FUNCTIONS: &[(&str, usize)] = &[
+    ("abs", 1),
+    ("sqrt", 1),
+    ("exp", 1),
+    ("log", 1),
+    ("log2", 1),
+    ("log10", 1),
+    ("sin", 1),
+    ("cos", 1),
+    ("tan", 1),
+    ("asin", 1),
+    ("acos", 1),
+    ("atan", 1),
+    ("atan2", 2),
+    ("sinh", 1),
+    ("cosh", 1),
+    ("tanh", 1),
+    ("hypot", 2),
+    ("floor", 1),
+    ("ceil", 1),
+    ("round", 1),
+    ("fix", 1),
+    ("sign", 1),
+    ("mod", 2),
+    ("rem", 2),
+    ("min", 2),
+    ("max", 2),
+    ("power", 2),
+];
+
+/// Whole-signal operations. `movmean` takes a literal window as its second
+/// argument; the others take one argument.
+pub(crate) const WHOLE_FUNCTIONS: &[(&str, usize)] =
+    &[("gradient", 1), ("cumtrapz", 1), ("movmean", 2)];
+
+fn arity_of(name: &str) -> Option<usize> {
+    SCALAR_FUNCTIONS
+        .iter()
+        .chain(WHOLE_FUNCTIONS.iter())
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, arity)| *arity)
+}
+
+/// The closest known name by case-insensitive prefix and length, used only to
+/// improve the error message.
+fn suggest(name: &str) -> Option<String> {
+    let lowered = name.to_ascii_lowercase();
+    SCALAR_FUNCTIONS
+        .iter()
+        .chain(WHOLE_FUNCTIONS.iter())
+        .map(|(candidate, _)| *candidate)
+        .filter(|candidate| lowered.starts_with(candidate) || candidate.starts_with(&lowered))
+        .min_by_key(|candidate| candidate.len().abs_diff(lowered.len()))
+        .map(str::to_owned)
+}
+
+/// Parses `src` into an expression tree.
+///
+/// # Errors
+///
+/// Returns [`ExprError`] for any lexical or syntactic problem, carrying the
+/// byte span of the offending token.
+pub fn parse(src: &str) -> Result<Expr, ExprError> {
+    let tokens = tokenize(src)?;
+    let mut parser = Parser {
+        tokens: &tokens,
+        index: 0,
+        next_call_id: 0,
+    };
+    let expr = parser.expression(0)?;
+    if let Some(extra) = parser.peek_spanned() {
+        return Err(ExprError::UnexpectedToken {
+            start: extra.start,
+            end: extra.end,
+        });
+    }
+    Ok(expr)
+}
+
+struct Parser<'a> {
+    tokens: &'a [Spanned],
+    index: usize,
+    next_call_id: usize,
+}
+
+/// MATLAB precedence, lowest first. The right value exceeds the left for
+/// left-associative operators and trails it for right-associative ones.
+fn infix_power(token: &Token) -> Option<(BinaryOp, u8, u8)> {
+    Some(match token {
+        Token::OrOr => (BinaryOp::OrOr, 1, 2),
+        Token::AndAnd => (BinaryOp::AndAnd, 3, 4),
+        Token::Or => (BinaryOp::Or, 5, 6),
+        Token::And => (BinaryOp::And, 7, 8),
+        Token::Lt => (BinaryOp::Lt, 9, 10),
+        Token::Le => (BinaryOp::Le, 9, 10),
+        Token::Gt => (BinaryOp::Gt, 9, 10),
+        Token::Ge => (BinaryOp::Ge, 9, 10),
+        Token::EqEq => (BinaryOp::Eq, 9, 10),
+        Token::Ne => (BinaryOp::Ne, 9, 10),
+        Token::Plus => (BinaryOp::Add, 11, 12),
+        Token::Minus => (BinaryOp::Sub, 11, 12),
+        Token::Star => (BinaryOp::Mul, 13, 14),
+        Token::Slash => (BinaryOp::Div, 13, 14),
+        Token::Caret => (BinaryOp::Pow, 18, 17),
+        _ => return None,
+    })
+}
+
+/// Unary operators sit between multiplication (13/14) and power (17/18), which
+/// is what makes `-2^2` parse as `-(2^2)` and `-2*3` as `(-2)*3`.
+const UNARY_POWER: u8 = 15;
+
+impl Parser<'_> {
+    fn peek_spanned(&self) -> Option<&Spanned> {
+        self.tokens.get(self.index)
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        self.peek_spanned().map(|entry| &entry.token)
+    }
+
+    fn advance(&mut self) -> Result<Spanned, ExprError> {
+        let entry = self
+            .tokens
+            .get(self.index)
+            .ok_or(ExprError::UnexpectedEnd)?;
+        self.index += 1;
+        Ok(entry.clone())
+    }
+
+    fn eat(&mut self, expected: &Token) -> Result<(), ExprError> {
+        let entry = self.advance()?;
+        if &entry.token == expected {
+            Ok(())
+        } else {
+            Err(ExprError::UnexpectedToken {
+                start: entry.start,
+                end: entry.end,
+            })
+        }
+    }
+
+    fn expression(&mut self, minimum: u8) -> Result<Expr, ExprError> {
+        let mut lhs = self.prefix()?;
+        while let Some((op, left, right)) = self.peek().and_then(infix_power) {
+            if left < minimum {
+                break;
+            }
+            self.index += 1;
+            let rhs = self.expression(right)?;
+            lhs = Expr::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn prefix(&mut self) -> Result<Expr, ExprError> {
+        let entry = self.advance()?;
+        match entry.token {
+            Token::Number(value) => Ok(Expr::Number(value)),
+            Token::Signal(path) => Ok(Expr::Signal(path)),
+            Token::Minus | Token::Plus | Token::Not => {
+                let op = match entry.token {
+                    Token::Minus => UnaryOp::Neg,
+                    Token::Plus => UnaryOp::Pos,
+                    _ => UnaryOp::Not,
+                };
+                let rhs = self.expression(UNARY_POWER)?;
+                Ok(Expr::Unary {
+                    op,
+                    rhs: Box::new(rhs),
+                })
+            }
+            Token::LParen => {
+                let inner = self.expression(0)?;
+                self.eat(&Token::RParen)?;
+                Ok(inner)
+            }
+            Token::Ident(name) => self.identifier(name, entry.start, entry.end),
+            _ => Err(ExprError::UnexpectedToken {
+                start: entry.start,
+                end: entry.end,
+            }),
+        }
+    }
+
+    fn identifier(&mut self, name: String, start: usize, end: usize) -> Result<Expr, ExprError> {
+        if self.peek() != Some(&Token::LParen) {
+            return match name.as_str() {
+                "t" => Ok(Expr::Time),
+                "pi" => Ok(Expr::Number(std::f64::consts::PI)),
+                "eps" => Ok(Expr::Number(f64::EPSILON)),
+                "Inf" | "inf" => Ok(Expr::Number(f64::INFINITY)),
+                "NaN" | "nan" => Ok(Expr::Number(f64::NAN)),
+                _ => Err(ExprError::UnknownIdentifier {
+                    suggestion: suggest(&name),
+                    name,
+                    start,
+                    end,
+                }),
+            };
+        }
+        let Some(expected) = arity_of(&name) else {
+            return Err(ExprError::UnknownIdentifier {
+                suggestion: suggest(&name),
+                name,
+                start,
+                end,
+            });
+        };
+        self.eat(&Token::LParen)?;
+        let mut args = Vec::new();
+        if self.peek() != Some(&Token::RParen) {
+            loop {
+                args.push(self.expression(0)?);
+                if self.peek() == Some(&Token::Comma) {
+                    self.index += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        let closing = self.advance()?;
+        if closing.token != Token::RParen {
+            return Err(ExprError::UnexpectedToken {
+                start: closing.start,
+                end: closing.end,
+            });
+        }
+        if args.len() != expected {
+            return Err(ExprError::BadArity {
+                name,
+                expected,
+                actual: args.len(),
+            });
+        }
+        let id = self.next_call_id;
+        self.next_call_id += 1;
+        Ok(Expr::Call {
+            id,
+            name,
+            args,
+            start,
+            end: closing.end,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Renders the tree in fully parenthesized prefix form so precedence
+    /// assertions read as the shape they mean.
+    fn shape(expr: &Expr) -> String {
+        match expr {
+            Expr::Number(value) => format!("{value}"),
+            Expr::Time => "t".into(),
+            Expr::Signal(path) => format!("@{path}"),
+            Expr::Unary { op, rhs } => format!("({op:?} {})", shape(rhs)),
+            Expr::Binary { op, lhs, rhs } => {
+                format!("({op:?} {} {})", shape(lhs), shape(rhs))
+            }
+            Expr::Call { name, args, .. } => {
+                let rendered: Vec<String> = args.iter().map(shape).collect();
+                format!("({name} {})", rendered.join(" "))
+            }
+        }
+    }
+
+    #[test]
+    fn power_binds_tighter_than_unary_minus() {
+        assert_eq!(shape(&parse("-2^2").unwrap()), "(Neg (Pow 2 2))");
+    }
+
+    #[test]
+    fn unary_minus_binds_tighter_than_multiplication() {
+        assert_eq!(shape(&parse("-2*3").unwrap()), "(Mul (Neg 2) 3)");
+    }
+
+    #[test]
+    fn power_is_right_associative() {
+        assert_eq!(shape(&parse("2^3^2").unwrap()), "(Pow 2 (Pow 3 2))");
+    }
+
+    #[test]
+    fn short_circuit_operators_bind_looser_than_elementwise() {
+        assert_eq!(shape(&parse("1 || 2 | 3").unwrap()), "(OrOr 1 (Or 2 3))");
+        assert_eq!(shape(&parse("1 && 2 & 3").unwrap()), "(AndAnd 1 (And 2 3))");
+        assert_eq!(
+            shape(&parse("1 || 2 && 3").unwrap()),
+            "(OrOr 1 (AndAnd 2 3))"
+        );
+    }
+
+    #[test]
+    fn comparisons_bind_looser_than_arithmetic() {
+        assert_eq!(shape(&parse("1 + 2 > 3").unwrap()), "(Gt (Add 1 2) 3)");
+    }
+
+    #[test]
+    fn parses_constants_and_the_time_binding() {
+        assert_eq!(shape(&parse("t").unwrap()), "t");
+        assert_eq!(
+            shape(&parse("pi").unwrap()),
+            std::f64::consts::PI.to_string()
+        );
+        assert_eq!(shape(&parse("inf").unwrap()), "inf");
+        assert_eq!(shape(&parse("Inf").unwrap()), "inf");
+        assert!(matches!(parse("NaN").unwrap(), Expr::Number(value) if value.is_nan()));
+    }
+
+    #[test]
+    fn parses_calls_and_signal_references() {
+        assert_eq!(
+            shape(&parse("hypot('a/x', 'a/y')").unwrap()),
+            "(hypot @a/x @a/y)"
+        );
+        assert_eq!(
+            shape(&parse("gradient(hypot('a/x', 'a/y'))").unwrap()),
+            "(gradient (hypot @a/x @a/y))"
+        );
+    }
+
+    #[test]
+    fn assigns_each_call_a_distinct_id() {
+        let expr = parse("gradient(movmean('a/x', 5))").unwrap();
+        let Expr::Call {
+            id: outer, args, ..
+        } = &expr
+        else {
+            panic!("expected a call");
+        };
+        let Expr::Call { id: inner, .. } = &args[0] else {
+            panic!("expected a nested call");
+        };
+        assert_ne!(outer, inner);
+    }
+
+    #[test]
+    fn rejects_an_unknown_identifier_with_a_suggestion() {
+        let error = parse("sqrtt('a/x')").expect_err("unknown name");
+        assert!(matches!(
+            error,
+            ExprError::UnknownIdentifier {
+                ref name,
+                suggestion: Some(ref hint),
+                ..
+            } if name == "sqrtt" && hint == "sqrt"
+        ));
+    }
+
+    #[test]
+    fn rejects_trailing_tokens() {
+        assert!(matches!(
+            parse("1 2").expect_err("trailing"),
+            ExprError::UnexpectedToken { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_an_empty_expression() {
+        assert_eq!(
+            parse("  % only a comment").unwrap_err(),
+            ExprError::UnexpectedEnd
+        );
+    }
 
     #[test]
     fn tokenizes_signal_references_in_both_quote_styles() {
