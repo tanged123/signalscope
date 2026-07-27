@@ -1286,6 +1286,26 @@ button {
   color: var(--fg-1);
 }
 
+.tree-derived-mark {
+  margin-left: 6px;
+  color: var(--amber-7);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tree-derived-remove {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-4);
+  cursor: pointer;
+}
+
+.tree-derived-remove:hover {
+  color: var(--fg-1);
+}
+
 .tree-empty {
   padding: 4px 8px;
   color: var(--fg-4);

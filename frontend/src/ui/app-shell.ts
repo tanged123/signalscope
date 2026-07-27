@@ -246,6 +246,9 @@ export class AppShell {
           this.workspace.toggleFavorite(path);
           this.tree?.setFavorites(this.workspace.favorites());
         },
+        onRemoveDerived: (path) => {
+          void this.removeDerived(path);
+        },
       },
     );
     this.palette = new CommandPalette(this.root, (mode) =>
@@ -926,6 +929,19 @@ export class AppShell {
     const focused = this.workspace.focusedPanelId();
     if (focused !== null) this.workspace.addSeries(focused, summary.path);
     this.afterLayoutChange();
+  }
+
+  private async removeDerived(path: string): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) return;
+    try {
+      await port.remove(path);
+      this.workspace.removeDerived(path);
+      await this.reloadSignals();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
   }
 
   private showModeHelp(text: string): void {
