@@ -59,6 +59,7 @@
   --seq-14: #fdb2af;
   --seq-15: #fcbfd4;
   --seq-16: #fbccfa;
+  /* Reserved for live streaming sources; loaded files do not show status dots. */
   --status-connected: #00cc66;
   --status-disconnected: #999999;
   --status-error: #ff3333;

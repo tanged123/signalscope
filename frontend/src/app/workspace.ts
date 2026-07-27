@@ -53,6 +53,14 @@ export class WorkspaceModel {
     return this.session;
   }
 
+  theme(): Session["theme"] {
+    return this.session.theme;
+  }
+
+  setTheme(theme: Session["theme"]): void {
+    this.session.theme = theme;
+  }
+
   panels(): readonly PanelState[] {
     return this.activeTab().panels;
   }
@@ -117,6 +125,14 @@ export class WorkspaceModel {
 
   favorites(): readonly string[] {
     return this.session.favorites;
+  }
+
+  cursorMode(): WorkspaceTab["cursor_mode"] {
+    return this.activeTab().cursor_mode;
+  }
+
+  setCursorMode(mode: WorkspaceTab["cursor_mode"]): void {
+    this.activeTab().cursor_mode = mode;
   }
 
   focusedPanelId(): string | null {
@@ -513,6 +529,7 @@ function createWorkspaceTab(number: number): WorkspaceTab {
   return {
     id: `workspace-${String(number)}`,
     title: `Workspace ${String(number)}`,
+    cursor_mode: "none",
     focused_panel_id: null,
     panels: [],
     layout: [],

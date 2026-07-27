@@ -11,6 +11,20 @@ function widths(model: WorkspaceModel, rowIndex: number): number[] {
 }
 
 describe("WorkspaceModel", () => {
+  it("stores cursor mode independently for each workspace", () => {
+    const model = new WorkspaceModel();
+    expect(model.cursorMode()).toBe("none");
+    model.setCursorMode("track");
+    const first = model.activeTabId();
+    const second = model.addTab().id;
+    expect(model.cursorMode()).toBe("none");
+    model.setCursorMode("measure");
+    model.selectTab(first);
+    expect(model.cursorMode()).toBe("track");
+    model.selectTab(second);
+    expect(model.cursorMode()).toBe("measure");
+  });
+
   it("keeps panel grids independent across workspace tabs", () => {
     const model = new WorkspaceModel();
     const firstPanel = model.addPanelRow();

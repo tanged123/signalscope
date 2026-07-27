@@ -82,6 +82,17 @@ Install the repository hook with `./scripts/install-hooks.sh`. Do not use a
 blanket `git add -A` or silently stage unrelated work. Review staged and
 unstaged diffs separately before committing.
 
+Every completed task branch intended for review or a PR must include a
+synchronized version bump as its final change before handoff. Choose `major`
+for breaking API, protocol, schema, or session-compatibility changes; `minor`
+for backward-compatible user-facing features or capabilities; and `patch` for
+fixes, refactors, tests, build/CI/tooling, or documentation. Run
+`./scripts/version.sh bump <major|minor|patch>` followed by
+`./scripts/version.sh check`, and commit all resulting manifest changes. For
+parallel PRs, update from the latest target branch before finalizing; if its
+version changed, recompute the bump so the PR increments from the current
+target version.
+
 ## Product and architecture invariants
 
 SignalScope is native software with a portable export, not a web app:

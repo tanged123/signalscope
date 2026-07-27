@@ -1,3 +1,4 @@
+import { formatCombo } from "../app/commands";
 import type { SampleResponse, TileResponse } from "../generated/protocol";
 import type {
   AxisStyle,
@@ -52,8 +53,8 @@ import {
 import {
   marker,
   OverlayRenderer,
+  type CursorMode,
   type CursorPoint,
-  type CursorStyle,
 } from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
 import { required, signalLabel } from "./dom";
@@ -102,6 +103,7 @@ export interface PanelCallbacks {
   onClearXSignal(id: string): void;
   onToggleSeries(id: string, path: string): void;
   onResized(id: string): void;
+  onGesture(id: string, hint: string | null): void;
   onCursor(
     id: string,
     cursor: PanelCursor | null,
@@ -164,7 +166,7 @@ export class PanelView {
     y: number[];
   }[] = [];
   private cursorT: number | null = null;
-  private cursorStyle: CursorStyle = "none";
+  private cursorMode: CursorMode = "none";
   private box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private dragging = false;
   private emphasizePath: string | null = null;
@@ -462,7 +464,7 @@ export class PanelView {
       );
       cChip.title =
         state.color_signal === null
-          ? "Drop a signal here to assign colour, or use ⌘P → set color signal"
+          ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
     const note = required<HTMLElement>(this.element, ".panel-mode-note");
@@ -919,8 +921,8 @@ export class PanelView {
     this.drawOverlay();
   }
 
-  setCursorStyle(cursorStyle: CursorStyle): void {
-    this.cursorStyle = cursorStyle;
+  setCursorMode(cursorMode: CursorMode): void {
+    this.cursorMode = cursorMode;
     this.drawOverlay();
   }
 
@@ -931,6 +933,10 @@ export class PanelView {
   /** The canvas's rendered CSS width, for density-bounded tile queries. */
   plotWidth(): number {
     return this.canvas.clientWidth;
+  }
+
+  panelRect(): DOMRect {
+    return this.element.getBoundingClientRect();
   }
 
   plotClick(offsetX: number, offsetY: number): void {
@@ -1202,7 +1208,7 @@ export class PanelView {
     );
     const cursorT = this.cursorT;
     const xyMarkers =
-      state?.mode === "xy" && cursorT !== null
+      state?.mode === "xy" && cursorT !== null && this.cursorMode !== "none"
         ? this.xyTraces.flatMap((entry) => {
             const point = markerAt(entry.trace, cursorT);
             return point === null ? [] : [point];
@@ -1210,9 +1216,9 @@ export class PanelView {
         : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
       cursorT: state?.mode === "xy" ? null : cursorT,
-      cursorStyle: this.cursorStyle,
+      cursorMode: this.cursorMode,
       cursorPoints:
-        this.cursorStyle === "dot" && cursorT !== null
+        this.cursorMode === "track" && cursorT !== null
           ? this.cursorPointsAt(state?.mode, cursorT, bySeries)
           : [],
       xyMarkers,
@@ -1272,6 +1278,7 @@ export class PanelView {
 
   private beginPan(down: PointerEvent, layout: PlotLayout): void {
     this.dragging = true;
+    this.callbacks.onGesture(this.id, "drag: pan");
     this.overlay.setPointerCapture(down.pointerId);
     const startX = { ...layout.xRange };
     const startY = { ...layout.yRange };
@@ -1288,6 +1295,7 @@ export class PanelView {
       this.overlay.removeEventListener("pointerup", finish);
       this.overlay.removeEventListener("pointercancel", finish);
       this.dragging = false;
+      this.callbacks.onGesture(this.id, null);
     };
     this.overlay.addEventListener("pointermove", move);
     this.overlay.addEventListener("pointerup", finish);
@@ -1317,6 +1325,12 @@ export class PanelView {
         this.overlay.setPointerCapture(down.pointerId);
       }
       dragMode = zoomDragMode(event.offsetX - start.x, event.offsetY - start.y);
+      this.callbacks.onGesture(
+        this.id,
+        dragMode === "xy"
+          ? "drag: zoom"
+          : `drag: zoom ${dragMode.toUpperCase()}`,
+      );
       // An axis the drag excluded spans the whole plot, so the marquee reads
       // as a band rather than a rectangle.
       const spansX = dragMode !== "y";
@@ -1367,6 +1381,7 @@ export class PanelView {
       this.overlay.removeEventListener("pointerup", finish);
       this.overlay.removeEventListener("pointercancel", cancel);
       this.dragging = false;
+      this.callbacks.onGesture(this.id, null);
     };
     this.overlay.addEventListener("pointermove", move);
     this.overlay.addEventListener("pointerup", finish);

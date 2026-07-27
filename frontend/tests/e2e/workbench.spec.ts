@@ -118,7 +118,7 @@ test("command palette runs workspace-scoped panel commands", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.keyboard.press("ControlOrMeta+p");
+  await page.keyboard.press("ControlOrMeta+Shift+p");
   await expect(page.locator(".palette-input")).toBeFocused();
   await page.locator(".palette-input").fill("split current panel right");
   await page.keyboard.press("Enter");
@@ -154,6 +154,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onClearXSignal: () => {},
       onToggleSeries: () => {},
       onResized: () => {},
+      onGesture: () => {},
       onCursor: () => {},
       onTimeWindow: () => {},
       onYRange: () => {},

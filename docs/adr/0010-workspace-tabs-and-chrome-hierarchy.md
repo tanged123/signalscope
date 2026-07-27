@@ -1,5 +1,8 @@
 # ADR 0010: Workspace tabs and chrome hierarchy
 
+> Superseded in part by ADR 0020 for the global toolbar and application-menu
+> hierarchy. Workspace tabs and their ownership model remain accepted.
+
 - Status: Accepted
 - Date: 2026-07-24
 

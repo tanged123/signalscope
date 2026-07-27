@@ -23,6 +23,7 @@ impl Default for Session {
             tabs: vec![WorkspaceTab {
                 id: DEFAULT_TAB_ID.into(),
                 title: DEFAULT_TAB_TITLE.into(),
+                cursor_mode: CursorMode::None,
                 focused_panel_id: None,
                 panels: Vec::new(),
                 layout: Vec::new(),
@@ -143,30 +144,14 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate(5, value)
         }
         5 => {
-            for_each_panel(&mut value, |panel| {
-                let Some(annotations) = panel
-                    .get_mut("annotations")
-                    .and_then(serde_json::Value::as_array_mut)
-                else {
-                    return;
-                };
-                for annotation in annotations {
-                    let Some(object) = annotation.as_object_mut() else {
-                        continue;
-                    };
-                    let anchor = object
-                        .remove("time")
-                        .unwrap_or_else(|| serde_json::json!(0.0));
-                    let pinned_value = object
-                        .remove("value")
-                        .unwrap_or_else(|| serde_json::json!(0.0));
-                    object.insert("domain".into(), serde_json::json!("time"));
-                    object.insert("anchor".into(), anchor);
-                    object.insert("pinned_value".into(), pinned_value);
-                }
-            });
+            migrate_v5_annotations(&mut value);
             value["schema_version"] = serde_json::json!(6);
             migrate(6, value)
+        }
+        6 => {
+            default_tab_cursor_modes(&mut value);
+            value["schema_version"] = serde_json::json!(7);
+            migrate(7, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
@@ -218,6 +203,49 @@ fn default_panel_fields(value: &mut serde_json::Value, fields: &[&str]) {
     });
 }
 
+/// Defaults the v7 workspace cursor state without disturbing authored fields.
+fn default_tab_cursor_modes(value: &mut serde_json::Value) {
+    let Some(tabs) = value
+        .get_mut("tabs")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for tab in tabs {
+        if let Some(object) = tab.as_object_mut() {
+            object
+                .entry("cursor_mode")
+                .or_insert_with(|| serde_json::json!("none"));
+        }
+    }
+}
+
+/// Rewrites the v5 time/value annotation pair into the domain-tagged anchor.
+fn migrate_v5_annotations(value: &mut serde_json::Value) {
+    for_each_panel(value, |panel| {
+        let Some(annotations) = panel
+            .get_mut("annotations")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            return;
+        };
+        for annotation in annotations {
+            let Some(object) = annotation.as_object_mut() else {
+                continue;
+            };
+            let anchor = object
+                .remove("time")
+                .unwrap_or_else(|| serde_json::json!(0.0));
+            let pinned_value = object
+                .remove("value")
+                .unwrap_or_else(|| serde_json::json!(0.0));
+            object.insert("domain".into(), serde_json::json!("time"));
+            object.insert("anchor".into(), anchor);
+            object.insert("pinned_value".into(), pinned_value);
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +256,7 @@ mod tests {
             tabs: vec![WorkspaceTab {
                 id: "workspace-1".into(),
                 title: "Flight review".into(),
+                cursor_mode: CursorMode::None,
                 focused_panel_id: Some("panel-a".into()),
                 panels: vec![PanelState {
                     id: "panel-a".into(),
@@ -397,6 +426,29 @@ mod tests {
         assert!((annotation.anchor - 12.5).abs() < f64::EPSILON);
         assert!((annotation.pinned_value - 42.0).abs() < f64::EPSILON);
         assert_eq!(annotation.label, "peak");
+    }
+
+    #[test]
+    fn v6_workspaces_gain_a_default_cursor_mode() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 6,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "focused_panel_id": null,
+                "layout": [],
+                "panels": []
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v6 session migrates");
+        assert_eq!(session.tabs[0].cursor_mode, CursorMode::None);
     }
 
     #[test]

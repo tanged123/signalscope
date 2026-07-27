@@ -21,5 +21,6 @@ Accepted decisions:
 17. [Spectrum semantics](0017-spectrum-semantics.md)
 18. [Histogram semantics](0018-histogram-semantics.md)
 19. [Prepared plot capabilities](0019-prepared-plot-capabilities.md)
+20. [Three-strip chrome and hidden application menu](0020-three-strip-chrome-and-hidden-application-menu.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

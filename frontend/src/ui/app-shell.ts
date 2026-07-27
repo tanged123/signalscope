@@ -1,4 +1,9 @@
-import { CommandRegistry, formatCombo } from "../app/commands";
+import {
+  CommandRegistry,
+  formatCombo,
+  PLANNED_TITLE,
+  type Command,
+} from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
 import { LinkedTimeModel } from "../app/linked-time";
@@ -15,17 +20,27 @@ import {
   type SignalSummary,
   type TileResponse,
 } from "../generated/protocol";
-import type { PanelMode, PanelState } from "../generated/session";
-import type { CursorStyle } from "../render/overlay-renderer";
-import { CommandPalette, type PaletteEntry } from "./command-palette";
+import type {
+  CursorMode,
+  PanelMode,
+  PanelState,
+  Theme,
+} from "../generated/session";
+import {
+  CommandPalette,
+  type PaletteEntry,
+  type PaletteMode,
+} from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
+import { AppMenu } from "./app-menu";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
-const CURSOR_STYLES: readonly CursorStyle[] = ["none", "dot", "line"];
+const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
+const THEME_STORAGE_KEY = "signalscope.theme";
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
 
@@ -48,7 +63,6 @@ export class AppShell {
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
-  private cursorStyle: CursorStyle = "none";
 
   constructor(
     private readonly root: HTMLElement,
@@ -57,6 +71,7 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    this.restoreTheme();
     this.workspaceTabs = new WorkspaceTabsView(
       required(this.root, ".workspace-tabs"),
       {
@@ -126,6 +141,9 @@ export class AppShell {
         onResized: () => {
           this.scheduleRender();
         },
+        onGesture: (_id, hint) => {
+          required(this.root, ".gesture-hint").textContent = hint ?? "";
+        },
         onCursor: (id, cursor, client) => {
           this.setCursor(id, cursor, client);
         },
@@ -163,7 +181,6 @@ export class AppShell {
         },
         onToggleStats: (id) => {
           this.workspace.toggleStats(id);
-          this.syncStatsToggle();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
@@ -225,8 +242,14 @@ export class AppShell {
         },
       },
     );
-    this.palette = new CommandPalette(this.root, () => this.paletteEntries());
+    this.palette = new CommandPalette(this.root, (mode) =>
+      this.paletteEntries(mode),
+    );
     this.registerCommands();
+    void new AppMenu(
+      required<HTMLButtonElement>(this.root, ".menu-button"),
+      this.commands,
+    );
     this.bindControls();
     this.renderWindowReadout();
     await this.reloadSignals();
@@ -262,6 +285,8 @@ export class AppShell {
       id: "open-files",
       title: "Open CSV or MCAP…",
       keys: "o",
+      section: "file",
+      group: "open",
       enabled: () => this.plane.ingest !== null,
       run: () => {
         void this.openFiles();
@@ -270,6 +295,8 @@ export class AppShell {
     this.commands.register({
       id: "new-workspace-tab",
       title: "New workspace tab",
+      section: "workspace",
+      group: "new",
       run: () => {
         this.workspace.addTab();
         this.afterLayoutChange();
@@ -286,8 +313,10 @@ export class AppShell {
     });
     this.commands.register({
       id: "split-panel-down",
-      title: "Split current panel down",
+      title: "New panel",
       keys: "n",
+      section: "workspace",
+      group: "new",
       run: () => {
         const id = this.workspace.focusedPanelId();
         if (id === null) {
@@ -304,15 +333,21 @@ export class AppShell {
       (id) => void this.workspace.splitPanelRight(id),
     );
     this.commands.register({
-      id: "cycle-cursor-style",
-      title: "Cursor: cycle off/dot/line",
+      id: "cycle-cursor-mode",
+      title: "Cursor: cycle none/track/measure",
+      keys: "c",
       run: () => {
-        this.cycleCursorStyle();
+        this.cycleCursorMode();
       },
     });
     this.commands.register({
       id: "toggle-all-stats",
       title: "Toggle statistics on every panel",
+      section: "view",
+      group: "display",
+      checked: () =>
+        this.workspace.panels().length > 0 &&
+        this.workspace.panels().every((panel) => panel.show_stats),
       run: () => {
         // Any panel still hiding stats turns them all on; otherwise all off.
         const target = this.workspace
@@ -321,7 +356,6 @@ export class AppShell {
         for (const panel of this.workspace.panels()) {
           if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
         }
-        this.syncStatsToggle();
         this.workspaceView?.refreshPanelStates();
         this.renderTiles();
       },
@@ -469,6 +503,10 @@ export class AppShell {
     this.commands.register({
       id: "toggle-signal-tree",
       title: "Toggle signal tree",
+      section: "view",
+      group: "docks",
+      checked: () =>
+        !required(this.root, ".workbench").classList.contains("tree-collapsed"),
       enabled: () => window.innerWidth > 820,
       run: () => {
         this.toggleSignalTree();
@@ -486,6 +524,8 @@ export class AppShell {
       id: "toggle-theme",
       title: "Toggle theme",
       keys: "t",
+      section: "view",
+      group: "display",
       run: () => {
         this.toggleTheme();
       },
@@ -494,16 +534,32 @@ export class AppShell {
       id: "toggle-formula",
       title: "Toggle derived formula editor",
       keys: "e",
+      section: "view",
+      group: "docks",
+      checked: () =>
+        !required(this.root, ".workbench").classList.contains(
+          "formula-collapsed",
+        ),
       run: () => {
         this.toggleFormula();
       },
     });
     this.commands.register({
       id: "command-palette",
-      title: "Command palette",
+      title: "Command list",
+      keys: "mod+shift+p",
+      section: "help",
+      group: "commands",
+      run: () => {
+        this.palette?.open("commands");
+      },
+    });
+    this.commands.register({
+      id: "go-to-signal",
+      title: "Go to signal",
       keys: "mod+p",
       run: () => {
-        this.palette?.open();
+        this.palette?.open("signals");
       },
     });
     this.commands.register({
@@ -511,9 +567,43 @@ export class AppShell {
       title: "Keyboard help",
       keys: "?",
       run: () => {
-        this.palette?.open();
+        this.palette?.open("commands");
       },
     });
+    this.commands.register({
+      id: "about-signalscope",
+      title: "About SignalScope",
+      section: "help",
+      group: "about",
+      run: () => {
+        this.showModeHelp("SignalScope 0.3.2");
+      },
+    });
+    for (const planned of [
+      ["open-recent", "Open Recent ▸", "file", "open"],
+      ["open-workspace", "Open Workspace…", "file", "workspace"],
+      ["save-workspace", "Save Workspace", "file", "workspace"],
+      ["save-workspace-as", "Save Workspace As…", "file", "workspace"],
+      ["export", "Export ▸ HTML · PNG · CSV", "file", "export"],
+      ["annotations-dock", "Annotations dock", "view", "docks"],
+      ["font-size", "Font size ▸", "view", "display"],
+      ["axes-default", "Axes default ▸", "view", "display"],
+      ["series-palette", "Series palette ▸", "view", "display"],
+      ["duplicate-workspace", "Duplicate Workspace", "workspace", "new"],
+      ["save-layout-preset", "Save Layout As Preset…", "workspace", "layout"],
+      ["apply-layout-preset", "Apply Preset ▸", "workspace", "layout"],
+      ["reset-layout", "Reset Layout", "workspace", "layout"],
+      ["keymap", "Keymap", "help", "commands"],
+    ] as const) {
+      this.commands.register({
+        id: planned[0],
+        title: planned[1],
+        section: planned[2],
+        group: planned[3],
+        status: "planned",
+        run: () => undefined,
+      });
+    }
   }
 
   /** Moves between panel domains without dropping the assigned XY x series. */
@@ -548,10 +638,13 @@ export class AppShell {
     });
   }
 
-  private paletteEntries(): PaletteEntry[] {
-    const commands = this.commands.list().map((command) => ({
+  private paletteEntries(mode: PaletteMode): PaletteEntry[] {
+    // Planned and momentarily unavailable commands both stay listed so the
+    // palette matches the menu, but each says why it will not run.
+    const commands = this.commands.listAll().map((command) => ({
       title: command.title,
       hint: command.keys === undefined ? "" : formatCombo(command.keys),
+      ...unavailableReason(command),
       run: () => {
         this.commands.run(command.id);
       },
@@ -616,14 +709,9 @@ export class AppShell {
               },
             })),
           ];
-    return [
-      ...commands,
-      ...tabs,
-      ...panels,
-      ...xSignals,
-      ...colorSignals,
-      ...signals,
-    ];
+    return mode === "signals"
+      ? [...signals, ...tabs, ...panels]
+      : [...commands, ...xSignals, ...colorSignals];
   }
 
   private bindControls(): void {
@@ -634,32 +722,18 @@ export class AppShell {
       },
       true,
     );
-    const openButton = required<HTMLButtonElement>(this.root, ".open-files");
-    openButton.hidden = this.plane.ingest === null;
-    openButton.addEventListener("click", () => {
-      this.commands.run("open-files");
-    });
     required(this.root, ".tree-toggle").addEventListener("click", () => {
       this.commands.run("toggle-signal-tree");
     });
     this.bindSignalTreeResize();
-    required(this.root, ".theme-toggle").addEventListener("click", () => {
-      this.commands.run("toggle-theme");
-    });
     required(this.root, ".linked-toggle").addEventListener("click", () => {
       this.commands.run("toggle-linked");
     });
     required(this.root, ".formula-toggle").addEventListener("click", () => {
       this.commands.run("toggle-formula");
     });
-    required(this.root, ".cursor-style-toggle").addEventListener(
-      "click",
-      () => {
-        this.commands.run("cycle-cursor-style");
-      },
-    );
-    required(this.root, ".stats-toggle").addEventListener("click", () => {
-      this.commands.run("toggle-all-stats");
+    required(this.root, ".cursor-toggle").addEventListener("click", () => {
+      this.commands.run("cycle-cursor-mode");
     });
     const formula = required<HTMLFormElement>(this.root, ".formula-bar");
     formula.addEventListener("submit", (event) => {
@@ -762,11 +836,11 @@ export class AppShell {
     this.renderWindowReadout();
   }
 
-  /** Renders the toolbar window readout from the linked-time model. */
+  /** Renders the status-bar window readout from the linked-time model. */
   private renderWindowReadout(): void {
     const state = this.time.snapshot();
     required(this.root, ".window-readout").textContent =
-      `t: ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
+      `window ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
   }
 
   private afterLayoutChange(): void {
@@ -775,15 +849,9 @@ export class AppShell {
       this.workspace.activeTabId(),
     );
     this.workspaceView?.sync(this.signals.length > 0);
-    this.syncStatsToggle();
+    this.workspaceView?.setCursorMode(this.workspace.cursorMode());
+    this.syncCursorMode();
     void this.refreshTiles();
-  }
-
-  private syncStatsToggle(): void {
-    const panels = this.workspace.panels();
-    const active =
-      panels.length > 0 && panels.every((panel) => panel.show_stats);
-    required(this.root, ".stats-toggle").classList.toggle("active", active);
   }
 
   private showModeHelp(text: string): void {
@@ -1013,17 +1081,18 @@ export class AppShell {
     cursor: PlotCursor | null,
     client: { x: number; y: number } | null,
   ): void {
-    if (this.cursorStyle === "none") cursor = null;
+    const mode = this.workspace.cursorMode();
+    if (mode === "none") cursor = null;
     const panel = this.workspace.panel(panelId);
     const localDomain = panel?.mode === "fft" || panel?.mode === "histogram";
     if (cursor?.link === "local" || (cursor === null && localDomain)) {
       this.workspaceView?.setLocalCursor(panelId, cursor?.x ?? null);
-      if (cursor === null) this.renderLinkedCursorReadout();
-      else required(this.root, ".cursor-readout").textContent = cursor.heading;
+      if (cursor === null) this.renderCursorTime();
+      else this.renderCursorTime(cursor.heading);
       this.renderTooltip(
         panelId,
-        this.cursorStyle === "line" ? cursor : null,
-        this.cursorStyle === "line" ? client : null,
+        mode === "track" ? cursor : null,
+        mode === "track" ? client : null,
       );
       return;
     }
@@ -1031,37 +1100,38 @@ export class AppShell {
     this.time.setCursor(cursorT);
     const state = this.time.snapshot();
     this.workspaceView?.setCursor(state.cursorT);
-    this.renderLinkedCursorReadout();
+    this.renderCursorTime();
     this.renderTooltip(
       panelId,
-      this.cursorStyle === "line" && state.cursorT !== null ? cursor : null,
-      this.cursorStyle === "line" ? client : null,
+      mode === "track" && state.cursorT !== null ? cursor : null,
+      mode === "track" ? client : null,
     );
-    this.scheduleLiveValues(this.cursorStyle === "none" ? null : state.cursorT);
+    this.scheduleLiveValues(mode === "none" ? null : state.cursorT);
   }
 
-  private cycleCursorStyle(): void {
-    const current = CURSOR_STYLES.indexOf(this.cursorStyle);
-    this.cursorStyle =
-      CURSOR_STYLES[(current + 1) % CURSOR_STYLES.length] ?? "dot";
-    this.workspaceView?.setCursorStyle(this.cursorStyle);
-    const button = required<HTMLButtonElement>(
-      this.root,
-      ".cursor-style-toggle",
-    );
-    const symbol =
-      this.cursorStyle === "none"
-        ? "off"
-        : this.cursorStyle === "dot"
-          ? "·"
-          : "│";
-    button.textContent = `cursor ${symbol}`;
-    button.title = `Cursor: ${this.cursorStyle} (click to cycle)`;
-    if (this.cursorStyle === "none") {
-      this.workspaceView?.clearCursors();
+  private cycleCursorMode(): void {
+    const current = CURSOR_MODES.indexOf(this.workspace.cursorMode());
+    const mode = CURSOR_MODES[(current + 1) % CURSOR_MODES.length] ?? "track";
+    this.workspace.setCursorMode(mode);
+    this.workspaceView?.setCursorMode(mode);
+    this.syncCursorMode();
+  }
+
+  private syncCursorMode(): void {
+    const mode = this.workspace.cursorMode();
+    required(this.root, ".cursor-mode").textContent =
+      mode === "none" ? "" : `cursor: ${mode}`;
+    // The dock button cycles the same three states as `C`, so it reads as
+    // pressed for every mode that puts a cursor on the plots.
+    const button = required<HTMLButtonElement>(this.root, ".cursor-toggle");
+    button.classList.toggle("active", mode !== "none");
+    button.ariaPressed = String(mode !== "none");
+    button.title = `Cursor mode: ${mode} — cycle (C)`;
+    if (mode !== "track") this.hideTooltip();
+    if (mode === "none") {
       this.time.setCursor(null);
-      this.renderLinkedCursorReadout();
-      this.hideTooltip();
+      this.workspaceView?.clearCursors();
+      this.renderCursorTime();
       this.scheduleLiveValues(null);
     }
   }
@@ -1093,14 +1163,33 @@ export class AppShell {
     tip.replaceChildren(tooltipHeader(cursor.heading), ...rows);
     tip.hidden = false;
     const rect = tip.getBoundingClientRect();
-    const x =
-      client.x + 16 + rect.width > window.innerWidth - 8
-        ? client.x - 16 - rect.width
-        : client.x + 16;
-    const y =
-      client.y + 14 + rect.height > window.innerHeight - 8
-        ? client.y - 14 - rect.height
-        : client.y + 14;
+    const panelRect = this.workspaceView?.panelRect(panelId);
+    if (panelRect === null || panelRect === undefined) {
+      tip.hidden = true;
+      return;
+    }
+    const rightCandidate = client.x + 12;
+    const leftCandidate = client.x - 12 - rect.width;
+    const x = Math.max(
+      panelRect.left,
+      Math.min(
+        rightCandidate + rect.width <= panelRect.right
+          ? rightCandidate
+          : leftCandidate,
+        panelRect.right - rect.width,
+      ),
+    );
+    const belowCandidate = client.y + 12;
+    const aboveCandidate = client.y - 12 - rect.height;
+    const y = Math.max(
+      panelRect.top,
+      Math.min(
+        belowCandidate + rect.height <= panelRect.bottom
+          ? belowCandidate
+          : aboveCandidate,
+        panelRect.bottom - rect.height,
+      ),
+    );
     tip.style.transform = `translate(${String(x)}px, ${String(y)}px)`;
   }
 
@@ -1108,10 +1197,11 @@ export class AppShell {
     required<HTMLElement>(this.root, ".plot-tip").hidden = true;
   }
 
-  private renderLinkedCursorReadout(): void {
+  private renderCursorTime(localHeading?: string): void {
     const cursorT = this.time.snapshot().cursorT;
-    required(this.root, ".cursor-readout").textContent =
-      cursorT === null ? "t = —" : `t = ${formatCursorTime(cursorT)}`;
+    required(this.root, ".cursor-time").textContent =
+      localHeading ??
+      (cursorT === null ? "t —" : `t ${formatCursorTime(cursorT)}`);
   }
 
   private scheduleLiveValues(cursorT: number | null): void {
@@ -1151,13 +1241,17 @@ export class AppShell {
 
   private async updateSources(): Promise<void> {
     const sources = await this.plane.listSources();
+    const firstName = sources[0] === undefined ? "" : basename(sources[0].path);
+    required(this.root, ".source-name").textContent = firstName;
+    required(this.root, ".session-identity").textContent =
+      firstName === ""
+        ? ""
+        : `${firstName} — ${this.signals.length.toLocaleString()} signals`;
     const rows = required(this.root, ".source-rows");
     rows.replaceChildren(
       ...sources.map((source) => {
         const row = document.createElement("div");
         row.className = "source-row";
-        const dot = document.createElement("span");
-        dot.className = "status-dot";
         const name = document.createElement("span");
         name.className = "signal-path";
         name.textContent = basename(source.path);
@@ -1165,7 +1259,7 @@ export class AppShell {
         const points = document.createElement("span");
         points.className = "source-points";
         points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
-        row.append(dot, name, points);
+        row.append(name, points);
         return row;
       }),
     );
@@ -1188,10 +1282,19 @@ export class AppShell {
 
   private toggleTheme(): void {
     const documentRoot = document.documentElement;
-    documentRoot.dataset.theme =
-      documentRoot.dataset.theme === "light" ? "dark" : "light";
+    const theme = documentRoot.dataset.theme === "light" ? "dark" : "light";
+    documentRoot.dataset.theme = theme;
+    this.workspace.setTheme(theme);
+    storeTheme(theme);
     this.workspaceView?.invalidateTheme();
     this.renderTiles();
+  }
+
+  private restoreTheme(): void {
+    const stored = storedTheme();
+    const theme = stored ?? this.workspace.theme();
+    document.documentElement.dataset.theme = theme;
+    this.workspace.setTheme(theme);
   }
 
   private toggleSignalTree(): void {
@@ -1310,29 +1413,53 @@ export class AppShell {
   }
 }
 
+/** Explains why a listed command cannot run, or nothing when it can. */
+function unavailableReason(command: Command): { unavailable?: string } {
+  if (command.status === "planned") {
+    return { unavailable: PLANNED_TITLE };
+  }
+  return (command.enabled?.() ?? true)
+    ? {}
+    : { unavailable: "unavailable in this context" };
+}
+
+/**
+ * Reads the persisted theme. The self-contained snapshot opens from `file://`,
+ * where `localStorage` access can throw, so storage failures degrade to the
+ * session's own theme instead of aborting the boot.
+ */
+function storedTheme(): Theme | null {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "dark" || stored === "light" ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeTheme(theme: Theme): void {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // A snapshot opened without storage still switches theme for this session.
+  }
+}
+
 function shellMarkup(): string {
   return `<main class="workbench formula-collapsed">
-    <div class="tool-bar">
+    <div class="title-bar">
+      <button class="menu-button" aria-label="Application menu" aria-haspopup="menu" aria-expanded="false">≡</button>
       <span class="brand">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         SIGNALSCOPE
       </span>
-      <span class="tool-divider"></span>
-      <button class="tool-button active tree-toggle" title="Hide signal tree" aria-controls="signal-tree" aria-expanded="true">☰ Signals</button>
-      <button class="tool-button open-files" hidden>Open CSV / MCAP</button>
-      <button class="tool-button active linked-toggle">⇄ Linked t</button>
-      <button class="tool-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span> Derived</button>
-      <button class="tool-button cursor-style-toggle" title="Cursor: off (click to cycle)">cursor off</button>
-      <button class="tool-button stats-toggle" title="Show statistics on every panel">Σ Stats</button>
-      <button class="tool-button theme-toggle" title="Toggle theme (T)">◐</button>
-      <span class="tool-spacer"></span>
-      <span class="window-label">window</span>
-      <span class="window-readout"></span>
-      <button class="tool-button follow-slot" disabled>⏸ FOLLOW</button>
-      <span class="command-hint">commands <kbd>⌘P</kbd></span>
+      <span class="session-identity"></span>
     </div>
 
-    <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
+    <div class="workspace-strip">
+      <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
+      <button class="layout-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">layout ▾</button>
+    </div>
 
     <aside class="signal-tree" id="signal-tree" aria-label="Signals">
       <div class="search-wrap">
@@ -1361,17 +1488,30 @@ function shellMarkup(): string {
     <div class="plot-tip" hidden></div>
 
     <footer class="status-bar">
-      <span><span class="status-dot"></span> <span class="signal-count">0 signals</span></span>
-      <span class="point-count status-value">0 pts</span>
-      <span>render <span class="render-ms status-value">— ms</span></span>
-      <span>cursor <span class="status-value cursor-readout">t = —</span></span>
-      <span class="gesture-hint">
-        <span><b>ZOOM</b> drag box · wheel</span>
-        <span><b>ONE AXIS</b> thin drag · ⇧wheel Y · ⌥wheel X</span>
-        <span><b>PAN</b> right-drag</span>
-        <span><b>FIT</b> double-click</span>
+      <span class="dock-toggles">
+        <button class="status-button active tree-toggle" title="Hide signal tree" aria-controls="signal-tree" aria-expanded="true">▤</button>
+        <button class="status-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span></button>
+        <button class="status-button cursor-toggle" title="Cursor mode: none — cycle (C)" aria-pressed="false">┼</button>
       </span>
-      <span class="status-command">⌘P</span>
+      <span class="status-separator"></span>
+      <span class="source-truth">
+        <span class="source-name"></span>
+        <span class="signal-count">0 signals</span>
+        <span class="point-count">0 pts</span>
+        <span class="render-stat">render <span class="render-ms">— ms</span></span>
+      </span>
+      <span class="status-spacer"></span>
+      <span class="gesture-hint"></span>
+      <span class="cursor-mode"></span>
+      <span class="status-separator"></span>
+      <span class="time-cluster">
+        <button class="status-button active linked-toggle">⇄ linked</button>
+        <span class="cursor-time">t —</span>
+        <span class="window-readout"></span>
+        <button class="follow-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">‖ FOLLOW</button>
+      </span>
+      <span class="status-separator"></span>
+      <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
     </footer>
   </main>`;
 }

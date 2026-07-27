@@ -14,21 +14,23 @@ test.describe("desktop plot interactions", () => {
     const panel = page.locator(".panel").first();
     const overlay = panel.locator(".overlay-canvas");
     await overlay.hover({ position: { x: 300, y: 120 } });
-    await expect(page.locator(".cursor-readout")).toHaveText("t = —");
+    await expect(page.locator(".cursor-mode")).toBeEmpty();
+    await expect(page.locator(".cursor-time")).toHaveText("t —");
     await expect(page.locator(".plot-tip")).toBeHidden();
 
-    await page.locator(".cursor-style-toggle").click();
+    await page.keyboard.press("c");
     await overlay.hover({ position: { x: 300, y: 120 } });
-    await expect(page.locator(".cursor-readout")).not.toHaveText("t = —");
-    await expect(page.locator(".plot-tip")).toBeHidden();
+    await expect(page.locator(".cursor-mode")).toHaveText("cursor: track");
+    await expect(page.locator(".cursor-time")).not.toHaveText("t —");
+    await expect(page.locator(".plot-tip")).toBeVisible();
     await expect(
       page.locator(".tree-scroll .signal-value").first(),
     ).not.toHaveText("—");
 
-    await page.locator(".cursor-style-toggle").click();
+    await page.keyboard.press("c");
     await overlay.hover({ position: { x: 300, y: 120 } });
-    await expect(page.locator(".plot-tip")).toBeVisible();
-    await expect(page.locator(".plot-tip-row").first()).not.toContainText("—");
+    await expect(page.locator(".cursor-mode")).toHaveText("cursor: measure");
+    await expect(page.locator(".plot-tip")).toBeHidden();
 
     const readout = page.locator(".window-readout");
     const beforeWindow = await readout.textContent();
@@ -53,6 +55,39 @@ test.describe("desktop plot interactions", () => {
     expect(metricGaps.every((gap) => gap >= 8)).toBe(true);
   });
 
+  test("the status-bar cursor button cycles the same three modes as C", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const button = page.locator(".cursor-toggle");
+    const readout = page.locator(".cursor-mode");
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveAttribute("aria-pressed", "false");
+    await expect(button).not.toHaveClass(/active/);
+    await expect(button).toHaveAttribute("title", /none/);
+
+    await button.click();
+    await expect(readout).toHaveText("cursor: track");
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+    await expect(button).toHaveClass(/active/);
+    await expect(button).toHaveAttribute("title", /track/);
+
+    await button.click();
+    await expect(readout).toHaveText("cursor: measure");
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+
+    await button.click();
+    await expect(readout).toBeEmpty();
+    await expect(button).toHaveAttribute("aria-pressed", "false");
+    await expect(button).not.toHaveClass(/active/);
+
+    // The keyboard path drives the same state, so the button follows it.
+    await page.keyboard.press("c");
+    await expect(readout).toHaveText("cursor: track");
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+  });
+
   test("directional zoom and double-click fit round-trip the window", async ({
     page,
     isMobile,
@@ -72,7 +107,9 @@ test.describe("desktop plot interactions", () => {
     await page.mouse.move(box.x + 150, box.y + 60);
     await page.mouse.down();
     await page.mouse.move(box.x + 420, box.y + 65, { steps: 6 });
+    await expect(page.locator(".gesture-hint")).toHaveText("drag: zoom X");
     await page.mouse.up();
+    await expect(page.locator(".gesture-hint")).toBeEmpty();
     await expect(readout).not.toHaveText(fitted ?? "");
     await overlay.dblclick({ position: { x: 300, y: 120 } });
     await expect(readout).toHaveText(fitted ?? "");

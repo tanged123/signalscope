@@ -46,3 +46,10 @@ identifies the source-domain location while `pinned_value` is retained as
 historical context. Plot adapters resolve the current display position after
 FFT recomputation or histogram rebinning. The v5-to-v6 migration maps existing
 `time`/`value` annotations to the `time` domain without changing their meaning.
+
+## Amendment (2026-07-26, cursor modes)
+
+Session schema version 7 adds `cursor_mode` to each workspace tab. The
+v6-to-v7 migration initializes every tab to `none`; `track` and `measure`
+remain independent as users switch workspaces. See ADR 0020 for the chrome and
+interaction decision.

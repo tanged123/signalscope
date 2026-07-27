@@ -121,6 +121,7 @@ interface Frame {
   project: Projection;
   width: number;
   height: number;
+  finishAxes: () => void;
 }
 
 /** What both axis routines draw against, so they share one call shape. */
@@ -187,7 +188,7 @@ export class CanvasRenderer {
     options: RenderOptions,
   ): number {
     const started = performance.now();
-    const { context, colors, plot, project } = this.beginFrame({
+    const { context, colors, plot, project, finishAxes } = this.beginFrame({
       xRange,
       yRange: { min: options.yRange[0], max: options.yRange[1] },
       xLabel: options.xLabel,
@@ -213,6 +214,7 @@ export class CanvasRenderer {
         options.emphasisIndex !== undefined && options.emphasisIndex !== index,
       );
     });
+    finishAxes();
     return performance.now() - started;
   }
 
@@ -223,22 +225,24 @@ export class CanvasRenderer {
    */
   renderPaths(paths: readonly PlotPath[], options: PathRenderOptions): number {
     const started = performance.now();
-    const { context, colors, plot, project, width, height } = this.beginFrame({
-      xRange: { min: options.xRange[0], max: options.xRange[1] },
-      yRange: { min: options.yRange[0], max: options.yRange[1] },
-      xLabel: options.xLabel,
-      yLabel: options.yLabel,
-      ...(options.axisStyle === undefined
-        ? {}
-        : { axisStyle: options.axisStyle }),
-      ...(options.xScale === undefined ? {} : { xScale: options.xScale }),
-      ...(options.colorbar === undefined
-        ? {}
-        : { rightGutter: COLORBAR_GUTTER }),
-    });
+    const { context, colors, plot, project, width, height, finishAxes } =
+      this.beginFrame({
+        xRange: { min: options.xRange[0], max: options.xRange[1] },
+        yRange: { min: options.yRange[0], max: options.yRange[1] },
+        xLabel: options.xLabel,
+        yLabel: options.yLabel,
+        ...(options.axisStyle === undefined
+          ? {}
+          : { axisStyle: options.axisStyle }),
+        ...(options.xScale === undefined ? {} : { xScale: options.xScale }),
+        ...(options.colorbar === undefined
+          ? {}
+          : { rightGutter: COLORBAR_GUTTER }),
+      });
     for (const path of paths) {
       this.drawPath(context, plot, project, path, colors);
     }
+    finishAxes();
     if (options.colorbar !== undefined) {
       // Inline axes give the plot the full canvas height; the bar keeps the
       // gutter layout's vertical insets so its ticks stay readable.
@@ -253,7 +257,7 @@ export class CanvasRenderer {
 
   /**
    * Clears the canvas, derives the plot rectangle, publishes `this.layout`,
-   * and draws the axis furniture. Both entry points share it so the spec's
+   * and draws the axis grid. Both entry points share it so the spec's
    * plot insets and tick policy live in exactly one place.
    */
   private beginFrame(spec: FrameSpec): Frame {
@@ -294,9 +298,12 @@ export class CanvasRenderer {
         : ticks(spec.xRange.min, spec.xRange.max, 7);
     const axes = { context, plot, project, colors, xTicks } as const;
     const labels = { xLabel: spec.xLabel, yLabel: spec.yLabel };
-    if (inline) this.drawInlineAxes(axes, spec.yRange, labels);
-    else this.drawAxes(axes, spec.yRange, labels);
-    return { context, colors, plot, project, width, height };
+    this.drawGrid(axes, spec.yRange);
+    const finishAxes = (): void => {
+      if (inline) this.drawInlineFurniture(axes, spec.yRange, labels);
+      else this.drawAxisFurniture(axes, spec.yRange, labels);
+    };
+    return { context, colors, plot, project, width, height, finishAxes };
   }
 
   private drawPath(
@@ -498,7 +505,29 @@ export class CanvasRenderer {
     return this.palette;
   }
 
-  private drawAxes(
+  /** Gridlines only; both axis styles share them and both draw them first. */
+  private drawGrid(axes: AxisFrame, yRange: Range): void {
+    const { context, plot, project, colors, xTicks } = axes;
+    const yTicks = ticks(yRange.min, yRange.max, 6);
+    context.lineWidth = 1;
+    context.strokeStyle = colors.grid;
+    for (const value of xTicks) {
+      const x = Math.round(project.toX(value)) + 0.5;
+      context.beginPath();
+      context.moveTo(x, plot.y);
+      context.lineTo(x, plot.y + plot.height);
+      context.stroke();
+    }
+    for (const value of yTicks) {
+      const y = Math.round(project.toY(value)) + 0.5;
+      context.beginPath();
+      context.moveTo(plot.x, y);
+      context.lineTo(plot.x + plot.width, y);
+      context.stroke();
+    }
+  }
+
+  private drawAxisFurniture(
     axes: AxisFrame,
     yRange: Range,
     labels: { xLabel: string; yLabel: string },
@@ -513,24 +542,15 @@ export class CanvasRenderer {
     const yLabels = formatTicks(yTicks);
     const { toX, toY } = project;
 
-    context.strokeStyle = colors.grid;
     context.fillStyle = colors.fg2;
     context.textAlign = "center";
     xTicks.forEach((value, index) => {
       const x = Math.round(toX(value)) + 0.5;
-      context.beginPath();
-      context.moveTo(x, plot.y);
-      context.lineTo(x, plot.y + plot.height);
-      context.stroke();
       context.fillText(xLabels[index] ?? "", x, plot.y + plot.height + 12);
     });
     context.textAlign = "right";
     yTicks.forEach((value, index) => {
       const y = Math.round(toY(value)) + 0.5;
-      context.beginPath();
-      context.moveTo(plot.x, y);
-      context.lineTo(plot.x + plot.width, y);
-      context.stroke();
       context.fillText(yLabels[index] ?? "", plot.x - 11, y);
     });
 
@@ -616,7 +636,7 @@ export class CanvasRenderer {
     context.restore();
   }
 
-  private drawInlineAxes(
+  private drawInlineFurniture(
     axes: AxisFrame,
     yRange: Range,
     labels: { xLabel: string; yLabel: string },
@@ -627,21 +647,6 @@ export class CanvasRenderer {
     context.textBaseline = "middle";
     const yTicks = ticks(yRange.min, yRange.max, 6);
     const { toX, toY } = project;
-    context.strokeStyle = colors.grid;
-    for (const value of xTicks) {
-      const x = Math.round(toX(value)) + 0.5;
-      context.beginPath();
-      context.moveTo(x, plot.y);
-      context.lineTo(x, plot.y + plot.height);
-      context.stroke();
-    }
-    for (const value of yTicks) {
-      const y = Math.round(toY(value)) + 0.5;
-      context.beginPath();
-      context.moveTo(plot.x, y);
-      context.lineTo(plot.x + plot.width, y);
-      context.stroke();
-    }
     const backed = (
       text: string,
       x: number,
