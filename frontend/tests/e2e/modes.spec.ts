@@ -74,6 +74,20 @@ async function trajectoryPoints(
   );
 }
 
+async function histogramBinStart(
+  overlay: Locator,
+  readout: Locator,
+): Promise<number> {
+  await overlay.hover({ position: { x: 250, y: 120 } });
+  await expect(readout).toContainText("bin");
+  const text = (await readout.textContent()) ?? "";
+  const match = /bin\s+([−+\d.e]+)/.exec(text);
+  if (match?.[1] === undefined) {
+    throw new Error(`could not parse histogram interval from "${text}"`);
+  }
+  return Number(match[1].replace("−", "-"));
+}
+
 test.describe("panel modes", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
@@ -303,6 +317,38 @@ test.describe("panel modes", () => {
     await expect(tip.locator(".plot-tip-value").first()).toContainText(
       "samples",
     );
+  });
+
+  test("histogram zoom, pan, and fit move only its viewport", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "desktop interaction");
+    const panel = page.locator(".panel").first();
+    await panel.locator(".mode-pill", { hasText: "H" }).click();
+    await page.keyboard.press("c");
+    const overlay = panel.locator(".overlay-canvas");
+    const readout = page.locator(".cursor-time");
+    const fitted = await histogramBinStart(overlay, readout);
+
+    await overlay.hover({ position: { x: 400, y: 120 } });
+    await page.mouse.wheel(0, -240);
+    const zoomed = await histogramBinStart(overlay, readout);
+    expect(zoomed).not.toBeCloseTo(fitted, 4);
+
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("overlay not laid out");
+    await page.keyboard.down("Control");
+    await page.mouse.move(box.x + 250, box.y + 120);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 330, box.y + 120, { steps: 6 });
+    await page.mouse.up();
+    await page.keyboard.up("Control");
+    const panned = await histogramBinStart(overlay, readout);
+    expect(panned).toBeLessThan(zoomed);
+
+    await overlay.dblclick({ position: { x: 250, y: 120 } });
+    expect(await histogramBinStart(overlay, readout)).toBeCloseTo(fitted, 4);
   });
 
   for (const mode of [

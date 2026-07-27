@@ -1,6 +1,6 @@
 # 18. Histogram semantics
 
-Status: Accepted
+Status: Accepted (amended 2026-07-27)
 
 ## Context
 
@@ -44,9 +44,11 @@ This is therefore a design decision, not an extraction.
   value anchor and resolve to the current bin after rebinning. Deltas report
   `Δvalue` and `Δcount`; statistics describe the source values plus bin count.
 - **Axes** are `value (<unit>)` on x and `count` on y.
-- **No zoom or pan.** The bin edges are a function of the visible window, so
-  dragging the x axis would show bins that no longer describe what is drawn.
-  Double-click fit and the linked time window remain the controls.
+- **Viewport-only zoom and pan.** Wheel, box, pointer, and touch gestures move
+  the camera over the already-computed distribution on either axis; they do
+  not change bin edges or re-bin. The bin edges remain a function of the
+  visible time window, so changing that linked window still re-bins.
+  Double-click and double-tap fit restore the computed distribution extent.
 
 ## Consequences
 
@@ -57,3 +59,10 @@ This is therefore a design decision, not an extraction.
 - If the maintainer would rather leave `H` inert until the design pass
   covers it, this ADR and its two implementation tasks can be dropped with
   no other consequence; nothing else in Phase 2B depends on them.
+
+## Amendment: viewport controls
+
+The viewport-only interaction bullet above supersedes only the original
+“No zoom or pan” decision. The source window, bin rule, shared edges, count
+semantics, step outlines, cursor inspection, annotations, statistics, axes,
+and `window: visible t` semantics remain unchanged.

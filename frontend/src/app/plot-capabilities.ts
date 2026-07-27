@@ -186,8 +186,8 @@ const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
   histogram: {
     xAxis: "local",
     cursorLink: "local",
-    pan: new Set(),
-    zoom: new Set(),
+    pan: new Set(["x", "y"]),
+    zoom: new Set(["x", "y", "box"]),
     fit: true,
     stickyAutoY: false,
     windowNote: "window: visible t",

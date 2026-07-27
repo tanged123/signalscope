@@ -144,4 +144,14 @@ describe("gesture policy", () => {
     expect(allowsFit(full)).toBe(true);
     expect(allowsFit(policy({ fit: false }))).toBe(false);
   });
+
+  it("keeps histogram viewport controls enabled", () => {
+    const histogram = policyFor("histogram");
+    expect(panAxes(histogram)).toEqual({ x: true, y: true });
+    expect(wheelAxes(histogram, { shift: false, alt: false })).toEqual({
+      x: true,
+      y: true,
+    });
+    expect(boxZoomAxes(histogram, "xy")).toEqual({ x: true, y: true });
+  });
 });
