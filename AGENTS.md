@@ -195,8 +195,9 @@ Match the Final Spec rather than generic dashboard patterns:
   identity must not depend on color alone. Status colors are reserved.
 - Every plot owns complete labeled axes. Preserve gutter/inline axis semantics,
   linked time, per-panel state, and serialized axis choices.
-- Preserve keyboard paths for pointer actions and the specified desktop/mobile
+- Preserve keyboard paths for pointer actions and the specified desktop
   gestures. Right-click must never be the only way to perform an action.
+  Touch input is out of scope per ADR 0021.
 - Keep the renderer deterministic from tiles, viewport, and tokens so snapshot
   and workbench output stay pixel- and behavior-aligned.
 - Avoid adding runtime dependencies to the snapshot frontend. The exported
@@ -211,8 +212,8 @@ Add tests with behavior changes, not only compilation checks:
   round-trips and migrations.
 - TypeScript: expression and linked-time units, renderer behavior where
   practical, snapshot/no-network/size checks.
-- Playwright: desktop and mobile-emulation interactions when changing input,
-  gestures, layout, or export behavior.
+- Playwright: desktop interactions when changing input, gestures, layout, or
+  export behavior.
 - Keep generated protocol outputs synchronized and run the artifact checks for
   snapshot changes.
 
