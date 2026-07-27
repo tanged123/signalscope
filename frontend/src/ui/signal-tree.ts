@@ -113,7 +113,6 @@ export class SignalTreeView {
       const button = document.createElement("button");
       button.className = "tree-row tree-group";
       button.style.paddingLeft = `${String(8 + row.depth * 12)}px`;
-      button.dataset.groupPath = row.path;
       button.textContent = `${row.expanded ? "▾" : "▸"} ${row.label}`;
       button.addEventListener("click", () => {
         if (this.collapsed.has(row.path)) {

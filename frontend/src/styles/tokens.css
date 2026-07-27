@@ -67,8 +67,6 @@
   --font-mono: JetBrains Mono, ui-monospace, "SF Mono", Menlo, monospace;
   --tree-row-height: 22px;
   --dur-quick: 80ms;
-  --dur-normal: 140ms;
-  --dur-slow: 240ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 

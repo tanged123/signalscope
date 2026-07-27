@@ -605,10 +605,6 @@ button {
   white-space: nowrap;
 }
 
-.legend-menu {
-  color: var(--fg-4);
-}
-
 .legend-overflow {
   min-width: 30px;
   flex: none;

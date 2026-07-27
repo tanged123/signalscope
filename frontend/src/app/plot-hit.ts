@@ -1,5 +1,4 @@
 import type { EnvelopeBin } from "../generated/protocol";
-import type { Annotation } from "../generated/session";
 import { projectX, projectY, type PlotLayout } from "./plot-math";
 
 export interface HitSeries {
@@ -44,26 +43,4 @@ export function nearestVertex(
     }
   }
   return best === null ? null : { ...best, distance: Math.sqrt(bestSquared) };
-}
-
-export function nearestAnnotation(
-  annotations: readonly Annotation[],
-  layout: PlotLayout,
-  px: number,
-  py: number,
-  threshold: number,
-): string | null {
-  let bestId: string | null = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const annotation of annotations) {
-    const distance = Math.hypot(
-      projectX(layout, annotation.anchor) - px,
-      projectY(layout, annotation.pinned_value) - py,
-    );
-    if (distance <= threshold && distance < bestDistance) {
-      bestId = annotation.id;
-      bestDistance = distance;
-    }
-  }
-  return bestId;
 }

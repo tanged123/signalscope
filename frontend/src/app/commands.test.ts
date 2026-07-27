@@ -85,13 +85,6 @@ describe("CommandRegistry", () => {
     ).toBe(true);
     expect(ran).toEqual(["signals", "commands"]);
   });
-
-  it("list() hides disabled commands", () => {
-    const registry = new CommandRegistry();
-    registry.register(command({ id: "on" }));
-    registry.register(command({ id: "off", enabled: () => false }));
-    expect(registry.list().map((entry) => entry.id)).toEqual(["on"]);
-  });
 });
 
 describe("formatCombo", () => {
@@ -144,7 +137,6 @@ describe("formatCombo", () => {
       }),
     );
 
-    expect(registry.list()).toEqual([]);
     expect(registry.listAll().map((entry) => entry.id)).toEqual(["planned"]);
     expect(registry.run("planned")).toBe(false);
     expect(ran).toBe(false);

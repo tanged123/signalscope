@@ -20,13 +20,6 @@ export class CommandRegistry {
     this.commands.set(command.id, command);
   }
 
-  list(): Command[] {
-    return [...this.commands.values()].filter(
-      (command) =>
-        command.status !== "planned" && (command.enabled?.() ?? true),
-    );
-  }
-
   listAll(): Command[] {
     return [...this.commands.values()];
   }
