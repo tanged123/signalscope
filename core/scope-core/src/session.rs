@@ -4,6 +4,8 @@ mod generated;
 
 pub use generated::*;
 
+use std::path::Path;
+
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -68,6 +70,35 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
         return Err(SessionError::WrongApplication(head.app));
     }
     migrate(head.schema_version, value)
+}
+
+/// Serializes `session` to `path` through a sibling temporary file that is
+/// renamed into place, so an interrupted write never truncates the previous
+/// session.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Io`] when the write or rename fails and
+/// [`SessionError::Json`] when serialization fails.
+pub fn save_to_path(session: &Session, path: &Path) -> Result<(), SessionError> {
+    let json = serde_json::to_string_pretty(session)?;
+    let temporary = path.with_extension("json.tmp");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&temporary, json)?;
+    std::fs::rename(&temporary, path)?;
+    Ok(())
+}
+
+/// Reads and migrates the session stored at `path`.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Io`] when the file cannot be read and the variants
+/// of [`from_json`] otherwise.
+pub fn load_from_path(path: &Path) -> Result<Session, SessionError> {
+    from_json(&std::fs::read_to_string(path)?)
 }
 
 /// Migration ladder (ADR 0005): each arm upgrades `value` one schema
@@ -186,6 +217,8 @@ pub enum SessionError {
     #[error("unsupported session schema version: {0}")]
     UnsupportedVersion(u32),
     #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
 
@@ -261,6 +294,44 @@ fn migrate_v5_annotations(value: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saving_and_loading_round_trips_through_a_file() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("session.json");
+        let session = Session {
+            source_paths: vec!["/data/run.csv".into()],
+            ..Session::default()
+        };
+
+        save_to_path(&session, &path).expect("saves");
+        let restored = load_from_path(&path).expect("loads");
+        assert_eq!(restored.source_paths, session.source_paths);
+        assert!(
+            !directory.path().join("session.json.tmp").exists(),
+            "the temporary file is renamed, not left behind"
+        );
+    }
+
+    #[test]
+    fn a_truncated_session_fails_instead_of_partially_restoring() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("session.json");
+        std::fs::write(&path, "{\"app\":\"signalscope\",\"schema_ver").expect("writes");
+        assert!(matches!(
+            load_from_path(&path).expect_err("truncated"),
+            SessionError::Json(_)
+        ));
+    }
+
+    #[test]
+    fn a_missing_session_file_reports_io() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        assert!(matches!(
+            load_from_path(&directory.path().join("absent.json")).expect_err("absent"),
+            SessionError::Io(_)
+        ));
+    }
 
     #[test]
     fn current_session_round_trips() {
