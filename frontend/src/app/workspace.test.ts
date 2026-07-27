@@ -38,6 +38,40 @@ describe("linked time", () => {
   });
 });
 
+describe("derived definitions", () => {
+  it("records definitions in order and removes them by path", () => {
+    const model = new WorkspaceModel();
+    model.addDerived("derived/speed", "hypot('a/x', 'a/y')");
+    model.addDerived("derived/jerk", "gradient('derived/speed')");
+    expect(model.snapshot().derived).toEqual([
+      { path: "derived/speed", expr: "hypot('a/x', 'a/y')" },
+      { path: "derived/jerk", expr: "gradient('derived/speed')" },
+    ]);
+
+    model.removeDerived("derived/speed");
+    expect(model.snapshot().derived.map((entry) => entry.path)).toEqual([
+      "derived/jerk",
+    ]);
+  });
+
+  it("replaces a redefined path in place", () => {
+    const model = new WorkspaceModel();
+    model.addDerived("derived/speed", "'a/x'");
+    model.addDerived("derived/speed", "'a/y'");
+    expect(model.snapshot().derived).toEqual([
+      { path: "derived/speed", expr: "'a/y'" },
+    ]);
+  });
+
+  it("records each source path once", () => {
+    const model = new WorkspaceModel();
+    model.addSourcePath("/data/run.csv");
+    model.addSourcePath("/data/run.csv");
+    model.addSourcePath("/data/bench.csv");
+    expect(model.sourcePaths()).toEqual(["/data/run.csv", "/data/bench.csv"]);
+  });
+});
+
 describe("WorkspaceModel", () => {
   it("stores cursor mode independently for each workspace", () => {
     const model = new WorkspaceModel();

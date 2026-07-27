@@ -1,6 +1,7 @@
 import type {
   Annotation,
   DashStyle,
+  DerivedSignal,
   LayoutRow,
   LinkedTime,
   PanelMode,
@@ -28,6 +29,8 @@ export function emptySession(): Session {
     active_tab_id: "workspace-1",
     tabs: [createWorkspaceTab(1)],
     favorites: [],
+    derived: [],
+    source_paths: [],
   };
 }
 
@@ -145,6 +148,38 @@ export class WorkspaceModel {
 
   favorites(): readonly string[] {
     return this.session.favorites;
+  }
+
+  derived(): readonly DerivedSignal[] {
+    return this.session.derived;
+  }
+
+  /** Records a definition, replacing any existing one for the same path. */
+  addDerived(path: string, expr: string): void {
+    const existing = this.session.derived.findIndex(
+      (entry) => entry.path === path,
+    );
+    if (existing === -1) {
+      this.session.derived.push({ path, expr });
+    } else {
+      this.session.derived[existing] = { path, expr };
+    }
+  }
+
+  removeDerived(path: string): void {
+    this.session.derived = this.session.derived.filter(
+      (entry) => entry.path !== path,
+    );
+  }
+
+  sourcePaths(): readonly string[] {
+    return this.session.source_paths;
+  }
+
+  addSourcePath(path: string): void {
+    if (!this.session.source_paths.includes(path)) {
+      this.session.source_paths.push(path);
+    }
   }
 
   cursorMode(): WorkspaceTab["cursor_mode"] {

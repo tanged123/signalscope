@@ -30,6 +30,8 @@ impl Default for Session {
                 layout: Vec::new(),
             }],
             favorites: Vec::new(),
+            derived: Vec::new(),
+            source_paths: Vec::new(),
         }
     }
 }
@@ -166,6 +168,12 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(9);
             migrate(9, value)
         }
+        9 => {
+            value["derived"] = serde_json::json!([]);
+            value["source_paths"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(10);
+            migrate(10, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -300,6 +308,51 @@ mod tests {
 
         let json = serde_json::to_string(&session).unwrap();
         assert_eq!(from_json(&json).unwrap(), session);
+    }
+
+    #[test]
+    fn v9_sessions_gain_empty_derived_and_source_lists() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 9,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [], "panels": []
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v9 session migrates");
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert!(session.derived.is_empty());
+        assert!(session.source_paths.is_empty());
+    }
+
+    #[test]
+    fn derived_definitions_survive_a_round_trip() {
+        let session = Session {
+            derived: vec![
+                DerivedSignal {
+                    path: "derived/speed".into(),
+                    expr: "hypot('imu/vx', 'imu/vy')".into(),
+                },
+                DerivedSignal {
+                    path: "derived/jerk".into(),
+                    expr: "gradient('derived/speed')".into(),
+                },
+            ],
+            source_paths: vec!["/data/run.csv".into()],
+            ..Session::default()
+        };
+        let restored =
+            from_json(&serde_json::to_string(&session).expect("serializes")).expect("round trips");
+        assert_eq!(restored.derived, session.derived);
+        assert_eq!(restored.source_paths, session.source_paths);
     }
 
     #[test]
