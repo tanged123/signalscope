@@ -287,7 +287,16 @@ export class WorkspaceModel {
 
   setColorSignal(id: string, path: string | null): void {
     const panel = this.panel(id);
-    if (panel !== undefined) panel.color_signal = path;
+    if (panel === undefined) return;
+    panel.color_signal = path;
+    panel.color_by_time = false;
+  }
+
+  setColorByTime(id: string): void {
+    const panel = this.panel(id);
+    if (panel === undefined) return;
+    panel.color_signal = null;
+    panel.color_by_time = true;
   }
 
   addSeries(panelId: string, path: string): boolean {

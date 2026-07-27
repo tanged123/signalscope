@@ -713,7 +713,7 @@ export class AppShell {
               title: "Panel: set color signal (c:)… time",
               hint: "colour by time",
               run: () => {
-                this.workspace.setColorSignal(focused, "time");
+                this.workspace.setColorByTime(focused);
                 this.afterLayoutChange();
               },
             },

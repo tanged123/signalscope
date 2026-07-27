@@ -386,15 +386,16 @@ export class PanelView {
       cChip.replaceChildren(
         chipPrefix("c:"),
         document.createTextNode(
-          state.color_signal === null
-            ? "none"
-            : state.color_signal === "time"
-              ? "time"
+          state.color_by_time
+            ? "time"
+            : state.color_signal === null
+              ? "none"
               : signalLabel(state.color_signal),
         ),
       );
-      cChip.title =
-        state.color_signal === null
+      cChip.title = state.color_by_time
+        ? "Colour channel: time — click to clear"
+        : state.color_signal === null
           ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
           : `Colour channel: ${state.color_signal} — click to clear`;
     }
@@ -554,10 +555,10 @@ export class PanelView {
     }
     if (this.xyTraces.length === 0) return 0;
     const colorSeries: "time" | SampleResponse["series"][number] | null =
-      state.color_signal === null
-        ? null
-        : state.color_signal === "time"
-          ? "time"
+      state.color_by_time
+        ? "time"
+        : state.color_signal === null
+          ? null
           : (byPath.get(state.color_signal) ?? null);
     const colorFor = (trace: XyTrace): number[] | null => {
       if (colorSeries === null) return null;
@@ -598,7 +599,7 @@ export class PanelView {
         colorSeries === null
           ? null
           : {
-              path: state.color_signal ?? "time",
+              path: state.color_by_time ? "time" : (state.color_signal ?? ""),
             },
       window,
     });
@@ -650,12 +651,9 @@ export class PanelView {
               max: colorDomainMax,
               label:
                 state.c_label ??
-                (state.color_signal === "time"
+                (colorSeries === "time"
                   ? "t (s)"
-                  : axisName(
-                      state.color_signal ?? "",
-                      colorSeries === "time" ? null : colorSeries.unit,
-                    )),
+                  : axisName(state.color_signal ?? "", colorSeries.unit)),
             },
           }
         : {}),

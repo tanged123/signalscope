@@ -226,6 +226,17 @@ describe("WorkspaceModel", () => {
     expect(slots).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
+  it("colour-by-time replaces the colour signal", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setColorSignal(panel.id, "demo/speed");
+    model.setColorByTime(panel.id);
+    expect(model.panel(panel.id)?.color_by_time).toBe(true);
+    expect(model.panel(panel.id)?.color_signal).toBeNull();
+    model.setColorSignal(panel.id, null);
+    expect(model.panel(panel.id)?.color_by_time).toBe(false);
+  });
+
   it("keeps the user dash default solid and writes the spec width", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
