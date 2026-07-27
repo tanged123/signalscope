@@ -576,7 +576,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.3.4");
+        this.showModeHelp("SignalScope 0.4.0");
       },
     });
     for (const planned of [
