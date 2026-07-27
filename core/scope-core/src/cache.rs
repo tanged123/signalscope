@@ -283,7 +283,6 @@ pub fn try_load(
         Ok::<_, CacheError>(LoadedCache {
             summary: IngestSummary {
                 source_id,
-                source_path: source.to_owned(),
                 row_count: usize::try_from(directory.row_count).unwrap_or(usize::MAX),
                 signals,
             },

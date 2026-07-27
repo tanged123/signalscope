@@ -121,7 +121,6 @@ impl CsvDecoder {
 
         Ok(IngestSummary {
             source_id,
-            source_path: path.to_owned(),
             row_count,
             signals,
         })

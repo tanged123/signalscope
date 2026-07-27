@@ -5,8 +5,6 @@ use std::sync::Arc;
 use crate::store::Signal;
 use scope_protocol::EnvelopeBin;
 
-pub const TILE_BINS: usize = 256;
-
 fn sample_bin(time: f64, value: f64) -> EnvelopeBin {
     let finite = value.is_finite().then_some(value);
     EnvelopeBin {
