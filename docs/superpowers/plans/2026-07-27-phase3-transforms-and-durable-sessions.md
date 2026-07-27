@@ -3771,7 +3771,7 @@ test("creates a derived signal from the formula bar", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("reports an unparseable expression without creating a signal", async ({
+test("reports an unparsable expression without creating a signal", async ({
   page,
 }) => {
   await openWorkbench(page);
