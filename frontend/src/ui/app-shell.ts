@@ -72,6 +72,8 @@ export class AppShell {
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
   private autosaveTimer: number | null = null;
+  private workspacePath: string | null = null;
+  private dirty = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -286,6 +288,7 @@ export class AppShell {
       this.fitWindowToPlotted();
     }
     this.afterLayoutChange();
+    this.renderWorkspaceName();
   }
 
   private registerCommands(): void {
@@ -619,11 +622,39 @@ export class AppShell {
         this.showModeHelp("SignalScope 0.6.0");
       },
     });
+    this.commands.register({
+      id: "open-workspace",
+      title: "Open Workspace…",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.pickAndLoadWorkspace();
+      },
+    });
+    this.commands.register({
+      id: "save-workspace",
+      title: "Save Workspace",
+      keys: "mod+s",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.saveWorkspace(this.workspacePath);
+      },
+    });
+    this.commands.register({
+      id: "save-workspace-as",
+      title: "Save Workspace As…",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.saveWorkspace(null);
+      },
+    });
     for (const planned of [
       ["open-recent", "Open Recent ▸", "file", "open"],
-      ["open-workspace", "Open Workspace…", "file", "workspace"],
-      ["save-workspace", "Save Workspace", "file", "workspace"],
-      ["save-workspace-as", "Save Workspace As…", "file", "workspace"],
       ["export", "Export ▸ HTML · PNG · CSV", "file", "export"],
       ["annotations-dock", "Annotations dock", "view", "docks"],
       ["font-size", "Font size ▸", "view", "display"],
@@ -889,6 +920,8 @@ export class AppShell {
   /** Coalesces rapid state changes into one write. */
   scheduleAutosave(): void {
     if (this.plane.session === null) return;
+    this.dirty = true;
+    this.renderWorkspaceName();
     if (this.autosaveTimer !== null) window.clearTimeout(this.autosaveTimer);
     this.autosaveTimer = window.setTimeout(() => {
       this.autosaveTimer = null;
@@ -907,9 +940,63 @@ export class AppShell {
     try {
       const loaded = await port.load(null);
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.workspacePath = loaded.path;
     } catch (error: unknown) {
       this.reportError(error);
     }
+  }
+
+  /** Saves to `path`, or asks for one when null. */
+  private async saveWorkspace(path: string | null): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const target = path ?? (await port.pick("save"));
+      if (target === null) return;
+      await port.save(JSON.stringify(this.workspace.snapshot()), target);
+      this.workspacePath = target;
+      this.dirty = false;
+      this.renderWorkspaceName();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async pickAndLoadWorkspace(): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const target = await port.pick("open");
+      if (target === null) return;
+      await this.loadSession(target);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  /** Loads session state. Task 16 expands this into source/derived replay. */
+  async loadSession(path: string | null): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const loaded = await port.load(path);
+      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.workspacePath = loaded.path;
+      this.dirty = false;
+      this.restoreTheme();
+      this.renderWorkspaceName();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  /** Shows the open workspace's file name and whether it has unsaved edits. */
+  private renderWorkspaceName(): void {
+    const element = required<HTMLElement>(this.root, ".workspace-name");
+    const name =
+      this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
+    element.textContent = this.dirty ? `${name} •` : name;
   }
 
   /**
@@ -1542,6 +1629,7 @@ function shellMarkup(): string {
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         SIGNALSCOPE
       </span>
+      <span class="workspace-name">Untitled</span>
       <span class="session-identity"></span>
     </div>
 
