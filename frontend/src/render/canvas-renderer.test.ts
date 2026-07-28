@@ -148,7 +148,8 @@ const TEST_PALETTE: Palette = {
     "#0072bd",
   ],
   sequential: ["#000000", "#ffffff"],
-  fontMono: '"JetBrains Mono", monospace',
+  fontPlot: '"JetBrains Mono", monospace',
+  fontSize: 9,
 };
 
 function tile(
