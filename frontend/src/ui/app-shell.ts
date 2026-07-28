@@ -6,6 +6,7 @@ import {
   type Command,
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
+import { browserStorage, CommandUsage } from "../app/frecency";
 import { HistoryStack } from "../app/history";
 import { runIngest } from "../app/ingest";
 import {
@@ -64,6 +65,7 @@ const SAMPLE_CAP = 8192;
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
+  private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private signals: SignalSummary[] = [];
   private signalsByPath = new Map<string, SignalSummary>();
@@ -303,6 +305,9 @@ export class AppShell {
       },
     });
     this.registerCommands();
+    this.commands.onRun = (id) => {
+      this.usage.record(id);
+    };
     void new AppMenu(
       required<HTMLButtonElement>(this.root, ".menu-button"),
       this.commands,
@@ -891,7 +896,10 @@ export class AppShell {
     if (mode === "settings") return this.settingsEntries();
     // Planned and momentarily unavailable commands both stay listed so the
     // palette matches the menu, but each says why it will not run.
-    const commands = this.commands.listAll().map((command) => ({
+    const ranked = [...this.commands.listAll()].sort(
+      (left, right) => this.usage.score(right.id) - this.usage.score(left.id),
+    );
+    const commands = ranked.map((command) => ({
       title: command.title,
       hint: command.keys === undefined ? "" : formatCombo(command.keys),
       ...unavailableReason(command),
