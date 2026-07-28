@@ -145,6 +145,36 @@
       "fields": {
         "path": "string"
       }
+    },
+    "SessionDialogMode": {
+      "kind": "enum",
+      "variants": ["open", "save"]
+    },
+    "PickSessionRequest": {
+      "kind": "object",
+      "fields": {
+        "mode": "SessionDialogMode"
+      }
+    },
+    "SaveSessionRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "path": "string?"
+      }
+    },
+    "LoadSessionRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string?"
+      }
+    },
+    "LoadedSession": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "path": "string?"
+      }
     }
   }
 }

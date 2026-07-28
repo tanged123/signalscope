@@ -110,3 +110,23 @@ export interface DerivedRequest {
 export interface RemoveSignalRequest {
   path: string;
 }
+
+export type SessionDialogMode = "open" | "save";
+
+export interface PickSessionRequest {
+  mode: SessionDialogMode;
+}
+
+export interface SaveSessionRequest {
+  session_json: string;
+  path: string | null;
+}
+
+export interface LoadSessionRequest {
+  path: string | null;
+}
+
+export interface LoadedSession {
+  session_json: string;
+  path: string | null;
+}

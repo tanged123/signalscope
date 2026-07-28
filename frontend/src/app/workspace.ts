@@ -35,7 +35,7 @@ export function emptySession(): Session {
 }
 
 export class WorkspaceModel {
-  private readonly session: Session;
+  private session: Session;
   private nextPanelNumber: number;
   private nextTabNumber: number;
 
@@ -54,6 +54,11 @@ export class WorkspaceModel {
 
   snapshot(): Readonly<Session> {
     return this.session;
+  }
+
+  /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
+  replace(session: Session): void {
+    this.session = session;
   }
 
   theme(): Session["theme"] {

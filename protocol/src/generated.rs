@@ -206,3 +206,35 @@ pub struct DerivedRequest {
 pub struct RemoveSignalRequest {
     pub path: String,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionDialogMode {
+    Open,
+    Save,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct PickSessionRequest {
+    pub mode: SessionDialogMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveSessionRequest {
+    pub session_json: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LoadSessionRequest {
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LoadedSession {
+    pub session_json: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}

@@ -23,7 +23,7 @@ import type {
   CursorMode,
   PanelMode,
   PanelState,
-  Theme,
+  Session,
 } from "../generated/session";
 import {
   CommandPalette,
@@ -41,7 +41,7 @@ import { AppMenu } from "./app-menu";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
-const THEME_STORAGE_KEY = "signalscope.theme";
+const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
 const QUICK_SUFFIX: Record<QuickTransform, string> = {
@@ -71,6 +71,9 @@ export class AppShell {
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
+  private autosaveTimer: number | null = null;
+  private workspacePath: string | null = null;
+  private dirty = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -79,6 +82,7 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    await this.restoreSession();
     this.restoreTheme();
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
@@ -284,6 +288,7 @@ export class AppShell {
       this.fitWindowToPlotted();
     }
     this.afterLayoutChange();
+    this.renderWorkspaceName();
   }
 
   private registerCommands(): void {
@@ -614,14 +619,42 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.6.0");
+        this.showModeHelp("SignalScope 0.7.0");
+      },
+    });
+    this.commands.register({
+      id: "open-workspace",
+      title: "Open Workspace…",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.pickAndLoadWorkspace();
+      },
+    });
+    this.commands.register({
+      id: "save-workspace",
+      title: "Save Workspace",
+      keys: "mod+s",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.saveWorkspace(this.workspacePath);
+      },
+    });
+    this.commands.register({
+      id: "save-workspace-as",
+      title: "Save Workspace As…",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.saveWorkspace(null);
       },
     });
     for (const planned of [
       ["open-recent", "Open Recent ▸", "file", "open"],
-      ["open-workspace", "Open Workspace…", "file", "workspace"],
-      ["save-workspace", "Save Workspace", "file", "workspace"],
-      ["save-workspace-as", "Save Workspace As…", "file", "workspace"],
       ["export", "Export ▸ HTML · PNG · CSV", "file", "export"],
       ["annotations-dock", "Annotations dock", "view", "docks"],
       ["font-size", "Font size ▸", "view", "display"],
@@ -825,6 +858,7 @@ export class AppShell {
               : "…";
           progress.textContent = `${name} · ${status.stage} ${percent}`;
         });
+        this.workspace.addSourcePath(path);
       }
       await this.reloadSignals();
       this.afterLayoutChange();
@@ -881,6 +915,123 @@ export class AppShell {
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
     this.syncCursorMode();
     void this.refreshTiles();
+    this.scheduleAutosave();
+  }
+
+  /** Coalesces rapid state changes into one write. */
+  scheduleAutosave(): void {
+    if (this.plane.session === null) return;
+    this.dirty = true;
+    this.renderWorkspaceName();
+    if (this.autosaveTimer !== null) window.clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = window.setTimeout(() => {
+      this.autosaveTimer = null;
+      void this.plane.session
+        ?.save(JSON.stringify(this.workspace.snapshot()), null)
+        .catch((error: unknown) => {
+          this.reportError(error);
+        });
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  /** Restores the autosaved session, if any, before the first render. */
+  private async restoreSession(): Promise<void> {
+    await this.loadSession(null);
+  }
+
+  /** Saves to `path`, or asks for one when null. */
+  private async saveWorkspace(path: string | null): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const target = path ?? (await port.pick("save"));
+      if (target === null) return;
+      await port.save(JSON.stringify(this.workspace.snapshot()), target);
+      this.workspacePath = target;
+      this.dirty = false;
+      this.renderWorkspaceName();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async pickAndLoadWorkspace(): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const target = await port.pick("open");
+      if (target === null) return;
+      await this.loadSession(target);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  /**
+   * Replaces the current session, re-ingests its sources, and replays its
+   * derived definitions in order. Definitions whose references are missing
+   * stay recorded; their panels show the unresolved-signal empty state.
+   */
+  async loadSession(path: string | null): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    const progress = required<HTMLElement>(this.root, ".ingest-progress");
+    try {
+      const loaded = await port.load(path);
+      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.workspacePath = loaded.path;
+      this.dirty = false;
+      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspaceView?.invalidateTheme();
+
+      const ingestPort = this.plane.ingest;
+      if (ingestPort !== null) {
+        progress.hidden = false;
+        for (const source of this.workspace.sourcePaths()) {
+          const name = basename(source);
+          try {
+            await runIngest(ingestPort, source, (status) => {
+              const percent =
+                status.fraction > 0
+                  ? `${String(Math.round(status.fraction * 100))}%`
+                  : "…";
+              progress.textContent = `${name} · ${status.stage} ${percent}`;
+            });
+          } catch {
+            progress.textContent = `${name} · unavailable`;
+          }
+        }
+      }
+      await this.reloadSignals();
+
+      const derivedPort = this.plane.derived;
+      if (derivedPort !== null) {
+        for (const definition of [...this.workspace.derived()]) {
+          try {
+            await derivedPort.create(definition.path, definition.expr);
+          } catch {
+            // Unresolved definitions stay recorded for a later source retry.
+          }
+        }
+        await this.reloadSignals();
+      }
+
+      this.afterLayoutChange();
+      this.dirty = false;
+      this.renderWorkspaceName();
+    } catch (error: unknown) {
+      this.reportError(error);
+    } finally {
+      progress.hidden = true;
+    }
+  }
+
+  /** Shows the open workspace's file name and whether it has unsaved edits. */
+  private renderWorkspaceName(): void {
+    const element = required<HTMLElement>(this.root, ".workspace-name");
+    const name =
+      this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
+    element.textContent = this.dirty ? `${name} •` : name;
   }
 
   /**
@@ -1362,16 +1513,14 @@ export class AppShell {
     const theme = documentRoot.dataset.theme === "light" ? "dark" : "light";
     documentRoot.dataset.theme = theme;
     this.workspace.setTheme(theme);
-    storeTheme(theme);
+    this.scheduleAutosave();
     this.workspaceView?.invalidateTheme();
     this.renderTiles();
   }
 
+  /** Applies the session's theme. The session is the only durable store. */
   private restoreTheme(): void {
-    const stored = storedTheme();
-    const theme = stored ?? this.workspace.theme();
-    document.documentElement.dataset.theme = theme;
-    this.workspace.setTheme(theme);
+    document.documentElement.dataset.theme = this.workspace.theme();
   }
 
   private toggleSignalTree(): void {
@@ -1507,28 +1656,6 @@ function unavailableReason(command: Command): { unavailable?: string } {
     : { unavailable: "unavailable in this context" };
 }
 
-/**
- * Reads the persisted theme. The self-contained snapshot opens from `file://`,
- * where `localStorage` access can throw, so storage failures degrade to the
- * session's own theme instead of aborting the boot.
- */
-function storedTheme(): Theme | null {
-  try {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === "dark" || stored === "light" ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeTheme(theme: Theme): void {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-  } catch {
-    // A snapshot opened without storage still switches theme for this session.
-  }
-}
-
 function shellMarkup(): string {
   return `<main class="workbench formula-collapsed">
     <div class="title-bar">
@@ -1537,6 +1664,7 @@ function shellMarkup(): string {
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         SIGNALSCOPE
       </span>
+      <span class="workspace-name">Untitled</span>
       <span class="session-identity"></span>
     </div>
 

@@ -46,7 +46,7 @@ test("theme is a pure token swap", async ({ page }) => {
   await page.keyboard.press("t");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.getByLabel("Panel 1 panel")).toBeVisible();
 });
 
@@ -59,12 +59,15 @@ test("application menu mirrors commands and marks planned work", async ({
   const menu = page.locator(".app-menu");
   await expect(menu).toBeVisible();
   await expect(button).toHaveAttribute("aria-expanded", "true");
-  const planned = menu.locator(".app-menu-item", {
+  const unavailable = menu.locator(".app-menu-item", {
     hasText: "Open Workspace",
   });
-  await expect(planned).toHaveAttribute("aria-disabled", "true");
-  await planned.dispatchEvent("click");
+  await expect(unavailable).toHaveAttribute("aria-disabled", "true");
+  await unavailable.dispatchEvent("click");
   await expect(menu).toBeVisible();
+  await expect(
+    menu.locator(".app-menu-item", { hasText: "Export" }),
+  ).toHaveAttribute("title", /planned/);
 
   // Opening focuses the first item; the roving arrow keys wrap in both
   // directions and Home/End reach the ends.
@@ -90,11 +93,14 @@ test("application menu mirrors commands and marks planned work", async ({
   await expect(button).toBeFocused();
   await page.keyboard.press("ControlOrMeta+Shift+p");
   await page.locator(".palette-input").fill("Open Workspace");
-  const plannedRow = page.locator(".palette-row", {
+  const unavailableRow = page.locator(".palette-row", {
     hasText: "Open Workspace",
   });
-  await expect(plannedRow).toBeDisabled();
-  await expect(plannedRow).toHaveAttribute("title", /planned/);
+  await expect(unavailableRow).toBeDisabled();
+  await expect(unavailableRow).toHaveAttribute(
+    "title",
+    "unavailable in this context",
+  );
 });
 
 test("tabbing out of the application menu dismisses it", async ({ page }) => {

@@ -9,12 +9,14 @@ use scope_core::{
     cache, compute, expr,
     ingest::SUPPORTED_FORMATS,
     pyramid::Pyramid,
+    session,
     store::{Signal, SignalId, SignalStore, Source, SourceId},
 };
 use scope_protocol::{
     DerivedRequest, Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState,
-    IngestStatus, RemoveSignalRequest, SampleRequest, SampleResponse, SampleSeries, SignalSummary,
-    SignalTile, SourceSummary, TileRequest, TileResponse,
+    IngestStatus, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
+    SampleRequest, SampleResponse, SampleSeries, SaveSessionRequest, SessionDialogMode,
+    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -366,6 +368,81 @@ fn remove_signal(
     Ok(Envelope::new(()))
 }
 
+const AUTOSAVE_FILE: &str = "session.autosave.json";
+
+/// Resolves an explicit path, or the autosave slot when none is given.
+fn session_path(app: &AppHandle, path: Option<String>) -> Result<PathBuf, String> {
+    match path {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join(AUTOSAVE_FILE)),
+    }
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn save_session(
+    request: Envelope<SaveSessionRequest>,
+    app: AppHandle,
+) -> Result<Envelope<String>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let path = session_path(&app, request.path)?;
+    session::save_to_path(&session, &path).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(path.display().to_string()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn load_session(
+    request: Envelope<LoadSessionRequest>,
+    app: AppHandle,
+) -> Result<Envelope<LoadedSession>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let explicit = request.path.is_some();
+    let path = session_path(&app, request.path)?;
+    if !explicit && !path.exists() {
+        let session = session::Session::default();
+        return Ok(Envelope::new(LoadedSession {
+            session_json: serde_json::to_string(&session).map_err(|error| error.to_string())?,
+            path: None,
+        }));
+    }
+    let session = session::load_from_path(&path).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(LoadedSession {
+        session_json: serde_json::to_string(&session).map_err(|error| error.to_string())?,
+        path: explicit.then(|| path.display().to_string()),
+    }))
+}
+
+#[tauri::command]
+async fn pick_session_path(
+    request: Envelope<PickSessionRequest>,
+    app: AppHandle,
+) -> Result<Envelope<Option<String>>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app
+            .dialog()
+            .file()
+            .add_filter("SignalScope workspace", &["json"]);
+        match request.mode {
+            SessionDialogMode::Open => dialog.blocking_pick_file(),
+            SessionDialogMode::Save => dialog.blocking_save_file(),
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        picked
+            .and_then(|file| file.into_path().ok())
+            .map(|path| path.display().to_string()),
+    ))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the native `SignalScope` application.
 ///
@@ -386,7 +463,10 @@ pub fn run() {
             query_tiles,
             query_samples,
             create_derived,
-            remove_signal
+            remove_signal,
+            save_session,
+            load_session,
+            pick_session_path
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");
