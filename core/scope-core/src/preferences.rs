@@ -71,8 +71,39 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
+        PREFERENCES_SCHEMA_VERSION => Ok(repair_current(&value)),
         version => Err(PreferencesError::UnsupportedVersion(version)),
+    }
+}
+
+fn repair_current(value: &serde_json::Value) -> Preferences {
+    let defaults = Preferences::default();
+    let family = |name: &str, fallback| match value.get(name).and_then(serde_json::Value::as_str) {
+        Some("inter") => FontFamily::Inter,
+        Some("dejavu") => FontFamily::Dejavu,
+        Some("arimo") => FontFamily::Arimo,
+        Some("jetbrains") => FontFamily::Jetbrains,
+        _ => fallback,
+    };
+    let size = |name: &str, fallback: f64, min: f64, max: f64, half_steps: bool| {
+        let value = value
+            .get(name)
+            .and_then(serde_json::Value::as_f64)
+            .filter(|candidate| candidate.is_finite())
+            .unwrap_or(fallback)
+            .clamp(min, max);
+        if half_steps {
+            (value * 2.0).round() / 2.0
+        } else {
+            value.round()
+        }
+    };
+    Preferences {
+        schema_version: PREFERENCES_SCHEMA_VERSION,
+        ui_font_family: family("ui_font_family", defaults.ui_font_family),
+        plot_font_family: family("plot_font_family", defaults.plot_font_family),
+        ui_font_size: size("ui_font_size", defaults.ui_font_size, 10.0, 20.0, false),
+        plot_font_size: size("plot_font_size", defaults.plot_font_size, 6.0, 16.0, true),
     }
 }
 
@@ -141,6 +172,24 @@ mod tests {
     fn truncated_preferences_fail_instead_of_partially_restoring() {
         let error = from_json("{\"schema_ver").unwrap_err();
         assert!(matches!(error, PreferencesError::Json(_)));
+    }
+
+    #[test]
+    fn repairs_unknown_families_and_sizes_without_losing_valid_fields() {
+        let preferences = from_json(
+            r#"{
+                "schema_version": 1,
+                "ui_font_family": "unknown",
+                "plot_font_family": "arimo",
+                "ui_font_size": 99,
+                "plot_font_size": 10.5
+            }"#,
+        )
+        .expect("repairs hand-edited preferences");
+        assert_eq!(preferences.ui_font_family, FontFamily::Inter);
+        assert_eq!(preferences.plot_font_family, FontFamily::Arimo);
+        assert_eq!(preferences.ui_font_size, 20.0);
+        assert_eq!(preferences.plot_font_size, 10.5);
     }
 
     #[test]

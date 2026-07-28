@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { Session } from "../generated/session";
 import { emptySession } from "./workspace";
-import { HistoryStack } from "./history";
+import {
+  HistoryStack,
+  historySnapshot,
+  restoreTransientSessionState,
+} from "./history";
 
 function sessionWithTheme(theme: Session["theme"]): Session {
   return { ...emptySession(), theme };
@@ -58,6 +62,15 @@ describe("HistoryStack", () => {
     expect(stack.undo()?.theme).toBe("light");
   });
 
+  it("closes a coalescing run on an unchanged unkeyed commit", () => {
+    const stack = new HistoryStack();
+    stack.reset(sessionWithWindow(60));
+    stack.commit(sessionWithWindow(50), "range:panel-1");
+    stack.commit(sessionWithWindow(50));
+    stack.commit(sessionWithWindow(40), "range:panel-1");
+    expect(stack.undo()?.linked_time.t1).toBe(50);
+  });
+
   it("clears the redo branch on a new commit", () => {
     const stack = new HistoryStack();
     stack.reset(sessionWithWindow(60));
@@ -87,5 +100,44 @@ describe("HistoryStack", () => {
     restored.theme = "light";
     expect(stack.redo()?.theme).toBe("light");
     expect(stack.undo()?.theme).toBe("dark");
+  });
+});
+
+describe("history session projection", () => {
+  it("excludes cursor, focus, and ingested source paths", () => {
+    const session = emptySession();
+    const tab = session.tabs[0];
+    if (tab === undefined) throw new Error("expected a workspace tab");
+    session.linked_time.cursorT = 12;
+    session.source_paths = ["/data/run.csv"];
+    tab.focused_panel_id = "panel-1";
+
+    const snapshot = historySnapshot(session);
+
+    expect(snapshot.linked_time.cursorT).toBeNull();
+    expect(snapshot.source_paths).toEqual([]);
+    expect(snapshot.tabs[0]?.focused_panel_id).toBeNull();
+  });
+
+  it("preserves live transient state when applying history", () => {
+    const historical = emptySession();
+    const current = structuredClone(historical);
+    const historicalTab = historical.tabs[0];
+    const currentTab = current.tabs[0];
+    if (historicalTab === undefined || currentTab === undefined) {
+      throw new Error("expected a workspace tab");
+    }
+    historicalTab.focused_panel_id = null;
+    currentTab.focused_panel_id = currentTab.panels[0]?.id ?? null;
+    current.linked_time.cursorT = 8;
+    current.source_paths = ["/data/run.csv"];
+
+    const restored = restoreTransientSessionState(historical, current);
+
+    expect(restored.linked_time.cursorT).toBe(8);
+    expect(restored.source_paths).toEqual(["/data/run.csv"]);
+    expect(restored.tabs[0]?.focused_panel_id).toBe(
+      currentTab.focused_panel_id,
+    );
   });
 });

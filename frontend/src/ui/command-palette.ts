@@ -53,11 +53,18 @@ export class CommandPalette {
         event.preventDefault();
         this.selected = Math.max(this.selected - 1, 0);
         this.renderList();
-      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      } else if (
+        event.key === "ArrowLeft" ||
+        event.key === "ArrowRight" ||
+        event.key === "+" ||
+        event.key === "-"
+      ) {
         const entry = this.matches[this.selected];
         if (entry?.adjust !== undefined) {
           event.preventDefault();
-          entry.adjust(event.key === "ArrowRight" ? 1 : -1);
+          entry.adjust(
+            event.key === "ArrowRight" || event.key === "+" ? 1 : -1,
+          );
           this.refreshEntries();
         }
       } else if (event.key === "Enter") {

@@ -2,6 +2,38 @@ import type { Session } from "../generated/session";
 
 const HISTORY_LIMIT = 100;
 
+export function historySnapshot(session: Readonly<Session>): Session {
+  const snapshot: Session = {
+    ...structuredClone(session),
+    source_paths: [],
+  };
+  snapshot.linked_time.cursorT = null;
+  for (const tab of snapshot.tabs) tab.focused_panel_id = null;
+  return snapshot;
+}
+
+export function restoreTransientSessionState(
+  historical: Readonly<Session>,
+  current: Readonly<Session>,
+): Session {
+  const restored: Session = {
+    ...structuredClone(historical),
+    source_paths: [...current.source_paths],
+  };
+  restored.linked_time.cursorT = current.linked_time.cursorT;
+  for (const tab of restored.tabs) {
+    const currentTab = current.tabs.find(
+      (candidate) => candidate.id === tab.id,
+    );
+    const focused = currentTab?.focused_panel_id ?? null;
+    tab.focused_panel_id =
+      focused !== null && tab.panels.some((panel) => panel.id === focused)
+        ? focused
+        : (tab.panels[0]?.id ?? null);
+  }
+  return restored;
+}
+
 /**
  * Bounded snapshot history for workspace undo/redo. The session is
  * kilobyte-scale JSON, so whole-state clones beat hand-written inverse
@@ -27,7 +59,10 @@ export class HistoryStack {
       return;
     }
     const snapshot = structuredClone(next);
-    if (JSON.stringify(snapshot) === JSON.stringify(this.present)) return;
+    if (JSON.stringify(snapshot) === JSON.stringify(this.present)) {
+      if (coalesceKey === undefined) this.lastKey = null;
+      return;
+    }
     if (coalesceKey !== undefined && coalesceKey === this.lastKey) {
       // Mid-gesture: fold into the open entry instead of stacking a step
       // per wheel tick or drag frame.

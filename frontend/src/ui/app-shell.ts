@@ -7,7 +7,11 @@ import {
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { browserStorage, CommandUsage } from "../app/frecency";
-import { HistoryStack } from "../app/history";
+import {
+  HistoryStack,
+  historySnapshot,
+  restoreTransientSessionState,
+} from "../app/history";
 import { runIngest } from "../app/ingest";
 import {
   applyPreferences,
@@ -90,6 +94,8 @@ export class AppShell {
   private workspacePath: string | null = null;
   private dirty = false;
   private restoringHistory = false;
+  private historyGestureKey: string | null = null;
+  private historyCoalesceTimer: number | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -100,7 +106,7 @@ export class AppShell {
     this.root.innerHTML = shellMarkup();
     await this.loadPreferences();
     await this.restoreSession();
-    this.history.reset(this.workspace.snapshot());
+    this.history.reset(historySnapshot(this.workspace.snapshot()));
     this.restoreTheme();
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
@@ -177,8 +183,15 @@ export class AppShell {
         onResized: () => {
           this.scheduleRender();
         },
-        onGesture: (_id, hint) => {
+        onGesture: (id, hint) => {
           required(this.root, ".gesture-hint").textContent = hint ?? "";
+          if (hint === null) {
+            this.historyGestureKey = null;
+            this.closeHistoryCoalescing();
+          } else {
+            this.historyGestureKey = `range:${id}`;
+            this.clearHistoryCoalesceTimer();
+          }
         },
         onCursor: (id, cursor, client) => {
           this.setCursor(id, cursor, client);
@@ -188,7 +201,7 @@ export class AppShell {
         },
         onYRange: (id, range) => {
           this.workspace.setPanelYRange(id, [range[0], range[1]]);
-          this.commitHistory(`yrange:${id}`);
+          this.commitHistory(`range:${id}`);
           this.scheduleRender();
         },
         onXRange: (id, range) => {
@@ -1095,18 +1108,47 @@ export class AppShell {
   /** Records the post-mutation state; no-op while restoring history. */
   private commitHistory(coalesceKey?: string): void {
     if (this.restoringHistory) return;
-    this.history.commit(this.workspace.snapshot(), coalesceKey);
+    const key = this.historyGestureKey ?? coalesceKey;
+    this.history.commit(historySnapshot(this.workspace.snapshot()), key);
+    if (key === undefined || this.historyGestureKey !== null) {
+      this.clearHistoryCoalesceTimer();
+      return;
+    }
+    this.clearHistoryCoalesceTimer();
+    this.historyCoalesceTimer = window.setTimeout(() => {
+      this.historyCoalesceTimer = null;
+      this.history.commit(historySnapshot(this.workspace.snapshot()));
+    }, 250);
+  }
+
+  private closeHistoryCoalescing(): void {
+    this.clearHistoryCoalesceTimer();
+    this.history.commit(historySnapshot(this.workspace.snapshot()));
+  }
+
+  private clearHistoryCoalesceTimer(): void {
+    if (this.historyCoalesceTimer === null) return;
+    window.clearTimeout(this.historyCoalesceTimer);
+    this.historyCoalesceTimer = null;
   }
 
   private applyHistory(session: Session | null): void {
     if (session === null) return;
     this.restoringHistory = true;
     try {
-      this.workspace.replace(session);
+      this.workspace.replace(
+        restoreTransientSessionState(session, this.workspace.snapshot()),
+      );
       document.documentElement.dataset.theme = this.workspace.theme();
       this.workspaceView?.invalidateTheme();
       this.renderWindowReadout();
       this.afterLayoutChange();
+      this.workspaceView?.setCursor(this.workspace.linkedTime().cursorT);
+      required(this.root, ".linked-toggle").classList.toggle(
+        "active",
+        this.workspace.linkedTime().linked,
+      );
+      this.tree?.setFavorites(this.workspace.favorites());
     } finally {
       this.restoringHistory = false;
     }
@@ -1245,7 +1287,7 @@ export class AppShell {
       }
       const loaded = await port.reset();
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
-      this.history.reset(this.workspace.snapshot());
+      this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
       this.tilesByPanel.clear();
       this.samplesByPanel.clear();
@@ -1285,7 +1327,7 @@ export class AppShell {
     try {
       const loaded = await port.load(path);
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
-      this.history.reset(this.workspace.snapshot());
+      this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = loaded.path;
       this.dirty = false;
       document.documentElement.dataset.theme = this.workspace.theme();
@@ -1527,7 +1569,7 @@ export class AppShell {
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
     }
-    this.commitHistory(`window:${panelId}`);
+    this.commitHistory(`range:${panelId}`);
     this.renderTiles();
     this.scheduleRefresh();
   }
@@ -1541,7 +1583,7 @@ export class AppShell {
       return;
     }
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
-    this.commitHistory(`xrange:${panelId}`);
+    this.commitHistory(`range:${panelId}`);
     this.renderTiles();
   }
 
