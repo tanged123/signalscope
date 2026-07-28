@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CommandRegistry, formatCombo, type Command } from "./commands";
+import {
+  CommandRegistry,
+  formatCombo,
+  reservedWhileEditing,
+  type Command,
+} from "./commands";
 
 function key(
   keyValue: string,
@@ -84,6 +89,69 @@ describe("CommandRegistry", () => {
       registry.handleKey(key("P", { metaKey: true, shiftKey: true })),
     ).toBe(true);
     expect(ran).toEqual(["signals", "commands"]);
+  });
+
+  it("matches mod+= for ctrl+= and ctrl+shift+= (plus)", () => {
+    const registry = new CommandRegistry();
+    let runs = 0;
+    registry.register({
+      id: "increase-plot-font",
+      title: "Plot font size: increase",
+      keys: "mod+=",
+      run: () => {
+        runs += 1;
+      },
+    });
+    expect(registry.handleKey(key("=", { ctrlKey: true }))).toBe(true);
+    expect(
+      registry.handleKey(key("+", { ctrlKey: true, shiftKey: true })),
+    ).toBe(true);
+    expect(runs).toBe(2);
+  });
+
+  it("matches altKeys as secondary bindings", () => {
+    const registry = new CommandRegistry();
+    let runs = 0;
+    registry.register({
+      id: "redo",
+      title: "Redo",
+      keys: "mod+shift+z",
+      altKeys: ["mod+y"],
+      run: () => {
+        runs += 1;
+      },
+    });
+    expect(
+      registry.handleKey(key("Z", { ctrlKey: true, shiftKey: true })),
+    ).toBe(true);
+    expect(registry.handleKey(key("y", { ctrlKey: true }))).toBe(true);
+    expect(runs).toBe(2);
+  });
+
+  it("reports run ids through onRun", () => {
+    const registry = new CommandRegistry();
+    const seen: string[] = [];
+    registry.onRun = (id) => seen.push(id);
+    registry.register({
+      id: "undo",
+      title: "Undo",
+      keys: "mod+z",
+      run: () => undefined,
+    });
+    registry.run("undo");
+    registry.handleKey(key("z", { ctrlKey: true }));
+    expect(seen).toEqual(["undo", "undo"]);
+  });
+});
+
+describe("reservedWhileEditing", () => {
+  it("reserves native undo/redo combos", () => {
+    expect(reservedWhileEditing(key("z", { ctrlKey: true }))).toBe(true);
+    expect(
+      reservedWhileEditing(key("Z", { ctrlKey: true, shiftKey: true })),
+    ).toBe(true);
+    expect(reservedWhileEditing(key("y", { ctrlKey: true }))).toBe(true);
+    expect(reservedWhileEditing(key("s", { ctrlKey: true }))).toBe(false);
   });
 });
 
