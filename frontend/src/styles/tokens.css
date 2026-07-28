@@ -47,6 +47,7 @@
 }
 
 :root {
+  font-size: 13px;
   color-scheme: dark;
   --surface-void: #07090c;
   --surface-0: #0e1116;
