@@ -25,33 +25,34 @@
 
 ## File Structure
 
-| File | Role |
-|---|---|
-| `protocol/schema/scope-preferences.json` | New prefs schema (v1) |
-| `protocol/scripts/generate-types.mjs` | Add prefs codegen job |
-| `scripts/codegen.sh`, `package.json` (`codegen:check`) | Add new generated files to format/diff lists |
-| `core/scope-core/src/preferences.rs` (+ `preferences/generated.rs`) | Rust Default/IO/migration + tests |
-| `protocol/testdata/preferences-conformance.json` | TS↔Rust fixture |
-| `shell/src-tauri/src/lib.rs` | `load_preferences` / `save_preferences` commands |
-| `frontend/src/generated/preferences.ts` | Generated TS types |
-| `frontend/src/app/preferences.ts` (+ test) | Defaults, clamps, parse, font stacks, apply |
-| `frontend/src/app/history.ts` (+ test) | `HistoryStack` |
-| `frontend/src/app/frecency.ts` (+ test) | `CommandUsage` |
-| `frontend/src/app/commands.ts` (+ test) | comboFor `=` handling, `altKeys`, `reservedWhileEditing`, `onRun` |
-| `frontend/src/app/data-plane.ts` | `PreferencesPort`, plane wiring |
-| `frontend/src/ui/command-palette.ts` | `"settings"` mode, `keepOpen`, `adjust` |
-| `frontend/src/ui/app-shell.ts` | Prefs wiring, undo/redo commands + commit sites, settings entries, frecency ranking |
-| `frontend/src/render/canvas-renderer.ts`, `overlay-renderer.ts` | `--font-plot` / `--plot-font-size` driven text |
-| `frontend/src/styles/tokens.css`, `app.css` | New tokens, @font-face, rem conversion |
-| `frontend/public/fonts/` | DejaVu Sans + Arimo woff2 + licenses |
-| `frontend/tests/e2e/settings-and-undo.spec.ts` | E2E coverage |
-| `docs/adr/0023-global-preferences-file.md` | ADR (confirm next free number) |
+| File                                                                | Role                                                                                |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `protocol/schema/scope-preferences.json`                            | New prefs schema (v1)                                                               |
+| `protocol/scripts/generate-types.mjs`                               | Add prefs codegen job                                                               |
+| `scripts/codegen.sh`, `package.json` (`codegen:check`)              | Add new generated files to format/diff lists                                        |
+| `core/scope-core/src/preferences.rs` (+ `preferences/generated.rs`) | Rust Default/IO/migration + tests                                                   |
+| `protocol/testdata/preferences-conformance.json`                    | TS↔Rust fixture                                                                     |
+| `shell/src-tauri/src/lib.rs`                                        | `load_preferences` / `save_preferences` commands                                    |
+| `frontend/src/generated/preferences.ts`                             | Generated TS types                                                                  |
+| `frontend/src/app/preferences.ts` (+ test)                          | Defaults, clamps, parse, font stacks, apply                                         |
+| `frontend/src/app/history.ts` (+ test)                              | `HistoryStack`                                                                      |
+| `frontend/src/app/frecency.ts` (+ test)                             | `CommandUsage`                                                                      |
+| `frontend/src/app/commands.ts` (+ test)                             | comboFor `=` handling, `altKeys`, `reservedWhileEditing`, `onRun`                   |
+| `frontend/src/app/data-plane.ts`                                    | `PreferencesPort`, plane wiring                                                     |
+| `frontend/src/ui/command-palette.ts`                                | `"settings"` mode, `keepOpen`, `adjust`                                             |
+| `frontend/src/ui/app-shell.ts`                                      | Prefs wiring, undo/redo commands + commit sites, settings entries, frecency ranking |
+| `frontend/src/render/canvas-renderer.ts`, `overlay-renderer.ts`     | `--font-plot` / `--plot-font-size` driven text                                      |
+| `frontend/src/styles/tokens.css`, `app.css`                         | New tokens, @font-face, rem conversion                                              |
+| `frontend/public/fonts/`                                            | DejaVu Sans + Arimo woff2 + licenses                                                |
+| `frontend/tests/e2e/settings-and-undo.spec.ts`                      | E2E coverage                                                                        |
+| `docs/adr/0023-global-preferences-file.md`                          | ADR (confirm next free number)                                                      |
 
 ---
 
 ### Task 1: Preferences schema + codegen pipeline
 
 **Files:**
+
 - Create: `protocol/schema/scope-preferences.json`
 - Create: `core/scope-core/src/preferences.rs` (module skeleton)
 - Modify: `protocol/scripts/generate-types.mjs:8-23` (jobs array)
@@ -61,6 +62,7 @@
 - Generated: `core/scope-core/src/preferences/generated.rs`, `frontend/src/generated/preferences.ts`
 
 **Interfaces:**
+
 - Produces (Rust): `scope_core::preferences::{Preferences, FontFamily, PREFERENCES_SCHEMA_VERSION}` with `Preferences::default()`.
 - Produces (TS): `frontend/src/generated/preferences.ts` exporting `PREFERENCES_SCHEMA_VERSION` (=1), `type FontFamily = "inter" | "dejavu" | "arimo" | "jetbrains"`, `interface Preferences { schema_version: number; ui_font_family: FontFamily; plot_font_family: FontFamily; ui_font_size: number; plot_font_size: number; }`.
 
@@ -158,10 +160,12 @@ git commit -m "feat(prefs): add versioned preferences schema and codegen"
 ### Task 2: Rust preferences IO, migration, and conformance fixture
 
 **Files:**
+
 - Modify: `core/scope-core/src/preferences.rs`
 - Create: `protocol/testdata/preferences-conformance.json` (via `REGENERATE_FIXTURES=1`)
 
 **Interfaces:**
+
 - Consumes: Task 1's `Preferences`, `FontFamily`, `PREFERENCES_SCHEMA_VERSION`.
 - Produces: `preferences::from_json(&str) -> Result<Preferences, PreferencesError>`, `preferences::save_to_path(&Preferences, &Path) -> Result<(), PreferencesError>`, `preferences::load_from_path(&Path) -> Result<Preferences, PreferencesError>`, `enum PreferencesError { UnsupportedVersion(u32), Io, Json }`.
 
@@ -337,9 +341,11 @@ git commit -m "feat(prefs): preferences io, migration ladder, conformance fixtur
 ### Task 3: Tauri load/save preferences commands
 
 **Files:**
+
 - Modify: `shell/src-tauri/src/lib.rs` (near the session commands, `lib.rs:436-535`, and the handler list at `lib.rs:548-562`)
 
 **Interfaces:**
+
 - Consumes: `scope_core::preferences` from Task 2; existing `Envelope` from `scope_protocol`.
 - Produces: Tauri commands `load_preferences() -> Envelope<Option<String>>` (None when the file doesn't exist; Err on corrupt/future-version) and `save_preferences(request: Envelope<String>) -> Envelope<()>` (validates via `from_json`, then atomic save). These are what `TauriPlane` invokes in Task 9.
 
@@ -401,11 +407,13 @@ git commit -m "feat(prefs): tauri load/save preferences commands"
 ### Task 4: Frontend preferences module + conformance test
 
 **Files:**
+
 - Create: `frontend/src/app/preferences.ts`
 - Create: `frontend/src/app/preferences.test.ts`
 - Create: `frontend/src/app/preferences-conformance.test.ts`
 
 **Interfaces:**
+
 - Consumes: generated `frontend/src/generated/preferences.ts` (Task 1); fixture `protocol/testdata/preferences-conformance.json` (Task 2).
 - Produces (used by Tasks 9, 12): `defaultPreferences(): Preferences`, `parsePreferences(json: string): Preferences | null`, `clampUiFontSize(value: number): number`, `clampPlotFontSize(value: number): number`, `applyPreferences(prefs: Preferences, target: PreferencesTarget): void`, `fontLabel(family: FontFamily): string`, `fontStack(family: FontFamily): string`, `FONT_FAMILIES: readonly FontFamily[]`, `UI_FONT_SIZE` / `PLOT_FONT_SIZE` (`{ min, max, default, step }`), `interface PreferencesTarget { style: { setProperty(name: string, value: string): void; fontSize: string } }`.
 
@@ -454,7 +462,9 @@ describe("preferences", () => {
   it("rejects malformed json and future versions", () => {
     expect(parsePreferences("{nope")).toBeNull();
     expect(
-      parsePreferences(JSON.stringify({ ...defaultPreferences(), schema_version: 99 })),
+      parsePreferences(
+        JSON.stringify({ ...defaultPreferences(), schema_version: 99 }),
+      ),
     ).toBeNull();
   });
 
@@ -478,7 +488,10 @@ describe("preferences", () => {
         fontSize: "",
       },
     };
-    applyPreferences({ ...defaultPreferences(), plot_font_family: "dejavu" }, target);
+    applyPreferences(
+      { ...defaultPreferences(), plot_font_family: "dejavu" },
+      target,
+    );
     expect(set.get("--font-ui")).toBe(fontStack("inter"));
     expect(set.get("--font-plot")).toBe(fontStack("dejavu"));
     expect(set.get("--plot-font-size")).toBe("9");
@@ -528,7 +541,12 @@ import {
 } from "../generated/preferences";
 
 export const UI_FONT_SIZE = { min: 10, max: 20, default: 13, step: 1 } as const;
-export const PLOT_FONT_SIZE = { min: 6, max: 16, default: 9, step: 0.5 } as const;
+export const PLOT_FONT_SIZE = {
+  min: 6,
+  max: 16,
+  default: 9,
+  step: 0.5,
+} as const;
 
 export const FONT_FAMILIES: readonly FontFamily[] = [
   "inter",
@@ -614,7 +632,9 @@ export function parsePreferences(json: string): Preferences | null {
     schema_version: PREFERENCES_SCHEMA_VERSION,
     ui_font_family: family(value.ui_font_family, defaults.ui_font_family),
     plot_font_family: family(value.plot_font_family, defaults.plot_font_family),
-    ui_font_size: clampUiFontSize(size(value.ui_font_size, defaults.ui_font_size)),
+    ui_font_size: clampUiFontSize(
+      size(value.ui_font_size, defaults.ui_font_size),
+    ),
     plot_font_size: clampPlotFontSize(
       size(value.plot_font_size, defaults.plot_font_size),
     ),
@@ -662,10 +682,12 @@ git commit -m "feat(prefs): frontend preferences module and conformance test"
 ### Task 5: Bundle DejaVu Sans and Arimo fonts
 
 **Files:**
+
 - Create: `frontend/public/fonts/dejavu-sans-latin-400-normal.woff2`, `dejavu-sans-latin-700-normal.woff2`, `arimo-latin-400-normal.woff2`, `arimo-latin-700-normal.woff2`, `LICENSE-dejavu-sans.txt`, `LICENSE-arimo.txt`
 - Modify: `frontend/src/styles/tokens.css:1-15` (add @font-face blocks)
 
 **Interfaces:**
+
 - Produces: font families `"DejaVu Sans"` and `Arimo` resolvable by the stacks defined in Task 4. No code interfaces.
 
 - [ ] **Step 1: Download the woff2 files and licenses**
@@ -739,12 +761,14 @@ git commit -m "feat(fonts): bundle dejavu sans and arimo with licenses"
 ### Task 6: Plot font tokens and renderer sizing
 
 **Files:**
+
 - Modify: `frontend/src/styles/tokens.css` (`:root` block)
 - Modify: `frontend/src/render/canvas-renderer.ts:20-96, 488-506`
 - Modify: `frontend/src/render/overlay-renderer.ts:217, 288, 322-339`
 - Create: `frontend/src/render/plot-fonts.test.ts`
 
 **Interfaces:**
+
 - Consumes: CSS vars `--font-plot` and `--plot-font-size` (set by Task 4's `applyPreferences`; defaults from tokens.css).
 - Produces: exported `tickFont(palette)` / `labelFont(palette)` from `canvas-renderer.ts` now deriving from `palette.fontPlot: string` and `palette.fontSize: number` (tick = base, label = base + 0.5); overlay plates draw at base + 1. `Palette`/`OverlayPalette` gain `fontPlot`/`fontSize` and **drop `fontMono`**.
 
@@ -753,8 +777,8 @@ git commit -m "feat(fonts): bundle dejavu sans and arimo with licenses"
 In `frontend/src/styles/tokens.css` `:root` block (after `--font-mono`, line 67):
 
 ```css
-  --font-plot: JetBrains Mono, ui-monospace, "SF Mono", Menlo, monospace;
-  --plot-font-size: 9;
+--font-plot: JetBrains Mono, ui-monospace, "SF Mono", Menlo, monospace;
+--plot-font-size: 9;
 ```
 
 - [ ] **Step 2: Write failing test**
@@ -782,15 +806,22 @@ Expected: FAIL — `tickFont`/`labelFont` not exported.
 - [ ] **Step 3: Implement renderer changes**
 
 `canvas-renderer.ts`:
+
 - In `Palette` (line 20-29): replace `fontMono: string;` with `fontPlot: string;` and add `fontSize: number;`.
 - Replace the two font helpers (lines 90-96) with exported versions typed loosely so the test needs no full palette:
 
 ```ts
-export function tickFont(palette: { fontPlot: string; fontSize: number }): string {
+export function tickFont(palette: {
+  fontPlot: string;
+  fontSize: number;
+}): string {
   return `${String(palette.fontSize)}px ${palette.fontPlot}`;
 }
 
-export function labelFont(palette: { fontPlot: string; fontSize: number }): string {
+export function labelFont(palette: {
+  fontPlot: string;
+  fontSize: number;
+}): string {
   return `${String(palette.fontSize + 0.5)}px ${palette.fontPlot}`;
 }
 ```
@@ -817,6 +848,7 @@ function plotFontSize(styles: CSSStyleDeclaration): number {
 - Run `grep -n "fontMono" frontend/src/render/*.ts` and update every remaining use (colorbar/axis draw sites in canvas-renderer use `tickFont`/`labelFont` already; fix any direct `palette.fontMono` reference to `palette.fontPlot`).
 
 `overlay-renderer.ts`:
+
 - In `OverlayPalette`: replace `fontMono` with `fontPlot: string;` and add `fontSize: number;`.
 - Lines 217 and 288: `context.font = \`${String(palette.fontSize + 1)}px ${palette.fontPlot}\`;`
 - `resolvePalette()` (line 322-339): replace the `fontMono:` line with:
@@ -852,9 +884,11 @@ git commit -m "feat(fonts): drive plot text from --font-plot and --plot-font-siz
 ### Task 7: UI font-size rem conversion
 
 **Files:**
+
 - Modify: `frontend/src/styles/tokens.css` (`:root`), `frontend/src/styles/app.css` (~60 declarations)
 
 **Interfaces:**
+
 - Produces: root `font-size: 13px` in tokens.css as the rem base; every `font-size:`/`font:` px literal in app.css converted to rem so `applyPreferences` (which sets `documentElement.style.fontSize`) scales the whole UI. Spacing/borders stay px.
 
 - [ ] **Step 1: Set the rem base**
@@ -862,26 +896,26 @@ git commit -m "feat(fonts): drive plot text from --font-plot and --plot-font-siz
 Add to the `:root` block in `tokens.css` (top of the block):
 
 ```css
-  font-size: 13px;
+font-size: 13px;
 ```
 
 - [ ] **Step 2: Convert app.css font sizes to rem**
 
 Enumerate every value first: `grep -no 'font\(-size\)\?: [0-9.]*px' frontend/src/styles/app.css | sort -t: -k3 -u`. Convert each with **rem = px / 13, 4 decimals**:
 
-| px | rem |
-|---|---|
-| 9 | 0.6923rem |
-| 9.5 | 0.7308rem |
-| 10 | 0.7692rem |
+| px   | rem       |
+| ---- | --------- |
+| 9    | 0.6923rem |
+| 9.5  | 0.7308rem |
+| 10   | 0.7692rem |
 | 10.5 | 0.8077rem |
-| 11 | 0.8462rem |
+| 11   | 0.8462rem |
 | 11.5 | 0.8846rem |
-| 12 | 0.9231rem |
+| 12   | 0.9231rem |
 | 12.5 | 0.9615rem |
-| 13 | 1rem |
-| 14 | 1.0769rem |
-| 15 | 1.1538rem |
+| 13   | 1rem      |
+| 14   | 1.0769rem |
+| 15   | 1.1538rem |
 
 Apply mechanically (covers both `font-size: Npx` and the `font: Npx …` shorthands):
 
@@ -924,10 +958,12 @@ git commit -m "refactor(styles): rem-based ui font sizes on a 13px root"
 ### Task 8: Keymap upgrades in commands.ts
 
 **Files:**
+
 - Modify: `frontend/src/app/commands.ts`
 - Create: `frontend/src/app/commands.test.ts` (extend if it already exists)
 
 **Interfaces:**
+
 - Produces: `Command.altKeys?: string[]` (secondary bindings; palette/menu hints keep showing `keys`); `CommandRegistry.onRun: ((id: string) => void) | null` (fires after every successful `run`/`handleKey` execution — Task 13's frecency hook); exported `reservedWhileEditing(event: KeyboardEvent): boolean` (true for `mod+z`, `mod+shift+z`, `mod+y` — Task 11's editing guard); `comboFor` now maps `+` → `=` and suppresses `shift` for `=` so ctrl+= and ctrl+shift+= both produce `"mod+="`.
 
 - [ ] **Step 1: Write failing tests**
@@ -962,7 +998,9 @@ describe("command registry keys", () => {
         runs += 1;
       },
     });
-    expect(registry.handleKey(keyEvent({ ctrlKey: true, key: "=" }))).toBe(true);
+    expect(registry.handleKey(keyEvent({ ctrlKey: true, key: "=" }))).toBe(
+      true,
+    );
     expect(
       registry.handleKey(keyEvent({ ctrlKey: true, shiftKey: true, key: "+" })),
     ).toBe(true);
@@ -984,7 +1022,9 @@ describe("command registry keys", () => {
     expect(
       registry.handleKey(keyEvent({ ctrlKey: true, shiftKey: true, key: "Z" })),
     ).toBe(true);
-    expect(registry.handleKey(keyEvent({ ctrlKey: true, key: "y" }))).toBe(true);
+    expect(registry.handleKey(keyEvent({ ctrlKey: true, key: "y" }))).toBe(
+      true,
+    );
     expect(runs).toBe(2);
   });
 
@@ -992,7 +1032,12 @@ describe("command registry keys", () => {
     const registry = new CommandRegistry();
     const seen: string[] = [];
     registry.onRun = (id) => seen.push(id);
-    registry.register({ id: "undo", title: "Undo", keys: "mod+z", run: () => undefined });
+    registry.register({
+      id: "undo",
+      title: "Undo",
+      keys: "mod+z",
+      run: () => undefined,
+    });
     registry.run("undo");
     registry.handleKey(keyEvent({ ctrlKey: true, key: "z" }));
     expect(seen).toEqual(["undo", "undo"]);
@@ -1001,12 +1046,20 @@ describe("command registry keys", () => {
 
 describe("reservedWhileEditing", () => {
   it("reserves native undo/redo combos", () => {
-    expect(reservedWhileEditing(keyEvent({ ctrlKey: true, key: "z" }))).toBe(true);
+    expect(reservedWhileEditing(keyEvent({ ctrlKey: true, key: "z" }))).toBe(
+      true,
+    );
     expect(
-      reservedWhileEditing(keyEvent({ ctrlKey: true, shiftKey: true, key: "Z" })),
+      reservedWhileEditing(
+        keyEvent({ ctrlKey: true, shiftKey: true, key: "Z" }),
+      ),
     ).toBe(true);
-    expect(reservedWhileEditing(keyEvent({ ctrlKey: true, key: "y" }))).toBe(true);
-    expect(reservedWhileEditing(keyEvent({ ctrlKey: true, key: "s" }))).toBe(false);
+    expect(reservedWhileEditing(keyEvent({ ctrlKey: true, key: "y" }))).toBe(
+      true,
+    );
+    expect(reservedWhileEditing(keyEvent({ ctrlKey: true, key: "s" }))).toBe(
+      false,
+    );
   });
 });
 ```
@@ -1039,17 +1092,17 @@ In `frontend/src/app/commands.ts`:
 4. In `handleKey()` (line 40-54), change the match to include altKeys and report:
 
 ```ts
-    for (const command of this.commands.values()) {
-      if (
-        (command.keys === combo || (command.altKeys?.includes(combo) ?? false)) &&
-        command.status !== "planned" &&
-        (command.enabled?.() ?? true)
-      ) {
-        command.run();
-        this.onRun?.(command.id);
-        return true;
-      }
-    }
+for (const command of this.commands.values()) {
+  if (
+    (command.keys === combo || (command.altKeys?.includes(combo) ?? false)) &&
+    command.status !== "planned" &&
+    (command.enabled?.() ?? true)
+  ) {
+    command.run();
+    this.onRun?.(command.id);
+    return true;
+  }
+}
 ```
 
 5. Replace `comboFor` (lines 57-65):
@@ -1101,10 +1154,12 @@ git commit -m "feat(commands): altkeys, plus-equals normalization, onRun hook, e
 ### Task 9: Preferences port and AppShell wiring + plot-font shortcuts
 
 **Files:**
+
 - Modify: `frontend/src/app/data-plane.ts` (interfaces + both planes)
 - Modify: `frontend/src/ui/app-shell.ts` (fields, `mount`, new methods, commands, planned list at line 664-685)
 
 **Interfaces:**
+
 - Consumes: Task 3 commands, Task 4 module, Task 8 `mod+=` normalization.
 - Produces: `interface PreferencesPort { load(): Promise<string | null>; save(preferencesJson: string): Promise<void>; }`; `DataPlane.preferences: PreferencesPort | null` (`TauriPlane` implements, `BakedPlane` null). AppShell: `private prefs: Preferences`, `private loadPreferences(): Promise<void>`, `private updatePreferences(patch: Partial<Omit<Preferences, "schema_version">>): void`, `private schedulePreferencesSave(): void` — Task 12's settings entries call `updatePreferences` and read `this.prefs`. Commands `increase-plot-font` (`mod+=`), `decrease-plot-font` (`mod+-`), `reset-plot-font` (`mod+0`), replacing the inert `font-size` planned entry.
 
@@ -1124,17 +1179,17 @@ Add to `DataPlane` after `session`: `readonly preferences: PreferencesPort | nul
 In `TauriPlane`, declare `readonly preferences: PreferencesPort;` and initialize in the constructor after `this.session = {…};`:
 
 ```ts
-    this.preferences = {
-      load: async () =>
-        open(await this.invoke<Envelope<string | null>>("load_preferences")),
-      save: async (preferencesJson: string) => {
-        open(
-          await this.invoke<Envelope<null>>("save_preferences", {
-            request: seal(preferencesJson),
-          }),
-        );
-      },
-    };
+this.preferences = {
+  load: async () =>
+    open(await this.invoke<Envelope<string | null>>("load_preferences")),
+  save: async (preferencesJson: string) => {
+    open(
+      await this.invoke<Envelope<null>>("save_preferences", {
+        request: seal(preferencesJson),
+      }),
+    );
+  },
+};
 ```
 
 In `BakedPlane`, add `readonly preferences = null;` beside `readonly session = null;`.
@@ -1217,40 +1272,40 @@ import type { Preferences } from "../generated/preferences";
 5. In `registerCommands()`, add (in the view/display neighborhood, near `toggle-theme`):
 
 ```ts
-    this.commands.register({
-      id: "increase-plot-font",
-      title: "Plot font size: increase",
-      keys: "mod+=",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({
-          plot_font_size: this.prefs.plot_font_size + PLOT_FONT_SIZE.step,
-        });
-      },
+this.commands.register({
+  id: "increase-plot-font",
+  title: "Plot font size: increase",
+  keys: "mod+=",
+  section: "view",
+  group: "display",
+  run: () => {
+    this.updatePreferences({
+      plot_font_size: this.prefs.plot_font_size + PLOT_FONT_SIZE.step,
     });
-    this.commands.register({
-      id: "decrease-plot-font",
-      title: "Plot font size: decrease",
-      keys: "mod+-",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({
-          plot_font_size: this.prefs.plot_font_size - PLOT_FONT_SIZE.step,
-        });
-      },
+  },
+});
+this.commands.register({
+  id: "decrease-plot-font",
+  title: "Plot font size: decrease",
+  keys: "mod+-",
+  section: "view",
+  group: "display",
+  run: () => {
+    this.updatePreferences({
+      plot_font_size: this.prefs.plot_font_size - PLOT_FONT_SIZE.step,
     });
-    this.commands.register({
-      id: "reset-plot-font",
-      title: "Plot font size: reset",
-      keys: "mod+0",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({ plot_font_size: PLOT_FONT_SIZE.default });
-      },
-    });
+  },
+});
+this.commands.register({
+  id: "reset-plot-font",
+  title: "Plot font size: reset",
+  keys: "mod+0",
+  section: "view",
+  group: "display",
+  run: () => {
+    this.updatePreferences({ plot_font_size: PLOT_FONT_SIZE.default });
+  },
+});
 ```
 
 6. Delete the `["font-size", "Font size ▸", "view", "display"],` row from the planned array (line 668).
@@ -1272,10 +1327,12 @@ git commit -m "feat(prefs): preferences port, appshell wiring, plot font shortcu
 ### Task 10: HistoryStack
 
 **Files:**
+
 - Create: `frontend/src/app/history.ts`
 - Create: `frontend/src/app/history.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Session` type from `../generated/session`.
 - Produces (Task 11 uses exactly these): `class HistoryStack { reset(current: Session): void; commit(next: Session, coalesceKey?: string): void; undo(): Session | null; redo(): Session | null; canUndo(): boolean; canRedo(): boolean; }`. `undo`/`redo` return deep clones safe to hand to `WorkspaceModel.replace`. `commit` deduplicates unchanged state and folds consecutive commits sharing a coalesce key into one entry. Cap: 100 past entries.
 
@@ -1473,9 +1530,11 @@ git commit -m "feat(history): bounded snapshot history stack"
 ### Task 11: Undo/redo integration in AppShell
 
 **Files:**
+
 - Modify: `frontend/src/ui/app-shell.ts`
 
 **Interfaces:**
+
 - Consumes: `HistoryStack` (Task 10), `Command.altKeys` + `reservedWhileEditing` (Task 8).
 - Produces: commands `undo` (`mod+z`) and `redo` (`mod+shift+z`, altKeys `["mod+y"]`), section `workspace`, group `history`; `private commitHistory(coalesceKey?: string): void`; `private applyHistory(session: Session | null): void`. Undo of a derived-signal removal recreates the backend signal; undo of a derived-signal creation leaves the orphan signal in the tree (harmless; redo re-records it) — data effects of ingestion are never rolled back.
 
@@ -1543,40 +1602,40 @@ git commit -m "feat(history): bounded snapshot history stack"
 5. In `registerCommands()`:
 
 ```ts
-    this.commands.register({
-      id: "undo",
-      title: "Undo",
-      keys: "mod+z",
-      section: "workspace",
-      group: "history",
-      enabled: () => this.history.canUndo(),
-      run: () => {
-        this.applyHistory(this.history.undo());
-      },
-    });
-    this.commands.register({
-      id: "redo",
-      title: "Redo",
-      keys: "mod+shift+z",
-      altKeys: ["mod+y"],
-      section: "workspace",
-      group: "history",
-      enabled: () => this.history.canRedo(),
-      run: () => {
-        this.applyHistory(this.history.redo());
-      },
-    });
+this.commands.register({
+  id: "undo",
+  title: "Undo",
+  keys: "mod+z",
+  section: "workspace",
+  group: "history",
+  enabled: () => this.history.canUndo(),
+  run: () => {
+    this.applyHistory(this.history.undo());
+  },
+});
+this.commands.register({
+  id: "redo",
+  title: "Redo",
+  keys: "mod+shift+z",
+  altKeys: ["mod+y"],
+  section: "workspace",
+  group: "history",
+  enabled: () => this.history.canRedo(),
+  run: () => {
+    this.applyHistory(this.history.redo());
+  },
+});
 ```
 
 6. Editing guard — in `bindControls()` replace the line `if (editing && !event.metaKey && !event.ctrlKey) return;` (line 834) with:
 
 ```ts
-      if (
-        editing &&
-        ((!event.metaKey && !event.ctrlKey) || reservedWhileEditing(event))
-      ) {
-        return;
-      }
+if (
+  editing &&
+  ((!event.metaKey && !event.ctrlKey) || reservedWhileEditing(event))
+) {
+  return;
+}
 ```
 
 - [ ] **Step 2: Add commit calls at every mutation site**
@@ -1601,7 +1660,7 @@ git commit -m "feat(history): bounded snapshot history stack"
 - [ ] **Step 3: Verify behavior manually + gates**
 
 Run: `./scripts/test.sh frontend`
-Expected: PASS. Then in `./scripts/dev.sh pnpm dev`: press `n` (split), ctrl+z (panel gone), ctrl+y (back), ctrl+shift+z equivalent; wheel-zoom a plot several ticks then a single ctrl+z restores the pre-gesture window; `t` theme toggle undoes; typing in the formula bar, ctrl+z edits the *text*, not the workspace.
+Expected: PASS. Then in `./scripts/dev.sh pnpm dev`: press `n` (split), ctrl+z (panel gone), ctrl+y (back), ctrl+shift+z equivalent; wheel-zoom a plot several ticks then a single ctrl+z restores the pre-gesture window; `t` theme toggle undoes; typing in the formula bar, ctrl+z edits the _text_, not the workspace.
 
 - [ ] **Step 4: Commit**
 
@@ -1615,10 +1674,12 @@ git commit -m "feat(history): workspace undo/redo with gesture coalescing"
 ### Task 12: Settings palette (ctrl+,)
 
 **Files:**
+
 - Modify: `frontend/src/ui/command-palette.ts`
 - Modify: `frontend/src/ui/app-shell.ts` (`paletteEntries`, `registerCommands`)
 
 **Interfaces:**
+
 - Consumes: `updatePreferences` / `this.prefs` / `fontLabel` / `FONT_FAMILIES` / `UI_FONT_SIZE` / `PLOT_FONT_SIZE` / `defaultPreferences` (Tasks 4, 9); `toggleTheme` (existing).
 - Produces: `PaletteMode = "commands" | "signals" | "settings"`; `PaletteEntry.keepOpen?: boolean` (run without closing; list refreshes) and `PaletteEntry.adjust?: (direction: -1 | 1) => void` (ArrowLeft/ArrowRight while selected); command `open-settings` (`mod+,`, section `view`, group `display`).
 
@@ -1639,12 +1700,12 @@ In `command-palette.ts`:
 3. Add field `private mode: PaletteMode = "commands";` and set `this.mode = mode;` first in `open()`. Placeholder line becomes:
 
 ```ts
-    this.input.placeholder =
-      mode === "signals"
-        ? "signals, workspaces, panels…"
-        : mode === "settings"
-          ? "settings — enter cycles, ←/→ adjust…"
-          : "commands…";
+this.input.placeholder =
+  mode === "signals"
+    ? "signals, workspaces, panels…"
+    : mode === "settings"
+      ? "settings — enter cycles, ←/→ adjust…"
+      : "commands…";
 ```
 
 4. In the input `keydown` handler, add before the `Enter` branch:
@@ -1678,15 +1739,15 @@ In `command-palette.ts`:
 and in `renderList()`'s click listener:
 
 ```ts
-        row.addEventListener("click", () => {
-          if (entry.keepOpen === true) {
-            entry.run();
-            this.refreshEntries();
-          } else {
-            this.close();
-            entry.run();
-          }
-        });
+row.addEventListener("click", () => {
+  if (entry.keepOpen === true) {
+    entry.run();
+    this.refreshEntries();
+  } else {
+    this.close();
+    entry.run();
+  }
+});
 ```
 
 6. Add:
@@ -1707,7 +1768,7 @@ and in `renderList()`'s click listener:
 Extend the `../app/preferences` import in `app-shell.ts` with `fontLabel`, `FONT_FAMILIES`, `UI_FONT_SIZE`, `defaultPreferences` (some already imported in Task 9). In `paletteEntries()` (line 724), first line:
 
 ```ts
-    if (mode === "settings") return this.settingsEntries();
+if (mode === "settings") return this.settingsEntries();
 ```
 
 New method:
@@ -1782,16 +1843,16 @@ New method:
 Register the command in `registerCommands()`:
 
 ```ts
-    this.commands.register({
-      id: "open-settings",
-      title: "Settings…",
-      keys: "mod+,",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.palette?.open("settings");
-      },
-    });
+this.commands.register({
+  id: "open-settings",
+  title: "Settings…",
+  keys: "mod+,",
+  section: "view",
+  group: "display",
+  run: () => {
+    this.palette?.open("settings");
+  },
+});
 ```
 
 - [ ] **Step 3: Verify + gate**
@@ -1810,11 +1871,13 @@ git commit -m "feat(settings): palette settings mode behind mod+comma"
 ### Task 13: Palette frecency
 
 **Files:**
+
 - Create: `frontend/src/app/frecency.ts`
 - Create: `frontend/src/app/frecency.test.ts`
 - Modify: `frontend/src/ui/app-shell.ts` (usage field, `onRun` hook, `paletteEntries` ranking)
 
 **Interfaces:**
+
 - Consumes: `CommandRegistry.onRun` (Task 8).
 - Produces: `class CommandUsage { constructor(storage: Pick<Storage, "getItem" | "setItem"> | null, now: () => number); record(id: string): void; score(id: string): number; }` (score = `count * 0.5 ** (ageMs / week)`, 0 for unknown ids; max 50 tracked ids, least-recently-used evicted) and `browserStorage(): Pick<Storage, "getItem" | "setItem"> | null`.
 
@@ -1980,9 +2043,9 @@ Expected: PASS.
 3. In `mount()` right after `this.registerCommands();` (line 271):
 
 ```ts
-    this.commands.onRun = (id) => {
-      this.usage.record(id);
-    };
+this.commands.onRun = (id) => {
+  this.usage.record(id);
+};
 ```
 
 4. In `paletteEntries()` (line 727), rank commands before mapping — replace `const commands = this.commands.listAll().map((command) => ({` with:
@@ -2010,9 +2073,11 @@ git commit -m "feat(palette): frecency ranking for commands"
 ### Task 14: End-to-end tests
 
 **Files:**
+
 - Create: `frontend/tests/e2e/settings-and-undo.spec.ts`
 
 **Interfaces:**
+
 - Consumes: everything shipped in Tasks 5–13; the e2e host is the baked demo plane (prefs port null — in-memory settings only, which these tests rely on).
 
 - [ ] **Step 1: Read the house style**
@@ -2064,7 +2129,9 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
   await expect(palette).toBeVisible();
   await expect(palette.locator(".palette-row")).toHaveCount(6);
 
-  const plotFont = palette.locator(".palette-row", { hasText: "Plot font" }).first();
+  const plotFont = palette
+    .locator(".palette-row", { hasText: "Plot font" })
+    .first();
   await expect(plotFont.locator(".palette-hint")).toHaveText("JetBrains Mono");
 
   const uiSize = palette.locator(".palette-row", { hasText: "UI font size" });
@@ -2114,6 +2181,7 @@ git commit -m "test(e2e): undo/redo, settings palette, plot font shortcuts"
 ### Task 15: ADR + full CI gate
 
 **Files:**
+
 - Create: `docs/adr/0023-global-preferences-file.md` (confirm the next free number with `ls docs/adr/`)
 
 **Interfaces:** none — documentation and verification.

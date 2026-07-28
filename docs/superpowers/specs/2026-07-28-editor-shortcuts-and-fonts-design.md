@@ -112,6 +112,7 @@ Bundle two new variable/static woff2 files in `frontend/public/fonts/` with
   - overlay plates (cursor/delta/annotation) = base + 1
 
   These are exactly today's ratios at the default base of 9.
+
 - The renderers' cached palette (read via `getComputedStyle`) picks up font
   changes through the existing `invalidateTheme()` invalidation path, followed
   by a re-render. Overlay `measureText` plate layout scales automatically
