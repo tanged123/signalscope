@@ -26,6 +26,9 @@ the `.signalscope.json` suffix. Opening remains unfiltered so valid legacy or
 extensionless session files can still be selected and validated by
 `scope-core::session`.
 
+Save prompts for a path only while the workspace is unnamed, then overwrites
+that named file. Save As always prompts and adopts the newly selected path.
+
 New Workspace resets both presentation and native data state, writes the empty
 session into the autosave slot, and leaves named workspace files untouched.
 

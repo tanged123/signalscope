@@ -9,6 +9,7 @@ import { runIngest } from "../app/ingest";
 import { quickTransform } from "../app/quick-transform";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
+import { persistWorkspace } from "../app/workspace-save";
 import {
   formatCursorTime,
   formatValue,
@@ -646,7 +647,7 @@ export class AppShell {
       group: "workspace",
       enabled: () => this.plane.session !== null,
       run: () => {
-        void this.saveWorkspace(this.workspacePath);
+        void this.saveWorkspace(false);
       },
     });
     this.commands.register({
@@ -656,7 +657,7 @@ export class AppShell {
       group: "workspace",
       enabled: () => this.plane.session !== null,
       run: () => {
-        void this.saveWorkspace(null);
+        void this.saveWorkspace(true);
       },
     });
     for (const planned of [
@@ -825,13 +826,11 @@ export class AppShell {
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
       const target = event.target;
-      if (
+      const editing =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
+        (target instanceof HTMLElement && target.isContentEditable);
+      if (editing && !event.metaKey && !event.ctrlKey) return;
       if (this.commands.handleKey(event)) event.preventDefault();
     });
   }
@@ -945,17 +944,18 @@ export class AppShell {
     await this.loadSession(null);
   }
 
-  /** Saves to `path`, or asks for one when null. */
-  private async saveWorkspace(path: string | null): Promise<void> {
+  private async saveWorkspace(saveAs: boolean): Promise<void> {
     const port = this.plane.session;
     if (port === null) return;
     try {
-      const target = path ?? (await port.pick("save"));
-      if (target === null) return;
-      this.workspacePath = await port.save(
+      const savedPath = await persistWorkspace(
+        port,
         JSON.stringify(this.workspace.snapshot()),
-        target,
+        this.workspacePath,
+        saveAs,
       );
+      if (savedPath === null) return;
+      this.workspacePath = savedPath;
       this.dirty = false;
       this.renderWorkspaceName();
     } catch (error: unknown) {

@@ -137,3 +137,12 @@ test("the palette disables commands the current build cannot run", async ({
   await expect(row).toBeDisabled();
   await expect(row).toHaveAttribute("title", "unavailable in this context");
 });
+
+test("application shortcuts remain active while search has focus", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator(".signal-search").focus();
+  await page.keyboard.press("ControlOrMeta+Shift+p");
+  await expect(page.locator(".palette-input")).toBeVisible();
+});
