@@ -6,6 +6,7 @@ import {
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
+import { quickTransform } from "../app/quick-transform";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
 import {
@@ -44,12 +45,6 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
-const QUICK_SUFFIX: Record<QuickTransform, string> = {
-  gradient: "dot",
-  cumtrapz: "int",
-  movmean: "avg",
-  abs: "abs",
-};
 
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
@@ -1054,7 +1049,7 @@ export class AppShell {
     if (port === null) return;
     try {
       await port.remove(path);
-      this.workspace.removeDerived(path);
+      this.workspace.removeSignal(path);
       await this.reloadSignals();
       this.afterLayoutChange();
     } catch (error: unknown) {
@@ -1632,18 +1627,6 @@ export class AppShell {
     required(this.root, ".render-ms").textContent = `error: ${message}`;
     console.error(error);
   }
-}
-
-/** The derived name and expression a legend quick transform produces. */
-function quickTransform(
-  path: string,
-  kind: QuickTransform,
-): [path: string, expr: string] {
-  const short = path.split("/").pop() ?? path;
-  const name = `derived/${short}_${QUICK_SUFFIX[kind]}`;
-  const expr =
-    kind === "movmean" ? `movmean('${path}', 51)` : `${kind}('${path}')`;
-  return [name, expr];
 }
 
 /** Explains why a listed command cannot run, or nothing when it can. */

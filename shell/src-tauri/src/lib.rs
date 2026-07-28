@@ -26,6 +26,7 @@ struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
     derived_source: Option<SourceId>,
+    derived_references: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Default)]
@@ -307,6 +308,104 @@ fn query_samples(
 
 const DERIVED_PREFIX: &str = "derived/";
 
+impl DataState {
+    fn dependents(&self, path: &str) -> Vec<&str> {
+        self.derived_references
+            .iter()
+            .filter(|(derived, references)| {
+                derived.as_str() != path && references.iter().any(|reference| reference == path)
+            })
+            .map(|(derived, _)| derived.as_str())
+            .collect()
+    }
+
+    fn ensure_owned_derived(&self, path: &str) -> Result<(), String> {
+        let Some(signal) = self.store.signal_by_path(path) else {
+            return Ok(());
+        };
+        if Some(signal.source_id) != self.derived_source {
+            return Err(format!("signal path belongs to an ingested source: {path}"));
+        }
+        Ok(())
+    }
+
+    fn ensure_without_dependents(&self, path: &str, action: &str) -> Result<(), String> {
+        let dependents = self.dependents(path);
+        if dependents.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "cannot {action} {path}; dependent derived signals: {}",
+                dependents.join(", ")
+            ))
+        }
+    }
+
+    fn create_derived_signal(&mut self, request: DerivedRequest) -> Result<SignalSummary, String> {
+        let path = if request.path.starts_with(DERIVED_PREFIX) {
+            request.path
+        } else {
+            format!("{DERIVED_PREFIX}{}", request.path)
+        };
+        self.ensure_owned_derived(&path)?;
+        if self.store.signal_by_path(&path).is_some() {
+            self.ensure_without_dependents(&path, "replace")?;
+        }
+
+        let parsed = expr::parse(&request.expr).map_err(|error| error.to_string())?;
+        let references = expr::references(&parsed);
+        let evaluated = expr::evaluate(&parsed, &self.store).map_err(|error| error.to_string())?;
+
+        let source_id = if let Some(id) = self.derived_source {
+            id
+        } else {
+            let id = self.store.register_source(DERIVED_PREFIX);
+            self.derived_source = Some(id);
+            id
+        };
+        if let Some(previous) = self.store.remove_signal(&path) {
+            self.pyramids.remove(&previous);
+        }
+        let signal_id = self
+            .store
+            .insert_signal(
+                source_id,
+                path.clone(),
+                None,
+                evaluated.time,
+                evaluated.values,
+            )
+            .map_err(|error| error.to_string())?;
+        let signal = self
+            .store
+            .signal(signal_id)
+            .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
+        let pyramid = Pyramid::from_signal(signal);
+        let summary = signal_summary(signal);
+        self.pyramids.insert(signal_id, pyramid);
+        self.derived_references.insert(path, references);
+        Ok(summary)
+    }
+
+    fn remove_derived_signal(&mut self, path: &str) -> Result<(), String> {
+        if !path.starts_with(DERIVED_PREFIX) {
+            return Err(format!(
+                "only derived signals can be removed individually: {path}"
+            ));
+        }
+        self.ensure_owned_derived(path)?;
+        if self.store.signal_by_path(path).is_none() {
+            return Ok(());
+        }
+        self.ensure_without_dependents(path, "remove")?;
+        if let Some(id) = self.store.remove_signal(path) {
+            self.pyramids.remove(&id);
+        }
+        self.derived_references.remove(path);
+        Ok(())
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn create_derived(
@@ -314,38 +413,8 @@ fn create_derived(
     state: State<'_, Mutex<DataState>>,
 ) -> Result<Envelope<SignalSummary>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    let path = if request.path.starts_with(DERIVED_PREFIX) {
-        request.path
-    } else {
-        format!("{DERIVED_PREFIX}{}", request.path)
-    };
     let mut data = state.lock().map_err(|error| error.to_string())?;
-
-    let parsed = expr::parse(&request.expr).map_err(|error| error.to_string())?;
-    let evaluated = expr::evaluate(&parsed, &data.store).map_err(|error| error.to_string())?;
-
-    let source_id = if let Some(id) = data.derived_source {
-        id
-    } else {
-        let id = data.store.register_source(DERIVED_PREFIX);
-        data.derived_source = Some(id);
-        id
-    };
-    if let Some(previous) = data.store.remove_signal(&path) {
-        data.pyramids.remove(&previous);
-    }
-    let signal_id = data
-        .store
-        .insert_signal(source_id, path, None, evaluated.time, evaluated.values)
-        .map_err(|error| error.to_string())?;
-    let signal = data
-        .store
-        .signal(signal_id)
-        .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
-    let pyramid = Pyramid::from_signal(signal);
-    let summary = signal_summary(signal);
-    data.pyramids.insert(signal_id, pyramid);
-    Ok(Envelope::new(summary))
+    data.create_derived_signal(request).map(Envelope::new)
 }
 
 #[tauri::command]
@@ -355,16 +424,8 @@ fn remove_signal(
     state: State<'_, Mutex<DataState>>,
 ) -> Result<Envelope<()>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    if !request.path.starts_with(DERIVED_PREFIX) {
-        return Err(format!(
-            "only derived signals can be removed individually: {}",
-            request.path
-        ));
-    }
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    if let Some(id) = data.store.remove_signal(&request.path) {
-        data.pyramids.remove(&id);
-    }
+    data.remove_derived_signal(&request.path)?;
     Ok(Envelope::new(()))
 }
 
@@ -470,4 +531,84 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    fn data_with_signal(path: &str) -> (DataState, SourceId) {
+        let mut data = DataState::default();
+        let source = data.store.register_source("input.csv");
+        data.store
+            .insert_signal(
+                source,
+                path,
+                None,
+                Arc::from(vec![0.0, 1.0]),
+                vec![1.0, 2.0],
+            )
+            .expect("insert source signal");
+        (data, source)
+    }
+
+    #[test]
+    fn rejects_replacing_or_removing_a_derived_signal_with_dependents() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/a".into(),
+            expr: "'input/x'".into(),
+        })
+        .expect("create a");
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/b".into(),
+            expr: "'derived/a' * 2".into(),
+        })
+        .expect("create b");
+
+        let replace = data
+            .create_derived_signal(DerivedRequest {
+                path: "derived/a".into(),
+                expr: "'input/x' + 1".into(),
+            })
+            .expect_err("dependent prevents replacement");
+        assert!(replace.contains("derived/b"));
+        let remove = data
+            .remove_derived_signal("derived/a")
+            .expect_err("dependent prevents removal");
+        assert!(remove.contains("derived/b"));
+        assert_eq!(
+            data.store
+                .signal_by_path("derived/a")
+                .expect("a remains")
+                .values(),
+            &[1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn derived_prefix_does_not_grant_ownership_of_ingested_signals() {
+        let (mut data, source) = data_with_signal("derived/value");
+
+        let replace = data
+            .create_derived_signal(DerivedRequest {
+                path: "derived/value".into(),
+                expr: "'derived/value' * 2".into(),
+            })
+            .expect_err("ingested signal cannot be replaced");
+        assert!(replace.contains("ingested"));
+        let remove = data
+            .remove_derived_signal("derived/value")
+            .expect_err("ingested signal cannot be removed");
+        assert!(remove.contains("ingested"));
+        assert_eq!(
+            data.store
+                .signal_by_path("derived/value")
+                .expect("ingested signal remains")
+                .source_id,
+            source
+        );
+    }
 }

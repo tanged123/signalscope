@@ -48,7 +48,7 @@ describe("derived definitions", () => {
       { path: "derived/jerk", expr: "gradient('derived/speed')" },
     ]);
 
-    model.removeDerived("derived/speed");
+    model.removeSignal("derived/speed");
     expect(model.snapshot().derived.map((entry) => entry.path)).toEqual([
       "derived/jerk",
     ]);
@@ -61,6 +61,55 @@ describe("derived definitions", () => {
     expect(model.snapshot().derived).toEqual([
       { path: "derived/speed", expr: "'a/y'" },
     ]);
+  });
+
+  it("removes a signal from every serialized workspace reference", () => {
+    const model = new WorkspaceModel();
+    const path = "derived/speed";
+    const first = model.addPanelRow();
+    model.addSeries(first.id, path);
+    model.addAnnotation(first.id, {
+      id: "ann-1",
+      series_path: path,
+      domain: "time",
+      anchor: 0,
+      pinned_value: 1,
+      label: "",
+    });
+    const axes = model.addPanelRow();
+    model.setXSignal(axes.id, path);
+    model.setColorSignal(axes.id, path);
+    model.toggleFavorite(path);
+    model.addDerived(path, "'imu/x'");
+
+    model.addTab();
+    const second = model.addPanelRow();
+    model.addSeries(second.id, path);
+    model.addAnnotation(second.id, {
+      id: "ann-2",
+      series_path: path,
+      domain: "time",
+      anchor: 1,
+      pinned_value: 2,
+      label: "",
+    });
+
+    model.removeSignal(path);
+
+    expect(model.snapshot().derived).toEqual([]);
+    expect(model.snapshot().favorites).toEqual([]);
+    for (const tab of model.tabs()) {
+      for (const panel of tab.panels) {
+        expect(panel.series.some((series) => series.path === path)).toBe(false);
+        expect(
+          panel.annotations.some(
+            (annotation) => annotation.series_path === path,
+          ),
+        ).toBe(false);
+        expect(panel.x_signal).not.toBe(path);
+        expect(panel.color_signal).not.toBe(path);
+      }
+    }
   });
 
   it("records each source path once", () => {

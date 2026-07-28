@@ -171,10 +171,29 @@ export class WorkspaceModel {
     }
   }
 
-  removeDerived(path: string): void {
+  removeSignal(path: string): void {
     this.session.derived = this.session.derived.filter(
       (entry) => entry.path !== path,
     );
+    this.session.favorites = this.session.favorites.filter(
+      (favorite) => favorite !== path,
+    );
+    for (const tab of this.session.tabs) {
+      for (const panel of tab.panels) {
+        panel.series = panel.series.filter((series) => series.path !== path);
+        panel.annotations = panel.annotations.filter(
+          (annotation) => annotation.series_path !== path,
+        );
+        if (panel.x_signal === path) {
+          panel.x_signal = null;
+          panel.x_range = null;
+        }
+        if (panel.color_signal === path) {
+          panel.color_signal = null;
+          panel.color_by_time = false;
+        }
+      }
+    }
   }
 
   sourcePaths(): readonly string[] {
