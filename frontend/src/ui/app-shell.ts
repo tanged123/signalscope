@@ -13,8 +13,11 @@ import {
   clampPlotFontSize,
   clampUiFontSize,
   defaultPreferences,
+  FONT_FAMILIES,
+  fontLabel,
   parsePreferences,
   PLOT_FONT_SIZE,
+  UI_FONT_SIZE,
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
 import { mergeSampleResponses } from "../app/samples";
@@ -683,6 +686,16 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "open-settings",
+      title: "Settings…",
+      keys: "mod+,",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.palette?.open("settings");
+      },
+    });
+    this.commands.register({
       id: "go-to-signal",
       title: "Go to signal",
       keys: "mod+p",
@@ -809,7 +822,73 @@ export class AppShell {
     });
   }
 
+  private settingsEntries(): PaletteEntry[] {
+    const cycleFont = (key: "ui_font_family" | "plot_font_family"): void => {
+      const index = FONT_FAMILIES.indexOf(this.prefs[key]);
+      const next = FONT_FAMILIES[(index + 1) % FONT_FAMILIES.length] ?? "inter";
+      this.updatePreferences({ [key]: next });
+    };
+    const sizeEntry = (
+      title: string,
+      key: "ui_font_size" | "plot_font_size",
+      step: number,
+    ): PaletteEntry => ({
+      title,
+      hint: `${String(this.prefs[key])}px`,
+      keepOpen: true,
+      run: () => {
+        this.updatePreferences({ [key]: this.prefs[key] + step });
+      },
+      adjust: (direction) => {
+        this.updatePreferences({ [key]: this.prefs[key] + direction * step });
+      },
+    });
+    return [
+      {
+        title: "Theme",
+        hint: this.workspace.theme(),
+        keepOpen: true,
+        run: () => {
+          this.toggleTheme();
+        },
+      },
+      {
+        title: "UI font",
+        hint: fontLabel(this.prefs.ui_font_family),
+        keepOpen: true,
+        run: () => {
+          cycleFont("ui_font_family");
+        },
+      },
+      {
+        title: "Plot font",
+        hint: fontLabel(this.prefs.plot_font_family),
+        keepOpen: true,
+        run: () => {
+          cycleFont("plot_font_family");
+        },
+      },
+      sizeEntry("UI font size", "ui_font_size", UI_FONT_SIZE.step),
+      sizeEntry("Plot font size", "plot_font_size", PLOT_FONT_SIZE.step),
+      {
+        title: "Reset appearance to defaults",
+        hint: "",
+        keepOpen: true,
+        run: () => {
+          const defaults = defaultPreferences();
+          this.updatePreferences({
+            ui_font_family: defaults.ui_font_family,
+            plot_font_family: defaults.plot_font_family,
+            ui_font_size: defaults.ui_font_size,
+            plot_font_size: defaults.plot_font_size,
+          });
+        },
+      },
+    ];
+  }
+
   private paletteEntries(mode: PaletteMode): PaletteEntry[] {
+    if (mode === "settings") return this.settingsEntries();
     // Planned and momentarily unavailable commands both stay listed so the
     // palette matches the menu, but each says why it will not run.
     const commands = this.commands.listAll().map((command) => ({
