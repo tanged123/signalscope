@@ -69,6 +69,7 @@ test("application menu mirrors commands and marks planned work", async ({
   await expect(newWorkspace).toHaveAttribute("aria-disabled", "true");
   await expect(newWorkspace).toContainText("Ctrl+N");
   await expect(unavailable).toHaveAttribute("aria-disabled", "true");
+  await expect(unavailable).toContainText("Ctrl+O");
   await unavailable.dispatchEvent("click");
   await expect(menu).toBeVisible();
   await expect(

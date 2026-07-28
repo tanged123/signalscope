@@ -632,6 +632,7 @@ export class AppShell {
     this.commands.register({
       id: "open-workspace",
       title: "Open Workspace…",
+      keys: "mod+o",
       section: "file",
       group: "workspace",
       enabled: () => this.plane.session !== null,

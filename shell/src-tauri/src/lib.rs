@@ -434,7 +434,7 @@ fn remove_signal(
 }
 
 const AUTOSAVE_FILE: &str = "session.autosave.json";
-const DEFAULT_SESSION_FILE: &str = "workspace.signalscope.json";
+const DEFAULT_SESSION_FILE: &str = "workspace.signalscope";
 
 /// Resolves an explicit path, or the autosave slot when none is given.
 fn session_path(app: &AppHandle, path: Option<String>) -> Result<PathBuf, String> {
@@ -450,7 +450,7 @@ fn session_path(app: &AppHandle, path: Option<String>) -> Result<PathBuf, String
 
 fn normalized_session_save_path(mut path: PathBuf) -> PathBuf {
     if path.extension().is_none_or(std::ffi::OsStr::is_empty) {
-        path.set_extension("signalscope.json");
+        path.set_extension("signalscope");
     }
     path
 }
@@ -521,7 +521,7 @@ async fn pick_session_path(
         SessionDialogMode::Save => app
             .dialog()
             .file()
-            .add_filter("SignalScope workspace", &["json"])
+            .add_filter("SignalScope workspace", &["signalscope", "json"])
             .set_file_name(DEFAULT_SESSION_FILE)
             .blocking_save_file(),
     })
@@ -647,11 +647,15 @@ mod tests {
     fn extensionless_workspace_saves_gain_the_default_extension() {
         assert_eq!(
             normalized_session_save_path(PathBuf::from("/tmp/goodstuff")),
-            PathBuf::from("/tmp/goodstuff.signalscope.json")
+            PathBuf::from("/tmp/goodstuff.signalscope")
         );
         assert_eq!(
             normalized_session_save_path(PathBuf::from("/tmp/goodstuff.json")),
             PathBuf::from("/tmp/goodstuff.json")
+        );
+        assert_eq!(
+            normalized_session_save_path(PathBuf::from("/tmp/goodstuff.signalscope.json")),
+            PathBuf::from("/tmp/goodstuff.signalscope.json")
         );
     }
 

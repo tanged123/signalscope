@@ -21,10 +21,10 @@ restored on launch without a prompt: the application resumes where it was left.
 Named workspace files are separate and explicit, so the unsaved indicator means
 only "not yet written to the named file".
 
-Named saves default to `workspace.signalscope.json`; an extensionless name gains
-the `.signalscope.json` suffix. Opening remains unfiltered so valid legacy or
-extensionless session files can still be selected and validated by
-`scope-core::session`.
+Named saves default to `workspace.signalscope`; an extensionless name gains the
+`.signalscope` suffix. Opening remains unfiltered so valid legacy `.json`,
+`.signalscope.json`, or extensionless session files can still be selected and
+validated by `scope-core::session`.
 
 Save prompts for a path only while the workspace is unnamed, then overwrites
 that named file. Save As always prompts and adopts the newly selected path.
