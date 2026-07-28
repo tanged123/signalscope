@@ -10,4 +10,5 @@ fi
 node "$script_dir/../protocol/scripts/generate-types.mjs"
 rustfmt --edition 2024 \
   "$script_dir/../protocol/src/generated.rs" \
-  "$script_dir/../core/scope-core/src/session/generated.rs"
+  "$script_dir/../core/scope-core/src/session/generated.rs" \
+  "$script_dir/../core/scope-core/src/preferences/generated.rs"

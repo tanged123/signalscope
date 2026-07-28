@@ -8,6 +8,7 @@ pub mod cache;
 pub mod compute;
 pub mod expr;
 pub mod ingest;
+pub mod preferences;
 pub mod pyramid;
 pub mod session;
 pub mod store;

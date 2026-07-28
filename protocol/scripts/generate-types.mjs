@@ -20,6 +20,13 @@ const jobs = [
     rust: "core/scope-core/src/session/generated.rs",
     ts: "frontend/src/generated/session.ts",
   },
+  {
+    schema: "protocol/schema/scope-preferences.json",
+    versionKey: "schema_version",
+    versionConst: "PREFERENCES_SCHEMA_VERSION",
+    rust: "core/scope-core/src/preferences/generated.rs",
+    ts: "frontend/src/generated/preferences.ts",
+  },
 ];
 
 const primitiveRust = {
