@@ -6,6 +6,14 @@ import {
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
+import {
+  applyPreferences,
+  clampPlotFontSize,
+  clampUiFontSize,
+  defaultPreferences,
+  parsePreferences,
+  PLOT_FONT_SIZE,
+} from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
@@ -27,6 +35,7 @@ import type {
   PanelState,
   Session,
 } from "../generated/session";
+import type { Preferences } from "../generated/preferences";
 import {
   CommandPalette,
   type PaletteEntry,
@@ -68,6 +77,8 @@ export class AppShell {
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
   private autosaveTimer: number | null = null;
+  private prefs: Preferences = defaultPreferences();
+  private prefsSaveTimer: number | null = null;
   private workspacePath: string | null = null;
   private dirty = false;
 
@@ -78,6 +89,7 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    await this.loadPreferences();
     await this.restoreSession();
     this.restoreTheme();
     if (this.plane.derived === null) {
@@ -570,6 +582,40 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "increase-plot-font",
+      title: "Plot font size: increase",
+      keys: "mod+=",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_font_size: this.prefs.plot_font_size + PLOT_FONT_SIZE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "decrease-plot-font",
+      title: "Plot font size: decrease",
+      keys: "mod+-",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_font_size: this.prefs.plot_font_size - PLOT_FONT_SIZE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "reset-plot-font",
+      title: "Plot font size: reset",
+      keys: "mod+0",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({ plot_font_size: PLOT_FONT_SIZE.default });
+      },
+    });
+    this.commands.register({
       id: "toggle-formula",
       title: "Toggle derived formula editor",
       keys: "e",
@@ -665,7 +711,6 @@ export class AppShell {
       ["open-recent", "Open Recent ▸", "file", "open"],
       ["export", "Export ▸ HTML · PNG · CSV", "file", "export"],
       ["annotations-dock", "Annotations dock", "view", "docks"],
-      ["font-size", "Font size ▸", "view", "display"],
       ["axes-default", "Axes default ▸", "view", "display"],
       ["series-palette", "Series palette ▸", "view", "display"],
       ["duplicate-workspace", "Duplicate Workspace", "workspace", "new"],
@@ -937,6 +982,52 @@ export class AppShell {
         .catch((error: unknown) => {
           this.reportError(error);
         });
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  /** Loads global preferences; any failure falls back to defaults without
+   * touching the stored file (it is only written on a user change). */
+  private async loadPreferences(): Promise<void> {
+    const port = this.plane.preferences;
+    if (port !== null) {
+      try {
+        const json = await port.load();
+        const parsed = json === null ? null : parsePreferences(json);
+        if (json !== null && parsed === null) {
+          console.warn(
+            "preferences file is unreadable or newer; using defaults",
+          );
+        }
+        this.prefs = parsed ?? defaultPreferences();
+      } catch (error: unknown) {
+        console.warn("preferences load failed; using defaults", error);
+      }
+    }
+    applyPreferences(this.prefs, document.documentElement);
+  }
+
+  private updatePreferences(
+    patch: Partial<Omit<Preferences, "schema_version">>,
+  ): void {
+    this.prefs = { ...this.prefs, ...patch };
+    this.prefs.ui_font_size = clampUiFontSize(this.prefs.ui_font_size);
+    this.prefs.plot_font_size = clampPlotFontSize(this.prefs.plot_font_size);
+    applyPreferences(this.prefs, document.documentElement);
+    this.workspaceView?.invalidateTheme();
+    this.renderTiles();
+    this.schedulePreferencesSave();
+  }
+
+  /** Coalesces rapid setting changes into one write, like autosave. */
+  private schedulePreferencesSave(): void {
+    const port = this.plane.preferences;
+    if (port === null) return;
+    if (this.prefsSaveTimer !== null) window.clearTimeout(this.prefsSaveTimer);
+    this.prefsSaveTimer = window.setTimeout(() => {
+      this.prefsSaveTimer = null;
+      void port.save(JSON.stringify(this.prefs)).catch((error: unknown) => {
+        this.reportError(error);
+      });
     }, AUTOSAVE_DEBOUNCE_MS);
   }
 
