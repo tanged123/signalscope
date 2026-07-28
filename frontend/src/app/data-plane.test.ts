@@ -125,3 +125,23 @@ describe("derived port", () => {
     expect(plane.derived).toBeNull();
   });
 });
+
+describe("session port", () => {
+  it("starts a new native session through the native plane", async () => {
+    const calls: string[] = [];
+    const plane = new TauriPlane((command) => {
+      calls.push(command);
+      return Promise.resolve(
+        seal({
+          session_json: '{"app":"signalscope"}',
+          path: null,
+        }) as never,
+      );
+    });
+
+    const loaded = await plane.session.reset();
+
+    expect(calls).toEqual(["reset_session"]);
+    expect(loaded.path).toBeNull();
+  });
+});

@@ -309,6 +309,10 @@ fn query_samples(
 const DERIVED_PREFIX: &str = "derived/";
 
 impl DataState {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     fn dependents(&self, path: &str) -> Vec<&str> {
         self.derived_references
             .iter()
@@ -430,6 +434,7 @@ fn remove_signal(
 }
 
 const AUTOSAVE_FILE: &str = "session.autosave.json";
+const DEFAULT_SESSION_FILE: &str = "workspace.signalscope.json";
 
 /// Resolves an explicit path, or the autosave slot when none is given.
 fn session_path(app: &AppHandle, path: Option<String>) -> Result<PathBuf, String> {
@@ -443,6 +448,13 @@ fn session_path(app: &AppHandle, path: Option<String>) -> Result<PathBuf, String
     }
 }
 
+fn normalized_session_save_path(mut path: PathBuf) -> PathBuf {
+    if path.extension().is_none_or(std::ffi::OsStr::is_empty) {
+        path.set_extension("signalscope.json");
+    }
+    path
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn save_session(
@@ -451,7 +463,10 @@ fn save_session(
 ) -> Result<Envelope<String>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
-    let path = session_path(&app, request.path)?;
+    let path = match request.path {
+        Some(path) => normalized_session_save_path(PathBuf::from(path)),
+        None => session_path(&app, None)?,
+    };
     session::save_to_path(&session, &path).map_err(|error| error.to_string())?;
     Ok(Envelope::new(path.display().to_string()))
 }
@@ -480,20 +495,35 @@ fn load_session(
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn reset_session(
+    app: AppHandle,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<LoadedSession>, String> {
+    let session = session::Session::default();
+    let path = session_path(&app, None)?;
+    session::save_to_path(&session, &path).map_err(|error| error.to_string())?;
+    state.lock().map_err(|error| error.to_string())?.reset();
+    Ok(Envelope::new(LoadedSession {
+        session_json: serde_json::to_string(&session).map_err(|error| error.to_string())?,
+        path: None,
+    }))
+}
+
+#[tauri::command]
 async fn pick_session_path(
     request: Envelope<PickSessionRequest>,
     app: AppHandle,
 ) -> Result<Envelope<Option<String>>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        let dialog = app
+    let picked = tauri::async_runtime::spawn_blocking(move || match request.mode {
+        SessionDialogMode::Open => app.dialog().file().blocking_pick_file(),
+        SessionDialogMode::Save => app
             .dialog()
             .file()
-            .add_filter("SignalScope workspace", &["json"]);
-        match request.mode {
-            SessionDialogMode::Open => dialog.blocking_pick_file(),
-            SessionDialogMode::Save => dialog.blocking_save_file(),
-        }
+            .add_filter("SignalScope workspace", &["json"])
+            .set_file_name(DEFAULT_SESSION_FILE)
+            .blocking_save_file(),
     })
     .await
     .map_err(|error| error.to_string())?;
@@ -527,6 +557,7 @@ pub fn run() {
             remove_signal,
             save_session,
             load_session,
+            reset_session,
             pick_session_path
         ])
         .run(tauri::generate_context!())
@@ -610,5 +641,35 @@ mod tests {
                 .source_id,
             source
         );
+    }
+
+    #[test]
+    fn extensionless_workspace_saves_gain_the_default_extension() {
+        assert_eq!(
+            normalized_session_save_path(PathBuf::from("/tmp/goodstuff")),
+            PathBuf::from("/tmp/goodstuff.signalscope.json")
+        );
+        assert_eq!(
+            normalized_session_save_path(PathBuf::from("/tmp/goodstuff.json")),
+            PathBuf::from("/tmp/goodstuff.json")
+        );
+    }
+
+    #[test]
+    fn resetting_data_clears_sources_signals_and_derived_state() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/a".into(),
+            expr: "'input/x'".into(),
+        })
+        .expect("create derived signal");
+
+        data.reset();
+
+        assert_eq!(data.store.sources().count(), 0);
+        assert_eq!(data.store.signals().count(), 0);
+        assert!(data.pyramids.is_empty());
+        assert!(data.derived_source.is_none());
+        assert!(data.derived_references.is_empty());
     }
 }

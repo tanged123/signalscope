@@ -62,6 +62,12 @@ test("application menu mirrors commands and marks planned work", async ({
   const unavailable = menu.locator(".app-menu-item", {
     hasText: "Open Workspace",
   });
+  const newWorkspace = menu.getByRole("menuitem", {
+    name: "New Workspace Ctrl+N",
+    exact: true,
+  });
+  await expect(newWorkspace).toHaveAttribute("aria-disabled", "true");
+  await expect(newWorkspace).toContainText("Ctrl+N");
   await expect(unavailable).toHaveAttribute("aria-disabled", "true");
   await unavailable.dispatchEvent("click");
   await expect(menu).toBeVisible();

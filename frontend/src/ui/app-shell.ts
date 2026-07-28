@@ -618,6 +618,17 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "new-workspace",
+      title: "New Workspace",
+      keys: "mod+n",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.newWorkspace();
+      },
+    });
+    this.commands.register({
       id: "open-workspace",
       title: "Open Workspace…",
       section: "file",
@@ -941,8 +952,35 @@ export class AppShell {
     try {
       const target = path ?? (await port.pick("save"));
       if (target === null) return;
-      await port.save(JSON.stringify(this.workspace.snapshot()), target);
-      this.workspacePath = target;
+      this.workspacePath = await port.save(
+        JSON.stringify(this.workspace.snapshot()),
+        target,
+      );
+      this.dirty = false;
+      this.renderWorkspaceName();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async newWorkspace(): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      if (this.autosaveTimer !== null) {
+        window.clearTimeout(this.autosaveTimer);
+        this.autosaveTimer = null;
+      }
+      const loaded = await port.reset();
+      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.workspacePath = null;
+      this.tilesByPanel.clear();
+      this.samplesByPanel.clear();
+      this.missingByPanel.clear();
+      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspaceView?.invalidateTheme();
+      await this.reloadSignals();
+      this.afterLayoutChange();
       this.dirty = false;
       this.renderWorkspaceName();
     } catch (error: unknown) {

@@ -21,6 +21,14 @@ restored on launch without a prompt: the application resumes where it was left.
 Named workspace files are separate and explicit, so the unsaved indicator means
 only "not yet written to the named file".
 
+Named saves default to `workspace.signalscope.json`; an extensionless name gains
+the `.signalscope.json` suffix. Opening remains unfiltered so valid legacy or
+extensionless session files can still be selected and validated by
+`scope-core::session`.
+
+New Workspace resets both presentation and native data state, writes the empty
+session into the autosave slot, and leaves named workspace files untouched.
+
 Sessions cross the protocol boundary as JSON strings rather than as generated
 protocol types. The protocol and session schemas have independent generators,
 and routing every load through `session::from_json` keeps migration in one

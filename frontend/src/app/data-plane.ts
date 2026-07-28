@@ -35,6 +35,7 @@ export interface DerivedPort {
 export interface SessionPort {
   save(sessionJson: string, path: string | null): Promise<string>;
   load(path: string | null): Promise<LoadedSession>;
+  reset(): Promise<LoadedSession>;
   pick(mode: SessionDialogMode): Promise<string | null>;
 }
 
@@ -123,6 +124,8 @@ export class TauriPlane implements DataPlane {
             request: seal<LoadSessionRequest>({ path }),
           }),
         ),
+      reset: async () =>
+        open(await this.invoke<Envelope<LoadedSession>>("reset_session")),
       pick: async (mode: SessionDialogMode) =>
         open(
           await this.invoke<Envelope<string | null>>("pick_session_path", {
