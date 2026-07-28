@@ -2,9 +2,11 @@ import {
   CommandRegistry,
   formatCombo,
   PLANNED_TITLE,
+  reservedWhileEditing,
   type Command,
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
+import { HistoryStack } from "../app/history";
 import { runIngest } from "../app/ingest";
 import {
   applyPreferences,
@@ -59,6 +61,7 @@ const SAMPLE_CAP = 8192;
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
+  private readonly history = new HistoryStack();
   private signals: SignalSummary[] = [];
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
@@ -81,6 +84,7 @@ export class AppShell {
   private prefsSaveTimer: number | null = null;
   private workspacePath: string | null = null;
   private dirty = false;
+  private restoringHistory = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -91,6 +95,7 @@ export class AppShell {
     this.root.innerHTML = shellMarkup();
     await this.loadPreferences();
     await this.restoreSession();
+    this.history.reset(this.workspace.snapshot());
     this.restoreTheme();
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
@@ -136,6 +141,7 @@ export class AppShell {
         },
         onSelectMode: (id, mode) => {
           this.transitionPanelMode(id, mode);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -150,6 +156,7 @@ export class AppShell {
         },
         onSetColorSignal: (id, path) => {
           this.workspace.setColorSignal(id, path);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -158,6 +165,7 @@ export class AppShell {
         },
         onToggleSeries: (id, path) => {
           this.workspace.toggleSeriesVisible(id, path);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
@@ -175,6 +183,7 @@ export class AppShell {
         },
         onYRange: (id, range) => {
           this.workspace.setPanelYRange(id, [range[0], range[1]]);
+          this.commitHistory(`yrange:${id}`);
           this.scheduleRender();
         },
         onXRange: (id, range) => {
@@ -189,14 +198,17 @@ export class AppShell {
             pinned_value: hit.pinnedValue,
             label: "",
           });
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
         onRemoveAnnotation: (id, annotationId) => {
           this.workspace.removeAnnotation(id, annotationId);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
         onEditAnnotationLabel: (id, annotationId, label) => {
           this.workspace.setAnnotationLabel(id, annotationId, label);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
         onFitView: (id) => {
@@ -204,11 +216,13 @@ export class AppShell {
         },
         onToggleStats: (id) => {
           this.workspace.toggleStats(id);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onToggleAxisStyle: (id) => {
           this.workspace.toggleAxisStyle(id);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
@@ -218,16 +232,19 @@ export class AppShell {
         },
         onEditAxisLabel: (id, axis, label) => {
           this.workspace.setAxisLabel(id, axis, label);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onSetSeriesStyle: (id, path, style) => {
           this.workspace.setSeriesStyle(id, path, style);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onRemoveSeries: (id, path) => {
           this.workspace.removeSeries(id, path);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -235,6 +252,7 @@ export class AppShell {
           void this.applyQuickTransform(path, kind);
         },
         onLayoutChanged: () => {
+          this.commitHistory();
           void this.refreshTiles();
         },
         onDropSignalNewPanel: (path) => {
@@ -264,6 +282,7 @@ export class AppShell {
         },
         onToggleFavorite: (path) => {
           this.workspace.toggleFavorite(path);
+          this.commitHistory();
           this.tree?.setFavorites(this.workspace.favorites());
         },
         onRemoveDerived: (path) => {
@@ -317,6 +336,29 @@ export class AppShell {
       const delta = (window.t1 - window.t0) * 0.1 * direction;
       this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
     };
+    this.commands.register({
+      id: "undo",
+      title: "Undo",
+      keys: "mod+z",
+      section: "workspace",
+      group: "history",
+      enabled: () => this.history.canUndo(),
+      run: () => {
+        this.applyHistory(this.history.undo());
+      },
+    });
+    this.commands.register({
+      id: "redo",
+      title: "Redo",
+      keys: "mod+shift+z",
+      altKeys: ["mod+y"],
+      section: "workspace",
+      group: "history",
+      enabled: () => this.history.canRedo(),
+      run: () => {
+        this.applyHistory(this.history.redo());
+      },
+    });
     this.commands.register({
       id: "open-files",
       title: "Open CSV or MCAP…",
@@ -392,6 +434,7 @@ export class AppShell {
         for (const panel of this.workspace.panels()) {
           if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
         }
+        this.commitHistory();
         this.workspaceView?.refreshPanelStates();
         this.renderTiles();
       },
@@ -876,7 +919,12 @@ export class AppShell {
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable);
-      if (editing && !event.metaKey && !event.ctrlKey) return;
+      if (
+        editing &&
+        ((!event.metaKey && !event.ctrlKey) || reservedWhileEditing(event))
+      ) {
+        return;
+      }
       if (this.commands.handleKey(event)) event.preventDefault();
     });
   }
@@ -957,7 +1005,52 @@ export class AppShell {
       `window ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
   }
 
+  /** Records the post-mutation state; no-op while restoring history. */
+  private commitHistory(coalesceKey?: string): void {
+    if (this.restoringHistory) return;
+    this.history.commit(this.workspace.snapshot(), coalesceKey);
+  }
+
+  private applyHistory(session: Session | null): void {
+    if (session === null) return;
+    this.restoringHistory = true;
+    try {
+      this.workspace.replace(session);
+      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspaceView?.invalidateTheme();
+      this.renderWindowReadout();
+      this.afterLayoutChange();
+    } finally {
+      this.restoringHistory = false;
+    }
+    void this.replayMissingDerived();
+  }
+
+  /**
+   * After an undo resurrects derived definitions the data plane no longer
+   * holds (their removal really deleted the signal), recreate them exactly
+   * as session load does. Unresolved definitions stay recorded.
+   */
+  private async replayMissingDerived(): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) return;
+    const missing = this.workspace
+      .derived()
+      .filter((definition) => !this.signalsByPath.has(definition.path));
+    if (missing.length === 0) return;
+    for (const definition of missing) {
+      try {
+        await port.create(definition.path, definition.expr);
+      } catch {
+        // Unresolved definitions stay recorded for a later source retry.
+      }
+    }
+    await this.reloadSignals();
+    await this.refreshTiles();
+  }
+
   private afterLayoutChange(): void {
+    this.commitHistory();
     this.workspaceTabs?.sync(
       this.workspace.tabs(),
       this.workspace.activeTabId(),
@@ -1065,6 +1158,7 @@ export class AppShell {
       }
       const loaded = await port.reset();
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.history.reset(this.workspace.snapshot());
       this.workspacePath = null;
       this.tilesByPanel.clear();
       this.samplesByPanel.clear();
@@ -1104,6 +1198,7 @@ export class AppShell {
     try {
       const loaded = await port.load(path);
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.history.reset(this.workspace.snapshot());
       this.workspacePath = loaded.path;
       this.dirty = false;
       document.documentElement.dataset.theme = this.workspace.theme();
@@ -1345,6 +1440,7 @@ export class AppShell {
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
     }
+    this.commitHistory(`window:${panelId}`);
     this.renderTiles();
     this.scheduleRefresh();
   }
@@ -1358,6 +1454,7 @@ export class AppShell {
       return;
     }
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
+    this.commitHistory(`xrange:${panelId}`);
     this.renderTiles();
   }
 
@@ -1401,6 +1498,7 @@ export class AppShell {
       this.workspace.clearPanelXRange(panelId);
       this.workspace.clearPanelYRange(panelId);
       this.workspaceView?.resetYAxis(panelId);
+      this.commitHistory();
       this.renderTiles();
       return;
     }
@@ -1408,11 +1506,13 @@ export class AppShell {
     this.workspaceView?.resetYAxis(panelId);
     const extent = this.timeExtent(panel.series.map((series) => series.path));
     if (extent === null) {
+      this.commitHistory();
       this.renderTiles();
       this.scheduleRefresh();
       return;
     }
     this.applyTimeWindow(panelId, extent.t0, extent.t1);
+    this.commitHistory();
   }
 
   /** Removes the assigned X signal while leaving an empty XY axis slot. */
@@ -1466,6 +1566,7 @@ export class AppShell {
     const current = CURSOR_MODES.indexOf(this.workspace.cursorMode());
     const mode = CURSOR_MODES[(current + 1) % CURSOR_MODES.length] ?? "track";
     this.workspace.setCursorMode(mode);
+    this.commitHistory();
     this.workspaceView?.setCursorMode(mode);
     this.syncCursorMode();
   }
@@ -1629,6 +1730,7 @@ export class AppShell {
       }
     }
     this.workspace.setLinked(linked);
+    this.commitHistory();
     required(this.root, ".linked-toggle").classList.toggle("active", linked);
     void this.refreshTiles();
   }
@@ -1638,6 +1740,7 @@ export class AppShell {
     const theme = documentRoot.dataset.theme === "light" ? "dark" : "light";
     documentRoot.dataset.theme = theme;
     this.workspace.setTheme(theme);
+    this.commitHistory();
     this.scheduleAutosave();
     this.workspaceView?.invalidateTheme();
     this.renderTiles();
