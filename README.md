@@ -42,6 +42,21 @@ telemetry, paired XY position, angular values, steps and setpoints, boolean and
 discrete state, high-frequency vibration, thermal drift, and intentional GPS
 gaps. Plot nine or more together to exercise the colour-plus-dash identities.
 
+### Derived signals
+
+Press `E` to open the formula bar. Signal references use their quoted full
+tree path; drag leaves from the signal tree to insert them:
+
+```text
+derived/pitch_twice = 'demo_flight/attitude/pitch_deg' * 2
+derived/speed = hypot('demo_flight/velocity_body/x_mps', 'demo_flight/velocity_body/y_mps')
+```
+
+Press `?` in the bar for syntax help or `Ctrl+Space` for context-sensitive
+function and signal completion. Enter creates, Up/Down recalls accepted
+formulas, and Escape closes the bar. Angle conversions use `rad2deg(x)` and
+`deg2rad(x)`.
+
 ### Supported input files
 
 - `.csv`, `.tsv`, `.txt`, and `.dat`: numeric delimited text using comma, tab,

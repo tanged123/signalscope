@@ -26,3 +26,17 @@ One authoritative implementation of derived-signal semantics. The derived
 formula bar remains part of the UI contract and stays inert until the protocol
 request exists. No JavaScript evaluation of user expressions runs in the
 webview.
+
+## Amendment (2026-07-27, MATLAB dialect)
+
+The expression surface syntax is MATLAB rather than the JavaScript dialect the
+Final Spec describes. A quoted string in value position is a signal reference,
+so there is no `$` sigil; functions are bare MATLAB names; `^` is power, `~=`
+is inequality, `%` starts a comment, and `.* ./ .^` are accepted synonyms. The
+three transforms are `gradient`, `cumtrapz`, and `movmean`, which is what they
+already computed. Logical expressions yield numeric 1 or 0; there is no ternary
+and no `e` constant, because MATLAB has neither.
+
+The decision above is unchanged: evaluation happens in `scope-core`, and no
+JavaScript evaluation of user expressions runs in the webview. Only the syntax
+the parser accepts has changed.

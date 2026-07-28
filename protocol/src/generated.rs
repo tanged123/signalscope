@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -194,4 +194,47 @@ pub struct IngestStatus {
     pub response: Option<IngestResponse>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DerivedRequest {
+    pub path: String,
+    pub expr: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RemoveSignalRequest {
+    pub path: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionDialogMode {
+    Open,
+    Save,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct PickSessionRequest {
+    pub mode: SessionDialogMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveSessionRequest {
+    pub session_json: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LoadSessionRequest {
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct LoadedSession {
+    pub session_json: String,
+    #[serde(default)]
+    pub path: Option<String>,
 }

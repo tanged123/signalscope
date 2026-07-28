@@ -6,15 +6,17 @@ use std::{
 };
 
 use scope_core::{
-    cache, compute,
+    cache, compute, expr,
     ingest::SUPPORTED_FORMATS,
     pyramid::Pyramid,
-    store::{Signal, SignalId, SignalStore, Source},
+    session,
+    store::{Signal, SignalId, SignalStore, Source, SourceId},
 };
 use scope_protocol::{
-    Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState, IngestStatus,
-    SampleRequest, SampleResponse, SampleSeries, SignalSummary, SignalTile, SourceSummary,
-    TileRequest, TileResponse,
+    DerivedRequest, Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState,
+    IngestStatus, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
+    SampleRequest, SampleResponse, SampleSeries, SaveSessionRequest, SessionDialogMode,
+    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -23,6 +25,8 @@ use tauri_plugin_dialog::DialogExt;
 struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
+    derived_source: Option<SourceId>,
+    derived_references: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Default)]
@@ -106,7 +110,9 @@ fn last_progress(app: &AppHandle, job_id: u64) -> (IngestStage, f64) {
 fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<IngestResponse, String> {
     let state = app.state::<Mutex<DataState>>();
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    let DataState { store, pyramids } = &mut *data;
+    let DataState {
+        store, pyramids, ..
+    } = &mut *data;
 
     let mut on_progress = |stage, fraction| set_job(app, job_id, running(stage, fraction));
     let outcome =
@@ -300,6 +306,234 @@ fn query_samples(
     }))
 }
 
+const DERIVED_PREFIX: &str = "derived/";
+
+impl DataState {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn dependents(&self, path: &str) -> Vec<&str> {
+        self.derived_references
+            .iter()
+            .filter(|(derived, references)| {
+                derived.as_str() != path && references.iter().any(|reference| reference == path)
+            })
+            .map(|(derived, _)| derived.as_str())
+            .collect()
+    }
+
+    fn ensure_owned_derived(&self, path: &str) -> Result<(), String> {
+        let Some(signal) = self.store.signal_by_path(path) else {
+            return Ok(());
+        };
+        if Some(signal.source_id) != self.derived_source {
+            return Err(format!("signal path belongs to an ingested source: {path}"));
+        }
+        Ok(())
+    }
+
+    fn ensure_without_dependents(&self, path: &str, action: &str) -> Result<(), String> {
+        let dependents = self.dependents(path);
+        if dependents.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "cannot {action} {path}; dependent derived signals: {}",
+                dependents.join(", ")
+            ))
+        }
+    }
+
+    fn create_derived_signal(&mut self, request: DerivedRequest) -> Result<SignalSummary, String> {
+        let path = if request.path.starts_with(DERIVED_PREFIX) {
+            request.path
+        } else {
+            format!("{DERIVED_PREFIX}{}", request.path)
+        };
+        self.ensure_owned_derived(&path)?;
+        if self.store.signal_by_path(&path).is_some() {
+            self.ensure_without_dependents(&path, "replace")?;
+        }
+
+        let parsed = expr::parse(&request.expr).map_err(|error| error.to_string())?;
+        let references = expr::references(&parsed);
+        let evaluated = expr::evaluate(&parsed, &self.store).map_err(|error| error.to_string())?;
+
+        let source_id = if let Some(id) = self.derived_source {
+            id
+        } else {
+            let id = self.store.register_source(DERIVED_PREFIX);
+            self.derived_source = Some(id);
+            id
+        };
+        if let Some(previous) = self.store.remove_signal(&path) {
+            self.pyramids.remove(&previous);
+        }
+        let signal_id = self
+            .store
+            .insert_signal(
+                source_id,
+                path.clone(),
+                None,
+                evaluated.time,
+                evaluated.values,
+            )
+            .map_err(|error| error.to_string())?;
+        let signal = self
+            .store
+            .signal(signal_id)
+            .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
+        let pyramid = Pyramid::from_signal(signal);
+        let summary = signal_summary(signal);
+        self.pyramids.insert(signal_id, pyramid);
+        self.derived_references.insert(path, references);
+        Ok(summary)
+    }
+
+    fn remove_derived_signal(&mut self, path: &str) -> Result<(), String> {
+        if !path.starts_with(DERIVED_PREFIX) {
+            return Err(format!(
+                "only derived signals can be removed individually: {path}"
+            ));
+        }
+        self.ensure_owned_derived(path)?;
+        if self.store.signal_by_path(path).is_none() {
+            return Ok(());
+        }
+        self.ensure_without_dependents(path, "remove")?;
+        if let Some(id) = self.store.remove_signal(path) {
+            self.pyramids.remove(&id);
+        }
+        self.derived_references.remove(path);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn create_derived(
+    request: Envelope<DerivedRequest>,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<SignalSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.create_derived_signal(request).map(Envelope::new)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn remove_signal(
+    request: Envelope<RemoveSignalRequest>,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.remove_derived_signal(&request.path)?;
+    Ok(Envelope::new(()))
+}
+
+const AUTOSAVE_FILE: &str = "session.autosave.json";
+const DEFAULT_SESSION_FILE: &str = "workspace.signalscope";
+
+/// Resolves an explicit path, or the autosave slot when none is given.
+fn session_path(app: &AppHandle, path: Option<String>) -> Result<PathBuf, String> {
+    match path {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join(AUTOSAVE_FILE)),
+    }
+}
+
+fn normalized_session_save_path(mut path: PathBuf) -> PathBuf {
+    if path.extension().is_none_or(std::ffi::OsStr::is_empty) {
+        path.set_extension("signalscope");
+    }
+    path
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn save_session(
+    request: Envelope<SaveSessionRequest>,
+    app: AppHandle,
+) -> Result<Envelope<String>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let path = match request.path {
+        Some(path) => normalized_session_save_path(PathBuf::from(path)),
+        None => session_path(&app, None)?,
+    };
+    session::save_to_path(&session, &path).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(path.display().to_string()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn load_session(
+    request: Envelope<LoadSessionRequest>,
+    app: AppHandle,
+) -> Result<Envelope<LoadedSession>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let explicit = request.path.is_some();
+    let path = session_path(&app, request.path)?;
+    if !explicit && !path.exists() {
+        let session = session::Session::default();
+        return Ok(Envelope::new(LoadedSession {
+            session_json: serde_json::to_string(&session).map_err(|error| error.to_string())?,
+            path: None,
+        }));
+    }
+    let session = session::load_from_path(&path).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(LoadedSession {
+        session_json: serde_json::to_string(&session).map_err(|error| error.to_string())?,
+        path: explicit.then(|| path.display().to_string()),
+    }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn reset_session(
+    app: AppHandle,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<LoadedSession>, String> {
+    let session = session::Session::default();
+    let path = session_path(&app, None)?;
+    session::save_to_path(&session, &path).map_err(|error| error.to_string())?;
+    state.lock().map_err(|error| error.to_string())?.reset();
+    Ok(Envelope::new(LoadedSession {
+        session_json: serde_json::to_string(&session).map_err(|error| error.to_string())?,
+        path: None,
+    }))
+}
+
+#[tauri::command]
+async fn pick_session_path(
+    request: Envelope<PickSessionRequest>,
+    app: AppHandle,
+) -> Result<Envelope<Option<String>>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let picked = tauri::async_runtime::spawn_blocking(move || match request.mode {
+        SessionDialogMode::Open => app.dialog().file().blocking_pick_file(),
+        SessionDialogMode::Save => app
+            .dialog()
+            .file()
+            .add_filter("SignalScope workspace", &["signalscope", "json"])
+            .set_file_name(DEFAULT_SESSION_FILE)
+            .blocking_save_file(),
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        picked
+            .and_then(|file| file.into_path().ok())
+            .map(|path| path.display().to_string()),
+    ))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the native `SignalScope` application.
 ///
@@ -318,8 +552,128 @@ pub fn run() {
             list_sources,
             list_signals,
             query_tiles,
-            query_samples
+            query_samples,
+            create_derived,
+            remove_signal,
+            save_session,
+            load_session,
+            reset_session,
+            pick_session_path
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    fn data_with_signal(path: &str) -> (DataState, SourceId) {
+        let mut data = DataState::default();
+        let source = data.store.register_source("input.csv");
+        data.store
+            .insert_signal(
+                source,
+                path,
+                None,
+                Arc::from(vec![0.0, 1.0]),
+                vec![1.0, 2.0],
+            )
+            .expect("insert source signal");
+        (data, source)
+    }
+
+    #[test]
+    fn rejects_replacing_or_removing_a_derived_signal_with_dependents() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/a".into(),
+            expr: "'input/x'".into(),
+        })
+        .expect("create a");
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/b".into(),
+            expr: "'derived/a' * 2".into(),
+        })
+        .expect("create b");
+
+        let replace = data
+            .create_derived_signal(DerivedRequest {
+                path: "derived/a".into(),
+                expr: "'input/x' + 1".into(),
+            })
+            .expect_err("dependent prevents replacement");
+        assert!(replace.contains("derived/b"));
+        let remove = data
+            .remove_derived_signal("derived/a")
+            .expect_err("dependent prevents removal");
+        assert!(remove.contains("derived/b"));
+        assert_eq!(
+            data.store
+                .signal_by_path("derived/a")
+                .expect("a remains")
+                .values(),
+            &[1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn derived_prefix_does_not_grant_ownership_of_ingested_signals() {
+        let (mut data, source) = data_with_signal("derived/value");
+
+        let replace = data
+            .create_derived_signal(DerivedRequest {
+                path: "derived/value".into(),
+                expr: "'derived/value' * 2".into(),
+            })
+            .expect_err("ingested signal cannot be replaced");
+        assert!(replace.contains("ingested"));
+        let remove = data
+            .remove_derived_signal("derived/value")
+            .expect_err("ingested signal cannot be removed");
+        assert!(remove.contains("ingested"));
+        assert_eq!(
+            data.store
+                .signal_by_path("derived/value")
+                .expect("ingested signal remains")
+                .source_id,
+            source
+        );
+    }
+
+    #[test]
+    fn extensionless_workspace_saves_gain_the_default_extension() {
+        assert_eq!(
+            normalized_session_save_path(PathBuf::from("/tmp/goodstuff")),
+            PathBuf::from("/tmp/goodstuff.signalscope")
+        );
+        assert_eq!(
+            normalized_session_save_path(PathBuf::from("/tmp/goodstuff.json")),
+            PathBuf::from("/tmp/goodstuff.json")
+        );
+        assert_eq!(
+            normalized_session_save_path(PathBuf::from("/tmp/goodstuff.signalscope.json")),
+            PathBuf::from("/tmp/goodstuff.signalscope.json")
+        );
+    }
+
+    #[test]
+    fn resetting_data_clears_sources_signals_and_derived_state() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/a".into(),
+            expr: "'input/x'".into(),
+        })
+        .expect("create derived signal");
+
+        data.reset();
+
+        assert_eq!(data.store.sources().count(), 0);
+        assert_eq!(data.store.signals().count(), 0);
+        assert!(data.pyramids.is_empty());
+        assert!(data.derived_source.is_none());
+        assert!(data.derived_references.is_empty());
+    }
 }

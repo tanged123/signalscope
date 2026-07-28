@@ -209,9 +209,9 @@ Add tests with behavior changes, not only compilation checks:
 
 - Rust: ingest comments/delimiters, duplicate/atomic failure, finite time
   validation, pyramid extrema and NaN-gap invariants, protocol/session
-  round-trips and migrations.
-- TypeScript: expression and linked-time units, renderer behavior where
-  practical, snapshot/no-network/size checks.
+  round-trips and migrations, expression parse/evaluate semantics.
+- TypeScript: linked-time units, formula-bar input parsing, renderer behavior
+  where practical, snapshot/no-network/size checks.
 - Playwright: desktop interactions when changing input, gestures, layout, or
   export behavior.
 - Keep generated protocol outputs synchronized and run the artifact checks for

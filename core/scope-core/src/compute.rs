@@ -1,12 +1,13 @@
 //! Host-independent signal transforms.
 
-/// Calculates the sample-wise derivative.
+/// Sample-wise central-difference derivative, matching MATLAB's `gradient`
+/// for non-uniform spacing: one-sided at the two ends, centered elsewhere.
 ///
 /// # Panics
 ///
 /// Panics when `time` and `values` have different lengths.
 #[must_use]
-pub fn derivative(time: &[f64], values: &[f64]) -> Vec<f64> {
+pub fn gradient(time: &[f64], values: &[f64]) -> Vec<f64> {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
     if time.is_empty() {
         return Vec::new();
@@ -26,13 +27,15 @@ pub fn derivative(time: &[f64], values: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-/// Calculates the cumulative trapezoidal integral.
+/// Cumulative trapezoidal integral, matching MATLAB's `cumtrapz`. Pairs
+/// containing a non-finite value contribute nothing rather than poisoning
+/// the running total.
 ///
 /// # Panics
 ///
 /// Panics when `time` and `values` have different lengths.
 #[must_use]
-pub fn integrate(time: &[f64], values: &[f64]) -> Vec<f64> {
+pub fn cumtrapz(time: &[f64], values: &[f64]) -> Vec<f64> {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
     let mut result = vec![0.0; time.len()];
     for index in 1..time.len() {
@@ -46,8 +49,12 @@ pub fn integrate(time: &[f64], values: &[f64]) -> Vec<f64> {
     result
 }
 
+/// Centered moving mean over `window` samples, matching MATLAB's
+/// `movmean(values, window, 'omitnan')` for odd windows. Even windows differ:
+/// MATLAB spans `[i-k/2, i+k/2-1]` while this spans `half = k/2` on both
+/// sides, giving `k+1` samples. The UI only generates odd windows.
 #[must_use]
-pub fn smooth(values: &[f64], window: usize) -> Vec<f64> {
+pub fn movmean(values: &[f64], window: usize) -> Vec<f64> {
     let window = window.max(1);
     let half = window / 2;
     (0..values.len())
@@ -65,6 +72,40 @@ pub fn smooth(values: &[f64], window: usize) -> Vec<f64> {
             }
         })
         .collect()
+}
+
+/// Linearly interpolates `values` at `query`, returning NaN outside the
+/// sample range rather than holding the endpoints flat.
+///
+/// This mirrors `lerpSample` in `frontend/src/app/xy.ts` exactly;
+/// `protocol/testdata/lerp-conformance.json` locks the two together.
+#[must_use]
+#[allow(clippy::float_cmp)]
+pub fn lerp_at(time: &[f64], values: &[f64], query: f64) -> f64 {
+    let count = time.len();
+    if count == 0 || query < time[0] || query > time[count - 1] {
+        return f64::NAN;
+    }
+    let mut low = 0;
+    let mut high = count - 1;
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if time[mid] < query {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    if time[low] == query {
+        return values[low];
+    }
+    let previous = low.saturating_sub(1);
+    let span = time[low] - time[previous];
+    if span == 0.0 {
+        return values[low];
+    }
+    let alpha = (query - time[previous]) / span;
+    values[previous] + (values[low] - values[previous]) * alpha
 }
 
 /// A decimated slice of a signal restricted to a time window.
@@ -143,8 +184,69 @@ mod tests {
         let time = [0.0, 1.0, 2.0];
         let values = [0.0, 2.0, 4.0];
 
-        assert_eq!(derivative(&time, &values), [2.0, 2.0, 2.0]);
-        assert_eq!(integrate(&time, &values), [0.0, 1.0, 4.0]);
+        assert_eq!(gradient(&time, &values), [2.0, 2.0, 2.0]);
+        assert_eq!(cumtrapz(&time, &values), [0.0, 1.0, 4.0]);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn lerp_at_interpolates_and_refuses_to_extrapolate() {
+        let time = [0.0, 1.0, 3.0];
+        let values = [0.0, 10.0, 30.0];
+
+        assert_eq!(lerp_at(&time, &values, 0.0), 0.0);
+        assert_eq!(lerp_at(&time, &values, 1.0), 10.0);
+        assert_eq!(lerp_at(&time, &values, 2.0), 20.0);
+        assert_eq!(lerp_at(&time, &values, 3.0), 30.0);
+        assert!(lerp_at(&time, &values, -0.5).is_nan());
+        assert!(lerp_at(&time, &values, 3.5).is_nan());
+        assert!(lerp_at(&[], &[], 0.0).is_nan());
+    }
+
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct LerpFixture {
+        time: Vec<f64>,
+        values: Vec<f64>,
+        queries: Vec<f64>,
+        results: Vec<f64>,
+    }
+
+    const LERP_FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../protocol/testdata/lerp-conformance.json"
+    );
+
+    #[test]
+    fn lerp_conformance_fixture_matches_rust() {
+        let time: Vec<f64> = (0..64).map(|index| f64::from(index) * 0.375).collect();
+        let values: Vec<f64> = time
+            .iter()
+            .enumerate()
+            .map(|(index, value)| value * 2.5 - f64::from(u32::try_from(index % 7).unwrap()))
+            .collect();
+        let queries = vec![0.0, 0.1, 0.375, 1.0, 5.5, 11.812_5, 23.624_9, 23.625];
+        let current = LerpFixture {
+            time: time.clone(),
+            values: values.clone(),
+            results: queries
+                .iter()
+                .map(|query| lerp_at(&time, &values, *query))
+                .collect(),
+            queries,
+        };
+        if std::env::var("REGENERATE_FIXTURES").is_ok() {
+            std::fs::write(
+                LERP_FIXTURE_PATH,
+                format!("{}\n", serde_json::to_string_pretty(&current).unwrap()),
+            )
+            .expect("write fixture");
+            return;
+        }
+        let stored: LerpFixture = serde_json::from_str(
+            &std::fs::read_to_string(LERP_FIXTURE_PATH).expect("read fixture"),
+        )
+        .expect("parse fixture");
+        assert_eq!(stored, current, "regenerate with REGENERATE_FIXTURES=1");
     }
 
     #[test]

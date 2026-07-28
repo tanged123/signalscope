@@ -4,6 +4,8 @@ mod generated;
 
 pub use generated::*;
 
+use std::path::Path;
+
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -30,6 +32,8 @@ impl Default for Session {
                 layout: Vec::new(),
             }],
             favorites: Vec::new(),
+            derived: Vec::new(),
+            source_paths: Vec::new(),
         }
     }
 }
@@ -66,6 +70,35 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
         return Err(SessionError::WrongApplication(head.app));
     }
     migrate(head.schema_version, value)
+}
+
+/// Serializes `session` to `path` through a sibling temporary file that is
+/// renamed into place, so an interrupted write never truncates the previous
+/// session.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Io`] when the write or rename fails and
+/// [`SessionError::Json`] when serialization fails.
+pub fn save_to_path(session: &Session, path: &Path) -> Result<(), SessionError> {
+    let json = serde_json::to_string_pretty(session)?;
+    let temporary = path.with_extension("json.tmp");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&temporary, json)?;
+    std::fs::rename(&temporary, path)?;
+    Ok(())
+}
+
+/// Reads and migrates the session stored at `path`.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Io`] when the file cannot be read and the variants
+/// of [`from_json`] otherwise.
+pub fn load_from_path(path: &Path) -> Result<Session, SessionError> {
+    from_json(&std::fs::read_to_string(path)?)
 }
 
 /// Migration ladder (ADR 0005): each arm upgrades `value` one schema
@@ -166,6 +199,12 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(9);
             migrate(9, value)
         }
+        9 => {
+            value["derived"] = serde_json::json!([]);
+            value["source_paths"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(10);
+            migrate(10, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -177,6 +216,8 @@ pub enum SessionError {
     WrongApplication(String),
     #[error("unsupported session schema version: {0}")]
     UnsupportedVersion(u32),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
@@ -254,6 +295,76 @@ fn migrate_v5_annotations(value: &mut serde_json::Value) {
 mod tests {
     use super::*;
 
+    const SESSION_FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../protocol/testdata/session-conformance.json"
+    );
+
+    #[test]
+    fn session_conformance_fixture_matches_rust() {
+        let session = Session {
+            derived: vec![DerivedSignal {
+                path: "derived/speed".into(),
+                expr: "hypot('imu/vx', 'imu/vy')".into(),
+            }],
+            source_paths: vec!["/data/run.csv".into()],
+            favorites: vec!["imu/vx".into()],
+            ..Session::default()
+        };
+        let current = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&session).expect("serializes")
+        );
+        if std::env::var("REGENERATE_FIXTURES").is_ok() {
+            std::fs::write(SESSION_FIXTURE_PATH, &current).expect("write fixture");
+            return;
+        }
+        let stored = std::fs::read_to_string(SESSION_FIXTURE_PATH).expect("read fixture");
+        assert_eq!(
+            from_json(&stored).expect("the fixture is a loadable session"),
+            session,
+            "regenerate with REGENERATE_FIXTURES=1"
+        );
+    }
+
+    #[test]
+    fn saving_and_loading_round_trips_through_a_file() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("session.json");
+        let session = Session {
+            source_paths: vec!["/data/run.csv".into()],
+            ..Session::default()
+        };
+
+        save_to_path(&session, &path).expect("saves");
+        let restored = load_from_path(&path).expect("loads");
+        assert_eq!(restored.source_paths, session.source_paths);
+        assert!(
+            !directory.path().join("session.json.tmp").exists(),
+            "the temporary file is renamed, not left behind"
+        );
+    }
+
+    #[test]
+    fn a_truncated_session_fails_instead_of_partially_restoring() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("session.json");
+        std::fs::write(&path, "{\"app\":\"signalscope\",\"schema_ver").expect("writes");
+        assert!(matches!(
+            load_from_path(&path).expect_err("truncated"),
+            SessionError::Json(_)
+        ));
+    }
+
+    #[test]
+    fn a_missing_session_file_reports_io() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        assert!(matches!(
+            load_from_path(&directory.path().join("absent.json")).expect_err("absent"),
+            SessionError::Io(_)
+        ));
+    }
+
     #[test]
     fn current_session_round_trips() {
         let session = Session {
@@ -300,6 +411,51 @@ mod tests {
 
         let json = serde_json::to_string(&session).unwrap();
         assert_eq!(from_json(&json).unwrap(), session);
+    }
+
+    #[test]
+    fn v9_sessions_gain_empty_derived_and_source_lists() {
+        let json = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 9,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 60.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "favorites": [],
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [], "panels": []
+            }]
+        })
+        .to_string();
+        let session = from_json(&json).expect("v9 session migrates");
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert!(session.derived.is_empty());
+        assert!(session.source_paths.is_empty());
+    }
+
+    #[test]
+    fn derived_definitions_survive_a_round_trip() {
+        let session = Session {
+            derived: vec![
+                DerivedSignal {
+                    path: "derived/speed".into(),
+                    expr: "hypot('imu/vx', 'imu/vy')".into(),
+                },
+                DerivedSignal {
+                    path: "derived/jerk".into(),
+                    expr: "gradient('derived/speed')".into(),
+                },
+            ],
+            source_paths: vec!["/data/run.csv".into()],
+            ..Session::default()
+        };
+        let restored =
+            from_json(&serde_json::to_string(&session).expect("serializes")).expect("round trips");
+        assert_eq!(restored.derived, session.derived);
+        assert_eq!(restored.source_paths, session.source_paths);
     }
 
     #[test]

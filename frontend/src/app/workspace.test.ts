@@ -38,7 +38,100 @@ describe("linked time", () => {
   });
 });
 
+describe("derived definitions", () => {
+  it("records definitions in order and removes them by path", () => {
+    const model = new WorkspaceModel();
+    model.addDerived("derived/speed", "hypot('a/x', 'a/y')");
+    model.addDerived("derived/jerk", "gradient('derived/speed')");
+    expect(model.snapshot().derived).toEqual([
+      { path: "derived/speed", expr: "hypot('a/x', 'a/y')" },
+      { path: "derived/jerk", expr: "gradient('derived/speed')" },
+    ]);
+
+    model.removeSignal("derived/speed");
+    expect(model.snapshot().derived.map((entry) => entry.path)).toEqual([
+      "derived/jerk",
+    ]);
+  });
+
+  it("replaces a redefined path in place", () => {
+    const model = new WorkspaceModel();
+    model.addDerived("derived/speed", "'a/x'");
+    model.addDerived("derived/speed", "'a/y'");
+    expect(model.snapshot().derived).toEqual([
+      { path: "derived/speed", expr: "'a/y'" },
+    ]);
+  });
+
+  it("removes a signal from every serialized workspace reference", () => {
+    const model = new WorkspaceModel();
+    const path = "derived/speed";
+    const first = model.addPanelRow();
+    model.addSeries(first.id, path);
+    model.addAnnotation(first.id, {
+      id: "ann-1",
+      series_path: path,
+      domain: "time",
+      anchor: 0,
+      pinned_value: 1,
+      label: "",
+    });
+    const axes = model.addPanelRow();
+    model.setXSignal(axes.id, path);
+    model.setColorSignal(axes.id, path);
+    model.toggleFavorite(path);
+    model.addDerived(path, "'imu/x'");
+
+    model.addTab();
+    const second = model.addPanelRow();
+    model.addSeries(second.id, path);
+    model.addAnnotation(second.id, {
+      id: "ann-2",
+      series_path: path,
+      domain: "time",
+      anchor: 1,
+      pinned_value: 2,
+      label: "",
+    });
+
+    model.removeSignal(path);
+
+    expect(model.snapshot().derived).toEqual([]);
+    expect(model.snapshot().favorites).toEqual([]);
+    for (const tab of model.tabs()) {
+      for (const panel of tab.panels) {
+        expect(panel.series.some((series) => series.path === path)).toBe(false);
+        expect(
+          panel.annotations.some(
+            (annotation) => annotation.series_path === path,
+          ),
+        ).toBe(false);
+        expect(panel.x_signal).not.toBe(path);
+        expect(panel.color_signal).not.toBe(path);
+      }
+    }
+  });
+
+  it("records each source path once", () => {
+    const model = new WorkspaceModel();
+    model.addSourcePath("/data/run.csv");
+    model.addSourcePath("/data/run.csv");
+    model.addSourcePath("/data/bench.csv");
+    expect(model.sourcePaths()).toEqual(["/data/run.csv", "/data/bench.csv"]);
+  });
+});
+
 describe("WorkspaceModel", () => {
+  it("replaces the whole session", () => {
+    const model = new WorkspaceModel();
+    const loaded = emptySession();
+    loaded.theme = "light";
+    loaded.derived = [{ path: "derived/x", expr: "'a/y'" }];
+    model.replace(loaded);
+    expect(model.theme()).toBe("light");
+    expect(model.snapshot().derived).toHaveLength(1);
+  });
+
   it("stores cursor mode independently for each workspace", () => {
     const model = new WorkspaceModel();
     expect(model.cursorMode()).toBe("none");

@@ -12,6 +12,17 @@ Finish linked desktop and touch gestures, gutter/inline axes, editable labels, s
 
 Ship the docked expression bar with history, full prototype-compatible expression semantics, derived signals in the tree, schema migrations, autosave/recovery, and snapshot/session round-trip coverage.
 
+Phase 3 shipped a MATLAB-dialect expression language evaluated in
+`scope-core::expr` ([ADR 0008](adr/0008-expression-evaluation-layer.md)
+amendment): quoted names are signal references, functions are bare MATLAB
+names, and the transforms are `gradient`/`cumtrapz`/`movmean`. Derived signals
+materialize into the store under one synthetic source with an in-memory
+pyramid, so every tile, sample, and panel-mode consumer is unchanged. Sessions
+reached schema v10 with ordered derived definitions and source paths, and gained
+autosave with resume-on-launch plus named workspace files
+([ADR 0022](adr/0022-durable-session-persistence.md)). The `localStorage` theme
+key is gone; the session is the only durable store.
+
 ## Phase 4 — export and fidelity
 
 Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. Once export can bake a manifest, generate the README demo GIF and hosted live demo from that same path, per [the demo artifacts design](superpowers/specs/2026-07-27-automated-demo-artifacts-design.md).

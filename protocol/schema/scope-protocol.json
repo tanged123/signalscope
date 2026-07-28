@@ -1,5 +1,5 @@
 {
-  "protocol_version": 4,
+  "protocol_version": 5,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -131,6 +131,49 @@
         "fraction": "f64",
         "response": "IngestResponse?",
         "error": "string?"
+      }
+    },
+    "DerivedRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "expr": "string"
+      }
+    },
+    "RemoveSignalRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string"
+      }
+    },
+    "SessionDialogMode": {
+      "kind": "enum",
+      "variants": ["open", "save"]
+    },
+    "PickSessionRequest": {
+      "kind": "object",
+      "fields": {
+        "mode": "SessionDialogMode"
+      }
+    },
+    "SaveSessionRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "path": "string?"
+      }
+    },
+    "LoadSessionRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string?"
+      }
+    },
+    "LoadedSession": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "path": "string?"
       }
     }
   }

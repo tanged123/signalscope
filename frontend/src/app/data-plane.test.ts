@@ -61,7 +61,21 @@ describe("TauriPlane.querySamples", () => {
     const invoke = <T>(): Promise<T> =>
       Promise.resolve(
         JSON.parse(
-          '{"protocol_version":4,"payload":{"request_id":"samples-2","series":[{"signal_id":"7","signal_path":"vehicle/speed","unit":"m/s","time":[0,1,2],"values":[0,null,2],"stride":1}]}}',
+          JSON.stringify(
+            seal({
+              request_id: "samples-2",
+              series: [
+                {
+                  signal_id: "7",
+                  signal_path: "vehicle/speed",
+                  unit: "m/s",
+                  time: [0, 1, 2],
+                  values: [0, Number.NaN, 2],
+                  stride: 1,
+                },
+              ],
+            }),
+          ),
         ) as T,
       );
     const response = await new TauriPlane(invoke).querySamples({
@@ -72,5 +86,62 @@ describe("TauriPlane.querySamples", () => {
     });
 
     expect(Number.isNaN(response.series[0]?.values[1])).toBe(true);
+  });
+});
+
+describe("derived port", () => {
+  it("creates a derived signal through the native plane", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(
+        seal({
+          signal_id: "7",
+          path: "derived/speed",
+          unit: null,
+          point_count: "3",
+          t_min: 0,
+          t_max: 2,
+        }) as never,
+      );
+    });
+    const summary = await plane.derived.create("derived/speed", "'a/x' * 2");
+    expect(summary.path).toBe("derived/speed");
+    expect(calls[0]?.command).toBe("create_derived");
+  });
+
+  it("removes a derived signal through the native plane", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(seal(null) as never);
+    });
+    await plane.derived.remove("derived/speed");
+    expect(calls[0]?.command).toBe("remove_signal");
+  });
+
+  it("has no derived port in a snapshot", () => {
+    const plane = new BakedPlane(seal({ signals: [] }));
+    expect(plane.derived).toBeNull();
+  });
+});
+
+describe("session port", () => {
+  it("starts a new native session through the native plane", async () => {
+    const calls: string[] = [];
+    const plane = new TauriPlane((command) => {
+      calls.push(command);
+      return Promise.resolve(
+        seal({
+          session_json: '{"app":"signalscope"}',
+          path: null,
+        }) as never,
+      );
+    });
+
+    const loaded = await plane.session.reset();
+
+    expect(calls).toEqual(["reset_session"]);
+    expect(loaded.path).toBeNull();
   });
 });

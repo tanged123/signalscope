@@ -6,6 +6,7 @@ const FALLBACK_ROW_HEIGHT = 22;
 export interface SignalTreeCallbacks {
   onPlotSignal(path: string): void;
   onToggleFavorite(path: string): void;
+  onRemoveDerived(path: string): void;
 }
 
 export class SignalTreeView {
@@ -169,7 +170,26 @@ export class SignalTreeView {
     const value = document.createElement("span");
     value.className = "signal-value";
     value.textContent = this.liveValues.get(path) ?? "—";
-    rowElement.append(star, name, value);
+    rowElement.append(star, name);
+    if (path.startsWith("derived/")) {
+      const mark = document.createElement("span");
+      mark.className = "tree-derived-mark";
+      mark.textContent = "ƒx";
+      mark.title = "derived signal";
+      rowElement.append(mark);
+    }
+    rowElement.append(value);
+    if (path.startsWith("derived/")) {
+      const remove = document.createElement("button");
+      remove.className = "tree-derived-remove";
+      remove.textContent = "✕";
+      remove.title = `Remove ${path}`;
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.callbacks.onRemoveDerived(path);
+      });
+      rowElement.append(remove);
+    }
     return rowElement;
   }
 

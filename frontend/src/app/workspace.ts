@@ -1,6 +1,7 @@
 import type {
   Annotation,
   DashStyle,
+  DerivedSignal,
   LayoutRow,
   LinkedTime,
   PanelMode,
@@ -28,11 +29,13 @@ export function emptySession(): Session {
     active_tab_id: "workspace-1",
     tabs: [createWorkspaceTab(1)],
     favorites: [],
+    derived: [],
+    source_paths: [],
   };
 }
 
 export class WorkspaceModel {
-  private readonly session: Session;
+  private session: Session;
   private nextPanelNumber: number;
   private nextTabNumber: number;
 
@@ -51,6 +54,11 @@ export class WorkspaceModel {
 
   snapshot(): Readonly<Session> {
     return this.session;
+  }
+
+  /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
+  replace(session: Session): void {
+    this.session = session;
   }
 
   theme(): Session["theme"] {
@@ -145,6 +153,57 @@ export class WorkspaceModel {
 
   favorites(): readonly string[] {
     return this.session.favorites;
+  }
+
+  derived(): readonly DerivedSignal[] {
+    return this.session.derived;
+  }
+
+  /** Records a definition, replacing any existing one for the same path. */
+  addDerived(path: string, expr: string): void {
+    const existing = this.session.derived.findIndex(
+      (entry) => entry.path === path,
+    );
+    if (existing === -1) {
+      this.session.derived.push({ path, expr });
+    } else {
+      this.session.derived[existing] = { path, expr };
+    }
+  }
+
+  removeSignal(path: string): void {
+    this.session.derived = this.session.derived.filter(
+      (entry) => entry.path !== path,
+    );
+    this.session.favorites = this.session.favorites.filter(
+      (favorite) => favorite !== path,
+    );
+    for (const tab of this.session.tabs) {
+      for (const panel of tab.panels) {
+        panel.series = panel.series.filter((series) => series.path !== path);
+        panel.annotations = panel.annotations.filter(
+          (annotation) => annotation.series_path !== path,
+        );
+        if (panel.x_signal === path) {
+          panel.x_signal = null;
+          panel.x_range = null;
+        }
+        if (panel.color_signal === path) {
+          panel.color_signal = null;
+          panel.color_by_time = false;
+        }
+      }
+    }
+  }
+
+  sourcePaths(): readonly string[] {
+    return this.session.source_paths;
+  }
+
+  addSourcePath(path: string): void {
+    if (!this.session.source_paths.includes(path)) {
+      this.session.source_paths.push(path);
+    }
   }
 
   cursorMode(): WorkspaceTab["cursor_mode"] {

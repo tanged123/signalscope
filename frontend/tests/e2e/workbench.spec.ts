@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import type { PanelView as PanelViewClass } from "../../src/ui/panel";
+import type { FormulaBar as FormulaBarClass } from "../../src/ui/formula-bar";
 
 test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await page.goto("/");
@@ -184,6 +185,9 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onEditAxisLabel: () => {},
       onSetSeriesStyle: () => {},
       onRemoveSeries: () => {},
+      onQuickTransform: (id, path, kind) => {
+        host.dataset.quickTransform = `${id}:${path}:${kind}`;
+      },
     });
     host.appendChild(view.element);
     view.update(
@@ -224,6 +228,12 @@ test("panel legend keeps controls visible and exposes overflow", async ({
   );
   expect(wideVisible + wideOverflow).toBe(40);
   await expect(panel.locator(".panel-actions")).toBeVisible();
+  await headerChips.first().locator(".legend-chip-caret").click();
+  await panel.getByRole("button", { name: "d/dt" }).click();
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-quick-transform",
+    "legend-probe-panel:monte_carlo/run_1:gradient",
+  );
 
   await page.locator("#legend-probe").evaluate((host) => {
     host.style.width = "520px";
@@ -244,29 +254,240 @@ test("panel legend keeps controls visible and exposes overflow", async ({
   await expect(panel.locator(".legend-overflow-menu")).toBeHidden();
 });
 
-test("formula editor is transient with pointer and keyboard paths", async ({
+test("formula component creates and recalls accepted formulas", async ({
   page,
 }) => {
   await page.goto("/");
-  const editor = page.locator(".formula-bar");
-  const input = page.locator(".formula-input");
-  const toggle = page.locator(".formula-toggle");
+  await page.evaluate(async () => {
+    const modulePath = "/src/ui/formula-bar.ts";
+    const { FormulaBar, formulaBarMarkup } = (await import(
+      /* @vite-ignore */ modulePath
+    )) as {
+      FormulaBar: typeof FormulaBarClass;
+      formulaBarMarkup: () => string;
+    };
+    const host = document.createElement("div");
+    host.id = "formula-probe";
+    host.style.paddingTop = "300px";
+    host.innerHTML = formulaBarMarkup();
+    document.body.replaceChildren(host);
+    const form = host.querySelector<HTMLFormElement>(".formula-bar");
+    if (form === null)
+      throw new Error("Formula bar markup is missing its form");
+    const bar = new FormulaBar(form, {
+      onCreate: (path, expression) => {
+        if (path === "derived/bad") {
+          return Promise.reject(new Error('unknown signal "missing/path"'));
+        }
+        host.dataset.created = `${path}|${expression}`;
+        return Promise.resolve();
+      },
+      onClose: () => {
+        host.dataset.closed = "true";
+      },
+    });
+    bar.setSignals([
+      "demo_flight/attitude/pitch_deg",
+      "demo_flight/attitude/roll_deg",
+    ]);
+    bar.setOpen(true);
+  });
 
-  await expect(editor).toBeHidden();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-
-  await toggle.click();
-  await expect(editor).toBeVisible();
+  const host = page.locator("#formula-probe");
+  const input = host.locator(".formula-input");
+  await input.fill("derived/rate = gra");
+  await expect(host.locator(".formula-completions")).toBeVisible();
+  await expect(
+    host.getByRole("option", { name: /gradient.*time derivative/ }),
+  ).toBeVisible();
+  await input.press("Enter");
+  await expect(input).toHaveValue("derived/rate = gradient()");
   await expect(input).toBeFocused();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  await input.fill("derived/rate = 'pitch");
+  await expect(
+    host.getByRole("option", {
+      name: /demo_flight\/attitude\/pitch_deg/,
+    }),
+  ).toBeVisible();
+  await input.press("Tab");
+  await expect(input).toHaveValue(
+    "derived/rate = 'demo_flight/attitude/pitch_deg'",
+  );
+
+  await input.fill("derived/root = sq");
+  await host.getByRole("option", { name: /sqrt.*square root/ }).click();
+  await expect(input).toHaveValue("derived/root = sqrt()");
+  await expect(input).toBeFocused();
+
+  await input.fill("derived/x = atan");
+  await input.press("ArrowDown");
+  await expect(
+    host.getByRole("option", { name: /atan2.*two-argument arctangent/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveAttribute(
+    "aria-activedescendant",
+    "formula-completion-1",
+  );
+  await input.press("ArrowUp");
+  await expect(
+    host.getByRole("option", { name: /atan.*inverse tangent/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveAttribute(
+    "aria-activedescendant",
+    "formula-completion-0",
+  );
+  await input.press("ArrowUp");
+  await expect(
+    host.getByRole("option", { name: /atan2.*two-argument arctangent/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveAttribute(
+    "aria-activedescendant",
+    "formula-completion-1",
+  );
+  await input.press("Enter");
+  await expect(input).toHaveValue("derived/x = atan2(, )");
+  await expect(input).toHaveJSProperty("selectionStart", 18);
+  await expect(input).toBeFocused();
+
+  await input.fill("derived/x = ");
+  await input.press("Control+Space");
+  await expect(host.locator(".formula-completions")).toBeVisible();
+  await input.press("Escape");
+  await expect(host.locator(".formula-completions")).toBeHidden();
+  await expect(host).not.toHaveAttribute("data-closed", "true");
+  await input.press("Escape");
+  await expect(host).toHaveAttribute("data-closed", "true");
+
+  await input.fill("derived/double = 'demo/x' * 2");
+  await input.press("Enter");
+  await expect(host).toHaveAttribute(
+    "data-created",
+    "derived/double|'demo/x' * 2",
+  );
+  await expect(input).toHaveValue("");
+  await input.press("ArrowUp");
+  await expect(input).toHaveValue("derived/double = 'demo/x' * 2");
+
+  await input.fill("derived/bad = 'missing/path'");
+  await input.press("Enter");
+  await expect(host.locator(".formula-error")).toContainText("unknown signal");
+  await expect(host.locator(".formula-error-guidance")).toHaveText(
+    "Signal references use quoted full paths. Drag from the tree to insert.",
+  );
+  await expect(input).toHaveValue("derived/bad = 'missing/path'");
+
+  await input.fill("derived/recovered = 'demo/x'");
+  await input.press("Enter");
+  await expect(host.locator(".formula-error")).toBeHidden();
+  await expect(host.locator(".formula-error-guidance")).toBeHidden();
+  await expect(host.locator(".formula-error-guidance")).toBeEmpty();
+});
+
+test("formula help teaches real paths once and remains available", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    localStorage.removeItem("signalscope.formulaHelpSeen");
+    const modulePath = "/src/ui/formula-bar.ts";
+    const { FormulaBar, formulaBarMarkup } = (await import(
+      /* @vite-ignore */ modulePath
+    )) as {
+      FormulaBar: typeof FormulaBarClass;
+      formulaBarMarkup: () => string;
+    };
+    const host = document.createElement("div");
+    host.id = "formula-help-probe";
+    host.innerHTML = formulaBarMarkup();
+    document.body.replaceChildren(host);
+    const form = host.querySelector<HTMLFormElement>(".formula-bar");
+    if (form === null)
+      throw new Error("Formula bar markup is missing its form");
+    const bar = new FormulaBar(form, {
+      onCreate: () => Promise.resolve(),
+      onClose: () => {
+        host.dataset.closed = "true";
+      },
+    });
+    bar.setSignals(["demo_flight/attitude/pitch_deg"]);
+    bar.setOpen(true);
+  });
+
+  const host = page.locator("#formula-help-probe");
+  const help = host.locator(".formula-help-popover");
+  await expect(help).toBeVisible();
+  await expect(help.locator(".formula-help-example")).toContainText(
+    "'demo_flight/attitude/pitch_deg'",
+  );
+  const button = host.getByRole("button", { name: "Formula help" });
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  await button.click();
+  await expect(help).toBeHidden();
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("signalscope.formulaHelpSeen")),
+    )
+    .toBe("1");
+  await button.click();
+  await expect(help).toBeVisible();
+  await button.focus();
+  await page.keyboard.press("Escape");
+  await expect(help).toBeHidden();
+  await expect(host).not.toHaveAttribute("data-closed", "true");
+
+  const input = host.locator(".formula-input");
+  await input.fill("derived/sum = hypot(, )");
+  await input.evaluate((element: HTMLInputElement) => {
+    element.setSelectionRange(20, 20);
+  });
+  const firstTransfer = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.setData(
+      "application/x-signalscope-signal",
+      "demo_flight/attitude/pitch_deg",
+    );
+    return transfer;
+  });
+  const bar = host.locator(".formula-bar");
+  await bar.dispatchEvent("dragover", { dataTransfer: firstTransfer });
+  await expect(bar).toHaveClass(/drop-target/);
+  await bar.dispatchEvent("drop", { dataTransfer: firstTransfer });
+  await expect(input).toHaveValue(
+    "derived/sum = hypot('demo_flight/attitude/pitch_deg', )",
+  );
+  await expect(input).toBeFocused();
+  await expect(bar).not.toHaveClass(/drop-target/);
+
+  await input.evaluate((element: HTMLInputElement) => {
+    const close = element.value.lastIndexOf(")");
+    element.setSelectionRange(close, close);
+  });
+  const secondTransfer = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.setData(
+      "application/x-signalscope-signal",
+      "demo_flight/attitude/roll_deg",
+    );
+    return transfer;
+  });
+  await bar.dispatchEvent("drop", { dataTransfer: secondTransfer });
+  await expect(input).toHaveValue(
+    "derived/sum = hypot('demo_flight/attitude/pitch_deg', 'demo_flight/attitude/roll_deg')",
+  );
 
   await page.keyboard.press("Escape");
-  await expect(editor).toBeHidden();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(host).toHaveAttribute("data-closed", "true");
+  await button.press("Enter");
+  await expect(help).toBeVisible();
+});
 
-  await page.keyboard.press("e");
-  await expect(editor).toBeVisible();
-  await expect(input).toBeFocused();
+test("formula editor hides when the data plane cannot derive", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.locator(".formula-bar")).toBeHidden();
+  await expect(page.locator(".formula-toggle")).toBeHidden();
 });
 
 test("signal tree toggles and collapses through its resize edge", async ({

@@ -6,8 +6,10 @@ import {
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import { runIngest } from "../app/ingest";
+import { quickTransform } from "../app/quick-transform";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
+import { persistWorkspace } from "../app/workspace-save";
 import {
   formatCursorTime,
   formatValue,
@@ -23,7 +25,7 @@ import type {
   CursorMode,
   PanelMode,
   PanelState,
-  Theme,
+  Session,
 } from "../generated/session";
 import {
   CommandPalette,
@@ -31,6 +33,8 @@ import {
   type PaletteMode,
 } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
+import { FormulaBar, formulaBarMarkup } from "./formula-bar";
+import type { QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
@@ -39,7 +43,7 @@ import { AppMenu } from "./app-menu";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
-const THEME_STORAGE_KEY = "signalscope.theme";
+const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
 
@@ -52,6 +56,7 @@ export class AppShell {
   private workspaceTabs: WorkspaceTabsView | null = null;
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
+  private formulaBar: FormulaBar | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
@@ -62,6 +67,9 @@ export class AppShell {
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
+  private autosaveTimer: number | null = null;
+  private workspacePath: string | null = null;
+  private dirty = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -70,7 +78,11 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    await this.restoreSession();
     this.restoreTheme();
+    if (this.plane.derived === null) {
+      required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
+    }
     this.workspaceTabs = new WorkspaceTabsView(
       required(this.root, ".workspace-tabs"),
       {
@@ -207,6 +219,9 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
+        onQuickTransform: (_id, path, kind) => {
+          void this.applyQuickTransform(path, kind);
+        },
         onLayoutChanged: () => {
           void this.refreshTiles();
         },
@@ -239,11 +254,20 @@ export class AppShell {
           this.workspace.toggleFavorite(path);
           this.tree?.setFavorites(this.workspace.favorites());
         },
+        onRemoveDerived: (path) => {
+          void this.removeDerived(path);
+        },
       },
     );
     this.palette = new CommandPalette(this.root, (mode) =>
       this.paletteEntries(mode),
     );
+    this.formulaBar = new FormulaBar(required(this.root, ".formula-bar"), {
+      onCreate: (path, expression) => this.createDerived(path, expression),
+      onClose: () => {
+        this.setFormulaOpen(false);
+      },
+    });
     this.registerCommands();
     void new AppMenu(
       required<HTMLButtonElement>(this.root, ".menu-button"),
@@ -260,6 +284,7 @@ export class AppShell {
       this.fitWindowToPlotted();
     }
     this.afterLayoutChange();
+    this.renderWorkspaceName();
   }
 
   private registerCommands(): void {
@@ -590,14 +615,54 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.5.0");
+        this.showModeHelp("SignalScope 0.8.1");
+      },
+    });
+    this.commands.register({
+      id: "new-workspace",
+      title: "New Workspace",
+      keys: "mod+n",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.newWorkspace();
+      },
+    });
+    this.commands.register({
+      id: "open-workspace",
+      title: "Open Workspace…",
+      keys: "mod+o",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.pickAndLoadWorkspace();
+      },
+    });
+    this.commands.register({
+      id: "save-workspace",
+      title: "Save Workspace",
+      keys: "mod+s",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.saveWorkspace(false);
+      },
+    });
+    this.commands.register({
+      id: "save-workspace-as",
+      title: "Save Workspace As…",
+      section: "file",
+      group: "workspace",
+      enabled: () => this.plane.session !== null,
+      run: () => {
+        void this.saveWorkspace(true);
       },
     });
     for (const planned of [
       ["open-recent", "Open Recent ▸", "file", "open"],
-      ["open-workspace", "Open Workspace…", "file", "workspace"],
-      ["save-workspace", "Save Workspace", "file", "workspace"],
-      ["save-workspace-as", "Save Workspace As…", "file", "workspace"],
       ["export", "Export ▸ HTML · PNG · CSV", "file", "export"],
       ["annotations-dock", "Annotations dock", "view", "docks"],
       ["font-size", "Font size ▸", "view", "display"],
@@ -753,19 +818,6 @@ export class AppShell {
     required(this.root, ".cursor-toggle").addEventListener("click", () => {
       this.commands.run("cycle-cursor-mode");
     });
-    const formula = required<HTMLFormElement>(this.root, ".formula-bar");
-    formula.addEventListener("submit", (event) => {
-      event.preventDefault();
-    });
-    required<HTMLInputElement>(formula, ".formula-input").addEventListener(
-      "keydown",
-      (event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          this.setFormulaOpen(false);
-        }
-      },
-    );
     required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
       "input",
       (event) => {
@@ -775,13 +827,11 @@ export class AppShell {
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
       const target = event.target;
-      if (
+      const editing =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
+        (target instanceof HTMLElement && target.isContentEditable);
+      if (editing && !event.metaKey && !event.ctrlKey) return;
       if (this.commands.handleKey(event)) event.preventDefault();
     });
   }
@@ -814,6 +864,7 @@ export class AppShell {
               : "…";
           progress.textContent = `${name} · ${status.stage} ${percent}`;
         });
+        this.workspace.addSourcePath(path);
       }
       await this.reloadSignals();
       this.afterLayoutChange();
@@ -870,6 +921,190 @@ export class AppShell {
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
     this.syncCursorMode();
     void this.refreshTiles();
+    this.scheduleAutosave();
+  }
+
+  /** Coalesces rapid state changes into one write. */
+  scheduleAutosave(): void {
+    if (this.plane.session === null) return;
+    this.dirty = true;
+    this.renderWorkspaceName();
+    if (this.autosaveTimer !== null) window.clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = window.setTimeout(() => {
+      this.autosaveTimer = null;
+      void this.plane.session
+        ?.save(JSON.stringify(this.workspace.snapshot()), null)
+        .catch((error: unknown) => {
+          this.reportError(error);
+        });
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  /** Restores the autosaved session, if any, before the first render. */
+  private async restoreSession(): Promise<void> {
+    await this.loadSession(null);
+  }
+
+  private async saveWorkspace(saveAs: boolean): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const savedPath = await persistWorkspace(
+        port,
+        JSON.stringify(this.workspace.snapshot()),
+        this.workspacePath,
+        saveAs,
+      );
+      if (savedPath === null) return;
+      this.workspacePath = savedPath;
+      this.dirty = false;
+      this.renderWorkspaceName();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async newWorkspace(): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      if (this.autosaveTimer !== null) {
+        window.clearTimeout(this.autosaveTimer);
+        this.autosaveTimer = null;
+      }
+      const loaded = await port.reset();
+      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.workspacePath = null;
+      this.tilesByPanel.clear();
+      this.samplesByPanel.clear();
+      this.missingByPanel.clear();
+      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspaceView?.invalidateTheme();
+      await this.reloadSignals();
+      this.afterLayoutChange();
+      this.dirty = false;
+      this.renderWorkspaceName();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async pickAndLoadWorkspace(): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    try {
+      const target = await port.pick("open");
+      if (target === null) return;
+      await this.loadSession(target);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  /**
+   * Replaces the current session, re-ingests its sources, and replays its
+   * derived definitions in order. Definitions whose references are missing
+   * stay recorded; their panels show the unresolved-signal empty state.
+   */
+  async loadSession(path: string | null): Promise<void> {
+    const port = this.plane.session;
+    if (port === null) return;
+    const progress = required<HTMLElement>(this.root, ".ingest-progress");
+    try {
+      const loaded = await port.load(path);
+      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.workspacePath = loaded.path;
+      this.dirty = false;
+      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspaceView?.invalidateTheme();
+
+      const ingestPort = this.plane.ingest;
+      if (ingestPort !== null) {
+        progress.hidden = false;
+        for (const source of this.workspace.sourcePaths()) {
+          const name = basename(source);
+          try {
+            await runIngest(ingestPort, source, (status) => {
+              const percent =
+                status.fraction > 0
+                  ? `${String(Math.round(status.fraction * 100))}%`
+                  : "…";
+              progress.textContent = `${name} · ${status.stage} ${percent}`;
+            });
+          } catch {
+            progress.textContent = `${name} · unavailable`;
+          }
+        }
+      }
+      await this.reloadSignals();
+
+      const derivedPort = this.plane.derived;
+      if (derivedPort !== null) {
+        for (const definition of [...this.workspace.derived()]) {
+          try {
+            await derivedPort.create(definition.path, definition.expr);
+          } catch {
+            // Unresolved definitions stay recorded for a later source retry.
+          }
+        }
+        await this.reloadSignals();
+      }
+
+      this.afterLayoutChange();
+      this.dirty = false;
+      this.renderWorkspaceName();
+    } catch (error: unknown) {
+      this.reportError(error);
+    } finally {
+      progress.hidden = true;
+    }
+  }
+
+  /** Shows the open workspace's file name and whether it has unsaved edits. */
+  private renderWorkspaceName(): void {
+    const element = required<HTMLElement>(this.root, ".workspace-name");
+    const name =
+      this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
+    element.textContent = this.dirty ? `${name} •` : name;
+  }
+
+  /**
+   * Creates a derived signal, records its definition in the session, and
+   * plots it on the focused panel. Task 16's session replay calls this too.
+   */
+  async createDerived(path: string, expr: string): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) throw new Error("This snapshot cannot create signals");
+    const summary = await port.create(path, expr);
+    this.workspace.addDerived(summary.path, expr);
+    await this.reloadSignals();
+    const focused = this.workspace.focusedPanelId();
+    if (focused !== null) this.workspace.addSeries(focused, summary.path);
+    this.afterLayoutChange();
+  }
+
+  private async removeDerived(path: string): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) return;
+    try {
+      await port.remove(path);
+      this.workspace.removeSignal(path);
+      await this.reloadSignals();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async applyQuickTransform(
+    path: string,
+    kind: QuickTransform,
+  ): Promise<void> {
+    try {
+      await this.createDerived(...quickTransform(path, kind));
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
   }
 
   private showModeHelp(text: string): void {
@@ -889,6 +1124,7 @@ export class AppShell {
       this.signals.map((summary) => [summary.path, summary]),
     );
     this.tree?.setSignals(this.signals.map((summary) => summary.path));
+    this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.tree?.setFavorites(this.workspace.favorites());
     this.updateStatus();
   }
@@ -1311,16 +1547,14 @@ export class AppShell {
     const theme = documentRoot.dataset.theme === "light" ? "dark" : "light";
     documentRoot.dataset.theme = theme;
     this.workspace.setTheme(theme);
-    storeTheme(theme);
+    this.scheduleAutosave();
     this.workspaceView?.invalidateTheme();
     this.renderTiles();
   }
 
+  /** Applies the session's theme. The session is the only durable store. */
   private restoreTheme(): void {
-    const stored = storedTheme();
-    const theme = stored ?? this.workspace.theme();
-    document.documentElement.dataset.theme = theme;
-    this.workspace.setTheme(theme);
+    document.documentElement.dataset.theme = this.workspace.theme();
   }
 
   private toggleSignalTree(): void {
@@ -1421,15 +1655,10 @@ export class AppShell {
   private setFormulaOpen(open: boolean): void {
     const workbench = required(this.root, ".workbench");
     const button = required<HTMLButtonElement>(this.root, ".formula-toggle");
-    const input = required<HTMLInputElement>(this.root, ".formula-input");
     workbench.classList.toggle("formula-collapsed", !open);
     button.classList.toggle("active", open);
     button.ariaExpanded = String(open);
-    if (open) {
-      input.focus();
-    } else {
-      input.blur();
-    }
+    this.formulaBar?.setOpen(open);
   }
 
   private reportError(error: unknown): void {
@@ -1449,28 +1678,6 @@ function unavailableReason(command: Command): { unavailable?: string } {
     : { unavailable: "unavailable in this context" };
 }
 
-/**
- * Reads the persisted theme. The self-contained snapshot opens from `file://`,
- * where `localStorage` access can throw, so storage failures degrade to the
- * session's own theme instead of aborting the boot.
- */
-function storedTheme(): Theme | null {
-  try {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === "dark" || stored === "light" ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeTheme(theme: Theme): void {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-  } catch {
-    // A snapshot opened without storage still switches theme for this session.
-  }
-}
-
 function shellMarkup(): string {
   return `<main class="workbench formula-collapsed">
     <div class="title-bar">
@@ -1479,6 +1686,7 @@ function shellMarkup(): string {
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         SIGNALSCOPE
       </span>
+      <span class="workspace-name">Untitled</span>
       <span class="session-identity"></span>
     </div>
 
@@ -1507,10 +1715,7 @@ function shellMarkup(): string {
 
     <div class="mode-help" role="status" hidden></div>
 
-    <form class="formula-bar" id="formula-editor">
-      <span class="formula-mark">ƒx</span>
-      <input class="formula-input" aria-label="Derived signal formula" placeholder='derived/name = Math.hypot($("signal/x"), $("signal/y"))' spellcheck="false" />
-    </form>
+    ${formulaBarMarkup()}
     <div class="plot-tip" hidden></div>
 
     <footer class="status-bar">
