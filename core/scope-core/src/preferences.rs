@@ -36,7 +36,7 @@ pub fn from_json(json: &str) -> Result<Preferences, PreferencesError> {
 
     let value: serde_json::Value = serde_json::from_str(json)?;
     let head: Head = Head::deserialize(&value)?;
-    migrate(head.schema_version, value)
+    migrate(head.schema_version, &value)
 }
 
 /// Serializes `preferences` through a sibling temporary file renamed into
@@ -69,9 +69,9 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
 
 /// Migration ladder (ADR 0005 pattern): v1 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
-fn migrate(version: u32, value: serde_json::Value) -> Result<Preferences, PreferencesError> {
+fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION => Ok(repair_current(&value)),
+        PREFERENCES_SCHEMA_VERSION => Ok(repair_current(value)),
         version => Err(PreferencesError::UnsupportedVersion(version)),
     }
 }
@@ -188,8 +188,8 @@ mod tests {
         .expect("repairs hand-edited preferences");
         assert_eq!(preferences.ui_font_family, FontFamily::Inter);
         assert_eq!(preferences.plot_font_family, FontFamily::Arimo);
-        assert_eq!(preferences.ui_font_size, 20.0);
-        assert_eq!(preferences.plot_font_size, 10.5);
+        assert!((preferences.ui_font_size - 20.0).abs() < f64::EPSILON);
+        assert!((preferences.plot_font_size - 10.5).abs() < f64::EPSILON);
     }
 
     #[test]
