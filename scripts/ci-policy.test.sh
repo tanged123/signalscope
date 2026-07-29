@@ -26,17 +26,46 @@ expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"resu
 expect_status 1 check_ci_results '{"version":{"result":"cancelled"},"flake":{"result":"success"}}'
 expect_status 1 check_ci_results ''
 
-asset_dir="$(mktemp -d)"
-trap 'rm -rf "$asset_dir" ${windows_asset_dir:+"$windows_asset_dir"}' EXIT
+test_root="$(mktemp -d)"
+trap 'rm -rf "$test_root"' EXIT
+
+asset_dir="$test_root/empty-assets"
+mkdir -p "$asset_dir"
 expect_status 2 env GH_TOKEN=test \
   "$script_dir/release.sh" publish v1.2.3-trailing "$asset_dir"
 
-windows_asset_dir="$(mktemp -d)"
+windows_asset_dir="$test_root/windows-assets"
+mkdir -p "$windows_asset_dir"
 : >"$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe"
 : >"$windows_asset_dir/signalscope-shell.exe"
 listed="$("$script_dir/release.sh" assets "$windows_asset_dir" | tr -d '\0')"
 if [ "$listed" != "$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe" ]; then
   printf 'release assets must list the NSIS installer and nothing else, got: %s\n' "$listed" >&2
+  failures=$((failures + 1))
+fi
+
+# `publish` forwards whatever assets() discovers to `gh release create`. Stub gh
+# so that hand-off is covered without a token or network access.
+publish_dir="$test_root/publish-assets"
+stub_dir="$test_root/stub-bin"
+mkdir -p "$publish_dir" "$stub_dir"
+: >"$publish_dir/signalscope_1.2.3_amd64.deb"
+: >"$publish_dir/SignalScope_1.2.3_x64-setup.exe"
+: >"$publish_dir/signalscope-shell.exe"
+: >"$publish_dir/latest.json"
+
+cat >"$stub_dir/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$GH_STUB_ARGS"
+STUB
+chmod +x "$stub_dir/gh"
+
+PATH="$stub_dir:$PATH" GH_TOKEN=test GH_STUB_ARGS="$test_root/gh-args" \
+  "$script_dir/release.sh" publish v1.2.3 "$publish_dir"
+
+published="$(sed -n "s|^$publish_dir/||p" "$test_root/gh-args" | LC_ALL=C sort | tr '\n' ' ')"
+if [ "$published" != "SignalScope_1.2.3_x64-setup.exe signalscope_1.2.3_amd64.deb " ]; then
+  printf 'publish must forward only publishable assets, got: %s\n' "$published" >&2
   failures=$((failures + 1))
 fi
 
