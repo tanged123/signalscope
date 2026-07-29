@@ -65,6 +65,7 @@ Canonical commands:
 ./scripts/format.sh                   apply treefmt formatting in place
 ./scripts/format.sh --check           check an isolated copy; writes nothing
 ./scripts/build.sh web|native         frontend or native bundles
+./scripts/build.sh windows            Windows NSIS installer (Git Bash only)
 ./scripts/export.sh                   bake a self-contained HTML snapshot
 ./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
 ./scripts/build.sh appimage           Ubuntu/FHS AppImage build
@@ -75,7 +76,8 @@ Canonical commands:
 ./scripts/release.sh version            validate release metadata
 ./scripts/release.sh tag                create and push an annotated release tag
 ./scripts/release.sh publish <tag> <dir> publish staged release assets
-./scripts/ci.sh format|quality|rust|frontend|e2e|build|appimage
+./scripts/release.sh assets <dir>       list publishable release assets
+./scripts/ci.sh format|quality|rust|frontend|e2e|build|appimage|windows
 ./scripts/ci.sh all                   complete local quality gate
 ./scripts/ci.sh flake                 flake check (includes formatting)
 ```
@@ -99,7 +101,10 @@ Run `./scripts/setup.sh` before frontend work when dependencies are absent.
 The Nix flake supplies the normal pinned toolchain. AppImage packaging is the
 intentional exception: run it outside the Nix shell on Ubuntu/FHS using the
 two AppImage scripts. Do not “fix” that path by reintroducing the known Nix
-`linuxdeploy` GTK schema mismatch.
+`linuxdeploy` GTK schema mismatch. Windows packaging is the second intentional
+exception: run `./scripts/build.sh windows` from Git Bash on Windows, where the
+script sources its Tauri CLI and pnpm from npm because Nix is unavailable.
+Windows is build-only — every quality gate stays on Linux.
 
 Every workflow shell command must call an appropriate script. Keep setup,
 formatting, linting, tests, coverage, builds, artifact checks, and release
