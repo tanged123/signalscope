@@ -5,19 +5,21 @@ use std::{
     thread,
 };
 
+use base64::Engine;
 use scope_core::{
     cache, compute, expr,
     ingest::SUPPORTED_FORMATS,
     preferences,
     pyramid::Pyramid,
-    session,
+    session, snapshot,
     store::{Signal, SignalId, SignalStore, Source, SourceId},
 };
 use scope_protocol::{
-    DerivedRequest, Envelope, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState,
+    DerivedRequest, Envelope, ExportEstimate, ExportEstimateRequest, ExportFileKind, ExportScope,
+    ExportWriteRequest, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState,
     IngestStatus, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
-    SampleRequest, SampleResponse, SampleSeries, SaveSessionRequest, SessionDialogMode,
-    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest, SaveSessionRequest,
+    SessionDialogMode, SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -535,6 +537,139 @@ async fn pick_session_path(
     ))
 }
 
+fn normalized_export_save_path(mut path: PathBuf, extension: &str) -> PathBuf {
+    if path.extension().is_none_or(std::ffi::OsStr::is_empty) {
+        path.set_extension(extension);
+    }
+    path
+}
+
+fn template_path(app: &AppHandle) -> Result<PathBuf, String> {
+    use tauri::path::BaseDirectory;
+
+    if let Ok(path) = app
+        .path()
+        .resolve("snapshot-template.html", BaseDirectory::Resource)
+    {
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../frontend/dist/snapshot-template.html");
+    if development.exists() {
+        return Ok(development);
+    }
+    Err("snapshot template is missing; run ./scripts/build.sh web".to_owned())
+}
+
+fn estimate_for(
+    data: &DataState,
+    session: &session::Session,
+    session_json: &str,
+    template_bytes: u64,
+) -> ExportEstimate {
+    let base = template_bytes + session_json.len() as u64;
+    let visible = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::Visible);
+    let all = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::All);
+    ExportEstimate {
+        visible_bytes: base + snapshot::estimated_bytes(&visible, &data.store, &data.pyramids),
+        all_bytes: base + snapshot::estimated_bytes(&all, &data.store, &data.pyramids),
+    }
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn export_estimate(
+    request: Envelope<ExportEstimateRequest>,
+    app: AppHandle,
+    state: State<'_, Mutex<DataState>>,
+) -> Result<Envelope<ExportEstimate>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let template_bytes = std::fs::metadata(template_path(&app)?)
+        .map_err(|error| error.to_string())?
+        .len();
+    let data = state.lock().map_err(|error| error.to_string())?;
+    Ok(Envelope::new(estimate_for(
+        &data,
+        &session,
+        &request.session_json,
+        template_bytes,
+    )))
+}
+
+#[tauri::command]
+async fn export_write(
+    request: Envelope<ExportWriteRequest>,
+    app: AppHandle,
+) -> Result<Envelope<Option<String>>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let dialog_app = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .add_filter("HTML snapshot", &["html"])
+            .set_file_name("snapshot.html")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(path) = picked.and_then(|file| file.into_path().ok()) else {
+        return Ok(Envelope::new(None));
+    };
+    let path = normalized_export_save_path(path, "html");
+    let template =
+        std::fs::read_to_string(template_path(&app)?).map_err(|error| error.to_string())?;
+    let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let html = {
+        let state = app.state::<Mutex<DataState>>();
+        let data = state.lock().map_err(|error| error.to_string())?;
+        let export = snapshot::plan(&session, &data.store, &data.pyramids, request.scope);
+        let manifest = snapshot::bake(&export, &data.store, &data.pyramids, &session)
+            .map_err(|error| error.to_string())?;
+        snapshot::inject(&template, &manifest).map_err(|error| error.to_string())?
+    };
+    let staged = path.with_extension("html.tmp");
+    std::fs::write(&staged, html).map_err(|error| error.to_string())?;
+    std::fs::rename(&staged, &path).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(Some(path.display().to_string())))
+}
+
+#[tauri::command]
+async fn save_export_file(
+    request: Envelope<SaveExportFileRequest>,
+    app: AppHandle,
+) -> Result<Envelope<Option<String>>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let (label, extension) = match request.kind {
+        ExportFileKind::Png => ("PNG image", "png"),
+        ExportFileKind::Csv => ("CSV", "csv"),
+    };
+    let file_name = request.file_name.clone();
+    let dialog_app = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .add_filter(label, &[extension])
+            .set_file_name(&file_name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(path) = picked.and_then(|file| file.into_path().ok()) else {
+        return Ok(Envelope::new(None));
+    };
+    let path = normalized_export_save_path(path, extension);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&request.data_base64)
+        .map_err(|error| error.to_string())?;
+    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(Some(path.display().to_string())))
+}
+
 const PREFERENCES_FILE: &str = "preferences.json";
 
 fn preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -593,6 +728,9 @@ pub fn run() {
             load_session,
             reset_session,
             pick_session_path,
+            export_estimate,
+            export_write,
+            save_export_file,
             load_preferences,
             save_preferences
         ])
@@ -693,6 +831,30 @@ mod tests {
             normalized_session_save_path(PathBuf::from("/tmp/goodstuff.signalscope.json")),
             PathBuf::from("/tmp/goodstuff.signalscope.json")
         );
+    }
+
+    #[test]
+    fn export_paths_gain_the_requested_extension() {
+        assert_eq!(
+            normalized_export_save_path(PathBuf::from("/tmp/snap"), "html"),
+            PathBuf::from("/tmp/snap.html")
+        );
+        assert_eq!(
+            normalized_export_save_path(PathBuf::from("/tmp/snap.html"), "html"),
+            PathBuf::from("/tmp/snap.html")
+        );
+    }
+
+    #[test]
+    fn estimate_covers_both_scopes_from_state() {
+        let (mut data, _) = data_with_signal("input/x");
+        let signal = data.store.signal_by_path("input/x").expect("signal");
+        data.pyramids
+            .insert(signal.id, Pyramid::from_signal(signal));
+        let session = session::Session::default();
+        let estimate = estimate_for(&data, &session, "{}", 1_000);
+        assert!(estimate.all_bytes > estimate.visible_bytes);
+        assert!(estimate.visible_bytes >= 1_000);
     }
 
     #[test]

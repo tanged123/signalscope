@@ -65,6 +65,7 @@ Canonical commands:
 ./scripts/format.sh                   apply treefmt formatting in place
 ./scripts/format.sh --check           check an isolated copy; writes nothing
 ./scripts/build.sh web|native         frontend or native bundles
+./scripts/export.sh                   bake a self-contained HTML snapshot
 ./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
 ./scripts/build.sh appimage           Ubuntu/FHS AppImage build
 ./scripts/coverage.sh                 Rust + frontend LCOV
