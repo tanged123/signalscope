@@ -65,13 +65,23 @@ plugins.
 ### Identity and naming
 
 Split identity into `(source_id, local_path)` with the display path
-composed as `prefix/local_path`. The prefix is a per-source attribute
-assigned **deterministically**: canonical source paths are sorted
-before assignment, so re-ingesting the same inputs always yields the
-same prefixes regardless of worker commit order (sessions and
-snapshot determinism both depend on display-path stability).
-`DuplicateSignal` then guards only genuine collisions inside one
-source.
+composed as `prefix/local_path`. The store's duplicate index,
+transaction rollback, and lookups key on `(source_id, local_path)`;
+display paths become presentation values whose uniqueness follows
+from unique prefixes, with `signal_by_path` kept as the resolution
+step for session references. `DuplicateSignal` then guards only
+genuine collisions inside one source.
+
+Prefixes and `source_id`s must be stable against both worker commit
+order and later workspace changes, so neither may derive from rank
+in the current batch: an ordinal suffix renumbers every later source
+when one file is added or removed. Instead the prefix derives from
+the source's own canonical path (file stem, disambiguated with
+parent-directory segments), both are pre-assigned at batch
+registration before any worker decodes, and the session persists the
+source→prefix map so unchanged sources keep their display paths when
+a workspace grows. Like every wire `u64`, `source_id` uses the
+schema's string representation at the TypeScript boundary.
 
 This changes every MCAP path (bare today) and is therefore a breaking
 session-schema change with a real migration, not a prefix cosmetic.
@@ -94,10 +104,10 @@ consequence is retired):
   registration becomes a host-side commit step. The cache-hit load
   path already has exactly this shape and becomes the only shape.
 - `IngestBatchRequest { paths }` (the shell expands directory picks
-  and globs) registers one job. Decode and pyramid-build run on a
+  and globs) registers one job and pre-assigns every file's
+  `source_id` and prefix up front. Decode and pyramid-build run on a
   bounded worker pool off the store lock; each finished file commits
-  under a short write lock via the per-file transaction, with its
-  pre-assigned prefix.
+  under a short write lock via the per-file transaction.
 - Failure policy is per-file: a sweep must not abort at run 517.
   Failed files land in the batch summary; succeeded runs stay
   registered. Single-file ingest keeps today's atomicity.
@@ -108,9 +118,11 @@ consequence is retired):
 - Session restore switches to the same batch path, fixing the
   sequential re-ingest on launch.
 - Peak RSS is bounded by workers × (file bytes + columns + one sort
-  copy) until decoders stream. Making the CSV decoder genuinely
-  streaming belongs to this phase; MCAP stays whole-file (ADR 0009)
-  until the out-of-core work.
+  copy + the file's pyramid bins — the dominant term at ~7.5× the
+  columns until the P3 compactions land). Worker-count defaults size
+  against that full bound, not the decode share alone. Making the
+  CSV decoder genuinely streaming belongs to this phase; MCAP stays
+  whole-file (ADR 0009) until the out-of-core work.
 
 ### Source sets and ensemble queries
 
@@ -210,9 +222,12 @@ behind the current API (`Arc<[f64]>` cannot wrap a mapped region):
 - Sidecars live beside the source today, which fails for the normal
   Monte Carlo case of a read-only or network-mounted results
   directory, and write failure is currently non-fatal — impossible
-  once the store depends on the files. A cache root (an ADR 0023
-  amendment with a preferences schema bump) becomes the fallback and
-  the spill target during ingest.
+  once the store depends on the files. A guaranteed-writable,
+  app-owned cache root (an ADR 0023 amendment with a preferences
+  schema bump) becomes the fallback and the spill target during
+  ingest, with entries keyed by a source fingerprint (canonical
+  path, size, mtime) and reclaimed by LRU under a configurable size
+  cap.
 - Derived signals have no backing file; their columns spill to the
   cache root. Set-scoped derived signals — apply an expression per
   member, band the result, which is the actual Monte Carlo ask —
@@ -228,9 +243,16 @@ Three tiers, each with a different author in mind.
 Replace the `SourceFormat` enum with a registry of format providers:
 `{ id, label, extensions, sniff(&[u8]) -> confidence, decoder() }`.
 Dispatch, `SUPPORTED_FORMATS`, and the shell's picker filters derive
-from it. Sniffing reads a fixed probe window, highest confidence
-wins, ties resolve by registration order, and zero confidence falls
-back to CSV-like — preserving today's test-locked total dispatch.
+from it. Sniffing reads a fixed probe window; selection is
+deterministic and independent of registration order: explicit
+provider priority first, then stable provider id as the tie-break,
+and the session records the provider id chosen per source so reopen
+reproduces the same decode. Zero confidence no longer falls through
+to CSV unconditionally — the CSV provider claims anything that
+passes a text-plausibility gate (short text files keep working), and
+input nothing claims fails closed with an unsupported-format error
+naming the known formats, a deliberate behavior change from today's
+test-locked total dispatch where binary garbage parses as CSV.
 The registry's justification is runtime registration for recipes and
 plugins, not the (small) edit cost of built-ins.
 
@@ -270,8 +292,12 @@ no isolation at all, so subprocess plugins, if offered, are an
 explicitly-trusted developer mode gated on per-executable
 registration in preferences, never discovered from data directories.
 The sandboxed path is WASM (wasmtime/WIT: no filesystem, no
-network). Second, one transport and one encoding ship first, not a
-matrix. Plugins are native-host-only and never enter the frontend or
+network), and the sandbox includes host-enforced resource limits,
+not just capability denial: fuel/deadline budgets, a memory cap, and
+maximum batch and total output sizes, with the host terminating and
+rolling back any module that exceeds them or stops responding to
+cancellation. Second, one transport and one encoding ship first, not
+a matrix. Plugins are native-host-only and never enter the frontend or
 snapshots.
 
 ## Protocol and session impact
@@ -281,7 +307,9 @@ cannot share one bump:
 
 - P1: protocol bump (batch job shapes, `source_id`/`local_path` on
   `SignalSummary`, registry-derived formats listing) and a
-  **breaking** session bump (display-path rewrite migration above).
+  **breaking** session bump (display-path rewrite migration above,
+  plus the persisted source→prefix map and per-source format
+  provider id).
 - P2: protocol bump (set summaries, ensemble tiles), session bump
   (set membership), snapshot manifest addition for ensemble levels.
 - P3: sidecar format version; no wire change expected.
