@@ -169,9 +169,27 @@ jobs:
           path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
+  windows:
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/cargo-cache
+        with:
+          target-key: windows
+      - run: ./scripts/ci.sh windows
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-nsis
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
   tag:
     if: github.ref == 'refs/heads/main'
-    needs: [version, flake, quality, rust, frontend, e2e, build, appimage]
+    needs: [version, flake, quality, rust, frontend, e2e, build, appimage, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -190,7 +208,7 @@ jobs:
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
   publish:
-    needs: [tag, build, appimage]
+    needs: [tag, build, appimage, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
