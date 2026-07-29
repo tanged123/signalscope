@@ -31,6 +31,12 @@ trap 'rmdir "$asset_dir"' EXIT
 expect_status 2 env GH_TOKEN=test \
   "$script_dir/release.sh" publish v1.2.3-trailing "$asset_dir"
 
+# The Windows installer script must refuse to run anywhere but Windows.
+case "$(uname -s)" in
+MINGW* | MSYS* | CYGWIN*) ;;
+*) expect_status 1 "$script_dir/build-windows.sh" ;;
+esac
+
 if [ "$failures" -ne 0 ]; then
   exit 1
 fi
