@@ -146,21 +146,6 @@ pub fn plan(
     }
 }
 
-fn clip(bins: Vec<EnvelopeBin>, window: Option<(f64, f64)>) -> Vec<EnvelopeBin> {
-    let Some((t0, t1)) = window else {
-        return bins;
-    };
-    if bins.iter().all(|bin| bin.t1 < t0 || bin.t0 > t1) {
-        return Vec::new();
-    }
-    let start = bins.partition_point(|bin| bin.t1 < t0).saturating_sub(1);
-    let end = bins
-        .partition_point(|bin| bin.t0 <= t1)
-        .saturating_add(1)
-        .min(bins.len());
-    bins[start..end].to_vec()
-}
-
 fn signal_summary(signal: &Signal) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
@@ -196,8 +181,7 @@ pub fn bake(
             continue;
         };
         let levels = (entry.finest_level..pyramid.level_count())
-            .filter_map(|index| pyramid.level(index))
-            .map(|bins| clip(bins, entry.window))
+            .filter_map(|index| pyramid.level_window(index, entry.window))
             .collect();
         signals.push(BakedSignal {
             summary: signal_summary(signal),
@@ -222,7 +206,7 @@ const SLOT_MARKER: &str = "id=\"signalscope-baked-data\"";
 /// malformed, and [`SnapshotError::Serialize`] when encoding fails.
 pub fn inject(template: &str, manifest: &SnapshotManifest) -> Result<String, SnapshotError> {
     let sealed = scope_protocol::Envelope::new(manifest.clone());
-    let json = serde_json::to_string(&sealed)?.replace("</script", "<\\/script");
+    let json = serde_json::to_string(&sealed)?.replace('<', "\\u003c");
     let marker = template
         .find(SLOT_MARKER)
         .ok_or(SnapshotError::MissingSlot)?;
@@ -519,9 +503,9 @@ mod tests {
     }
 
     #[test]
-    fn inject_escapes_closing_script_sequences() {
+    fn inject_escapes_case_insensitive_script_terminators() {
         let mut session = Session::default();
-        session.tabs[0].title = "</script><script>alert(1)</script>".to_owned();
+        session.tabs[0].title = "</ScRiPt><script>alert(1)</SCRIPT>".to_owned();
         let (store, pyramids) = store_with(&[]);
         let export = plan(&session, &store, &pyramids, ExportScope::All);
         let manifest = bake(&export, &store, &pyramids, &session).expect("bake");
@@ -530,8 +514,8 @@ mod tests {
             &manifest,
         )
         .expect("inject");
-        assert_eq!(html.matches("</script").count(), 1);
-        assert!(html.contains("<\\/script"));
+        assert_eq!(html.to_ascii_lowercase().matches("</script").count(), 1);
+        assert!(html.contains("\\u003c/ScRiPt"));
     }
 
     #[test]

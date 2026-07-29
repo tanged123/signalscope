@@ -1309,11 +1309,7 @@ export class AppShell {
   private async restoreSession(): Promise<void> {
     const baked = this.plane.bakedSessionJson;
     if (baked !== undefined && baked !== "") {
-      try {
-        this.workspace.replace(parseBakedSession(baked));
-      } catch (error: unknown) {
-        this.reportError(error);
-      }
+      this.workspace.replace(parseBakedSession(baked));
       return;
     }
     await this.loadSession(null);

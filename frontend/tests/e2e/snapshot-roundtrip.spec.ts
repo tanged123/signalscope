@@ -38,4 +38,22 @@ test.describe("exported snapshot round trip", () => {
     ).length;
     expect(bytes).toBeLessThan(2_000_000);
   });
+
+  test("rejects an unsupported session instead of partially restoring", async ({
+    page,
+  }) => {
+    const html = readFileSync(artifact, "utf8");
+    const malformed = html.replace(
+      '\\"schema_version\\":10',
+      '\\"schema_version\\":999',
+    );
+    expect(malformed).not.toBe(html);
+
+    await page.setContent(malformed);
+
+    await expect(page.locator("#app")).toHaveText(
+      /SignalScope failed to start: snapshot session schema 999/,
+    );
+    await expect(page.locator(".panel")).toHaveCount(0);
+  });
 });

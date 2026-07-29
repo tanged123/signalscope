@@ -137,10 +137,8 @@ impl Pyramid {
         self.merged.len() + 1
     }
 
-    /// Materializes one logical level. Level 0 is synthesized from the raw
-    /// columns. Bounded-cost access is [`Pyramid::query`]; this accessor
-    /// exists for tests and snapshot baking, where materializing a full
-    /// level is intentional.
+    /// Materializes one complete logical level. Level 0 is synthesized from
+    /// the raw columns.
     #[must_use]
     pub fn level(&self, index: usize) -> Option<Vec<EnvelopeBin>> {
         if index == 0 {
@@ -148,6 +146,48 @@ impl Pyramid {
         } else {
             self.merged.get(index - 1).cloned()
         }
+    }
+
+    /// Materializes one logical level, bounded to a time window when present.
+    #[must_use]
+    pub fn level_window(
+        &self,
+        index: usize,
+        window: Option<(f64, f64)>,
+    ) -> Option<Vec<EnvelopeBin>> {
+        let Some((t0, t1)) = window else {
+            return self.level(index);
+        };
+        if index == 0 {
+            if self.time.first().is_none_or(|first| t1 < *first)
+                || self.time.last().is_none_or(|last| t0 > *last)
+            {
+                return Some(Vec::new());
+            }
+            let start = self
+                .time
+                .partition_point(|time| *time < t0)
+                .saturating_sub(1);
+            let end = self
+                .time
+                .partition_point(|time| *time <= t1)
+                .saturating_add(1)
+                .min(self.time.len());
+            return Some(self.synthesize_raw(start, end));
+        }
+
+        let level = self.merged.get(index - 1)?;
+        if level.first().is_none_or(|first| t1 < first.t0)
+            || level.last().is_none_or(|last| t0 > last.t1)
+        {
+            return Some(Vec::new());
+        }
+        let start = level.partition_point(|bin| bin.t1 < t0).saturating_sub(1);
+        let end = level
+            .partition_point(|bin| bin.t0 <= t1)
+            .saturating_add(1)
+            .min(level.len());
+        Some(level[start..end].to_vec())
     }
 
     #[must_use]
@@ -166,11 +206,9 @@ impl Pyramid {
         let raw_start = self.time.partition_point(|time| *time < t0);
         let raw_end = self.time.partition_point(|time| *time <= t1);
         if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
-            let start = raw_start.saturating_sub(1);
-            let end = raw_end.saturating_add(1).min(self.time.len());
             return PyramidQuery {
                 level: 0,
-                bins: self.synthesize_raw(start, end),
+                bins: self.level_window(0, Some((t0, t1))).unwrap_or_default(),
             };
         }
 
@@ -179,15 +217,11 @@ impl Pyramid {
             .iter()
             .position(|level| count_overlapping(level, t0, t1) <= target)
             .unwrap_or_else(|| self.merged.len().saturating_sub(1));
-        let level = &self.merged[level_index];
-        let start = level.partition_point(|bin| bin.t1 < t0).saturating_sub(1);
-        let end = level
-            .partition_point(|bin| bin.t0 <= t1)
-            .saturating_add(1)
-            .min(level.len());
         PyramidQuery {
             level: u32::try_from(level_index + 1).unwrap_or(u32::MAX),
-            bins: level[start..end].to_vec(),
+            bins: self
+                .level_window(level_index + 1, Some((t0, t1)))
+                .unwrap_or_default(),
         }
     }
 
@@ -301,6 +335,24 @@ mod tests {
             query.bins.iter().map(|bin| bin.t0).collect::<Vec<_>>(),
             [1.0, 2.0, 3.0]
         );
+    }
+
+    #[test]
+    fn windowed_levels_materialize_only_the_window_and_neighbors() {
+        let time = (0..100_000).map(f64::from).collect::<Vec<_>>();
+        let pyramid = Pyramid::from_samples(&time, &time);
+        let levels = (0..pyramid.level_count())
+            .map(|index| {
+                pyramid
+                    .level_window(index, Some((50_000.0, 50_010.0)))
+                    .expect("logical level")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(levels[0].len(), 13);
+        assert_eq!(levels[0].first().map(|bin| bin.t0), Some(49_999.0));
+        assert_eq!(levels[0].last().map(|bin| bin.t1), Some(50_011.0));
+        assert!(levels.iter().all(|level| level.len() <= 13));
     }
 
     #[test]
