@@ -179,7 +179,10 @@ jobs:
       - uses: ./.github/actions/cargo-cache
         with:
           target-key: windows
-      - run: ./scripts/ci.sh windows
+      - env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: ./scripts/ci.sh windows
         shell: bash
       - uses: actions/upload-artifact@v4
         with:
