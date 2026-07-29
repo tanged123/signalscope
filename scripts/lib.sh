@@ -48,3 +48,10 @@ quality_checks() {
   pnpm --filter @signalscope/frontend check:unused
   zizmor .github/workflows/ .github/actions/
 }
+
+bake_roundtrip_artifact() {
+  "$signalscope_scripts_dir/export.sh" \
+    --data frontend/tests/e2e/fixtures/roundtrip.csv \
+    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
+    --out build/export/roundtrip.html
+}

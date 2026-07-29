@@ -25,5 +25,6 @@ Accepted decisions:
 21. [Desktop-only input](0021-desktop-only-input.md)
 22. [Durable session persistence](0022-durable-session-persistence.md)
 23. [Global preferences file](0023-global-preferences-file.md)
+24. [Snapshot manifest and export budget](0024-snapshot-manifest-and-export-budget.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

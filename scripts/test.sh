@@ -40,12 +40,14 @@ frontend)
   test_frontend
   ;;
 e2e)
+  bake_roundtrip_artifact
   pnpm e2e
   ;;
 full)
   test_core
   test_frontend
   cargo test -p signalscope-shell
+  bake_roundtrip_artifact
   pnpm e2e
   ;;
 -h | --help | help)
