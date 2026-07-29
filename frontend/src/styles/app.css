@@ -26,7 +26,7 @@ input {
 body {
   background: var(--surface-void);
   color: var(--fg-1);
-  font-size: 13px;
+  font-size: 1rem;
   line-height: 1.3;
   -webkit-font-smoothing: antialiased;
 }
@@ -77,7 +77,7 @@ button {
   gap: 7px;
   margin-right: 4px;
   color: var(--fg-1);
-  font-size: 10px;
+  font-size: 0.7692rem;
   font-weight: 650;
   letter-spacing: 0.08em;
 }
@@ -122,13 +122,13 @@ button {
   height: 22px;
   padding: 0;
   color: var(--fg-2);
-  font: 15px var(--font-mono);
+  font: 1.1538rem var(--font-mono);
 }
 
 .session-identity {
   overflow: hidden;
   color: var(--fg-3);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -136,7 +136,7 @@ button {
 .workspace-name {
   color: var(--fg-3);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 0.8462rem;
 }
 
 .workspace-strip {
@@ -176,7 +176,7 @@ button {
   flex: 1;
   padding: 0 8px;
   color: inherit;
-  font-size: 10.5px;
+  font-size: 0.8077rem;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -187,7 +187,7 @@ button {
   flex: none;
   padding: 0 7px;
   color: var(--fg-4);
-  font: 9px var(--font-mono);
+  font: 0.6923rem var(--font-mono);
 }
 
 .workspace-tab-close:hover,
@@ -203,7 +203,7 @@ button {
 .workspace-tab-add {
   min-width: 30px;
   border-right: 1px solid var(--border);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .status-button.active {
@@ -215,7 +215,7 @@ button {
   flex: none;
   padding: 0 9px;
   color: var(--fg-4);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .planned,
@@ -264,7 +264,7 @@ button {
   padding: 4px 5px;
   border-radius: 2px;
   color: var(--fg-2);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
   text-align: left;
 }
 
@@ -305,7 +305,7 @@ button {
 
 .window-readout {
   color: var(--fg-2);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .signal-tree {
@@ -364,13 +364,13 @@ button {
   outline: 0;
   background: transparent;
   color: var(--fg-1);
-  font: 11px var(--font-mono);
+  font: 0.8462rem var(--font-mono);
 }
 
 .tree-heading {
   padding: 8px 12px 4px;
   color: var(--fg-3);
-  font-size: 10px;
+  font-size: 0.7692rem;
   letter-spacing: 0.08em;
 }
 
@@ -383,14 +383,14 @@ button {
 
 .signal-value {
   color: var(--fg-3);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .source-footer {
   padding: 7px 10px;
   border-top: 1px solid var(--border-faint);
   color: var(--fg-3);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .source-row {
@@ -451,7 +451,7 @@ button {
   background: var(--amber-3);
   border-top: 1px dashed var(--amber-7);
   color: var(--amber-7);
-  font: 10.5px var(--font-mono);
+  font: 0.8077rem var(--font-mono);
   inset: auto 0 0;
   pointer-events: none;
 }
@@ -501,7 +501,7 @@ button {
 .mode-pill {
   padding: 1px 6px;
   color: var(--fg-3);
-  font: 9px var(--font-mono);
+  font: 0.6923rem var(--font-mono);
 }
 
 .mode-pill.active {
@@ -519,7 +519,7 @@ button {
   border: 1px dashed var(--border-strong);
   border-radius: 2px;
   color: var(--fg-2);
-  font: 10.5px var(--font-mono);
+  font: 0.8077rem var(--font-mono);
 }
 
 .axis-chip[hidden] {
@@ -557,7 +557,7 @@ button {
   align-items: center;
   border-radius: 2px;
   color: var(--fg-2);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .legend-chip:hover {
@@ -618,7 +618,7 @@ button {
   border: 1px solid var(--border-strong);
   border-radius: 2px;
   color: var(--fg-2);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .legend-overflow:hover,
@@ -664,7 +664,7 @@ button {
 .panel-mode-note {
   flex: none;
   color: var(--fg-4);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .panel-mode-note[hidden] {
@@ -694,13 +694,13 @@ button {
   padding: 0 4px;
   border-right: 1px solid var(--border-strong);
   color: var(--fg-4);
-  font-size: 9px;
+  font-size: 0.6923rem;
 }
 
 .panel-action {
   padding: 2px 5px;
   color: var(--fg-3);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .plot-wrap {
@@ -729,7 +729,7 @@ button {
 
 .panel-axis-toggle {
   color: var(--fg-4);
-  font-size: 10px;
+  font-size: 0.7692rem;
   white-space: nowrap;
 }
 
@@ -741,7 +741,7 @@ button {
   background: var(--surface-0);
   border-top: 1px solid var(--border-faint);
   color: var(--fg-2);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -779,14 +779,14 @@ button {
   padding: 6px 10px;
   border-top: 1px solid var(--border);
   color: var(--fg-2);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .annotations-heading {
   margin-bottom: 3px;
   color: var(--fg-4);
-  font-size: 9px;
+  font-size: 0.6923rem;
   letter-spacing: 0.08em;
 }
 
@@ -833,7 +833,7 @@ button {
   z-index: 3;
   width: 130px;
   padding: 1px 4px;
-  font: 9.5px var(--font-mono);
+  font: 0.7308rem var(--font-mono);
 }
 
 .axis-label-editor-y {
@@ -863,7 +863,7 @@ button {
   border-radius: 2px;
   background: var(--surface-2);
   color: var(--fg-2);
-  font: 10.5px var(--font-mono);
+  font: 0.8077rem var(--font-mono);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
@@ -900,7 +900,7 @@ button {
   border-radius: 2px;
   background: var(--surface-2);
   color: var(--fg-2);
-  font: 10.5px var(--font-mono);
+  font: 0.8077rem var(--font-mono);
   pointer-events: none;
 }
 
@@ -917,7 +917,7 @@ button {
   border-radius: 2px;
   background: var(--surface-2);
   box-shadow: var(--elev-2);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
 }
 
 .inspector-path {
@@ -964,7 +964,7 @@ button {
   background: var(--surface-3);
   color: var(--fg-2);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
   cursor: pointer;
 }
 
@@ -1028,7 +1028,7 @@ button {
 
 .formula-mark {
   color: var(--amber-7);
-  font: 11px var(--font-mono);
+  font: 0.8462rem var(--font-mono);
 }
 
 .formula-symbol {
@@ -1043,7 +1043,7 @@ button {
   outline: 0;
   background: transparent;
   color: var(--fg-2);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
 }
 
 .formula-input::placeholder {
@@ -1054,7 +1054,7 @@ button {
   padding-right: 8px;
   color: var(--status-error);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
 }
 
 .formula-help-button {
@@ -1063,7 +1063,7 @@ button {
   border: 1px solid var(--border-strong);
   border-radius: 2px;
   color: var(--fg-2);
-  font: 10.5px var(--font-mono);
+  font: 0.8077rem var(--font-mono);
 }
 
 .formula-help-button:hover,
@@ -1085,7 +1085,7 @@ button {
   border-radius: 2px;
   background: var(--surface-2);
   color: var(--fg-3);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
 }
 
 .formula-help-popover code {
@@ -1137,7 +1137,7 @@ button {
 
 .formula-error-guidance {
   color: var(--fg-3);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .status-bar {
@@ -1149,7 +1149,7 @@ button {
   background: var(--surface-1);
   border-width: 1px 0 0;
   color: var(--fg-3);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .status-bar,
@@ -1179,7 +1179,7 @@ button {
   padding: 1px 6px;
   border-radius: 2px;
   color: var(--fg-3);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .source-truth,
@@ -1225,7 +1225,7 @@ button {
 .follow-slot {
   padding: 0;
   color: var(--fg-4);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .palette-hints {
@@ -1265,7 +1265,7 @@ button {
   padding: 0 8px;
   border-right: 1px solid var(--border);
   color: var(--fg-4);
-  font: 9px var(--font-mono);
+  font: 0.6923rem var(--font-mono);
   letter-spacing: 0.08em;
 }
 
@@ -1274,7 +1274,7 @@ button {
   padding: 0 9px;
   border-right: 1px solid var(--border);
   color: var(--fg-3);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
 }
 
 .maximized-panel-tab:hover,
@@ -1318,7 +1318,7 @@ button {
   display: grid;
   place-items: center;
   color: var(--fg-3);
-  font: 10.5px var(--font-mono);
+  font: 0.8077rem var(--font-mono);
 }
 
 .workspace-empty {
@@ -1331,12 +1331,12 @@ button {
 }
 
 .empty-headline {
-  font-size: 12px;
+  font-size: 0.9231rem;
 }
 
 .empty-hint {
   color: var(--fg-4);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .workspace.drop-target {
@@ -1380,7 +1380,7 @@ button {
   gap: 5px;
   border-radius: 2px;
   color: var(--fg-2);
-  font-size: 11px;
+  font-size: 0.8462rem;
   text-align: left;
 }
 
@@ -1398,7 +1398,7 @@ button {
   flex: none;
   padding: 0 2px;
   color: var(--fg-4);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .tree-star.active {
@@ -1409,7 +1409,7 @@ button {
   margin-left: 6px;
   color: var(--amber-7);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 0.7692rem;
 }
 
 .tree-derived-remove {
@@ -1428,7 +1428,7 @@ button {
 .tree-empty {
   padding: 4px 8px;
   color: var(--fg-4);
-  font-size: 10.5px;
+  font-size: 0.8077rem;
 }
 
 .legend-chip.muted .legend-name {
@@ -1443,7 +1443,7 @@ button {
 .ingest-progress {
   padding-bottom: 5px;
   color: var(--fg-2);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .palette-overlay {
@@ -1471,7 +1471,7 @@ button {
   outline: 0;
   background: var(--surface-2);
   color: var(--fg-1);
-  font: 13px var(--font-mono);
+  font: 1rem var(--font-mono);
 }
 
 .palette-row {
@@ -1481,7 +1481,7 @@ button {
   justify-content: space-between;
   padding: 6px 12px;
   color: var(--fg-2);
-  font-size: 11.5px;
+  font-size: 0.8846rem;
   text-align: left;
 }
 
@@ -1498,7 +1498,7 @@ button {
 
 .palette-hint {
   color: var(--fg-4);
-  font: 10px var(--font-mono);
+  font: 0.7692rem var(--font-mono);
 }
 
 .workbench.formula-collapsed {

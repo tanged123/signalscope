@@ -25,7 +25,8 @@ export interface Palette {
   grid: string;
   series: string[];
   sequential: string[];
-  fontMono: string;
+  fontPlot: string;
+  fontSize: number;
 }
 
 export interface RenderOptions {
@@ -87,12 +88,23 @@ export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 const DASH_CYCLE = ["solid", "dash", "dot"] as const;
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
 
-function tickFont(palette: Palette): string {
-  return `9px ${palette.fontMono}`;
+function plotFontSize(styles: CSSStyleDeclaration): number {
+  const parsed = Number.parseFloat(styles.getPropertyValue("--plot-font-size"));
+  return Number.isFinite(parsed) ? parsed : 9;
 }
 
-function labelFont(palette: Palette): string {
-  return `9.5px ${palette.fontMono}`;
+export function tickFont(palette: {
+  fontPlot: string;
+  fontSize: number;
+}): string {
+  return `${String(palette.fontSize)}px ${palette.fontPlot}`;
+}
+
+export function labelFont(palette: {
+  fontPlot: string;
+  fontSize: number;
+}): string {
+  return `${String(palette.fontSize + 0.5)}px ${palette.fontPlot}`;
 }
 
 export function resolveSeriesStyle(
@@ -500,7 +512,11 @@ export class CanvasRenderer {
       sequential: SEQ_TOKENS.map((token) =>
         styles.getPropertyValue(token).trim(),
       ),
-      fontMono: styles.getPropertyValue("--font-mono").trim() || FALLBACK_MONO,
+      fontPlot:
+        styles.getPropertyValue("--font-plot").trim() ||
+        styles.getPropertyValue("--font-mono").trim() ||
+        FALLBACK_MONO,
+      fontSize: plotFontSize(styles),
     };
     return this.palette;
   }

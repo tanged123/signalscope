@@ -39,11 +39,17 @@ export interface SessionPort {
   pick(mode: SessionDialogMode): Promise<string | null>;
 }
 
+export interface PreferencesPort {
+  load(): Promise<string | null>;
+  save(preferencesJson: string): Promise<void>;
+}
+
 export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
   readonly session: SessionPort | null;
+  readonly preferences: PreferencesPort | null;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
@@ -75,6 +81,8 @@ export class TauriPlane implements DataPlane {
   readonly derived: DerivedPort;
 
   readonly session: SessionPort;
+
+  readonly preferences: PreferencesPort;
 
   constructor(private readonly invoke: TauriInternals["invoke"]) {
     this.ingest = {
@@ -133,6 +141,17 @@ export class TauriPlane implements DataPlane {
           }),
         ),
     };
+    this.preferences = {
+      load: async () =>
+        open(await this.invoke<Envelope<string | null>>("load_preferences")),
+      save: async (preferencesJson: string) => {
+        open(
+          await this.invoke<Envelope<null>>("save_preferences", {
+            request: seal(preferencesJson),
+          }),
+        );
+      },
+    };
   }
 
   async listSignals(): Promise<SignalSummary[]> {
@@ -181,6 +200,8 @@ export class BakedPlane implements DataPlane {
   readonly derived = null;
 
   readonly session = null;
+
+  readonly preferences = null;
 
   private readonly payload: BakedManifest["payload"];
 

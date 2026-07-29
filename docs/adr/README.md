@@ -24,5 +24,6 @@ Accepted decisions:
 20. [Three-strip chrome and hidden application menu](0020-three-strip-chrome-and-hidden-application-menu.md)
 21. [Desktop-only input](0021-desktop-only-input.md)
 22. [Durable session persistence](0022-durable-session-persistence.md)
+23. [Global preferences file](0023-global-preferences-file.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

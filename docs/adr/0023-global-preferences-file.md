@@ -1,0 +1,32 @@
+# ADR 0023: Global preferences file
+
+- Status: Accepted
+- Date: 2026-07-28
+
+## Context
+
+ADR 0022 made the per-workspace session the only durable store; theme lives
+there. The design handoff calls for appearance settings that follow the user,
+not the workspace. Font family and size preferences forced the decision.
+
+## Decision
+
+Appearance preferences (UI font family and size, plot font family and size)
+persist in `preferences.json` in the app data directory, governed by a
+dedicated versioned schema (`protocol/schema/scope-preferences.json`), code
+generation per ADR 0004, a migration ladder per ADR 0005, and atomic writes per
+ADR 0022.
+
+The frontend reaches it through a nullable `preferences` data-plane port; the
+baked snapshot host keeps in-memory defaults. Load failures and future schema
+versions fall back to defaults without rewriting the stored file.
+Command-usage frecency stays in local storage: it is a disposable cache, not
+user state. Theme remains in the session for now; migrating it to global
+preferences is an open follow-up.
+
+## Consequences
+
+Two durable stores exist with a clear split: session for workspace state and
+preferences for user appearance. Every preferences schema change needs a
+schema bump, migration rung, and TypeScript-to-Rust conformance fixture, like
+the session.

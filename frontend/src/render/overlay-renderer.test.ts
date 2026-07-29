@@ -14,7 +14,8 @@ const palette: OverlayPalette = {
   fg3: "#777",
   surface0: "#000",
   surface2: "#111",
-  fontMono: "monospace",
+  fontPlot: "monospace",
+  fontSize: 9,
   series: ["#407fd0"],
 };
 

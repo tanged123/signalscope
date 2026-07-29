@@ -22,7 +22,8 @@ export interface OverlayPalette {
   fg3: string;
   surface0: string;
   surface2: string;
-  fontMono: string;
+  fontPlot: string;
+  fontSize: number;
   series: string[];
 }
 
@@ -214,7 +215,7 @@ export class OverlayRenderer {
     palette: OverlayPalette,
   ): void {
     context.save();
-    context.font = `10px ${palette.fontMono}`;
+    context.font = `${String(palette.fontSize + 1)}px ${palette.fontPlot}`;
     state.annotations.forEach((annotation, index) => {
       if (
         annotation.x < layout.xRange.min ||
@@ -285,7 +286,7 @@ export class OverlayRenderer {
     context.stroke();
     context.restore();
     context.save();
-    context.font = `10px ${palette.fontMono}`;
+    context.font = `${String(palette.fontSize + 1)}px ${palette.fontPlot}`;
     const text = fitText(
       context,
       delta.label,
@@ -332,11 +333,20 @@ export class OverlayRenderer {
       fg3: token("--fg-3"),
       surface0: token("--surface-0"),
       surface2: token("--surface-2"),
-      fontMono: token("--font-mono") || '"JetBrains Mono", monospace',
+      fontPlot:
+        token("--font-plot") ||
+        token("--font-mono") ||
+        '"JetBrains Mono", monospace',
+      fontSize: overlayPlotFontSize(styles),
       series: SERIES_TOKENS.map((name) => token(name)),
     };
     return this.palette;
   }
+}
+
+function overlayPlotFontSize(styles: CSSStyleDeclaration): number {
+  const parsed = Number.parseFloat(styles.getPropertyValue("--plot-font-size"));
+  return Number.isFinite(parsed) ? parsed : 9;
 }
 
 /**

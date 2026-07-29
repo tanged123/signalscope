@@ -2,10 +2,29 @@ import {
   CommandRegistry,
   formatCombo,
   PLANNED_TITLE,
+  reservedWhileEditing,
+  setEditingReservedCombos,
   type Command,
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
+import { browserStorage, CommandUsage } from "../app/frecency";
+import {
+  HistoryStack,
+  historySnapshot,
+  restoreTransientSessionState,
+} from "../app/history";
 import { runIngest } from "../app/ingest";
+import {
+  applyPreferences,
+  clampPlotFontSize,
+  clampUiFontSize,
+  defaultPreferences,
+  FONT_FAMILIES,
+  fontLabel,
+  parsePreferences,
+  PLOT_FONT_SIZE,
+  UI_FONT_SIZE,
+} from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
@@ -27,6 +46,7 @@ import type {
   PanelState,
   Session,
 } from "../generated/session";
+import type { Preferences } from "../generated/preferences";
 import {
   CommandPalette,
   type PaletteEntry,
@@ -50,6 +70,8 @@ const SAMPLE_CAP = 8192;
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
+  private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
+  private readonly history = new HistoryStack();
   private signals: SignalSummary[] = [];
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
@@ -68,8 +90,13 @@ export class AppShell {
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
   private autosaveTimer: number | null = null;
+  private prefs: Preferences = defaultPreferences();
+  private prefsSaveTimer: number | null = null;
   private workspacePath: string | null = null;
   private dirty = false;
+  private restoringHistory = false;
+  private historyGestureKey: string | null = null;
+  private historyCoalesceTimer: number | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -78,7 +105,9 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    await this.loadPreferences();
     await this.restoreSession();
+    this.history.reset(historySnapshot(this.workspace.snapshot()));
     this.restoreTheme();
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
@@ -124,6 +153,7 @@ export class AppShell {
         },
         onSelectMode: (id, mode) => {
           this.transitionPanelMode(id, mode);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -138,6 +168,7 @@ export class AppShell {
         },
         onSetColorSignal: (id, path) => {
           this.workspace.setColorSignal(id, path);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -146,14 +177,22 @@ export class AppShell {
         },
         onToggleSeries: (id, path) => {
           this.workspace.toggleSeriesVisible(id, path);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onResized: () => {
           this.scheduleRender();
         },
-        onGesture: (_id, hint) => {
+        onGesture: (id, hint) => {
           required(this.root, ".gesture-hint").textContent = hint ?? "";
+          if (hint === null) {
+            this.historyGestureKey = null;
+            this.closeHistoryCoalescing();
+          } else {
+            this.historyGestureKey = `range:${id}`;
+            this.clearHistoryCoalesceTimer();
+          }
         },
         onCursor: (id, cursor, client) => {
           this.setCursor(id, cursor, client);
@@ -163,6 +202,7 @@ export class AppShell {
         },
         onYRange: (id, range) => {
           this.workspace.setPanelYRange(id, [range[0], range[1]]);
+          this.commitHistory(`range:${id}`);
           this.scheduleRender();
         },
         onXRange: (id, range) => {
@@ -177,14 +217,17 @@ export class AppShell {
             pinned_value: hit.pinnedValue,
             label: "",
           });
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
         onRemoveAnnotation: (id, annotationId) => {
           this.workspace.removeAnnotation(id, annotationId);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
         onEditAnnotationLabel: (id, annotationId, label) => {
           this.workspace.setAnnotationLabel(id, annotationId, label);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
         onFitView: (id) => {
@@ -192,11 +235,13 @@ export class AppShell {
         },
         onToggleStats: (id) => {
           this.workspace.toggleStats(id);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onToggleAxisStyle: (id) => {
           this.workspace.toggleAxisStyle(id);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
@@ -206,16 +251,19 @@ export class AppShell {
         },
         onEditAxisLabel: (id, axis, label) => {
           this.workspace.setAxisLabel(id, axis, label);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onSetSeriesStyle: (id, path, style) => {
           this.workspace.setSeriesStyle(id, path, style);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onRemoveSeries: (id, path) => {
           this.workspace.removeSeries(id, path);
+          this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
@@ -223,6 +271,7 @@ export class AppShell {
           void this.applyQuickTransform(path, kind);
         },
         onLayoutChanged: () => {
+          this.commitHistory();
           void this.refreshTiles();
         },
         onDropSignalNewPanel: (path) => {
@@ -252,6 +301,7 @@ export class AppShell {
         },
         onToggleFavorite: (path) => {
           this.workspace.toggleFavorite(path);
+          this.commitHistory();
           this.tree?.setFavorites(this.workspace.favorites());
         },
         onRemoveDerived: (path) => {
@@ -269,6 +319,9 @@ export class AppShell {
       },
     });
     this.registerCommands();
+    this.commands.onRun = (id) => {
+      this.usage.record(id);
+    };
     void new AppMenu(
       required<HTMLButtonElement>(this.root, ".menu-button"),
       this.commands,
@@ -305,6 +358,38 @@ export class AppShell {
       const delta = (window.t1 - window.t0) * 0.1 * direction;
       this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
     };
+    const undoCommand: Command = {
+      id: "undo",
+      title: "Undo",
+      keys: "mod+z",
+      section: "workspace",
+      group: "history",
+      enabled: () => this.history.canUndo(),
+      run: () => {
+        this.applyHistory(this.history.undo());
+      },
+    };
+    const redoCommand: Command = {
+      id: "redo",
+      title: "Redo",
+      keys: "mod+shift+z",
+      altKeys: ["mod+y"],
+      section: "workspace",
+      group: "history",
+      enabled: () => this.history.canRedo(),
+      run: () => {
+        this.applyHistory(this.history.redo());
+      },
+    };
+    this.commands.register(undoCommand);
+    this.commands.register(redoCommand);
+    setEditingReservedCombos(
+      [
+        undoCommand.keys,
+        redoCommand.keys,
+        ...(redoCommand.altKeys ?? []),
+      ].filter((keys): keys is string => keys !== undefined),
+    );
     this.commands.register({
       id: "open-files",
       title: "Open CSV or MCAP…",
@@ -380,6 +465,7 @@ export class AppShell {
         for (const panel of this.workspace.panels()) {
           if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
         }
+        this.commitHistory();
         this.workspaceView?.refreshPanelStates();
         this.renderTiles();
       },
@@ -570,6 +656,40 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "increase-plot-font",
+      title: "Plot font size: increase",
+      keys: "mod+=",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_font_size: this.prefs.plot_font_size + PLOT_FONT_SIZE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "decrease-plot-font",
+      title: "Plot font size: decrease",
+      keys: "mod+-",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_font_size: this.prefs.plot_font_size - PLOT_FONT_SIZE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "reset-plot-font",
+      title: "Plot font size: reset",
+      keys: "mod+0",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({ plot_font_size: PLOT_FONT_SIZE.default });
+      },
+    });
+    this.commands.register({
       id: "toggle-formula",
       title: "Toggle derived formula editor",
       keys: "e",
@@ -594,6 +714,16 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "open-settings",
+      title: "Settings…",
+      keys: "mod+,",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.palette?.open("settings");
+      },
+    });
+    this.commands.register({
       id: "go-to-signal",
       title: "Go to signal",
       keys: "mod+p",
@@ -615,7 +745,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.8.1");
+        this.showModeHelp("SignalScope 0.9.0");
       },
     });
     this.commands.register({
@@ -665,7 +795,6 @@ export class AppShell {
       ["open-recent", "Open Recent ▸", "file", "open"],
       ["export", "Export ▸ HTML · PNG · CSV", "file", "export"],
       ["annotations-dock", "Annotations dock", "view", "docks"],
-      ["font-size", "Font size ▸", "view", "display"],
       ["axes-default", "Axes default ▸", "view", "display"],
       ["series-palette", "Series palette ▸", "view", "display"],
       ["duplicate-workspace", "Duplicate Workspace", "workspace", "new"],
@@ -721,10 +850,79 @@ export class AppShell {
     });
   }
 
+  private settingsEntries(): PaletteEntry[] {
+    const cycleFont = (key: "ui_font_family" | "plot_font_family"): void => {
+      const index = FONT_FAMILIES.indexOf(this.prefs[key]);
+      const next = FONT_FAMILIES[(index + 1) % FONT_FAMILIES.length] ?? "inter";
+      this.updatePreferences({ [key]: next });
+    };
+    const sizeEntry = (
+      title: string,
+      key: "ui_font_size" | "plot_font_size",
+      step: number,
+    ): PaletteEntry => ({
+      title,
+      hint: `${String(this.prefs[key])}px`,
+      keepOpen: true,
+      run: () => {
+        this.updatePreferences({ [key]: this.prefs[key] + step });
+      },
+      adjust: (direction) => {
+        this.updatePreferences({ [key]: this.prefs[key] + direction * step });
+      },
+    });
+    return [
+      {
+        title: "Theme",
+        hint: this.workspace.theme(),
+        keepOpen: true,
+        run: () => {
+          this.toggleTheme();
+        },
+      },
+      {
+        title: "UI font",
+        hint: fontLabel(this.prefs.ui_font_family),
+        keepOpen: true,
+        run: () => {
+          cycleFont("ui_font_family");
+        },
+      },
+      {
+        title: "Plot font",
+        hint: fontLabel(this.prefs.plot_font_family),
+        keepOpen: true,
+        run: () => {
+          cycleFont("plot_font_family");
+        },
+      },
+      sizeEntry("UI font size", "ui_font_size", UI_FONT_SIZE.step),
+      sizeEntry("Plot font size", "plot_font_size", PLOT_FONT_SIZE.step),
+      {
+        title: "Reset appearance to defaults",
+        hint: "",
+        keepOpen: true,
+        run: () => {
+          const defaults = defaultPreferences();
+          this.updatePreferences({
+            ui_font_family: defaults.ui_font_family,
+            plot_font_family: defaults.plot_font_family,
+            ui_font_size: defaults.ui_font_size,
+            plot_font_size: defaults.plot_font_size,
+          });
+        },
+      },
+    ];
+  }
+
   private paletteEntries(mode: PaletteMode): PaletteEntry[] {
+    if (mode === "settings") return this.settingsEntries();
     // Planned and momentarily unavailable commands both stay listed so the
     // palette matches the menu, but each says why it will not run.
-    const commands = this.commands.listAll().map((command) => ({
+    const ranked = [...this.commands.listAll()].sort(
+      (left, right) => this.usage.score(right.id) - this.usage.score(left.id),
+    );
+    const commands = ranked.map((command) => ({
       title: command.title,
       hint: command.keys === undefined ? "" : formatCombo(command.keys),
       ...unavailableReason(command),
@@ -831,7 +1029,12 @@ export class AppShell {
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable);
-      if (editing && !event.metaKey && !event.ctrlKey) return;
+      if (
+        editing &&
+        ((!event.metaKey && !event.ctrlKey) || reservedWhileEditing(event))
+      ) {
+        return;
+      }
       if (this.commands.handleKey(event)) event.preventDefault();
     });
   }
@@ -912,7 +1115,81 @@ export class AppShell {
       `window ${state.t0.toFixed(3)} → ${state.t1.toFixed(3)} s`;
   }
 
+  /** Records the post-mutation state; no-op while restoring history. */
+  private commitHistory(coalesceKey?: string): void {
+    if (this.restoringHistory) return;
+    const key = this.historyGestureKey ?? coalesceKey;
+    this.history.commit(historySnapshot(this.workspace.snapshot()), key);
+    if (key === undefined || this.historyGestureKey !== null) {
+      this.clearHistoryCoalesceTimer();
+      return;
+    }
+    this.clearHistoryCoalesceTimer();
+    this.historyCoalesceTimer = window.setTimeout(() => {
+      this.historyCoalesceTimer = null;
+      this.history.commit(historySnapshot(this.workspace.snapshot()));
+    }, 250);
+  }
+
+  private closeHistoryCoalescing(): void {
+    this.clearHistoryCoalesceTimer();
+    this.history.commit(historySnapshot(this.workspace.snapshot()));
+  }
+
+  private clearHistoryCoalesceTimer(): void {
+    if (this.historyCoalesceTimer === null) return;
+    window.clearTimeout(this.historyCoalesceTimer);
+    this.historyCoalesceTimer = null;
+  }
+
+  private applyHistory(session: Session | null): void {
+    if (session === null) return;
+    this.restoringHistory = true;
+    try {
+      this.workspace.replace(
+        restoreTransientSessionState(session, this.workspace.snapshot()),
+      );
+      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspaceView?.invalidateTheme();
+      this.renderWindowReadout();
+      this.afterLayoutChange();
+      this.workspaceView?.setCursor(this.workspace.linkedTime().cursorT);
+      required(this.root, ".linked-toggle").classList.toggle(
+        "active",
+        this.workspace.linkedTime().linked,
+      );
+      this.tree?.setFavorites(this.workspace.favorites());
+    } finally {
+      this.restoringHistory = false;
+    }
+    void this.replayMissingDerived();
+  }
+
+  /**
+   * After an undo resurrects derived definitions the data plane no longer
+   * holds (their removal really deleted the signal), recreate them exactly
+   * as session load does. Unresolved definitions stay recorded.
+   */
+  private async replayMissingDerived(): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) return;
+    const missing = this.workspace
+      .derived()
+      .filter((definition) => !this.signalsByPath.has(definition.path));
+    if (missing.length === 0) return;
+    for (const definition of missing) {
+      try {
+        await port.create(definition.path, definition.expr);
+      } catch {
+        // Unresolved definitions stay recorded for a later source retry.
+      }
+    }
+    await this.reloadSignals();
+    await this.refreshTiles();
+  }
+
   private afterLayoutChange(): void {
+    this.commitHistory();
     this.workspaceTabs?.sync(
       this.workspace.tabs(),
       this.workspace.activeTabId(),
@@ -937,6 +1214,52 @@ export class AppShell {
         .catch((error: unknown) => {
           this.reportError(error);
         });
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  /** Loads global preferences; any failure falls back to defaults without
+   * touching the stored file (it is only written on a user change). */
+  private async loadPreferences(): Promise<void> {
+    const port = this.plane.preferences;
+    if (port !== null) {
+      try {
+        const json = await port.load();
+        const parsed = json === null ? null : parsePreferences(json);
+        if (json !== null && parsed === null) {
+          console.warn(
+            "preferences file is unreadable or newer; using defaults",
+          );
+        }
+        this.prefs = parsed ?? defaultPreferences();
+      } catch (error: unknown) {
+        console.warn("preferences load failed; using defaults", error);
+      }
+    }
+    applyPreferences(this.prefs, document.documentElement);
+  }
+
+  private updatePreferences(
+    patch: Partial<Omit<Preferences, "schema_version">>,
+  ): void {
+    this.prefs = { ...this.prefs, ...patch };
+    this.prefs.ui_font_size = clampUiFontSize(this.prefs.ui_font_size);
+    this.prefs.plot_font_size = clampPlotFontSize(this.prefs.plot_font_size);
+    applyPreferences(this.prefs, document.documentElement);
+    this.workspaceView?.invalidateTheme();
+    this.renderTiles();
+    this.schedulePreferencesSave();
+  }
+
+  /** Coalesces rapid setting changes into one write, like autosave. */
+  private schedulePreferencesSave(): void {
+    const port = this.plane.preferences;
+    if (port === null) return;
+    if (this.prefsSaveTimer !== null) window.clearTimeout(this.prefsSaveTimer);
+    this.prefsSaveTimer = window.setTimeout(() => {
+      this.prefsSaveTimer = null;
+      void port.save(JSON.stringify(this.prefs)).catch((error: unknown) => {
+        this.reportError(error);
+      });
     }, AUTOSAVE_DEBOUNCE_MS);
   }
 
@@ -974,6 +1297,7 @@ export class AppShell {
       }
       const loaded = await port.reset();
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
       this.tilesByPanel.clear();
       this.samplesByPanel.clear();
@@ -1013,6 +1337,7 @@ export class AppShell {
     try {
       const loaded = await port.load(path);
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = loaded.path;
       this.dirty = false;
       document.documentElement.dataset.theme = this.workspace.theme();
@@ -1254,6 +1579,7 @@ export class AppShell {
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
     }
+    this.commitHistory(`range:${panelId}`);
     this.renderTiles();
     this.scheduleRefresh();
   }
@@ -1267,6 +1593,7 @@ export class AppShell {
       return;
     }
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
+    this.commitHistory(`range:${panelId}`);
     this.renderTiles();
   }
 
@@ -1310,6 +1637,7 @@ export class AppShell {
       this.workspace.clearPanelXRange(panelId);
       this.workspace.clearPanelYRange(panelId);
       this.workspaceView?.resetYAxis(panelId);
+      this.commitHistory();
       this.renderTiles();
       return;
     }
@@ -1317,11 +1645,13 @@ export class AppShell {
     this.workspaceView?.resetYAxis(panelId);
     const extent = this.timeExtent(panel.series.map((series) => series.path));
     if (extent === null) {
+      this.commitHistory();
       this.renderTiles();
       this.scheduleRefresh();
       return;
     }
     this.applyTimeWindow(panelId, extent.t0, extent.t1);
+    this.commitHistory();
   }
 
   /** Removes the assigned X signal while leaving an empty XY axis slot. */
@@ -1375,6 +1705,7 @@ export class AppShell {
     const current = CURSOR_MODES.indexOf(this.workspace.cursorMode());
     const mode = CURSOR_MODES[(current + 1) % CURSOR_MODES.length] ?? "track";
     this.workspace.setCursorMode(mode);
+    this.commitHistory();
     this.workspaceView?.setCursorMode(mode);
     this.syncCursorMode();
   }
@@ -1538,6 +1869,7 @@ export class AppShell {
       }
     }
     this.workspace.setLinked(linked);
+    this.commitHistory();
     required(this.root, ".linked-toggle").classList.toggle("active", linked);
     void this.refreshTiles();
   }
@@ -1547,6 +1879,7 @@ export class AppShell {
     const theme = documentRoot.dataset.theme === "light" ? "dark" : "light";
     documentRoot.dataset.theme = theme;
     this.workspace.setTheme(theme);
+    this.commitHistory();
     this.scheduleAutosave();
     this.workspaceView?.invalidateTheme();
     this.renderTiles();

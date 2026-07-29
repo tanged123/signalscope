@@ -1,4 +1,5 @@
 /.direnv/
+/.claude/worktrees/
 /build/
 /target/
 /result

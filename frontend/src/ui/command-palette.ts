@@ -7,9 +7,13 @@ export interface PaletteEntry {
   run: () => void;
   /** Set when the entry is listed but not runnable; the text says why. */
   unavailable?: string;
+  /** Runs without closing the palette; the entry list refreshes after. */
+  keepOpen?: boolean;
+  /** ArrowLeft/ArrowRight handler for value entries (e.g. font sizes). */
+  adjust?: (direction: -1 | 1) => void;
 }
 
-export type PaletteMode = "commands" | "signals";
+export type PaletteMode = "commands" | "signals" | "settings";
 
 export class CommandPalette {
   private readonly element: HTMLElement;
@@ -18,6 +22,7 @@ export class CommandPalette {
   private entries: PaletteEntry[] = [];
   private matches: PaletteEntry[] = [];
   private selected = 0;
+  private mode: PaletteMode = "commands";
 
   constructor(
     root: HTMLElement,
@@ -48,6 +53,20 @@ export class CommandPalette {
         event.preventDefault();
         this.selected = Math.max(this.selected - 1, 0);
         this.renderList();
+      } else if (
+        event.key === "ArrowLeft" ||
+        event.key === "ArrowRight" ||
+        event.key === "+" ||
+        event.key === "-"
+      ) {
+        const entry = this.matches[this.selected];
+        if (entry?.adjust !== undefined) {
+          event.preventDefault();
+          entry.adjust(
+            event.key === "ArrowRight" || event.key === "+" ? 1 : -1,
+          );
+          this.refreshEntries();
+        }
       } else if (event.key === "Enter") {
         event.preventDefault();
         this.runSelected();
@@ -59,10 +78,15 @@ export class CommandPalette {
   }
 
   open(mode: PaletteMode): void {
+    this.mode = mode;
     this.entries = this.provider(mode);
     this.element.hidden = false;
     this.input.placeholder =
-      mode === "signals" ? "signals, workspaces, panels…" : "commands…";
+      mode === "signals"
+        ? "signals, workspaces, panels…"
+        : mode === "settings"
+          ? "settings — enter cycles, ←/→ adjust…"
+          : "commands…";
     this.input.value = "";
     this.filter();
     this.input.focus();
@@ -107,8 +131,13 @@ export class CommandPalette {
         hint.textContent = entry.hint;
         row.append(title, hint);
         row.addEventListener("click", () => {
-          this.close();
-          entry.run();
+          if (entry.keepOpen === true) {
+            entry.run();
+            this.refreshEntries();
+          } else {
+            this.close();
+            entry.run();
+          }
         });
         return row;
       }),
@@ -117,9 +146,22 @@ export class CommandPalette {
 
   private runSelected(): void {
     const entry = this.matches[this.selected];
-    if (entry !== undefined && entry.unavailable === undefined) {
+    if (entry === undefined || entry.unavailable !== undefined) return;
+    if (entry.keepOpen === true) {
+      entry.run();
+      this.refreshEntries();
+    } else {
       this.close();
       entry.run();
     }
+  }
+
+  /** Re-pulls entries so hints show updated values, keeping the selection. */
+  private refreshEntries(): void {
+    const selected = this.selected;
+    this.entries = this.provider(this.mode);
+    this.filter();
+    this.selected = Math.min(selected, Math.max(0, this.matches.length - 1));
+    this.renderList();
   }
 }

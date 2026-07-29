@@ -8,6 +8,7 @@ use std::{
 use scope_core::{
     cache, compute, expr,
     ingest::SUPPORTED_FORMATS,
+    preferences,
     pyramid::Pyramid,
     session,
     store::{Signal, SignalId, SignalStore, Source, SourceId},
@@ -534,6 +535,39 @@ async fn pick_session_path(
     ))
 }
 
+const PREFERENCES_FILE: &str = "preferences.json";
+
+fn preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join(PREFERENCES_FILE))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
+    let path = preferences_path(&app)?;
+    if !path.exists() {
+        return Ok(Envelope::new(None));
+    }
+    let preferences = preferences::load_from_path(&path).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(Some(
+        serde_json::to_string(&preferences).map_err(|error| error.to_string())?,
+    )))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn save_preferences(request: Envelope<String>, app: AppHandle) -> Result<Envelope<()>, String> {
+    let json = request.open().map_err(|error| error.to_string())?;
+    let preferences = preferences::from_json(&json).map_err(|error| error.to_string())?;
+    preferences::save_to_path(&preferences, &preferences_path(&app)?)
+        .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the native `SignalScope` application.
 ///
@@ -558,7 +592,9 @@ pub fn run() {
             save_session,
             load_session,
             reset_session,
-            pick_session_path
+            pick_session_path,
+            load_preferences,
+            save_preferences
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SignalScope");

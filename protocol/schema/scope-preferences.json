@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "types": {
+    "FontFamily": {
+      "kind": "enum",
+      "variants": ["inter", "dejavu", "arimo", "jetbrains"],
+      "default": "inter"
+    },
+    "Preferences": {
+      "kind": "object",
+      "fields": {
+        "schema_version": "u32",
+        "ui_font_family": "FontFamily",
+        "plot_font_family": "FontFamily",
+        "ui_font_size": "f64",
+        "plot_font_size": "f64"
+      }
+    }
+  }
+}

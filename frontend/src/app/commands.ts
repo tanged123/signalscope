@@ -5,6 +5,8 @@ export interface Command {
   id: string;
   title: string;
   keys?: string;
+  /** Secondary key bindings; hints keep displaying `keys`. */
+  altKeys?: string[];
   section?: "file" | "view" | "workspace" | "help";
   group?: string;
   status?: "available" | "planned";
@@ -14,6 +16,9 @@ export interface Command {
 }
 
 export class CommandRegistry {
+  /** Called with the command id after every successful execution. */
+  onRun: ((id: string) => void) | null = null;
+
   private readonly commands = new Map<string, Command>();
 
   register(command: Command): void {
@@ -34,6 +39,7 @@ export class CommandRegistry {
       return false;
     }
     command.run();
+    this.onRun?.(id);
     return true;
   }
 
@@ -42,11 +48,13 @@ export class CommandRegistry {
     if (combo === null) return false;
     for (const command of this.commands.values()) {
       if (
-        command.keys === combo &&
+        (command.keys === combo ||
+          (command.altKeys?.includes(combo) ?? false)) &&
         command.status !== "planned" &&
         (command.enabled?.() ?? true)
       ) {
         command.run();
+        this.onRun?.(command.id);
         return true;
       }
     }
@@ -56,12 +64,31 @@ export class CommandRegistry {
 
 function comboFor(event: KeyboardEvent): string | null {
   if (event.altKey) return null;
-  const key = event.key.toLowerCase();
+  // Shifted ctrl+= arrives as "+" on row-number layouts; both spellings mean
+  // the same zoom-in binding, so "+" folds into "=" and drops its shift.
+  const key = event.key === "+" ? "=" : event.key.toLowerCase();
   if (event.metaKey || event.ctrlKey) {
-    return `mod+${event.shiftKey ? "shift+" : ""}${key}`;
+    const shift = event.shiftKey && key !== "=" ? "shift+" : "";
+    return `mod+${shift}${key}`;
   }
   if (event.shiftKey && key.length > 1) return `shift+${key}`;
   return key;
+}
+
+const editingReserved = new Set<string>();
+
+export function setEditingReservedCombos(combos: Iterable<string>): void {
+  editingReserved.clear();
+  for (const combo of combos) editingReserved.add(combo);
+}
+
+/**
+ * True when the combo belongs to native text editing (undo/redo) and must
+ * not be captured while an input, textarea, or contenteditable has focus.
+ */
+export function reservedWhileEditing(event: KeyboardEvent): boolean {
+  const combo = comboFor(event);
+  return combo !== null && editingReserved.has(combo);
 }
 
 /**
