@@ -109,6 +109,8 @@ export class AppMenu {
     if (planned) {
       item.classList.add("planned");
       item.title = PLANNED_TITLE;
+    } else if (!enabled) {
+      item.title = "unavailable in this context";
     }
     const check = document.createElement("span");
     check.className = "app-menu-check";

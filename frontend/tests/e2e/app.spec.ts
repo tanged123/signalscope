@@ -72,9 +72,15 @@ test("application menu mirrors commands and marks planned work", async ({
   await expect(unavailable).toContainText("Ctrl+O");
   await unavailable.dispatchEvent("click");
   await expect(menu).toBeVisible();
-  await expect(
-    menu.locator(".app-menu-item", { hasText: "Export" }),
-  ).toHaveAttribute("title", /planned/);
+  for (const title of [
+    "Export ▸ HTML Snapshot…",
+    "Export ▸ PNG…",
+    "Export ▸ Visible CSV…",
+  ]) {
+    await expect(
+      menu.locator(".app-menu-item", { hasText: title }),
+    ).toHaveAttribute("aria-disabled", "true");
+  }
 
   // Opening focuses the first item; the roving arrow keys wrap in both
   // directions and Home/End reach the ends.

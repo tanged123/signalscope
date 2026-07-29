@@ -1501,6 +1501,110 @@ button {
   font: 0.7692rem var(--font-mono);
 }
 
+.export-overlay {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  background: var(--surface-overlay);
+  inset: 0;
+  place-items: center;
+}
+
+.export-dialog {
+  display: grid;
+  width: min(420px, 90vw);
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+  box-shadow: var(--elev-3);
+}
+
+.export-title {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-1);
+}
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--fg-2);
+}
+
+.export-row.selected {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg-1);
+}
+
+.export-row.disabled,
+.export-scope.disabled {
+  opacity: 0.5;
+}
+
+.export-size {
+  margin-left: auto;
+  color: var(--fg-3);
+  font: 0.7692rem var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.export-scope {
+  display: grid;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-faint);
+}
+
+.export-scope-title {
+  color: var(--fg-3);
+  font: 0.6923rem var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.export-scope-toggle,
+.export-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.export-scope-option,
+.export-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+  font: 0.7692rem var(--font-mono);
+}
+
+.export-scope-option.active,
+.export-actions button:hover {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.export-caption {
+  margin: 0;
+  color: var(--fg-4);
+  font: 0.7308rem var(--font-mono);
+}
+
+.export-actions {
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.export-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .workbench.formula-collapsed {
   grid-template-rows: 30px 28px minmax(0, 1fr) 0 26px;
 }

@@ -146,3 +146,37 @@ describe("session port", () => {
     expect(loaded.path).toBeNull();
   });
 });
+
+describe("export port", () => {
+  it("routes export calls through native commands", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      if (command === "export_estimate") {
+        return Promise.resolve(
+          seal({ visible_bytes: "10", all_bytes: "20" }) as never,
+        );
+      }
+      return Promise.resolve(seal("/tmp/out.html") as never);
+    });
+
+    const estimate = await plane.exporter.estimate("{}");
+    expect(estimate.all_bytes).toBe("20");
+    await plane.exporter.writeHtml("{}", "visible");
+    expect(calls.map((call) => call.command)).toEqual([
+      "export_estimate",
+      "export_write",
+    ]);
+  });
+
+  it("exposes the baked session and no exporter", () => {
+    const plane = new BakedPlane(
+      seal({
+        session_json: '{"app":"signalscope"}',
+        signals: [],
+      }),
+    );
+    expect(plane.bakedSessionJson).toBe('{"app":"signalscope"}');
+    expect(plane.exporter).toBeNull();
+  });
+});

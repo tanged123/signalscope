@@ -6,6 +6,8 @@ import {
   setEditingReservedCombos,
   type Command,
 } from "../app/commands";
+import { parseBakedSession } from "../app/baked-session";
+import { buildCsv, CSV_SAMPLE_CAP } from "../app/csv-export";
 import type { DataPlane } from "../app/data-plane";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -26,6 +28,7 @@ import {
   UI_FONT_SIZE,
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
+import { composePanelPng, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
@@ -37,6 +40,7 @@ import {
 } from "../app/plot-math";
 import {
   type SampleResponse,
+  type SampleSeries,
   type SignalSummary,
   type TileResponse,
 } from "../generated/protocol";
@@ -54,6 +58,7 @@ import {
 } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
 import { FormulaBar, formulaBarMarkup } from "./formula-bar";
+import { ExportDialog, type ExportFormat } from "./export-dialog";
 import type { QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
@@ -79,6 +84,9 @@ export class AppShell {
   private tree: SignalTreeView | null = null;
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
+  private exportDialog: ExportDialog | null = null;
+  private exportPng: Uint8Array | null = null;
+  private exportCsv: string | null = null;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
@@ -791,9 +799,42 @@ export class AppShell {
         void this.saveWorkspace(true);
       },
     });
+    this.commands.register({
+      id: "export-html",
+      title: "Export ▸ HTML Snapshot…",
+      section: "file",
+      group: "export",
+      enabled: () => this.plane.exporter !== null,
+      run: () => {
+        this.openExportDialog("html");
+      },
+    });
+    this.commands.register({
+      id: "export-png",
+      title: "Export ▸ PNG…",
+      section: "file",
+      group: "export",
+      enabled: () =>
+        this.plane.exporter !== null &&
+        this.workspace.focusedPanelId() !== null,
+      run: () => {
+        this.openExportDialog("png");
+      },
+    });
+    this.commands.register({
+      id: "export-csv",
+      title: "Export ▸ Visible CSV…",
+      section: "file",
+      group: "export",
+      enabled: () =>
+        this.plane.exporter !== null &&
+        this.workspace.focusedPanelId() !== null,
+      run: () => {
+        this.openExportDialog("csv");
+      },
+    });
     for (const planned of [
       ["open-recent", "Open Recent ▸", "file", "open"],
-      ["export", "Export ▸ HTML · PNG · CSV", "file", "export"],
       ["annotations-dock", "Annotations dock", "view", "docks"],
       ["axes-default", "Axes default ▸", "view", "display"],
       ["series-palette", "Series palette ▸", "view", "display"],
@@ -1024,6 +1065,7 @@ export class AppShell {
     );
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
+      if (this.exportDialog?.isOpen() === true) return;
       const target = event.target;
       const editing =
         target instanceof HTMLInputElement ||
@@ -1263,8 +1305,17 @@ export class AppShell {
     }, AUTOSAVE_DEBOUNCE_MS);
   }
 
-  /** Restores the autosaved session, if any, before the first render. */
+  /** Restores the baked snapshot session or the autosaved session. */
   private async restoreSession(): Promise<void> {
+    const baked = this.plane.bakedSessionJson;
+    if (baked !== undefined && baked !== "") {
+      try {
+        this.workspace.replace(parseBakedSession(baked));
+      } catch (error: unknown) {
+        this.reportError(error);
+      }
+      return;
+    }
     await this.loadSession(null);
   }
 
@@ -1285,6 +1336,138 @@ export class AppShell {
     } catch (error: unknown) {
       this.reportError(error);
     }
+  }
+
+  private openExportDialog(format: ExportFormat): void {
+    this.exportPng = null;
+    this.exportCsv = null;
+    this.exportDialog ??= new ExportDialog(this.root, {
+      estimateHtml: async () => {
+        const exporter = this.plane.exporter;
+        if (exporter === null) return null;
+        try {
+          const estimate = await exporter.estimate(
+            JSON.stringify(this.workspace.snapshot()),
+          );
+          return {
+            visibleBytes: Number(estimate.visible_bytes),
+            allBytes: Number(estimate.all_bytes),
+          };
+        } catch (error: unknown) {
+          this.reportError(error);
+          return null;
+        }
+      },
+      pngBytes: async () => {
+        try {
+          this.exportPng = await this.buildVisiblePng();
+          return this.exportPng?.length ?? null;
+        } catch (error: unknown) {
+          this.reportError(error);
+          return null;
+        }
+      },
+      csvBytes: async () => {
+        try {
+          this.exportCsv = await this.buildVisibleCsv();
+          return this.exportCsv === null
+            ? null
+            : new TextEncoder().encode(this.exportCsv).length;
+        } catch (error: unknown) {
+          this.reportError(error);
+          return null;
+        }
+      },
+      runExport: async (selected, scope) => {
+        try {
+          await this.runExport(selected, scope);
+        } catch (error: unknown) {
+          this.reportError(error);
+          throw error;
+        }
+      },
+    });
+    this.exportDialog.open(format);
+  }
+
+  private async runExport(
+    format: ExportFormat,
+    scope: "visible" | "all",
+  ): Promise<void> {
+    const exporter = this.plane.exporter;
+    if (exporter === null) return;
+    let path: string | null;
+    if (format === "html") {
+      path = await exporter.writeHtml(
+        JSON.stringify(this.workspace.snapshot()),
+        scope,
+      );
+    } else {
+      const panelId = this.workspace.focusedPanelId();
+      const panel =
+        panelId === null ? undefined : this.workspace.panel(panelId);
+      if (panel === undefined) return;
+      const name = panel.title.trim() || panel.id;
+      if (format === "png") {
+        const bytes = this.exportPng ?? (await this.buildVisiblePng());
+        if (bytes === null) return;
+        path = await exporter.saveFile(`${name}.png`, "png", toBase64(bytes));
+      } else {
+        const csv = this.exportCsv ?? (await this.buildVisibleCsv());
+        if (csv === null) return;
+        path = await exporter.saveFile(
+          `${name}.csv`,
+          "csv",
+          toBase64(new TextEncoder().encode(csv)),
+        );
+      }
+    }
+    if (path !== null) this.showModeHelp(`exported ${path}`);
+  }
+
+  private async buildVisiblePng(): Promise<Uint8Array | null> {
+    const panelId = this.workspace.focusedPanelId();
+    if (panelId === null) return null;
+    const panel = this.workspace.panel(panelId);
+    const canvases = this.workspaceView?.panelCanvases(panelId) ?? null;
+    if (panel === undefined || canvases === null) return null;
+    const styles = getComputedStyle(document.documentElement);
+    const composed = composePanelPng(
+      panel.title,
+      canvases.plot,
+      canvases.overlay,
+      {
+        background: styles.getPropertyValue("--surface-1").trim(),
+        text: styles.getPropertyValue("--fg-1").trim(),
+      },
+    );
+    const blob = await new Promise<Blob | null>((resolve) => {
+      composed.toBlob(resolve, "image/png");
+    });
+    return blob === null ? null : new Uint8Array(await blob.arrayBuffer());
+  }
+
+  private async buildVisibleCsv(): Promise<string | null> {
+    const panelId = this.workspace.focusedPanelId();
+    if (panelId === null) return null;
+    const panel = this.workspace.panel(panelId);
+    if (panel === undefined) return null;
+    const { ids } = this.panelSignalIds(panel);
+    if (ids.length === 0) return null;
+    const window = this.effectiveWindow(panel);
+    const response = await this.plane.querySamples({
+      request_id: crypto.randomUUID(),
+      signal_ids: ids,
+      window,
+      max_points: CSV_SAMPLE_CAP,
+    });
+    const byId = new Map(
+      response.series.map((series) => [series.signal_id, series]),
+    );
+    const ordered = ids
+      .map((id) => byId.get(id))
+      .filter((series): series is SampleSeries => series !== undefined);
+    return buildCsv(ordered, window);
   }
 
   private async newWorkspace(): Promise<void> {

@@ -1,6 +1,11 @@
 import {
   type DerivedRequest,
   type EnvelopeBin,
+  type ExportEstimate,
+  type ExportEstimateRequest,
+  type ExportFileKind,
+  type ExportScope,
+  type ExportWriteRequest,
   type IngestJob,
   type IngestRequest,
   type IngestStatus,
@@ -11,6 +16,7 @@ import {
   type SampleRequest,
   type SampleResponse,
   type SaveSessionRequest,
+  type SaveExportFileRequest,
   type SessionDialogMode,
   type SignalSummary,
   type SnapshotManifest,
@@ -45,12 +51,24 @@ export interface PreferencesPort {
   save(preferencesJson: string): Promise<void>;
 }
 
+export interface ExportPort {
+  estimate(sessionJson: string): Promise<ExportEstimate>;
+  writeHtml(sessionJson: string, scope: ExportScope): Promise<string | null>;
+  saveFile(
+    fileName: string,
+    kind: ExportFileKind,
+    dataBase64: string,
+  ): Promise<string | null>;
+}
+
 export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
   readonly session: SessionPort | null;
   readonly preferences: PreferencesPort | null;
+  readonly exporter: ExportPort | null;
+  readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
@@ -79,6 +97,8 @@ export class TauriPlane implements DataPlane {
   readonly session: SessionPort;
 
   readonly preferences: PreferencesPort;
+
+  readonly exporter: ExportPort;
 
   constructor(private readonly invoke: TauriInternals["invoke"]) {
     this.ingest = {
@@ -148,6 +168,39 @@ export class TauriPlane implements DataPlane {
         );
       },
     };
+    this.exporter = {
+      estimate: async (sessionJson: string) =>
+        open(
+          await this.invoke<Envelope<ExportEstimate>>("export_estimate", {
+            request: seal<ExportEstimateRequest>({
+              session_json: sessionJson,
+            }),
+          }),
+        ),
+      writeHtml: async (sessionJson: string, scope: ExportScope) =>
+        open(
+          await this.invoke<Envelope<string | null>>("export_write", {
+            request: seal<ExportWriteRequest>({
+              session_json: sessionJson,
+              scope,
+            }),
+          }),
+        ),
+      saveFile: async (
+        fileName: string,
+        kind: ExportFileKind,
+        dataBase64: string,
+      ) =>
+        open(
+          await this.invoke<Envelope<string | null>>("save_export_file", {
+            request: seal<SaveExportFileRequest>({
+              file_name: fileName,
+              kind,
+              data_base64: dataBase64,
+            }),
+          }),
+        ),
+    };
   }
 
   async listSignals(): Promise<SignalSummary[]> {
@@ -199,6 +252,10 @@ export class BakedPlane implements DataPlane {
 
   readonly preferences = null;
 
+  readonly exporter = null;
+
+  readonly bakedSessionJson: string;
+
   private readonly payload: BakedManifest["payload"];
 
   /**
@@ -213,6 +270,7 @@ export class BakedPlane implements DataPlane {
 
   constructor(manifest: BakedManifest) {
     this.payload = open(manifest);
+    this.bakedSessionJson = this.payload.session_json;
   }
 
   static fromDocument(documentRoot: Document = document): BakedPlane {
