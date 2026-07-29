@@ -7,10 +7,12 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/export.sh --data <file>... [--workspace <file>] --out <path>
+Usage: ./scripts/export.sh [--no-build] --data <file>... [--workspace <file>]
+                           [--range visible|all]
+                           [--fidelity preview|standard|high|full] --out <path>
 
-Bakes a self-contained HTML snapshot from data files (all-loaded scope).
-Builds the frontend snapshot template first, then runs the scope-bake CLI.
+Bakes a self-contained HTML snapshot from data files. Defaults to all/full.
+Builds the frontend snapshot template first unless --no-build is supplied.
 EOF
 }
 
@@ -21,5 +23,9 @@ case "${1:-}" in
   ;;
 esac
 
-"$signalscope_scripts_dir/build.sh" web
+if [ "${1:-}" = "--no-build" ]; then
+  shift
+else
+  "$signalscope_scripts_dir/build.sh" web
+fi
 cargo run --quiet -p scope-core --bin scope-bake -- "$@"

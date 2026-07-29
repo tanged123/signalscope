@@ -1,5 +1,5 @@
 {
-  "protocol_version": 6,
+  "protocol_version": 7,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -176,9 +176,13 @@
         "path": "string?"
       }
     },
-    "ExportScope": {
+    "ExportRange": {
       "kind": "enum",
       "variants": ["visible", "all"]
+    },
+    "ExportFidelity": {
+      "kind": "enum",
+      "variants": ["preview", "standard", "high", "full"]
     },
     "ExportEstimateRequest": {
       "kind": "object",
@@ -189,15 +193,27 @@
     "ExportEstimate": {
       "kind": "object",
       "fields": {
-        "visible_bytes": "u64",
-        "all_bytes": "u64"
+        "entries": "ExportEstimateEntry[]"
+      }
+    },
+    "ExportEstimateEntry": {
+      "kind": "object",
+      "fields": {
+        "range": "ExportRange",
+        "fidelity": "ExportFidelity",
+        "bytes": "u64",
+        "series_total": "u64",
+        "series_decimated": "u64",
+        "series_full_rate": "u64",
+        "coarsest_ratio": "u64"
       }
     },
     "ExportWriteRequest": {
       "kind": "object",
       "fields": {
         "session_json": "string",
-        "scope": "ExportScope"
+        "range": "ExportRange",
+        "fidelity": "ExportFidelity"
       }
     },
     "ExportFileKind": {

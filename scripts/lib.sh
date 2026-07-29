@@ -54,5 +54,14 @@ bake_roundtrip_artifact() {
   "$signalscope_scripts_dir/export.sh" \
     --data frontend/tests/e2e/fixtures/roundtrip.csv \
     --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
-    --out build/export/roundtrip.html
+    --range all \
+    --fidelity preview \
+    --out build/export/roundtrip-preview.html
+  "$signalscope_scripts_dir/export.sh" \
+    --no-build \
+    --data frontend/tests/e2e/fixtures/roundtrip.csv \
+    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
+    --range all \
+    --fidelity full \
+    --out build/export/roundtrip-full.html
 }

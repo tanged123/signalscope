@@ -15,11 +15,12 @@ use scope_core::{
     store::{Signal, SignalId, SignalStore, Source, SourceId},
 };
 use scope_protocol::{
-    DerivedRequest, Envelope, ExportEstimate, ExportEstimateRequest, ExportFileKind, ExportScope,
-    ExportWriteRequest, IngestJob, IngestRequest, IngestResponse, IngestStage, IngestState,
-    IngestStatus, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
-    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest, SaveSessionRequest,
-    SessionDialogMode, SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
+    ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest, IngestJob, IngestRequest,
+    IngestResponse, IngestStage, IngestState, IngestStatus, LoadSessionRequest, LoadedSession,
+    PickSessionRequest, RemoveSignalRequest, SampleRequest, SampleResponse, SampleSeries,
+    SaveExportFileRequest, SaveSessionRequest, SessionDialogMode, SignalSummary, SignalTile,
+    SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -583,12 +584,27 @@ fn estimate_for(
     template_bytes: u64,
 ) -> Result<ExportEstimate, snapshot::SnapshotError> {
     let base = template_bytes + session_json.len() as u64;
-    let visible = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::Visible)?;
-    let all = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::All)?;
-    Ok(ExportEstimate {
-        visible_bytes: base + snapshot::estimated_bytes(&visible),
-        all_bytes: base + snapshot::estimated_bytes(&all),
-    })
+    let mut entries = Vec::with_capacity(8);
+    for range in [ExportRange::Visible, ExportRange::All] {
+        for fidelity in [
+            ExportFidelity::Preview,
+            ExportFidelity::Standard,
+            ExportFidelity::High,
+            ExportFidelity::Full,
+        ] {
+            let plan = snapshot::plan(session, &data.store, &data.pyramids, range, fidelity)?;
+            entries.push(ExportEstimateEntry {
+                range,
+                fidelity,
+                bytes: base + snapshot::estimated_bytes(&plan),
+                series_total: plan.series_total,
+                series_decimated: plan.series_decimated,
+                series_full_rate: plan.series_full_rate,
+                coarsest_ratio: plan.coarsest_ratio,
+            });
+        }
+    }
+    Ok(ExportEstimate { entries })
 }
 
 #[tauri::command]
@@ -637,8 +653,14 @@ async fn export_write(
     let manifest = {
         let state = app.state::<Mutex<DataState>>();
         let data = state.lock().map_err(|error| error.to_string())?;
-        let export = snapshot::plan(&session, &data.store, &data.pyramids, request.scope)
-            .map_err(|error| error.to_string())?;
+        let export = snapshot::plan(
+            &session,
+            &data.store,
+            &data.pyramids,
+            request.range,
+            request.fidelity,
+        )
+        .map_err(|error| error.to_string())?;
         snapshot::bake(&export, &session).map_err(|error| error.to_string())?
     };
     let html = snapshot::inject(&template, manifest).map_err(|error| error.to_string())?;
@@ -855,15 +877,27 @@ mod tests {
     }
 
     #[test]
-    fn estimate_covers_both_scopes_from_state() {
+    fn estimate_covers_every_range_and_fidelity_once() {
         let (mut data, _) = data_with_signal("input/x");
         let signal = data.store.signal_by_path("input/x").expect("signal");
         data.pyramids
             .insert(signal.id, Pyramid::from_signal(signal));
         let session = session::Session::default();
         let estimate = estimate_for(&data, &session, "{}", 1_000).expect("estimate");
-        assert!(estimate.all_bytes > estimate.visible_bytes);
-        assert!(estimate.visible_bytes >= 1_000);
+        assert_eq!(estimate.entries.len(), 8);
+        for range in [ExportRange::Visible, ExportRange::All] {
+            let entries: Vec<_> = estimate
+                .entries
+                .iter()
+                .filter(|entry| entry.range == range)
+                .collect();
+            assert_eq!(entries.len(), 4);
+            assert!(
+                entries
+                    .windows(2)
+                    .all(|pair| pair[0].bytes <= pair[1].bytes)
+            );
+        }
     }
 
     #[test]

@@ -154,19 +154,38 @@ describe("export port", () => {
       calls.push({ command, ...(args === undefined ? {} : { args }) });
       if (command === "export_estimate") {
         return Promise.resolve(
-          seal({ visible_bytes: "10", all_bytes: "20" }) as never,
+          seal({
+            entries: [
+              {
+                range: "visible",
+                fidelity: "standard",
+                bytes: "10",
+                series_total: "1",
+                series_decimated: "1",
+                series_full_rate: "0",
+                coarsest_ratio: "4",
+              },
+            ],
+          }) as never,
         );
       }
       return Promise.resolve(seal("/tmp/out.html") as never);
     });
 
     const estimate = await plane.exporter.estimate("{}");
-    expect(estimate.all_bytes).toBe("20");
-    await plane.exporter.writeHtml("{}", "visible");
+    expect(estimate.entries[0]?.bytes).toBe("10");
+    await plane.exporter.writeHtml("{}", "visible", "standard");
     expect(calls.map((call) => call.command)).toEqual([
       "export_estimate",
       "export_write",
     ]);
+    expect(calls[1]?.args?.request).toEqual(
+      seal({
+        session_json: "{}",
+        range: "visible",
+        fidelity: "standard",
+      }),
+    );
   });
 
   it("exposes the baked session and no exporter", () => {

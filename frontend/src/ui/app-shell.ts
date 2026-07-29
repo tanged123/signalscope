@@ -7,7 +7,7 @@ import {
   type Command,
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
-import { buildCsv, CSV_SAMPLE_CAP } from "../app/csv-export";
+import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import type { DataPlane } from "../app/data-plane";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
@@ -40,6 +40,8 @@ import {
   zoomRange,
 } from "../app/plot-math";
 import {
+  type ExportFidelity,
+  type ExportRange,
   type SampleResponse,
   type SampleSeries,
   type SignalSummary,
@@ -87,7 +89,7 @@ export class AppShell {
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
   private exportPng: Uint8Array | null = null;
-  private exportCsv: string | null = null;
+  private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
@@ -754,7 +756,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.10.3");
+        this.showModeHelp("SignalScope 0.11.0");
       },
     });
     this.commands.register({
@@ -1337,19 +1339,15 @@ export class AppShell {
 
   private openExportDialog(format: ExportFormat): void {
     this.exportPng = null;
-    this.exportCsv = null;
+    this.exportCsv.clear();
     this.exportDialog ??= new ExportDialog(this.root, {
       estimateHtml: async () => {
         const exporter = this.plane.exporter;
         if (exporter === null) return null;
         try {
-          const estimate = await exporter.estimate(
+          return await exporter.estimate(
             JSON.stringify(this.workspace.snapshot()),
           );
-          return {
-            visibleBytes: Number(estimate.visible_bytes),
-            allBytes: Number(estimate.all_bytes),
-          };
         } catch (error: unknown) {
           this.reportError(error);
           return null;
@@ -1364,20 +1362,24 @@ export class AppShell {
           return null;
         }
       },
-      csvBytes: async () => {
+      csvEstimate: async (fidelity) => {
         try {
-          this.exportCsv = await this.buildVisibleCsv();
-          return this.exportCsv === null
-            ? null
-            : new TextEncoder().encode(this.exportCsv).length;
+          const csv = await this.buildVisibleCsv(fidelity);
+          if (csv === null) return null;
+          this.exportCsv.set(fidelity, csv);
+          return {
+            bytes: new TextEncoder().encode(csv.text).length,
+            rows: csv.rows,
+            stride: csv.stride,
+          };
         } catch (error: unknown) {
           this.reportError(error);
           return null;
         }
       },
-      runExport: async (selected, scope) => {
+      runExport: async (selected, range, fidelity) => {
         try {
-          await this.runExport(selected, scope);
+          await this.runExport(selected, range, fidelity);
         } catch (error: unknown) {
           this.reportError(error);
           throw error;
@@ -1389,7 +1391,8 @@ export class AppShell {
 
   private async runExport(
     format: ExportFormat,
-    scope: "visible" | "all",
+    range: ExportRange,
+    fidelity: ExportFidelity,
   ): Promise<void> {
     const exporter = this.plane.exporter;
     if (exporter === null) return;
@@ -1397,7 +1400,8 @@ export class AppShell {
     if (format === "html") {
       path = await exporter.writeHtml(
         JSON.stringify(this.workspace.snapshot()),
-        scope,
+        range,
+        fidelity,
       );
     } else {
       const panelId = this.workspace.focusedPanelId();
@@ -1410,12 +1414,14 @@ export class AppShell {
         if (bytes === null) return;
         path = await exporter.saveFile(`${name}.png`, "png", toBase64(bytes));
       } else {
-        const csv = this.exportCsv ?? (await this.buildVisibleCsv());
+        const csv =
+          this.exportCsv.get(fidelity) ??
+          (await this.buildVisibleCsv(fidelity));
         if (csv === null) return;
         path = await exporter.saveFile(
           `${name}.csv`,
           "csv",
-          toBase64(new TextEncoder().encode(csv)),
+          toBase64(new TextEncoder().encode(csv.text)),
         );
       }
     }
@@ -1444,7 +1450,9 @@ export class AppShell {
     return blob === null ? null : new Uint8Array(await blob.arrayBuffer());
   }
 
-  private async buildVisibleCsv(): Promise<string | null> {
+  private async buildVisibleCsv(
+    fidelity: ExportFidelity,
+  ): Promise<CsvExport | null> {
     const panelId = this.workspace.focusedPanelId();
     if (panelId === null) return null;
     const panel = this.workspace.panel(panelId);
@@ -1456,7 +1464,7 @@ export class AppShell {
       request_id: crypto.randomUUID(),
       signal_ids: ids,
       window,
-      max_points: CSV_SAMPLE_CAP,
+      max_points: csvMaxPoints(fidelity),
     });
     const byId = new Map(
       response.series.map((series) => [series.signal_id, series]),

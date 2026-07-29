@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -241,9 +241,18 @@ pub struct LoadedSession {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ExportScope {
+pub enum ExportRange {
     Visible,
     All,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFidelity {
+    Preview,
+    Standard,
+    High,
+    Full,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -253,16 +262,30 @@ pub struct ExportEstimateRequest {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ExportEstimate {
+    pub entries: Vec<ExportEstimateEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportEstimateEntry {
+    pub range: ExportRange,
+    pub fidelity: ExportFidelity,
     #[serde(with = "u64_string")]
-    pub visible_bytes: u64,
+    pub bytes: u64,
     #[serde(with = "u64_string")]
-    pub all_bytes: u64,
+    pub series_total: u64,
+    #[serde(with = "u64_string")]
+    pub series_decimated: u64,
+    #[serde(with = "u64_string")]
+    pub series_full_rate: u64,
+    #[serde(with = "u64_string")]
+    pub coarsest_ratio: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ExportWriteRequest {
     pub session_json: String,
-    pub scope: ExportScope,
+    pub range: ExportRange,
+    pub fidelity: ExportFidelity,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]

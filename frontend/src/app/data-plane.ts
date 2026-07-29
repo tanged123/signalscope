@@ -3,8 +3,9 @@ import {
   type EnvelopeBin,
   type ExportEstimate,
   type ExportEstimateRequest,
+  type ExportFidelity,
   type ExportFileKind,
-  type ExportScope,
+  type ExportRange,
   type ExportWriteRequest,
   type IngestJob,
   type IngestRequest,
@@ -53,7 +54,11 @@ export interface PreferencesPort {
 
 export interface ExportPort {
   estimate(sessionJson: string): Promise<ExportEstimate>;
-  writeHtml(sessionJson: string, scope: ExportScope): Promise<string | null>;
+  writeHtml(
+    sessionJson: string,
+    range: ExportRange,
+    fidelity: ExportFidelity,
+  ): Promise<string | null>;
   saveFile(
     fileName: string,
     kind: ExportFileKind,
@@ -177,12 +182,17 @@ export class TauriPlane implements DataPlane {
             }),
           }),
         ),
-      writeHtml: async (sessionJson: string, scope: ExportScope) =>
+      writeHtml: async (
+        sessionJson: string,
+        range: ExportRange,
+        fidelity: ExportFidelity,
+      ) =>
         open(
           await this.invoke<Envelope<string | null>>("export_write", {
             request: seal<ExportWriteRequest>({
               session_json: sessionJson,
-              scope,
+              range,
+              fidelity,
             }),
           }),
         ),

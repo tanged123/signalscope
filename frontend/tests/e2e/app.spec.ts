@@ -2,6 +2,7 @@ import type {
   ExportDelegate,
   ExportDialog as ExportDialogInstance,
 } from "../../src/ui/export-dialog";
+import type { ExportEstimateEntry } from "../../src/generated/protocol";
 import { expect, test } from "./fixtures";
 
 type ExportDialogConstructor = new (
@@ -156,9 +157,22 @@ test("export dialog is modal and restores focus after a document Escape", async 
     document.body.appendChild(invoker);
     invoker.focus();
     const dialog = new ExportDialog(document.body, {
-      estimateHtml: () => Promise.resolve({ visibleBytes: 100, allBytes: 200 }),
+      estimateHtml: () =>
+        Promise.resolve({
+          entries: [
+            {
+              range: "visible",
+              fidelity: "standard",
+              bytes: "100",
+              series_total: "2",
+              series_decimated: "1",
+              series_full_rate: "1",
+              coarsest_ratio: "4",
+            },
+          ],
+        }),
       pngBytes: () => Promise.resolve(100),
-      csvBytes: () => Promise.resolve(100),
+      csvEstimate: () => Promise.resolve({ bytes: 100, rows: 10, stride: 2 }),
       runExport: () => Promise.resolve(),
     });
     dialog.open("html");
@@ -172,6 +186,72 @@ test("export dialog is modal and restores focus after a document Escape", async 
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(page.getByTestId("export-invoker")).toBeFocused();
+});
+
+test("export dialog exposes range, fidelity, and reduction consequences", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const moduleUrl = "/src/ui/export-dialog.ts";
+    const { ExportDialog } = (await import(moduleUrl)) as {
+      ExportDialog: ExportDialogConstructor;
+    };
+    const entries: ExportEstimateEntry[] = [];
+    for (const range of ["visible", "all"] as const) {
+      for (const [fidelity, bytes, ratio] of [
+        ["preview", "1000000", "64"],
+        ["standard", "4000000", "16"],
+        ["high", "20000000", "4"],
+        ["full", "1400000000", "1"],
+      ] as const) {
+        entries.push({
+          range,
+          fidelity,
+          bytes,
+          series_total: "41",
+          series_decimated: fidelity === "full" ? "0" : "38",
+          series_full_rate: fidelity === "full" ? "41" : "3",
+          coarsest_ratio: ratio,
+        });
+      }
+    }
+    new ExportDialog(document.body, {
+      estimateHtml: () => Promise.resolve({ entries }),
+      pngBytes: () => Promise.resolve(400_000),
+      csvEstimate: (fidelity) =>
+        Promise.resolve({
+          bytes: fidelity === "high" ? 1_200_000 : 400_000,
+          rows: fidelity === "high" ? 16_384 : 512,
+          stride: fidelity === "high" ? 8 : 256,
+        }),
+      runExport: () => Promise.resolve(),
+    }).open("html");
+  });
+
+  const dialog = page.getByRole("dialog", { name: "Export" });
+  await expect(dialog.locator('[data-fidelity="standard"]')).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(dialog.locator(".export-awareness")).toHaveText(
+    "38 of 41 series decimated · coarsest 1 pt per 16 samples · 3 kept at full rate",
+  );
+  await dialog.locator('[data-range="all"]').click();
+  await dialog.locator('[data-fidelity="full"]').click();
+  await expect(dialog.locator(".export-confirm")).toHaveText("Export 1.4 GB");
+  await expect(dialog.locator('[data-fidelity-size="full"]')).toHaveClass(
+    /warning/,
+  );
+
+  await dialog.locator('input[value="csv"]').check();
+  await expect(dialog.locator('[data-fidelity="high"]')).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(dialog.locator('[data-size="csv"]')).toHaveText(
+    "1.2 MB · 16,384 rows · stride 1:8",
+  );
 });
 
 test("the palette disables commands the current build cannot run", async ({
