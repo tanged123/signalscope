@@ -165,9 +165,36 @@ every signal for all range×fidelity combinations on a dialog open.
 ### Out-of-core storage — bins and columns
 
 Paging columns alone strands ~90% of the footprint, so this phase
-addresses both, and it is a cross-cutting `scope-core` refactor, not
-a swap behind the current API (`Arc<[f64]>` cannot wrap a mapped
-region):
+addresses both. Before any paging, shrink what is resident — two
+compactions cut the bin footprint roughly an order of magnitude with
+no architectural change, and they make everything downstream (RAM,
+sidecar bytes, mmap pages) proportionally cheaper:
+
+- **Split the storage bin from the wire bin.** `EnvelopeBin` is the
+  generated protocol type reused as storage; its four `Option<f64>`
+  fields cost 16 bytes each because f64 has no niche. A dedicated
+  storage layout — NaN sentinels plus one flags byte for the
+  optional fields, u32 counts, struct-of-arrays per level — is
+  ~70–80 bytes per bin instead of 120 (and shrinks the 88-byte
+  sidecar record too). Conversion to the wire type happens at the
+  query boundary; the protocol schema is untouched.
+- **Stop storing the finest levels.** Stored bins total ~one per raw
+  sample only because levels 1–2 hold 75% of them. Queries dense
+  enough to select those levels have few samples per pixel by
+  construction (level choice bounds in-window bins to ~2× pixel
+  width), so binning them on the fly from the raw column stays
+  viewport-bounded, exactly like the existing level-0 path. Starting
+  stored levels at 3 cuts stored bins ~4× (validate the on-the-fly
+  cost against ADR 0003's render invariants before committing to the
+  exact cutoff).
+
+Together: ~120 bytes of bin per raw sample drops to ~15–20. The
+1,000-run example's resident bins go from ~380 GB to ~50 GB — still
+too big for RAM at full scale, so paging remains necessary; the
+compactions just shrink the problem paging has to solve.
+
+The paging work is a cross-cutting `scope-core` refactor, not a swap
+behind the current API (`Arc<[f64]>` cannot wrap a mapped region):
 
 - Columns move to an owned-or-mapped abstraction inside `Signal`.
   Touches `insert_signal`, the pyramid builder (which currently
@@ -277,9 +304,11 @@ restore.
    with partial members and timebase checks, query-time ensemble
    merge behind a member limit (tens of runs), band rendering, the
    snapshot/export answer.
-3. **P3 — out-of-core bins and columns.** Unlocks thousand-run
-   sweeps and the precomputed ensemble pyramid; benchmarked against
-   the Phase 5 targets.
+3. **P3 — storage: compaction, then paging.** Bin compaction and
+   finest-level elision first (an order of magnitude off resident
+   footprint, shippable on their own), then out-of-core bins and
+   columns. Unlocks thousand-run sweeps and the precomputed ensemble
+   pyramid; benchmarked against the Phase 5 targets.
 4. **P4 — container readers + recipes.** HDF5/MAT readers, recipe
    format, import wizard, preferences amendment.
 5. **P5 — parser plugins.** Dedicated spec, then implementation.
