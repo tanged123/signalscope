@@ -22,8 +22,8 @@ use scope_protocol::{
     ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest, IngestJob, IngestRequest,
     IngestResponse, IngestStage, IngestState, IngestStatus, LoadSessionRequest, LoadedSession,
     PickSessionRequest, RemoveSignalRequest, SampleRequest, SampleResponse, SampleSeries,
-    SaveExportFileRequest, SaveSessionRequest, SessionDialogMode, SignalSummary, SignalTile,
-    SourceSummary, TileRequest, TileResponse,
+    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode,
+    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -548,6 +548,20 @@ fn normalized_export_save_path(mut path: PathBuf, extension: &str) -> PathBuf {
     path
 }
 
+fn export_file_path(directory: &Path, file_name: &str, extension: &str) -> Result<PathBuf, String> {
+    let mut components = Path::new(file_name).components();
+    let Some(std::path::Component::Normal(_)) = components.next() else {
+        return Err("export file name must be a single path component".to_owned());
+    };
+    if components.next().is_some() {
+        return Err("export file name must be a single path component".to_owned());
+    }
+    Ok(normalized_export_save_path(
+        directory.join(file_name),
+        extension,
+    ))
+}
+
 fn write_export_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
     static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
     let file_name = path
@@ -713,6 +727,41 @@ async fn save_export_file(
     Ok(Envelope::new(Some(path.display().to_string())))
 }
 
+#[tauri::command]
+async fn pick_export_directory(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        picked
+            .and_then(|folder| folder.into_path().ok())
+            .map(|path| path.display().to_string()),
+    ))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn save_export_file_to_directory(
+    request: Envelope<SaveExportFileToDirectoryRequest>,
+) -> Result<Envelope<String>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let extension = match request.kind {
+        ExportFileKind::Png => "png",
+        ExportFileKind::Csv => "csv",
+    };
+    let directory = PathBuf::from(&request.directory);
+    if !directory.is_dir() {
+        return Err("export directory does not exist".to_owned());
+    }
+    let path = export_file_path(&directory, &request.file_name, extension)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&request.data_base64)
+        .map_err(|error| error.to_string())?;
+    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(Envelope::new(path.display().to_string()))
+}
+
 const PREFERENCES_FILE: &str = "preferences.json";
 
 fn preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -774,6 +823,8 @@ pub fn run() {
             export_estimate,
             export_write,
             save_export_file,
+            pick_export_directory,
+            save_export_file_to_directory,
             load_preferences,
             save_preferences
         ])
@@ -890,6 +941,18 @@ mod tests {
             normalized_export_save_path(PathBuf::from("/tmp/plot.csv"), "png"),
             PathBuf::from("/tmp/plot.png")
         );
+    }
+
+    #[test]
+    fn directory_export_names_are_single_path_components() {
+        let directory = Path::new("/tmp/exports");
+        assert_eq!(
+            export_file_path(directory, "plot.png", "png").expect("valid file name"),
+            directory.join("plot.png")
+        );
+        assert!(export_file_path(directory, "../plot.png", "png").is_err());
+        assert!(export_file_path(directory, "nested/plot.png", "png").is_err());
+        assert!(export_file_path(directory, "", "png").is_err());
     }
 
     #[test]

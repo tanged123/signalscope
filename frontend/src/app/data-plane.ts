@@ -18,6 +18,7 @@ import {
   type SampleResponse,
   type SaveSessionRequest,
   type SaveExportFileRequest,
+  type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
   type SignalSummary,
   type SnapshotManifest,
@@ -64,6 +65,13 @@ export interface ExportPort {
     kind: ExportFileKind,
     dataBase64: string,
   ): Promise<string | null>;
+  pickDirectory(): Promise<string | null>;
+  saveFileToDirectory(
+    directory: string,
+    fileName: string,
+    kind: ExportFileKind,
+    dataBase64: string,
+  ): Promise<string>;
 }
 
 export interface DataPlane {
@@ -204,6 +212,26 @@ export class TauriPlane implements DataPlane {
         open(
           await this.invoke<Envelope<string | null>>("save_export_file", {
             request: seal<SaveExportFileRequest>({
+              file_name: fileName,
+              kind,
+              data_base64: dataBase64,
+            }),
+          }),
+        ),
+      pickDirectory: async () =>
+        open(
+          await this.invoke<Envelope<string | null>>("pick_export_directory"),
+        ),
+      saveFileToDirectory: async (
+        directory: string,
+        fileName: string,
+        kind: ExportFileKind,
+        dataBase64: string,
+      ) =>
+        open(
+          await this.invoke<Envelope<string>>("save_export_file_to_directory", {
+            request: seal<SaveExportFileToDirectoryRequest>({
+              directory,
               file_name: fileName,
               kind,
               data_base64: dataBase64,

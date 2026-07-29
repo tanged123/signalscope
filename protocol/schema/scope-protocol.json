@@ -1,5 +1,5 @@
 {
-  "protocol_version": 7,
+  "protocol_version": 8,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -223,6 +223,15 @@
     "SaveExportFileRequest": {
       "kind": "object",
       "fields": {
+        "file_name": "string",
+        "kind": "ExportFileKind",
+        "data_base64": "string"
+      }
+    },
+    "SaveExportFileToDirectoryRequest": {
+      "kind": "object",
+      "fields": {
+        "directory": "string",
         "file_name": "string",
         "kind": "ExportFileKind",
         "data_base64": "string"

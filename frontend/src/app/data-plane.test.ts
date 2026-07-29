@@ -188,6 +188,42 @@ describe("export port", () => {
     );
   });
 
+  it("selects one export folder and writes named files into it", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(
+        seal(
+          command === "pick_export_directory"
+            ? "/tmp/exports"
+            : "/tmp/exports/plot.png",
+        ) as never,
+      );
+    });
+
+    expect(await plane.exporter.pickDirectory()).toBe("/tmp/exports");
+    expect(
+      await plane.exporter.saveFileToDirectory(
+        "/tmp/exports",
+        "plot.png",
+        "png",
+        "cG5n",
+      ),
+    ).toBe("/tmp/exports/plot.png");
+    expect(calls.map((call) => call.command)).toEqual([
+      "pick_export_directory",
+      "save_export_file_to_directory",
+    ]);
+    expect(calls[1]?.args?.request).toEqual(
+      seal({
+        directory: "/tmp/exports",
+        file_name: "plot.png",
+        kind: "png",
+        data_base64: "cG5n",
+      }),
+    );
+  });
+
   it("exposes the baked session and no exporter", () => {
     const plane = new BakedPlane(
       seal({

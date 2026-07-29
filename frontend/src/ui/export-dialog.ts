@@ -7,6 +7,7 @@ import type {
 import { required } from "./dom";
 
 export type ExportFormat = "html" | "png" | "csv";
+export type PngScope = "focused" | "all";
 
 export interface CsvEstimate {
   bytes: number;
@@ -17,11 +18,13 @@ export interface CsvEstimate {
 export interface ExportDelegate {
   estimateHtml(): Promise<ExportEstimate | null>;
   pngBytes(): Promise<number | null>;
+  pngPanelCount(): number;
   csvEstimate(fidelity: ExportFidelity): Promise<CsvEstimate | null>;
   runExport(
     format: ExportFormat,
     range: ExportRange,
     fidelity: ExportFidelity,
+    pngScope: PngScope,
   ): Promise<void>;
 }
 
@@ -34,6 +37,7 @@ export class ExportDialog {
   private selected: ExportFormat = "html";
   private range: ExportRange = "visible";
   private fidelity: ExportFidelity = "standard";
+  private pngScope: PngScope = "focused";
   private htmlEstimate: ExportEstimate | null | undefined;
   private pngSize: number | null = null;
   private pngLoaded = false;
@@ -75,6 +79,13 @@ export class ExportDialog {
         <span class="export-size" data-size="csv">…</span>
       </label>
       <div class="export-controls">
+        <div class="export-png-scope" hidden>
+          <span class="export-control-title">PANELS</span>
+          <div class="export-options" role="radiogroup" aria-label="PNG panels">
+            <button class="export-option active" data-png-scope="focused" aria-pressed="true">focused panel</button>
+            <button class="export-option" data-png-scope="all" aria-pressed="false">all panels</button>
+          </div>
+        </div>
         <span class="export-control-title">RANGE</span>
         <div class="export-options export-range" role="radiogroup" aria-label="Export range">
           <button class="export-option active" data-range="visible" aria-pressed="true">visible window</button>
@@ -133,6 +144,14 @@ export class ExportDialog {
         this.renderSelection();
       });
     }
+    for (const button of this.element.querySelectorAll<HTMLButtonElement>(
+      "[data-png-scope]",
+    )) {
+      button.addEventListener("click", () => {
+        this.pngScope = button.dataset.pngScope as PngScope;
+        this.renderSelection();
+      });
+    }
     this.confirm.addEventListener("click", () => {
       void this.run();
     });
@@ -148,6 +167,7 @@ export class ExportDialog {
     this.selected = format;
     this.range = "visible";
     this.fidelity = format === "csv" ? "high" : "standard";
+    this.pngScope = "focused";
     this.htmlEstimate = undefined;
     this.pngSize = null;
     this.pngLoaded = false;
@@ -203,7 +223,12 @@ export class ExportDialog {
   private async run(): Promise<void> {
     this.confirm.disabled = true;
     try {
-      await this.delegate.runExport(this.selected, this.range, this.fidelity);
+      await this.delegate.runExport(
+        this.selected,
+        this.range,
+        this.fidelity,
+        this.pngScope,
+      );
       this.close();
     } catch {
       // The delegate reports the error; keep the dialog open for retry.
@@ -231,9 +256,12 @@ export class ExportDialog {
     this.renderRows();
 
     const htmlSelected = this.selected === "html";
+    const pngSelected = this.selected === "png";
     const fidelitySelected = htmlSelected || this.selected === "csv";
     const controls = required(this.element, ".export-controls");
-    controls.classList.toggle("disabled", !fidelitySelected);
+    controls.classList.remove("disabled");
+    required<HTMLElement>(this.element, ".export-png-scope").hidden =
+      !pngSelected;
     required(this.element, ".export-range").classList.toggle(
       "disabled",
       !htmlSelected,
@@ -254,6 +282,13 @@ export class ExportDialog {
       button.classList.toggle("active", active);
       button.ariaPressed = String(active);
     }
+    for (const button of this.element.querySelectorAll<HTMLButtonElement>(
+      "[data-png-scope]",
+    )) {
+      const active = button.dataset.pngScope === this.pngScope;
+      button.classList.toggle("active", active);
+      button.ariaPressed = String(active);
+    }
     this.renderFidelitySizes();
     this.renderAwareness();
 
@@ -267,7 +302,9 @@ export class ExportDialog {
         ? this.entry() !== undefined
         : this.selected === "csv"
           ? this.csv !== null && this.csvFidelity === this.fidelity
-          : this.pngSize !== null;
+          : this.pngScope === "all"
+            ? this.delegate.pngPanelCount() > 0
+            : this.pngSize !== null;
     this.confirm.disabled = !selectedAvailable;
   }
 
@@ -285,11 +322,13 @@ export class ExportDialog {
     this.setRow(
       "png",
       this.pngSize,
-      this.pngSize === null
-        ? this.pngLoaded
-          ? "no focused panel"
-          : "…"
-        : formatBytes(this.pngSize),
+      this.pngScope === "all"
+        ? `${formatCount(this.delegate.pngPanelCount())} PNG files`
+        : this.pngSize === null
+          ? this.pngLoaded
+            ? "no focused panel"
+            : "…"
+          : formatBytes(this.pngSize),
     );
     const csv = this.csv;
     this.setRow(
@@ -311,7 +350,10 @@ export class ExportDialog {
     const row = this.row(format);
     const unavailable =
       (format === "html" && this.htmlEstimate === null) ||
-      (format === "png" && this.pngLoaded && bytes === null) ||
+      (format === "png" &&
+        this.pngLoaded &&
+        bytes === null &&
+        this.delegate.pngPanelCount() === 0) ||
       (format === "csv" && this.csvLoaded && bytes === null);
     required<HTMLInputElement>(row, "input").disabled = unavailable;
     row.classList.toggle("disabled", unavailable);
@@ -347,6 +389,8 @@ export class ExportDialog {
       this.csvFidelity === this.fidelity
     ) {
       awareness.textContent = `${formatCount(this.csv.rows)} rows · stride 1:${String(this.csv.stride)}`;
+    } else if (this.selected === "png" && this.pngScope === "all") {
+      awareness.textContent = `${formatCount(this.delegate.pngPanelCount())} panels across all workspaces`;
     } else {
       awareness.textContent = "…";
     }
@@ -362,6 +406,7 @@ export class ExportDialog {
         ? (this.csv?.bytes ?? null)
         : null;
     }
+    if (this.pngScope === "all") return null;
     return this.pngSize;
   }
 

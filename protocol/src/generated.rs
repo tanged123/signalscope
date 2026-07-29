@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -297,6 +297,14 @@ pub enum ExportFileKind {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SaveExportFileRequest {
+    pub file_name: String,
+    pub kind: ExportFileKind,
+    pub data_base64: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveExportFileToDirectoryRequest {
+    pub directory: String,
     pub file_name: String,
     pub kind: ExportFileKind,
     pub data_base64: String,

@@ -172,6 +172,7 @@ test("export dialog is modal and restores focus after a document Escape", async 
           ],
         }),
       pngBytes: () => Promise.resolve(100),
+      pngPanelCount: () => 1,
       csvEstimate: () => Promise.resolve({ bytes: 100, rows: 10, stride: 2 }),
       runExport: () => Promise.resolve(),
     });
@@ -219,6 +220,7 @@ test("export dialog exposes range, fidelity, and reduction consequences", async 
     new ExportDialog(document.body, {
       estimateHtml: () => Promise.resolve({ entries }),
       pngBytes: () => Promise.resolve(400_000),
+      pngPanelCount: () => 3,
       csvEstimate: (fidelity) =>
         Promise.resolve({
           bytes: fidelity === "high" ? 1_200_000 : 400_000,
@@ -252,6 +254,39 @@ test("export dialog exposes range, fidelity, and reduction consequences", async 
   await expect(dialog.locator('[data-size="csv"]')).toHaveText(
     "1.2 MB · 16,384 rows · stride 1:8",
   );
+});
+
+test("PNG export defaults to the focused panel and can select all panels", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const moduleUrl = "/src/ui/export-dialog.ts";
+    const { ExportDialog } = (await import(moduleUrl)) as {
+      ExportDialog: ExportDialogConstructor;
+    };
+    new ExportDialog(document.body, {
+      estimateHtml: () => Promise.resolve(null),
+      pngBytes: () => Promise.resolve(400_000),
+      pngPanelCount: () => 3,
+      csvEstimate: () => Promise.resolve(null),
+      runExport: (_format, _range, _fidelity, pngScope) => {
+        document.body.dataset.pngScope = pngScope;
+        return Promise.resolve();
+      },
+    }).open("png");
+  });
+
+  const dialog = page.getByRole("dialog", { name: "Export" });
+  await expect(dialog.locator('[data-png-scope="focused"]')).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(dialog.locator('[data-size="png"]')).toHaveText("400 kB");
+  await dialog.locator('[data-png-scope="all"]').click();
+  await expect(dialog.locator('[data-size="png"]')).toHaveText("3 PNG files");
+  await dialog.locator(".export-confirm").click();
+  await expect(page.locator("body")).toHaveAttribute("data-png-scope", "all");
 });
 
 test("the palette disables commands the current build cannot run", async ({

@@ -1562,6 +1562,15 @@ button {
   border-top: 1px solid var(--border-faint);
 }
 
+.export-png-scope {
+  display: grid;
+  gap: 7px;
+}
+
+.export-png-scope[hidden] {
+  display: none;
+}
+
 .export-control-title {
   color: var(--fg-3);
   font: 0.6923rem var(--font-mono);
