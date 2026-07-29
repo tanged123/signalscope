@@ -886,6 +886,10 @@ export class PanelView {
     return this.canvas.clientWidth;
   }
 
+  canvases(): { plot: HTMLCanvasElement; overlay: HTMLCanvasElement } {
+    return { plot: this.canvas, overlay: this.overlay };
+  }
+
   panelRect(): DOMRect {
     return this.element.getBoundingClientRect();
   }

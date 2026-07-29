@@ -1,5 +1,5 @@
 {
-  "protocol_version": 5,
+  "protocol_version": 8,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -174,6 +174,81 @@
       "fields": {
         "session_json": "string",
         "path": "string?"
+      }
+    },
+    "ExportRange": {
+      "kind": "enum",
+      "variants": ["visible", "all"]
+    },
+    "ExportFidelity": {
+      "kind": "enum",
+      "variants": ["preview", "standard", "high", "full"]
+    },
+    "ExportEstimateRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string"
+      }
+    },
+    "ExportEstimate": {
+      "kind": "object",
+      "fields": {
+        "entries": "ExportEstimateEntry[]"
+      }
+    },
+    "ExportEstimateEntry": {
+      "kind": "object",
+      "fields": {
+        "range": "ExportRange",
+        "fidelity": "ExportFidelity",
+        "bytes": "u64",
+        "series_total": "u64",
+        "series_decimated": "u64",
+        "series_full_rate": "u64",
+        "coarsest_ratio": "u64"
+      }
+    },
+    "ExportWriteRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "range": "ExportRange",
+        "fidelity": "ExportFidelity"
+      }
+    },
+    "ExportFileKind": {
+      "kind": "enum",
+      "variants": ["png", "csv"]
+    },
+    "SaveExportFileRequest": {
+      "kind": "object",
+      "fields": {
+        "file_name": "string",
+        "kind": "ExportFileKind",
+        "data_base64": "string"
+      }
+    },
+    "SaveExportFileToDirectoryRequest": {
+      "kind": "object",
+      "fields": {
+        "directory": "string",
+        "file_name": "string",
+        "kind": "ExportFileKind",
+        "data_base64": "string"
+      }
+    },
+    "BakedSignal": {
+      "kind": "object",
+      "fields": {
+        "summary": "SignalSummary",
+        "levels": "EnvelopeBin[][]"
+      }
+    },
+    "SnapshotManifest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "signals": "BakedSignal[]"
       }
     }
   }

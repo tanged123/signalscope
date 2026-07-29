@@ -1,6 +1,12 @@
 import {
   type DerivedRequest,
   type EnvelopeBin,
+  type ExportEstimate,
+  type ExportEstimateRequest,
+  type ExportFidelity,
+  type ExportFileKind,
+  type ExportRange,
+  type ExportWriteRequest,
   type IngestJob,
   type IngestRequest,
   type IngestStatus,
@@ -11,8 +17,11 @@ import {
   type SampleRequest,
   type SampleResponse,
   type SaveSessionRequest,
+  type SaveExportFileRequest,
+  type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
   type SignalSummary,
+  type SnapshotManifest,
   type SourceSummary,
   type TileRequest,
   type TileResponse,
@@ -44,24 +53,42 @@ export interface PreferencesPort {
   save(preferencesJson: string): Promise<void>;
 }
 
+export interface ExportPort {
+  estimate(sessionJson: string): Promise<ExportEstimate>;
+  writeHtml(
+    sessionJson: string,
+    range: ExportRange,
+    fidelity: ExportFidelity,
+  ): Promise<string | null>;
+  saveFile(
+    fileName: string,
+    kind: ExportFileKind,
+    dataBase64: string,
+  ): Promise<string | null>;
+  pickDirectory(): Promise<string | null>;
+  saveFileToDirectory(
+    directory: string,
+    fileName: string,
+    kind: ExportFileKind,
+    dataBase64: string,
+  ): Promise<string>;
+}
+
 export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
   readonly session: SessionPort | null;
   readonly preferences: PreferencesPort | null;
+  readonly exporter: ExportPort | null;
+  readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
-interface BakedSignal {
-  summary: SignalSummary;
-  levels: EnvelopeBin[][];
-}
-
-type BakedManifest = Envelope<{ signals: BakedSignal[] }>;
+type BakedManifest = Envelope<SnapshotManifest>;
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -83,6 +110,8 @@ export class TauriPlane implements DataPlane {
   readonly session: SessionPort;
 
   readonly preferences: PreferencesPort;
+
+  readonly exporter: ExportPort;
 
   constructor(private readonly invoke: TauriInternals["invoke"]) {
     this.ingest = {
@@ -152,6 +181,64 @@ export class TauriPlane implements DataPlane {
         );
       },
     };
+    this.exporter = {
+      estimate: async (sessionJson: string) =>
+        open(
+          await this.invoke<Envelope<ExportEstimate>>("export_estimate", {
+            request: seal<ExportEstimateRequest>({
+              session_json: sessionJson,
+            }),
+          }),
+        ),
+      writeHtml: async (
+        sessionJson: string,
+        range: ExportRange,
+        fidelity: ExportFidelity,
+      ) =>
+        open(
+          await this.invoke<Envelope<string | null>>("export_write", {
+            request: seal<ExportWriteRequest>({
+              session_json: sessionJson,
+              range,
+              fidelity,
+            }),
+          }),
+        ),
+      saveFile: async (
+        fileName: string,
+        kind: ExportFileKind,
+        dataBase64: string,
+      ) =>
+        open(
+          await this.invoke<Envelope<string | null>>("save_export_file", {
+            request: seal<SaveExportFileRequest>({
+              file_name: fileName,
+              kind,
+              data_base64: dataBase64,
+            }),
+          }),
+        ),
+      pickDirectory: async () =>
+        open(
+          await this.invoke<Envelope<string | null>>("pick_export_directory"),
+        ),
+      saveFileToDirectory: async (
+        directory: string,
+        fileName: string,
+        kind: ExportFileKind,
+        dataBase64: string,
+      ) =>
+        open(
+          await this.invoke<Envelope<string>>("save_export_file_to_directory", {
+            request: seal<SaveExportFileToDirectoryRequest>({
+              directory,
+              file_name: fileName,
+              kind,
+              data_base64: dataBase64,
+            }),
+          }),
+        ),
+    };
   }
 
   async listSignals(): Promise<SignalSummary[]> {
@@ -203,6 +290,10 @@ export class BakedPlane implements DataPlane {
 
   readonly preferences = null;
 
+  readonly exporter = null;
+
+  readonly bakedSessionJson: string;
+
   private readonly payload: BakedManifest["payload"];
 
   /**
@@ -217,6 +308,7 @@ export class BakedPlane implements DataPlane {
 
   constructor(manifest: BakedManifest) {
     this.payload = open(manifest);
+    this.bakedSessionJson = this.payload.session_json;
   }
 
   static fromDocument(documentRoot: Document = document): BakedPlane {
@@ -372,6 +464,7 @@ function createDemoManifest(): BakedManifest {
     },
   ];
   return seal({
+    session_json: "",
     signals: demoSignals.map(({ summary, generate }) => ({
       summary,
       levels: buildDemoLevels(makeBins(generate)),

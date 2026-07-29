@@ -13,6 +13,15 @@ import { SESSION_SCHEMA_VERSION } from "../generated/session";
 
 const MIN_FRACTION = 0.1;
 
+export interface WorkspaceViewState {
+  activeTabId: string;
+  tabs: {
+    id: string;
+    focusedPanelId: string | null;
+    maximizedPanelId: string | null;
+  }[];
+}
+
 export function emptySession(): Session {
   return {
     app: "signalscope",
@@ -114,6 +123,37 @@ export class WorkspaceModel {
       throw new Error("Active workspace tab is unavailable");
     }
     return tab;
+  }
+
+  captureViewState(): WorkspaceViewState {
+    return {
+      activeTabId: this.session.active_tab_id,
+      tabs: this.session.tabs.map((tab) => ({
+        id: tab.id,
+        focusedPanelId: tab.focused_panel_id,
+        maximizedPanelId: tab.maximized_panel_id,
+      })),
+    };
+  }
+
+  showTabForExport(id: string): boolean {
+    const tab = this.session.tabs.find((entry) => entry.id === id);
+    if (tab === undefined) return false;
+    this.session.active_tab_id = id;
+    tab.maximized_panel_id = null;
+    return true;
+  }
+
+  restoreViewState(state: WorkspaceViewState): void {
+    for (const saved of state.tabs) {
+      const tab = this.session.tabs.find((entry) => entry.id === saved.id);
+      if (tab === undefined) continue;
+      tab.focused_panel_id = saved.focusedPanelId;
+      tab.maximized_panel_id = saved.maximizedPanelId;
+    }
+    if (this.session.tabs.some((tab) => tab.id === state.activeTabId)) {
+      this.session.active_tab_id = state.activeTabId;
+    }
   }
 
   addTab(): WorkspaceTab {

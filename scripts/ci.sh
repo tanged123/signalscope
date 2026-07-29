@@ -49,6 +49,7 @@ check_format_read_only() {
 }
 
 check_e2e() {
+  bake_roundtrip_artifact
   pnpm e2e
 }
 

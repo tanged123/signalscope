@@ -31,6 +31,7 @@ describe("BakedPlane.querySamples", () => {
     };
     const plane = new BakedPlane(
       seal({
+        session_json: "",
         signals: [
           {
             summary,
@@ -121,7 +122,7 @@ describe("derived port", () => {
   });
 
   it("has no derived port in a snapshot", () => {
-    const plane = new BakedPlane(seal({ signals: [] }));
+    const plane = new BakedPlane(seal({ session_json: "", signals: [] }));
     expect(plane.derived).toBeNull();
   });
 });
@@ -143,5 +144,94 @@ describe("session port", () => {
 
     expect(calls).toEqual(["reset_session"]);
     expect(loaded.path).toBeNull();
+  });
+});
+
+describe("export port", () => {
+  it("routes export calls through native commands", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      if (command === "export_estimate") {
+        return Promise.resolve(
+          seal({
+            entries: [
+              {
+                range: "visible",
+                fidelity: "standard",
+                bytes: "10",
+                series_total: "1",
+                series_decimated: "1",
+                series_full_rate: "0",
+                coarsest_ratio: "4",
+              },
+            ],
+          }) as never,
+        );
+      }
+      return Promise.resolve(seal("/tmp/out.html") as never);
+    });
+
+    const estimate = await plane.exporter.estimate("{}");
+    expect(estimate.entries[0]?.bytes).toBe("10");
+    await plane.exporter.writeHtml("{}", "visible", "standard");
+    expect(calls.map((call) => call.command)).toEqual([
+      "export_estimate",
+      "export_write",
+    ]);
+    expect(calls[1]?.args?.request).toEqual(
+      seal({
+        session_json: "{}",
+        range: "visible",
+        fidelity: "standard",
+      }),
+    );
+  });
+
+  it("selects one export folder and writes named files into it", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(
+        seal(
+          command === "pick_export_directory"
+            ? "/tmp/exports"
+            : "/tmp/exports/plot.png",
+        ) as never,
+      );
+    });
+
+    expect(await plane.exporter.pickDirectory()).toBe("/tmp/exports");
+    expect(
+      await plane.exporter.saveFileToDirectory(
+        "/tmp/exports",
+        "plot.png",
+        "png",
+        "cG5n",
+      ),
+    ).toBe("/tmp/exports/plot.png");
+    expect(calls.map((call) => call.command)).toEqual([
+      "pick_export_directory",
+      "save_export_file_to_directory",
+    ]);
+    expect(calls[1]?.args?.request).toEqual(
+      seal({
+        directory: "/tmp/exports",
+        file_name: "plot.png",
+        kind: "png",
+        data_base64: "cG5n",
+      }),
+    );
+  });
+
+  it("exposes the baked session and no exporter", () => {
+    const plane = new BakedPlane(
+      seal({
+        session_json: '{"app":"signalscope"}',
+        signals: [],
+      }),
+    );
+    expect(plane.bakedSessionJson).toBe('{"app":"signalscope"}');
+    expect(plane.exporter).toBeNull();
   });
 });

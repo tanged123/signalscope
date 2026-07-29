@@ -1,0 +1,81 @@
+{
+  "app": "signalscope",
+  "schema_version": 10,
+  "theme": "light",
+  "linked_time": {
+    "t0": 0.0,
+    "t1": 7.5,
+    "linked": true,
+    "paused": false,
+    "cursorT": null,
+    "mode": "fixed"
+  },
+  "active_tab_id": "roundtrip",
+  "tabs": [
+    {
+      "id": "roundtrip",
+      "title": "Roundtrip",
+      "cursor_mode": "none",
+      "focused_panel_id": "alpha-beta",
+      "maximized_panel_id": null,
+      "panels": [
+        {
+          "id": "alpha-beta",
+          "title": "Alpha & Beta",
+          "mode": "time",
+          "axis_style": "gutter",
+          "x_signal": null,
+          "color_signal": null,
+          "color_by_time": false,
+          "series": [
+            {
+              "path": "roundtrip/alpha",
+              "color_slot": 0,
+              "dash": "solid",
+              "width": 1.5,
+              "visible": true
+            },
+            {
+              "path": "roundtrip/beta",
+              "color_slot": 1,
+              "dash": "solid",
+              "width": 1.5,
+              "visible": true
+            }
+          ],
+          "y_range": null,
+          "x_range": null,
+          "x_label": "time (s)",
+          "y_label": "value",
+          "c_label": null,
+          "time_window": null,
+          "annotations": [
+            {
+              "id": "peak",
+              "series_path": "roundtrip/alpha",
+              "domain": "time",
+              "anchor": 4.0,
+              "pinned_value": 8.0,
+              "label": "peak"
+            }
+          ],
+          "show_stats": true
+        }
+      ],
+      "layout": [
+        {
+          "height": 1.0,
+          "panels": [
+            {
+              "panel_id": "alpha-beta",
+              "width": 1.0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "favorites": [],
+  "derived": [],
+  "source_paths": []
+}

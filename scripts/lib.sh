@@ -33,8 +33,9 @@ artifact_checks() {
 }
 
 rust_checks() {
-  cargo clippy --workspace --all-targets -- -D warnings
-  cargo test --workspace
+  local check_config='{"bundle":{"resources":[]}}'
+  TAURI_CONFIG="$check_config" cargo clippy --workspace --all-targets -- -D warnings
+  TAURI_CONFIG="$check_config" cargo test --workspace
 }
 
 quality_checks() {
@@ -47,4 +48,20 @@ quality_checks() {
   pnpm --filter @signalscope/frontend check:deps
   pnpm --filter @signalscope/frontend check:unused
   zizmor .github/workflows/ .github/actions/
+}
+
+bake_roundtrip_artifact() {
+  "$signalscope_scripts_dir/export.sh" \
+    --data frontend/tests/e2e/fixtures/roundtrip.csv \
+    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
+    --range all \
+    --fidelity preview \
+    --out build/export/roundtrip-preview.html
+  "$signalscope_scripts_dir/export.sh" \
+    --no-build \
+    --data frontend/tests/e2e/fixtures/roundtrip.csv \
+    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
+    --range all \
+    --fidelity full \
+    --out build/export/roundtrip-full.html
 }

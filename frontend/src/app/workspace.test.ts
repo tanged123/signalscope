@@ -164,6 +164,41 @@ describe("WorkspaceModel", () => {
     expect(model.focusedPanelId()).toBe(secondPanel.id);
   });
 
+  it("shows full tabs for export and restores their view state", () => {
+    const model = new WorkspaceModel();
+    const firstPanel = model.addPanelRow();
+    const firstTab = model.activeTabId();
+    model.maximizePanel(firstPanel.id);
+    const secondTab = model.addTab();
+    const secondPanel = model.addPanelRow();
+    model.maximizePanel(secondPanel.id);
+    const before = model.captureViewState();
+
+    expect(model.showTabForExport(firstTab)).toBe(true);
+    expect(model.activeTabId()).toBe(firstTab);
+    expect(model.maximizedPanelId()).toBeNull();
+    expect(model.showTabForExport(secondTab.id)).toBe(true);
+    expect(model.maximizedPanelId()).toBeNull();
+
+    model.restoreViewState(before);
+
+    expect(model.activeTabId()).toBe(secondTab.id);
+    expect(
+      model.tabs().map((tab) => ({
+        id: tab.id,
+        focused: tab.focused_panel_id,
+        maximized: tab.maximized_panel_id,
+      })),
+    ).toEqual([
+      { id: firstTab, focused: firstPanel.id, maximized: firstPanel.id },
+      {
+        id: secondTab.id,
+        focused: secondPanel.id,
+        maximized: secondPanel.id,
+      },
+    ]);
+  });
+
   it("closes tabs without ever removing the last workspace", () => {
     const model = new WorkspaceModel();
     const firstTab = model.activeTabId();

@@ -168,6 +168,12 @@ export class WorkspaceView {
     return this.views.get(id)?.plotWidth() ?? 0;
   }
 
+  panelCanvases(
+    id: string,
+  ): { plot: HTMLCanvasElement; overlay: HTMLCanvasElement } | null {
+    return this.views.get(id)?.canvases() ?? null;
+  }
+
   panelRect(id: string): DOMRect | null {
     return this.views.get(id)?.panelRect() ?? null;
   }
