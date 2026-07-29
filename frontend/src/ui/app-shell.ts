@@ -9,6 +9,7 @@ import {
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, CSV_SAMPLE_CAP } from "../app/csv-export";
 import type { DataPlane } from "../app/data-plane";
+import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
   HistoryStack,
@@ -1403,7 +1404,7 @@ export class AppShell {
       const panel =
         panelId === null ? undefined : this.workspace.panel(panelId);
       if (panel === undefined) return;
-      const name = panel.title.trim() || panel.id;
+      const name = exportFileStem(panel.title, panel.id);
       if (format === "png") {
         const bytes = this.exportPng ?? (await this.buildVisiblePng());
         if (bytes === null) return;

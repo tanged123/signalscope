@@ -63,10 +63,10 @@ fn run(args: &Args) -> Result<(), String> {
             args.template.display()
         )
     })?;
-    let export = snapshot::plan(&session, &store, &pyramids, ExportScope::All);
-    let manifest =
-        snapshot::bake(&export, &store, &pyramids, &session).map_err(|error| error.to_string())?;
-    let html = snapshot::inject(&template, &manifest).map_err(|error| error.to_string())?;
+    let export = snapshot::plan(&session, &store, &pyramids, ExportScope::All)
+        .map_err(|error| error.to_string())?;
+    let manifest = snapshot::bake(&export, &session).map_err(|error| error.to_string())?;
+    let html = snapshot::inject(&template, manifest).map_err(|error| error.to_string())?;
     if let Some(parent) = args.out.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }

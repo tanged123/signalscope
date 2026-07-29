@@ -155,14 +155,39 @@ impl Pyramid {
         index: usize,
         window: Option<(f64, f64)>,
     ) -> Option<Vec<EnvelopeBin>> {
+        let range = self.level_window_range(index, window)?;
+        if index == 0 {
+            Some(self.synthesize_raw(range.start, range.end))
+        } else {
+            Some(self.merged[index - 1][range].to_vec())
+        }
+    }
+
+    /// Counts the bins [`Pyramid::level_window`] would materialize.
+    #[must_use]
+    pub fn level_window_count(&self, index: usize, window: Option<(f64, f64)>) -> Option<usize> {
+        self.level_window_range(index, window)
+            .map(|range| range.len())
+    }
+
+    fn level_window_range(
+        &self,
+        index: usize,
+        window: Option<(f64, f64)>,
+    ) -> Option<std::ops::Range<usize>> {
+        let len = if index == 0 {
+            self.time.len()
+        } else {
+            self.merged.get(index - 1)?.len()
+        };
         let Some((t0, t1)) = window else {
-            return self.level(index);
+            return Some(0..len);
         };
         if index == 0 {
             if self.time.first().is_none_or(|first| t1 < *first)
                 || self.time.last().is_none_or(|last| t0 > *last)
             {
-                return Some(Vec::new());
+                return Some(0..0);
             }
             let start = self
                 .time
@@ -172,22 +197,21 @@ impl Pyramid {
                 .time
                 .partition_point(|time| *time <= t1)
                 .saturating_add(1)
-                .min(self.time.len());
-            return Some(self.synthesize_raw(start, end));
+                .min(len);
+            return Some(start..end);
         }
-
-        let level = self.merged.get(index - 1)?;
+        let level = &self.merged[index - 1];
         if level.first().is_none_or(|first| t1 < first.t0)
             || level.last().is_none_or(|last| t0 > last.t1)
         {
-            return Some(Vec::new());
+            return Some(0..0);
         }
         let start = level.partition_point(|bin| bin.t1 < t0).saturating_sub(1);
         let end = level
             .partition_point(|bin| bin.t0 <= t1)
             .saturating_add(1)
-            .min(level.len());
-        Some(level[start..end].to_vec())
+            .min(len);
+        Some(start..end)
     }
 
     #[must_use]
@@ -353,6 +377,20 @@ mod tests {
         assert_eq!(levels[0].first().map(|bin| bin.t0), Some(49_999.0));
         assert_eq!(levels[0].last().map(|bin| bin.t1), Some(50_011.0));
         assert!(levels.iter().all(|level| level.len() <= 13));
+    }
+
+    #[test]
+    fn windowed_level_counts_match_materialized_bins() {
+        let time = (0..100_000).map(f64::from).collect::<Vec<_>>();
+        let pyramid = Pyramid::from_samples(&time, &time);
+        let window = Some((50_000.0, 50_010.0));
+
+        for index in 0..pyramid.level_count() {
+            assert_eq!(
+                pyramid.level_window_count(index, window),
+                pyramid.level_window(index, window).map(|bins| bins.len())
+            );
+        }
     }
 
     #[test]

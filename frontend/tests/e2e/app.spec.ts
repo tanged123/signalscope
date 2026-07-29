@@ -1,4 +1,13 @@
+import type {
+  ExportDelegate,
+  ExportDialog as ExportDialogInstance,
+} from "../../src/ui/export-dialog";
 import { expect, test } from "./fixtures";
+
+type ExportDialogConstructor = new (
+  root: HTMLElement,
+  delegate: ExportDelegate,
+) => ExportDialogInstance;
 
 test("shared presentation plane renders the demo workspace", async ({
   page,
@@ -131,6 +140,38 @@ test("tabbing out of the application menu dismisses it", async ({ page }) => {
   // browser resumes from the menu button instead of dropping focus to the body.
   await expect(page.locator(".menu-button")).not.toBeFocused();
   await expect(page.locator("body")).not.toBeFocused();
+});
+
+test("export dialog is modal and restores focus after a document Escape", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const moduleUrl = "/src/ui/export-dialog.ts";
+    const { ExportDialog } = (await import(moduleUrl)) as {
+      ExportDialog: ExportDialogConstructor;
+    };
+    const invoker = document.createElement("button");
+    invoker.dataset.testid = "export-invoker";
+    document.body.appendChild(invoker);
+    invoker.focus();
+    const dialog = new ExportDialog(document.body, {
+      estimateHtml: () => Promise.resolve({ visibleBytes: 100, allBytes: 200 }),
+      pngBytes: () => Promise.resolve(100),
+      csvBytes: () => Promise.resolve(100),
+      runExport: () => Promise.resolve(),
+    });
+    dialog.open("html");
+  });
+
+  const dialog = page.getByRole("dialog", { name: "Export" });
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement).blur();
+  });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("export-invoker")).toBeFocused();
 });
 
 test("the palette disables commands the current build cannot run", async ({

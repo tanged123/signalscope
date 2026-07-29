@@ -3,14 +3,19 @@ import { describe, expect, it } from "vitest";
 import type { SampleSeries } from "../generated/protocol";
 import { buildCsv } from "./csv-export";
 
-function series(path: string, time: number[], values: number[]): SampleSeries {
+function series(
+  path: string,
+  time: number[],
+  values: number[],
+  stride = 1,
+): SampleSeries {
   return {
     signal_id: "1",
     signal_path: path,
     unit: null,
     time,
     values,
-    stride: 1,
+    stride,
   };
 }
 
@@ -34,5 +39,17 @@ describe("buildCsv", () => {
     expect(buildCsv([base], { t0: 0, t1: 0 }).split("\n")[0]).toBe(
       'time,"weird""path"',
     );
+  });
+
+  it("records every strided series before the CSV header", () => {
+    const base = series("a", [0, 2], [10, 12], 2);
+    const other = series('b"quoted', [0, 3], [20, 23], 3);
+    expect(
+      buildCsv([base, other], { t0: 0, t1: 3 }).split("\n").slice(0, 3),
+    ).toEqual([
+      '# stride,"a",1:2',
+      '# stride,"b""quoted",1:3',
+      'time,"a","b""quoted"',
+    ]);
   });
 });

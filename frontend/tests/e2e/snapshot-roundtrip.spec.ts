@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { SESSION_SCHEMA_VERSION } from "../../src/generated/session";
 import { expect, test } from "./fixtures";
 
 const artifact = new URL(
@@ -44,7 +45,7 @@ test.describe("exported snapshot round trip", () => {
   }) => {
     const html = readFileSync(artifact, "utf8");
     const malformed = html.replace(
-      '\\"schema_version\\":10',
+      `\\"schema_version\\":${String(SESSION_SCHEMA_VERSION)}`,
       '\\"schema_version\\":999',
     );
     expect(malformed).not.toBe(html);

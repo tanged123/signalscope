@@ -19,6 +19,13 @@ export class ExportDialog {
   private selected: ExportFormat = "html";
   private scope: ExportScope = "visible";
   private loadToken = 0;
+  private returnFocus: HTMLElement | null = null;
+  private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== "Escape" || this.element.hidden) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.close();
+  };
 
   constructor(
     root: HTMLElement,
@@ -27,7 +34,7 @@ export class ExportDialog {
     this.element = document.createElement("div");
     this.element.className = "export-overlay";
     this.element.hidden = true;
-    this.element.innerHTML = `<div class="export-dialog" role="dialog" aria-label="Export">
+    this.element.innerHTML = `<div class="export-dialog" role="dialog" aria-modal="true" aria-label="Export">
       <header class="export-title">Export</header>
       <label class="export-row" data-format="html">
         <input type="radio" name="export-format" value="html" />
@@ -66,12 +73,6 @@ export class ExportDialog {
     this.element.addEventListener("pointerdown", (event) => {
       if (event.target === this.element) this.close();
     });
-    this.element.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        this.close();
-      }
-    });
     required(this.element, ".export-cancel").addEventListener("click", () => {
       this.close();
     });
@@ -97,9 +98,16 @@ export class ExportDialog {
   }
 
   open(format: ExportFormat): void {
+    if (this.element.hidden) {
+      this.returnFocus =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+    }
     this.selected = format;
     this.scope = "visible";
     this.element.hidden = false;
+    document.addEventListener("keydown", this.onDocumentKeyDown);
     this.renderSelection();
     const token = ++this.loadToken;
     void Promise.all([
@@ -122,6 +130,9 @@ export class ExportDialog {
   close(): void {
     this.element.hidden = true;
     this.loadToken += 1;
+    document.removeEventListener("keydown", this.onDocumentKeyDown);
+    this.returnFocus?.focus();
+    this.returnFocus = null;
   }
 
   isOpen(): boolean {

@@ -1,31 +1,54 @@
 //! Snapshot export planning, baking, and template injection (ADR 0023).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Write,
+};
 
 use crate::pyramid::Pyramid;
 use crate::session::{LinkedTime, PanelMode, PanelState, Session};
 use crate::store::{Signal, SignalId, SignalStore};
-use scope_protocol::{BakedSignal, EnvelopeBin, ExportScope, SignalSummary, SnapshotManifest};
+use scope_protocol::{BakedSignal, ExportScope, SignalSummary, SnapshotManifest};
+use serde::Serialize;
 use thiserror::Error;
 
 pub const MAX_BINS_PER_BAKED_LEVEL: usize = 2048;
 
-pub struct SignalPlan {
-    pub signal_id: SignalId,
-    pub finest_level: usize,
-    pub window: Option<(f64, f64)>,
+pub struct LevelPlan {
+    pub index: usize,
+    pub bin_count: usize,
 }
 
-pub struct ExportPlan {
-    pub signals: Vec<SignalPlan>,
+pub struct SignalPlan<'a> {
+    pub signal: &'a Signal,
+    pub pyramid: &'a Pyramid,
+    pub window: Option<(f64, f64)>,
+    pub levels: Vec<LevelPlan>,
+}
+
+impl SignalPlan<'_> {
+    #[must_use]
+    pub fn finest_level(&self) -> usize {
+        self.levels.first().map_or(0, |level| level.index)
+    }
+}
+
+pub struct ExportPlan<'a> {
+    pub signals: Vec<SignalPlan<'a>>,
 }
 
 #[derive(Debug, Error)]
 pub enum SnapshotError {
     #[error("template is missing the #signalscope-baked-data slot")]
     MissingSlot,
+    #[error("selected signal {0:?} is missing")]
+    MissingSignal(SignalId),
+    #[error("signal {0:?} is missing its pyramid")]
+    MissingPyramid(SignalId),
     #[error("manifest serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
+    #[error("manifest output is not UTF-8: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
 }
 
 fn effective_window(panel: &PanelState, linked: &LinkedTime) -> (f64, f64) {
@@ -55,49 +78,62 @@ fn panel_signal_paths(panel: &PanelState) -> Vec<&str> {
     paths
 }
 
-fn count_in_window(bins: &[EnvelopeBin], t0: f64, t1: f64) -> usize {
-    let start = bins.partition_point(|bin| bin.t1 < t0);
-    let end = bins.partition_point(|bin| bin.t0 <= t1);
-    end.saturating_sub(start)
-}
-
-fn raw_count_in_window(signal: &Signal, t0: f64, t1: f64) -> usize {
-    let time = signal.time();
-    let start = time.partition_point(|time| *time < t0);
-    let end = time.partition_point(|time| *time <= t1);
-    end.saturating_sub(start)
-}
-
-fn finest_level(signal: &Signal, pyramid: &Pyramid, t0: f64, t1: f64) -> usize {
-    if raw_count_in_window(signal, t0, t1) <= MAX_BINS_PER_BAKED_LEVEL {
-        return 0;
+fn signal_plan<'a>(
+    signal: &'a Signal,
+    pyramid: &'a Pyramid,
+    window: Option<(f64, f64)>,
+    needs_raw: bool,
+) -> SignalPlan<'a> {
+    let finest = if needs_raw {
+        0
+    } else {
+        (0..pyramid.level_count())
+            .find(|index| {
+                pyramid
+                    .level_window_count(*index, window)
+                    .is_some_and(|count| count <= MAX_BINS_PER_BAKED_LEVEL)
+            })
+            .unwrap_or_else(|| pyramid.level_count().saturating_sub(1))
+    };
+    let levels = (finest..pyramid.level_count())
+        .map(|index| LevelPlan {
+            index,
+            bin_count: pyramid
+                .level_window_count(index, window)
+                .expect("planned pyramid level exists"),
+        })
+        .collect();
+    SignalPlan {
+        signal,
+        pyramid,
+        window,
+        levels,
     }
-    for (index, level) in pyramid.merged_levels().iter().enumerate() {
-        if count_in_window(level, t0, t1) <= MAX_BINS_PER_BAKED_LEVEL {
-            return index + 1;
-        }
-    }
-    pyramid.level_count().saturating_sub(1)
 }
 
-#[must_use]
-pub fn plan(
+/// Resolves the selected signals, pyramids, levels, and exact clipped bin counts.
+///
+/// # Errors
+///
+/// Returns an error if a selected signal or its pyramid is missing.
+pub fn plan<'a>(
     session: &Session,
-    store: &SignalStore,
-    pyramids: &BTreeMap<SignalId, Pyramid>,
+    store: &'a SignalStore,
+    pyramids: &'a BTreeMap<SignalId, Pyramid>,
     scope: ExportScope,
-) -> ExportPlan {
+) -> Result<ExportPlan<'a>, SnapshotError> {
     if scope == ExportScope::All {
-        return ExportPlan {
+        return Ok(ExportPlan {
             signals: store
                 .signals()
-                .map(|signal| SignalPlan {
-                    signal_id: signal.id,
-                    finest_level: 0,
-                    window: None,
+                .map(|signal| {
+                    let pyramid = pyramids
+                        .get(&signal.id)
+                        .ok_or(SnapshotError::MissingPyramid(signal.id))?;
+                    Ok(signal_plan(signal, pyramid, None, true))
                 })
-                .collect(),
-        };
+                .collect::<Result<_, SnapshotError>>()?,
+        });
     }
 
     let mut window: Option<(f64, f64)> = None;
@@ -121,29 +157,26 @@ pub fn plan(
         }
     }
     let Some((t0, t1)) = window else {
-        return ExportPlan {
+        return Ok(ExportPlan {
             signals: Vec::new(),
-        };
+        });
     };
 
-    ExportPlan {
+    Ok(ExportPlan {
         signals: wanted
             .into_iter()
-            .filter_map(|id| {
-                let signal = store.signal(id)?;
-                let pyramid = pyramids.get(&id)?;
-                Some(SignalPlan {
-                    signal_id: id,
-                    finest_level: if needs_raw.contains(&id) {
-                        0
-                    } else {
-                        finest_level(signal, pyramid, t0, t1)
-                    },
-                    window: Some((t0, t1)),
-                })
+            .map(|id| {
+                let signal = store.signal(id).ok_or(SnapshotError::MissingSignal(id))?;
+                let pyramid = pyramids.get(&id).ok_or(SnapshotError::MissingPyramid(id))?;
+                Ok(signal_plan(
+                    signal,
+                    pyramid,
+                    Some((t0, t1)),
+                    needs_raw.contains(&id),
+                ))
             })
-            .collect(),
-    }
+            .collect::<Result<_, SnapshotError>>()?,
+    })
 }
 
 fn signal_summary(signal: &Signal) -> SignalSummary {
@@ -163,28 +196,19 @@ fn signal_summary(signal: &Signal) -> SignalSummary {
 /// # Errors
 ///
 /// Returns [`SnapshotError::Serialize`] when the session cannot be encoded.
-pub fn bake(
-    plan: &ExportPlan,
-    store: &SignalStore,
-    pyramids: &BTreeMap<SignalId, Pyramid>,
-    session: &Session,
-) -> Result<SnapshotManifest, SnapshotError> {
+pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, SnapshotError> {
     let mut baked_session = session.clone();
     baked_session.source_paths.clear();
 
     let mut signals = Vec::new();
     for entry in &plan.signals {
-        let Some(signal) = store.signal(entry.signal_id) else {
-            continue;
-        };
-        let Some(pyramid) = pyramids.get(&entry.signal_id) else {
-            continue;
-        };
-        let levels = (entry.finest_level..pyramid.level_count())
-            .filter_map(|index| pyramid.level_window(index, entry.window))
+        let levels = entry
+            .levels
+            .iter()
+            .filter_map(|level| entry.pyramid.level_window(level.index, entry.window))
             .collect();
         signals.push(BakedSignal {
-            summary: signal_summary(signal),
+            summary: signal_summary(entry.signal),
             levels,
         });
     }
@@ -198,15 +222,29 @@ pub fn bake(
 
 const SLOT_MARKER: &str = "id=\"signalscope-baked-data\"";
 
+struct HtmlSafeFormatter;
+
+impl serde_json::ser::Formatter for HtmlSafeFormatter {
+    fn write_string_fragment<W>(&mut self, writer: &mut W, fragment: &str) -> std::io::Result<()>
+    where
+        W: ?Sized + Write,
+    {
+        let mut remaining = fragment;
+        while let Some(offset) = remaining.find('<') {
+            writer.write_all(&remaining.as_bytes()[..offset])?;
+            writer.write_all(b"\\u003c")?;
+            remaining = &remaining[offset + 1..];
+        }
+        writer.write_all(remaining.as_bytes())
+    }
+}
+
 /// Injects a sealed manifest into the snapshot template's inert JSON slot.
 ///
 /// # Errors
 ///
-/// Returns [`SnapshotError::MissingSlot`] when the slot is absent or
-/// malformed, and [`SnapshotError::Serialize`] when encoding fails.
-pub fn inject(template: &str, manifest: &SnapshotManifest) -> Result<String, SnapshotError> {
-    let sealed = scope_protocol::Envelope::new(manifest.clone());
-    let json = serde_json::to_string(&sealed)?.replace('<', "\\u003c");
+/// Returns an error when the slot is absent or malformed, or encoding fails.
+pub fn inject(template: &str, manifest: SnapshotManifest) -> Result<String, SnapshotError> {
     let marker = template
         .find(SLOT_MARKER)
         .ok_or(SnapshotError::MissingSlot)?;
@@ -219,41 +257,26 @@ pub fn inject(template: &str, manifest: &SnapshotManifest) -> Result<String, Sna
         .map(|offset| open_end + offset)
         .ok_or(SnapshotError::MissingSlot)?;
 
-    let mut html = String::with_capacity(template.len() + json.len());
-    html.push_str(&template[..open_end]);
-    html.push_str(&json);
-    html.push_str(&template[close..]);
-    Ok(html)
+    let mut html = Vec::with_capacity(template.len());
+    html.extend_from_slice(&template.as_bytes()[..open_end]);
+    scope_protocol::Envelope::new(manifest).serialize(
+        &mut serde_json::Serializer::with_formatter(&mut html, HtmlSafeFormatter),
+    )?;
+    html.extend_from_slice(&template.as_bytes()[close..]);
+    Ok(String::from_utf8(html)?)
 }
 
 const BYTES_PER_BIN: u64 = 200;
 
 /// Estimates serialized data bytes from planned level metadata.
 #[must_use]
-pub fn estimated_bytes(
-    plan: &ExportPlan,
-    store: &SignalStore,
-    pyramids: &BTreeMap<SignalId, Pyramid>,
-) -> u64 {
-    let mut bins = 0_u64;
-    for entry in &plan.signals {
-        let Some(signal) = store.signal(entry.signal_id) else {
-            continue;
-        };
-        let Some(pyramid) = pyramids.get(&entry.signal_id) else {
-            continue;
-        };
-        for index in entry.finest_level..pyramid.level_count() {
-            let count = match (index, entry.window) {
-                (0, None) => signal.len(),
-                (0, Some((t0, t1))) => raw_count_in_window(signal, t0, t1),
-                (_, None) => pyramid.merged_levels()[index - 1].len(),
-                (_, Some((t0, t1))) => count_in_window(&pyramid.merged_levels()[index - 1], t0, t1),
-            };
-            bins += count as u64;
-        }
-    }
-    bins * BYTES_PER_BIN
+pub fn estimated_bytes(plan: &ExportPlan) -> u64 {
+    plan.signals
+        .iter()
+        .flat_map(|signal| &signal.levels)
+        .map(|level| level.bin_count as u64)
+        .sum::<u64>()
+        * BYTES_PER_BIN
 }
 
 #[cfg(test)]
@@ -323,24 +346,29 @@ mod tests {
     #[test]
     fn all_scope_bakes_every_signal_full_range_from_level_zero() {
         let (store, pyramids) = store_with(&[("a", 10), ("b", 10_000)]);
-        let plan = plan(&Session::default(), &store, &pyramids, ExportScope::All);
+        let plan = plan(&Session::default(), &store, &pyramids, ExportScope::All).expect("plan");
         assert_eq!(plan.signals.len(), 2);
-        assert!(plan.signals.iter().all(|signal| signal.finest_level == 0));
+        assert!(plan.signals.iter().all(|signal| signal.finest_level() == 0));
         assert!(plan.signals.iter().all(|signal| signal.window.is_none()));
+    }
+
+    #[test]
+    fn planning_rejects_a_signal_without_a_pyramid() {
+        let (store, mut pyramids) = store_with(&[("a", 10)]);
+        pyramids.clear();
+        assert!(matches!(
+            plan(&Session::default(), &store, &pyramids, ExportScope::All),
+            Err(SnapshotError::MissingPyramid(SignalId(1)))
+        ));
     }
 
     #[test]
     fn visible_scope_excludes_signals_on_no_panel() {
         let (store, pyramids) = store_with(&[("a", 10), ("b", 10)]);
         let session = session_with(vec![panel(PanelMode::Time, &["a"])]);
-        let export = plan(&session, &store, &pyramids, ExportScope::Visible);
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
         assert_eq!(export.signals.len(), 1);
-        assert_eq!(
-            store
-                .signal(export.signals[0].signal_id)
-                .map(|signal| &signal.path),
-            Some(&"a".to_owned())
-        );
+        assert_eq!(export.signals[0].signal.path, "a");
     }
 
     #[test]
@@ -348,17 +376,19 @@ mod tests {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
         let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
         session.linked_time.t1 = 99_999.0;
-        let export = plan(&session, &store, &pyramids, ExportScope::Visible);
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
         let entry = &export.signals[0];
-        assert!(entry.finest_level > 0);
-        let level = pyramids[&entry.signal_id]
-            .level(entry.finest_level)
+        assert!(entry.finest_level() > 0);
+        let level = entry
+            .pyramid
+            .level(entry.finest_level())
             .expect("planned level");
         assert!(level.len() <= MAX_BINS_PER_BAKED_LEVEL);
-        if entry.finest_level > 1 {
+        if entry.finest_level() > 1 {
             assert!(
-                pyramids[&entry.signal_id]
-                    .level(entry.finest_level - 1)
+                entry
+                    .pyramid
+                    .level(entry.finest_level() - 1)
                     .expect("previous level")
                     .len()
                     > MAX_BINS_PER_BAKED_LEVEL
@@ -370,16 +400,16 @@ mod tests {
     fn honesty_rule_bakes_raw_when_sparse() {
         let (store, pyramids) = store_with(&[("a", 500)]);
         let session = session_with(vec![panel(PanelMode::Time, &["a"])]);
-        let export = plan(&session, &store, &pyramids, ExportScope::Visible);
-        assert_eq!(export.signals[0].finest_level, 0);
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
+        assert_eq!(export.signals[0].finest_level(), 0);
     }
 
     #[test]
     fn sample_mode_panels_force_level_zero() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
         let session = session_with(vec![panel(PanelMode::Fft, &["a"])]);
-        let export = plan(&session, &store, &pyramids, ExportScope::Visible);
-        assert_eq!(export.signals[0].finest_level, 0);
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
+        assert_eq!(export.signals[0].finest_level(), 0);
     }
 
     #[test]
@@ -391,12 +421,11 @@ mod tests {
         let mut time = panel(PanelMode::Time, &["ignored"]);
         time.x_signal = Some("x".to_owned());
         let session = session_with(vec![xy, time]);
-        let export = plan(&session, &store, &pyramids, ExportScope::Visible);
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
         let paths: Vec<&str> = export
             .signals
             .iter()
-            .filter_map(|entry| store.signal(entry.signal_id))
-            .map(|signal| signal.path.as_str())
+            .map(|entry| entry.signal.path.as_str())
             .collect();
         assert_eq!(paths, ["x", "y", "c", "ignored"]);
     }
@@ -412,7 +441,7 @@ mod tests {
         unlinked.time_window = Some([20.0, 30.0]);
         session.linked_time.linked = false;
         session.tabs[0].panels = vec![linked, unlinked];
-        let export = plan(&session, &store, &pyramids, ExportScope::Visible);
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
         assert!(
             export
                 .signals
@@ -428,8 +457,8 @@ mod tests {
             source_paths: vec!["/home/user/secret.csv".to_owned()],
             ..Session::default()
         };
-        let export = plan(&session, &store, &pyramids, ExportScope::All);
-        let manifest = bake(&export, &store, &pyramids, &session).expect("bake");
+        let export = plan(&session, &store, &pyramids, ExportScope::All).expect("plan");
+        let manifest = bake(&export, &session).expect("bake");
         assert!(!manifest.session_json.contains("secret.csv"));
         let ids: Vec<u64> = manifest
             .signals
@@ -446,33 +475,30 @@ mod tests {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
         let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
         session.linked_time.t1 = 99_999.0;
-        let export = plan(&session, &store, &pyramids, ExportScope::Visible);
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
         let entry = &export.signals[0];
-        assert!(entry.finest_level > 0);
-        let pyramid = &pyramids[&entry.signal_id];
-        let manifest = bake(&export, &store, &pyramids, &session).expect("bake");
+        assert!(entry.finest_level() > 0);
+        let pyramid = entry.pyramid;
+        let finest_level = entry.finest_level();
+        let manifest = bake(&export, &session).expect("bake");
         assert_eq!(
             manifest.signals[0].levels.len(),
-            pyramid.level_count() - entry.finest_level
+            pyramid.level_count() - finest_level
         );
         assert_eq!(
             manifest.signals[0].levels[0],
-            pyramid.level(entry.finest_level).expect("planned level")
+            pyramid.level(finest_level).expect("planned level")
         );
     }
 
     #[test]
     fn clipping_retains_one_neighbor_bin_each_side() {
         let (store, pyramids) = store_with(&[("a", 1_000)]);
-        let signal_id = store.signal_by_path("a").expect("signal").id;
-        let export = ExportPlan {
-            signals: vec![SignalPlan {
-                signal_id,
-                finest_level: 0,
-                window: Some((100.0, 200.0)),
-            }],
-        };
-        let manifest = bake(&export, &store, &pyramids, &Session::default()).expect("bake");
+        let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        session.linked_time.t0 = 100.0;
+        session.linked_time.t1 = 200.0;
+        let export = plan(&session, &store, &pyramids, ExportScope::Visible).expect("plan");
+        let manifest = bake(&export, &session).expect("bake");
         let level = &manifest.signals[0].levels[0];
         assert_eq!(level.first().map(|bin| bin.t0), Some(99.0));
         assert_eq!(level.last().map(|bin| bin.t1), Some(201.0));
@@ -482,9 +508,9 @@ mod tests {
     fn bake_serializes_deterministically() {
         let (store, pyramids) = store_with(&[("b", 100), ("a", 100)]);
         let session = Session::default();
-        let export = plan(&session, &store, &pyramids, ExportScope::All);
-        let first = bake(&export, &store, &pyramids, &session).expect("bake");
-        let second = bake(&export, &store, &pyramids, &session).expect("bake");
+        let export = plan(&session, &store, &pyramids, ExportScope::All).expect("plan");
+        let first = bake(&export, &session).expect("bake");
+        let second = bake(&export, &session).expect("bake");
         assert_eq!(
             serde_json::to_string(&first).expect("serialize"),
             serde_json::to_string(&second).expect("serialize")
@@ -495,7 +521,7 @@ mod tests {
     fn inject_replaces_the_slot_atomically() {
         let template = "<html><script id=\"signalscope-baked-data\" type=\"application/json\">\n      null\n    </script></html>";
         let manifest = empty_manifest();
-        let html = inject(template, &manifest).expect("inject");
+        let html = inject(template, manifest).expect("inject");
         assert!(!html.contains(">null<") && !html.contains("null\n"));
         assert!(html.contains("\"session_json\""));
         assert!(html.starts_with("<html><script id=\"signalscope-baked-data\""));
@@ -507,11 +533,11 @@ mod tests {
         let mut session = Session::default();
         session.tabs[0].title = "</ScRiPt><script>alert(1)</SCRIPT>".to_owned();
         let (store, pyramids) = store_with(&[]);
-        let export = plan(&session, &store, &pyramids, ExportScope::All);
-        let manifest = bake(&export, &store, &pyramids, &session).expect("bake");
+        let export = plan(&session, &store, &pyramids, ExportScope::All).expect("plan");
+        let manifest = bake(&export, &session).expect("bake");
         let html = inject(
             "<script id=\"signalscope-baked-data\">null</script>",
-            &manifest,
+            manifest,
         )
         .expect("inject");
         assert_eq!(html.to_ascii_lowercase().matches("</script").count(), 1);
@@ -521,7 +547,7 @@ mod tests {
     #[test]
     fn inject_without_slot_errors() {
         assert!(matches!(
-            inject("<html></html>", &empty_manifest()),
+            inject("<html></html>", empty_manifest()),
             Err(SnapshotError::MissingSlot)
         ));
     }
@@ -529,18 +555,14 @@ mod tests {
     #[test]
     fn estimate_counts_planned_bins_without_serializing() {
         let (store, pyramids) = store_with(&[("a", 1_000)]);
-        let export = plan(&Session::default(), &store, &pyramids, ExportScope::All);
-        let signal_id = export.signals[0].signal_id;
-        let expected_bins: usize = (0..pyramids[&signal_id].level_count())
-            .map(|index| {
-                pyramids[&signal_id]
-                    .level(index)
-                    .expect("logical level")
-                    .len()
-            })
+        let export = plan(&Session::default(), &store, &pyramids, ExportScope::All).expect("plan");
+        let expected_bins: usize = export.signals[0]
+            .levels
+            .iter()
+            .map(|level| level.bin_count)
             .sum();
         assert_eq!(
-            estimated_bytes(&export, &store, &pyramids),
+            estimated_bytes(&export),
             expected_bins as u64 * BYTES_PER_BIN
         );
     }
@@ -551,11 +573,31 @@ mod tests {
         let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
         session.linked_time.t0 = 40_000.0;
         session.linked_time.t1 = 40_100.0;
-        let visible = plan(&session, &store, &pyramids, ExportScope::Visible);
-        let all = plan(&session, &store, &pyramids, ExportScope::All);
-        assert!(
-            estimated_bytes(&visible, &store, &pyramids) < estimated_bytes(&all, &store, &pyramids)
-        );
+        let visible =
+            plan(&session, &store, &pyramids, ExportScope::Visible).expect("visible plan");
+        let all = plan(&session, &store, &pyramids, ExportScope::All).expect("all plan");
+        assert!(estimated_bytes(&visible) < estimated_bytes(&all));
+    }
+
+    #[test]
+    fn estimate_stays_within_two_times_the_serialized_manifest() {
+        let mut store = SignalStore::new();
+        let source = store.register_source("test.csv");
+        let time: Vec<f64> = (0..10_000).map(|value| f64::from(value) / 7.0).collect();
+        let values: Vec<f64> = time.iter().map(|time| time.sin() * 13.0).collect();
+        let id = store
+            .insert_signal(source, "a".to_owned(), None, time.into(), values)
+            .expect("insert");
+        let mut pyramids = BTreeMap::new();
+        pyramids.insert(id, Pyramid::from_signal(store.signal(id).expect("signal")));
+        let session = Session::default();
+        let export = plan(&session, &store, &pyramids, ExportScope::All).expect("plan");
+        let estimated = estimated_bytes(&export);
+        let actual = serde_json::to_vec(&bake(&export, &session).expect("bake"))
+            .expect("serialize")
+            .len() as u64;
+        assert!(estimated <= actual * 2);
+        assert!(actual <= estimated * 2);
     }
 
     fn empty_manifest() -> scope_protocol::SnapshotManifest {

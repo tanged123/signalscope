@@ -544,6 +544,19 @@ fn normalized_export_save_path(mut path: PathBuf, extension: &str) -> PathBuf {
     path
 }
 
+fn write_export_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let staged = path.with_extension("html.tmp");
+    if let Err(error) = std::fs::write(&staged, contents) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(&staged, path) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn template_path(app: &AppHandle) -> Result<PathBuf, String> {
     use tauri::path::BaseDirectory;
 
@@ -568,14 +581,14 @@ fn estimate_for(
     session: &session::Session,
     session_json: &str,
     template_bytes: u64,
-) -> ExportEstimate {
+) -> Result<ExportEstimate, snapshot::SnapshotError> {
     let base = template_bytes + session_json.len() as u64;
-    let visible = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::Visible);
-    let all = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::All);
-    ExportEstimate {
-        visible_bytes: base + snapshot::estimated_bytes(&visible, &data.store, &data.pyramids),
-        all_bytes: base + snapshot::estimated_bytes(&all, &data.store, &data.pyramids),
-    }
+    let visible = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::Visible)?;
+    let all = snapshot::plan(session, &data.store, &data.pyramids, ExportScope::All)?;
+    Ok(ExportEstimate {
+        visible_bytes: base + snapshot::estimated_bytes(&visible),
+        all_bytes: base + snapshot::estimated_bytes(&all),
+    })
 }
 
 #[tauri::command]
@@ -591,12 +604,10 @@ fn export_estimate(
         .map_err(|error| error.to_string())?
         .len();
     let data = state.lock().map_err(|error| error.to_string())?;
-    Ok(Envelope::new(estimate_for(
-        &data,
-        &session,
-        &request.session_json,
-        template_bytes,
-    )))
+    Ok(Envelope::new(
+        estimate_for(&data, &session, &request.session_json, template_bytes)
+            .map_err(|error| error.to_string())?,
+    ))
 }
 
 #[tauri::command]
@@ -623,17 +634,15 @@ async fn export_write(
     let template =
         std::fs::read_to_string(template_path(&app)?).map_err(|error| error.to_string())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
-    let html = {
+    let manifest = {
         let state = app.state::<Mutex<DataState>>();
         let data = state.lock().map_err(|error| error.to_string())?;
-        let export = snapshot::plan(&session, &data.store, &data.pyramids, request.scope);
-        let manifest = snapshot::bake(&export, &data.store, &data.pyramids, &session)
+        let export = snapshot::plan(&session, &data.store, &data.pyramids, request.scope)
             .map_err(|error| error.to_string())?;
-        snapshot::inject(&template, &manifest).map_err(|error| error.to_string())?
+        snapshot::bake(&export, &session).map_err(|error| error.to_string())?
     };
-    let staged = path.with_extension("html.tmp");
-    std::fs::write(&staged, html).map_err(|error| error.to_string())?;
-    std::fs::rename(&staged, &path).map_err(|error| error.to_string())?;
+    let html = snapshot::inject(&template, manifest).map_err(|error| error.to_string())?;
+    write_export_file(&path, &html).map_err(|error| error.to_string())?;
     Ok(Envelope::new(Some(path.display().to_string())))
 }
 
@@ -852,9 +861,29 @@ mod tests {
         data.pyramids
             .insert(signal.id, Pyramid::from_signal(signal));
         let session = session::Session::default();
-        let estimate = estimate_for(&data, &session, "{}", 1_000);
+        let estimate = estimate_for(&data, &session, "{}", 1_000).expect("estimate");
         assert!(estimate.all_bytes > estimate.visible_bytes);
         assert!(estimate.visible_bytes >= 1_000);
+    }
+
+    #[test]
+    fn failed_export_rename_removes_the_staging_file() {
+        let root = std::env::temp_dir().join(format!(
+            "signalscope-export-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("temporary directory");
+        let destination = root.join("destination.html");
+        std::fs::create_dir(&destination).expect("destination directory");
+
+        assert!(write_export_file(&destination, "snapshot").is_err());
+        assert!(!destination.with_extension("html.tmp").exists());
+
+        std::fs::remove_dir_all(root).expect("remove temporary directory");
     }
 
     #[test]

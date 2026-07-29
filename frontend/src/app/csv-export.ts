@@ -13,9 +13,14 @@ export function buildCsv(
 ): string {
   const [base, ...rest] = series;
   if (base === undefined) return "time\n";
-  const lines = [
+  const lines = series
+    .filter((item) => item.stride > 1)
+    .map(
+      (item) => `# stride,${quote(item.signal_path)},1:${String(item.stride)}`,
+    );
+  lines.push(
     ["time", ...series.map((item) => quote(item.signal_path))].join(","),
-  ];
+  );
   for (let index = 0; index < base.time.length; index += 1) {
     const time = base.time[index];
     if (time === undefined || time < window.t0 || time > window.t1) {
