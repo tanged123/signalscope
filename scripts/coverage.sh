@@ -31,6 +31,7 @@ coverage_rust() {
 coverage_frontend() {
   echo "Generating frontend coverage..."
   pnpm --filter @signalscope/frontend test:coverage
+  bake_roundtrip_artifact
   SIGNALSCOPE_COVERAGE=1 pnpm e2e
   (
     cd "$signalscope_root/frontend"
