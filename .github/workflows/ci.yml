@@ -192,7 +192,8 @@ jobs:
 
   tag:
     if: github.ref == 'refs/heads/main'
-    needs: [version, flake, quality, rust, frontend, e2e, build, appimage, windows]
+    needs:
+      [version, flake, quality, rust, frontend, e2e, build, appimage, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
