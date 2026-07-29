@@ -13,6 +13,7 @@ import {
   type SaveSessionRequest,
   type SessionDialogMode,
   type SignalSummary,
+  type SnapshotManifest,
   type SourceSummary,
   type TileRequest,
   type TileResponse,
@@ -56,12 +57,7 @@ export interface DataPlane {
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
-interface BakedSignal {
-  summary: SignalSummary;
-  levels: EnvelopeBin[][];
-}
-
-type BakedManifest = Envelope<{ signals: BakedSignal[] }>;
+type BakedManifest = Envelope<SnapshotManifest>;
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
@@ -372,6 +368,7 @@ function createDemoManifest(): BakedManifest {
     },
   ];
   return seal({
+    session_json: "",
     signals: demoSignals.map(({ summary, generate }) => ({
       summary,
       levels: buildDemoLevels(makeBins(generate)),

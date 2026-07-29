@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -237,4 +237,56 @@ pub struct LoadedSession {
     pub session_json: String,
     #[serde(default)]
     pub path: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportScope {
+    Visible,
+    All,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportEstimateRequest {
+    pub session_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportEstimate {
+    #[serde(with = "u64_string")]
+    pub visible_bytes: u64,
+    #[serde(with = "u64_string")]
+    pub all_bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportWriteRequest {
+    pub session_json: String,
+    pub scope: ExportScope,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFileKind {
+    Png,
+    Csv,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveExportFileRequest {
+    pub file_name: String,
+    pub kind: ExportFileKind,
+    pub data_base64: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BakedSignal {
+    pub summary: SignalSummary,
+    pub levels: Vec<Vec<EnvelopeBin>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SnapshotManifest {
+    pub session_json: String,
+    pub signals: Vec<BakedSignal>,
 }

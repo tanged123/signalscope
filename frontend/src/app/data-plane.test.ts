@@ -31,6 +31,7 @@ describe("BakedPlane.querySamples", () => {
     };
     const plane = new BakedPlane(
       seal({
+        session_json: "",
         signals: [
           {
             summary,
@@ -121,7 +122,7 @@ describe("derived port", () => {
   });
 
   it("has no derived port in a snapshot", () => {
-    const plane = new BakedPlane(seal({ signals: [] }));
+    const plane = new BakedPlane(seal({ session_json: "", signals: [] }));
     expect(plane.derived).toBeNull();
   });
 });

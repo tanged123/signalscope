@@ -1,5 +1,5 @@
 {
-  "protocol_version": 5,
+  "protocol_version": 6,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -174,6 +174,56 @@
       "fields": {
         "session_json": "string",
         "path": "string?"
+      }
+    },
+    "ExportScope": {
+      "kind": "enum",
+      "variants": ["visible", "all"]
+    },
+    "ExportEstimateRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string"
+      }
+    },
+    "ExportEstimate": {
+      "kind": "object",
+      "fields": {
+        "visible_bytes": "u64",
+        "all_bytes": "u64"
+      }
+    },
+    "ExportWriteRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "scope": "ExportScope"
+      }
+    },
+    "ExportFileKind": {
+      "kind": "enum",
+      "variants": ["png", "csv"]
+    },
+    "SaveExportFileRequest": {
+      "kind": "object",
+      "fields": {
+        "file_name": "string",
+        "kind": "ExportFileKind",
+        "data_base64": "string"
+      }
+    },
+    "BakedSignal": {
+      "kind": "object",
+      "fields": {
+        "summary": "SignalSummary",
+        "levels": "EnvelopeBin[][]"
+      }
+    },
+    "SnapshotManifest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "signals": "BakedSignal[]"
       }
     }
   }
