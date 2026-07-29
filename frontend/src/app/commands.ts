@@ -75,7 +75,12 @@ function comboFor(event: KeyboardEvent): string | null {
   return key;
 }
 
-const EDITING_RESERVED = new Set(["mod+z", "mod+shift+z", "mod+y"]);
+const editingReserved = new Set<string>();
+
+export function setEditingReservedCombos(combos: Iterable<string>): void {
+  editingReserved.clear();
+  for (const combo of combos) editingReserved.add(combo);
+}
 
 /**
  * True when the combo belongs to native text editing (undo/redo) and must
@@ -83,7 +88,7 @@ const EDITING_RESERVED = new Set(["mod+z", "mod+shift+z", "mod+y"]);
  */
 export function reservedWhileEditing(event: KeyboardEvent): boolean {
   const combo = comboFor(event);
-  return combo !== null && EDITING_RESERVED.has(combo);
+  return combo !== null && editingReserved.has(combo);
 }
 
 /**

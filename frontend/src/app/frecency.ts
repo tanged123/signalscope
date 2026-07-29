@@ -9,6 +9,27 @@ interface UsageRecord {
 
 type UsageTable = Record<string, UsageRecord>;
 
+function isUsageTable(value: unknown): value is UsageTable {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return false;
+  }
+  return Object.values(value).every(
+    (entry) =>
+      entry !== null &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      Number.isInteger((entry as Partial<UsageRecord>).count) &&
+      ((entry as Partial<UsageRecord>).count ?? -1) >= 0 &&
+      Number.isFinite((entry as Partial<UsageRecord>).lastUsed) &&
+      ((entry as Partial<UsageRecord>).lastUsed ?? -1) >= 0,
+  );
+}
+
 /** localStorage when available; storage access can throw in locked-down
  * webviews, and frecency is disposable, so failures degrade to null. */
 export function browserStorage(): Pick<Storage, "getItem" | "setItem"> | null {
@@ -61,7 +82,8 @@ export class CommandUsage {
     if (this.table === null) {
       try {
         const raw = this.storage?.getItem(STORAGE_KEY);
-        this.table = raw == null ? {} : (JSON.parse(raw) as UsageTable);
+        const parsed: unknown = raw == null ? {} : JSON.parse(raw);
+        this.table = isUsageTable(parsed) ? parsed : {};
       } catch {
         this.table = {};
       }

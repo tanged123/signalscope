@@ -76,12 +76,16 @@ export function clampPlotFontSize(value: number): number {
  * back to defaults without overwriting the file.
  */
 export function parsePreferences(json: string): Preferences | null {
-  let value: Partial<Preferences>;
+  let parsed: unknown;
   try {
-    value = JSON.parse(json) as Partial<Preferences>;
+    parsed = JSON.parse(json);
   } catch {
     return null;
   }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const value = parsed as Partial<Preferences>;
   if (value.schema_version !== PREFERENCES_SCHEMA_VERSION) return null;
   const defaults = defaultPreferences();
   const family = (candidate: unknown, fallback: FontFamily): FontFamily =>

@@ -5,7 +5,12 @@ mod generated;
 
 pub use generated::*;
 
-use std::path::Path;
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -48,13 +53,57 @@ pub fn from_json(json: &str) -> Result<Preferences, PreferencesError> {
 /// [`PreferencesError::Json`] when serialization fails.
 pub fn save_to_path(preferences: &Preferences, path: &Path) -> Result<(), PreferencesError> {
     let json = serde_json::to_string_pretty(preferences)?;
-    let temporary = path.with_extension("json.tmp");
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&temporary, json)?;
-    std::fs::rename(&temporary, path)?;
+    let (temporary, mut file) = create_temporary_sibling(path)?;
+    if let Err(error) = file.write_all(json.as_bytes()) {
+        drop(file);
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.into());
+    }
+    drop(file);
+    if let Err(error) = std::fs::rename(&temporary, path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.into());
+    }
     Ok(())
+}
+
+static NEXT_TEMPORARY_ID: AtomicU64 = AtomicU64::new(0);
+
+fn create_temporary_sibling(path: &Path) -> Result<(PathBuf, File), std::io::Error> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "preferences path has no file name",
+        )
+    })?;
+    loop {
+        let id = NEXT_TEMPORARY_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(
+            ".{}.{}.{}.tmp",
+            file_name.to_string_lossy(),
+            std::process::id(),
+            id
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Reads and migrates the preferences stored at `path`.
@@ -160,6 +209,42 @@ mod tests {
             !directory.path().join("preferences.json.tmp").exists(),
             "the temporary file is renamed, not left behind"
         );
+    }
+
+    #[test]
+    fn overlapping_saves_do_not_collide() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("preferences.json");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let errors = std::sync::Mutex::new(Vec::new());
+
+        std::thread::scope(|scope| {
+            for index in 0..8 {
+                let barrier = std::sync::Arc::clone(&barrier);
+                let errors = &errors;
+                let path = &path;
+                scope.spawn(move || {
+                    let preferences = Preferences {
+                        plot_font_size: if index % 2 == 0 { 9.0 } else { 11.5 },
+                        ..Preferences::default()
+                    };
+                    barrier.wait();
+                    for _ in 0..250 {
+                        if let Err(error) = save_to_path(&preferences, path) {
+                            errors.lock().expect("locks errors").push(error);
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+
+        assert!(
+            errors.into_inner().expect("unlocks errors").is_empty(),
+            "overlapping saves must use distinct temporary files"
+        );
+        let saved = load_from_path(&path).expect("final preferences remain valid");
+        assert!(matches!(saved.plot_font_size, 9.0 | 11.5));
     }
 
     #[test]

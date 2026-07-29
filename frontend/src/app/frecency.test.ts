@@ -59,4 +59,19 @@ describe("CommandUsage", () => {
     usage.record("undo");
     expect(usage.score("undo")).toBe(1);
   });
+
+  it.each([
+    "null",
+    "[]",
+    "1",
+    '{"undo":null}',
+    '{"undo":{"count":"many","lastUsed":0}}',
+  ])("ignores incompatible stored data: %s", (stored) => {
+    const storage = memoryStorage();
+    storage.data.set("signalscope.command-usage.v1", stored);
+    const usage = new CommandUsage(storage, () => 1000);
+    expect(usage.score("undo")).toBe(0);
+    usage.record("undo");
+    expect(usage.score("undo")).toBe(1);
+  });
 });

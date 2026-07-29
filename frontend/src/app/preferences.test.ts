@@ -37,6 +37,7 @@ describe("preferences", () => {
 
   it("rejects malformed json and future versions", () => {
     expect(parsePreferences("{nope")).toBeNull();
+    expect(parsePreferences("null")).toBeNull();
     expect(
       parsePreferences(
         JSON.stringify({ ...defaultPreferences(), schema_version: 99 }),

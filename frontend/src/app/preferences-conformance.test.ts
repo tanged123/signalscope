@@ -13,9 +13,7 @@ describe("preferences conformance", () => {
     expect(fixture.ui_font_family).toBe("inter");
   });
 
-  it("emits every key the Rust fixture carries", () => {
-    expect(Object.keys(defaultPreferences()).sort()).toEqual(
-      Object.keys(fixture).sort(),
-    );
+  it("emits the Rust fixture defaults", () => {
+    expect(defaultPreferences()).toEqual(fixture);
   });
 });

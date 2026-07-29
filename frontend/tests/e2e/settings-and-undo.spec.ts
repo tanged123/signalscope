@@ -10,10 +10,13 @@ test("ctrl+z undoes and ctrl+y redoes a panel split", async ({ page }) => {
   await page.keyboard.press("Control+z");
   await expect(page.locator(".panel")).toHaveCount(1);
 
-  await page.keyboard.press("Control+y");
+  await page.keyboard.press("Control+Shift+z");
   await expect(page.locator(".panel")).toHaveCount(2);
 
-  await page.keyboard.press("Control+Shift+z");
+  await page.keyboard.press("Control+z");
+  await expect(page.locator(".panel")).toHaveCount(1);
+
+  await page.keyboard.press("Control+y");
   await expect(page.locator(".panel")).toHaveCount(2);
 });
 
@@ -95,7 +98,7 @@ test("a wheel burst is one undo step", async ({ page }) => {
   await page.mouse.wheel(0, -100);
   await page.mouse.wheel(0, -100);
   await expect(readout).not.toHaveText(before ?? "");
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(750);
 
   await page.keyboard.press("Control+z");
 

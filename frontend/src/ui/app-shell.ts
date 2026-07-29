@@ -3,6 +3,7 @@ import {
   formatCombo,
   PLANNED_TITLE,
   reservedWhileEditing,
+  setEditingReservedCombos,
   type Command,
 } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
@@ -357,7 +358,7 @@ export class AppShell {
       const delta = (window.t1 - window.t0) * 0.1 * direction;
       this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
     };
-    this.commands.register({
+    const undoCommand: Command = {
       id: "undo",
       title: "Undo",
       keys: "mod+z",
@@ -367,8 +368,8 @@ export class AppShell {
       run: () => {
         this.applyHistory(this.history.undo());
       },
-    });
-    this.commands.register({
+    };
+    const redoCommand: Command = {
       id: "redo",
       title: "Redo",
       keys: "mod+shift+z",
@@ -379,7 +380,16 @@ export class AppShell {
       run: () => {
         this.applyHistory(this.history.redo());
       },
-    });
+    };
+    this.commands.register(undoCommand);
+    this.commands.register(redoCommand);
+    setEditingReservedCombos(
+      [
+        undoCommand.keys,
+        redoCommand.keys,
+        ...(redoCommand.altKeys ?? []),
+      ].filter((keys): keys is string => keys !== undefined),
+    );
     this.commands.register({
       id: "open-files",
       title: "Open CSV or MCAP…",

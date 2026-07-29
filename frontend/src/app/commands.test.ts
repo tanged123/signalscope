@@ -4,6 +4,7 @@ import {
   CommandRegistry,
   formatCombo,
   reservedWhileEditing,
+  setEditingReservedCombos,
   type Command,
 } from "./commands";
 
@@ -145,13 +146,14 @@ describe("CommandRegistry", () => {
 });
 
 describe("reservedWhileEditing", () => {
-  it("reserves native undo/redo combos", () => {
-    expect(reservedWhileEditing(key("z", { ctrlKey: true }))).toBe(true);
-    expect(
-      reservedWhileEditing(key("Z", { ctrlKey: true, shiftKey: true })),
-    ).toBe(true);
-    expect(reservedWhileEditing(key("y", { ctrlKey: true }))).toBe(true);
-    expect(reservedWhileEditing(key("s", { ctrlKey: true }))).toBe(false);
+  afterEach(() => {
+    setEditingReservedCombos([]);
+  });
+
+  it("reserves the configured command bindings", () => {
+    setEditingReservedCombos(["mod+u"]);
+    expect(reservedWhileEditing(key("u", { ctrlKey: true }))).toBe(true);
+    expect(reservedWhileEditing(key("z", { ctrlKey: true }))).toBe(false);
   });
 });
 
