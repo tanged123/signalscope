@@ -2,7 +2,7 @@ export function composePanelPng(
   title: string,
   plot: HTMLCanvasElement,
   overlay: HTMLCanvasElement,
-  colors: { background: string; text: string },
+  colors: { background: string; text: string; font: string },
 ): HTMLCanvasElement {
   const dpr = globalThis.devicePixelRatio || 1;
   const header = Math.round(28 * dpr);
@@ -14,7 +14,7 @@ export function composePanelPng(
   context.fillStyle = colors.background;
   context.fillRect(0, 0, output.width, output.height);
   context.fillStyle = colors.text;
-  context.font = `${String(Math.round(12 * dpr))}px system-ui, sans-serif`;
+  context.font = `${String(Math.round(12 * dpr))}px ${colors.font}`;
   context.textBaseline = "middle";
   context.fillText(title, Math.round(10 * dpr), header / 2);
   context.drawImage(plot, 0, header);

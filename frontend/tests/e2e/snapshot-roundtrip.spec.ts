@@ -27,6 +27,10 @@ test.describe("exported snapshot round trip", () => {
     test(`${fidelity} restores session state and data by value`, async ({
       page,
     }) => {
+      const networkRequests: string[] = [];
+      page.on("request", (request) => {
+        if (/^https?:/.test(request.url())) networkRequests.push(request.url());
+      });
       await page.goto(artifact.href);
 
       await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -48,6 +52,7 @@ test.describe("exported snapshot round trip", () => {
       await expect(stats).toBeVisible();
       await expect(stats).toContainText("max8.0000");
       await expect(stats).toContainText("min0.5000");
+      expect(networkRequests).toEqual([]);
     });
   }
 

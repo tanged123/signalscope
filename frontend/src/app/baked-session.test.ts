@@ -22,4 +22,20 @@ describe("parseBakedSession", () => {
     });
     expect(() => parseBakedSession(json)).toThrow(/schema/);
   });
+
+  it("rejects an invalid current-version session", () => {
+    const incomplete: Record<string, unknown> = { ...emptySession() };
+    delete incomplete.linked_time;
+    expect(() => parseBakedSession(JSON.stringify(incomplete))).toThrow(
+      /structure/,
+    );
+
+    const invalidPanel = emptySession();
+    const tab = invalidPanel.tabs[0];
+    if (tab === undefined) throw new Error("default tab is missing");
+    tab.panels = [{} as never];
+    expect(() => parseBakedSession(JSON.stringify(invalidPanel))).toThrow(
+      /structure/,
+    );
+  });
 });

@@ -264,7 +264,7 @@ Expected: FAIL — `plan` not found / module missing.
 - [ ] **Step 3: Implement `plan()`**
 
 ```rust
-//! Snapshot export planning, baking, and template injection (ADR 0023).
+//! Snapshot export planning, baking, and template injection (ADR 0024).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1758,7 +1758,7 @@ git commit -m "test(e2e): snapshot export round trip with size ceiling"
 
 **Files:**
 
-- Create: `docs/adr/0023-snapshot-manifest-and-export-budget.md`
+- Create: `docs/adr/0024-snapshot-manifest-and-export-budget.md`
 - Modify: `docs/adr/README.md` (index line, if the README lists ADRs — check)
 
 **Interfaces:** none — documentation of decisions already implemented.
@@ -1775,14 +1775,14 @@ Follow the two-section house style (see `docs/adr/0007-snapshot-injection.md`: `
 
 - [ ] **Step 2: Verify docs consistency and run the full gate**
 
-Check `docs/adr/README.md` for an index pattern; add ADR 0023 if listed. Run: `./scripts/ci.sh all`
+Check `docs/adr/README.md` for an index pattern; add ADR 0024 if listed. Run: `./scripts/ci.sh all`
 Expected: PASS.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/adr/0023-snapshot-manifest-and-export-budget.md docs/adr/README.md
-git commit -m "docs: ADR 0023 snapshot manifest and export budget"
+git add docs/adr/0024-snapshot-manifest-and-export-budget.md docs/adr/README.md
+git commit -m "docs: ADR 0024 snapshot manifest and export budget"
 ```
 
 ---

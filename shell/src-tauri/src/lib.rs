@@ -1,7 +1,10 @@
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
 };
 
@@ -539,14 +542,23 @@ async fn pick_session_path(
 }
 
 fn normalized_export_save_path(mut path: PathBuf, extension: &str) -> PathBuf {
-    if path.extension().is_none_or(std::ffi::OsStr::is_empty) {
+    if path.extension() != Some(std::ffi::OsStr::new(extension)) {
         path.set_extension(extension);
     }
     path
 }
 
 fn write_export_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    let staged = path.with_extension("html.tmp");
+    static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
+    let file_name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("export"))
+        .to_string_lossy();
+    let staged = path.with_file_name(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        NEXT_STAGING_ID.fetch_add(1, Ordering::Relaxed)
+    ));
     if let Err(error) = std::fs::write(&staged, contents) {
         let _ = std::fs::remove_file(&staged);
         return Err(error);
@@ -874,6 +886,10 @@ mod tests {
             normalized_export_save_path(PathBuf::from("/tmp/snap.html"), "html"),
             PathBuf::from("/tmp/snap.html")
         );
+        assert_eq!(
+            normalized_export_save_path(PathBuf::from("/tmp/plot.csv"), "png"),
+            PathBuf::from("/tmp/plot.png")
+        );
     }
 
     #[test]
@@ -915,7 +931,12 @@ mod tests {
         std::fs::create_dir(&destination).expect("destination directory");
 
         assert!(write_export_file(&destination, "snapshot").is_err());
-        assert!(!destination.with_extension("html.tmp").exists());
+        assert_eq!(
+            std::fs::read_dir(&root)
+                .expect("read temporary directory")
+                .count(),
+            1
+        );
 
         std::fs::remove_dir_all(root).expect("remove temporary directory");
     }

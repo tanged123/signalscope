@@ -97,7 +97,11 @@ fn run(args: &Args) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     let manifest = snapshot::bake(&export, &session).map_err(|error| error.to_string())?;
     let html = snapshot::inject(&template, manifest).map_err(|error| error.to_string())?;
-    if let Some(parent) = args.out.parent() {
+    if let Some(parent) = args
+        .out
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     std::fs::write(&args.out, html).map_err(|error| error.to_string())

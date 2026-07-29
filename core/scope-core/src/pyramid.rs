@@ -183,6 +183,9 @@ impl Pyramid {
         let Some((t0, t1)) = window else {
             return Some(0..len);
         };
+        if !t0.is_finite() || !t1.is_finite() || t0 > t1 {
+            return Some(0..0);
+        }
         if index == 0 {
             if self.time.first().is_none_or(|first| t1 < *first)
                 || self.time.last().is_none_or(|last| t0 > *last)
@@ -390,6 +393,22 @@ mod tests {
                 pyramid.level_window_count(index, window),
                 pyramid.level_window(index, window).map(|bins| bins.len())
             );
+        }
+    }
+
+    #[test]
+    fn invalid_windows_are_empty() {
+        let pyramid = Pyramid::from_samples(&[0.0, 1.0, 2.0], &[0.0, 1.0, 2.0]);
+
+        for window in [
+            Some((2.0, 1.0)),
+            Some((f64::NAN, 1.0)),
+            Some((0.0, f64::INFINITY)),
+        ] {
+            for index in 0..pyramid.level_count() {
+                assert_eq!(pyramid.level_window_count(index, window), Some(0));
+                assert_eq!(pyramid.level_window(index, window), Some(Vec::new()));
+            }
         }
     }
 

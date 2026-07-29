@@ -4,7 +4,7 @@ import { exportFileStem } from "./export-file";
 
 describe("exportFileStem", () => {
   it("removes separators and control characters from panel titles", () => {
-    expect(exportFileStem(" imu/accel\\raw\n ", "panel-1")).toBe(
+    expect(exportFileStem(' imu/accel\\raw:*?"<>|\n ', "panel-1")).toBe(
       "imu-accel-raw",
     );
   });

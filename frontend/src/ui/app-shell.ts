@@ -90,6 +90,7 @@ export class AppShell {
   private exportDialog: ExportDialog | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
+  private exportGeneration = 0;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
@@ -1338,6 +1339,7 @@ export class AppShell {
   }
 
   private openExportDialog(format: ExportFormat): void {
+    this.exportGeneration += 1;
     this.exportPng = null;
     this.exportCsv.clear();
     this.exportDialog ??= new ExportDialog(this.root, {
@@ -1354,19 +1356,24 @@ export class AppShell {
         }
       },
       pngBytes: async () => {
+        const generation = this.exportGeneration;
         try {
-          this.exportPng = await this.buildVisiblePng();
-          return this.exportPng?.length ?? null;
+          const png = await this.buildVisiblePng();
+          if (generation === this.exportGeneration) this.exportPng = png;
+          return png?.length ?? null;
         } catch (error: unknown) {
           this.reportError(error);
           return null;
         }
       },
       csvEstimate: async (fidelity) => {
+        const generation = this.exportGeneration;
         try {
           const csv = await this.buildVisibleCsv(fidelity);
           if (csv === null) return null;
-          this.exportCsv.set(fidelity, csv);
+          if (generation === this.exportGeneration) {
+            this.exportCsv.set(fidelity, csv);
+          }
           return {
             bytes: new TextEncoder().encode(csv.text).length,
             rows: csv.rows,
@@ -1378,8 +1385,11 @@ export class AppShell {
         }
       },
       runExport: async (selected, range, fidelity) => {
+        const cachedPng = this.exportPng;
+        const cachedCsv = this.exportCsv.get(fidelity);
+        this.exportGeneration += 1;
         try {
-          await this.runExport(selected, range, fidelity);
+          await this.runExport(selected, range, fidelity, cachedPng, cachedCsv);
         } catch (error: unknown) {
           this.reportError(error);
           throw error;
@@ -1393,6 +1403,8 @@ export class AppShell {
     format: ExportFormat,
     range: ExportRange,
     fidelity: ExportFidelity,
+    cachedPng: Uint8Array | null,
+    cachedCsv: CsvExport | undefined,
   ): Promise<void> {
     const exporter = this.plane.exporter;
     if (exporter === null) return;
@@ -1410,13 +1422,11 @@ export class AppShell {
       if (panel === undefined) return;
       const name = exportFileStem(panel.title, panel.id);
       if (format === "png") {
-        const bytes = this.exportPng ?? (await this.buildVisiblePng());
+        const bytes = cachedPng ?? (await this.buildVisiblePng());
         if (bytes === null) return;
         path = await exporter.saveFile(`${name}.png`, "png", toBase64(bytes));
       } else {
-        const csv =
-          this.exportCsv.get(fidelity) ??
-          (await this.buildVisibleCsv(fidelity));
+        const csv = cachedCsv ?? (await this.buildVisibleCsv(fidelity));
         if (csv === null) return;
         path = await exporter.saveFile(
           `${name}.csv`,
@@ -1442,6 +1452,7 @@ export class AppShell {
       {
         background: styles.getPropertyValue("--surface-1").trim(),
         text: styles.getPropertyValue("--fg-1").trim(),
+        font: styles.getPropertyValue("--font-ui").trim(),
       },
     );
     const blob = await new Promise<Blob | null>((resolve) => {

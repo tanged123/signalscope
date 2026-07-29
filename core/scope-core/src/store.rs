@@ -44,8 +44,8 @@ impl Signal {
     ///
     /// # Errors
     ///
-    /// Returns [`StoreError::ColumnLengthMismatch`] when the columns have
-    /// different lengths.
+    /// Returns an error when the columns have different lengths or the time
+    /// column is not finite and nondecreasing.
     pub fn new(
         id: SignalId,
         source_id: SourceId,
@@ -59,6 +59,12 @@ impl Signal {
                 time: time.len(),
                 values: values.len(),
             });
+        }
+        if let Some(index) = time.iter().position(|value| !value.is_finite()) {
+            return Err(StoreError::NonFiniteTime { index });
+        }
+        if let Some(index) = time.windows(2).position(|pair| pair[0] > pair[1]) {
+            return Err(StoreError::DecreasingTime { index: index + 1 });
         }
 
         Ok(Self {
@@ -271,6 +277,10 @@ impl Default for SignalStore {
 pub enum StoreError {
     #[error("time/value column length mismatch: {time} != {values}")]
     ColumnLengthMismatch { time: usize, values: usize },
+    #[error("time column contains a non-finite value at index {index}")]
+    NonFiniteTime { index: usize },
+    #[error("time column decreases at index {index}")]
+    DecreasingTime { index: usize },
     #[error("source {0:?} is not registered")]
     UnknownSource(SourceId),
     #[error("signal path is already registered: {0}")]
@@ -374,19 +384,37 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
-    fn time_bounds_use_finite_extrema_and_safe_fallbacks() {
-        let signal = Signal::new(
+    fn invalid_time_columns_are_rejected() {
+        let non_finite = Signal::new(
             SignalId(1),
             SourceId(1),
             "source/value",
             None,
-            Arc::from(vec![f64::NAN, 5.0, -2.0, f64::INFINITY]),
-            Arc::from(vec![0.0; 4]),
-        )
-        .unwrap();
-        assert_eq!(signal.time_bounds(), (-2.0, 5.0));
+            Arc::from(vec![0.0, f64::NAN]),
+            Arc::from(vec![0.0; 2]),
+        );
+        assert!(matches!(
+            non_finite,
+            Err(StoreError::NonFiniteTime { index: 1 })
+        ));
 
+        let decreasing = Signal::new(
+            SignalId(1),
+            SourceId(1),
+            "source/value",
+            None,
+            Arc::from(vec![0.0, 2.0, 1.0]),
+            Arc::from(vec![0.0; 3]),
+        );
+        assert!(matches!(
+            decreasing,
+            Err(StoreError::DecreasingTime { index: 2 })
+        ));
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn empty_time_bounds_use_safe_fallback() {
         let empty = Signal::new(
             SignalId(2),
             SourceId(1),

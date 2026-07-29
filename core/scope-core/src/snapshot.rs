@@ -1,4 +1,4 @@
-//! Snapshot export planning, baking, and template injection (ADR 0023).
+//! Snapshot export planning, baking, and template injection (ADR 0024).
 
 use std::{
     collections::{BTreeMap, BTreeSet},
