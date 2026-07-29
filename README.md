@@ -115,6 +115,7 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/build.sh native   # native bundle + shared frontend
 ./scripts/setup-appimage.sh # install AppImage dependencies on Ubuntu
 ./scripts/build.sh appimage # portable Linux AppImage (Ubuntu/FHS only)
+./scripts/build.sh windows  # Windows NSIS installer (Git Bash only)
 ./scripts/coverage.sh       # Rust + merged Vitest/Playwright frontend LCOV
 ./scripts/version.sh check  # verify synchronized release manifests
 ./scripts/release.sh version # validate release metadata

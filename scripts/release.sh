@@ -5,15 +5,16 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/release.sh [version|tag|publish]
+Usage: ./scripts/release.sh [version|tag|publish|assets]
 
   version                 Validate and print the synchronized app version.
   tag                     Create and push the annotated v<version> tag.
   publish <tag> <dir>     Create a GitHub Release from staged assets.
+  assets <dir>            List publishable release assets in a staged directory.
 
 'tag' is strict: it refuses an existing tag and never overwrites release
-history. 'publish' expects .deb, .rpm, .AppImage, or .dmg files in the staged
-asset directory and uses GH_TOKEN for GitHub authentication.
+history. 'publish' expects .deb, .rpm, .AppImage, .dmg, or *-setup.exe files in
+the staged asset directory and uses GH_TOKEN for GitHub authentication.
 EOF
 }
 
@@ -41,6 +42,22 @@ tag() {
   printf '%s\n' "$tag"
 }
 
+assets() {
+  local asset_dir="${1:-}"
+  if [ -z "$asset_dir" ]; then
+    echo "assets requires a staged asset directory" >&2
+    exit 2
+  fi
+  if [ ! -d "$asset_dir" ]; then
+    echo "asset directory does not exist: $asset_dir" >&2
+    exit 1
+  fi
+
+  find "$asset_dir" -type f \
+    \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' \
+    -o -name '*-setup.exe' \) -print0 | sort -z
+}
+
 publish() {
   local tag="${1:-}"
   local asset_dir="${2:-}"
@@ -61,15 +78,13 @@ publish() {
     exit 1
   fi
 
-  mapfile -d '' assets < <(
-    find "$asset_dir" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' \) -print0
-  )
-  if [ "${#assets[@]}" -eq 0 ]; then
+  mapfile -d '' release_assets < <(assets "$asset_dir")
+  if [ "${#release_assets[@]}" -eq 0 ]; then
     echo "no release assets found in $asset_dir" >&2
     exit 1
   fi
 
-  gh release create "$tag" "${assets[@]}" \
+  gh release create "$tag" "${release_assets[@]}" \
     --verify-tag \
     --title "SignalScope $tag" \
     --generate-notes
@@ -86,6 +101,10 @@ tag)
 publish)
   shift
   publish "$@"
+  ;;
+assets)
+  shift
+  assets "$@"
   ;;
 -h | --help | help)
   show_help

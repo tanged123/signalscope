@@ -8,7 +8,7 @@ mode="${1:-all}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|build|appimage]
+Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|build|appimage|windows]
 
 Each named mode matches the GitHub Actions job with the same name:
 
@@ -23,6 +23,7 @@ Each named mode matches the GitHub Actions job with the same name:
   e2e       Playwright desktop smoke tests.
   build     Native Tauri bundles via ./scripts/build.sh native.
   appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
+  windows   Windows-only NSIS installer build; runs outside the Nix shell.
 
 `all` runs format, quality, rust, frontend, and e2e sequentially with Cargo
 capped at two jobs by default — the complete local quality gate.
@@ -39,6 +40,9 @@ flake)
   ;;
 appimage)
   exec "$signalscope_scripts_dir/build-appimage.sh"
+  ;;
+windows)
+  exec "$signalscope_scripts_dir/build-windows.sh"
   ;;
 esac
 
