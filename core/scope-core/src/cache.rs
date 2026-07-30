@@ -33,20 +33,23 @@ use thiserror::Error;
 
 use crate::{
     bins::BinLevel,
-    columns::TimebaseId,
+    columns::{Column, TimebaseId},
     ingest::{
         self, DecodeContext, IngestError, IngestSummary,
         provenance::{fingerprint, provenance_digest},
     },
     paging::{PageCache, PageError, PageHandle},
     preferences::Preferences,
-    pyramid::Pyramid,
+    pyramid::{CachedBinLevel, Pyramid},
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
 
 pub const CACHE_VERSION: u32 = 4;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
 const HEADER_LEN: usize = 52;
+const PAGE_CACHE_BYTES: usize = 256 * 1024 * 1024;
+const MAX_DIRECTORY_BYTES: usize = 64 * 1024 * 1024;
+const RESIDENT_LEVEL_BINS: usize = 32;
 
 /// The sidecar file beside `source`: `<file name>.sspyr`.
 #[must_use]
@@ -431,7 +434,7 @@ pub fn write_at(
         let value_section = append_section(&mut payload, &encode_column(&signal.values()));
         let mut levels = Vec::new();
         for level in pyramid.merged_levels() {
-            levels.push(append_section(&mut payload, &encode_bins(level)));
+            levels.push(append_section(&mut payload, &encode_bins(&level)));
         }
         directory.signals.push(CacheSignal {
             local_path: signal.local_path.clone(),
@@ -503,17 +506,58 @@ fn try_load_from_root(
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LoadedCache>, CacheError> {
     let path = root.entry_path(provenance);
-    let Ok(bytes) = fs::read(&path) else {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let mut pages = PageCache::new(root.directory(), PAGE_CACHE_BYTES);
+    let file = PageHandle::new(&path);
+    let Ok(header_page) = pages.read(&file, 0..HEADER_LEN) else {
         return Ok(None);
     };
-    let Some((directory, payload)) = parse(&bytes, provenance) else {
+    let header = header_page.bytes();
+    if header[..8] != MAGIC
+        || u32::from_le_bytes(header[8..12].try_into().expect("cache version")) != CACHE_VERSION
+        || header[12..44] != digest_bytes(provenance).unwrap_or_default()
+    {
+        return Ok(None);
+    }
+    let directory_len = usize::try_from(u64::from_le_bytes(
+        header[44..52].try_into().expect("directory length"),
+    ))
+    .ok()
+    .filter(|len| *len <= MAX_DIRECTORY_BYTES);
+    drop(header_page);
+    let Some(directory_len) = directory_len else {
         return Ok(None);
     };
+    let directory_end = HEADER_LEN.saturating_add(directory_len);
+    let Ok(directory_page) = pages.read(&file, HEADER_LEN..directory_end) else {
+        return Ok(None);
+    };
+    let Ok(directory) = serde_json::from_slice::<CacheDirectory>(directory_page.bytes()) else {
+        return Ok(None);
+    };
+    drop(directory_page);
+    let payload_base = directory_end.next_multiple_of(8) as u64;
+    let largest =
+        directory
+            .time_sections
+            .iter()
+            .chain(directory.signals.iter().flat_map(|signal| {
+                std::iter::once(&signal.value_section).chain(signal.levels.iter())
+            }))
+            .filter_map(|section| usize::try_from(section.len).ok())
+            .max()
+            .unwrap_or(1);
+    if largest > PAGE_CACHE_BYTES {
+        pages = PageCache::new(root.directory(), largest);
+    }
 
     let mut decoded = Vec::new();
     let total = directory.signals.len().max(1);
     for (index, entry) in directory.signals.iter().enumerate() {
-        let Some(signal) = decode_signal(&directory, entry, payload) else {
+        let Some(signal) = decode_paged_signal(&path, payload_base, &pages, &directory, entry)
+        else {
             return Ok(None);
         };
         decoded.push(signal);
@@ -529,11 +573,11 @@ fn try_load_from_root(
                 source_id,
                 entry.local_path,
                 entry.unit,
-                Arc::clone(&entry.time),
-                Arc::clone(&entry.values),
+                entry.time,
+                entry.values,
             )?;
             let signal = store.signal(id).expect("inserted signal exists");
-            pyramids.push((id, Pyramid::from_signal_parts(signal, entry.merged)));
+            pyramids.push((id, Pyramid::from_signal_cached_parts(signal, entry.merged)));
             signals.push(id);
         }
         Ok::<_, CacheError>(LoadedCache {
@@ -551,9 +595,9 @@ fn try_load_from_root(
 struct DecodedSignal {
     local_path: String,
     unit: Option<String>,
-    time: Arc<[f64]>,
-    values: Arc<[f64]>,
-    merged: Vec<BinLevel>,
+    time: Column,
+    values: Column,
+    merged: Vec<CachedBinLevel>,
 }
 
 fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
@@ -567,62 +611,78 @@ fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
     Some(bytes)
 }
 
-fn parse<'a>(bytes: &'a [u8], expected: &str) -> Option<(CacheDirectory, &'a [u8])> {
-    if bytes.len() < HEADER_LEN || bytes[..8] != MAGIC {
-        return None;
-    }
-    let read_u32 = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
-    let read_u64 = |at: usize| Some(u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?));
-    if read_u32(8)? != CACHE_VERSION {
-        return None;
-    }
-    if bytes.get(12..44)? != digest_bytes(expected)? {
-        return None;
-    }
-    let directory_len = usize::try_from(read_u64(44)?).ok()?;
-    let directory_end = HEADER_LEN.checked_add(directory_len)?;
-    let directory: CacheDirectory =
-        serde_json::from_slice(bytes.get(HEADER_LEN..directory_end)?).ok()?;
-    let payload_base = directory_end.checked_next_multiple_of(8)?;
-    Some((directory, bytes.get(payload_base..)?))
-}
-
-fn decode_signal(
+fn decode_paged_signal(
+    path: &Path,
+    payload_base: u64,
+    pages: &PageCache,
     directory: &CacheDirectory,
     entry: &CacheSignal,
-    payload: &[u8],
 ) -> Option<DecodedSignal> {
     let time_section = *directory
         .time_sections
         .get(usize::try_from(entry.time_section).ok()?)?;
-    let time = decode_column(section_bytes(payload, time_section)?)?;
-    let values = decode_column(section_bytes(payload, entry.value_section)?)?;
     let point_count = usize::try_from(entry.point_count).ok()?;
-    if time.len() != point_count || values.len() != point_count {
+    let column_bytes = point_count.checked_mul(size_of::<f64>())?;
+    let time = section_handle(path, payload_base, pages, time_section)?;
+    let values = section_handle(path, payload_base, pages, entry.value_section)?;
+    if time.byte_len() != column_bytes || values.byte_len() != column_bytes {
+        return None;
+    }
+    let time_values = time.values().ok()?;
+    if time_values.iter().any(|value| !value.is_finite())
+        || time_values.windows(2).any(|pair| pair[0] > pair[1])
+        || values.bytes().ok().is_none()
+    {
         return None;
     }
     let mut merged = Vec::new();
     let mut expected_len = point_count.div_ceil(1 << crate::pyramid::FINEST_STORED_LEVEL);
     for section in &entry.levels {
-        let level = decode_bins(section_bytes(payload, *section)?)?;
+        let handle = section_handle(path, payload_base, pages, *section)?;
+        let level = BinLevel::decode_cache(&handle.bytes().ok()?)?;
         if level.len() != expected_len {
             return None;
         }
-        merged.push(level);
+        merged.push(if level.len() > RESIDENT_LEVEL_BINS {
+            CachedBinLevel::Paged(handle)
+        } else {
+            CachedBinLevel::Resident(level)
+        });
         expected_len = expected_len.div_ceil(2);
     }
-    if point_count > 0 && merged.last().is_none_or(|level| level.len() != 1) {
+    if point_count > 0
+        && merged
+            .last()
+            .and_then(CachedBinLevel::materialize)
+            .is_none_or(|level| level.len() != 1)
+    {
         return None;
     }
     Some(DecodedSignal {
         local_path: entry.local_path.clone(),
         unit: entry.unit.clone(),
-        time: time.into(),
-        values: values.into(),
+        time: Column::paged(time),
+        values: Column::paged(values),
         merged,
     })
 }
 
+fn section_handle(
+    path: &Path,
+    payload_base: u64,
+    pages: &PageCache,
+    section: CacheSection,
+) -> Option<PageHandle> {
+    if section.offset % 8 != 0 {
+        return None;
+    }
+    let offset = payload_base.checked_add(section.offset)?;
+    let len = usize::try_from(section.len).ok()?;
+    let handle = PageHandle::cached(pages.clone(), path, offset, len);
+    (crc32fast::hash(&handle.bytes().ok()?) == section.crc32).then_some(handle)
+}
+
+#[cfg(test)]
 fn section_bytes(payload: &[u8], section: CacheSection) -> Option<&[u8]> {
     let start = usize::try_from(section.offset).ok()?;
     let len = usize::try_from(section.len).ok()?;
@@ -647,18 +707,6 @@ fn encode_column(values: &[f64]) -> Vec<u8> {
         out.extend_from_slice(&value.to_le_bytes());
     }
     out
-}
-
-fn decode_column(bytes: &[u8]) -> Option<Vec<f64>> {
-    if bytes.len() % 8 != 0 {
-        return None;
-    }
-    Some(
-        bytes
-            .chunks_exact(8)
-            .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("8-byte chunk")))
-            .collect(),
-    )
 }
 
 fn encode_bins(bins: &BinLevel) -> Vec<u8> {
@@ -688,61 +736,9 @@ fn encode_bins(bins: &BinLevel) -> Vec<u8> {
     out
 }
 
+#[cfg(test)]
 fn decode_bins(bytes: &[u8]) -> Option<BinLevel> {
-    let count = usize::try_from(u64::from_le_bytes(bytes.get(..8)?.try_into().ok()?)).ok()?;
-    let used = 8_usize.checked_add(count.checked_mul(BinLevel::BYTES_PER_BIN)?)?;
-    if bytes.len() != used.checked_next_multiple_of(8)? {
-        return None;
-    }
-    let mut at = 8;
-    let t0 = decode_f64_array(bytes, &mut at, count)?;
-    let t1 = decode_f64_array(bytes, &mut at, count)?;
-    let first = decode_f64_array(bytes, &mut at, count)?;
-    let last = decode_f64_array(bytes, &mut at, count)?;
-    let min = decode_f64_array(bytes, &mut at, count)?;
-    let max = decode_f64_array(bytes, &mut at, count)?;
-    let sum = decode_f64_array(bytes, &mut at, count)?;
-    let sum_sq = decode_f64_array(bytes, &mut at, count)?;
-    let sample_count = decode_u32_array(bytes, &mut at, count)?;
-    let finite_count = decode_u32_array(bytes, &mut at, count)?;
-    let flags = bytes.get(at..at.checked_add(count)?)?.to_vec();
-    Some(BinLevel {
-        t0,
-        t1,
-        first,
-        last,
-        min,
-        max,
-        sum,
-        sum_sq,
-        sample_count,
-        finite_count,
-        flags,
-    })
-}
-
-fn decode_f64_array(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<f64>> {
-    let len = count.checked_mul(8)?;
-    let end = at.checked_add(len)?;
-    let values = bytes
-        .get(*at..end)?
-        .chunks_exact(8)
-        .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("8-byte chunk")))
-        .collect();
-    *at = end;
-    Some(values)
-}
-
-fn decode_u32_array(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<u32>> {
-    let len = count.checked_mul(4)?;
-    let end = at.checked_add(len)?;
-    let values = bytes
-        .get(*at..end)?
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().expect("4-byte chunk")))
-        .collect();
-    *at = end;
-    Some(values)
+    BinLevel::decode_cache(bytes)
 }
 
 fn pad_to_8(bytes: &mut Vec<u8>) {
@@ -1002,7 +998,10 @@ mod tests {
             let actual = cached.query(0.0, 499.0, 100);
             assert_eq!(expected.level, actual.level);
             assert_eq!(expected.bins, actual.bins);
-            assert_eq!(fresh.signal(*id).unwrap().len(), 500);
+            let signal = fresh.signal(*id).unwrap();
+            assert_eq!(signal.len(), 500);
+            assert!(signal.is_paged());
+            assert!(cached.paged_level_count() > 0);
         }
         let speed = fresh.signal_by_path("flight/speed").unwrap();
         assert!(speed.values()[42].is_nan());

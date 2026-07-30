@@ -114,6 +114,22 @@ impl PageHandle {
             .collect::<Vec<_>>()
             .into())
     }
+
+    /// Loads the complete byte region.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for memory handles or failed page reads.
+    pub fn bytes(&self) -> Result<Arc<[u8]>, PageError> {
+        if self.memory.is_some() {
+            return Err(PageError::MemoryHandle);
+        }
+        let len = self.len.ok_or(PageError::InvalidRange)?;
+        let cache = self.cache.clone().unwrap_or_else(|| {
+            PageCache::new(self.path.parent().unwrap_or_else(|| Path::new(".")), len)
+        });
+        Ok(cache.read(self, 0..len)?.shared())
+    }
 }
 
 #[derive(Clone)]
@@ -172,6 +188,11 @@ impl Lease {
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    #[must_use]
+    pub fn shared(&self) -> Arc<[u8]> {
+        Arc::clone(&self.bytes)
     }
 }
 

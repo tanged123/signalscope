@@ -89,6 +89,28 @@ impl BinLevel {
         (0..self.len()).map(|index| self.to_wire(index)).collect()
     }
 
+    pub(crate) fn decode_cache(bytes: &[u8]) -> Option<Self> {
+        let count = usize::try_from(u64::from_le_bytes(bytes.get(..8)?.try_into().ok()?)).ok()?;
+        let used = 8_usize.checked_add(count.checked_mul(Self::BYTES_PER_BIN)?)?;
+        if bytes.len() != used.checked_next_multiple_of(8)? {
+            return None;
+        }
+        let mut at = 8;
+        Some(Self {
+            t0: decode_f64s(bytes, &mut at, count)?,
+            t1: decode_f64s(bytes, &mut at, count)?,
+            first: decode_f64s(bytes, &mut at, count)?,
+            last: decode_f64s(bytes, &mut at, count)?,
+            min: decode_f64s(bytes, &mut at, count)?,
+            max: decode_f64s(bytes, &mut at, count)?,
+            sum: decode_f64s(bytes, &mut at, count)?,
+            sum_sq: decode_f64s(bytes, &mut at, count)?,
+            sample_count: decode_u32s(bytes, &mut at, count)?,
+            finite_count: decode_u32s(bytes, &mut at, count)?,
+            flags: bytes.get(at..at.checked_add(count)?)?.to_vec(),
+        })
+    }
+
     pub(crate) fn t0s(&self) -> &[f64] {
         &self.t0
     }
@@ -96,6 +118,36 @@ impl BinLevel {
     pub(crate) fn t1s(&self) -> &[f64] {
         &self.t1
     }
+}
+
+fn decode_f64s(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<f64>> {
+    let end = at.checked_add(count.checked_mul(size_of::<f64>())?)?;
+    let values = bytes
+        .get(*at..end)?
+        .chunks_exact(size_of::<f64>())
+        .map(|chunk| {
+            let mut value = [0; size_of::<f64>()];
+            value.copy_from_slice(chunk);
+            f64::from_le_bytes(value)
+        })
+        .collect();
+    *at = end;
+    Some(values)
+}
+
+fn decode_u32s(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<u32>> {
+    let end = at.checked_add(count.checked_mul(size_of::<u32>())?)?;
+    let values = bytes
+        .get(*at..end)?
+        .chunks_exact(size_of::<u32>())
+        .map(|chunk| {
+            let mut value = [0; size_of::<u32>()];
+            value.copy_from_slice(chunk);
+            u32::from_le_bytes(value)
+        })
+        .collect();
+    *at = end;
+    Some(values)
 }
 
 #[derive(Clone, Copy)]
