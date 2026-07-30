@@ -6,6 +6,7 @@
 
 pub mod cache;
 pub mod compute;
+pub mod ensemble;
 pub mod expr;
 pub mod ingest;
 pub mod naming;
