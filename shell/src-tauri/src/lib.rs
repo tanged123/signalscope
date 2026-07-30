@@ -47,6 +47,7 @@ struct DataState {
     pyramids: BTreeMap<SignalId, Pyramid>,
     registry: SourceRegistry,
     sets: BTreeMap<SetId, SourceSet>,
+    materialized_sets: BTreeMap<SetId, ensemble::MaterializedSet>,
     next_set_id: u64,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
@@ -63,6 +64,7 @@ impl Default for DataState {
             pyramids: BTreeMap::new(),
             registry: SourceRegistry::default(),
             sets: BTreeMap::new(),
+            materialized_sets: BTreeMap::new(),
             next_set_id: 0,
             derived_source: None,
             derived_references: BTreeMap::new(),
@@ -628,6 +630,7 @@ fn create_set(
     let set = build_set(&data.store, &keys, id, request.label)?;
     let summary = set_summary(&set);
     data.sets.insert(id, set);
+    data.materialized_sets.remove(&id);
     Ok(Envelope::new(summary))
 }
 
@@ -657,6 +660,7 @@ fn update_set_members(
     }
     let summary = set_summary(&set);
     data.sets.insert(id, set);
+    data.materialized_sets.remove(&id);
     Ok(Envelope::new(summary))
 }
 
@@ -671,18 +675,23 @@ fn set_time_alignment(
         .map(SourceKey)
         .map_err(|error| error.to_string())?;
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    let set = data
-        .sets
-        .get_mut(&SetId(request.set_id))
-        .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
-    set.set_transform(
-        key,
-        AffineTransform {
-            scale: request.scale,
-            offset: request.offset,
-        },
-    );
-    Ok(Envelope::new(set_summary(set)))
+    let id = SetId(request.set_id);
+    let summary = {
+        let set = data
+            .sets
+            .get_mut(&id)
+            .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
+        set.set_transform(
+            key,
+            AffineTransform {
+                scale: request.scale,
+                offset: request.offset,
+            },
+        );
+        set_summary(set)
+    };
+    data.materialized_sets.remove(&id);
+    Ok(Envelope::new(summary))
 }
 
 #[tauri::command]
@@ -693,12 +702,35 @@ fn query_ensemble_tiles(
 ) -> Result<Envelope<EnsembleTileResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let filter = parse_source_keys(request.member_filter)?;
-    let data = state.lock().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    let id = SetId(request.set_id);
+    if filter.is_empty() {
+        let generation = data
+            .sets
+            .get(&id)
+            .ok_or_else(|| format!("unknown set id: {}", request.set_id))?
+            .generation;
+        let needs_materialization = data
+            .materialized_sets
+            .get(&id)
+            .is_none_or(|materialized| materialized.generation() != generation);
+        if needs_materialization {
+            let set = data.sets.get(&id).expect("checked set").clone();
+            let materialized = ensemble::materialize(
+                &set,
+                &data.store,
+                &data.pyramids,
+                &CacheRoot::app_owned(&data.cache_root),
+            )
+            .map_err(|error| error.to_string())?;
+            data.materialized_sets.insert(id, materialized);
+        }
+    }
     let set = data
         .sets
-        .get(&SetId(request.set_id))
+        .get(&id)
         .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
-    let tile = ensemble::query(
+    let tile = ensemble::query_with_materialization(
         set,
         &request.local_path,
         &data.store,
@@ -707,6 +739,10 @@ fn query_ensemble_tiles(
         request.pixel_width,
         (!filter.is_empty()).then_some(&filter),
         ensemble::Limits::default(),
+        filter
+            .is_empty()
+            .then(|| data.materialized_sets.get(&id))
+            .flatten(),
     )
     .map_err(|error| error.to_string())?;
     Ok(Envelope::new(EnsembleTileResponse {

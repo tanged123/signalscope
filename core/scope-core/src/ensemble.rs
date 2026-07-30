@@ -6,8 +6,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use scope_protocol::EnvelopeBin;
+use sha2::{Digest, Sha256};
 
 use crate::{
+    cache::{self, CACHE_VERSION, CacheRoot},
+    paging::{PageCache, PageError, PageHandle},
     pyramid::Pyramid,
     sets::{AffineTransform, SetKey, SourceSet},
     store::{SignalId, SignalStore, SourceKey},
@@ -56,6 +59,12 @@ pub enum EnsembleError {
     TooManyMembers { requested: usize, limit: usize },
     #[error("a set member does not contain the requested signal")]
     MissingSignal,
+    #[error("materialized generation {materialized} does not match set generation {current}")]
+    StaleGeneration { materialized: u64, current: u64 },
+    #[error(transparent)]
+    Page(#[from] PageError),
+    #[error(transparent)]
+    Cache(#[from] cache::CacheError),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,6 +85,100 @@ pub struct EnsembleTile {
     pub set_key: SetKey,
     pub member_keys: Vec<SourceKey>,
     pub level: u32,
+    pub source: TileSource,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TileSource {
+    QueryTimeMerge,
+    Materialized,
+}
+
+#[derive(Clone, Debug)]
+pub struct MaterializedSet {
+    set_key: SetKey,
+    generation: u64,
+    member_keys: Vec<SourceKey>,
+    signals: BTreeMap<String, Vec<MaterializedLevel>>,
+    windows: BTreeMap<String, (f64, f64)>,
+}
+
+#[derive(Clone, Debug)]
+struct MaterializedLevel {
+    handle: PageHandle,
+    cells: usize,
+}
+
+impl MaterializedSet {
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    pub fn level_count(&self, local_path: &str) -> usize {
+        self.signals.get(local_path).map_or(0, Vec::len)
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error when the backing page cannot be read.
+    pub fn level(
+        &self,
+        local_path: &str,
+        index: usize,
+    ) -> Result<Vec<EnsembleCell>, EnsembleError> {
+        let level = self
+            .signals
+            .get(local_path)
+            .and_then(|levels| levels.get(index))
+            .ok_or(EnsembleError::MissingSignal)?;
+        decode_cells(&level.handle.values()?).ok_or(EnsembleError::MissingSignal)
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error when the signal is absent or its page cannot be read.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss
+    )]
+    pub fn level_window(
+        &self,
+        local_path: &str,
+        window: (f64, f64),
+        pixel_width: u32,
+    ) -> Result<(u32, Vec<EnsembleCell>), EnsembleError> {
+        let levels = self
+            .signals
+            .get(local_path)
+            .ok_or(EnsembleError::MissingSignal)?;
+        let full = self
+            .windows
+            .get(local_path)
+            .ok_or(EnsembleError::MissingSignal)?;
+        let target = usize::try_from(pixel_width.max(1))
+            .unwrap_or(usize::MAX)
+            .saturating_mul(2);
+        let fraction = if full.1 > full.0 {
+            ((window.1.min(full.1) - window.0.max(full.0)) / (full.1 - full.0)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let index = levels
+            .iter()
+            .position(|level| {
+                ((level.cells as f64 * fraction).ceil() as usize).saturating_add(2) <= target
+            })
+            .unwrap_or_else(|| levels.len().saturating_sub(1));
+        let cells = self
+            .level(local_path, index)?
+            .into_iter()
+            .filter(|cell| cell.t1 >= window.0 && cell.t0 <= window.1)
+            .collect();
+        Ok((u32::try_from(index).unwrap_or(u32::MAX), cells))
+    }
 }
 
 #[must_use]
@@ -98,6 +201,83 @@ pub fn ensemble_cells(members: &[MemberBins], grid: &Grid) -> Vec<EnsembleCell> 
         .collect()
 }
 
+/// Builds independently queryable levels for every complete set signal.
+///
+/// # Errors
+///
+/// Returns an error for invalid alignment, missing member data, or cache IO.
+pub fn materialize(
+    set: &SourceSet,
+    store: &SignalStore,
+    pyramids: &BTreeMap<SignalId, Pyramid>,
+    root: &CacheRoot,
+) -> Result<MaterializedSet, EnsembleError> {
+    set.alignment()
+        .map_err(|_| EnsembleError::AlignmentRequired)?;
+    let directory = root.directory().join("ensemble").join(format!(
+        "{}-{}-v{}",
+        set.key.0, set.generation, CACHE_VERSION
+    ));
+    let capacity = set
+        .members
+        .keys()
+        .filter_map(|key| store.sources().find(|source| source.key == *key))
+        .flat_map(|source| store.signals_of(source.id))
+        .map(|signal| signal.len().saturating_mul(7 * size_of::<f64>()))
+        .max()
+        .unwrap_or(1)
+        .max(64 * 1024 * 1024);
+    let pages = PageCache::new(&directory, capacity);
+    let page_root = CacheRoot::app_owned(&directory);
+    let mut signals = BTreeMap::new();
+    let mut windows = BTreeMap::new();
+
+    for local_path in &set.fingerprint.local_paths {
+        let members = member_pyramids(set, local_path, store, pyramids)?;
+        let level_count = members
+            .iter()
+            .map(|(_, pyramid)| pyramid.level_count())
+            .min()
+            .unwrap_or(0);
+        let window = aligned_window(set, local_path, store)?;
+        let mut levels = Vec::with_capacity(level_count);
+        for index in 0..level_count {
+            let bins = members
+                .iter()
+                .map(|(transform, pyramid)| MemberBins {
+                    bins: pyramid.level(index).unwrap_or_default(),
+                    transform: *transform,
+                })
+                .collect::<Vec<_>>();
+            let cells = bins
+                .iter()
+                .map(|member| member.bins.len())
+                .max()
+                .unwrap_or(1);
+            let cells = u32::try_from(cells).unwrap_or(u32::MAX).max(1);
+            let cells = ensemble_cells(&bins, &Grid::new(window.0, window.1, cells));
+            let mut hash = Sha256::new();
+            hash.update(local_path.as_bytes());
+            let name = format!("{:x}-{index}.ssens", hash.finalize());
+            let handle = cache::write_page(&page_root, &name, &encode_cells(&cells), &pages)?;
+            levels.push(MaterializedLevel {
+                handle,
+                cells: cells.len(),
+            });
+        }
+        windows.insert(local_path.clone(), window);
+        signals.insert(local_path.clone(), levels);
+    }
+
+    Ok(MaterializedSet {
+        set_key: set.key,
+        generation: set.generation,
+        member_keys: set.members.keys().copied().collect(),
+        signals,
+        windows,
+    })
+}
+
 /// # Errors
 ///
 /// Returns an error for unaligned, oversized, or incomplete member queries.
@@ -112,8 +292,56 @@ pub fn query(
     member_filter: Option<&BTreeSet<SourceKey>>,
     limits: Limits,
 ) -> Result<EnsembleTile, EnsembleError> {
+    query_with_materialization(
+        set,
+        local_path,
+        store,
+        pyramids,
+        window,
+        pixel_width,
+        member_filter,
+        limits,
+        None,
+    )
+}
+
+/// # Errors
+///
+/// Returns an error for stale materialization or invalid query inputs.
+#[allow(clippy::too_many_arguments)]
+pub fn query_with_materialization(
+    set: &SourceSet,
+    local_path: &str,
+    store: &SignalStore,
+    pyramids: &BTreeMap<SignalId, Pyramid>,
+    window: (f64, f64),
+    pixel_width: u32,
+    member_filter: Option<&BTreeSet<SourceKey>>,
+    limits: Limits,
+    materialized: Option<&MaterializedSet>,
+) -> Result<EnsembleTile, EnsembleError> {
     set.alignment()
         .map_err(|_| EnsembleError::AlignmentRequired)?;
+    if let Some(materialized) = materialized.filter(|_| member_filter.is_none()) {
+        if materialized.set_key != set.key {
+            return Err(EnsembleError::MissingSignal);
+        }
+        if materialized.generation != set.generation {
+            return Err(EnsembleError::StaleGeneration {
+                materialized: materialized.generation,
+                current: set.generation,
+            });
+        }
+        let (level, cells) = materialized.level_window(local_path, window, pixel_width)?;
+        return Ok(EnsembleTile {
+            cells,
+            generation: set.generation,
+            set_key: set.key,
+            member_keys: materialized.member_keys.clone(),
+            level,
+            source: TileSource::Materialized,
+        });
+    }
     let member_keys = set
         .members
         .keys()
@@ -162,7 +390,112 @@ pub fn query(
         set_key: set.key,
         member_keys,
         level,
+        source: TileSource::QueryTimeMerge,
     })
+}
+
+fn member_pyramids<'a>(
+    set: &SourceSet,
+    local_path: &str,
+    store: &SignalStore,
+    pyramids: &'a BTreeMap<SignalId, Pyramid>,
+) -> Result<Vec<(AffineTransform, &'a Pyramid)>, EnsembleError> {
+    set.members
+        .keys()
+        .map(|key| {
+            let transform = set
+                .transform(*key)
+                .ok_or(EnsembleError::AlignmentRequired)?;
+            let source = store
+                .sources()
+                .find(|source| source.key == *key)
+                .ok_or(EnsembleError::MissingSignal)?;
+            let signal = store
+                .signals_of(source.id)
+                .find(|signal| signal.local_path == local_path)
+                .ok_or(EnsembleError::MissingSignal)?;
+            let pyramid = pyramids
+                .get(&signal.id)
+                .ok_or(EnsembleError::MissingSignal)?;
+            Ok((transform, pyramid))
+        })
+        .collect()
+}
+
+fn aligned_window(
+    set: &SourceSet,
+    local_path: &str,
+    store: &SignalStore,
+) -> Result<(f64, f64), EnsembleError> {
+    let mut window = (f64::INFINITY, f64::NEG_INFINITY);
+    for key in set.members.keys() {
+        let transform = set
+            .transform(*key)
+            .ok_or(EnsembleError::AlignmentRequired)?;
+        let source = store
+            .sources()
+            .find(|source| source.key == *key)
+            .ok_or(EnsembleError::MissingSignal)?;
+        let signal = store
+            .signals_of(source.id)
+            .find(|signal| signal.local_path == local_path)
+            .ok_or(EnsembleError::MissingSignal)?;
+        let bounds = signal.time_bounds();
+        let left = transform.apply(bounds.0);
+        let right = transform.apply(bounds.1);
+        window.0 = window.0.min(left).min(right);
+        window.1 = window.1.max(left).max(right);
+    }
+    (window.0.is_finite() && window.1.is_finite())
+        .then_some(window)
+        .ok_or(EnsembleError::MissingSignal)
+}
+
+fn encode_cells(cells: &[EnsembleCell]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(cells.len() * 7 * size_of::<f64>());
+    for cell in cells {
+        for value in [
+            cell.t0,
+            cell.t1,
+            cell.min_run_mean,
+            cell.max_run_mean,
+            cell.mean_of_run_means,
+            cell.sigma,
+            f64::from(cell.run_count),
+        ] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn decode_cells(bytes: &[f64]) -> Option<Vec<EnsembleCell>> {
+    if bytes.len() % 7 != 0 {
+        return None;
+    }
+    bytes
+        .chunks_exact(7)
+        .map(|values| {
+            let run_count = values[6];
+            if !run_count.is_finite()
+                || run_count < 0.0
+                || run_count > f64::from(u32::MAX)
+                || run_count.fract() != 0.0
+            {
+                return None;
+            }
+            Some(EnsembleCell {
+                t0: values[0],
+                t1: values[1],
+                min_run_mean: values[2],
+                max_run_mean: values[3],
+                mean_of_run_means: values[4],
+                sigma: values[5],
+                run_count: run_count as u32,
+            })
+        })
+        .collect()
 }
 
 fn inverse_window(window: (f64, f64), transform: AffineTransform) -> (f64, f64) {
@@ -456,5 +789,104 @@ mod tests {
         )
         .unwrap();
         assert!(tile.cells.len() <= 402);
+    }
+
+    #[test]
+    fn materialized_levels_are_built_from_runs_not_ensemble_children() {
+        let set = set_with(2);
+        let mut store = SignalStore::new();
+        let mut pyramids = BTreeMap::new();
+        for (index, values) in [[0.0, 100.0, 0.0, 100.0], [100.0, 0.0, 100.0, 0.0]]
+            .into_iter()
+            .enumerate()
+        {
+            let index = u8::try_from(index).unwrap();
+            let source = store
+                .register_source(format!("{index}.csv"), key(index + 1), format!("r{index}"))
+                .unwrap();
+            let signal = store
+                .insert_signal(
+                    source,
+                    "value",
+                    None,
+                    Arc::from([0.0, 1.0, 2.0, 3.0]),
+                    values.to_vec(),
+                )
+                .unwrap();
+            pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
+        }
+        let root = tempfile::tempdir().unwrap();
+        let materialized = materialize(
+            &set,
+            &store,
+            &pyramids,
+            &crate::cache::CacheRoot::app_owned(root.path()),
+        )
+        .unwrap();
+
+        let fine = materialized.level("value", 0).unwrap();
+        let coarse = materialized.level("value", 1).unwrap();
+        assert!((fine[0].min_run_mean - coarse[0].min_run_mean).abs() > 1.0);
+        assert!((coarse[0].min_run_mean - 50.0).abs() < 1e-12);
+        assert!((coarse[0].max_run_mean - 50.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn membership_changes_invalidate_materialized_levels() {
+        let mut set = set_with(4);
+        let (store, pyramids) = stored(4);
+        let root = tempfile::tempdir().unwrap();
+        let materialized = materialize(
+            &set,
+            &store,
+            &pyramids,
+            &crate::cache::CacheRoot::app_owned(root.path()),
+        )
+        .unwrap();
+        set.remove_member(key(3));
+
+        assert!(matches!(
+            query_with_materialization(
+                &set,
+                "value",
+                &store,
+                &pyramids,
+                (0.0, 1.0),
+                8,
+                None,
+                Limits::default(),
+                Some(&materialized),
+            ),
+            Err(EnsembleError::StaleGeneration { .. })
+        ));
+    }
+
+    #[test]
+    fn filtered_queries_bypass_full_set_materialization() {
+        let set = set_with(4);
+        let (store, pyramids) = stored(4);
+        let root = tempfile::tempdir().unwrap();
+        let materialized = materialize(
+            &set,
+            &store,
+            &pyramids,
+            &crate::cache::CacheRoot::app_owned(root.path()),
+        )
+        .unwrap();
+        let filter = BTreeSet::from([key(1)]);
+        let tile = query_with_materialization(
+            &set,
+            "value",
+            &store,
+            &pyramids,
+            (0.0, 1.0),
+            8,
+            Some(&filter),
+            Limits::default(),
+            Some(&materialized),
+        )
+        .unwrap();
+
+        assert_eq!(tile.source, TileSource::QueryTimeMerge);
     }
 }
