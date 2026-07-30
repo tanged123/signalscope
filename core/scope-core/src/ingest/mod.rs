@@ -1,6 +1,7 @@
 //! Streaming source decoders and format dispatch.
 
 pub mod admission;
+pub mod batch;
 mod csv;
 mod decoded;
 mod mcap;
