@@ -351,7 +351,7 @@ fn decode_signal(entry: &CacheSignal, payload: &[u8]) -> Option<DecodedSignal> {
         return None;
     }
     let mut merged = Vec::new();
-    let mut expected_len = point_count.div_ceil(2);
+    let mut expected_len = point_count.div_ceil(1 << crate::pyramid::FINEST_STORED_LEVEL);
     for section in &entry.sections[2..] {
         let level = decode_bins(section_bytes(payload, *section)?)?;
         if level.len() != expected_len {
