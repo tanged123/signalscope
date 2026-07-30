@@ -16,10 +16,14 @@ progress reporting, multi-panel layouts, a virtualized signal tree, and the
 shared snapshot presentation plane. Workspace tabs retain multiple independent
 panel grids over the same loaded sources and linked time window.
 
-[![SignalScope demo](https://tanged123.github.io/signalscope/demo.gif)](https://tanged123.github.io/signalscope/)
+## Interactive demo
 
-The GIF and the [live snapshot](https://tanged123.github.io/signalscope/) are
-generated on release from the product's own export path.
+[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif)](https://tanged123.github.io/signalscope/demo.html)
+
+**[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)**
+to zoom, inspect values, and explore the exported workspace in your browser.
+The preview and snapshot are regenerated from SignalScope's export path on
+every release, so this view tracks the shipping UI.
 
 ## Quick start
 

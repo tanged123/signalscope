@@ -26,6 +26,20 @@ expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"resu
 expect_status 1 check_ci_results '{"version":{"result":"cancelled"},"flake":{"result":"success"}}'
 expect_status 1 check_ci_results ''
 
+readme="$script_dir/../README.md"
+if ! grep -q '^## Interactive demo$' "$readme"; then
+  echo "README must give the hosted demo its own section" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq '![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif)' "$readme"; then
+  echo "README must embed the release-generated demo GIF" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq '[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)' "$readme"; then
+  echo "README must link directly to the interactive HTML snapshot" >&2
+  failures=$((failures + 1))
+fi
+
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
 
@@ -87,7 +101,7 @@ if [ "$actual" -ne 1 ]; then
   echo "demo publish must return a failed push's status" >&2
   failures=$((failures + 1))
 fi
-if rg -q "unbound variable" "$failed_push_output"; then
+if grep -q "unbound variable" "$failed_push_output"; then
   echo "demo publish cleanup must retain its temporary path" >&2
   failures=$((failures + 1))
 fi
