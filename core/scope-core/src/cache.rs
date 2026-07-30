@@ -5,11 +5,9 @@
 //! ```text
 //! 0..8    magic  b"\x89SSPYR\r\n"
 //! 8..12   cache_version u32
-//! 12..20  source byte length u64
-//! 20..28  source mtime, ns since epoch, u64
-//! 28..32  crc32 of the source's first 64 KiB u32
-//! 32..40  directory JSON length u64
-//! 40..    directory JSON, then zero padding to an 8-byte boundary
+//! 12..44  decode provenance SHA-256
+//! 44..52  directory JSON length u64
+//! 52..    directory JSON, then zero padding to an 8-byte boundary
 //! ...     payload sections, each 8-byte aligned
 //! ```
 //!
@@ -25,10 +23,9 @@
 
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
-    time::UNIX_EPOCH,
 };
 
 use scope_protocol::{EnvelopeBin, IngestStage};
@@ -36,16 +33,18 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    ingest::{self, DecodeContext, IngestError, IngestSummary},
+    ingest::{
+        self, DecodeContext, IngestError, IngestSummary,
+        provenance::{fingerprint, provenance_digest},
+    },
     pyramid::Pyramid,
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
 
-pub const CACHE_VERSION: u32 = 2;
+pub const CACHE_VERSION: u32 = 3;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
-const HEADER_LEN: usize = 40;
+const HEADER_LEN: usize = 52;
 const BIN_RECORD_LEN: usize = 88;
-const FINGERPRINT_HEAD_LEN: usize = 64 * 1024;
 
 /// The sidecar file beside `source`: `<file name>.sspyr`.
 #[must_use]
@@ -53,32 +52,6 @@ pub fn sidecar_path(source: &Path) -> PathBuf {
     let mut name = source.file_name().unwrap_or_default().to_os_string();
     name.push(".sspyr");
     source.with_file_name(name)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Fingerprint {
-    source_len: u64,
-    mtime_ns: u64,
-    head_crc: u32,
-}
-
-fn fingerprint(source: &Path) -> std::io::Result<Fingerprint> {
-    let metadata = fs::metadata(source)?;
-    let mtime_ns = metadata
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX)
-        });
-    let mut head = Vec::with_capacity(FINGERPRINT_HEAD_LEN);
-    File::open(source)?
-        .take(FINGERPRINT_HEAD_LEN as u64)
-        .read_to_end(&mut head)?;
-    Ok(Fingerprint {
-        source_len: metadata.len(),
-        mtime_ns,
-        head_crc: crc32fast::hash(&head),
-    })
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -89,7 +62,7 @@ struct CacheDirectory {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CacheSignal {
-    path: String,
+    local_path: String,
     unit: Option<String>,
     point_count: u64,
     sections: Vec<CacheSection>,
@@ -112,6 +85,8 @@ pub enum CacheError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Ingest(#[from] IngestError),
+    #[error("invalid provenance digest: {0}")]
+    InvalidProvenance(String),
 }
 
 pub struct LoadedCache {
@@ -121,6 +96,8 @@ pub struct LoadedCache {
 
 pub struct IngestOutcome {
     pub loaded: LoadedCache,
+    pub provider_id: String,
+    pub provenance: String,
     /// `Some` when the freshly built sidecar could not be written. Sidecar
     /// write failures are non-fatal; callers may log and continue.
     pub sidecar_error: Option<CacheError>,
@@ -144,10 +121,16 @@ pub fn ingest_or_load(
     context: &mut DecodeContext<'_>,
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
+    let provider = ingest::provider_for(ingest::sniff_format(source)?);
+    let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
     let mut on_cache = |fraction| progress(IngestStage::Cache, fraction);
-    if let Some(loaded) = try_load(source, store, key, prefix, &mut on_cache)? {
+    if let Some(loaded) =
+        try_load_with_provenance(source, store, key, prefix, &provenance, &mut on_cache)?
+    {
         return Ok(IngestOutcome {
             loaded,
+            provider_id: provider.id.to_owned(),
+            provenance,
             sidecar_error: None,
         });
     }
@@ -167,9 +150,18 @@ pub fn ingest_or_load(
         .filter_map(|(id, pyramid)| Some((store.signal(*id)?, pyramid)))
         .collect();
     let mut on_write = |fraction| progress(IngestStage::Cache, fraction);
-    let sidecar_error = write(source, summary.row_count as u64, &entries, &mut on_write).err();
+    let sidecar_error = write(
+        source,
+        &provenance,
+        summary.row_count as u64,
+        &entries,
+        &mut on_write,
+    )
+    .err();
     Ok(IngestOutcome {
         loaded: LoadedCache { summary, pyramids },
+        provider_id: provider.id.to_owned(),
+        provenance,
         sidecar_error,
     })
 }
@@ -182,11 +174,13 @@ pub fn ingest_or_load(
 /// sidecar fails. Callers should treat write failures as non-fatal.
 pub fn write(
     source: &Path,
+    provenance: &str,
     row_count: u64,
     signals: &[(&Signal, &Pyramid)],
     progress: &mut dyn FnMut(f64),
 ) -> Result<PathBuf, CacheError> {
-    let fingerprint = fingerprint(source)?;
+    let provenance =
+        digest_bytes(provenance).ok_or_else(|| CacheError::InvalidProvenance(provenance.into()))?;
     let mut payload: Vec<u8> = Vec::new();
     let mut directory = CacheDirectory {
         row_count,
@@ -204,7 +198,7 @@ pub fn write(
             sections.push(append_section(&mut payload, &encode_bins(level)));
         }
         directory.signals.push(CacheSignal {
-            path: signal.path.clone(),
+            local_path: signal.local_path.clone(),
             unit: signal.unit.clone(),
             point_count: signal.len() as u64,
             sections,
@@ -216,9 +210,7 @@ pub fn write(
     let mut header = Vec::with_capacity(HEADER_LEN + directory_json.len() + 8);
     header.extend_from_slice(&MAGIC);
     header.extend_from_slice(&CACHE_VERSION.to_le_bytes());
-    header.extend_from_slice(&fingerprint.source_len.to_le_bytes());
-    header.extend_from_slice(&fingerprint.mtime_ns.to_le_bytes());
-    header.extend_from_slice(&fingerprint.head_crc.to_le_bytes());
+    header.extend_from_slice(&provenance);
     header.extend_from_slice(&(directory_json.len() as u64).to_le_bytes());
     header.extend_from_slice(&directory_json);
     pad_to_8(&mut header);
@@ -247,12 +239,24 @@ pub fn try_load(
     prefix: &str,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LoadedCache>, CacheError> {
+    let provider = ingest::provider_for(ingest::sniff_format(source)?);
+    let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
+    try_load_with_provenance(source, store, key, prefix, &provenance, progress)
+}
+
+fn try_load_with_provenance(
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    provenance: &str,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Option<LoadedCache>, CacheError> {
     let path = sidecar_path(source);
     let Ok(bytes) = fs::read(&path) else {
         return Ok(None);
     };
-    let expected = fingerprint(source)?;
-    let Some((directory, payload)) = parse(&bytes, expected) else {
+    let Some((directory, payload)) = parse(&bytes, provenance) else {
         return Ok(None);
     };
 
@@ -273,11 +277,7 @@ pub fn try_load(
         for entry in decoded {
             let id = store.insert_signal(
                 source_id,
-                entry
-                    .path
-                    .strip_prefix(&format!("{prefix}/"))
-                    .unwrap_or(&entry.path)
-                    .to_owned(),
+                entry.local_path,
                 entry.unit,
                 Arc::clone(&entry.time),
                 Arc::clone(&entry.values),
@@ -301,14 +301,25 @@ pub fn try_load(
 }
 
 struct DecodedSignal {
-    path: String,
+    local_path: String,
     unit: Option<String>,
     time: Arc<[f64]>,
     values: Arc<[f64]>,
     merged: Vec<Vec<EnvelopeBin>>,
 }
 
-fn parse(bytes: &[u8], expected: Fingerprint) -> Option<(CacheDirectory, &[u8])> {
+fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
+    if digest.len() != 64 {
+        return None;
+    }
+    let mut bytes = [0; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
+fn parse<'a>(bytes: &'a [u8], expected: &str) -> Option<(CacheDirectory, &'a [u8])> {
     if bytes.len() < HEADER_LEN || bytes[..8] != MAGIC {
         return None;
     }
@@ -317,15 +328,10 @@ fn parse(bytes: &[u8], expected: Fingerprint) -> Option<(CacheDirectory, &[u8])>
     if read_u32(8)? != CACHE_VERSION {
         return None;
     }
-    let stored = Fingerprint {
-        source_len: read_u64(12)?,
-        mtime_ns: read_u64(20)?,
-        head_crc: read_u32(28)?,
-    };
-    if stored != expected {
+    if bytes.get(12..44)? != digest_bytes(expected)? {
         return None;
     }
-    let directory_len = usize::try_from(read_u64(32)?).ok()?;
+    let directory_len = usize::try_from(read_u64(44)?).ok()?;
     let directory_end = HEADER_LEN.checked_add(directory_len)?;
     let directory: CacheDirectory =
         serde_json::from_slice(bytes.get(HEADER_LEN..directory_end)?).ok()?;
@@ -357,7 +363,7 @@ fn decode_signal(entry: &CacheSignal, payload: &[u8]) -> Option<DecodedSignal> {
         return None;
     }
     Some(DecodedSignal {
-        path: entry.path.clone(),
+        local_path: entry.local_path.clone(),
         unit: entry.unit.clone(),
         time: time.into(),
         values: values.into(),
@@ -550,7 +556,16 @@ mod tests {
             .iter()
             .map(|(id, pyramid)| (store.signal(*id).unwrap(), pyramid))
             .collect();
-        write(source, summary.row_count as u64, &entries, &mut |_| {}).unwrap();
+        let provider = ingest::provider_for(ingest::sniff_format(source).unwrap());
+        let provenance = provenance_digest(&provider, &fingerprint(source).unwrap(), &[]);
+        write(
+            source,
+            &provenance,
+            summary.row_count as u64,
+            &entries,
+            &mut |_| {},
+        )
+        .unwrap();
     }
 
     #[test]
@@ -603,6 +618,26 @@ mod tests {
         );
         assert_eq!(cached.loaded.pyramids.len(), outcome.loaded.pyramids.len());
         assert!(stages.iter().all(|stage| *stage == IngestStage::Cache));
+    }
+
+    #[test]
+    fn a_changed_cache_abi_invalidates_the_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let mut store = SignalStore::new();
+        let outcome = ingest_or_load_test(&source, &mut store, &mut |_, _| {}).unwrap();
+        assert_eq!(outcome.provider_id, "csv");
+        assert_eq!(outcome.provenance.len(), 64);
+
+        let path = sidecar_path(&source);
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[12..44].fill(0);
+        std::fs::write(&path, bytes).unwrap();
+
+        let mut fresh = SignalStore::new();
+        let reloaded = ingest_or_load_test(&source, &mut fresh, &mut |_, _| {}).unwrap();
+        assert_eq!(reloaded.provenance, outcome.provenance);
+        assert_ne!(&std::fs::read(path).unwrap()[12..44], &[0; 32]);
     }
 
     #[test]
@@ -665,7 +700,7 @@ mod tests {
         );
 
         let mut versioned = original;
-        versioned[8..12].copy_from_slice(&3_u32.to_le_bytes());
+        versioned[8..12].copy_from_slice(&(CACHE_VERSION + 1).to_le_bytes());
         fs::write(&path, &versioned).unwrap();
         assert!(
             try_load_test(&source, &mut fresh, &mut |_| {})
