@@ -41,6 +41,7 @@ export function emptySession(): Session {
     favorites: [],
     derived: [],
     sources: [],
+    source_sets: [],
   };
 }
 

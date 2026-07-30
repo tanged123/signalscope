@@ -49,6 +49,32 @@ function isSource(value: unknown): boolean {
   );
 }
 
+function isSourceSet(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.key === "string" &&
+    typeof value.label === "string" &&
+    typeof value.generation === "string" &&
+    isRecord(value.time_domain) &&
+    ["seconds", "milliseconds", "microseconds", "nanoseconds"].includes(
+      String(value.time_domain.unit),
+    ) &&
+    ["relative", "absolute_epoch", "event_aligned", "synthetic_index"].includes(
+      String(value.time_domain.origin),
+    ) &&
+    typeof value.time_domain.alignment_origin === "number" &&
+    Array.isArray(value.members) &&
+    value.members.every(
+      (member) =>
+        isRecord(member) &&
+        typeof member.source_key === "string" &&
+        isStringArray(member.missing) &&
+        typeof member.scale === "number" &&
+        typeof member.offset === "number",
+    )
+  );
+}
+
 function isNumberPair(value: unknown): value is [number, number] {
   return (
     Array.isArray(value) &&
@@ -181,6 +207,8 @@ function isSession(value: JsonObject): value is JsonObject & Session {
         typeof item.expr === "string",
     ) &&
     Array.isArray(value.sources) &&
-    value.sources.every(isSource)
+    value.sources.every(isSource) &&
+    Array.isArray(value.source_sets) &&
+    value.source_sets.every(isSourceSet)
   );
 }

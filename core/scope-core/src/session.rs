@@ -34,6 +34,7 @@ impl Default for Session {
             favorites: Vec::new(),
             derived: Vec::new(),
             sources: Vec::new(),
+            source_sets: Vec::new(),
         }
     }
 }
@@ -200,6 +201,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate_v10_sources(&mut value);
             value["schema_version"] = serde_json::json!(11);
             migrate(11, value)
+        }
+        11 => {
+            value["source_sets"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(12);
+            migrate(12, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
@@ -502,6 +508,42 @@ mod tests {
                 .all(|record| record.provider_id.is_none())
         );
         assert_eq!(from_json(&json).unwrap().sources, session.sources);
+    }
+
+    #[test]
+    fn v11_sessions_gain_an_empty_set_list_and_round_trip_membership() {
+        let mut value = serde_json::to_value(Session::default()).unwrap();
+        value["schema_version"] = serde_json::json!(11);
+        value.as_object_mut().unwrap().remove("source_sets");
+        let json = serde_json::to_string(&value).unwrap();
+        let session = from_json(&json).expect("v11 migrates");
+        assert!(session.source_sets.is_empty());
+
+        let with_sets = Session {
+            source_sets: vec![SourceSetState {
+                key: uuid::Uuid::nil().to_string(),
+                label: "Runs".into(),
+                generation: 4,
+                time_domain: TimeDomainState {
+                    unit: TimeUnitState::Seconds,
+                    origin: OriginKindState::Relative,
+                    alignment_origin: 0.0,
+                },
+                members: vec![SetMemberState {
+                    source_key: uuid::Uuid::nil().to_string(),
+                    missing: vec!["imu/ay".into()],
+                    scale: 1.0,
+                    offset: 0.0,
+                }],
+            }],
+            ..session
+        };
+        let restored = from_json(&serde_json::to_string(&with_sets).unwrap()).unwrap();
+        assert_eq!(restored.source_sets, with_sets.source_sets);
+        assert_eq!(
+            restored.source_sets[0].members[0].missing,
+            vec!["imu/ay".to_owned()]
+        );
     }
 
     #[test]

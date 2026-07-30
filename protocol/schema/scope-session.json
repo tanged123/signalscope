@@ -1,5 +1,5 @@
 {
-  "schema_version": 11,
+  "schema_version": 12,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -123,6 +123,46 @@
         "reconcile_legacy": "bool"
       }
     },
+    "TimeUnitState": {
+      "kind": "enum",
+      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
+    },
+    "OriginKindState": {
+      "kind": "enum",
+      "variants": [
+        "relative",
+        "absolute_epoch",
+        "event_aligned",
+        "synthetic_index"
+      ]
+    },
+    "TimeDomainState": {
+      "kind": "object",
+      "fields": {
+        "unit": "TimeUnitState",
+        "origin": "OriginKindState",
+        "alignment_origin": "f64"
+      }
+    },
+    "SetMemberState": {
+      "kind": "object",
+      "fields": {
+        "source_key": "string",
+        "missing": "string[]",
+        "scale": "f64",
+        "offset": "f64"
+      }
+    },
+    "SourceSetState": {
+      "kind": "object",
+      "fields": {
+        "key": "string",
+        "label": "string",
+        "generation": "u64",
+        "time_domain": "TimeDomainState",
+        "members": "SetMemberState[]"
+      }
+    },
     "Session": {
       "kind": "object",
       "fields": {
@@ -134,7 +174,8 @@
         "tabs": "WorkspaceTab[]",
         "favorites": "string[]",
         "derived": "DerivedSignal[]",
-        "sources": "SourceRecord[]"
+        "sources": "SourceRecord[]",
+        "source_sets": "SourceSetState[]"
       }
     }
   }

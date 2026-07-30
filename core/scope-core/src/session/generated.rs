@@ -2,7 +2,28 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 11;
+pub const SESSION_SCHEMA_VERSION: u32 = 12;
+
+mod u64_string {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(D::Error::custom)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -163,6 +184,49 @@ pub struct SourceRecord {
     pub reconcile_legacy: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TimeUnitState {
+    Seconds,
+    Milliseconds,
+    Microseconds,
+    Nanoseconds,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginKindState {
+    Relative,
+    AbsoluteEpoch,
+    EventAligned,
+    SyntheticIndex,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TimeDomainState {
+    pub unit: TimeUnitState,
+    pub origin: OriginKindState,
+    pub alignment_origin: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetMemberState {
+    pub source_key: String,
+    pub missing: Vec<String>,
+    pub scale: f64,
+    pub offset: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SourceSetState {
+    pub key: String,
+    pub label: String,
+    #[serde(with = "u64_string")]
+    pub generation: u64,
+    pub time_domain: TimeDomainState,
+    pub members: Vec<SetMemberState>,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Session {
     pub app: String,
@@ -174,4 +238,5 @@ pub struct Session {
     pub favorites: Vec<String>,
     pub derived: Vec<DerivedSignal>,
     pub sources: Vec<SourceRecord>,
+    pub source_sets: Vec<SourceSetState>,
 }
