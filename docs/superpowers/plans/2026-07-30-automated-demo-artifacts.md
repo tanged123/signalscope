@@ -399,7 +399,7 @@ Place it after `tag` and depend on it, so artifacts regenerate on release only â
 release. Give the job read-only contents permission and a checkout without
 persisted credentials. Use `./.github/actions/setup` with the Cachix token,
 then run `./scripts/demo.sh all` and upload `build/demo` with
-`actions/upload-artifact@v4`.
+`actions/upload-artifact@v7`.
 
 Add a separate `deploy-demo` job after `tag` and `demo`. Give only this job the
 `github-pages` environment and Pages write/OIDC permissions. Download the
