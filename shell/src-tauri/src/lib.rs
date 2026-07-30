@@ -10,7 +10,7 @@ use std::{
 
 use base64::Engine;
 use scope_core::{
-    compute, expr,
+    compute, ensemble, expr,
     ingest::{
         self, DecodedSource, IngestError, IngestSummary, SUPPORTED_FORMATS,
         admission::{BudgetConfig, MemoryBudget},
@@ -18,19 +18,22 @@ use scope_core::{
     },
     preferences,
     pyramid::Pyramid,
-    restore, session, snapshot,
+    restore, session,
+    sets::{AffineTransform, SetId, SourceSet, propose_sets},
+    snapshot,
     sources::{SourceRecord, SourceRegistry},
     store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
 };
 use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
-    BatchState, BatchStatus, DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry,
-    ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest,
-    FileState, FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession,
-    PickSessionRequest, RemoveSignalRequest, RestoreReconcileRequest, RestoreReconcileResponse,
-    RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
-    SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode, SignalSummary,
-    SignalTile, SourceSummary, TileRequest, TileResponse,
+    BatchState, BatchStatus, CreateSetRequest, DerivedRequest, EnsembleBin, EnsembleTileRequest,
+    EnsembleTileResponse, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
+    ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest, FileState, FormatDescriptor,
+    IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
+    RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
+    SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
+    SaveSessionRequest, SessionDialogMode, SetSummary, SetTimeAlignmentRequest, SignalSummary,
+    SignalTile, SourceSummary, TileRequest, TileResponse, UpdateSetMembersRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -40,6 +43,8 @@ struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
     registry: SourceRegistry,
+    sets: BTreeMap<SetId, SourceSet>,
+    next_set_id: u64,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
 }
@@ -518,6 +523,194 @@ fn list_signals(
             })
             .collect(),
     ))
+}
+
+fn set_summary(set: &SourceSet) -> SetSummary {
+    SetSummary {
+        set_id: set.id.0,
+        set_key: set.key.0.to_string(),
+        label: set.label.clone(),
+        generation: set.generation,
+        member_count: u32::try_from(set.members.len()).unwrap_or(u32::MAX),
+        local_paths: set.fingerprint.local_paths.iter().cloned().collect(),
+        aligned: set.alignment().is_ok(),
+    }
+}
+
+fn parse_source_keys(keys: Vec<String>) -> Result<BTreeSet<SourceKey>, String> {
+    keys.into_iter()
+        .map(|key| {
+            uuid::Uuid::parse_str(&key)
+                .map(SourceKey)
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+fn build_set(
+    store: &SignalStore,
+    keys: &BTreeSet<SourceKey>,
+    id: SetId,
+    label: String,
+) -> Result<SourceSet, String> {
+    let candidates = keys
+        .iter()
+        .map(|key| {
+            let source = store
+                .sources()
+                .find(|source| source.key == *key)
+                .ok_or_else(|| format!("unknown source key: {}", key.0))?;
+            Ok((
+                *key,
+                store
+                    .signals_of(source.id)
+                    .map(|signal| signal.local_path.clone())
+                    .collect(),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut proposed = propose_sets(&candidates);
+    if proposed.len() != 1 {
+        return Err("set members must share a schema".into());
+    }
+    let mut set = proposed.remove(0);
+    set.id = id;
+    set.label = label;
+    Ok(set)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn list_sets(state: State<'_, Arc<Mutex<DataState>>>) -> Result<Envelope<Vec<SetSummary>>, String> {
+    let data = state.lock().map_err(|error| error.to_string())?;
+    Ok(Envelope::new(data.sets.values().map(set_summary).collect()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn create_set(
+    request: Envelope<CreateSetRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<SetSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let keys = parse_source_keys(request.member_keys)?;
+    if keys.is_empty() {
+        return Err("a set requires at least one source".into());
+    }
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.next_set_id = data.next_set_id.saturating_add(1);
+    let id = SetId(data.next_set_id);
+    let set = build_set(&data.store, &keys, id, request.label)?;
+    let summary = set_summary(&set);
+    data.sets.insert(id, set);
+    Ok(Envelope::new(summary))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_set_members(
+    request: Envelope<UpdateSetMembersRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<SetSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let keys = parse_source_keys(request.member_keys)?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    let id = SetId(request.set_id);
+    let previous = data
+        .sets
+        .get(&id)
+        .ok_or_else(|| format!("unknown set id: {}", id.0))?
+        .clone();
+    let mut set = build_set(&data.store, &keys, id, previous.label)?;
+    set.key = previous.key;
+    set.generation = previous.generation.saturating_add(1);
+    for (key, member) in &mut set.members {
+        if let Some(saved) = previous.members.get(key) {
+            member.time_domain = saved.time_domain;
+            member.transform = saved.transform;
+        }
+    }
+    let summary = set_summary(&set);
+    data.sets.insert(id, set);
+    Ok(Envelope::new(summary))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_time_alignment(
+    request: Envelope<SetTimeAlignmentRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<SetSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let key = uuid::Uuid::parse_str(&request.source_key)
+        .map(SourceKey)
+        .map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    let set = data
+        .sets
+        .get_mut(&SetId(request.set_id))
+        .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
+    set.set_transform(
+        key,
+        AffineTransform {
+            scale: request.scale,
+            offset: request.offset,
+        },
+    );
+    Ok(Envelope::new(set_summary(set)))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn query_ensemble_tiles(
+    request: Envelope<EnsembleTileRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<EnsembleTileResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let filter = parse_source_keys(request.member_filter)?;
+    let data = state.lock().map_err(|error| error.to_string())?;
+    let set = data
+        .sets
+        .get(&SetId(request.set_id))
+        .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
+    let tile = ensemble::query(
+        set,
+        &request.local_path,
+        &data.store,
+        &data.pyramids,
+        (request.window.t0, request.window.t1),
+        request.pixel_width,
+        (!filter.is_empty()).then_some(&filter),
+        ensemble::Limits::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(EnsembleTileResponse {
+        request_id: request.request_id,
+        set_key: tile.set_key.0.to_string(),
+        generation: tile.generation,
+        level: tile.level,
+        member_keys: tile
+            .member_keys
+            .into_iter()
+            .map(|key| key.0.to_string())
+            .collect(),
+        bins: tile
+            .cells
+            .into_iter()
+            .map(|cell| EnsembleBin {
+                t0: cell.t0,
+                t1: cell.t1,
+                min_run_mean: cell.min_run_mean.is_finite().then_some(cell.min_run_mean),
+                max_run_mean: cell.max_run_mean.is_finite().then_some(cell.max_run_mean),
+                mean_of_run_means: cell
+                    .mean_of_run_means
+                    .is_finite()
+                    .then_some(cell.mean_of_run_means),
+                sigma: cell.sigma.is_finite().then_some(cell.sigma),
+                run_count: cell.run_count,
+            })
+            .collect(),
+    }))
 }
 
 #[tauri::command]
@@ -1121,6 +1314,11 @@ pub fn run() {
             restore_reconcile,
             list_sources,
             list_signals,
+            list_sets,
+            create_set,
+            update_set_members,
+            set_time_alignment,
+            query_ensemble_tiles,
             query_tiles,
             query_samples,
             create_derived,

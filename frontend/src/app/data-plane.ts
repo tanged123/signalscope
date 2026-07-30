@@ -5,6 +5,8 @@ import {
   type BatchStatus,
   type DerivedRequest,
   type EnvelopeBin,
+  type EnsembleTileRequest,
+  type EnsembleTileResponse,
   type ExportEstimate,
   type ExportEstimateRequest,
   type ExportFidelity,
@@ -26,6 +28,7 @@ import {
   type SaveExportFileRequest,
   type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
+  type SetSummary,
   type SignalSummary,
   type SnapshotManifest,
   type SourceSummary,
@@ -107,7 +110,11 @@ export interface DataPlane {
   readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
+  listSets(): Promise<SetSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
+  queryEnsembleTiles(
+    request: EnsembleTileRequest,
+  ): Promise<EnsembleTileResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
@@ -322,11 +329,28 @@ export class TauriPlane implements DataPlane {
     return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
   }
 
+  async listSets(): Promise<SetSummary[]> {
+    return open(await this.invoke<Envelope<SetSummary[]>>("list_sets"));
+  }
+
   async queryTiles(request: TileRequest): Promise<TileResponse> {
     return open(
       await this.invoke<Envelope<TileResponse>>("query_tiles", {
         request: seal(request),
       }),
+    );
+  }
+
+  async queryEnsembleTiles(
+    request: EnsembleTileRequest,
+  ): Promise<EnsembleTileResponse> {
+    return open(
+      await this.invoke<Envelope<EnsembleTileResponse>>(
+        "query_ensemble_tiles",
+        {
+          request: seal(request),
+        },
+      ),
     );
   }
 
@@ -419,6 +443,10 @@ export class BakedPlane implements DataPlane {
     ]);
   }
 
+  listSets(): Promise<SetSummary[]> {
+    return Promise.resolve([]);
+  }
+
   queryTiles(request: TileRequest): Promise<TileResponse> {
     const requested = new Set(request.signal_ids);
     return Promise.resolve({
@@ -441,6 +469,10 @@ export class BakedPlane implements DataPlane {
           };
         }),
     });
+  }
+
+  queryEnsembleTiles(): Promise<EnsembleTileResponse> {
+    return Promise.reject(new Error("ensemble data was not baked"));
   }
 
   querySamples(request: SampleRequest): Promise<SampleResponse> {

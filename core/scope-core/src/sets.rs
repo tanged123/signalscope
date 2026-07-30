@@ -130,6 +130,7 @@ pub struct SetMember {
 pub struct SourceSet {
     pub key: SetKey,
     pub id: SetId,
+    pub label: String,
     pub fingerprint: SchemaFingerprint,
     pub members: BTreeMap<SourceKey, SetMember>,
     pub generation: u64,
@@ -310,6 +311,7 @@ pub fn propose_sets(candidates: &[(SourceKey, Vec<String>)]) -> Vec<SourceSet> {
             SourceSet {
                 key: SetKey(fingerprint.digest()),
                 id: SetId(set_index as u64 + 1),
+                label: format!("Set {}", set_index + 1),
                 fingerprint,
                 members,
                 generation: 1,

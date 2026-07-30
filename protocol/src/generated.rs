@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -54,6 +54,78 @@ mod u64_vec_string {
 pub struct TimeWindow {
     pub t0: f64,
     pub t1: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct EnsembleBin {
+    pub t0: f64,
+    pub t1: f64,
+    #[serde(default)]
+    pub min_run_mean: Option<f64>,
+    #[serde(default)]
+    pub max_run_mean: Option<f64>,
+    #[serde(default)]
+    pub mean_of_run_means: Option<f64>,
+    #[serde(default)]
+    pub sigma: Option<f64>,
+    pub run_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct EnsembleTileRequest {
+    pub request_id: String,
+    #[serde(with = "u64_string")]
+    pub set_id: u64,
+    pub local_path: String,
+    pub window: TimeWindow,
+    pub pixel_width: u32,
+    pub member_filter: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct EnsembleTileResponse {
+    pub request_id: String,
+    pub set_key: String,
+    #[serde(with = "u64_string")]
+    pub generation: u64,
+    pub level: u32,
+    pub member_keys: Vec<String>,
+    pub bins: Vec<EnsembleBin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetSummary {
+    #[serde(with = "u64_string")]
+    pub set_id: u64,
+    pub set_key: String,
+    pub label: String,
+    #[serde(with = "u64_string")]
+    pub generation: u64,
+    pub member_count: u32,
+    pub local_paths: Vec<String>,
+    pub aligned: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CreateSetRequest {
+    pub label: String,
+    pub member_keys: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct UpdateSetMembersRequest {
+    #[serde(with = "u64_string")]
+    pub set_id: u64,
+    pub member_keys: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetTimeAlignmentRequest {
+    #[serde(with = "u64_string")]
+    pub set_id: u64,
+    pub source_key: String,
+    pub scale: f64,
+    pub offset: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
