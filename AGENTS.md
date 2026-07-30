@@ -61,7 +61,10 @@ Canonical commands:
 ./scripts/run.sh web                  browser development host
 ./scripts/run.sh native               Tauri development host
 ./scripts/test.sh                     quick Rust + frontend checks
-./scripts/test.sh core|frontend|e2e|full
+./scripts/test.sh core [filter…]         filtered Rust data-plane tests
+./scripts/test.sh shell [filter…]        filtered Tauri shell tests
+./scripts/test.sh unit [filter…]         filtered frontend unit tests
+./scripts/test.sh frontend|e2e|full
 ./scripts/format.sh                   apply treefmt formatting in place
 ./scripts/format.sh --check           check an isolated copy; writes nothing
 ./scripts/build.sh web|native         frontend or native bundles
