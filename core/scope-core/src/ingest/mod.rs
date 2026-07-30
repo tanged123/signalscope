@@ -102,6 +102,16 @@ pub(crate) fn apply_permutation(order: &[usize], column: &[f64]) -> Vec<f64> {
     order.iter().map(|&index| column[index]).collect()
 }
 
+pub(crate) fn apply_permutation_in_place(
+    order: &[usize],
+    column: &mut Vec<f64>,
+    scratch: &mut Vec<f64>,
+) {
+    scratch.clear();
+    scratch.extend(order.iter().map(|&index| column[index]));
+    std::mem::swap(column, scratch);
+}
+
 #[derive(Debug, Error)]
 pub enum IngestError {
     #[error("source has fewer than two columns")]
