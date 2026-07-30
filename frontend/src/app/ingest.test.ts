@@ -5,7 +5,13 @@ import type { IngestPort } from "./data-plane";
 import { runIngest } from "./ingest";
 
 const response: IngestResponse = {
-  source: { source_id: "1", path: "/tmp/flight.csv", point_count: "10" },
+  source: {
+    source_id: "1",
+    source_key: "00000000-0000-0000-0000-000000000001",
+    prefix: "flight",
+    path: "/tmp/flight.csv",
+    point_count: "10",
+  },
   signals: [],
 };
 
@@ -13,6 +19,20 @@ function fakePort(statuses: IngestStatus[]): IngestPort {
   const queue = [...statuses];
   return {
     pickSources: () => Promise.resolve([]),
+    startBatch: () => Promise.resolve("7"),
+    batchStatus: () =>
+      Promise.resolve({
+        state: "done",
+        fraction: 1,
+        total: "0",
+        done: "0",
+        failed: "0",
+        recent_failures: [],
+      }),
+    batchDetail: () => Promise.resolve({ entries: [], total: "0" }),
+    cancelBatch: () => Promise.resolve(),
+    releaseBatch: () => Promise.resolve(),
+    listFormats: () => Promise.resolve([]),
     start: () => Promise.resolve("7"),
     status: () => {
       const next = queue.shift();

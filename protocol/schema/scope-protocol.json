@@ -1,11 +1,80 @@
 {
-  "protocol_version": 8,
+  "protocol_version": 9,
   "types": {
     "TimeWindow": {
       "kind": "object",
       "fields": {
         "t0": "f64",
         "t1": "f64"
+      }
+    },
+    "IngestBatchRequest": {
+      "kind": "object",
+      "fields": {
+        "paths": "string[]"
+      }
+    },
+    "BatchJob": {
+      "kind": "object",
+      "fields": {
+        "job_id": "u64"
+      }
+    },
+    "BatchState": {
+      "kind": "enum",
+      "variants": ["running", "done", "partial", "failed", "cancelled"]
+    },
+    "FileState": {
+      "kind": "enum",
+      "variants": ["pending", "running", "done", "failed", "cancelled"]
+    },
+    "BatchFailure": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "error": "string"
+      }
+    },
+    "BatchStatus": {
+      "kind": "object",
+      "fields": {
+        "state": "BatchState",
+        "fraction": "f64",
+        "total": "u64",
+        "done": "u64",
+        "failed": "u64",
+        "recent_failures": "BatchFailure[]"
+      }
+    },
+    "BatchDetailRequest": {
+      "kind": "object",
+      "fields": {
+        "job_id": "u64",
+        "offset": "u32",
+        "limit": "u32"
+      }
+    },
+    "BatchFileStatus": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "state": "FileState",
+        "error": "string?"
+      }
+    },
+    "BatchDetail": {
+      "kind": "object",
+      "fields": {
+        "entries": "BatchFileStatus[]",
+        "total": "u64"
+      }
+    },
+    "FormatDescriptor": {
+      "kind": "object",
+      "fields": {
+        "id": "string",
+        "label": "string",
+        "extensions": "string[]"
       }
     },
     "IngestRequest": {
@@ -87,6 +156,9 @@
       "kind": "object",
       "fields": {
         "signal_id": "u64",
+        "source_id": "u64",
+        "source_key": "string",
+        "local_path": "string",
         "path": "string",
         "unit": "string?",
         "point_count": "u64",
@@ -98,6 +170,8 @@
       "kind": "object",
       "fields": {
         "source_id": "u64",
+        "source_key": "string",
+        "prefix": "string",
         "path": "string",
         "point_count": "u64"
       }

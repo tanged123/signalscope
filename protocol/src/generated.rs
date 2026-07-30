@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -54,6 +54,86 @@ mod u64_vec_string {
 pub struct TimeWindow {
     pub t0: f64,
     pub t1: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IngestBatchRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchJob {
+    #[serde(with = "u64_string")]
+    pub job_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BatchState {
+    Running,
+    Done,
+    Partial,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileState {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchFailure {
+    pub path: String,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchStatus {
+    pub state: BatchState,
+    pub fraction: f64,
+    #[serde(with = "u64_string")]
+    pub total: u64,
+    #[serde(with = "u64_string")]
+    pub done: u64,
+    #[serde(with = "u64_string")]
+    pub failed: u64,
+    pub recent_failures: Vec<BatchFailure>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchDetailRequest {
+    #[serde(with = "u64_string")]
+    pub job_id: u64,
+    pub offset: u32,
+    pub limit: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchFileStatus {
+    pub path: String,
+    pub state: FileState,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchDetail {
+    pub entries: Vec<BatchFileStatus>,
+    #[serde(with = "u64_string")]
+    pub total: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct FormatDescriptor {
+    pub id: String,
+    pub label: String,
+    pub extensions: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -139,6 +219,10 @@ pub struct SampleResponse {
 pub struct SignalSummary {
     #[serde(with = "u64_string")]
     pub signal_id: u64,
+    #[serde(with = "u64_string")]
+    pub source_id: u64,
+    pub source_key: String,
+    pub local_path: String,
     pub path: String,
     #[serde(default)]
     pub unit: Option<String>,
@@ -152,6 +236,8 @@ pub struct SignalSummary {
 pub struct SourceSummary {
     #[serde(with = "u64_string")]
     pub source_id: u64,
+    pub source_key: String,
+    pub prefix: String,
     pub path: String,
     #[serde(with = "u64_string")]
     pub point_count: u64,

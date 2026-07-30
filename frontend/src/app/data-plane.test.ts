@@ -23,6 +23,9 @@ describe("BakedPlane.querySamples", () => {
   it("returns a capped level-zero slice with gaps intact", async () => {
     const summary: SignalSummary = {
       signal_id: "7",
+      source_id: "3",
+      source_key: "00000000-0000-0000-0000-000000000003",
+      local_path: "speed",
       path: "vehicle/speed",
       unit: "m/s",
       point_count: "5",
@@ -54,6 +57,56 @@ describe("BakedPlane.querySamples", () => {
     expect(response.series[0]?.time).toEqual([0, 2, 4]);
     expect(response.series[0]?.stride).toBe(2);
     expect(Number.isNaN(response.series[0]?.values[1])).toBe(true);
+  });
+});
+
+describe("batch ingest port", () => {
+  it("keeps wire identity fields as strings", async () => {
+    const plane = new TauriPlane(() =>
+      Promise.resolve(
+        seal([
+          {
+            signal_id: "9007199254740993",
+            source_id: "9007199254740995",
+            source_key: "00000000-0000-0000-0000-000000000003",
+            local_path: "speed",
+            path: "vehicle/speed",
+            unit: "m/s",
+            point_count: "2",
+            t_min: 0,
+            t_max: 1,
+          },
+        ]) as never,
+      ),
+    );
+
+    const [signal] = await plane.listSignals();
+    expect(typeof signal?.signal_id).toBe("string");
+    expect(typeof signal?.source_id).toBe("string");
+    expect(signal?.source_key).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("starts a batch and reports aggregate progress", async () => {
+    const plane = new TauriPlane((command) => {
+      if (command === "ingest_batch") {
+        return Promise.resolve(seal({ job_id: "7" }) as never);
+      }
+      return Promise.resolve(
+        seal({
+          state: "running",
+          fraction: 0,
+          total: "2",
+          done: "0",
+          failed: "0",
+          recent_failures: [],
+        }) as never,
+      );
+    });
+
+    const jobId = await plane.ingest.startBatch(["/a.csv", "/b.csv"]);
+    const status = await plane.ingest.batchStatus(jobId);
+    expect(status.total).toBe("2");
+    expect(status.recent_failures).toEqual([]);
   });
 });
 

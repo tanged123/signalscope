@@ -1,4 +1,8 @@
 import {
+  type BatchDetail,
+  type BatchDetailRequest,
+  type BatchJob,
+  type BatchStatus,
   type DerivedRequest,
   type EnvelopeBin,
   type ExportEstimate,
@@ -7,6 +11,8 @@ import {
   type ExportFileKind,
   type ExportRange,
   type ExportWriteRequest,
+  type FormatDescriptor,
+  type IngestBatchRequest,
   type IngestJob,
   type IngestRequest,
   type IngestStatus,
@@ -32,6 +38,16 @@ import { binsToSamples, sampleWindow } from "./samples";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
+  startBatch(paths: string[]): Promise<string>;
+  batchStatus(jobId: string): Promise<BatchStatus>;
+  batchDetail(
+    jobId: string,
+    offset: number,
+    limit: number,
+  ): Promise<BatchDetail>;
+  cancelBatch(jobId: string): Promise<void>;
+  releaseBatch(jobId: string): Promise<void>;
+  listFormats(): Promise<FormatDescriptor[]>;
   start(path: string): Promise<string>;
   status(jobId: string): Promise<IngestStatus>;
 }
@@ -117,6 +133,44 @@ export class TauriPlane implements DataPlane {
     this.ingest = {
       pickSources: async () =>
         open(await this.invoke<Envelope<string[]>>("pick_sources")),
+      startBatch: async (paths: string[]) =>
+        open(
+          await this.invoke<Envelope<BatchJob>>("ingest_batch", {
+            request: seal<IngestBatchRequest>({ paths }),
+          }),
+        ).job_id,
+      batchStatus: async (jobId: string) =>
+        open(
+          await this.invoke<Envelope<BatchStatus>>("batch_status", {
+            request: seal<BatchJob>({ job_id: jobId }),
+          }),
+        ),
+      batchDetail: async (jobId: string, offset: number, limit: number) =>
+        open(
+          await this.invoke<Envelope<BatchDetail>>("batch_detail", {
+            request: seal<BatchDetailRequest>({
+              job_id: jobId,
+              offset,
+              limit,
+            }),
+          }),
+        ),
+      cancelBatch: async (jobId: string) => {
+        open(
+          await this.invoke<Envelope<null>>("cancel_batch", {
+            request: seal<BatchJob>({ job_id: jobId }),
+          }),
+        );
+      },
+      releaseBatch: async (jobId: string) => {
+        open(
+          await this.invoke<Envelope<null>>("release_batch", {
+            request: seal<BatchJob>({ job_id: jobId }),
+          }),
+        );
+      },
+      listFormats: async () =>
+        open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
       start: async (path: string) =>
         open(
           await this.invoke<Envelope<IngestJob>>("ingest_source", {
@@ -334,7 +388,13 @@ export class BakedPlane implements DataPlane {
       0,
     );
     return Promise.resolve([
-      { source_id: "0", path: this.sourceLabel, point_count: String(points) },
+      {
+        source_id: "0",
+        source_key: "00000000-0000-0000-0000-000000000000",
+        prefix: this.payload.signals[0]?.summary.path.split("/")[0] ?? "demo",
+        path: this.sourceLabel,
+        point_count: String(points),
+      },
     ]);
   }
 
@@ -441,6 +501,9 @@ function createDemoManifest(): BakedManifest {
     {
       summary: {
         signal_id: "1",
+        source_id: "0",
+        source_key: "00000000-0000-0000-0000-000000000000",
+        local_path: "velocity_body/x",
         path: "rocket/velocity_body/x",
         unit: "m/s",
         point_count: String(pointCount),
@@ -453,6 +516,9 @@ function createDemoManifest(): BakedManifest {
     {
       summary: {
         signal_id: "2",
+        source_id: "0",
+        source_key: "00000000-0000-0000-0000-000000000000",
+        local_path: "velocity_body/y",
         path: "rocket/velocity_body/y",
         unit: "m/s",
         point_count: String(pointCount),

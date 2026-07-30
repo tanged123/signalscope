@@ -7,7 +7,7 @@ use std::{
 
 use crate::pyramid::Pyramid;
 use crate::session::{LinkedTime, PanelMode, PanelState, Session};
-use crate::store::{Signal, SignalId, SignalStore};
+use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{BakedSignal, ExportFidelity, ExportRange, SignalSummary, SnapshotManifest};
 use serde::Serialize;
 use thiserror::Error;
@@ -29,6 +29,7 @@ pub struct LevelPlan {
 
 pub struct SignalPlan<'a> {
     pub signal: &'a Signal,
+    pub source_key: SourceKey,
     pub pyramid: &'a Pyramid,
     pub window: Option<(f64, f64)>,
     pub levels: Vec<LevelPlan>,
@@ -57,6 +58,8 @@ pub enum SnapshotError {
     MissingSignal(SignalId),
     #[error("signal {0:?} is missing its pyramid")]
     MissingPyramid(SignalId),
+    #[error("signal {0:?} has no source")]
+    MissingSource(SignalId),
     #[error("manifest serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
     #[error("manifest output is not UTF-8: {0}")]
@@ -92,6 +95,7 @@ fn panel_signal_paths(panel: &PanelState) -> Vec<&str> {
 
 fn signal_plan<'a>(
     signal: &'a Signal,
+    source_key: SourceKey,
     pyramid: &'a Pyramid,
     window: Option<(f64, f64)>,
     needs_raw: bool,
@@ -120,6 +124,7 @@ fn signal_plan<'a>(
         .collect();
     SignalPlan {
         signal,
+        source_key,
         pyramid,
         window,
         levels,
@@ -186,6 +191,7 @@ pub fn plan<'a>(
                         .ok_or(SnapshotError::MissingPyramid(signal.id))?;
                     Ok(signal_plan(
                         signal,
+                        source_key(store, signal)?,
                         pyramid,
                         None,
                         needs_raw.contains(&signal.id),
@@ -224,6 +230,7 @@ pub fn plan<'a>(
                 let pyramid = pyramids.get(&id).ok_or(SnapshotError::MissingPyramid(id))?;
                 Ok(signal_plan(
                     signal,
+                    source_key(store, signal)?,
                     pyramid,
                     Some((t0, t1)),
                     needs_raw.contains(&id),
@@ -234,10 +241,21 @@ pub fn plan<'a>(
     ))
 }
 
-fn signal_summary(signal: &Signal) -> SignalSummary {
+fn source_key(store: &SignalStore, signal: &Signal) -> Result<SourceKey, SnapshotError> {
+    store
+        .sources()
+        .find(|source| source.id == signal.source_id)
+        .map(|source| source.key)
+        .ok_or(SnapshotError::MissingSource(signal.id))
+}
+
+fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
+        source_id: signal.source_id.0,
+        source_key: source_key.0.to_string(),
+        local_path: signal.local_path.clone(),
         path: signal.path.clone(),
         unit: signal.unit.clone(),
         point_count: signal.len() as u64,
@@ -263,7 +281,7 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
             .filter_map(|level| entry.pyramid.level_window(level.index, entry.window))
             .collect();
         signals.push(BakedSignal {
-            summary: signal_summary(entry.signal),
+            summary: signal_summary(entry.signal, entry.source_key),
             levels,
         });
     }
@@ -434,7 +452,7 @@ mod tests {
         let expected = SnapshotManifest {
             session_json: serde_json::to_string(&session).expect("session"),
             signals: vec![BakedSignal {
-                summary: signal_summary(signal),
+                summary: signal_summary(signal, source_key(&store, signal).expect("source")),
                 levels: (0..pyramid.level_count())
                     .map(|level| pyramid.level(level).expect("level"))
                     .collect(),
