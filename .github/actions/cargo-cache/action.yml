@@ -11,7 +11,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -20,7 +20,7 @@ runs:
         restore-keys: |
           cargo-registry-${{ runner.os }}-
     - if: inputs.target-key != ''
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: target
         key: cargo-target-${{ inputs.target-key }}-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
