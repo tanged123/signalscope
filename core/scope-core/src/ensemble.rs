@@ -98,15 +98,50 @@ pub enum TileSource {
 pub struct MaterializedSet {
     set_key: SetKey,
     generation: u64,
-    member_keys: Vec<SourceKey>,
     signals: BTreeMap<String, Vec<MaterializedLevel>>,
     windows: BTreeMap<String, (f64, f64)>,
+    signal_members: BTreeMap<String, Vec<SourceKey>>,
 }
 
 #[derive(Clone, Debug)]
 struct MaterializedLevel {
     handle: PageHandle,
     cells: usize,
+}
+
+impl MaterializedLevel {
+    fn value(&self, cell: usize, field: usize) -> Result<f64, EnsembleError> {
+        self.handle
+            .value(cell.saturating_mul(7).saturating_add(field))
+            .map_err(EnsembleError::from)
+    }
+
+    fn partition_point(
+        &self,
+        field: usize,
+        mut predicate: impl FnMut(f64) -> bool,
+    ) -> Result<usize, EnsembleError> {
+        let mut left = 0;
+        let mut right = self.cells;
+        while left < right {
+            let middle = left + (right - left) / 2;
+            if predicate(self.value(middle, field)?) {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+        Ok(left)
+    }
+
+    fn range(&self, range: std::ops::Range<usize>) -> Result<Vec<EnsembleCell>, EnsembleError> {
+        decode_cells(
+            &self
+                .handle
+                .values_range(range.start.saturating_mul(7)..range.end.saturating_mul(7))?,
+        )
+        .ok_or(EnsembleError::MissingSignal)
+    }
 }
 
 impl MaterializedSet {
@@ -172,11 +207,15 @@ impl MaterializedSet {
                 ((level.cells as f64 * fraction).ceil() as usize).saturating_add(2) <= target
             })
             .unwrap_or_else(|| levels.len().saturating_sub(1));
-        let cells = self
-            .level(local_path, index)?
-            .into_iter()
-            .filter(|cell| cell.t1 >= window.0 && cell.t0 <= window.1)
-            .collect();
+        let level = &levels[index];
+        let start = level
+            .partition_point(1, |time| time < window.0)?
+            .saturating_sub(1);
+        let end = level
+            .partition_point(0, |time| time <= window.1)?
+            .saturating_add(1)
+            .min(level.cells);
+        let cells = level.range(start..end)?;
         Ok((u32::try_from(index).unwrap_or(u32::MAX), cells))
     }
 }
@@ -231,9 +270,14 @@ pub fn materialize(
     let page_root = CacheRoot::app_owned(&directory);
     let mut signals = BTreeMap::new();
     let mut windows = BTreeMap::new();
+    let mut signal_members = BTreeMap::new();
 
     for local_path in &set.fingerprint.local_paths {
-        let members = member_pyramids(set, local_path, store, pyramids)?;
+        let members = match member_pyramids(set, local_path, store, pyramids) {
+            Ok(members) => members,
+            Err(EnsembleError::MissingSignal) => continue,
+            Err(error) => return Err(error),
+        };
         let level_count = members
             .iter()
             .map(|(_, pyramid)| pyramid.level_count())
@@ -266,15 +310,23 @@ pub fn materialize(
             });
         }
         windows.insert(local_path.clone(), window);
+        signal_members.insert(
+            local_path.clone(),
+            set.members
+                .keys()
+                .filter(|key| !set.missing_for(**key).contains(local_path))
+                .copied()
+                .collect(),
+        );
         signals.insert(local_path.clone(), levels);
     }
 
     Ok(MaterializedSet {
         set_key: set.key,
         generation: set.generation,
-        member_keys: set.members.keys().copied().collect(),
         signals,
         windows,
+        signal_members,
     })
 }
 
@@ -337,7 +389,11 @@ pub fn query_with_materialization(
             cells,
             generation: set.generation,
             set_key: set.key,
-            member_keys: materialized.member_keys.clone(),
+            member_keys: materialized
+                .signal_members
+                .get(local_path)
+                .cloned()
+                .ok_or(EnsembleError::MissingSignal)?,
             level,
             source: TileSource::Materialized,
         });
@@ -345,7 +401,10 @@ pub fn query_with_materialization(
     let member_keys = set
         .members
         .keys()
-        .filter(|key| member_filter.is_none_or(|filter| filter.contains(key)))
+        .filter(|key| {
+            !set.missing_for(**key).contains(local_path)
+                && member_filter.is_none_or(|filter| filter.contains(key))
+        })
         .copied()
         .collect::<Vec<_>>();
     if member_keys.len() > limits.max_members {
@@ -402,6 +461,7 @@ fn member_pyramids<'a>(
 ) -> Result<Vec<(AffineTransform, &'a Pyramid)>, EnsembleError> {
     set.members
         .keys()
+        .filter(|key| !set.missing_for(**key).contains(local_path))
         .map(|key| {
             let transform = set
                 .transform(*key)
@@ -429,6 +489,9 @@ fn aligned_window(
 ) -> Result<(f64, f64), EnsembleError> {
     let mut window = (f64::INFINITY, f64::NEG_INFINITY);
     for key in set.members.keys() {
+        if set.missing_for(*key).contains(local_path) {
+            continue;
+        }
         let transform = set
             .transform(*key)
             .ok_or(EnsembleError::AlignmentRequired)?;
@@ -888,5 +951,64 @@ mod tests {
         .unwrap();
 
         assert_eq!(tile.source, TileSource::QueryTimeMerge);
+    }
+
+    #[test]
+    fn materialization_skips_paths_missing_from_partial_members() {
+        let mut set = set_with(2);
+        set.fingerprint.local_paths.insert("optional".into());
+        set.members
+            .get_mut(&key(1))
+            .unwrap()
+            .local_paths
+            .insert("optional".into());
+        set.members
+            .get_mut(&key(2))
+            .unwrap()
+            .missing
+            .insert("optional".into());
+        let (mut store, mut pyramids) = stored(2);
+        let source = store
+            .sources()
+            .find(|source| source.key == key(1))
+            .unwrap()
+            .id;
+        let signal = store
+            .insert_signal(
+                source,
+                "optional",
+                None,
+                Arc::from([0.0, 0.5, 1.0]),
+                Arc::from([3.0; 3]),
+            )
+            .unwrap();
+        pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
+        let root = tempfile::tempdir().unwrap();
+
+        let materialized = materialize(
+            &set,
+            &store,
+            &pyramids,
+            &crate::cache::CacheRoot::app_owned(root.path()),
+        )
+        .unwrap();
+
+        assert!(materialized.level_count("value") > 0);
+        assert!(materialized.level_count("optional") > 0);
+        let tile = query_with_materialization(
+            &set,
+            "optional",
+            &store,
+            &pyramids,
+            (0.0, 1.0),
+            8,
+            None,
+            Limits::default(),
+            Some(&materialized),
+        )
+        .unwrap();
+        assert_eq!(tile.member_keys, vec![key(1)]);
+        assert!(tile.cells.iter().any(|cell| cell.run_count == 1));
+        assert!(tile.cells.iter().all(|cell| cell.run_count <= 1));
     }
 }

@@ -207,6 +207,10 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(12);
             migrate(12, value)
         }
+        12 => {
+            value["schema_version"] = serde_json::json!(13);
+            migrate(13, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -451,6 +455,11 @@ mod tests {
                         width: 1.5,
                         visible: true,
                     }],
+                    ensemble: Some(EnsembleSeriesState {
+                        set_key: "set-a".into(),
+                        local_path: "velocity_body/x".into(),
+                        member_filter: vec!["run-a".into(), "run-b".into()],
+                    }),
                     y_range: None,
                     x_range: None,
                     x_label: None,

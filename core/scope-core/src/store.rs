@@ -72,12 +72,20 @@ impl Signal {
                 values: values.len(),
             });
         }
-        let time_values = time.as_slice();
-        if let Some(index) = time_values.iter().position(|value| !value.is_finite()) {
-            return Err(StoreError::NonFiniteTime { index });
-        }
-        if let Some(index) = time_values.windows(2).position(|pair| pair[0] > pair[1]) {
-            return Err(StoreError::DecreasingTime { index: index + 1 });
+        let mut previous = None;
+        for start in (0..time.len()).step_by(8192) {
+            let end = start.saturating_add(8192).min(time.len());
+            let values = time.range(start..end).map_err(|_| StoreError::ColumnRead)?;
+            for (offset, value) in values.iter().copied().enumerate() {
+                let index = start + offset;
+                if !value.is_finite() {
+                    return Err(StoreError::NonFiniteTime { index });
+                }
+                if previous.is_some_and(|previous| previous > value) {
+                    return Err(StoreError::DecreasingTime { index });
+                }
+                previous = Some(value);
+            }
         }
 
         Ok(Self {
@@ -116,14 +124,11 @@ impl Signal {
     /// finite samples exist, so presentation windows stay well-formed.
     #[must_use]
     pub fn time_bounds(&self) -> (f64, f64) {
-        let time = self.time();
-        let mut finite = time.iter().copied().filter(|value| value.is_finite());
-        let Some(first) = finite.next() else {
-            return (0.0, 1.0);
-        };
-        finite.fold((first, first), |(min, max), value| {
-            (min.min(value), max.max(value))
-        })
+        self.time
+            .value(0)
+            .ok()
+            .zip(self.time.value(self.len().saturating_sub(1)).ok())
+            .unwrap_or((0.0, 1.0))
     }
 
     #[must_use]
@@ -394,6 +399,8 @@ pub enum StoreError {
     NonFiniteTime { index: usize },
     #[error("time column decreases at index {index}")]
     DecreasingTime { index: usize },
+    #[error("column page cannot be read")]
+    ColumnRead,
     #[error("source {0:?} is not registered")]
     UnknownSource(SourceId),
     #[error("signal is already registered in source {source_id:?}: {local_path}")]

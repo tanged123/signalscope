@@ -110,15 +110,6 @@ export class AppShell {
     string,
     { response: EnsembleTileResponse; memberCount: number }
   >();
-  private ensembleSelectionByPanel = new Map<
-    string,
-    {
-      setId: string;
-      localPath: string;
-      memberKeys: string[];
-      memberCount: number;
-    }
-  >();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -1119,7 +1110,8 @@ export class AppShell {
     if (target === null) {
       target = this.workspace.addPanelRow().id;
     }
-    this.ensembleSelectionByPanel.delete(target);
+    const panel = this.workspace.panel(target);
+    if (panel !== undefined) panel.ensemble = null;
     if (this.workspace.addSeries(target, path)) {
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
@@ -1155,12 +1147,13 @@ export class AppShell {
       this.showModeHelp("set metadata is unavailable");
       return;
     }
-    this.ensembleSelectionByPanel.set(target, {
-      setId: set.set_id,
-      localPath,
-      memberKeys: saved.members.map((member) => member.source_key),
-      memberCount: saved.members.length,
-    });
+    const panel = this.workspace.panel(target);
+    if (panel === undefined) return;
+    panel.ensemble = {
+      set_key: set.set_key,
+      local_path: localPath,
+      member_filter: saved.members.map((member) => member.source_key),
+    };
     this.workspace.focusPanel(target);
     this.afterLayoutChange();
   }
@@ -1823,6 +1816,15 @@ export class AppShell {
       this.plane.listSignals(),
       this.plane.listSets(),
     ]);
+    this.workspace.setSourceSets(
+      this.sets.map((set) => ({
+        key: set.set_key,
+        label: set.label,
+        generation: set.generation,
+        time_domain: set.time_domain,
+        members: set.members,
+      })),
+    );
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
@@ -1863,21 +1865,25 @@ export class AppShell {
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
-        const ensemble = this.ensembleSelectionByPanel.get(panel.id);
-        if (ensemble !== undefined) {
+        const ensemble = panel.ensemble;
+        if (ensemble !== null) {
+          const set = this.sets.find(
+            (candidate) => candidate.set_key === ensemble.set_key,
+          );
+          if (set === undefined) return;
           const window = this.effectiveWindow(panel);
           const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? width;
           try {
             nextEnsembles.set(panel.id, {
               response: await this.plane.queryEnsembleTiles({
                 request_id: crypto.randomUUID(),
-                set_id: ensemble.setId,
-                local_path: ensemble.localPath,
+                set_id: set.set_id,
+                local_path: ensemble.local_path,
                 window,
                 pixel_width: Math.max(1, Math.round(panelWidth)),
-                member_filter: ensemble.memberKeys,
+                member_filter: ensemble.member_filter,
               }),
-              memberCount: ensemble.memberCount,
+              memberCount: ensemble.member_filter.length,
             });
           } catch (error: unknown) {
             this.reportError(error);

@@ -22,7 +22,9 @@ use scope_core::{
     preferences,
     pyramid::Pyramid,
     restore, session,
-    sets::{AffineTransform, SetId, SourceSet, propose_sets},
+    sets::{
+        AffineTransform, OriginKind, SetId, SetKey, SourceSet, TimeDomain, TimeUnit, propose_sets,
+    },
     snapshot,
     sources::{SourceRecord, SourceRegistry},
     store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
@@ -35,9 +37,9 @@ use scope_protocol::{
     FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest,
     RemoveSignalRequest, RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest,
     SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
-    SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode, SetSummary,
-    SetTimeAlignmentRequest, SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
-    UpdateSetMembersRequest,
+    SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode, SetMemberSummary,
+    SetOriginKind, SetSummary, SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit,
+    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse, UpdateSetMembersRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -403,6 +405,10 @@ fn restore_reconcile(
     let mut outcome = restore::reconcile(&mut restored, &built.aliases, &missing)
         .map_err(|error| error.to_string())?;
     outcome.conflicts = built.conflicts;
+    {
+        let mut data = state.lock().map_err(|error| error.to_string())?;
+        restore_sets(&restored, &mut data)?;
+    }
     Ok(Envelope::new(RestoreReconcileResponse {
         session_json: serde_json::to_string(&restored).map_err(|error| error.to_string())?,
         rewritten: outcome.rewritten,
@@ -420,6 +426,65 @@ fn restore_reconcile(
             .collect(),
         unresolved: outcome.unresolved,
     }))
+}
+
+fn restore_sets(session: &session::Session, data: &mut DataState) -> Result<(), String> {
+    data.sets.clear();
+    data.materialized_sets.clear();
+    data.next_set_id = 0;
+    for saved in &session.source_sets {
+        let keys = saved
+            .members
+            .iter()
+            .map(|member| {
+                uuid::Uuid::parse_str(&member.source_key)
+                    .map(SourceKey)
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        if keys
+            .iter()
+            .any(|key| !data.store.sources().any(|source| source.key == *key))
+        {
+            continue;
+        }
+        data.next_set_id = data.next_set_id.saturating_add(1);
+        let id = SetId(data.next_set_id);
+        let mut set = build_set(&data.store, &keys, id, saved.label.clone())?;
+        set.key = SetKey(uuid::Uuid::parse_str(&saved.key).map_err(|error| error.to_string())?);
+        set.generation = saved.generation;
+        let domain = TimeDomain {
+            unit: match saved.time_domain.unit {
+                session::TimeUnitState::Seconds => TimeUnit::Seconds,
+                session::TimeUnitState::Milliseconds => TimeUnit::Milliseconds,
+                session::TimeUnitState::Microseconds => TimeUnit::Microseconds,
+                session::TimeUnitState::Nanoseconds => TimeUnit::Nanoseconds,
+            },
+            origin: match saved.time_domain.origin {
+                session::OriginKindState::Relative => OriginKind::Relative,
+                session::OriginKindState::AbsoluteEpoch => OriginKind::AbsoluteEpoch,
+                session::OriginKindState::EventAligned => OriginKind::EventAligned,
+                session::OriginKindState::SyntheticIndex => OriginKind::SyntheticIndex,
+            },
+            alignment_origin: saved.time_domain.alignment_origin,
+        };
+        for saved_member in &saved.members {
+            let key = SourceKey(
+                uuid::Uuid::parse_str(&saved_member.source_key)
+                    .map_err(|error| error.to_string())?,
+            );
+            if let Some(member) = set.members.get_mut(&key) {
+                member.missing = saved_member.missing.iter().cloned().collect();
+                member.time_domain = domain;
+                member.transform = Some(AffineTransform {
+                    scale: saved_member.scale,
+                    offset: saved_member.offset,
+                });
+            }
+        }
+        data.sets.insert(id, set);
+    }
+    Ok(())
 }
 
 fn core_source_record(record: &session::SourceRecord) -> Result<SourceRecord, String> {
@@ -553,12 +618,48 @@ fn list_signals(
 }
 
 fn set_summary(set: &SourceSet) -> SetSummary {
+    let domain = set
+        .members
+        .values()
+        .next()
+        .map_or_else(TimeDomain::default, |member| member.time_domain);
     SetSummary {
         set_id: set.id.0,
         set_key: set.key.0.to_string(),
         label: set.label.clone(),
         generation: set.generation,
         member_count: u32::try_from(set.members.len()).unwrap_or(u32::MAX),
+        members: set
+            .members
+            .values()
+            .map(|member| {
+                let transform = member.transform.unwrap_or(AffineTransform {
+                    scale: 1.0,
+                    offset: 0.0,
+                });
+                SetMemberSummary {
+                    source_key: member.source_key.0.to_string(),
+                    missing: member.missing.iter().cloned().collect(),
+                    scale: transform.scale,
+                    offset: transform.offset,
+                }
+            })
+            .collect(),
+        time_domain: SetTimeDomainSummary {
+            unit: match domain.unit {
+                TimeUnit::Seconds | TimeUnit::Unsupported => SetTimeUnit::Seconds,
+                TimeUnit::Milliseconds => SetTimeUnit::Milliseconds,
+                TimeUnit::Microseconds => SetTimeUnit::Microseconds,
+                TimeUnit::Nanoseconds => SetTimeUnit::Nanoseconds,
+            },
+            origin: match domain.origin {
+                OriginKind::Relative => SetOriginKind::Relative,
+                OriginKind::AbsoluteEpoch => SetOriginKind::AbsoluteEpoch,
+                OriginKind::EventAligned => SetOriginKind::EventAligned,
+                OriginKind::SyntheticIndex => SetOriginKind::SyntheticIndex,
+            },
+            alignment_origin: domain.alignment_origin,
+        },
         local_paths: set.fingerprint.local_paths.iter().cloned().collect(),
         aligned: set.alignment().is_ok(),
     }
@@ -609,7 +710,26 @@ fn build_set(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn list_sets(state: State<'_, Arc<Mutex<DataState>>>) -> Result<Envelope<Vec<SetSummary>>, String> {
-    let data = state.lock().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    if data.sets.is_empty() {
+        let candidates = data
+            .store
+            .sources()
+            .map(|source| {
+                (
+                    source.key,
+                    data.store
+                        .signals_of(source.id)
+                        .map(|signal| signal.local_path.clone())
+                        .collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for set in propose_sets(&candidates) {
+            data.next_set_id = data.next_set_id.max(set.id.0);
+            data.sets.insert(set.id, set);
+        }
+    }
     Ok(Envelope::new(data.sets.values().map(set_summary).collect()))
 }
 
@@ -702,30 +822,46 @@ fn query_ensemble_tiles(
 ) -> Result<Envelope<EnsembleTileResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let filter = parse_source_keys(request.member_filter)?;
-    let mut data = state.lock().map_err(|error| error.to_string())?;
     let id = SetId(request.set_id);
     if filter.is_empty() {
-        let generation = data
-            .sets
-            .get(&id)
-            .ok_or_else(|| format!("unknown set id: {}", request.set_id))?
-            .generation;
-        let needs_materialization = data
-            .materialized_sets
-            .get(&id)
-            .is_none_or(|materialized| materialized.generation() != generation);
-        if needs_materialization {
-            let set = data.sets.get(&id).expect("checked set").clone();
-            let materialized = ensemble::materialize(
-                &set,
-                &data.store,
-                &data.pyramids,
-                &CacheRoot::app_owned(&data.cache_root),
-            )
-            .map_err(|error| error.to_string())?;
-            data.materialized_sets.insert(id, materialized);
+        let build = {
+            let data = state.lock().map_err(|error| error.to_string())?;
+            let set = data
+                .sets
+                .get(&id)
+                .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
+            data.materialized_sets
+                .get(&id)
+                .is_none_or(|materialized| materialized.generation() != set.generation)
+                .then(|| {
+                    (
+                        set.clone(),
+                        data.store.clone(),
+                        data.pyramids.clone(),
+                        data.cache_root.clone(),
+                    )
+                })
+        };
+        if let Some((set, store, pyramids, cache_root)) = build {
+            let materialized =
+                ensemble::materialize(
+                    &set,
+                    &store,
+                    &pyramids,
+                    &CacheRoot::app_owned(&cache_root),
+                )
+                    .map_err(|error| error.to_string())?;
+            let mut data = state.lock().map_err(|error| error.to_string())?;
+            if data
+                .sets
+                .get(&id)
+                .is_some_and(|current| current.generation == materialized.generation())
+            {
+                data.materialized_sets.insert(id, materialized);
+            }
         }
     }
+    let data = state.lock().map_err(|error| error.to_string())?;
     let set = data
         .sets
         .get(&id)
@@ -1439,24 +1575,47 @@ fn save_preferences(request: Envelope<String>, app: AppHandle) -> Result<Envelop
 /// Panics when Tauri cannot initialize or run the application.
 pub fn run() {
     let workers = std::thread::available_parallelism().map_or(1, usize::from);
-    let jobs = BatchJobs::new(BatchOptions {
-        worker_count: workers,
-        budget: Arc::new(MemoryBudget::new(BudgetConfig::from_available(
-            8 * 1024 * 1024 * 1024,
-        ))),
-        terminal_ttl: Duration::from_secs(300),
-    });
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Mutex::new(DataState::default())))
-        .manage(jobs)
         .manage(RestoreGate::default())
-        .setup(|app| {
-            let root = cache_path(app.handle()).map_err(std::io::Error::other)?;
-            app.state::<Arc<Mutex<DataState>>>()
-                .lock()
-                .map_err(|error| std::io::Error::other(error.to_string()))?
-                .cache_root = root;
+        .setup(move |app| {
+            let path = preferences_path(app.handle()).map_err(std::io::Error::other)?;
+            let preferences = if path.exists() {
+                preferences::load_from_path(&path).map_err(std::io::Error::other)?
+            } else {
+                preferences::Preferences::default()
+            };
+            let root = preferences
+                .cache_root
+                .map(PathBuf::from)
+                .unwrap_or(cache_path(app.handle()).map_err(std::io::Error::other)?);
+            let defaults = BudgetConfig::from_available(8 * 1024 * 1024 * 1024);
+            let config = BudgetConfig {
+                working_bytes: preferences
+                    .ingest_working_bytes
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or(defaults.working_bytes),
+                resident_bytes: preferences
+                    .ingest_resident_bytes
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or(defaults.resident_bytes),
+            };
+            let budget = MemoryBudget::new(config);
+            {
+                let state = app.state::<Arc<Mutex<DataState>>>();
+                let mut data = state
+                    .lock()
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                data.cache_root.clone_from(&root);
+                data.budget = budget.clone();
+            }
+            app.manage(BatchJobs::new(BatchOptions {
+                worker_count: workers,
+                budget: Arc::new(budget),
+                terminal_ttl: Duration::from_secs(300),
+                cache_directory: Some(root),
+            }));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1551,8 +1710,8 @@ mod tests {
             signals: vec![DecodedSignal {
                 local_path: "imu/ax".into(),
                 unit: None,
-                time,
-                values: Arc::from(vec![1.0, 2.0, 3.0, 4.0]),
+                time: time.into(),
+                values: vec![1.0, 2.0, 3.0, 4.0].into(),
             }],
         };
 
@@ -1820,5 +1979,57 @@ mod tests {
         assert!(data.pyramids.is_empty());
         assert!(data.derived_source.is_none());
         assert!(data.derived_references.is_empty());
+    }
+
+    #[test]
+    fn restored_sets_keep_durable_identity_membership_and_alignment() {
+        let mut data = DataState::default();
+        let keys = [
+            SourceKey(uuid::Uuid::from_u128(1)),
+            SourceKey(uuid::Uuid::from_u128(2)),
+        ];
+        for (index, key) in keys.into_iter().enumerate() {
+            let source = data
+                .store
+                .register_source(format!("{index}.csv"), key, format!("run_{index}"))
+                .unwrap();
+            data.store
+                .insert_signal(
+                    source,
+                    "value",
+                    None,
+                    Arc::from([0.0, 1.0]),
+                    Arc::from([1.0, 2.0]),
+                )
+                .unwrap();
+        }
+        let mut restored = session::Session::default();
+        restored.source_sets.push(session::SourceSetState {
+            key: uuid::Uuid::from_u128(9).to_string(),
+            label: "Monte Carlo".into(),
+            generation: 7,
+            time_domain: session::TimeDomainState {
+                unit: session::TimeUnitState::Seconds,
+                origin: session::OriginKindState::Relative,
+                alignment_origin: 0.0,
+            },
+            members: keys
+                .into_iter()
+                .enumerate()
+                .map(|(index, key)| session::SetMemberState {
+                    source_key: key.0.to_string(),
+                    missing: Vec::new(),
+                    scale: 1.0,
+                    offset: f64::from(u32::try_from(index).unwrap()) * 0.25,
+                })
+                .collect(),
+        });
+
+        restore_sets(&restored, &mut data).unwrap();
+
+        let set = data.sets.values().next().unwrap();
+        assert_eq!(set.key, SetKey(uuid::Uuid::from_u128(9)));
+        assert_eq!(set.generation, 7);
+        assert_eq!(set.transform(keys[1]).unwrap().offset, 0.25);
     }
 }

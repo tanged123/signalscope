@@ -35,12 +35,31 @@ export interface EnsembleTileResponse {
   bins: EnsembleBin[];
 }
 
+export interface SetMemberSummary {
+  source_key: string;
+  missing: string[];
+  scale: number;
+  offset: number;
+}
+
+export type SetTimeUnit = "seconds" | "milliseconds" | "microseconds" | "nanoseconds";
+
+export type SetOriginKind = "relative" | "absolute_epoch" | "event_aligned" | "synthetic_index";
+
+export interface SetTimeDomainSummary {
+  unit: SetTimeUnit;
+  origin: SetOriginKind;
+  alignment_origin: number;
+}
+
 export interface SetSummary {
   set_id: string;
   set_key: string;
   label: string;
   generation: string;
   member_count: number;
+  members: SetMemberSummary[];
+  time_domain: SetTimeDomainSummary;
   local_paths: string[];
   aligned: boolean;
 }

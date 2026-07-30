@@ -86,23 +86,53 @@ impl PageHandle {
             .map_or_else(|| self.byte_len() / size_of::<f64>(), |values| values.len())
     }
 
+    #[must_use]
+    pub fn same_region(&self, other: &Self) -> bool {
+        self.memory
+            .as_ref()
+            .zip(other.memory.as_ref())
+            .is_some_and(|(left, right)| Arc::ptr_eq(left, right))
+            || (self.memory.is_none()
+                && other.memory.is_none()
+                && self.path == other.path
+                && self.offset == other.offset
+                && self.len == other.len)
+    }
+
     /// Loads and decodes the complete f64 region.
     ///
     /// # Errors
     ///
     /// Returns an error for invalid regions or failed page reads.
     pub fn values(&self) -> Result<Arc<[f64]>, PageError> {
+        self.values_range(0..self.value_len())
+    }
+
+    /// Loads and decodes an f64 range.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid ranges or failed page reads.
+    pub fn values_range(&self, range: Range<usize>) -> Result<Arc<[f64]>, PageError> {
+        if range.start > range.end || range.end > self.value_len() {
+            return Err(PageError::InvalidRange);
+        }
         if let Some(values) = &self.memory {
-            return Ok(Arc::clone(values));
+            return Ok(values[range].into());
         }
         let len = self.len.ok_or(PageError::InvalidRange)?;
         if len % size_of::<f64>() != 0 {
             return Err(PageError::InvalidColumn);
         }
-        let cache = self.cache.clone().unwrap_or_else(|| {
-            PageCache::new(self.path.parent().unwrap_or_else(|| Path::new(".")), len)
-        });
-        let lease = cache.read(self, 0..len)?;
+        let start = range
+            .start
+            .checked_mul(size_of::<f64>())
+            .ok_or(PageError::InvalidRange)?;
+        let end = range
+            .end
+            .checked_mul(size_of::<f64>())
+            .ok_or(PageError::InvalidRange)?;
+        let lease = self.read(start..end)?;
         Ok(lease
             .bytes()
             .chunks_exact(size_of::<f64>())
@@ -115,6 +145,18 @@ impl PageHandle {
             .into())
     }
 
+    /// Loads one f64 value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid index or failed page read.
+    pub fn value(&self, index: usize) -> Result<f64, PageError> {
+        self.values_range(index..index.saturating_add(1))?
+            .first()
+            .copied()
+            .ok_or(PageError::InvalidRange)
+    }
+
     /// Loads the complete byte region.
     ///
     /// # Errors
@@ -125,10 +167,27 @@ impl PageHandle {
             return Err(PageError::MemoryHandle);
         }
         let len = self.len.ok_or(PageError::InvalidRange)?;
+        Ok(self.read(0..len)?.shared())
+    }
+
+    /// Loads a byte range.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for memory handles or failed page reads.
+    pub fn bytes_range(&self, range: Range<usize>) -> Result<Arc<[u8]>, PageError> {
+        if self.memory.is_some() {
+            return Err(PageError::MemoryHandle);
+        }
+        Ok(self.read(range)?.shared())
+    }
+
+    fn read(&self, range: Range<usize>) -> Result<Lease, PageError> {
+        let len = self.len.ok_or(PageError::InvalidRange)?;
         let cache = self.cache.clone().unwrap_or_else(|| {
             PageCache::new(self.path.parent().unwrap_or_else(|| Path::new(".")), len)
         });
-        Ok(cache.read(self, 0..len)?.shared())
+        cache.read(self, range)
     }
 }
 
@@ -237,10 +296,36 @@ impl PageCache {
             offset,
             len: range.len(),
         };
-        let mut state = lock(&self.inner);
-        if !key.path.starts_with(&state.root) {
-            return Err(PageError::OutsideRoot(key.path));
+        {
+            let mut state = lock(&self.inner);
+            if !key.path.starts_with(&state.root) {
+                return Err(PageError::OutsideRoot(key.path));
+            }
+            state.clock = state.clock.wrapping_add(1);
+            let used_at = state.clock;
+            if let Some(entry) = state.entries.get_mut(&key) {
+                entry.leases += 1;
+                entry.used_at = used_at;
+                return Ok(Lease {
+                    cache: Arc::clone(&self.inner),
+                    key,
+                    bytes: Arc::clone(&entry.bytes),
+                });
+            }
         }
+
+        let requested = range.len();
+        let mut bytes = vec![0; requested];
+        let file = File::open(&handle.path)?;
+        let read = read_at(&file, &mut bytes, offset)?;
+        if read != requested {
+            return Err(PageError::ShortRead {
+                expected: requested,
+                actual: read,
+            });
+        }
+        let bytes: Arc<[u8]> = bytes.into();
+        let mut state = lock(&self.inner);
         state.clock = state.clock.wrapping_add(1);
         let used_at = state.clock;
         if let Some(entry) = state.entries.get_mut(&key) {
@@ -252,19 +337,7 @@ impl PageCache {
                 bytes: Arc::clone(&entry.bytes),
             });
         }
-
-        let requested = range.len();
         make_room(&mut state, requested)?;
-        let mut bytes = vec![0; requested];
-        let file = File::open(&handle.path)?;
-        let read = read_at(&file, &mut bytes, offset)?;
-        if read != requested {
-            return Err(PageError::ShortRead {
-                expected: requested,
-                actual: read,
-            });
-        }
-        let bytes: Arc<[u8]> = bytes.into();
         state.entries.insert(
             key.clone(),
             Entry {
@@ -325,6 +398,7 @@ impl PageCache {
             });
         }
         state.entries.retain(|key, _| key.path != handle.path);
+        drop(state);
         std::fs::remove_file(&handle.path)?;
         Ok(())
     }

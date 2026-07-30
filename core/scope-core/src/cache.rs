@@ -40,7 +40,7 @@ use crate::{
     },
     paging::{PageCache, PageError, PageHandle},
     preferences::Preferences,
-    pyramid::{CachedBinLevel, Pyramid},
+    pyramid::{CachedBinLevel, PagedBinLevel, Pyramid},
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
 
@@ -257,13 +257,11 @@ pub(crate) fn write_page(
 ) -> Result<PageHandle, CacheError> {
     fs::create_dir_all(root.directory())?;
     let target = root.directory().join(name);
-    if fs::metadata(&target).map_or(true, |metadata| metadata.len() != bytes.len() as u64) {
-        let temporary = target.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
-        let mut file = File::create(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(temporary, &target)?;
-    }
+    let temporary = target.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
+    let mut file = File::create(&temporary)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    fs::rename(temporary, &target)?;
     Ok(PageHandle::cached(cache.clone(), target, 0, bytes.len()))
 }
 
@@ -628,34 +626,25 @@ fn decode_paged_signal(
     if time.byte_len() != column_bytes || values.byte_len() != column_bytes {
         return None;
     }
-    let time_values = time.values().ok()?;
-    if time_values.iter().any(|value| !value.is_finite())
-        || time_values.windows(2).any(|pair| pair[0] > pair[1])
-        || values.bytes().ok().is_none()
-    {
+    if !valid_time(&time) {
         return None;
     }
     let mut merged = Vec::new();
     let mut expected_len = point_count.div_ceil(1 << crate::pyramid::FINEST_STORED_LEVEL);
     for section in &entry.levels {
         let handle = section_handle(path, payload_base, pages, *section)?;
-        let level = BinLevel::decode_cache(&handle.bytes().ok()?)?;
-        if level.len() != expected_len {
+        let count = BinLevel::cache_count(&handle)?;
+        if count != expected_len || BinLevel::cache_len(count)? != handle.byte_len() {
             return None;
         }
-        merged.push(if level.len() > RESIDENT_LEVEL_BINS {
-            CachedBinLevel::Paged(handle)
+        merged.push(if count > RESIDENT_LEVEL_BINS {
+            CachedBinLevel::Paged(PagedBinLevel::new(handle, count)?)
         } else {
-            CachedBinLevel::Resident(level)
+            CachedBinLevel::Resident(BinLevel::decode_cache(&handle.bytes().ok()?)?)
         });
         expected_len = expected_len.div_ceil(2);
     }
-    if point_count > 0
-        && merged
-            .last()
-            .and_then(CachedBinLevel::materialize)
-            .is_none_or(|level| level.len() != 1)
-    {
+    if point_count > 0 && merged.last().is_none_or(|level| level.len() != 1) {
         return None;
     }
     Some(DecodedSignal {
@@ -679,7 +668,29 @@ fn section_handle(
     let offset = payload_base.checked_add(section.offset)?;
     let len = usize::try_from(section.len).ok()?;
     let handle = PageHandle::cached(pages.clone(), path, offset, len);
-    (crc32fast::hash(&handle.bytes().ok()?) == section.crc32).then_some(handle)
+    let mut hasher = crc32fast::Hasher::new();
+    for start in (0..len).step_by(1024 * 1024) {
+        let end = start.saturating_add(1024 * 1024).min(len);
+        hasher.update(&handle.bytes_range(start..end).ok()?);
+    }
+    (hasher.finalize() == section.crc32).then_some(handle)
+}
+
+fn valid_time(handle: &PageHandle) -> bool {
+    let mut previous = None;
+    for start in (0..handle.value_len()).step_by(8192) {
+        let end = start.saturating_add(8192).min(handle.value_len());
+        let Ok(values) = handle.values_range(start..end) else {
+            return false;
+        };
+        for value in values.iter().copied() {
+            if !value.is_finite() || previous.is_some_and(|previous| previous > value) {
+                return false;
+            }
+            previous = Some(value);
+        }
+    }
+    true
 }
 
 #[cfg(test)]

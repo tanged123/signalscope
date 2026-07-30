@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    cache::{self, CacheError},
+    cache::{self, CacheError, CacheRoot},
     ingest::{
         CancelToken, DecodeContext, DecodedSignal, DecodedSource, IngestError, IngestSummary,
     },
@@ -241,6 +241,7 @@ pub struct BatchOptions {
     pub worker_count: usize,
     pub budget: Arc<MemoryBudget>,
     pub terminal_ttl: Duration,
+    pub cache_directory: Option<PathBuf>,
 }
 
 impl BatchOptions {
@@ -253,6 +254,7 @@ impl BatchOptions {
                 resident_bytes: 256 * 1024 * 1024,
             })),
             terminal_ttl: Duration::from_secs(60),
+            cache_directory: None,
         }
     }
 }
@@ -365,6 +367,7 @@ impl BatchJobs {
                 flights: Arc::clone(&self.flights),
                 resident: Arc::clone(&self.resident),
                 budget: Arc::clone(&self.options.budget),
+                cache_directory: self.options.cache_directory.clone(),
                 sink: Arc::clone(&sink),
             };
             handles.push(thread::spawn(move || worker.run()));
@@ -435,6 +438,7 @@ impl BatchJobs {
         for handle in job.handles.drain(..) {
             let _ = handle.join();
         }
+        lock(&self.flights).retain(|_, flight| Arc::strong_count(flight) > 1);
     }
 
     pub fn sweep_terminal(&self, now: Instant) {
@@ -457,6 +461,7 @@ impl BatchJobs {
         for handle in handles {
             let _ = handle.join();
         }
+        lock(&self.flights).retain(|_, flight| Arc::strong_count(flight) > 1);
         self.status(id)
     }
 
@@ -474,6 +479,7 @@ struct Worker {
     flights: Arc<Mutex<BTreeMap<PathBuf, Arc<SingleFlight>>>>,
     resident: Arc<Mutex<Vec<ResidentCharge>>>,
     budget: Arc<MemoryBudget>,
+    cache_directory: Option<PathBuf>,
     sink: Arc<dyn CommitSink>,
 }
 
@@ -540,14 +546,26 @@ impl Worker {
             cancel: &self.cancel,
         };
         let mut stage_progress = |_, _| {};
-        let outcome = cache::ingest_or_load(
-            &record.path,
-            &mut temporary,
-            record.key,
-            &record.prefix,
-            &mut context,
-            &mut stage_progress,
-        )
+        let outcome = if let Some(directory) = &self.cache_directory {
+            cache::ingest_or_load_at(
+                &CacheRoot::app_owned(directory),
+                &record.path,
+                &mut temporary,
+                record.key,
+                &record.prefix,
+                &mut context,
+                &mut stage_progress,
+            )
+        } else {
+            cache::ingest_or_load(
+                &record.path,
+                &mut temporary,
+                record.key,
+                &record.prefix,
+                &mut context,
+                &mut stage_progress,
+            )
+        }
         .map_err(process_cache_error)?;
         if self.cancel.is_cancelled() {
             return Err(ProcessError::Cancelled);
@@ -564,8 +582,8 @@ impl Worker {
                 .map(|signal| DecodedSignal {
                     local_path: signal.local_path.clone(),
                     unit: signal.unit.clone(),
-                    time: signal.time_shared(),
-                    values: signal.values_shared(),
+                    time: signal.time_column().clone(),
+                    values: signal.values_column().clone(),
                 })
                 .collect(),
         };
@@ -622,14 +640,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 fn pyramid_bytes(pyramid: &Pyramid) -> usize {
     pyramid
-        .merged_levels()
-        .iter()
-        .map(|level| {
-            level
-                .len()
-                .saturating_mul(crate::bins::BinLevel::BYTES_PER_BIN)
-        })
-        .sum()
+        .stored_bin_count()
+        .saturating_mul(crate::bins::BinLevel::BYTES_PER_BIN)
 }
 
 #[cfg(test)]

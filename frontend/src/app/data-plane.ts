@@ -3,6 +3,7 @@ import {
   type BatchDetailRequest,
   type BatchJob,
   type BatchStatus,
+  type CreateSetRequest,
   type DerivedRequest,
   type EnvelopeBin,
   type EnsembleTileRequest,
@@ -30,13 +31,16 @@ import {
   type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
   type SetSummary,
+  type SetTimeAlignmentRequest,
   type SignalSummary,
   type SnapshotManifest,
   type SourceSummary,
   type TileRequest,
   type TileResponse,
+  type UpdateSetMembersRequest,
 } from "../generated/protocol";
 import { open, seal, type Envelope } from "./envelope";
+import { parseBakedSession } from "./baked-session";
 import { queryPyramid } from "./pyramid-query";
 import { binsToSamples, sampleWindow } from "./samples";
 
@@ -57,6 +61,17 @@ export interface IngestPort {
 export interface DerivedPort {
   create(path: string, expr: string): Promise<SignalSummary>;
   remove(path: string): Promise<void>;
+}
+
+export interface SetPort {
+  create(label: string, memberKeys: string[]): Promise<SetSummary>;
+  updateMembers(setId: string, memberKeys: string[]): Promise<SetSummary>;
+  setAlignment(
+    setId: string,
+    sourceKey: string,
+    scale: number,
+    offset: number,
+  ): Promise<SetSummary>;
 }
 
 export interface SessionPort {
@@ -108,6 +123,7 @@ export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
+  readonly sets: SetPort | null;
   readonly session: SessionPort | null;
   readonly restore: RestorePort | null;
   readonly preferences: PreferencesPort | null;
@@ -141,6 +157,7 @@ export class TauriPlane implements DataPlane {
   readonly ingest: IngestPort;
 
   readonly derived: DerivedPort;
+  readonly sets: SetPort;
 
   readonly session: SessionPort;
 
@@ -207,6 +224,42 @@ export class TauriPlane implements DataPlane {
           }),
         );
       },
+    };
+    this.sets = {
+      create: async (label: string, memberKeys: string[]) =>
+        open(
+          await this.invoke<Envelope<SetSummary>>("create_set", {
+            request: seal<CreateSetRequest>({
+              label,
+              member_keys: memberKeys,
+            }),
+          }),
+        ),
+      updateMembers: async (setId: string, memberKeys: string[]) =>
+        open(
+          await this.invoke<Envelope<SetSummary>>("update_set_members", {
+            request: seal<UpdateSetMembersRequest>({
+              set_id: setId,
+              member_keys: memberKeys,
+            }),
+          }),
+        ),
+      setAlignment: async (
+        setId: string,
+        sourceKey: string,
+        scale: number,
+        offset: number,
+      ) =>
+        open(
+          await this.invoke<Envelope<SetSummary>>("set_time_alignment", {
+            request: seal<SetTimeAlignmentRequest>({
+              set_id: setId,
+              source_key: sourceKey,
+              scale,
+              offset,
+            }),
+          }),
+        ),
     };
     this.session = {
       save: async (sessionJson: string, path: string | null) =>
@@ -390,6 +443,7 @@ export class BakedPlane implements DataPlane {
   readonly ingest = null;
 
   readonly derived = null;
+  readonly sets = null;
 
   readonly session = null;
 
@@ -461,12 +515,28 @@ export class BakedPlane implements DataPlane {
           (item) => item.set_key === key,
         );
         const members = new Set(entries.flatMap((item) => item.member_keys));
+        const saved = parseBakedSession(this.bakedSessionJson).source_sets.find(
+          (set) => set.key === key,
+        );
         return {
           set_id: String(index + 1),
           set_key: key,
           label: `Set ${String(index + 1)}`,
           generation: entries[0]?.generation ?? "0",
           member_count: members.size,
+          members:
+            saved?.members ??
+            [...members].map((source_key) => ({
+              source_key,
+              missing: [],
+              scale: 1,
+              offset: 0,
+            })),
+          time_domain: saved?.time_domain ?? {
+            unit: "seconds",
+            origin: "relative",
+            alignment_origin: 0,
+          },
           local_paths: entries.map((item) => item.local_path),
           aligned: true,
         };

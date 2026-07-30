@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 12;
+pub const SESSION_SCHEMA_VERSION: u32 = 13;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -114,6 +114,13 @@ pub struct Annotation {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct EnsembleSeriesState {
+    pub set_key: String,
+    pub local_path: String,
+    pub member_filter: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct PanelState {
     pub id: String,
     pub title: String,
@@ -125,6 +132,8 @@ pub struct PanelState {
     pub color_signal: Option<String>,
     pub color_by_time: bool,
     pub series: Vec<SeriesState>,
+    #[serde(default)]
+    pub ensemble: Option<EnsembleSeriesState>,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
     #[serde(default)]

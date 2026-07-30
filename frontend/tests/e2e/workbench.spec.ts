@@ -206,6 +206,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
           width: 1.4,
           visible: true,
         })),
+        ensemble: null,
         y_range: null,
         x_range: null,
         x_label: null,

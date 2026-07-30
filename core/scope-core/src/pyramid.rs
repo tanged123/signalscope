@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     bins::BinLevel,
-    columns::{Column, ColumnGuard, WeakColumn},
+    columns::{Column, WeakColumn},
     paging::PageHandle,
     store::Signal,
 };
@@ -56,14 +56,117 @@ pub struct Pyramid {
 #[derive(Clone, Debug)]
 pub(crate) enum CachedBinLevel {
     Resident(BinLevel),
-    Paged(PageHandle),
+    Paged(PagedBinLevel),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PagedBinLevel {
+    handle: PageHandle,
+    len: usize,
+}
+
+impl PagedBinLevel {
+    pub(crate) fn new(handle: PageHandle, len: usize) -> Option<Self> {
+        (BinLevel::cache_len(len)? == handle.byte_len()).then_some(Self { handle, len })
+    }
+
+    fn value(&self, field: usize, index: usize) -> Option<f64> {
+        if field >= 8 || index >= self.len {
+            return None;
+        }
+        let base = 8_usize.checked_add(field.checked_mul(self.len)?.checked_mul(8)?)?;
+        let offset = base.checked_add(index.checked_mul(8)?)?;
+        let bytes = self
+            .handle
+            .bytes_range(offset..offset.checked_add(8)?)
+            .ok()?;
+        Some(f64::from_le_bytes(bytes.as_ref().try_into().ok()?))
+    }
+
+    fn partition_point(
+        &self,
+        field: usize,
+        mut predicate: impl FnMut(f64) -> bool,
+    ) -> Option<usize> {
+        let mut left = 0;
+        let mut right = self.len;
+        while left < right {
+            let middle = left + (right - left) / 2;
+            if predicate(self.value(field, middle)?) {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+        Some(left)
+    }
+
+    fn range(&self, range: std::ops::Range<usize>) -> Option<BinLevel> {
+        BinLevel::decode_cache_range(&self.handle, self.len, range)
+    }
 }
 
 impl CachedBinLevel {
     pub(crate) fn materialize(&self) -> Option<BinLevel> {
         match self {
             Self::Resident(level) => Some(level.clone()),
-            Self::Paged(handle) => BinLevel::decode_cache(&handle.bytes().ok()?),
+            Self::Paged(level) => level.range(0..level.len),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Resident(level) => level.len(),
+            Self::Paged(level) => level.len,
+        }
+    }
+
+    fn range(&self, range: std::ops::Range<usize>) -> Option<BinLevel> {
+        match self {
+            Self::Resident(level) => Some(BinLevel::from_wire(
+                &range.map(|index| level.to_wire(index)).collect::<Vec<_>>(),
+            )),
+            Self::Paged(level) => level.range(range),
+        }
+    }
+
+    fn window_range(&self, t0: f64, t1: f64) -> Option<std::ops::Range<usize>> {
+        let len = self.len();
+        match self {
+            Self::Resident(level) => {
+                if level.t0s().first().is_none_or(|first| t1 < *first)
+                    || level.t1s().last().is_none_or(|last| t0 > *last)
+                {
+                    return Some(0..0);
+                }
+                let start = level
+                    .t1s()
+                    .partition_point(|time| *time < t0)
+                    .saturating_sub(1);
+                let end = level
+                    .t0s()
+                    .partition_point(|time| *time <= t1)
+                    .saturating_add(1)
+                    .min(len);
+                Some(start..end)
+            }
+            Self::Paged(level) => {
+                if level.value(0, 0).is_none_or(|first| t1 < first)
+                    || level
+                        .value(1, len.saturating_sub(1))
+                        .is_none_or(|last| t0 > last)
+                {
+                    return Some(0..0);
+                }
+                let start = level
+                    .partition_point(1, |time| time < t0)?
+                    .saturating_sub(1);
+                let end = level
+                    .partition_point(0, |time| time <= t1)?
+                    .saturating_add(1)
+                    .min(len);
+                Some(start..end)
+            }
         }
     }
 }
@@ -222,7 +325,7 @@ impl Pyramid {
 
     #[must_use]
     pub fn stored_bin_count(&self) -> usize {
-        self.merged_levels().iter().map(BinLevel::len).sum()
+        self.merged.iter().map(CachedBinLevel::len).sum()
     }
 
     #[must_use]
@@ -263,8 +366,11 @@ impl Pyramid {
         if index < self.first_stored_level {
             Some(self.synthesize_level(index, range).to_wire_vec())
         } else {
-            let level = self.merged[index - self.first_stored_level].materialize()?;
-            Some(range.map(|bin| level.to_wire(bin)).collect())
+            Some(
+                self.merged[index - self.first_stored_level]
+                    .range(range)?
+                    .to_wire_vec(),
+            )
         }
     }
 
@@ -286,10 +392,7 @@ impl Pyramid {
             }
             level_len(self.sample_count, index)
         } else {
-            self.merged
-                .get(index - self.first_stored_level)?
-                .materialize()?
-                .len()
+            self.merged.get(index - self.first_stored_level)?.len()
         };
         let Some((t0, t1)) = window else {
             return Some(0..len);
@@ -299,36 +402,25 @@ impl Pyramid {
         }
         if index < self.first_stored_level {
             let (time, _) = self.columns()?;
-            if time.first().is_none_or(|first| t1 < *first)
-                || time.last().is_none_or(|last| t0 > *last)
+            if time.value(0).ok().is_none_or(|first| t1 < first)
+                || time
+                    .value(time.len().saturating_sub(1))
+                    .ok()
+                    .is_none_or(|last| t0 > last)
             {
                 return Some(0..0);
             }
             let width = 1 << index;
-            let start = (time.partition_point(|time| *time < t0) / width).saturating_sub(1);
+            let start = (time.partition_point(|time| time < t0).ok()? / width).saturating_sub(1);
             let end = time
-                .partition_point(|time| *time <= t1)
+                .partition_point(|time| time <= t1)
+                .ok()?
                 .div_ceil(width)
                 .saturating_add(1)
                 .min(len);
             return Some(start..end);
         }
-        let level = self.merged[index - self.first_stored_level].materialize()?;
-        if level.t0s().first().is_none_or(|first| t1 < *first)
-            || level.t1s().last().is_none_or(|last| t0 > *last)
-        {
-            return Some(0..0);
-        }
-        let start = level
-            .t1s()
-            .partition_point(|time| *time < t0)
-            .saturating_sub(1);
-        let end = level
-            .t0s()
-            .partition_point(|time| *time <= t1)
-            .saturating_add(1)
-            .min(len);
-        Some(start..end)
+        self.merged[index - self.first_stored_level].window_range(t0, t1)
     }
 
     #[must_use]
@@ -339,7 +431,11 @@ impl Pyramid {
                 bins: Vec::new(),
             };
         };
-        if time.first().is_none_or(|first| t1 < *first) || time.last().is_none_or(|last| t0 > *last)
+        if time.value(0).ok().is_none_or(|first| t1 < first)
+            || time
+                .value(time.len().saturating_sub(1))
+                .ok()
+                .is_none_or(|last| t0 > last)
         {
             return PyramidQuery {
                 level: 0,
@@ -349,8 +445,8 @@ impl Pyramid {
         let target = usize::try_from(pixel_width.max(1))
             .unwrap_or(usize::MAX)
             .saturating_mul(2);
-        let raw_start = time.partition_point(|time| *time < t0);
-        let raw_end = time.partition_point(|time| *time <= t1);
+        let raw_start = time.partition_point(|time| time < t0).unwrap_or(0);
+        let raw_end = time.partition_point(|time| time <= t1).unwrap_or(0);
         if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
             return PyramidQuery {
                 level: 0,
@@ -378,10 +474,18 @@ impl Pyramid {
             return BinLevel::default();
         };
         let width = 1 << index;
+        let sample_start = range.start.saturating_mul(width).min(self.sample_count);
+        let sample_end = range.end.saturating_mul(width).min(self.sample_count);
+        let Ok(time) = time.range(sample_start..sample_end) else {
+            return BinLevel::default();
+        };
+        let Ok(values) = values.range(sample_start..sample_end) else {
+            return BinLevel::default();
+        };
         let mut level = BinLevel::with_capacity(range.len());
-        for bin in range {
+        for bin in 0..range.len() {
             let start = bin.saturating_mul(width);
-            if start >= self.sample_count {
+            if start >= time.len() {
                 break;
             }
             let merged = synthesize_bin(&time, &values, index, start);
@@ -396,13 +500,16 @@ impl Pyramid {
                 return 0;
             };
             let width = 1 << index;
-            let start = time.partition_point(|time| *time < t0) / width;
-            let end = time.partition_point(|time| *time <= t1).div_ceil(width);
+            let start = time.partition_point(|time| time < t0).unwrap_or(0) / width;
+            let end = time
+                .partition_point(|time| time <= t1)
+                .unwrap_or(0)
+                .div_ceil(width);
             end.saturating_sub(start)
         } else {
             self.merged[index - self.first_stored_level]
-                .materialize()
-                .map_or(0, |level| count_overlapping(&level, t0, t1))
+                .window_range(t0, t1)
+                .map_or(0, |range| range.len())
         }
     }
 
@@ -414,10 +521,12 @@ impl Pyramid {
         }
     }
 
-    fn columns(&self) -> Option<(ColumnGuard, ColumnGuard)> {
+    fn columns(&self) -> Option<(Column, Column)> {
         match &self.columns {
-            PyramidColumns::Retained { time, values } => Some((time.as_slice(), values.as_slice())),
-            PyramidColumns::Weak { time, values } => Some((time.upgrade()?, values.upgrade()?)),
+            PyramidColumns::Retained { time, values } => Some((time.clone(), values.clone())),
+            PyramidColumns::Weak { time, values } => {
+                Some((time.upgrade_column()?, values.upgrade_column()?))
+            }
         }
     }
 }
@@ -426,12 +535,6 @@ impl Pyramid {
 pub struct PyramidQuery {
     pub level: u32,
     pub bins: Vec<EnvelopeBin>,
-}
-
-fn count_overlapping(level: &BinLevel, t0: f64, t1: f64) -> usize {
-    let start = level.t1s().partition_point(|time| *time < t0);
-    let end = level.t0s().partition_point(|time| *time <= t1);
-    end.saturating_sub(start)
 }
 
 fn synthesize_bin(time: &[f64], values: &[f64], index: usize, start: usize) -> EnvelopeBin {

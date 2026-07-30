@@ -94,6 +94,39 @@ pub struct EnsembleTileResponse {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetMemberSummary {
+    pub source_key: String,
+    pub missing: Vec<String>,
+    pub scale: f64,
+    pub offset: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SetTimeUnit {
+    Seconds,
+    Milliseconds,
+    Microseconds,
+    Nanoseconds,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetOriginKind {
+    Relative,
+    AbsoluteEpoch,
+    EventAligned,
+    SyntheticIndex,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetTimeDomainSummary {
+    pub unit: SetTimeUnit,
+    pub origin: SetOriginKind,
+    pub alignment_origin: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SetSummary {
     #[serde(with = "u64_string")]
     pub set_id: u64,
@@ -102,6 +135,8 @@ pub struct SetSummary {
     #[serde(with = "u64_string")]
     pub generation: u64,
     pub member_count: u32,
+    pub members: Vec<SetMemberSummary>,
+    pub time_domain: SetTimeDomainSummary,
     pub local_paths: Vec<String>,
     pub aligned: bool,
 }

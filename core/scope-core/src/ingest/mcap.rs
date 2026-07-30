@@ -112,7 +112,7 @@ impl Decoder for McapDecoder {
                 signals.push(DecodedSignal {
                     local_path: format!("{topic}/{name}"),
                     unit: None,
-                    time: Arc::clone(&time),
+                    time: Arc::clone(&time).into(),
                     values: values.into(),
                 });
             }

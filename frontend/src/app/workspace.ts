@@ -7,6 +7,7 @@ import type {
   PanelMode,
   PanelState,
   Session,
+  SourceSetState,
   SourceRecord,
   WorkspaceTab,
 } from "../generated/session";
@@ -65,6 +66,10 @@ export class WorkspaceModel {
 
   snapshot(): Readonly<Session> {
     return this.session;
+  }
+
+  setSourceSets(sets: SourceSetState[]): void {
+    this.session.source_sets = structuredClone(sets);
   }
 
   /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
@@ -636,6 +641,7 @@ export class WorkspaceModel {
       color_signal: null,
       color_by_time: false,
       series: [],
+      ensemble: null,
       y_range: null,
       x_range: null,
       x_label: null,

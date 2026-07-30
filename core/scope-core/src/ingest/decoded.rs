@@ -2,21 +2,21 @@
 
 use std::{
     path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use super::{IngestError, IngestSummary};
-use crate::store::{SignalStore, SourceKey};
+use crate::{
+    columns::Column,
+    store::{SignalStore, SourceKey},
+};
 
 #[derive(Clone, Debug)]
 pub struct DecodedSignal {
     pub local_path: String,
     pub unit: Option<String>,
-    pub time: Arc<[f64]>,
-    pub values: Arc<[f64]>,
+    pub time: Column,
+    pub values: Column,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -115,14 +115,14 @@ mod tests {
                 DecodedSignal {
                     local_path: "imu/ax".into(),
                     unit: None,
-                    time: Arc::clone(&time),
-                    values: Arc::from(vec![1.0, 2.0]),
+                    time: Arc::clone(&time).into(),
+                    values: vec![1.0, 2.0].into(),
                 },
                 DecodedSignal {
                     local_path: "imu/ay".into(),
                     unit: Some("m/s2".into()),
-                    time,
-                    values: Arc::from(vec![3.0, 4.0]),
+                    time: time.into(),
+                    values: vec![3.0, 4.0].into(),
                 },
             ],
         }

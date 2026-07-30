@@ -188,7 +188,7 @@ fn finish(headers: Vec<String>, mut columns: Vec<Vec<f64>>) -> Result<DecodedSou
         signals.push(DecodedSignal {
             local_path: normalize_segment(&header),
             unit: None,
-            time: Arc::clone(&time),
+            time: Arc::clone(&time).into(),
             values: values.into(),
         });
     }

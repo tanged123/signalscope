@@ -1,5 +1,7 @@
 use scope_protocol::EnvelopeBin;
 
+use crate::paging::PageHandle;
+
 const HAS_FIRST: u8 = 1 << 0;
 const HAS_LAST: u8 = 1 << 1;
 const HAS_MIN: u8 = 1 << 2;
@@ -111,6 +113,76 @@ impl BinLevel {
         })
     }
 
+    pub(crate) fn cache_count(handle: &PageHandle) -> Option<usize> {
+        let bytes = handle.bytes_range(0..8).ok()?;
+        usize::try_from(u64::from_le_bytes(bytes.as_ref().try_into().ok()?)).ok()
+    }
+
+    pub(crate) fn cache_len(count: usize) -> Option<usize> {
+        8_usize
+            .checked_add(count.checked_mul(Self::BYTES_PER_BIN)?)?
+            .checked_next_multiple_of(8)
+    }
+
+    pub(crate) fn decode_cache_range(
+        handle: &PageHandle,
+        count: usize,
+        range: std::ops::Range<usize>,
+    ) -> Option<Self> {
+        if range.start > range.end || range.end > count {
+            return None;
+        }
+        let mut fields = Vec::with_capacity(8);
+        for field in 0..8 {
+            let base = 8_usize.checked_add(field * count * size_of::<f64>())?;
+            fields.push(decode_f64_bytes(
+                &handle
+                    .bytes_range(
+                        base.checked_add(range.start * size_of::<f64>())?
+                            ..base.checked_add(range.end * size_of::<f64>())?,
+                    )
+                    .ok()?,
+            )?);
+        }
+        let counts = 8_usize.checked_add(8 * count * size_of::<f64>())?;
+        let sample_count = decode_u32_bytes(
+            &handle
+                .bytes_range(
+                    counts.checked_add(range.start * size_of::<u32>())?
+                        ..counts.checked_add(range.end * size_of::<u32>())?,
+                )
+                .ok()?,
+        )?;
+        let finite_base = counts.checked_add(count * size_of::<u32>())?;
+        let finite_count = decode_u32_bytes(
+            &handle
+                .bytes_range(
+                    finite_base.checked_add(range.start * size_of::<u32>())?
+                        ..finite_base.checked_add(range.end * size_of::<u32>())?,
+                )
+                .ok()?,
+        )?;
+        let flags_base = finite_base.checked_add(count * size_of::<u32>())?;
+        let flags = handle
+            .bytes_range(flags_base.checked_add(range.start)?..flags_base.checked_add(range.end)?)
+            .ok()?
+            .to_vec();
+        let mut fields = fields.into_iter();
+        Some(Self {
+            t0: fields.next()?,
+            t1: fields.next()?,
+            first: fields.next()?,
+            last: fields.next()?,
+            min: fields.next()?,
+            max: fields.next()?,
+            sum: fields.next()?,
+            sum_sq: fields.next()?,
+            sample_count,
+            finite_count,
+            flags,
+        })
+    }
+
     pub(crate) fn t0s(&self) -> &[f64] {
         &self.t0
     }
@@ -118,6 +190,24 @@ impl BinLevel {
     pub(crate) fn t1s(&self) -> &[f64] {
         &self.t1
     }
+}
+
+fn decode_f64_bytes(bytes: &[u8]) -> Option<Vec<f64>> {
+    (bytes.len() % size_of::<f64>() == 0).then(|| {
+        bytes
+            .chunks_exact(size_of::<f64>())
+            .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("exact chunk")))
+            .collect()
+    })
+}
+
+fn decode_u32_bytes(bytes: &[u8]) -> Option<Vec<u32>> {
+    (bytes.len() % size_of::<u32>() == 0).then(|| {
+        bytes
+            .chunks_exact(size_of::<u32>())
+            .map(|chunk| u32::from_le_bytes(chunk.try_into().expect("exact chunk")))
+            .collect()
+    })
 }
 
 fn decode_f64s(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<f64>> {

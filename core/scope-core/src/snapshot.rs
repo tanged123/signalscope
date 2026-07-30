@@ -579,6 +579,7 @@ mod tests {
             color_signal: None,
             color_by_time: false,
             series: paths.iter().map(|path| series(path)).collect(),
+            ensemble: None,
             y_range: None,
             x_range: None,
             x_label: None,

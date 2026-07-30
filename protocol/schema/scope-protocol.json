@@ -42,6 +42,36 @@
         "bins": "EnsembleBin[]"
       }
     },
+    "SetMemberSummary": {
+      "kind": "object",
+      "fields": {
+        "source_key": "string",
+        "missing": "string[]",
+        "scale": "f64",
+        "offset": "f64"
+      }
+    },
+    "SetTimeUnit": {
+      "kind": "enum",
+      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
+    },
+    "SetOriginKind": {
+      "kind": "enum",
+      "variants": [
+        "relative",
+        "absolute_epoch",
+        "event_aligned",
+        "synthetic_index"
+      ]
+    },
+    "SetTimeDomainSummary": {
+      "kind": "object",
+      "fields": {
+        "unit": "SetTimeUnit",
+        "origin": "SetOriginKind",
+        "alignment_origin": "f64"
+      }
+    },
     "SetSummary": {
       "kind": "object",
       "fields": {
@@ -50,6 +80,8 @@
         "label": "string",
         "generation": "u64",
         "member_count": "u32",
+        "members": "SetMemberSummary[]",
+        "time_domain": "SetTimeDomainSummary",
         "local_paths": "string[]",
         "aligned": "bool"
       }

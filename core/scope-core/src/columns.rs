@@ -1,9 +1,10 @@
 use std::{
     fmt,
-    ops::Deref,
+    ops::{Deref, Range},
     sync::{Arc, Weak},
 };
 
+use crate::paging::PageError;
 pub use crate::paging::PageHandle;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -39,6 +40,50 @@ impl Column {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error when a page-backed range cannot be read.
+    pub fn range(&self, range: Range<usize>) -> Result<ColumnGuard, PageError> {
+        let values = match self {
+            Self::Owned(values) => values
+                .get(range)
+                .map(Arc::from)
+                .ok_or(PageError::InvalidRange)?,
+            Self::Paged(handle) => handle.values_range(range)?,
+        };
+        Ok(ColumnGuard { values })
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error when a page-backed value cannot be read.
+    pub fn value(&self, index: usize) -> Result<f64, PageError> {
+        match self {
+            Self::Owned(values) => values.get(index).copied().ok_or(PageError::InvalidRange),
+            Self::Paged(handle) => handle.value(index),
+        }
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error when a page-backed value cannot be read.
+    pub fn partition_point(
+        &self,
+        mut predicate: impl FnMut(f64) -> bool,
+    ) -> Result<usize, PageError> {
+        let mut left = 0;
+        let mut right = self.len();
+        while left < right {
+            let middle = left + (right - left) / 2;
+            if predicate(self.value(middle)?) {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+        Ok(left)
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         match self {
@@ -62,6 +107,9 @@ impl Column {
 
     #[must_use]
     pub fn same_values(&self, other: &Self) -> bool {
+        if let (Self::Paged(left), Self::Paged(right)) = (self, other) {
+            return left.same_region(right);
+        }
         let left = self.as_slice();
         let right = other.as_slice();
         Arc::ptr_eq(&left.values, &right.values) || *left == *right
@@ -95,6 +143,14 @@ impl WeakColumn {
                 Self::Paged(handle) => handle.values().ok()?,
             },
         })
+    }
+
+    #[must_use]
+    pub fn upgrade_column(&self) -> Option<Column> {
+        match self {
+            Self::Owned(values) => Some(Column::Owned(values.upgrade()?)),
+            Self::Paged(handle) => Some(Column::Paged(handle.clone())),
+        }
     }
 }
 
