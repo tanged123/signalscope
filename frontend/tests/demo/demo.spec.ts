@@ -1,8 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const artifact = new URL("../../../build/demo/demo.html", import.meta.url);
-const beat = (page: import("@playwright/test").Page) =>
-  page.waitForTimeout(900);
+const beat = (page: Page) => page.waitForTimeout(900);
 
 test("records the release demo", async ({ page }) => {
   const networkRequests: string[] = [];
