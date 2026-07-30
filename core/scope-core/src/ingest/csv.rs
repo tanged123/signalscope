@@ -10,7 +10,11 @@ use std::{
 use super::{
     Decoder, IngestError, IngestSummary, apply_permutation, normalize_segment, sort_permutation,
 };
-use crate::store::SignalStore;
+use crate::{
+    naming,
+    store::{SignalStore, SourceKey},
+};
+use uuid::Uuid;
 
 const TIME_NAMES: &[&str] = &[
     "t",
@@ -104,18 +108,18 @@ impl CsvDecoder {
             |index| columns[index].clone(),
         );
 
-        let source_id = store.register_source(path);
+        let source_id = store.register_source(
+            path,
+            SourceKey(Uuid::new_v4()),
+            naming::default_prefix(path),
+        )?;
         let time: Arc<[f64]> = time.into();
-        let base = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("source");
         let mut signals = Vec::new();
         for (index, (header, values)) in headers.into_iter().zip(columns).enumerate() {
             if Some(index) == time_index || !values.iter().any(|value| value.is_finite()) {
                 continue;
             }
-            let path = normalize_signal_path(base, &header);
+            let path = normalize_segment(&header);
             signals.push(store.insert_signal(source_id, path, None, Arc::clone(&time), values)?);
         }
 
@@ -219,10 +223,6 @@ fn sort_columns_by_time(columns: &mut [Vec<f64>], time_index: usize) {
 
 fn is_monotonic_finite(column: &[f64]) -> bool {
     column.iter().all(|value| value.is_finite()) && column.windows(2).all(|pair| pair[1] >= pair[0])
-}
-
-fn normalize_signal_path(base: &str, header: &str) -> String {
-    format!("{base}/{}", normalize_segment(header))
 }
 
 #[cfg(test)]

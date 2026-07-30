@@ -767,12 +767,14 @@ fn call(name: &str, first: f64, second: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::SignalStore;
+    use crate::store::{SignalStore, SourceKey};
     use std::sync::Arc;
 
     fn store_with(entries: &[(&str, &[f64], &[f64])]) -> SignalStore {
         let mut store = SignalStore::new();
-        let source = store.register_source("test");
+        let source = store
+            .register_source("test", SourceKey(uuid::Uuid::from_bytes([1; 16])), "")
+            .unwrap();
         for (path, time, values) in entries {
             let time: Arc<[f64]> = Arc::from(time.to_vec());
             store

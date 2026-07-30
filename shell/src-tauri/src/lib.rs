@@ -15,7 +15,7 @@ use scope_core::{
     preferences,
     pyramid::Pyramid,
     session, snapshot,
-    store::{Signal, SignalId, SignalStore, Source, SourceId},
+    store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
 };
 use scope_protocol::{
     DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
@@ -370,7 +370,14 @@ impl DataState {
         let source_id = if let Some(id) = self.derived_source {
             id
         } else {
-            let id = self.store.register_source(DERIVED_PREFIX);
+            let id = self
+                .store
+                .register_source(
+                    DERIVED_PREFIX,
+                    SourceKey(uuid::Uuid::new_v4()),
+                    DERIVED_PREFIX.trim_end_matches('/'),
+                )
+                .map_err(|error| error.to_string())?;
             self.derived_source = Some(id);
             id
         };
@@ -381,7 +388,7 @@ impl DataState {
             .store
             .insert_signal(
                 source_id,
-                path.clone(),
+                path.trim_start_matches(DERIVED_PREFIX),
                 None,
                 evaluated.time,
                 evaluated.values,
@@ -840,11 +847,19 @@ mod tests {
 
     fn data_with_signal(path: &str) -> (DataState, SourceId) {
         let mut data = DataState::default();
-        let source = data.store.register_source("input.csv");
+        let (prefix, local_path) = path.split_once('/').unwrap_or(("", path));
+        let source = data
+            .store
+            .register_source(
+                "input.csv",
+                SourceKey(uuid::Uuid::from_bytes([1; 16])),
+                prefix,
+            )
+            .unwrap();
         data.store
             .insert_signal(
                 source,
-                path,
+                local_path,
                 None,
                 Arc::from(vec![0.0, 1.0]),
                 vec![1.0, 2.0],

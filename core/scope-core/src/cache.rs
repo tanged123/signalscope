@@ -37,9 +37,11 @@ use thiserror::Error;
 
 use crate::{
     ingest::{self, IngestError, IngestSummary},
+    naming,
     pyramid::Pyramid,
-    store::{Signal, SignalId, SignalStore, StoreError},
+    store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
+use uuid::Uuid;
 
 pub const CACHE_VERSION: u32 = 2;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
@@ -263,13 +265,18 @@ pub fn try_load(
     }
 
     let loaded = store.transaction(|store| {
-        let source_id = store.register_source(source);
+        let prefix = naming::default_prefix(source);
+        let source_id = store.register_source(source, SourceKey(Uuid::new_v4()), prefix.clone())?;
         let mut pyramids = Vec::new();
         let mut signals = Vec::new();
         for entry in decoded {
             let id = store.insert_signal(
                 source_id,
-                entry.path,
+                entry
+                    .path
+                    .strip_prefix(&format!("{prefix}/"))
+                    .unwrap_or(&entry.path)
+                    .to_owned(),
                 entry.unit,
                 Arc::clone(&entry.time),
                 Arc::clone(&entry.values),

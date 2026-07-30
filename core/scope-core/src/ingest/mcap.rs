@@ -12,7 +12,11 @@ use serde_json::Value;
 use super::{
     Decoder, IngestError, IngestSummary, apply_permutation, normalize_segment, sort_permutation,
 };
-use crate::store::SignalStore;
+use crate::{
+    naming,
+    store::{SignalStore, SourceKey},
+};
+use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct McapDecoder;
@@ -93,7 +97,11 @@ impl Decoder for McapDecoder {
             columns.push_row(message.log_time as f64 * 1e-9, &fields);
         }
 
-        let source_id = store.register_source(path);
+        let source_id = store.register_source(
+            path,
+            SourceKey(Uuid::new_v4()),
+            naming::default_prefix(path),
+        )?;
         let mut signals = Vec::new();
         let mut row_count = 0;
         for (topic, columns) in topics {
@@ -240,16 +248,29 @@ mod tests {
         let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 3);
-        let x = store.signal_by_path("vehicle/imu/accel/x").unwrap();
+        let x = store
+            .signals()
+            .find(|signal| signal.path.ends_with("/vehicle/imu/accel/x"))
+            .unwrap();
         assert_eq!(x.time(), &[1.0, 2.0, 3.0]);
         assert_eq!(x.values(), &[0.5, 1.5, 2.5]);
-        let y = store.signal_by_path("vehicle/imu/accel/y").unwrap();
+        let y = store
+            .signals()
+            .find(|signal| signal.path.ends_with("/vehicle/imu/accel/y"))
+            .unwrap();
         assert!(y.values()[0].is_nan());
         assert_eq!(y.values()[1], -2.0);
-        let ok = store.signal_by_path("vehicle/imu/ok").unwrap();
+        let ok = store
+            .signals()
+            .find(|signal| signal.path.ends_with("/vehicle/imu/ok"))
+            .unwrap();
         assert!(ok.values()[0].is_nan());
         assert_eq!(&ok.values()[1..], &[1.0, 0.0]);
-        assert!(store.signal_by_path("vehicle/imu/name").is_none());
+        assert!(
+            store
+                .signals()
+                .all(|signal| !signal.path.ends_with("/vehicle/imu/name"))
+        );
     }
 
     #[test]

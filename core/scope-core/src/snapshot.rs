@@ -341,12 +341,14 @@ mod tests {
     use super::*;
     use crate::pyramid::Pyramid;
     use crate::session::{AxisStyle, DashStyle, PanelMode, PanelState, SeriesState, Session};
-    use crate::store::{SignalId, SignalStore};
+    use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
 
     fn store_with(signals: &[(&str, usize)]) -> (SignalStore, BTreeMap<SignalId, Pyramid>) {
         let mut store = SignalStore::new();
-        let source = store.register_source("test.csv");
+        let source = store
+            .register_source("test.csv", SourceKey(uuid::Uuid::from_bytes([1; 16])), "")
+            .unwrap();
         let mut pyramids = BTreeMap::new();
         for (path, count) in signals {
             let count = u32::try_from(*count).expect("test signal is small");
@@ -808,7 +810,9 @@ mod tests {
     #[test]
     fn estimate_stays_within_two_times_the_serialized_manifest() {
         let mut store = SignalStore::new();
-        let source = store.register_source("test.csv");
+        let source = store
+            .register_source("test.csv", SourceKey(uuid::Uuid::from_bytes([2; 16])), "")
+            .unwrap();
         let time: Vec<f64> = (0..10_000).map(|value| f64::from(value) / 7.0).collect();
         let values: Vec<f64> = time.iter().map(|time| time.sin() * 13.0).collect();
         let id = store
