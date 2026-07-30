@@ -3,6 +3,7 @@ import type { SignalTile, TileResponse } from "../generated/protocol";
 import {
   CanvasRenderer,
   dashPattern,
+  drawEnsembleBand,
   formatTicks,
   gutterWidth,
   resolveSeriesStyle,
@@ -10,6 +11,48 @@ import {
   type Palette,
   type RenderOptions,
 } from "./canvas-renderer";
+
+it("draws one band with dropout-sensitive opacity", () => {
+  const stops: string[] = [];
+  let fills = 0;
+  const context = {
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    closePath() {},
+    fill() {
+      fills += 1;
+    },
+    stroke() {},
+    createLinearGradient() {
+      return {
+        addColorStop(_offset: number, color: string) {
+          stops.push(color);
+        },
+      };
+    },
+    set fillStyle(_value: unknown) {},
+    set strokeStyle(_value: unknown) {},
+    lineWidth: 1,
+  } as unknown as CanvasRenderingContext2D;
+  const cell = (run_count: number, t0: number, t1: number) => ({
+    t0,
+    t1,
+    min_run_mean: 0,
+    max_run_mean: 2,
+    mean_of_run_means: 1,
+    sigma: 0,
+    run_count,
+  });
+  drawEnsembleBand(
+    context,
+    [cell(2, 0, 1), cell(1, 1, 2), cell(2, 2, 3)],
+    { toX: (value) => value, toY: (value) => value },
+    { color: "#336699", memberCount: 2 },
+  );
+  expect(fills).toBe(1);
+  expect(stops[1]).not.toBe(stops[0]);
+});
 
 interface DrawCall {
   op: string;

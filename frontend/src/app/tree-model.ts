@@ -3,6 +3,8 @@ interface TreeLeaf {
   path: string;
   label: string;
   depth: number;
+  runCount?: number;
+  memberPaths?: string[];
 }
 
 interface TreeGroup {
@@ -19,8 +21,33 @@ export function buildTreeRows(
   paths: readonly string[],
   collapsed: ReadonlySet<string>,
   filter: string,
+  options?: { setPrefixes: readonly string[] },
 ): TreeRow[] {
   const query = filter.trim().toLowerCase();
+  if (options !== undefined) {
+    const grouped = new Map<string, string[]>();
+    for (const path of paths) {
+      const prefix = options.setPrefixes.find((item) =>
+        path.startsWith(`${item}/`),
+      );
+      const localPath =
+        prefix === undefined ? path : path.slice(prefix.length + 1);
+      const members = grouped.get(localPath) ?? [];
+      members.push(path);
+      grouped.set(localPath, members);
+    }
+    return [...grouped]
+      .filter(([path]) => query === "" || path.toLowerCase().includes(query))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([path, memberPaths]) => ({
+        kind: "leaf",
+        path,
+        label: path,
+        depth: 0,
+        runCount: memberPaths.length,
+        memberPaths,
+      }));
+  }
   if (query !== "") {
     return [...paths]
       .filter((path) => path.toLowerCase().includes(query))

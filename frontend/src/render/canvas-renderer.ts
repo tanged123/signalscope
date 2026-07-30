@@ -1,4 +1,9 @@
-import type { SignalTile, TileResponse } from "../generated/protocol";
+import type {
+  EnsembleBin,
+  EnsembleTileResponse,
+  SignalTile,
+  TileResponse,
+} from "../generated/protocol";
 import type { AxisStyle, DashStyle } from "../generated/session";
 import {
   logTicks,
@@ -63,6 +68,78 @@ export interface PathRenderOptions {
   xScale?: AxisScale;
   /** Domain and axis name of the `c:` channel; reserves the right gutter. */
   colorbar?: { min: number; max: number; label: string };
+}
+
+export interface EnsembleRenderOptions {
+  xLabel: string;
+  yLabel: string;
+  yRange: readonly [number, number];
+  memberCount: number;
+  colorSlot: number;
+  axisStyle?: AxisStyle;
+}
+
+export function drawEnsembleBand(
+  context: CanvasRenderingContext2D,
+  cells: readonly EnsembleBin[],
+  scales: { toX(value: number): number; toY(value: number): number },
+  tokens: { color: string; memberCount: number },
+): void {
+  const finite = cells.filter(
+    (cell) =>
+      cell.run_count > 0 &&
+      cell.min_run_mean !== null &&
+      cell.max_run_mean !== null &&
+      cell.mean_of_run_means !== null,
+  );
+  if (finite.length === 0) return;
+  const gradient = context.createLinearGradient(
+    scales.toX(finite[0]?.t0 ?? 0),
+    0,
+    scales.toX(finite.at(-1)?.t1 ?? 1),
+    0,
+  );
+  const memberCount = Math.max(1, tokens.memberCount);
+  finite.forEach((cell, index) => {
+    const alpha = 0.08 + 0.24 * (cell.run_count / memberCount);
+    gradient.addColorStop(
+      finite.length === 1 ? 0 : index / (finite.length - 1),
+      withAlpha(tokens.color, alpha),
+    );
+  });
+  context.beginPath();
+  finite.forEach((cell, index) => {
+    const x = scales.toX((cell.t0 + cell.t1) / 2);
+    const y = scales.toY(cell.max_run_mean ?? 0);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  for (const cell of [...finite].reverse()) {
+    context.lineTo(
+      scales.toX((cell.t0 + cell.t1) / 2),
+      scales.toY(cell.min_run_mean ?? 0),
+    );
+  }
+  context.closePath();
+  context.fillStyle = gradient;
+  context.fill();
+
+  context.beginPath();
+  finite.forEach((cell, index) => {
+    const x = scales.toX((cell.t0 + cell.t1) / 2);
+    const y = scales.toY(cell.mean_of_run_means ?? 0);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.strokeStyle = tokens.color;
+  context.lineWidth = 1.4;
+  context.stroke();
+}
+
+function withAlpha(color: string, alpha: number): string {
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+  if (match === null) return color;
+  return `rgba(${String(Number.parseInt(match[1] ?? "0", 16))}, ${String(Number.parseInt(match[2] ?? "0", 16))}, ${String(Number.parseInt(match[3] ?? "0", 16))}, ${String(alpha)})`;
 }
 
 /** Sample dots appear only when vertices are sparser than this pixel gap. */
@@ -225,6 +302,29 @@ export class CanvasRenderer {
           (options.emphasisIndex === index ? 0.4 : 0),
         options.emphasisIndex !== undefined && options.emphasisIndex !== index,
       );
+    });
+    finishAxes();
+    return performance.now() - started;
+  }
+
+  renderEnsemble(
+    response: EnsembleTileResponse,
+    xRange: Range,
+    options: EnsembleRenderOptions,
+  ): number {
+    const started = performance.now();
+    const { context, colors, project, finishAxes } = this.beginFrame({
+      xRange,
+      yRange: { min: options.yRange[0], max: options.yRange[1] },
+      xLabel: options.xLabel,
+      yLabel: options.yLabel,
+      ...(options.axisStyle === undefined
+        ? {}
+        : { axisStyle: options.axisStyle }),
+    });
+    drawEnsembleBand(context, response.bins, project, {
+      color: colors.series[Math.max(0, options.colorSlot - 1)] ?? colors.fg2,
+      memberCount: options.memberCount,
     });
     finishAxes();
     return performance.now() - started;

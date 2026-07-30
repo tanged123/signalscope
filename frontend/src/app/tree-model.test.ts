@@ -50,6 +50,18 @@ describe("buildTreeRows", () => {
       },
     ]);
   });
+
+  it("collapses set members into one local-path row", () => {
+    const rows = buildTreeRows(
+      ["run_a/imu/ax", "run_b/imu/ax"],
+      new Set(),
+      "",
+      { setPrefixes: ["run_a", "run_b"] },
+    );
+    const leaf = rows.find((row) => row.kind === "leaf");
+    expect(leaf?.label).toBe("imu/ax");
+    expect(leaf?.runCount).toBe(2);
+  });
 });
 
 describe("virtualSlice", () => {

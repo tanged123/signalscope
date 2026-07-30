@@ -1405,6 +1405,21 @@ button {
   color: var(--fg-1);
 }
 
+.tree-run-count {
+  flex: none;
+  color: var(--fg-3);
+  font: 0.6923rem var(--font-mono);
+}
+
+.tree-set-mode {
+  width: 70px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-1);
+  color: var(--fg-2);
+  font: 0.6923rem var(--font-mono);
+}
+
 .tree-derived-mark {
   margin-left: 6px;
   color: var(--amber-7);

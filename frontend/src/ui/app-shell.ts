@@ -41,11 +41,13 @@ import {
 } from "../app/plot-math";
 import {
   type BatchStatus,
+  type EnsembleTileResponse,
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
   type SampleResponse,
   type SampleSeries,
+  type SetSummary,
   type SignalSummary,
   type TileResponse,
 } from "../generated/protocol";
@@ -68,7 +70,11 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
-import type { QuickTransform } from "./panel";
+import {
+  spaghettiSeries,
+  type PanelSeriesKind,
+  type QuickTransform,
+} from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
@@ -87,6 +93,7 @@ export class AppShell {
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private signals: SignalSummary[] = [];
+  private sets: SetSummary[] = [];
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
@@ -99,6 +106,19 @@ export class AppShell {
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
+  private ensemblesByPanel = new Map<
+    string,
+    { response: EnsembleTileResponse; memberCount: number }
+  >();
+  private ensembleSelectionByPanel = new Map<
+    string,
+    {
+      setId: string;
+      localPath: string;
+      memberKeys: string[];
+      memberCount: number;
+    }
+  >();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -316,6 +336,9 @@ export class AppShell {
       {
         onPlotSignal: (path) => {
           this.plotSignal(path);
+        },
+        onPlotSet: (localPath, memberPaths, mode) => {
+          this.plotSet(localPath, memberPaths, mode);
         },
         onToggleFavorite: (path) => {
           this.workspace.toggleFavorite(path);
@@ -1096,11 +1119,50 @@ export class AppShell {
     if (target === null) {
       target = this.workspace.addPanelRow().id;
     }
+    this.ensembleSelectionByPanel.delete(target);
     if (this.workspace.addSeries(target, path)) {
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
     }
+  }
+
+  private plotSet(
+    localPath: string,
+    memberPaths: readonly string[],
+    mode: PanelSeriesKind,
+  ): void {
+    if (mode === "single") {
+      const first = memberPaths[0];
+      if (first !== undefined) this.plotSignal(first);
+      return;
+    }
+    if (mode === "spaghetti") {
+      for (const path of spaghettiSeries({ members: memberPaths })) {
+        this.plotSignal(path);
+      }
+      return;
+    }
+    let target = this.workspace.focusedPanelId();
+    if (target === null) target = this.workspace.addPanelRow().id;
+    const set = this.sets.find((candidate) =>
+      candidate.local_paths.includes(localPath),
+    );
+    const saved = this.workspace
+      .snapshot()
+      .source_sets.find((candidate) => candidate.key === set?.set_key);
+    if (set === undefined || saved === undefined) {
+      this.showModeHelp("set metadata is unavailable");
+      return;
+    }
+    this.ensembleSelectionByPanel.set(target, {
+      setId: set.set_id,
+      localPath,
+      memberKeys: saved.members.map((member) => member.source_key),
+      memberCount: saved.members.length,
+    });
+    this.workspace.focusPanel(target);
+    this.afterLayoutChange();
   }
 
   private async openFiles(): Promise<void> {
@@ -1757,11 +1819,30 @@ export class AppShell {
   }
 
   private async reloadSignals(): Promise<void> {
-    this.signals = await this.plane.listSignals();
+    [this.signals, this.sets] = await Promise.all([
+      this.plane.listSignals(),
+      this.plane.listSets(),
+    ]);
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
     this.tree?.setSignals(this.signals.map((summary) => summary.path));
+    const memberKeys = new Set(
+      this.workspace
+        .snapshot()
+        .source_sets.flatMap((set) =>
+          set.members.map((member) => member.source_key),
+        ),
+    );
+    this.tree?.setSetPrefixes(
+      this.signals
+        .filter((signal) => memberKeys.has(signal.source_key))
+        .map((signal) =>
+          signal.path.endsWith(`/${signal.local_path}`)
+            ? signal.path.slice(0, -signal.local_path.length - 1)
+            : signal.path,
+        ),
+    );
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.tree?.setFavorites(this.workspace.favorites());
     this.updateStatus();
@@ -1775,9 +1856,34 @@ export class AppShell {
     );
     const nextTiles = new Map<string, TileResponse>();
     const nextSamples = new Map<string, SampleResponse>();
+    const nextEnsembles = new Map<
+      string,
+      { response: EnsembleTileResponse; memberCount: number }
+    >();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
+        const ensemble = this.ensembleSelectionByPanel.get(panel.id);
+        if (ensemble !== undefined) {
+          const window = this.effectiveWindow(panel);
+          const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? width;
+          try {
+            nextEnsembles.set(panel.id, {
+              response: await this.plane.queryEnsembleTiles({
+                request_id: crypto.randomUUID(),
+                set_id: ensemble.setId,
+                local_path: ensemble.localPath,
+                window,
+                pixel_width: Math.max(1, Math.round(panelWidth)),
+                member_filter: ensemble.memberKeys,
+              }),
+              memberCount: ensemble.memberCount,
+            });
+          } catch (error: unknown) {
+            this.reportError(error);
+          }
+          return;
+        }
         const { ids, missing } = this.panelSignalIds(panel);
         nextMissing.set(panel.id, missing);
         if (ids.length === 0) return;
@@ -1828,6 +1934,7 @@ export class AppShell {
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
     this.samplesByPanel = nextSamples;
+    this.ensemblesByPanel = nextEnsembles;
     this.missingByPanel = nextMissing;
     this.renderTiles();
   }
@@ -1871,6 +1978,7 @@ export class AppShell {
       this.workspaceView?.renderData(
         this.tilesByPanel,
         this.samplesByPanel,
+        this.ensemblesByPanel,
         (panelId) => {
           const panel = this.workspace.panel(panelId);
           return panel === undefined

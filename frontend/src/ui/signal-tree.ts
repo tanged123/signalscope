@@ -5,6 +5,11 @@ const FALLBACK_ROW_HEIGHT = 22;
 
 export interface SignalTreeCallbacks {
   onPlotSignal(path: string): void;
+  onPlotSet?(
+    localPath: string,
+    memberPaths: readonly string[],
+    mode: "single" | "spaghetti" | "band",
+  ): void;
   onToggleFavorite(path: string): void;
   onRemoveDerived(path: string): void;
 }
@@ -17,6 +22,7 @@ export class SignalTreeView {
   private rows: TreeRow[] = [];
   private readonly rowHeight: number;
   private liveValues: ReadonlyMap<string, string> = new Map();
+  private setPrefixes: string[] = [];
 
   constructor(
     private readonly listElement: HTMLElement,
@@ -59,6 +65,11 @@ export class SignalTreeView {
     this.refresh();
   }
 
+  setSetPrefixes(prefixes: readonly string[]): void {
+    this.setPrefixes = [...prefixes];
+    this.refresh();
+  }
+
   setFavorites(favorites: readonly string[]): void {
     this.favorites = favorites;
     this.renderFavorites();
@@ -77,7 +88,14 @@ export class SignalTreeView {
   }
 
   private refresh(): void {
-    this.rows = buildTreeRows(this.paths, this.collapsed, this.filter);
+    this.rows = buildTreeRows(
+      this.paths,
+      this.collapsed,
+      this.filter,
+      this.setPrefixes.length > 0
+        ? { setPrefixes: this.setPrefixes }
+        : undefined,
+    );
     this.renderRows();
   }
 
@@ -125,23 +143,38 @@ export class SignalTreeView {
       });
       return button;
     }
-    return this.leafElement(row.path, row.label, row.depth);
+    return this.leafElement(
+      row.path,
+      row.label,
+      row.depth,
+      row.runCount,
+      row.memberPaths,
+    );
   }
 
-  private leafElement(path: string, label: string, depth: number): HTMLElement {
+  private leafElement(
+    path: string,
+    label: string,
+    depth: number,
+    runCount?: number,
+    memberPaths?: readonly string[],
+  ): HTMLElement {
     const rowElement = document.createElement("div");
     rowElement.className = "tree-row tree-leaf";
     rowElement.style.paddingLeft = `${String(8 + depth * 12)}px`;
     rowElement.dataset.signalPath = path;
-    rowElement.draggable = true;
+    rowElement.draggable = memberPaths === undefined;
     rowElement.tabIndex = 0;
     rowElement.setAttribute("role", "button");
     rowElement.setAttribute("aria-label", `Plot ${path}`);
     rowElement.addEventListener("dragstart", (event) => {
-      event.dataTransfer?.setData(SIGNAL_DRAG_TYPE, path);
+      if (memberPaths === undefined) {
+        event.dataTransfer?.setData(SIGNAL_DRAG_TYPE, path);
+      }
     });
     rowElement.addEventListener("dblclick", () => {
-      this.callbacks.onPlotSignal(path);
+      if (memberPaths === undefined) this.callbacks.onPlotSignal(path);
+      else this.callbacks.onPlotSet?.(path, memberPaths, "band");
     });
     rowElement.addEventListener("keydown", (event) => {
       if (
@@ -149,11 +182,13 @@ export class SignalTreeView {
         (event.key === "Enter" || event.key === " ")
       ) {
         event.preventDefault();
-        this.callbacks.onPlotSignal(path);
+        if (memberPaths === undefined) this.callbacks.onPlotSignal(path);
+        else this.callbacks.onPlotSet?.(path, memberPaths, "band");
       }
     });
     const star = document.createElement("button");
     star.className = `tree-star ${this.favorites.includes(path) ? "active" : ""}`;
+    star.hidden = memberPaths !== undefined;
     star.textContent = "★";
     star.title = "Toggle favorite";
     star.setAttribute(
@@ -171,6 +206,31 @@ export class SignalTreeView {
     value.className = "signal-value";
     value.textContent = this.liveValues.get(path) ?? "—";
     rowElement.append(star, name);
+    if (runCount !== undefined && memberPaths !== undefined) {
+      const badge = document.createElement("span");
+      badge.className = "tree-run-count";
+      badge.textContent = `${String(runCount)} runs`;
+      const mode = document.createElement("select");
+      mode.className = "tree-set-mode";
+      mode.setAttribute("aria-label", `Plot mode for ${path}`);
+      for (const value of ["band", "spaghetti", "single"] as const) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        mode.appendChild(option);
+      }
+      mode.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      mode.addEventListener("change", () => {
+        this.callbacks.onPlotSet?.(
+          path,
+          memberPaths,
+          mode.value as "single" | "spaghetti" | "band",
+        );
+      });
+      rowElement.append(badge, mode);
+    }
     if (path.startsWith("derived/")) {
       const mark = document.createElement("span");
       mark.className = "tree-derived-mark";
