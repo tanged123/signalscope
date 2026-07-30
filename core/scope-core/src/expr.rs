@@ -356,6 +356,33 @@ pub fn parse(src: &str) -> Result<Expr, ExprError> {
     Ok(expr)
 }
 
+/// Rewrites quoted signal references without changing surrounding syntax.
+///
+/// # Errors
+///
+/// Returns [`ExprError`] when the expression is invalid.
+pub fn rename_references(src: &str, map: &BTreeMap<String, String>) -> Result<String, ExprError> {
+    parse(src)?;
+    let tokens = tokenize(src)?;
+    let mut out = String::with_capacity(src.len());
+    let mut cursor = 0;
+    for spanned in tokens {
+        let Token::Signal(name) = spanned.token else {
+            continue;
+        };
+        let Some(replacement) = map.get(&name) else {
+            continue;
+        };
+        out.push_str(&src[cursor..spanned.start]);
+        out.push('\'');
+        out.push_str(&replacement.replace('\'', "''"));
+        out.push('\'');
+        cursor = spanned.end;
+    }
+    out.push_str(&src[cursor..]);
+    Ok(out)
+}
+
 struct Parser<'a> {
     tokens: &'a [Spanned],
     index: usize,
@@ -767,6 +794,44 @@ fn call(name: &str, first: f64, second: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renaming_rewrites_only_signal_literals() {
+        let map = BTreeMap::from([
+            ("imu/ax".to_owned(), "run_a/imu/ax".to_owned()),
+            ("imu/ay".to_owned(), "run_a/imu/ay".to_owned()),
+        ]);
+        let renamed = rename_references("hypot('imu/ax', 'imu/ay') + 2 * 'imu/az'", &map).unwrap();
+        assert_eq!(
+            renamed,
+            "hypot('run_a/imu/ax', 'run_a/imu/ay') + 2 * 'imu/az'"
+        );
+        assert_eq!(references(&parse(&renamed).unwrap()).len(), 3);
+    }
+
+    #[test]
+    fn renaming_never_touches_lookalike_text() {
+        let map = BTreeMap::from([("a".to_owned(), "run/a".to_owned())]);
+        assert_eq!(
+            rename_references("abs('a') + 1", &map).unwrap(),
+            "abs('run/a') + 1"
+        );
+    }
+
+    #[test]
+    fn quotes_inside_a_renamed_name_round_trip() {
+        let map = BTreeMap::from([("it's".to_owned(), "run/it's".to_owned())]);
+        let renamed = rename_references("'it''s'", &map).unwrap();
+        assert_eq!(
+            references(&parse(&renamed).unwrap()),
+            vec!["run/it's".to_owned()]
+        );
+    }
+
+    #[test]
+    fn unparsable_expressions_are_not_partly_rewritten() {
+        assert!(rename_references("'a' +", &BTreeMap::new()).is_err());
+    }
     use crate::store::{SignalStore, SourceKey};
     use std::sync::Arc;
 
