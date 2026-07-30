@@ -13,6 +13,7 @@ pub mod preferences;
 pub mod pyramid;
 pub mod restore;
 pub mod session;
+pub mod sets;
 pub mod snapshot;
 pub mod sources;
 pub mod store;
