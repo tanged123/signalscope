@@ -69,14 +69,15 @@ single_recording() {
 }
 
 encode() {
-  local webm
+  local video_filter webm
   webm="$(single_recording)"
+  video_filter="signalstats,metadata=mode=select:key=lavfi.signalstats.YAVG:function=less:value=230,metadata=mode=select:key=lavfi.signalstats.YMAX:function=greater:value=100,fps=12,scale=800:-1:flags=lanczos"
   mkdir -p build/demo
   ffmpeg -y -loglevel error -i "$webm" \
-    -vf "fps=12,scale=800:-1:flags=lanczos,palettegen=stats_mode=diff" \
+    -vf "$video_filter,palettegen=stats_mode=diff" \
     -f image2 build/demo/palette.png
   ffmpeg -y -loglevel error -i "$webm" -i build/demo/palette.png \
-    -lavfi "fps=12,scale=800:-1:flags=lanczos,paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
+    -lavfi "$video_filter,paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
     build/demo/demo.gif
   rm -f build/demo/palette.png
 }
