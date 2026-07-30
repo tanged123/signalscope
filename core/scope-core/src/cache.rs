@@ -11,12 +11,9 @@
 //! ...     payload sections, each 8-byte aligned
 //! ```
 //!
-//! The JSON directory lists per-signal metadata and each payload section's
-//! (offset, len, crc32), offsets relative to the payload base. Sections per
-//! signal, in order: time column, values column, then one section per merged
-//! pyramid level. Levels are arrays of 88-byte bin records; `first`/`last`/
-//! `min`/`max` encode `None` as NaN, which is lossless because stored
-//! envelope values are always finite by construction.
+//! The JSON directory lists shared time columns and per-signal value and
+//! pyramid sections. Offsets are relative to the payload base. Every section
+//! is aligned and independently checksummed.
 //!
 //! Any structural mismatch is a cache miss (`Ok(None)`), never an error:
 //! the caller rebuilds and rewrites.
@@ -28,7 +25,7 @@ use std::{
     sync::Arc,
 };
 
-use scope_protocol::{EnvelopeBin, IngestStage};
+use scope_protocol::IngestStage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -42,10 +39,9 @@ use crate::{
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
 
-pub const CACHE_VERSION: u32 = 3;
+pub const CACHE_VERSION: u32 = 4;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
 const HEADER_LEN: usize = 52;
-const BIN_RECORD_LEN: usize = 88;
 
 /// The sidecar file beside `source`: `<file name>.sspyr`.
 #[must_use]
@@ -58,6 +54,7 @@ pub fn sidecar_path(source: &Path) -> PathBuf {
 #[derive(Debug, Deserialize, Serialize)]
 struct CacheDirectory {
     row_count: u64,
+    time_sections: Vec<CacheSection>,
     signals: Vec<CacheSignal>,
 }
 
@@ -66,7 +63,9 @@ struct CacheSignal {
     local_path: String,
     unit: Option<String>,
     point_count: u64,
-    sections: Vec<CacheSection>,
+    time_section: u32,
+    value_section: CacheSection,
+    levels: Vec<CacheSection>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -185,24 +184,35 @@ pub fn write(
     let mut payload: Vec<u8> = Vec::new();
     let mut directory = CacheDirectory {
         row_count,
+        time_sections: Vec::new(),
         signals: Vec::new(),
     };
+    let mut times: Vec<Arc<[f64]>> = Vec::new();
     let total = signals.len().max(1);
     for (index, (signal, pyramid)) in signals.iter().enumerate() {
-        let mut sections = Vec::new();
-        sections.push(append_section(&mut payload, &encode_column(signal.time())));
-        sections.push(append_section(
-            &mut payload,
-            &encode_column(signal.values()),
-        ));
+        let time = signal.time_shared();
+        let time_section = times
+            .iter()
+            .position(|candidate| Arc::ptr_eq(candidate, &time))
+            .unwrap_or_else(|| {
+                directory
+                    .time_sections
+                    .push(append_section(&mut payload, &encode_column(&time)));
+                times.push(Arc::clone(&time));
+                times.len() - 1
+            });
+        let value_section = append_section(&mut payload, &encode_column(signal.values()));
+        let mut levels = Vec::new();
         for level in pyramid.merged_levels() {
-            sections.push(append_section(&mut payload, &encode_bins(level)));
+            levels.push(append_section(&mut payload, &encode_bins(level)));
         }
         directory.signals.push(CacheSignal {
             local_path: signal.local_path.clone(),
             unit: signal.unit.clone(),
             point_count: signal.len() as u64,
-            sections,
+            time_section: u32::try_from(time_section).unwrap_or(u32::MAX),
+            value_section,
+            levels,
         });
         progress(fraction(index + 1, total));
     }
@@ -264,7 +274,7 @@ fn try_load_with_provenance(
     let mut decoded = Vec::new();
     let total = directory.signals.len().max(1);
     for (index, entry) in directory.signals.iter().enumerate() {
-        let Some(signal) = decode_signal(entry, payload) else {
+        let Some(signal) = decode_signal(&directory, entry, payload) else {
             return Ok(None);
         };
         decoded.push(signal);
@@ -340,19 +350,23 @@ fn parse<'a>(bytes: &'a [u8], expected: &str) -> Option<(CacheDirectory, &'a [u8
     Some((directory, bytes.get(payload_base..)?))
 }
 
-fn decode_signal(entry: &CacheSignal, payload: &[u8]) -> Option<DecodedSignal> {
-    if entry.sections.len() < 2 {
-        return None;
-    }
-    let time = decode_column(section_bytes(payload, entry.sections[0])?)?;
-    let values = decode_column(section_bytes(payload, entry.sections[1])?)?;
+fn decode_signal(
+    directory: &CacheDirectory,
+    entry: &CacheSignal,
+    payload: &[u8],
+) -> Option<DecodedSignal> {
+    let time_section = *directory
+        .time_sections
+        .get(usize::try_from(entry.time_section).ok()?)?;
+    let time = decode_column(section_bytes(payload, time_section)?)?;
+    let values = decode_column(section_bytes(payload, entry.value_section)?)?;
     let point_count = usize::try_from(entry.point_count).ok()?;
     if time.len() != point_count || values.len() != point_count {
         return None;
     }
     let mut merged = Vec::new();
     let mut expected_len = point_count.div_ceil(1 << crate::pyramid::FINEST_STORED_LEVEL);
-    for section in &entry.sections[2..] {
+    for section in &entry.levels {
         let level = decode_bins(section_bytes(payload, *section)?)?;
         if level.len() != expected_len {
             return None;
@@ -411,52 +425,87 @@ fn decode_column(bytes: &[u8]) -> Option<Vec<f64>> {
 }
 
 fn encode_bins(bins: &BinLevel) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bins.len() * BIN_RECORD_LEN);
-    for index in 0..bins.len() {
-        let bin = bins.to_wire(index);
-        out.extend_from_slice(&bin.t0.to_le_bytes());
-        out.extend_from_slice(&bin.t1.to_le_bytes());
-        for value in [bin.first, bin.last, bin.min, bin.max] {
-            out.extend_from_slice(&value.unwrap_or(f64::NAN).to_le_bytes());
+    let mut out = Vec::with_capacity(8 + bins.len() * BinLevel::BYTES_PER_BIN);
+    out.extend_from_slice(&(bins.len() as u64).to_le_bytes());
+    for values in [
+        &bins.t0,
+        &bins.t1,
+        &bins.first,
+        &bins.last,
+        &bins.min,
+        &bins.max,
+        &bins.sum,
+        &bins.sum_sq,
+    ] {
+        for value in values {
+            out.extend_from_slice(&value.to_le_bytes());
         }
-        out.extend_from_slice(&bin.sum.to_le_bytes());
-        out.extend_from_slice(&bin.sum_sq.to_le_bytes());
-        out.extend_from_slice(&bin.sample_count.to_le_bytes());
-        out.extend_from_slice(&bin.finite_count.to_le_bytes());
-        out.push(u8::from(bin.has_gap));
-        out.extend_from_slice(&[0_u8; 7]);
     }
+    for values in [&bins.sample_count, &bins.finite_count] {
+        for value in values {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    out.extend_from_slice(&bins.flags);
+    pad_to_8(&mut out);
     out
 }
 
 fn decode_bins(bytes: &[u8]) -> Option<BinLevel> {
-    if bytes.len() % BIN_RECORD_LEN != 0 {
+    let count = usize::try_from(u64::from_le_bytes(bytes.get(..8)?.try_into().ok()?)).ok()?;
+    let used = 8_usize.checked_add(count.checked_mul(BinLevel::BYTES_PER_BIN)?)?;
+    if bytes.len() != used.checked_next_multiple_of(8)? {
         return None;
     }
-    let field = |chunk: &[u8], at: usize| {
-        f64::from_le_bytes(chunk[at..at + 8].try_into().expect("8-byte field"))
-    };
-    let optional = |chunk: &[u8], at: usize| {
-        let value = field(chunk, at);
-        (!value.is_nan()).then_some(value)
-    };
-    let bins = bytes
-        .chunks_exact(BIN_RECORD_LEN)
-        .map(|chunk| EnvelopeBin {
-            t0: field(chunk, 0),
-            t1: field(chunk, 8),
-            first: optional(chunk, 16),
-            last: optional(chunk, 24),
-            min: optional(chunk, 32),
-            max: optional(chunk, 40),
-            sum: field(chunk, 48),
-            sum_sq: field(chunk, 56),
-            sample_count: u64::from_le_bytes(chunk[64..72].try_into().expect("8-byte field")),
-            finite_count: u64::from_le_bytes(chunk[72..80].try_into().expect("8-byte field")),
-            has_gap: chunk[80] != 0,
-        })
-        .collect::<Vec<_>>();
-    Some(BinLevel::from_wire(&bins))
+    let mut at = 8;
+    let t0 = decode_f64_array(bytes, &mut at, count)?;
+    let t1 = decode_f64_array(bytes, &mut at, count)?;
+    let first = decode_f64_array(bytes, &mut at, count)?;
+    let last = decode_f64_array(bytes, &mut at, count)?;
+    let min = decode_f64_array(bytes, &mut at, count)?;
+    let max = decode_f64_array(bytes, &mut at, count)?;
+    let sum = decode_f64_array(bytes, &mut at, count)?;
+    let sum_sq = decode_f64_array(bytes, &mut at, count)?;
+    let sample_count = decode_u32_array(bytes, &mut at, count)?;
+    let finite_count = decode_u32_array(bytes, &mut at, count)?;
+    let flags = bytes.get(at..at.checked_add(count)?)?.to_vec();
+    Some(BinLevel {
+        t0,
+        t1,
+        first,
+        last,
+        min,
+        max,
+        sum,
+        sum_sq,
+        sample_count,
+        finite_count,
+        flags,
+    })
+}
+
+fn decode_f64_array(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<f64>> {
+    let len = count.checked_mul(8)?;
+    let end = at.checked_add(len)?;
+    let values = bytes
+        .get(*at..end)?
+        .chunks_exact(8)
+        .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("8-byte chunk")))
+        .collect();
+    *at = end;
+    Some(values)
+}
+
+fn decode_u32_array(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<u32>> {
+    let len = count.checked_mul(4)?;
+    let end = at.checked_add(len)?;
+    let values = bytes
+        .get(*at..end)?
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes(chunk.try_into().expect("4-byte chunk")))
+        .collect();
+    *at = end;
+    Some(values)
 }
 
 fn pad_to_8(bytes: &mut Vec<u8>) {
@@ -567,6 +616,75 @@ mod tests {
             &mut |_| {},
         )
         .unwrap();
+    }
+
+    fn directory(bytes: &[u8]) -> (CacheDirectory, &[u8]) {
+        let len = usize::try_from(u64::from_le_bytes(bytes[44..52].try_into().unwrap())).unwrap();
+        let end = HEADER_LEN + len;
+        let directory = serde_json::from_slice(&bytes[HEADER_LEN..end]).unwrap();
+        let payload = &bytes[end.next_multiple_of(8)..];
+        (directory, payload)
+    }
+
+    #[test]
+    fn one_shared_time_column_is_written_once_per_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let (store, summary, pyramids) = build(&source);
+        write_sidecar(&source, &store, &summary, &pyramids);
+
+        let bytes = fs::read(sidecar_path(&source)).unwrap();
+        let (directory, payload) = directory(&bytes);
+        let references = directory
+            .signals
+            .iter()
+            .map(|signal| signal.time_section)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(directory.time_sections.len(), 1);
+        assert_eq!(references.len(), 1);
+        assert_eq!(
+            section_bytes(payload, directory.time_sections[0])
+                .unwrap()
+                .len(),
+            500 * size_of::<f64>()
+        );
+    }
+
+    #[test]
+    fn level_sections_are_aligned_and_independently_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let (store, summary, pyramids) = build(&source);
+        write_sidecar(&source, &store, &summary, &pyramids);
+
+        let bytes = fs::read(sidecar_path(&source)).unwrap();
+        let (directory, payload) = directory(&bytes);
+        for signal in directory.signals {
+            for section in signal.levels {
+                assert_eq!(section.offset % 8, 0);
+                assert_eq!(section.len % 8, 0);
+                assert!(decode_bins(section_bytes(payload, section).unwrap()).is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn a_v3_sidecar_is_a_miss_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let (store, summary, pyramids) = build(&source);
+        write_sidecar(&source, &store, &summary, &pyramids);
+        let path = sidecar_path(&source);
+        let mut bytes = fs::read(&path).unwrap();
+        bytes[8..12].copy_from_slice(&3_u32.to_le_bytes());
+        fs::write(path, bytes).unwrap();
+
+        assert!(
+            try_load_test(&source, &mut SignalStore::new(), &mut |_| {})
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
