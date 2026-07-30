@@ -33,7 +33,7 @@ impl Default for Session {
             }],
             favorites: Vec::new(),
             derived: Vec::new(),
-            source_paths: Vec::new(),
+            sources: Vec::new(),
         }
     }
 }
@@ -205,6 +205,42 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(10);
             migrate(10, value)
         }
+        10 => {
+            let paths = value
+                .get("source_paths")
+                .and_then(serde_json::Value::as_array)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|entry| entry.as_str().map(str::to_owned))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let mut taken = std::collections::BTreeSet::new();
+            let records = paths
+                .into_iter()
+                .map(|path| {
+                    let key = crate::naming::legacy_source_key(&path);
+                    let prefix = crate::naming::allocate_prefix(&taken, Path::new(&path), key)
+                        .unwrap_or_else(|| key.simple().to_string());
+                    taken.insert(prefix.clone());
+                    serde_json::json!({
+                        "key": key.to_string(),
+                        "path": path,
+                        "prefix": prefix,
+                        "provider_id": null,
+                        "decode_provenance": null,
+                        "reconcile_legacy": true
+                    })
+                })
+                .collect();
+            if let Some(object) = value.as_object_mut() {
+                object.remove("source_paths");
+                object.insert("sources".into(), serde_json::Value::Array(records));
+            }
+            value["schema_version"] = serde_json::json!(11);
+            migrate(11, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -300,6 +336,18 @@ mod tests {
         "/../../protocol/testdata/session-conformance.json"
     );
 
+    fn source(path: &str) -> SourceRecord {
+        let key = crate::naming::legacy_source_key(path);
+        SourceRecord {
+            key: key.to_string(),
+            path: path.into(),
+            prefix: crate::naming::default_prefix(Path::new(path)),
+            provider_id: None,
+            decode_provenance: None,
+            reconcile_legacy: false,
+        }
+    }
+
     #[test]
     fn session_conformance_fixture_matches_rust() {
         let session = Session {
@@ -307,7 +355,7 @@ mod tests {
                 path: "derived/speed".into(),
                 expr: "hypot('imu/vx', 'imu/vy')".into(),
             }],
-            source_paths: vec!["/data/run.csv".into()],
+            sources: vec![source("/data/run.csv")],
             favorites: vec!["imu/vx".into()],
             ..Session::default()
         };
@@ -332,13 +380,13 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp dir");
         let path = directory.path().join("session.json");
         let session = Session {
-            source_paths: vec!["/data/run.csv".into()],
+            sources: vec![source("/data/run.csv")],
             ..Session::default()
         };
 
         save_to_path(&session, &path).expect("saves");
         let restored = load_from_path(&path).expect("loads");
-        assert_eq!(restored.source_paths, session.source_paths);
+        assert_eq!(restored.sources, session.sources);
         assert!(
             !directory.path().join("session.json.tmp").exists(),
             "the temporary file is renamed, not left behind"
@@ -414,6 +462,41 @@ mod tests {
     }
 
     #[test]
+    fn v10_source_paths_migrate_to_deterministic_keyed_records() {
+        let json = serde_json::json!({
+            "app": "signalscope", "schema_version": 10, "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1", "favorites": [], "derived": [],
+            "source_paths": ["/data/run.csv", "/other/run.csv"],
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [], "panels": []
+            }]
+        })
+        .to_string();
+
+        let session = from_json(&json).expect("v10 migrates");
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(session.sources.len(), 2);
+        assert_eq!(
+            session.sources[0].key,
+            crate::naming::legacy_source_key("/data/run.csv").to_string()
+        );
+        assert_eq!(session.sources[0].prefix, "run");
+        assert!(session.sources[1].prefix.starts_with("run_"));
+        assert!(session.sources.iter().all(|record| record.reconcile_legacy));
+        assert!(
+            session
+                .sources
+                .iter()
+                .all(|record| record.provider_id.is_none())
+        );
+        assert_eq!(from_json(&json).unwrap().sources, session.sources);
+    }
+
+    #[test]
     fn v9_sessions_gain_empty_derived_and_source_lists() {
         let json = serde_json::json!({
             "app": "signalscope",
@@ -433,7 +516,7 @@ mod tests {
         let session = from_json(&json).expect("v9 session migrates");
         assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
         assert!(session.derived.is_empty());
-        assert!(session.source_paths.is_empty());
+        assert!(session.sources.is_empty());
     }
 
     #[test]
@@ -449,13 +532,13 @@ mod tests {
                     expr: "gradient('derived/speed')".into(),
                 },
             ],
-            source_paths: vec!["/data/run.csv".into()],
+            sources: vec![source("/data/run.csv")],
             ..Session::default()
         };
         let restored =
             from_json(&serde_json::to_string(&session).expect("serializes")).expect("round trips");
         assert_eq!(restored.derived, session.derived);
-        assert_eq!(restored.source_paths, session.source_paths);
+        assert_eq!(restored.sources, session.sources);
     }
 
     #[test]

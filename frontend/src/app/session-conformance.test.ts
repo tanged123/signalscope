@@ -12,7 +12,7 @@ describe("session conformance", () => {
     expect(fixture.app).toBe("signalscope");
     expect(fixture.schema_version).toBe(SESSION_SCHEMA_VERSION);
     expect(fixture.derived[0]?.expr).toBe("hypot('imu/vx', 'imu/vy')");
-    expect(fixture.source_paths).toEqual(["/data/run.csv"]);
+    expect(fixture.sources[0]?.path).toBe("/data/run.csv");
   });
 
   it("emits every key the Rust fixture carries", () => {

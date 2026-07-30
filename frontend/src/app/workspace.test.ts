@@ -112,12 +112,21 @@ describe("derived definitions", () => {
     }
   });
 
-  it("records each source path once", () => {
+  it("adds, updates, and removes sources by durable key", () => {
     const model = new WorkspaceModel();
-    model.addSourcePath("/data/run.csv");
-    model.addSourcePath("/data/run.csv");
-    model.addSourcePath("/data/bench.csv");
-    expect(model.sourcePaths()).toEqual(["/data/run.csv", "/data/bench.csv"]);
+    const source = {
+      key: "00000000-0000-0000-0000-000000000001",
+      path: "/data/run.csv",
+      prefix: "run",
+      provider_id: null,
+      decode_provenance: null,
+      reconcile_legacy: false,
+    };
+    model.addSource(source);
+    model.addSource({ ...source, path: "/moved/run.csv" });
+    expect(model.sources()).toEqual([{ ...source, path: "/moved/run.csv" }]);
+    model.removeSource(source.key);
+    expect(model.sources()).toEqual([]);
   });
 });
 

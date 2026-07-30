@@ -1,5 +1,5 @@
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -112,6 +112,17 @@
         "expr": "string"
       }
     },
+    "SourceRecord": {
+      "kind": "object",
+      "fields": {
+        "key": "string",
+        "path": "string",
+        "prefix": "string",
+        "provider_id": "string?",
+        "decode_provenance": "string?",
+        "reconcile_legacy": "bool"
+      }
+    },
     "Session": {
       "kind": "object",
       "fields": {
@@ -123,7 +134,7 @@
         "tabs": "WorkspaceTab[]",
         "favorites": "string[]",
         "derived": "DerivedSignal[]",
-        "source_paths": "string[]"
+        "sources": "SourceRecord[]"
       }
     }
   }

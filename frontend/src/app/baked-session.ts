@@ -31,6 +31,24 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
+function isSource(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.key === "string" &&
+    typeof value.path === "string" &&
+    typeof value.prefix === "string" &&
+    isNullable(
+      value.provider_id,
+      (item): item is string => typeof item === "string",
+    ) &&
+    isNullable(
+      value.decode_provenance,
+      (item): item is string => typeof item === "string",
+    ) &&
+    typeof value.reconcile_legacy === "boolean"
+  );
+}
+
 function isNumberPair(value: unknown): value is [number, number] {
   return (
     Array.isArray(value) &&
@@ -162,6 +180,7 @@ function isSession(value: JsonObject): value is JsonObject & Session {
         typeof item.path === "string" &&
         typeof item.expr === "string",
     ) &&
-    isStringArray(value.source_paths)
+    Array.isArray(value.sources) &&
+    value.sources.every(isSource)
   );
 }

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 10;
+pub const SESSION_SCHEMA_VERSION: u32 = 11;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -152,6 +152,18 @@ pub struct DerivedSignal {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SourceRecord {
+    pub key: String,
+    pub path: String,
+    pub prefix: String,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub decode_provenance: Option<String>,
+    pub reconcile_legacy: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Session {
     pub app: String,
     pub schema_version: u32,
@@ -161,5 +173,5 @@ pub struct Session {
     pub tabs: Vec<WorkspaceTab>,
     pub favorites: Vec<String>,
     pub derived: Vec<DerivedSignal>,
-    pub source_paths: Vec<String>,
+    pub sources: Vec<SourceRecord>,
 }

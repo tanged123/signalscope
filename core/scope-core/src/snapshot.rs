@@ -271,7 +271,7 @@ fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
 /// Returns [`SnapshotError::Serialize`] when the session cannot be encoded.
 pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, SnapshotError> {
     let mut baked_session = session.clone();
-    baked_session.source_paths.clear();
+    baked_session.sources.clear();
 
     let mut signals = Vec::new();
     for entry in &plan.signals {
@@ -642,10 +642,17 @@ mod tests {
     }
 
     #[test]
-    fn bake_clears_source_paths_and_orders_signals_by_id() {
+    fn bake_clears_sources_and_orders_signals_by_id() {
         let (store, pyramids) = store_with(&[("b", 100), ("a", 100)]);
         let session = Session {
-            source_paths: vec!["/home/user/secret.csv".to_owned()],
+            sources: vec![crate::session::SourceRecord {
+                key: uuid::Uuid::nil().to_string(),
+                path: "/home/user/secret.csv".into(),
+                prefix: "secret".into(),
+                provider_id: None,
+                decode_provenance: None,
+                reconcile_legacy: false,
+            }],
             ..Session::default()
         };
         let export = plan(

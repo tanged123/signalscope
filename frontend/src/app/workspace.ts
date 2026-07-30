@@ -7,6 +7,7 @@ import type {
   PanelMode,
   PanelState,
   Session,
+  SourceRecord,
   WorkspaceTab,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
@@ -39,7 +40,7 @@ export function emptySession(): Session {
     tabs: [createWorkspaceTab(1)],
     favorites: [],
     derived: [],
-    source_paths: [],
+    sources: [],
   };
 }
 
@@ -236,14 +237,22 @@ export class WorkspaceModel {
     }
   }
 
-  sourcePaths(): readonly string[] {
-    return this.session.source_paths;
+  sources(): readonly SourceRecord[] {
+    return this.session.sources;
   }
 
-  addSourcePath(path: string): void {
-    if (!this.session.source_paths.includes(path)) {
-      this.session.source_paths.push(path);
-    }
+  addSource(record: SourceRecord): void {
+    const index = this.session.sources.findIndex(
+      (source) => source.key === record.key,
+    );
+    if (index === -1) this.session.sources.push(record);
+    else this.session.sources[index] = record;
+  }
+
+  removeSource(key: string): void {
+    this.session.sources = this.session.sources.filter(
+      (source) => source.key !== key,
+    );
   }
 
   cursorMode(): WorkspaceTab["cursor_mode"] {

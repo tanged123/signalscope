@@ -1110,14 +1110,21 @@ export class AppShell {
       for (const path of paths) {
         const name = basename(path);
         progress.hidden = false;
-        await runIngest(port, path, (status) => {
+        const response = await runIngest(port, path, (status) => {
           const percent =
             status.fraction > 0
               ? `${String(Math.round(status.fraction * 100))}%`
               : "…";
           progress.textContent = `${name} · ${status.stage} ${percent}`;
         });
-        this.workspace.addSourcePath(path);
+        this.workspace.addSource({
+          key: response.source.source_key,
+          path: response.source.path,
+          prefix: response.source.prefix,
+          provider_id: null,
+          decode_provenance: null,
+          reconcile_legacy: false,
+        });
       }
       await this.reloadSignals();
       this.afterLayoutChange();
@@ -1621,10 +1628,10 @@ export class AppShell {
       const ingestPort = this.plane.ingest;
       if (ingestPort !== null) {
         progress.hidden = false;
-        for (const source of this.workspace.sourcePaths()) {
-          const name = basename(source);
+        for (const source of this.workspace.sources()) {
+          const name = basename(source.path);
           try {
-            await runIngest(ingestPort, source, (status) => {
+            await runIngest(ingestPort, source.path, (status) => {
               const percent =
                 status.fraction > 0
                   ? `${String(Math.round(status.fraction * 100))}%`

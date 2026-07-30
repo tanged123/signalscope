@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 100;
 export function historySnapshot(session: Readonly<Session>): Session {
   const snapshot: Session = {
     ...structuredClone(session),
-    source_paths: [],
+    sources: [],
   };
   snapshot.linked_time.cursorT = null;
   for (const tab of snapshot.tabs) tab.focused_panel_id = null;
@@ -18,7 +18,7 @@ export function restoreTransientSessionState(
 ): Session {
   const restored: Session = {
     ...structuredClone(historical),
-    source_paths: [...current.source_paths],
+    sources: structuredClone(current.sources),
   };
   restored.linked_time.cursorT = current.linked_time.cursorT;
   for (const tab of restored.tabs) {
