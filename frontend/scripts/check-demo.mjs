@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +48,37 @@ try {
     failures.push(
       `demo GIF is ${gifBytes} bytes; budget is ${maximumGifBytes} bytes`,
     );
+  }
+
+  const firstFrame = spawnSync(
+    "ffmpeg",
+    [
+      "-v",
+      "error",
+      "-i",
+      gifPath,
+      "-frames:v",
+      "1",
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "pipe:1",
+    ],
+    { maxBuffer: 2 * 1024 * 1024 },
+  );
+  if (firstFrame.status !== 0 || firstFrame.stdout.length === 0) {
+    failures.push("demo.gif first frame could not be decoded");
+  } else {
+    let minimum = 255;
+    let maximum = 0;
+    for (const channel of firstFrame.stdout) {
+      minimum = Math.min(minimum, channel);
+      maximum = Math.max(maximum, channel);
+    }
+    if (maximum - minimum < 80) {
+      failures.push("demo.gif begins with a blank frame");
+    }
   }
 } catch {
   failures.push("demo.gif is missing");
