@@ -12,6 +12,7 @@ pub mod ensemble;
 pub mod expr;
 pub mod ingest;
 pub mod naming;
+pub mod paging;
 pub mod preferences;
 pub mod pyramid;
 pub mod restore;

@@ -640,7 +640,7 @@ mod tests {
                 source,
                 "b",
                 None,
-                crate::columns::Column::paged(crate::columns::PageHandle::new(Arc::from(
+                crate::columns::Column::paged(crate::columns::PageHandle::memory(Arc::from(
                     time.to_vec(),
                 ))),
                 Arc::from([3.0, 4.0]),

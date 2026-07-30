@@ -4,20 +4,10 @@ use std::{
     sync::{Arc, Weak},
 };
 
+pub use crate::paging::PageHandle;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TimebaseId(pub u64);
-
-#[derive(Clone, Debug)]
-pub struct PageHandle {
-    values: Arc<[f64]>,
-}
-
-impl PageHandle {
-    #[must_use]
-    pub fn new(values: Arc<[f64]>) -> Self {
-        Self { values }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum Column {
@@ -37,11 +27,16 @@ impl Column {
     }
 
     #[must_use]
+    /// # Panics
+    ///
+    /// Panics for file-backed handles until a page reader is attached.
     pub fn as_slice(&self) -> ColumnGuard {
         ColumnGuard {
             values: match self {
                 Self::Owned(values) => Arc::clone(values),
-                Self::Paged(handle) => Arc::clone(&handle.values),
+                Self::Paged(handle) => handle
+                    .memory_values()
+                    .expect("paged column handle has no reader"),
             },
         }
     }
@@ -50,7 +45,7 @@ impl Column {
     pub fn len(&self) -> usize {
         match self {
             Self::Owned(values) => values.len(),
-            Self::Paged(handle) => handle.values.len(),
+            Self::Paged(handle) => handle.memory_values().map_or(0, |values| values.len()),
         }
     }
 
@@ -60,11 +55,18 @@ impl Column {
     }
 
     #[must_use]
+    /// # Panics
+    ///
+    /// Panics for file-backed handles until a page reader is attached.
     pub fn downgrade(&self) -> WeakColumn {
         WeakColumn {
             values: match self {
                 Self::Owned(values) => Arc::downgrade(values),
-                Self::Paged(handle) => Arc::downgrade(&handle.values),
+                Self::Paged(handle) => Arc::downgrade(
+                    &handle
+                        .memory_values()
+                        .expect("paged column handle has no reader"),
+                ),
             },
         }
     }
