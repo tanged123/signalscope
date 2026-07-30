@@ -28,10 +28,25 @@ export default defineConfig({
       ? {}
       : { launchOptions: { executablePath } }),
   },
-  projects: [{ name: "desktop", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "pnpm dev",
-    url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env.CI,
-  },
+  projects: [
+    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "demo",
+      testDir: "./tests/demo",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
+        video: { mode: "on", size: { width: 1280, height: 800 } },
+      },
+      outputDir: "../build/demo/recording",
+    },
+  ],
+  webServer:
+    process.env.SIGNALSCOPE_DEMO === "1"
+      ? undefined
+      : {
+          command: "pnpm dev",
+          url: "http://127.0.0.1:4173",
+          reuseExistingServer: !process.env.CI,
+        },
 });
