@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -18,18 +18,19 @@ use scope_core::{
     },
     preferences,
     pyramid::Pyramid,
-    session, snapshot,
+    restore, session, snapshot,
     sources::{SourceRecord, SourceRegistry},
     store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
 };
 use scope_protocol::{
-    BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob, BatchState,
-    BatchStatus, DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry,
+    AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
+    BatchState, BatchStatus, DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry,
     ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest,
     FileState, FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession,
-    PickSessionRequest, RemoveSignalRequest, SampleRequest, SampleResponse, SampleSeries,
-    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode,
-    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    PickSessionRequest, RemoveSignalRequest, RestoreReconcileRequest, RestoreReconcileResponse,
+    RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
+    SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode, SignalSummary,
+    SignalTile, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -41,6 +42,41 @@ struct DataState {
     registry: SourceRegistry,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Default)]
+struct RestoreGate(AtomicUsize);
+
+impl RestoreGate {
+    fn begin(&self) {
+        self.0.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn settle(&self) {
+        let _ = self
+            .0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                Some(count.saturating_sub(1))
+            });
+    }
+
+    fn autosave_allowed(&self) -> Result<(), String> {
+        (self.0.load(Ordering::Acquire) == 0)
+            .then_some(())
+            .ok_or_else(|| "restore in progress".into())
+    }
+
+    fn named_save_allowed(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+struct RestoreSettlement<'a>(&'a RestoreGate);
+
+impl Drop for RestoreSettlement<'_> {
+    fn drop(&mut self) {
+        self.0.settle();
+    }
 }
 
 fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
@@ -246,6 +282,127 @@ fn list_formats() -> Envelope<Vec<FormatDescriptor>> {
             })
             .collect(),
     )
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_sources(
+    request: Envelope<RestoreSourcesRequest>,
+    app: AppHandle,
+    jobs: State<'_, BatchJobs>,
+    gate: State<'_, RestoreGate>,
+) -> Result<Envelope<BatchJob>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let restored = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let records = restored
+        .sources
+        .iter()
+        .map(core_source_record)
+        .collect::<Result<Vec<_>, _>>()?;
+    jobs.replace_sources(records.clone())
+        .map_err(|error| error.to_string())?;
+    let state = Arc::clone(app.state::<Arc<Mutex<DataState>>>().inner());
+    state.lock().map_err(|error| error.to_string())?.reset();
+    gate.begin();
+    let job = jobs.submit(
+        records.iter().map(|record| record.path.clone()).collect(),
+        Arc::new(ShellCommitSink { state }),
+    );
+    Ok(Envelope::new(BatchJob { job_id: job.0 }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_reconcile(
+    request: Envelope<RestoreReconcileRequest>,
+    jobs: State<'_, BatchJobs>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+    gate: State<'_, RestoreGate>,
+) -> Result<Envelope<RestoreReconcileResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let _settlement = RestoreSettlement(&gate);
+    jobs.join(scope_core::ingest::batch::JobId(request.job_id))
+        .ok_or_else(|| format!("unknown batch job: {}", request.job_id))?;
+    let mut restored =
+        session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let mut builder = restore::AliasBuilder::default();
+    let mut missing = BTreeSet::new();
+    {
+        let data = state.lock().map_err(|error| error.to_string())?;
+        for record in &mut restored.sources {
+            let Ok(uuid) = uuid::Uuid::parse_str(&record.key) else {
+                continue;
+            };
+            let key = SourceKey(uuid);
+            let Some(current) = data.registry.record(key) else {
+                missing.insert(key);
+                continue;
+            };
+            record.path = current.path.display().to_string();
+            record.prefix.clone_from(&current.prefix);
+            record.provider_id.clone_from(&current.provider_id);
+            record
+                .decode_provenance
+                .clone_from(&current.decode_provenance);
+            let Some(source) = data.store.sources().find(|source| source.key == key) else {
+                missing.insert(key);
+                continue;
+            };
+            let Some(provider) = current.provider_id.as_deref() else {
+                missing.insert(key);
+                continue;
+            };
+            if !record.reconcile_legacy {
+                continue;
+            }
+            let local_paths = data
+                .store
+                .signals_of(source.id)
+                .map(|signal| signal.local_path.clone())
+                .collect::<Vec<_>>();
+            for (legacy, path) in restore::legacy_aliases(provider, current, &local_paths) {
+                builder.add(key, legacy, path);
+            }
+        }
+    }
+    let built = builder.build();
+    missing.extend(
+        built
+            .conflicts
+            .iter()
+            .flat_map(|conflict| conflict.claimants.iter().copied()),
+    );
+    let mut outcome = restore::reconcile(&mut restored, &built.aliases, &missing)
+        .map_err(|error| error.to_string())?;
+    outcome.conflicts = built.conflicts;
+    Ok(Envelope::new(RestoreReconcileResponse {
+        session_json: serde_json::to_string(&restored).map_err(|error| error.to_string())?,
+        rewritten: outcome.rewritten,
+        conflicts: outcome
+            .conflicts
+            .into_iter()
+            .map(|conflict| AliasConflictSummary {
+                legacy_path: conflict.legacy_path,
+                claimants: conflict
+                    .claimants
+                    .into_iter()
+                    .map(|key| key.0.to_string())
+                    .collect(),
+            })
+            .collect(),
+        unresolved: outcome.unresolved,
+    }))
+}
+
+fn core_source_record(record: &session::SourceRecord) -> Result<SourceRecord, String> {
+    Ok(SourceRecord {
+        key: SourceKey(uuid::Uuid::parse_str(&record.key).map_err(|error| error.to_string())?),
+        path: PathBuf::from(&record.path),
+        prefix: record.prefix.clone(),
+        provider_id: record.provider_id.clone(),
+        decode_provenance: record.decode_provenance.clone(),
+        reconcile_legacy: record.reconcile_legacy,
+    })
 }
 
 fn batch_status_response(status: scope_core::ingest::batch::BatchStatus) -> BatchStatus {
@@ -606,8 +763,14 @@ fn normalized_session_save_path(mut path: PathBuf) -> PathBuf {
 fn save_session(
     request: Envelope<SaveSessionRequest>,
     app: AppHandle,
+    gate: State<'_, RestoreGate>,
 ) -> Result<Envelope<String>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
+    if request.path.is_none() {
+        gate.autosave_allowed()?;
+    } else {
+        gate.named_save_allowed()?;
+    }
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
     let path = match request.path {
         Some(path) => normalized_session_save_path(PathBuf::from(path)),
@@ -953,6 +1116,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Mutex::new(DataState::default())))
         .manage(jobs)
+        .manage(RestoreGate::default())
         .invoke_handler(tauri::generate_handler![
             pick_sources,
             ingest_batch,
@@ -961,6 +1125,8 @@ pub fn run() {
             cancel_batch,
             release_batch,
             list_formats,
+            restore_sources,
+            restore_reconcile,
             list_sources,
             list_signals,
             query_tiles,
@@ -1027,8 +1193,8 @@ mod tests {
             key: SourceKey(uuid::Uuid::from_bytes([3; 16])),
             path: PathBuf::from("/a/run.csv"),
             prefix: "run".into(),
-            provider_id: None,
-            decode_provenance: None,
+            provider_id: Some("csv".into()),
+            decode_provenance: Some("abc".into()),
             reconcile_legacy: false,
         };
         let time: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0, 3.0]);
@@ -1055,6 +1221,9 @@ mod tests {
             4
         );
         assert!(data.pyramids.contains_key(&summary.signals[0]));
+        let restored = data.registry.record(record.key).expect("source record");
+        assert_eq!(restored.provider_id.as_deref(), Some("csv"));
+        assert_eq!(restored.decode_provenance.as_deref(), Some("abc"));
     }
 
     #[test]
@@ -1070,6 +1239,22 @@ mod tests {
             expand_sources(vec![dir.path().display().to_string()]).unwrap(),
             vec![dir.path().join("b.csv"), nested.join("a.mcap")]
         );
+    }
+
+    #[test]
+    fn restore_gate_refuses_autosave_until_restore_settles() {
+        let gate = RestoreGate::default();
+        gate.begin();
+        assert!(gate.autosave_allowed().is_err());
+        gate.settle();
+        assert!(gate.autosave_allowed().is_ok());
+    }
+
+    #[test]
+    fn restore_gate_never_blocks_named_saves() {
+        let gate = RestoreGate::default();
+        gate.begin();
+        assert!(gate.named_save_allowed().is_ok());
     }
 
     #[test]

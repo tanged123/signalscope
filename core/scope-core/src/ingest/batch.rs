@@ -16,7 +16,7 @@ use crate::{
         CancelToken, DecodeContext, DecodedSignal, DecodedSource, IngestError, IngestSummary,
     },
     pyramid::Pyramid,
-    sources::{Admission, SourceRecord, SourceRegistry},
+    sources::{Admission, SourceError, SourceRecord, SourceRegistry},
     store::SignalStore,
 };
 
@@ -373,6 +373,39 @@ impl BatchJobs {
         id
     }
 
+    /// # Errors
+    ///
+    /// Returns a source identity conflict.
+    pub fn restore_source(&self, record: SourceRecord) -> Result<(), SourceError> {
+        self.registry
+            .lock()
+            .expect("source registry lock")
+            .restore(record)
+    }
+
+    /// # Errors
+    ///
+    /// Returns an identity conflict or [`SourceError::Busy`].
+    pub fn replace_sources(&self, records: Vec<SourceRecord>) -> Result<(), SourceError> {
+        if self
+            .jobs
+            .lock()
+            .expect("batch jobs lock")
+            .values()
+            .any(|job| !job.progress.is_terminal())
+        {
+            return Err(SourceError::Busy);
+        }
+        let mut registry = SourceRegistry::new();
+        for record in records {
+            registry.restore(record)?;
+        }
+        *self.registry.lock().expect("source registry lock") = registry;
+        self.flights.lock().expect("single flights lock").clear();
+        self.resident.lock().expect("resident charges lock").clear();
+        Ok(())
+    }
+
     #[must_use]
     pub fn status(&self, id: JobId) -> Option<BatchStatus> {
         let mut jobs = self.jobs.lock().expect("batch jobs lock");
@@ -562,8 +595,11 @@ impl Worker {
             .reconcile(decoded.column_bytes().saturating_add(pyramid_bytes))
             .map_err(failed)?;
         let charge = ticket.transfer_to_resident().map_err(failed)?;
+        let mut committed = record.clone();
+        committed.provider_id = Some(outcome.provider_id.clone());
+        committed.decode_provenance = Some(outcome.provenance.clone());
         self.sink
-            .commit(record, decoded, pyramids)
+            .commit(&committed, decoded, pyramids)
             .map_err(|error| match error {
                 IngestError::Cancelled => ProcessError::Cancelled,
                 error => ProcessError::Failed(error.to_string()),
@@ -795,5 +831,27 @@ mod tests {
         jobs.wait_for_tests(job);
         jobs.release(job);
         assert!(jobs.status(job).is_none());
+    }
+
+    #[test]
+    fn restored_identity_is_used_by_the_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_csv(&dir, 0).canonicalize().unwrap();
+        let record = SourceRecord {
+            key: crate::store::SourceKey(uuid::Uuid::from_bytes([8; 16])),
+            path: path.clone(),
+            prefix: "saved".into(),
+            provider_id: None,
+            decode_provenance: None,
+            reconcile_legacy: true,
+        };
+        let jobs = BatchJobs::new(BatchOptions::for_tests());
+        jobs.replace_sources(vec![record.clone()]).unwrap();
+        let sink = std::sync::Arc::new(RecordingSink::default());
+        let job = jobs.submit(vec![path], sink.clone());
+        assert_eq!(jobs.wait_for_tests(job).state, BatchState::Done);
+        let store = sink.store.lock().unwrap();
+        assert_eq!(store.sources().next().unwrap().key, record.key);
+        assert!(store.signal_by_path("saved/value").is_some());
     }
 }

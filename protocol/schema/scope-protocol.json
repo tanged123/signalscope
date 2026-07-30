@@ -77,6 +77,35 @@
         "extensions": "string[]"
       }
     },
+    "RestoreSourcesRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string"
+      }
+    },
+    "RestoreReconcileRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "job_id": "u64"
+      }
+    },
+    "AliasConflictSummary": {
+      "kind": "object",
+      "fields": {
+        "legacy_path": "string",
+        "claimants": "string[]"
+      }
+    },
+    "RestoreReconcileResponse": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "rewritten": "u64",
+        "conflicts": "AliasConflictSummary[]",
+        "unresolved": "string[]"
+      }
+    },
     "IngestRequest": {
       "kind": "object",
       "fields": {

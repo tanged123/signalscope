@@ -35,6 +35,8 @@ pub enum SourceError {
     PrefixExhausted(String),
     #[error("unknown source key")]
     UnknownKey,
+    #[error("batch ingest is still running")]
+    Busy,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -83,7 +85,10 @@ impl SourceRegistry {
     /// # Errors
     ///
     /// Returns [`SourceError::PrefixExhausted`] for a conflicting prefix.
-    pub fn restore(&mut self, record: SourceRecord) -> Result<(), SourceError> {
+    pub fn restore(&mut self, mut record: SourceRecord) -> Result<(), SourceError> {
+        if let Ok(canonical) = record.path.canonicalize() {
+            record.path = canonical;
+        }
         let prefix_owner = self.prefixes.contains(&record.prefix);
         let same_record = self
             .by_key

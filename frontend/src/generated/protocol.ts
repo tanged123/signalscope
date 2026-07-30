@@ -56,6 +56,27 @@ export interface FormatDescriptor {
   extensions: string[];
 }
 
+export interface RestoreSourcesRequest {
+  session_json: string;
+}
+
+export interface RestoreReconcileRequest {
+  session_json: string;
+  job_id: string;
+}
+
+export interface AliasConflictSummary {
+  legacy_path: string;
+  claimants: string[];
+}
+
+export interface RestoreReconcileResponse {
+  session_json: string;
+  rewritten: string;
+  conflicts: AliasConflictSummary[];
+  unresolved: string[];
+}
+
 export interface IngestRequest {
   path: string;
 }

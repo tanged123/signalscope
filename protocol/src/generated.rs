@@ -137,6 +137,33 @@ pub struct FormatDescriptor {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RestoreSourcesRequest {
+    pub session_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RestoreReconcileRequest {
+    pub session_json: String,
+    #[serde(with = "u64_string")]
+    pub job_id: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct AliasConflictSummary {
+    pub legacy_path: String,
+    pub claimants: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RestoreReconcileResponse {
+    pub session_json: String,
+    #[serde(with = "u64_string")]
+    pub rewritten: u64,
+    pub conflicts: Vec<AliasConflictSummary>,
+    pub unresolved: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct IngestRequest {
     pub path: String,
 }
