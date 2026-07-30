@@ -316,6 +316,7 @@ export interface BakedEnsemble {
   set_key: string;
   generation: string;
   local_path: string;
+  member_filter: string[] | null;
   member_keys: string[];
   levels: EnsembleBin[][];
 }

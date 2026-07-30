@@ -21,3 +21,6 @@ pub mod sets;
 pub mod snapshot;
 pub mod sources;
 pub mod store;
+
+#[cfg(test)]
+mod benchmarks;

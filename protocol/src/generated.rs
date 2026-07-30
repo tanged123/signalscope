@@ -514,6 +514,8 @@ pub struct BakedEnsemble {
     #[serde(with = "u64_string")]
     pub generation: u64,
     pub local_path: String,
+    #[serde(default)]
+    pub member_filter: Option<Vec<String>>,
     pub member_keys: Vec<String>,
     pub levels: Vec<Vec<EnsembleBin>>,
 }

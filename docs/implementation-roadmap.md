@@ -39,6 +39,12 @@ Snapshots persist the exact set generation and members instead of recomputing
 or widening a band
 ([ADR 0028](adr/0028-ensemble-run-mean-envelope.md)).
 
+Out-of-core storage now compacts pyramid bins, synthesizes levels 0–2, shares
+sidecar time sections, and pages columns and fine levels through a leased LRU.
+Derived columns spill under resident pressure, while unfiltered full-set
+ensemble levels materialize per exact generation
+([ADR 0029](adr/0029-out-of-core-storage.md)).
+
 ## Phase 4 — export and fidelity
 
 Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. Once export can bake a manifest, generate the README demo GIF and hosted live demo from that same path, per [the demo artifacts design](superpowers/specs/2026-07-27-automated-demo-artifacts-design.md).

@@ -41,3 +41,7 @@ Writable source directories may keep beside-source sidecars. Read-only
 directories use the app-owned root, where entries are keyed by decode
 provenance so relocation does not invalidate them. App-owned cache writes are
 required; beside-source write failures remain non-fatal.
+
+ADR 0029 extends this root to page-backed columns, derived spills, and
+generation-keyed ensemble materializations. Live page leases prevent eviction
+and deletion.

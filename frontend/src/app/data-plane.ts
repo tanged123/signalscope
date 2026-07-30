@@ -575,20 +575,19 @@ export class BakedPlane implements DataPlane {
       ...new Set(this.payload.ensembles.map((item) => item.set_key)),
     ];
     const setKey = keys[Number(request.set_id) - 1];
-    const baked = this.payload.ensembles.find(
-      (item) =>
-        item.set_key === setKey && item.local_path === request.local_path,
-    );
-    if (baked === undefined) {
-      return Promise.reject(new Error("ensemble data was not baked"));
-    }
     const requested = [...request.member_filter].sort();
-    const members = [...baked.member_keys].sort();
-    if (
-      requested.length > 0 &&
-      (requested.length !== members.length ||
-        requested.some((key, index) => key !== members[index]))
-    ) {
+    const baked = this.payload.ensembles.find((item) => {
+      if (item.set_key !== setKey || item.local_path !== request.local_path) {
+        return false;
+      }
+      const filter = [...(item.member_filter ?? item.member_keys)].sort();
+      return (
+        (item.member_filter === null && requested.length === 0) ||
+        (requested.length === filter.length &&
+          requested.every((key, index) => key === filter[index]))
+      );
+    });
+    if (baked === undefined) {
       return Promise.reject(new Error("ensemble membership was not baked"));
     }
     const bins = baked.levels[0];

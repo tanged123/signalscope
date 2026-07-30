@@ -7,7 +7,7 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|full]
+Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
@@ -16,6 +16,7 @@ Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|full]
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
   e2e       Run Playwright desktop and mobile-review smoke tests.
+  bench     Run release-mode core performance floors.
   full      Run quick checks, compile/test the Tauri shell, then run e2e.
 EOF
 }
@@ -61,6 +62,9 @@ frontend)
 e2e)
   bake_roundtrip_artifact
   pnpm e2e
+  ;;
+bench)
+  cargo test --release -p scope-core -- --ignored --show-output bench_
   ;;
 full)
   test_core

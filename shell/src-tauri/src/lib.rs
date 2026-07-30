@@ -844,12 +844,7 @@ fn query_ensemble_tiles(
         };
         if let Some((set, store, pyramids, cache_root)) = build {
             let materialized =
-                ensemble::materialize(
-                    &set,
-                    &store,
-                    &pyramids,
-                    &CacheRoot::app_owned(&cache_root),
-                )
+                ensemble::materialize(&set, &store, &pyramids, &CacheRoot::app_owned(&cache_root))
                     .map_err(|error| error.to_string())?;
             let mut data = state.lock().map_err(|error| error.to_string())?;
             if data
@@ -2030,6 +2025,6 @@ mod tests {
         let set = data.sets.values().next().unwrap();
         assert_eq!(set.key, SetKey(uuid::Uuid::from_u128(9)));
         assert_eq!(set.generation, 7);
-        assert_eq!(set.transform(keys[1]).unwrap().offset, 0.25);
+        assert!((set.transform(keys[1]).unwrap().offset - 0.25).abs() < f64::EPSILON);
     }
 }

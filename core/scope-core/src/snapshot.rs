@@ -309,56 +309,87 @@ fn plan_ensembles(
     range: ExportRange,
     fidelity: ExportFidelity,
 ) -> Result<Vec<BakedEnsemble>, SnapshotError> {
-    let mut baked = Vec::new();
-    for selected in &selection.set_keys {
+    let mut requests = BTreeMap::new();
+    for panel in session.tabs.iter().flat_map(|tab| &tab.panels) {
+        let Some(ensemble) = &panel.ensemble else {
+            continue;
+        };
+        if !selection.set_keys.contains(&ensemble.set_key) {
+            continue;
+        }
         let set = sets
             .values()
-            .find(|set| set.key.0.to_string() == *selected)
-            .ok_or_else(|| SnapshotError::MissingSet(selected.clone()))?;
+            .find(|set| set.key.0.to_string() == ensemble.set_key)
+            .ok_or_else(|| SnapshotError::MissingSet(ensemble.set_key.clone()))?;
         let saved = session
             .source_sets
             .iter()
-            .find(|saved| saved.key == *selected)
-            .ok_or_else(|| SnapshotError::MissingSet(selected.clone()))?;
+            .find(|saved| saved.key == ensemble.set_key)
+            .ok_or_else(|| SnapshotError::MissingSet(ensemble.set_key.clone()))?;
         if saved.generation != set.generation {
-            return Err(SnapshotError::StaleSet(selected.clone()));
+            return Err(SnapshotError::StaleSet(ensemble.set_key.clone()));
         }
-        let members = saved
-            .members
+        let mut filter = ensemble.member_filter.clone();
+        filter.sort();
+        filter.dedup();
+        let window = match range {
+            ExportRange::Visible => effective_window(panel, &session.linked_time),
+            ExportRange::All => ensemble_window(session, store, set, range),
+        };
+        requests
+            .entry((
+                ensemble.set_key.clone(),
+                ensemble.local_path.clone(),
+                filter,
+            ))
+            .and_modify(|current: &mut (f64, f64)| {
+                current.0 = current.0.min(window.0);
+                current.1 = current.1.max(window.1);
+            })
+            .or_insert(window);
+    }
+
+    let mut baked = Vec::new();
+    for ((selected, local_path, filter), window) in requests {
+        let set = sets
+            .values()
+            .find(|set| set.key.0.to_string() == selected)
+            .ok_or_else(|| SnapshotError::MissingSet(selected.clone()))?;
+        let members = filter
             .iter()
-            .map(|member| {
-                uuid::Uuid::parse_str(&member.source_key)
+            .map(|key| {
+                uuid::Uuid::parse_str(key)
                     .map(SourceKey)
                     .map_err(|_| SnapshotError::MissingSet(selected.clone()))
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
-        let window = ensemble_window(session, store, set, range);
         let pixel_width = u32::try_from(ceiling(fidelity).unwrap_or(16_384) / 2)
             .unwrap_or(u32::MAX)
             .max(1);
-        for local_path in &set.fingerprint.local_paths {
-            let tile = ensemble::query(
-                set,
-                local_path,
-                store,
-                pyramids,
-                window,
-                pixel_width,
-                Some(&members),
-                ensemble::Limits::default(),
-            )?;
-            baked.push(BakedEnsemble {
-                set_key: selected.clone(),
-                generation: tile.generation,
-                local_path: local_path.clone(),
-                member_keys: tile
-                    .member_keys
-                    .into_iter()
-                    .map(|key| key.0.to_string())
-                    .collect(),
-                levels: vec![tile.cells.iter().map(ensemble_bin).collect()],
-            });
-        }
+        let tile = ensemble::query(
+            set,
+            &local_path,
+            store,
+            pyramids,
+            window,
+            pixel_width,
+            (!members.is_empty()).then_some(&members),
+            ensemble::Limits {
+                max_members: set.members.len(),
+            },
+        )?;
+        baked.push(BakedEnsemble {
+            set_key: selected,
+            generation: tile.generation,
+            local_path,
+            member_filter: Some(filter),
+            member_keys: tile
+                .member_keys
+                .into_iter()
+                .map(|key| key.0.to_string())
+                .collect(),
+            levels: vec![tile.cells.iter().map(ensemble_bin).collect()],
+        });
     }
     Ok(baked)
 }
@@ -533,8 +564,8 @@ mod tests {
     use super::*;
     use crate::pyramid::Pyramid;
     use crate::session::{
-        AxisStyle, DashStyle, OriginKindState, PanelMode, PanelState, SeriesState, Session,
-        SetMemberState, SourceSetState, TimeDomainState, TimeUnitState,
+        AxisStyle, DashStyle, EnsembleSeriesState, OriginKindState, PanelMode, PanelState,
+        SeriesState, Session, SetMemberState, SourceSetState, TimeDomainState, TimeUnitState,
     };
     use crate::sets::{SetId, SourceSet, propose_sets};
     use crate::store::{SignalId, SignalStore, SourceKey};
@@ -598,6 +629,13 @@ mod tests {
     }
 
     fn store_with_set(count: u8) -> (SignalStore, BTreeMap<SignalId, Pyramid>, SourceSet) {
+        store_with_partial_set(count, None)
+    }
+
+    fn store_with_partial_set(
+        count: u8,
+        missing_temperature: Option<u8>,
+    ) -> (SignalStore, BTreeMap<SignalId, Pyramid>, SourceSet) {
         let mut store = SignalStore::new();
         let mut pyramids = BTreeMap::new();
         let mut candidates = Vec::new();
@@ -616,10 +654,34 @@ mod tests {
                 )
                 .unwrap();
             pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
-            candidates.push((key, vec!["imu/ax".into()]));
+            let mut paths = vec!["imu/ax".into()];
+            if missing_temperature.is_some() && missing_temperature != Some(index) {
+                let signal = store
+                    .insert_signal(
+                        source,
+                        "temperature",
+                        None,
+                        vec![0.0, 0.5, 1.0],
+                        vec![20.0 + f64::from(index); 3],
+                    )
+                    .unwrap();
+                pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
+                paths.push("temperature".into());
+            }
+            candidates.push((key, paths));
         }
         let set = propose_sets(&candidates).pop().unwrap();
         (store, pyramids, set)
+    }
+
+    fn ensemble_panel(set: &SourceSet, path: &str, members: &[SourceKey]) -> PanelState {
+        let mut panel = panel(PanelMode::Time, &[]);
+        panel.ensemble = Some(EnsembleSeriesState {
+            set_key: set.key.0.to_string(),
+            local_path: path.to_owned(),
+            member_filter: members.iter().map(|key| key.0.to_string()).collect(),
+        });
+        panel
     }
 
     fn set_state(set: &SourceSet, members: &[SourceKey]) -> SourceSetState {
@@ -1099,10 +1161,11 @@ mod tests {
             SourceKey(uuid::Uuid::from_bytes([1; 16])),
             SourceKey(uuid::Uuid::from_bytes([3; 16])),
         ];
-        let session = Session {
-            source_sets: vec![set_state(&set, &members)],
-            ..Session::default()
-        };
+        let mut session = session_with(vec![ensemble_panel(&set, "imu/ax", &members)]);
+        session.source_sets = vec![set_state(
+            &set,
+            &set.members.keys().copied().collect::<Vec<_>>(),
+        )];
         let sets = BTreeMap::from([(SetId(1), set.clone())]);
         let selection = ExportSelection {
             source_keys: Vec::new(),
@@ -1120,9 +1183,76 @@ mod tests {
         .unwrap();
         let manifest = bake(&plan, &session).unwrap();
         let baked = &manifest.ensembles[0];
+        assert_eq!(
+            baked.member_filter.as_deref(),
+            Some(
+                members
+                    .iter()
+                    .map(|key| key.0.to_string())
+                    .collect::<Vec<_>>()
+                    .as_slice()
+            )
+        );
         assert_eq!(baked.member_keys.len(), 2);
         assert_eq!(baked.generation, 4);
         assert!(baked.levels[0].iter().all(|bin| bin.run_count <= 2));
+    }
+
+    #[test]
+    fn baking_preserves_full_set_filter_semantics() {
+        let (store, pyramids, set) = store_with_set(5);
+        let mut session = session_with(vec![ensemble_panel(&set, "imu/ax", &[])]);
+        session.source_sets = vec![set_state(
+            &set,
+            &set.members.keys().copied().collect::<Vec<_>>(),
+        )];
+        let sets = BTreeMap::from([(SetId(1), set.clone())]);
+        let selection = ExportSelection {
+            source_keys: Vec::new(),
+            set_keys: vec![set.key.0.to_string()],
+        };
+        let plan = plan_selected(
+            &session,
+            &store,
+            &pyramids,
+            &sets,
+            &selection,
+            ExportRange::Visible,
+            ExportFidelity::Preview,
+        )
+        .unwrap();
+        let baked = &plan.ensembles[0];
+        assert_eq!(baked.member_filter.as_deref(), Some([].as_slice()));
+        assert_eq!(baked.member_keys.len(), 5);
+    }
+
+    #[test]
+    fn baking_full_partial_set_records_only_contributors() {
+        let (store, pyramids, set) = store_with_partial_set(5, Some(5));
+        let mut session = session_with(vec![ensemble_panel(&set, "temperature", &[])]);
+        session.source_sets = vec![set_state(
+            &set,
+            &set.members.keys().copied().collect::<Vec<_>>(),
+        )];
+        let sets = BTreeMap::from([(SetId(1), set.clone())]);
+        let selection = ExportSelection {
+            source_keys: Vec::new(),
+            set_keys: vec![set.key.0.to_string()],
+        };
+        let plan = plan_selected(
+            &session,
+            &store,
+            &pyramids,
+            &sets,
+            &selection,
+            ExportRange::Visible,
+            ExportFidelity::Preview,
+        )
+        .unwrap();
+        let baked = &plan.ensembles[0];
+        assert_eq!(baked.member_filter.as_deref(), Some([].as_slice()));
+        assert_eq!(baked.member_keys.len(), 4);
+        assert!(baked.levels[0].iter().all(|bin| bin.run_count <= 4));
     }
 
     #[test]

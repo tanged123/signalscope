@@ -169,7 +169,7 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             object.insert("schema_version".into(), serde_json::json!(3));
             migrate(3, value)
         }
-        3 | 4 | 7 => {
+        3 | 4 | 7 | 12 => {
             // Purely additive optional panel fields; #[serde(default)] restores
             // absent fields, so no rewrite is needed.
             let next = version + 1;
@@ -206,10 +206,6 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["source_sets"] = serde_json::json!([]);
             value["schema_version"] = serde_json::json!(12);
             migrate(12, value)
-        }
-        12 => {
-            value["schema_version"] = serde_json::json!(13);
-            migrate(13, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),

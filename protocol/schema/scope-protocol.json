@@ -430,6 +430,7 @@
         "set_key": "string",
         "generation": "u64",
         "local_path": "string",
+        "member_filter": "string[]?",
         "member_keys": "string[]",
         "levels": "EnsembleBin[][]"
       }

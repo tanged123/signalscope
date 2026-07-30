@@ -182,6 +182,7 @@ describe("BakedPlane.queryEnsembleTiles", () => {
             set_key: "set-a",
             generation: "4",
             local_path: "imu/ax",
+            member_filter: ["run-1", "run-3"],
             member_keys: ["run-1", "run-3"],
             levels: [
               [
@@ -218,6 +219,44 @@ describe("BakedPlane.queryEnsembleTiles", () => {
         window: { t0: 0, t1: 1 },
         pixel_width: 100,
         member_filter: ["run-1"],
+      }),
+    ).rejects.toThrow("membership was not baked");
+  });
+
+  it("keeps full-set requests distinct from their available contributors", async () => {
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [],
+        ensembles: [
+          {
+            set_key: "set-a",
+            generation: "4",
+            local_path: "temperature",
+            member_filter: [],
+            member_keys: ["run-1", "run-2"],
+            levels: [[]],
+          },
+        ],
+      }),
+    );
+    const response = await plane.queryEnsembleTiles({
+      request_id: "r",
+      set_id: "1",
+      local_path: "temperature",
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+      member_filter: [],
+    });
+    expect(response.member_keys).toEqual(["run-1", "run-2"]);
+    await expect(
+      plane.queryEnsembleTiles({
+        request_id: "r",
+        set_id: "1",
+        local_path: "temperature",
+        window: { t0: 0, t1: 1 },
+        pixel_width: 100,
+        member_filter: ["run-1", "run-2"],
       }),
     ).rejects.toThrow("membership was not baked");
   });

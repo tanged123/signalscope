@@ -30,5 +30,6 @@ Accepted decisions:
 26. [Batch ingest and off-lock decode](0026-batch-ingest-and-off-lock-decode.md)
 27. [Durable source identity and restore reconciliation](0027-durable-source-identity-and-restore-reconciliation.md)
 28. [Ensemble run-mean envelope](0028-ensemble-run-mean-envelope.md)
+29. [Out-of-core columns, pyramids, and ensembles](0029-out-of-core-storage.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

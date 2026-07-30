@@ -18,7 +18,7 @@ export const FONT_FAMILIES: readonly FontFamily[] = [
   "arimo",
   "jetbrains",
 ];
-export const DEFAULT_CACHE_MAX_BYTES = String(20 * 1024 * 1024 * 1024);
+const DEFAULT_CACHE_MAX_BYTES = String(20 * 1024 * 1024 * 1024);
 
 const FONT_META: Record<FontFamily, { label: string; stack: string }> = {
   inter: {

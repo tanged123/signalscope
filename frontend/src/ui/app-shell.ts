@@ -777,7 +777,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 2.0.0");
+        this.showModeHelp("SignalScope 2.1.0");
       },
     });
     this.commands.register({
@@ -1152,7 +1152,7 @@ export class AppShell {
     panel.ensemble = {
       set_key: set.set_key,
       local_path: localPath,
-      member_filter: saved.members.map((member) => member.source_key),
+      member_filter: [],
     };
     this.workspace.focusPanel(target);
     this.afterLayoutChange();
@@ -1874,16 +1874,17 @@ export class AppShell {
           const window = this.effectiveWindow(panel);
           const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? width;
           try {
+            const response = await this.plane.queryEnsembleTiles({
+              request_id: crypto.randomUUID(),
+              set_id: set.set_id,
+              local_path: ensemble.local_path,
+              window,
+              pixel_width: Math.max(1, Math.round(panelWidth)),
+              member_filter: ensemble.member_filter,
+            });
             nextEnsembles.set(panel.id, {
-              response: await this.plane.queryEnsembleTiles({
-                request_id: crypto.randomUUID(),
-                set_id: set.set_id,
-                local_path: ensemble.local_path,
-                window,
-                pixel_width: Math.max(1, Math.round(panelWidth)),
-                member_filter: ensemble.member_filter,
-              }),
-              memberCount: ensemble.member_filter.length,
+              response,
+              memberCount: response.member_keys.length,
             });
           } catch (error: unknown) {
             this.reportError(error);
