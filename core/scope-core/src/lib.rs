@@ -13,4 +13,5 @@ pub mod preferences;
 pub mod pyramid;
 pub mod session;
 pub mod snapshot;
+pub mod sources;
 pub mod store;
