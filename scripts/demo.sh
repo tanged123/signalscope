@@ -110,6 +110,9 @@ publish() {
   git init --quiet "$work"
   git -C "$work" checkout --quiet --orphan gh-pages-publish
   git -C "$work" remote add origin "$origin_url"
+  while read -r key value; do
+    git -C "$work" config --local --add "$key" "$value"
+  done < <(git config --local --get-regexp '^http\..*\.extraheader$' || true)
   git -C "$work" add -- demo.html demo.gif index.html
   git -C "$work" \
     -c user.name="${GIT_AUTHOR_NAME:-github-actions[bot]}" \
