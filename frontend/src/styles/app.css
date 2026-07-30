@@ -1441,9 +1441,31 @@ button {
 }
 
 .ingest-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
   padding-bottom: 5px;
   color: var(--fg-2);
   font: 0.7692rem var(--font-mono);
+}
+
+.ingest-progress[hidden] {
+  display: none;
+}
+
+.ingest-cancel {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--fg-2);
+  font: inherit;
+}
+
+.ingest-failures {
+  flex-basis: 100%;
+  color: var(--status-error);
 }
 
 .palette-overlay {

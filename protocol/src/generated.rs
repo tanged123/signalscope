@@ -164,11 +164,6 @@ pub struct RestoreReconcileResponse {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestRequest {
-    pub path: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TileRequest {
     pub request_id: String,
     #[serde(with = "u64_vec_string")]
@@ -270,43 +265,12 @@ pub struct SourceSummary {
     pub point_count: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestResponse {
-    pub source: SourceSummary,
-    pub signals: Vec<SignalSummary>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestJob {
-    #[serde(with = "u64_string")]
-    pub job_id: u64,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IngestStage {
     Decode,
     Pyramid,
     Cache,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum IngestState {
-    Running,
-    Done,
-    Failed,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestStatus {
-    pub state: IngestState,
-    pub stage: IngestStage,
-    pub fraction: f64,
-    #[serde(default)]
-    pub response: Option<IngestResponse>,
-    #[serde(default)]
-    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

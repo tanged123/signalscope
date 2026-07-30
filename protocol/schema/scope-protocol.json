@@ -106,12 +106,6 @@
         "unresolved": "string[]"
       }
     },
-    "IngestRequest": {
-      "kind": "object",
-      "fields": {
-        "path": "string"
-      }
-    },
     "TileRequest": {
       "kind": "object",
       "fields": {
@@ -205,36 +199,9 @@
         "point_count": "u64"
       }
     },
-    "IngestResponse": {
-      "kind": "object",
-      "fields": {
-        "source": "SourceSummary",
-        "signals": "SignalSummary[]"
-      }
-    },
-    "IngestJob": {
-      "kind": "object",
-      "fields": {
-        "job_id": "u64"
-      }
-    },
     "IngestStage": {
       "kind": "enum",
       "variants": ["decode", "pyramid", "cache"]
-    },
-    "IngestState": {
-      "kind": "enum",
-      "variants": ["running", "done", "failed"]
-    },
-    "IngestStatus": {
-      "kind": "object",
-      "fields": {
-        "state": "IngestState",
-        "stage": "IngestStage",
-        "fraction": "f64",
-        "response": "IngestResponse?",
-        "error": "string?"
-      }
     },
     "DerivedRequest": {
       "kind": "object",

@@ -8,7 +8,7 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
-import type { DataPlane } from "../app/data-plane";
+import type { DataPlane, IngestPort } from "../app/data-plane";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -16,7 +16,7 @@ import {
   historySnapshot,
   restoreTransientSessionState,
 } from "../app/history";
-import { runIngest } from "../app/ingest";
+import { runBatchIngest } from "../app/ingest";
 import {
   applyPreferences,
   clampPlotFontSize,
@@ -40,6 +40,7 @@ import {
   zoomRange,
 } from "../app/plot-math";
 import {
+  type BatchStatus,
   type ExportFidelity,
   type ExportRange,
   type SampleResponse,
@@ -1105,33 +1106,31 @@ export class AppShell {
     const port = this.plane.ingest;
     if (port === null) return;
     const progress = required<HTMLElement>(this.root, ".ingest-progress");
+    let keepProgress = false;
     try {
       const paths = await port.pickSources();
-      for (const path of paths) {
-        const name = basename(path);
-        progress.hidden = false;
-        const response = await runIngest(port, path, (status) => {
-          const percent =
-            status.fraction > 0
-              ? `${String(Math.round(status.fraction * 100))}%`
-              : "…";
-          progress.textContent = `${name} · ${status.stage} ${percent}`;
+      if (paths.length === 0) return;
+      progress.hidden = false;
+      let jobId: string | null = null;
+      const tracked: IngestPort = {
+        ...port,
+        startBatch: async (batchPaths) => {
+          jobId = await port.startBatch(batchPaths);
+          return jobId;
+        },
+      };
+      const status = await runBatchIngest(tracked, paths, (current) => {
+        renderBatchProgress(progress, current, () => {
+          if (jobId !== null) void port.cancelBatch(jobId);
         });
-        this.workspace.addSource({
-          key: response.source.source_key,
-          path: response.source.path,
-          prefix: response.source.prefix,
-          provider_id: null,
-          decode_provenance: null,
-          reconcile_legacy: false,
-        });
-      }
+      });
+      keepProgress = status.recent_failures.length > 0;
       await this.reloadSignals();
       this.afterLayoutChange();
     } catch (error: unknown) {
       this.reportError(error);
     } finally {
-      progress.hidden = true;
+      progress.hidden = !keepProgress;
     }
   }
 
@@ -1628,19 +1627,11 @@ export class AppShell {
       const ingestPort = this.plane.ingest;
       if (ingestPort !== null) {
         progress.hidden = false;
-        for (const source of this.workspace.sources()) {
-          const name = basename(source.path);
-          try {
-            await runIngest(ingestPort, source.path, (status) => {
-              const percent =
-                status.fraction > 0
-                  ? `${String(Math.round(status.fraction * 100))}%`
-                  : "…";
-              progress.textContent = `${name} · ${status.stage} ${percent}`;
-            });
-          } catch {
-            progress.textContent = `${name} · unavailable`;
-          }
+        const paths = this.workspace.sources().map((source) => source.path);
+        if (paths.length > 0) {
+          await runBatchIngest(ingestPort, paths, (status) => {
+            renderBatchProgress(progress, status, () => undefined);
+          });
         }
       }
       await this.reloadSignals();
@@ -2116,6 +2107,16 @@ export class AppShell {
 
   private async updateSources(): Promise<void> {
     const sources = await this.plane.listSources();
+    for (const source of sources) {
+      this.workspace.addSource({
+        key: source.source_key,
+        path: source.path,
+        prefix: source.prefix,
+        provider_id: null,
+        decode_provenance: null,
+        reconcile_legacy: false,
+      });
+    }
     const firstName = sources[0] === undefined ? "" : basename(sources[0].path);
     required(this.root, ".source-name").textContent = firstName;
     required(this.root, ".session-identity").textContent =
@@ -2281,6 +2282,39 @@ export class AppShell {
     required(this.root, ".render-ms").textContent = `error: ${message}`;
     console.error(error);
   }
+}
+
+function renderBatchProgress(
+  progress: HTMLElement,
+  status: BatchStatus,
+  cancel: () => void,
+): void {
+  const summary = document.createElement("span");
+  summary.textContent = `${status.done}/${status.total} loaded · ${status.failed} failed`;
+  const children: HTMLElement[] = [summary];
+  if (status.state === "running") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ingest-cancel";
+    button.textContent = "Cancel";
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      cancel();
+    });
+    children.push(button);
+  }
+  if (status.recent_failures.length > 0) {
+    const failures = document.createElement("div");
+    failures.className = "ingest-failures";
+    for (const failure of status.recent_failures) {
+      const row = document.createElement("div");
+      row.textContent = `${basename(failure.path)} — ${failure.error}`;
+      row.title = failure.path;
+      failures.append(row);
+    }
+    children.push(failures);
+  }
+  progress.replaceChildren(...children);
 }
 
 /** Explains why a listed command cannot run, or nothing when it can. */

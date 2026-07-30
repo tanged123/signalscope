@@ -13,9 +13,6 @@ import {
   type ExportWriteRequest,
   type FormatDescriptor,
   type IngestBatchRequest,
-  type IngestJob,
-  type IngestRequest,
-  type IngestStatus,
   type LoadedSession,
   type LoadSessionRequest,
   type PickSessionRequest,
@@ -48,8 +45,6 @@ export interface IngestPort {
   cancelBatch(jobId: string): Promise<void>;
   releaseBatch(jobId: string): Promise<void>;
   listFormats(): Promise<FormatDescriptor[]>;
-  start(path: string): Promise<string>;
-  status(jobId: string): Promise<IngestStatus>;
 }
 
 export interface DerivedPort {
@@ -171,18 +166,6 @@ export class TauriPlane implements DataPlane {
       },
       listFormats: async () =>
         open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
-      start: async (path: string) =>
-        open(
-          await this.invoke<Envelope<IngestJob>>("ingest_source", {
-            request: seal<IngestRequest>({ path }),
-          }),
-        ).job_id,
-      status: async (jobId: string) =>
-        open(
-          await this.invoke<Envelope<IngestStatus>>("ingest_status", {
-            request: seal<IngestJob>({ job_id: jobId }),
-          }),
-        ),
     };
     this.derived = {
       create: async (path: string, expr: string) =>

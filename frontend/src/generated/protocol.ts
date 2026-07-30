@@ -77,10 +77,6 @@ export interface RestoreReconcileResponse {
   unresolved: string[];
 }
 
-export interface IngestRequest {
-  path: string;
-}
-
 export interface TileRequest {
   request_id: string;
   signal_ids: string[];
@@ -156,26 +152,7 @@ export interface SourceSummary {
   point_count: string;
 }
 
-export interface IngestResponse {
-  source: SourceSummary;
-  signals: SignalSummary[];
-}
-
-export interface IngestJob {
-  job_id: string;
-}
-
 export type IngestStage = "decode" | "pyramid" | "cache";
-
-export type IngestState = "running" | "done" | "failed";
-
-export interface IngestStatus {
-  state: IngestState;
-  stage: IngestStage;
-  fraction: number;
-  response: IngestResponse | null;
-  error: string | null;
-}
 
 export interface DerivedRequest {
   path: string;
