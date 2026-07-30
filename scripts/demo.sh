@@ -7,12 +7,13 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/demo.sh [all|bake|record|encode|publish <dir>]
+Usage: ./scripts/demo.sh [all|bake|record|encode|current|publish <dir>]
 
   all             Bake, record, encode, and check the demo artifacts.
   bake            Bake build/demo/demo.html through the export path.
   record          Record the baked artifact with Playwright.
   encode          Encode the single recording as build/demo/demo.gif.
+  current         Succeed only when HEAD is the current origin/main.
   publish <dir>   Force-push the artifacts to the orphan gh-pages branch.
 EOF
 }
@@ -93,6 +94,11 @@ check_demo() {
   pnpm --filter @signalscope/frontend check:demo
 }
 
+current() {
+  git fetch --quiet origin main
+  test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)"
+}
+
 publish() {
   local asset_dir="${1:-}"
   if [ -z "$asset_dir" ]; then
@@ -149,6 +155,9 @@ record)
   ;;
 encode)
   encode
+  ;;
+current)
+  current
   ;;
 publish)
   shift

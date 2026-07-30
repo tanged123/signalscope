@@ -35,8 +35,11 @@ try {
   gifBytes = gifDetails.size;
   if (
     !gifDetails.isFile() ||
-    gifBytes === 0 ||
-    !["GIF87a", "GIF89a"].includes(gif.subarray(0, 6).toString("ascii"))
+    gifBytes < 14 ||
+    !["GIF87a", "GIF89a"].includes(gif.subarray(0, 6).toString("ascii")) ||
+    gif.readUInt16LE(6) === 0 ||
+    gif.readUInt16LE(8) === 0 ||
+    gif.at(-1) !== 0x3b
   ) {
     failures.push("demo.gif is not a valid GIF file");
   }

@@ -416,9 +416,9 @@ Expected: pass. `quality_checks` runs `actionlint` and
 
 - [ ] **Step 3: Note the manual enablement step**
 
-Publishing succeeds but serves nothing until GitHub Pages is pointed at the
-`gh-pages` branch root in repository settings. Call this out at handoff; it
-cannot be done from the repository.
+Publishing succeeds but serves nothing until GitHub Pages is configured to use
+GitHub Actions in repository settings. Call this out at handoff; it cannot be
+done from the repository.
 
 ### Task 8: Documentation
 
@@ -506,6 +506,6 @@ subject and the why.
 ## Handoff Notes
 
 State at handoff: which commands ran and their results, that GitHub Pages must
-be pointed at `gh-pages` manually before the README links resolve, that the
-first real GIF only appears after the next release lands on main, and that the
-hosted demo lands on an empty workspace by design.
+use GitHub Actions before the README links resolve, that the first real GIF only
+appears after the next release lands on main, and that the hosted demo uses the
+shipping export's pre-populated default workspace.

@@ -216,7 +216,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: signalscope-demo-pages
-      cancel-in-progress: true
+      cancel-in-progress: false
     permissions:
       contents: write
       pages: write
@@ -232,21 +232,30 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: |
+      - id: freshness
+        continue-on-error: true
+        run: ./scripts/demo.sh current
+      - if: steps.freshness.outcome == 'success'
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           ./scripts/demo.sh all
-      - uses: actions/upload-artifact@v4
+      - if: steps.freshness.outcome == 'success'
+        uses: actions/upload-artifact@v4
         with:
           name: release-demo
           path: build/demo
           if-no-files-found: error
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
+      - if: steps.freshness.outcome == 'success'
+        uses: actions/configure-pages@v5
+      - if: steps.freshness.outcome == 'success'
+        uses: actions/upload-pages-artifact@v4
         with:
           path: build/demo/pages
-      - run: ./scripts/demo.sh publish build/demo
-      - id: deployment
+      - if: steps.freshness.outcome == 'success'
+        run: ./scripts/demo.sh publish build/demo
+      - if: steps.freshness.outcome == 'success'
+        id: deployment
         uses: actions/deploy-pages@v4
 
   publish:
