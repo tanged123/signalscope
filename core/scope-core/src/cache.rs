@@ -357,7 +357,7 @@ pub fn write_at(
                 times.push(Arc::clone(&time));
                 times.len() - 1
             });
-        let value_section = append_section(&mut payload, &encode_column(signal.values()));
+        let value_section = append_section(&mut payload, &encode_column(&signal.values()));
         let mut levels = Vec::new();
         for level in pyramid.merged_levels() {
             levels.push(append_section(&mut payload, &encode_bins(level)));
@@ -461,10 +461,8 @@ fn try_load_from_root(
                 Arc::clone(&entry.time),
                 Arc::clone(&entry.values),
             )?;
-            pyramids.push((
-                id,
-                Pyramid::from_parts(entry.time, entry.values, entry.merged),
-            ));
+            let signal = store.signal(id).expect("inserted signal exists");
+            pyramids.push((id, Pyramid::from_signal_parts(signal, entry.merged)));
             signals.push(id);
         }
         Ok::<_, CacheError>(LoadedCache {

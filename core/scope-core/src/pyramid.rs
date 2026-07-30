@@ -2,8 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::bins::BinLevel;
-use crate::store::Signal;
+use crate::{
+    bins::BinLevel,
+    columns::{Column, ColumnGuard, WeakColumn},
+    store::Signal,
+};
 use scope_protocol::EnvelopeBin;
 
 pub const FINEST_STORED_LEVEL: usize = 3;
@@ -43,16 +46,38 @@ fn merge_bins(left: &EnvelopeBin, right: &EnvelopeBin) -> EnvelopeBin {
 
 #[derive(Clone, Debug)]
 pub struct Pyramid {
-    time: Arc<[f64]>,
-    values: Arc<[f64]>,
+    columns: PyramidColumns,
+    sample_count: usize,
     first_stored_level: usize,
     merged: Vec<BinLevel>,
+}
+
+#[derive(Clone, Debug)]
+enum PyramidColumns {
+    Retained {
+        time: Column,
+        values: Column,
+    },
+    Weak {
+        time: WeakColumn,
+        values: WeakColumn,
+    },
 }
 
 impl Pyramid {
     #[must_use]
     pub fn from_signal(signal: &Signal) -> Self {
-        Self::from_columns(signal.time_shared(), signal.values_shared())
+        let time = signal.time();
+        let values = signal.values();
+        Self::build(
+            &time,
+            &values,
+            FINEST_STORED_LEVEL,
+            PyramidColumns::Weak {
+                time: signal.time_column().downgrade(),
+                values: signal.values_column().downgrade(),
+            },
+        )
     }
 
     #[must_use]
@@ -62,17 +87,32 @@ impl Pyramid {
     ///
     /// Panics when `time` and `values` have different lengths.
     pub fn from_samples(time: &[f64], values: &[f64]) -> Self {
-        Self::from_columns(Arc::from(time.to_vec()), Arc::from(values.to_vec()))
+        let time = Arc::from(time.to_vec());
+        let values = Arc::from(values.to_vec());
+        Self::from_columns(&time, &values)
     }
 
-    fn from_columns(time: Arc<[f64]>, values: Arc<[f64]>) -> Self {
+    fn from_columns(time: &Arc<[f64]>, values: &Arc<[f64]>) -> Self {
         Self::from_columns_with_cutoff(time, values, FINEST_STORED_LEVEL)
     }
 
     fn from_columns_with_cutoff(
-        time: Arc<[f64]>,
-        values: Arc<[f64]>,
+        time: &Arc<[f64]>,
+        values: &Arc<[f64]>,
         first_stored_level: usize,
+    ) -> Self {
+        let columns = PyramidColumns::Retained {
+            time: Column::owned(Arc::clone(time)),
+            values: Column::owned(Arc::clone(values)),
+        };
+        Self::build(time, values, first_stored_level, columns)
+    }
+
+    fn build(
+        time: &[f64],
+        values: &[f64],
+        first_stored_level: usize,
+        columns: PyramidColumns,
     ) -> Self {
         assert_eq!(time.len(), values.len(), "time/value lengths differ");
         let level_one: Vec<EnvelopeBin> = time
@@ -101,8 +141,8 @@ impl Pyramid {
             logical_level += 1;
         }
         Self {
-            time,
-            values,
+            columns,
+            sample_count: time.len(),
             first_stored_level,
             merged,
         }
@@ -110,7 +150,9 @@ impl Pyramid {
 
     #[cfg(test)]
     fn from_samples_storing_every_level(time: &[f64], values: &[f64]) -> Self {
-        Self::from_columns_with_cutoff(Arc::from(time.to_vec()), Arc::from(values.to_vec()), 1)
+        let time = Arc::from(time.to_vec());
+        let values = Arc::from(values.to_vec());
+        Self::from_columns_with_cutoff(&time, &values, 1)
     }
 
     /// Reassembles a pyramid from previously built parts (the sidecar cache).
@@ -123,19 +165,27 @@ impl Pyramid {
     #[must_use]
     pub fn from_parts(time: Arc<[f64]>, values: Arc<[f64]>, merged: Vec<BinLevel>) -> Self {
         assert_eq!(time.len(), values.len(), "time/value lengths differ");
-        let expected = if level_count(time.len()) > FINEST_STORED_LEVEL {
-            time.len().div_ceil(1 << FINEST_STORED_LEVEL)
-        } else {
-            0
-        };
-        assert_eq!(
-            merged.first().map_or(0, BinLevel::len),
-            expected,
-            "first stored level has the wrong length"
-        );
+        let sample_count = time.len();
+        validate_merged(sample_count, &merged);
         Self {
-            time,
-            values,
+            columns: PyramidColumns::Retained {
+                time: Column::owned(time),
+                values: Column::owned(values),
+            },
+            sample_count,
+            first_stored_level: FINEST_STORED_LEVEL,
+            merged,
+        }
+    }
+
+    pub(crate) fn from_signal_parts(signal: &Signal, merged: Vec<BinLevel>) -> Self {
+        validate_merged(signal.len(), &merged);
+        Self {
+            columns: PyramidColumns::Weak {
+                time: signal.time_column().downgrade(),
+                values: signal.values_column().downgrade(),
+            },
+            sample_count: signal.len(),
             first_stored_level: FINEST_STORED_LEVEL,
             merged,
         }
@@ -149,7 +199,7 @@ impl Pyramid {
 
     #[must_use]
     pub fn level_count(&self) -> usize {
-        level_count(self.time.len())
+        level_count(self.sample_count)
     }
 
     #[must_use]
@@ -165,7 +215,7 @@ impl Pyramid {
             None
         } else if index < self.first_stored_level {
             Some(
-                self.synthesize_level(index, 0..level_len(self.time.len(), index))
+                self.synthesize_level(index, 0..level_len(self.sample_count, index))
                     .to_wire_vec(),
             )
         } else {
@@ -207,7 +257,7 @@ impl Pyramid {
             if index >= self.level_count() {
                 return None;
             }
-            level_len(self.time.len(), index)
+            level_len(self.sample_count, index)
         } else {
             self.merged.get(index - self.first_stored_level)?.len()
         };
@@ -218,15 +268,15 @@ impl Pyramid {
             return Some(0..0);
         }
         if index < self.first_stored_level {
-            if self.time.first().is_none_or(|first| t1 < *first)
-                || self.time.last().is_none_or(|last| t0 > *last)
+            let (time, _) = self.columns()?;
+            if time.first().is_none_or(|first| t1 < *first)
+                || time.last().is_none_or(|last| t0 > *last)
             {
                 return Some(0..0);
             }
             let width = 1 << index;
-            let start = (self.time.partition_point(|time| *time < t0) / width).saturating_sub(1);
-            let end = self
-                .time
+            let start = (time.partition_point(|time| *time < t0) / width).saturating_sub(1);
+            let end = time
                 .partition_point(|time| *time <= t1)
                 .div_ceil(width)
                 .saturating_add(1)
@@ -253,8 +303,13 @@ impl Pyramid {
 
     #[must_use]
     pub fn query(&self, t0: f64, t1: f64, pixel_width: u32) -> PyramidQuery {
-        if self.time.first().is_none_or(|first| t1 < *first)
-            || self.time.last().is_none_or(|last| t0 > *last)
+        let Some((time, _)) = self.columns() else {
+            return PyramidQuery {
+                level: 0,
+                bins: Vec::new(),
+            };
+        };
+        if time.first().is_none_or(|first| t1 < *first) || time.last().is_none_or(|last| t0 > *last)
         {
             return PyramidQuery {
                 level: 0,
@@ -264,8 +319,8 @@ impl Pyramid {
         let target = usize::try_from(pixel_width.max(1))
             .unwrap_or(usize::MAX)
             .saturating_mul(2);
-        let raw_start = self.time.partition_point(|time| *time < t0);
-        let raw_end = self.time.partition_point(|time| *time <= t1);
+        let raw_start = time.partition_point(|time| *time < t0);
+        let raw_end = time.partition_point(|time| *time <= t1);
         if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
             return PyramidQuery {
                 level: 0,
@@ -289,43 +344,48 @@ impl Pyramid {
     ///
     /// Panics when `index` cannot be represented as a sample stride.
     pub fn synthesize_level(&self, index: usize, range: std::ops::Range<usize>) -> BinLevel {
+        let Some((time, values)) = self.columns() else {
+            return BinLevel::default();
+        };
         let width = 1 << index;
         let mut level = BinLevel::with_capacity(range.len());
         for bin in range {
             let start = bin.saturating_mul(width);
-            if start >= self.time.len() {
+            if start >= self.sample_count {
                 break;
             }
-            let merged = self.synthesize_bin(index, start);
+            let merged = synthesize_bin(&time, &values, index, start);
             level.push(&merged);
         }
         level
     }
 
-    fn synthesize_bin(&self, index: usize, start: usize) -> EnvelopeBin {
-        if index == 0 {
-            return sample_bin(self.time[start], self.values[start]);
-        }
-        let left = self.synthesize_bin(index - 1, start);
-        let right_start = start + (1 << (index - 1));
-        if right_start < self.time.len() {
-            merge_bins(&left, &self.synthesize_bin(index - 1, right_start))
-        } else {
-            left
-        }
-    }
-
     fn overlap_count(&self, index: usize, t0: f64, t1: f64) -> usize {
         if index < self.first_stored_level {
+            let Some((time, _)) = self.columns() else {
+                return 0;
+            };
             let width = 1 << index;
-            let start = self.time.partition_point(|time| *time < t0) / width;
-            let end = self
-                .time
-                .partition_point(|time| *time <= t1)
-                .div_ceil(width);
+            let start = time.partition_point(|time| *time < t0) / width;
+            let end = time.partition_point(|time| *time <= t1).div_ceil(width);
             end.saturating_sub(start)
         } else {
             count_overlapping(&self.merged[index - self.first_stored_level], t0, t1)
+        }
+    }
+
+    #[must_use]
+    pub fn retained_column_bytes(&self) -> usize {
+        match self.columns {
+            PyramidColumns::Retained { .. } => self.sample_count.saturating_mul(16),
+            PyramidColumns::Weak { .. } => 0,
+        }
+    }
+
+    fn columns(&self) -> Option<(ColumnGuard, ColumnGuard)> {
+        match &self.columns {
+            PyramidColumns::Retained { time, values } => Some((time.as_slice(), values.as_slice())),
+            PyramidColumns::Weak { time, values } => Some((time.upgrade()?, values.upgrade()?)),
         }
     }
 }
@@ -340,6 +400,19 @@ fn count_overlapping(level: &BinLevel, t0: f64, t1: f64) -> usize {
     let start = level.t1s().partition_point(|time| *time < t0);
     let end = level.t0s().partition_point(|time| *time <= t1);
     end.saturating_sub(start)
+}
+
+fn synthesize_bin(time: &[f64], values: &[f64], index: usize, start: usize) -> EnvelopeBin {
+    if index == 0 {
+        return sample_bin(time[start], values[start]);
+    }
+    let left = synthesize_bin(time, values, index - 1, start);
+    let right_start = start + (1 << (index - 1));
+    if right_start < time.len() {
+        merge_bins(&left, &synthesize_bin(time, values, index - 1, right_start))
+    } else {
+        left
+    }
 }
 
 fn merge_level(previous: &BinLevel) -> BinLevel {
@@ -366,6 +439,19 @@ fn level_count(samples: usize) -> usize {
 
 fn level_len(samples: usize, index: usize) -> usize {
     samples.div_ceil(1 << index)
+}
+
+fn validate_merged(sample_count: usize, merged: &[BinLevel]) {
+    let expected = if level_count(sample_count) > FINEST_STORED_LEVEL {
+        sample_count.div_ceil(1 << FINEST_STORED_LEVEL)
+    } else {
+        0
+    };
+    assert_eq!(
+        merged.first().map_or(0, BinLevel::len),
+        expected,
+        "first stored level has the wrong length"
+    );
 }
 
 fn min_option(left: Option<f64>, right: Option<f64>) -> Option<f64> {
@@ -552,6 +638,22 @@ mod tests {
 
         assert!(usize::try_from(query.level).unwrap() <= FINEST_STORED_LEVEL);
         assert!(query.bins.len() <= 1_602);
+    }
+
+    #[test]
+    fn a_signal_pyramid_does_not_retain_its_columns() {
+        let signal = Signal::new(
+            crate::store::SignalId(1),
+            crate::store::SourceId(1),
+            "x",
+            "run/x",
+            None,
+            Arc::from((0..1_024).map(f64::from).collect::<Vec<_>>()),
+            Arc::from((0..1_024).map(f64::from).collect::<Vec<_>>()),
+        )
+        .unwrap();
+
+        assert_eq!(Pyramid::from_signal(&signal).retained_column_bytes(), 0);
     }
 
     #[test]

@@ -763,9 +763,11 @@ fn query_samples(
             .store
             .signal(SignalId(raw_id))
             .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
+        let time = signal.time();
+        let values = signal.values();
         let slice = compute::sample_window(
-            signal.time(),
-            signal.values(),
+            &time,
+            &values,
             request.window.t0,
             request.window.t1,
             request.max_points,

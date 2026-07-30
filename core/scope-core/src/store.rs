@@ -1,7 +1,6 @@
 //! Signal and source registry for the native data plane.
 //!
-//! Phase 0 stores columns in owned memory while keeping the public boundary
-//! compatible with future mmap-backed columns.
+//! Columns may be owned or page-backed without changing signal semantics.
 
 use std::{
     collections::BTreeMap,
@@ -11,6 +10,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::columns::{Column, ColumnGuard, TimebaseId};
 
 /// Stable identifier for a loaded source.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -42,8 +43,9 @@ pub struct Signal {
     pub local_path: String,
     pub path: String,
     pub unit: Option<String>,
-    time: Arc<[f64]>,
-    values: Arc<[f64]>,
+    time: Column,
+    values: Column,
+    timebase_id: TimebaseId,
 }
 
 impl Signal {
@@ -59,19 +61,22 @@ impl Signal {
         local_path: impl Into<String>,
         path: impl Into<String>,
         unit: Option<String>,
-        time: Arc<[f64]>,
-        values: Arc<[f64]>,
+        time: impl Into<Column>,
+        values: impl Into<Column>,
     ) -> Result<Self, StoreError> {
+        let time = time.into();
+        let values = values.into();
         if time.len() != values.len() {
             return Err(StoreError::ColumnLengthMismatch {
                 time: time.len(),
                 values: values.len(),
             });
         }
-        if let Some(index) = time.iter().position(|value| !value.is_finite()) {
+        let time_values = time.as_slice();
+        if let Some(index) = time_values.iter().position(|value| !value.is_finite()) {
             return Err(StoreError::NonFiniteTime { index });
         }
-        if let Some(index) = time.windows(2).position(|pair| pair[0] > pair[1]) {
+        if let Some(index) = time_values.windows(2).position(|pair| pair[0] > pair[1]) {
             return Err(StoreError::DecreasingTime { index: index + 1 });
         }
 
@@ -83,6 +88,7 @@ impl Signal {
             unit,
             time,
             values,
+            timebase_id: TimebaseId(0),
         })
     }
 
@@ -97,20 +103,21 @@ impl Signal {
     }
 
     #[must_use]
-    pub fn time(&self) -> &[f64] {
-        &self.time
+    pub fn time(&self) -> ColumnGuard {
+        self.time.as_slice()
     }
 
     #[must_use]
-    pub fn values(&self) -> &[f64] {
-        &self.values
+    pub fn values(&self) -> ColumnGuard {
+        self.values.as_slice()
     }
 
     /// The finite min/max of the time column, or `(0.0, 1.0)` when no
     /// finite samples exist, so presentation windows stay well-formed.
     #[must_use]
     pub fn time_bounds(&self) -> (f64, f64) {
-        let mut finite = self.time.iter().copied().filter(|value| value.is_finite());
+        let time = self.time();
+        let mut finite = time.iter().copied().filter(|value| value.is_finite());
         let Some(first) = finite.next() else {
             return (0.0, 1.0);
         };
@@ -121,12 +128,25 @@ impl Signal {
 
     #[must_use]
     pub fn time_shared(&self) -> Arc<[f64]> {
-        Arc::clone(&self.time)
+        self.time().shared()
     }
 
     #[must_use]
     pub fn values_shared(&self) -> Arc<[f64]> {
-        Arc::clone(&self.values)
+        self.values().shared()
+    }
+
+    #[must_use]
+    pub fn timebase_id(&self) -> TimebaseId {
+        self.timebase_id
+    }
+
+    pub(crate) fn time_column(&self) -> &Column {
+        &self.time
+    }
+
+    pub(crate) fn values_column(&self) -> &Column {
+        &self.values
     }
 }
 
@@ -134,11 +154,13 @@ impl Signal {
 pub struct SignalStore {
     next_source_id: u64,
     next_signal_id: u64,
+    next_timebase_id: u64,
     sources: BTreeMap<SourceId, Source>,
     signals: BTreeMap<SignalId, Signal>,
     prefixes: BTreeMap<String, SourceId>,
     by_storage: BTreeMap<(SourceId, String), SignalId>,
     signal_paths: BTreeMap<String, SignalId>,
+    timebases: Vec<(Column, TimebaseId)>,
 }
 
 impl SignalStore {
@@ -147,11 +169,13 @@ impl SignalStore {
         Self {
             next_source_id: 1,
             next_signal_id: 1,
+            next_timebase_id: 1,
             sources: BTreeMap::new(),
             signals: BTreeMap::new(),
             prefixes: BTreeMap::new(),
             by_storage: BTreeMap::new(),
             signal_paths: BTreeMap::new(),
+            timebases: Vec::new(),
         }
     }
 
@@ -197,8 +221,8 @@ impl SignalStore {
         source_id: SourceId,
         local_path: impl Into<String>,
         unit: Option<String>,
-        time: Arc<[f64]>,
-        values: impl Into<Arc<[f64]>>,
+        time: impl Into<Column>,
+        values: impl Into<Column>,
     ) -> Result<SignalId, StoreError> {
         let source = self
             .sources
@@ -222,10 +246,30 @@ impl SignalStore {
             return Err(StoreError::DisplayPathCollision(path));
         }
 
-        let values: Arc<[f64]> = values.into();
+        let time = time.into();
+        let values = values.into();
+        let known_timebase = self
+            .timebases
+            .iter()
+            .find(|(candidate, _)| candidate.same_values(&time))
+            .map(|(_, id)| *id);
+        let timebase_id = known_timebase.unwrap_or(TimebaseId(self.next_timebase_id));
         let id = SignalId(self.next_signal_id);
         let point_count = values.len();
-        let signal = Signal::new(id, source_id, local_path, path.clone(), unit, time, values)?;
+        let mut signal = Signal::new(
+            id,
+            source_id,
+            local_path,
+            path.clone(),
+            unit,
+            time.clone(),
+            values,
+        )?;
+        signal.timebase_id = timebase_id;
+        if known_timebase.is_none() {
+            self.next_timebase_id += 1;
+            self.timebases.push((time, timebase_id));
+        }
         self.next_signal_id += 1;
         self.signals.insert(id, signal);
         self.signal_paths.insert(path, id);
@@ -252,6 +296,8 @@ impl SignalStore {
     pub fn transaction<T, E>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, E>) -> Result<T, E> {
         let source_watermark = self.next_source_id;
         let signal_watermark = self.next_signal_id;
+        let timebase_watermark = self.next_timebase_id;
+        let timebase_len = self.timebases.len();
         let source_point_counts = self
             .sources
             .iter()
@@ -271,6 +317,8 @@ impl SignalStore {
             }
             self.next_source_id = source_watermark;
             self.next_signal_id = signal_watermark;
+            self.next_timebase_id = timebase_watermark;
+            self.timebases.truncate(timebase_len);
         }
         result
     }
@@ -289,6 +337,13 @@ impl SignalStore {
             .remove(&(signal.source_id, signal.local_path.clone()));
         if let Some(source) = self.sources.get_mut(&signal.source_id) {
             source.point_count = source.point_count.saturating_sub(signal.len());
+        }
+        if !self
+            .signals
+            .values()
+            .any(|candidate| candidate.timebase_id == signal.timebase_id)
+        {
+            self.timebases.retain(|(_, id)| *id != signal.timebase_id);
         }
         Some(id)
     }
@@ -562,6 +617,40 @@ mod tests {
         )
         .unwrap();
         assert_eq!(empty.time_bounds(), (0.0, 1.0));
+    }
+
+    #[test]
+    fn equal_owned_and_paged_columns_share_a_timebase_id() {
+        let mut store = SignalStore::new();
+        let source = store
+            .register_source("/a/run.csv", SourceKey(uuid::Uuid::new_v4()), "run")
+            .unwrap();
+        let time: Arc<[f64]> = Arc::from([0.0, 1.0]);
+        let a = store
+            .insert_signal(
+                source,
+                "a",
+                None,
+                crate::columns::Column::owned(Arc::clone(&time)),
+                Arc::from([1.0, 2.0]),
+            )
+            .unwrap();
+        let b = store
+            .insert_signal(
+                source,
+                "b",
+                None,
+                crate::columns::Column::paged(crate::columns::PageHandle::new(Arc::from(
+                    time.to_vec(),
+                ))),
+                Arc::from([3.0, 4.0]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.signal(a).unwrap().timebase_id(),
+            store.signal(b).unwrap().timebase_id()
+        );
     }
 
     #[test]

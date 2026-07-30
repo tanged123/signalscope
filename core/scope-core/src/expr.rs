@@ -620,11 +620,13 @@ pub fn evaluate(expr: &Expr, store: &SignalStore) -> Result<Evaluated, ExprError
         let signal = store
             .signal_by_path(path)
             .ok_or_else(|| ExprError::UnknownSignal(path.clone()))?;
-        let values = if Arc::ptr_eq(&signal.time_shared(), &time) {
+        let values = if signal.timebase_id() == base.timebase_id() {
             signal.values().to_vec()
         } else {
+            let signal_time = signal.time();
+            let signal_values = signal.values();
             time.iter()
-                .map(|query| compute::lerp_at(signal.time(), signal.values(), *query))
+                .map(|query| compute::lerp_at(&signal_time, &signal_values, *query))
                 .collect()
         };
         resolved.insert(path.clone(), values);

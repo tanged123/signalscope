@@ -551,7 +551,7 @@ mod tests {
             let time: Vec<f64> = (0..count).map(f64::from).collect();
             let values: Vec<f64> = time.iter().map(|time| time * 0.5).collect();
             let id = store
-                .insert_signal(source, (*path).to_owned(), None, time.into(), values)
+                .insert_signal(source, (*path).to_owned(), None, time, values)
                 .expect("insert");
             let signal = store.signal(id).expect("signal");
             pyramids.insert(id, Pyramid::from_signal(signal));
@@ -610,7 +610,7 @@ mod tests {
                     source,
                     "imu/ax",
                     None,
-                    vec![0.0, 0.5, 1.0].into(),
+                    vec![0.0, 0.5, 1.0],
                     vec![f64::from(index); 3],
                 )
                 .unwrap();
@@ -1067,7 +1067,7 @@ mod tests {
         let time: Vec<f64> = (0..10_000).map(|value| f64::from(value) / 7.0).collect();
         let values: Vec<f64> = time.iter().map(|time| time.sin() * 13.0).collect();
         let id = store
-            .insert_signal(source, "a".to_owned(), None, time.into(), values)
+            .insert_signal(source, "a".to_owned(), None, time, values)
             .expect("insert");
         let mut pyramids = BTreeMap::new();
         pyramids.insert(id, Pyramid::from_signal(store.signal(id).expect("signal")));
