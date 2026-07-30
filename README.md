@@ -42,6 +42,11 @@ telemetry, paired XY position, angular values, steps and setpoints, boolean and
 discrete state, high-frequency vibration, thermal drift, and intentional GPS
 gaps. Plot nine or more together to exercise the colour-plus-dash identities.
 
+For ensemble bands, open all eight files in
+[`examples/monte_carlo`](examples/monte_carlo). The deterministic runs vary
+response and thermal parameters; run 8 omits `temperature` to demonstrate a
+partial set member.
+
 ### Derived signals
 
 Press `E` to open the formula bar. Signal references use their quoted full
