@@ -16,6 +16,11 @@ progress reporting, multi-panel layouts, a virtualized signal tree, and the
 shared snapshot presentation plane. Workspace tabs retain multiple independent
 panel grids over the same loaded sources and linked time window.
 
+[![SignalScope demo](https://tanged123.github.io/signalscope/demo.gif)](https://tanged123.github.io/signalscope/)
+
+The GIF and the [live snapshot](https://tanged123.github.io/signalscope/) are
+generated on release from the product's own export path.
+
 ## Quick start
 
 ```bash
