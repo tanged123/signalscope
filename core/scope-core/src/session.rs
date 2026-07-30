@@ -186,16 +186,7 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate(7, value)
         }
         8 => {
-            for_each_panel(&mut value, |panel| {
-                let by_time = panel
-                    .get("color_signal")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("time");
-                if by_time {
-                    panel.insert("color_signal".into(), serde_json::Value::Null);
-                }
-                panel.insert("color_by_time".into(), serde_json::json!(by_time));
-            });
+            migrate_v8_color(&mut value);
             value["schema_version"] = serde_json::json!(9);
             migrate(9, value)
         }
@@ -206,43 +197,60 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate(10, value)
         }
         10 => {
-            let paths = value
-                .get("source_paths")
-                .and_then(serde_json::Value::as_array)
-                .map(|entries| {
-                    entries
-                        .iter()
-                        .filter_map(|entry| entry.as_str().map(str::to_owned))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let mut taken = std::collections::BTreeSet::new();
-            let records = paths
-                .into_iter()
-                .map(|path| {
-                    let key = crate::naming::legacy_source_key(&path);
-                    let prefix = crate::naming::allocate_prefix(&taken, Path::new(&path), key)
-                        .unwrap_or_else(|| key.simple().to_string());
-                    taken.insert(prefix.clone());
-                    serde_json::json!({
-                        "key": key.to_string(),
-                        "path": path,
-                        "prefix": prefix,
-                        "provider_id": null,
-                        "decode_provenance": null,
-                        "reconcile_legacy": true
-                    })
-                })
-                .collect();
-            if let Some(object) = value.as_object_mut() {
-                object.remove("source_paths");
-                object.insert("sources".into(), serde_json::Value::Array(records));
-            }
+            migrate_v10_sources(&mut value);
             value["schema_version"] = serde_json::json!(11);
             migrate(11, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
+    }
+}
+
+fn migrate_v8_color(value: &mut serde_json::Value) {
+    for_each_panel(value, |panel| {
+        let by_time = panel
+            .get("color_signal")
+            .and_then(serde_json::Value::as_str)
+            == Some("time");
+        if by_time {
+            panel.insert("color_signal".into(), serde_json::Value::Null);
+        }
+        panel.insert("color_by_time".into(), serde_json::json!(by_time));
+    });
+}
+
+fn migrate_v10_sources(value: &mut serde_json::Value) {
+    let paths = value
+        .get("source_paths")
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut taken = std::collections::BTreeSet::new();
+    let records = paths
+        .into_iter()
+        .map(|path| {
+            let key = crate::naming::legacy_source_key(&path);
+            let prefix = crate::naming::allocate_prefix(&taken, Path::new(&path), key)
+                .unwrap_or_else(|| key.simple().to_string());
+            taken.insert(prefix.clone());
+            serde_json::json!({
+                "key": key.to_string(),
+                "path": path,
+                "prefix": prefix,
+                "provider_id": null,
+                "decode_provenance": null,
+                "reconcile_legacy": true
+            })
+        })
+        .collect();
+    if let Some(object) = value.as_object_mut() {
+        object.remove("source_paths");
+        object.insert("sources".into(), serde_json::Value::Array(records));
     }
 }
 

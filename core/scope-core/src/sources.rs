@@ -110,7 +110,7 @@ impl SourceRegistry {
         let canonical = path.canonicalize()?;
         let record = self.by_key.get_mut(&key).ok_or(SourceError::UnknownKey)?;
         self.by_path.remove(&record.path);
-        record.path = canonical.clone();
+        record.path.clone_from(&canonical);
         self.by_path.insert(canonical, key);
         Ok(())
     }

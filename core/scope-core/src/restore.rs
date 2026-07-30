@@ -92,9 +92,9 @@ impl AliasBuilder {
         let mut built = BuiltAliases::default();
         for (legacy_path, claims) in self.claims {
             if claims.len() == 1 {
-                built
-                    .aliases
-                    .insert(legacy_path, claims.into_values().next().expect("one alias"));
+                if let Some(path) = claims.into_values().next() {
+                    built.aliases.insert(legacy_path, path);
+                }
             } else {
                 built.conflicts.push(AliasConflict {
                     legacy_path,
@@ -196,12 +196,14 @@ mod tests {
     };
 
     fn session_with(path: &str, expression: &str) -> Session {
-        let mut session = Session::default();
-        session.favorites = vec![path.into()];
-        session.derived = vec![DerivedSignal {
-            path: "derived/speed".into(),
-            expr: expression.into(),
-        }];
+        let mut session = Session {
+            favorites: vec![path.into()],
+            derived: vec![DerivedSignal {
+                path: "derived/speed".into(),
+                expr: expression.into(),
+            }],
+            ..Session::default()
+        };
         session.tabs[0].panels.push(PanelState {
             id: "panel-a".into(),
             title: "A".into(),

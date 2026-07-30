@@ -3,7 +3,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        Arc, Condvar, Mutex, MutexGuard,
+        Arc, Condvar, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
@@ -129,6 +129,7 @@ impl BatchProgress {
         self.lock().cancelled = true;
     }
 
+    #[allow(clippy::cast_precision_loss)] // Progress ratios tolerate rounding.
     #[must_use]
     pub fn status(&self) -> BatchStatus {
         let inner = self.lock();
@@ -212,7 +213,7 @@ impl BatchProgress {
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().expect("batch progress lock")
+        lock(&self.inner)
     }
 }
 
@@ -278,16 +279,19 @@ struct SingleFlight {
 
 impl SingleFlight {
     fn publish(&self, outcome: FlightOutcome) {
-        *self.outcome.lock().expect("single flight lock") = Some(outcome);
+        *lock(&self.outcome) = Some(outcome);
         self.ready.notify_all();
     }
 
     fn wait(&self) -> FlightOutcome {
-        let mut outcome = self.outcome.lock().expect("single flight lock");
+        let mut outcome = lock(&self.outcome);
         while outcome.is_none() {
-            outcome = self.ready.wait(outcome).expect("single flight lock");
+            outcome = self
+                .ready
+                .wait(outcome)
+                .unwrap_or_else(PoisonError::into_inner);
         }
-        outcome.clone().expect("single flight outcome")
+        outcome.clone().unwrap_or(FlightOutcome::Cancelled)
     }
 }
 
@@ -318,19 +322,21 @@ impl BatchJobs {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // Workers retain both owned values.
     pub fn submit(&self, paths: Vec<PathBuf>, sink: Arc<dyn CommitSink>) -> JobId {
         let id = JobId(self.next_id.fetch_add(1, Ordering::Relaxed));
         let progress = Arc::new(BatchProgress::new(paths.clone()));
         let cancel = Arc::new(CancelToken::default());
         let mut work = VecDeque::new();
         {
-            let mut registry = self.registry.lock().expect("source registry lock");
+            let mut registry = lock(&self.registry);
             for (index, path) in paths.iter().enumerate() {
                 match registry.admit(path) {
                     Ok(Admission::New(record)) => work.push_back(WorkItem { index, record }),
                     Ok(Admission::Existing(key)) => {
-                        let record = registry.record(key).expect("admitted source").clone();
-                        work.push_back(WorkItem { index, record });
+                        if let Some(record) = registry.record(key).cloned() {
+                            work.push_back(WorkItem { index, record });
+                        }
                     }
                     Err(error) => progress.failed(index, error.to_string()),
                 }
@@ -338,7 +344,7 @@ impl BatchJobs {
         }
 
         let queue = Arc::new(Mutex::new(work));
-        self.jobs.lock().expect("batch jobs lock").insert(
+        lock(&self.jobs).insert(
             id,
             Job {
                 progress: Arc::clone(&progress),
@@ -348,11 +354,7 @@ impl BatchJobs {
             },
         );
 
-        let worker_count = self
-            .options
-            .worker_count
-            .max(1)
-            .min(queue.lock().expect("batch queue lock").len());
+        let worker_count = self.options.worker_count.max(1).min(lock(&queue).len());
         let mut handles = Vec::with_capacity(worker_count);
         for _ in 0..worker_count {
             let worker = Worker {
@@ -367,7 +369,7 @@ impl BatchJobs {
             };
             handles.push(thread::spawn(move || worker.run()));
         }
-        if let Some(job) = self.jobs.lock().expect("batch jobs lock").get_mut(&id) {
+        if let Some(job) = lock(&self.jobs).get_mut(&id) {
             job.handles = handles;
         }
         id
@@ -377,20 +379,14 @@ impl BatchJobs {
     ///
     /// Returns a source identity conflict.
     pub fn restore_source(&self, record: SourceRecord) -> Result<(), SourceError> {
-        self.registry
-            .lock()
-            .expect("source registry lock")
-            .restore(record)
+        lock(&self.registry).restore(record)
     }
 
     /// # Errors
     ///
     /// Returns an identity conflict or [`SourceError::Busy`].
     pub fn replace_sources(&self, records: Vec<SourceRecord>) -> Result<(), SourceError> {
-        if self
-            .jobs
-            .lock()
-            .expect("batch jobs lock")
+        if lock(&self.jobs)
             .values()
             .any(|job| !job.progress.is_terminal())
         {
@@ -400,15 +396,15 @@ impl BatchJobs {
         for record in records {
             registry.restore(record)?;
         }
-        *self.registry.lock().expect("source registry lock") = registry;
-        self.flights.lock().expect("single flights lock").clear();
-        self.resident.lock().expect("resident charges lock").clear();
+        *lock(&self.registry) = registry;
+        lock(&self.flights).clear();
+        lock(&self.resident).clear();
         Ok(())
     }
 
     #[must_use]
     pub fn status(&self, id: JobId) -> Option<BatchStatus> {
-        let mut jobs = self.jobs.lock().expect("batch jobs lock");
+        let mut jobs = lock(&self.jobs);
         let job = jobs.get_mut(&id)?;
         let status = job.progress.status();
         if status.state != BatchState::Running && job.finished_at.is_none() {
@@ -419,22 +415,20 @@ impl BatchJobs {
 
     #[must_use]
     pub fn detail(&self, id: JobId, offset: usize, limit: usize) -> Option<BatchDetail> {
-        self.jobs
-            .lock()
-            .expect("batch jobs lock")
+        lock(&self.jobs)
             .get(&id)
             .map(|job| job.progress.detail(offset, limit))
     }
 
     pub fn cancel(&self, id: JobId) {
-        if let Some(job) = self.jobs.lock().expect("batch jobs lock").get(&id) {
+        if let Some(job) = lock(&self.jobs).get(&id) {
             job.progress.cancel();
             job.cancel.cancel();
         }
     }
 
     pub fn release(&self, id: JobId) {
-        let Some(mut job) = self.jobs.lock().expect("batch jobs lock").remove(&id) else {
+        let Some(mut job) = lock(&self.jobs).remove(&id) else {
             return;
         };
         job.cancel.cancel();
@@ -445,7 +439,7 @@ impl BatchJobs {
 
     pub fn sweep_terminal(&self, now: Instant) {
         let ttl = self.options.terminal_ttl;
-        self.jobs.lock().expect("batch jobs lock").retain(|_, job| {
+        lock(&self.jobs).retain(|_, job| {
             if job.progress.is_terminal() && job.finished_at.is_none() {
                 job.finished_at = Some(now);
             }
@@ -457,7 +451,7 @@ impl BatchJobs {
     #[must_use]
     pub fn join(&self, id: JobId) -> Option<BatchStatus> {
         let handles = {
-            let mut jobs = self.jobs.lock().expect("batch jobs lock");
+            let mut jobs = lock(&self.jobs);
             std::mem::take(&mut jobs.get_mut(&id)?.handles)
         };
         for handle in handles {
@@ -485,14 +479,14 @@ struct Worker {
 
 impl Worker {
     fn run(&self) {
-        while let Some(item) = self.queue.lock().expect("batch queue lock").pop_front() {
+        while let Some(item) = lock(&self.queue).pop_front() {
             if self.cancel.is_cancelled() {
                 self.progress.cancelled(item.index);
                 continue;
             }
             self.progress.started(item.index);
             let (flight, leader) = {
-                let mut flights = self.flights.lock().expect("single flights lock");
+                let mut flights = lock(&self.flights);
                 if let Some(flight) = flights.get(&item.record.path) {
                     (Arc::clone(flight), false)
                 } else {
@@ -519,14 +513,8 @@ impl Worker {
     fn process(&self, record: &SourceRecord) -> FlightOutcome {
         match self.prepare_and_commit(record) {
             Ok((provider, provenance, charge)) => {
-                self.registry
-                    .lock()
-                    .expect("source registry lock")
-                    .set_provenance(record.key, provider, provenance);
-                self.resident
-                    .lock()
-                    .expect("resident charges lock")
-                    .push(charge);
+                lock(&self.registry).set_provenance(record.key, provider, provenance);
+                lock(&self.resident).push(charge);
                 FlightOutcome::Done
             }
             Err(ProcessError::Cancelled) => FlightOutcome::Cancelled,
@@ -538,11 +526,13 @@ impl Worker {
         &self,
         record: &SourceRecord,
     ) -> Result<(String, String, ResidentCharge), ProcessError> {
-        let file_len = fs::metadata(&record.path).map_err(failed)?.len();
+        let file_len = fs::metadata(&record.path)
+            .map_err(|error| failed(&error))?
+            .len();
         let mut ticket = self
             .budget
             .acquire_working(estimate_working_bytes(file_len, 1))
-            .map_err(failed)?;
+            .map_err(|error| failed(&error))?;
         let mut temporary = SignalStore::new();
         let mut decode_progress = |_| {};
         let mut context = DecodeContext {
@@ -593,8 +583,10 @@ impl Worker {
             .collect();
         ticket
             .reconcile(decoded.column_bytes().saturating_add(pyramid_bytes))
-            .map_err(failed)?;
-        let charge = ticket.transfer_to_resident().map_err(failed)?;
+            .map_err(|error| failed(&error))?;
+        let charge = ticket
+            .transfer_to_resident()
+            .map_err(|error| failed(&error))?;
         let mut committed = record.clone();
         committed.provider_id = Some(outcome.provider_id.clone());
         committed.decode_provenance = Some(outcome.provenance.clone());
@@ -613,15 +605,19 @@ enum ProcessError {
     Failed(String),
 }
 
-fn failed(error: impl ToString) -> ProcessError {
+fn failed(error: &impl ToString) -> ProcessError {
     ProcessError::Failed(error.to_string())
 }
 
 fn process_cache_error(error: CacheError) -> ProcessError {
     match error {
         CacheError::Ingest(IngestError::Cancelled) => ProcessError::Cancelled,
-        error => failed(error),
+        error => failed(&error),
     }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn pyramid_bytes(pyramid: &Pyramid) -> usize {
@@ -684,7 +680,7 @@ mod tests {
             self.max_concurrent_commits
                 .fetch_max(depth, Ordering::SeqCst);
             let result = commit(
-                &mut self.store.lock().expect("store lock"),
+                &mut lock(&self.store),
                 record.key,
                 &record.prefix,
                 &record.path,
@@ -807,7 +803,7 @@ mod tests {
         assert!(status.done < 64);
         assert_eq!(
             sink.store.lock().unwrap().sources().count(),
-            status.done as usize
+            usize::try_from(status.done).unwrap()
         );
     }
 

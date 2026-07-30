@@ -1,6 +1,6 @@
 //! Memory-weighted ingest admission.
 
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 use thiserror::Error;
 
@@ -72,13 +72,13 @@ impl MemoryBudget {
                 allowance: self.inner.config.working_bytes,
             });
         }
-        let mut usage = self.inner.usage.lock().expect("memory budget lock");
+        let mut usage = lock(&self.inner.usage);
         while usage.working.saturating_add(bytes) > self.inner.config.working_bytes {
             usage = self
                 .inner
                 .available
                 .wait(usage)
-                .expect("memory budget lock");
+                .unwrap_or_else(PoisonError::into_inner);
         }
         usage.working += bytes;
         Ok(Ticket {
@@ -90,16 +90,12 @@ impl MemoryBudget {
 
     #[must_use]
     pub fn working_used(&self) -> usize {
-        self.inner.usage.lock().expect("memory budget lock").working
+        lock(&self.inner.usage).working
     }
 
     #[must_use]
     pub fn resident_used(&self) -> usize {
-        self.inner
-            .usage
-            .lock()
-            .expect("memory budget lock")
-            .resident
+        lock(&self.inner.usage).resident
     }
 }
 
@@ -126,14 +122,14 @@ impl Ticket {
                 allowance,
             });
         }
-        let mut usage = self.budget.inner.usage.lock().expect("memory budget lock");
+        let mut usage = lock(&self.budget.inner.usage);
         while usage.working - self.bytes + actual > allowance {
             usage = self
                 .budget
                 .inner
                 .available
                 .wait(usage)
-                .expect("memory budget lock");
+                .unwrap_or_else(PoisonError::into_inner);
         }
         usage.working = usage.working - self.bytes + actual;
         self.bytes = actual;
@@ -146,7 +142,7 @@ impl Ticket {
     /// Returns [`BudgetError::ResidentFull`] before any resident charge is made.
     pub fn transfer_to_resident(mut self) -> Result<ResidentCharge, BudgetError> {
         {
-            let mut usage = self.budget.inner.usage.lock().expect("memory budget lock");
+            let mut usage = lock(&self.budget.inner.usage);
             if usage.resident.saturating_add(self.bytes) > self.budget.inner.config.resident_bytes {
                 return Err(BudgetError::ResidentFull {
                     requested: self.bytes,
@@ -175,7 +171,7 @@ impl Drop for Ticket {
         if !self.active {
             return;
         }
-        let mut usage = self.budget.inner.usage.lock().expect("memory budget lock");
+        let mut usage = lock(&self.budget.inner.usage);
         usage.working -= self.bytes;
         drop(usage);
         self.budget.inner.available.notify_all();
@@ -189,11 +185,15 @@ pub struct ResidentCharge {
 
 impl Drop for ResidentCharge {
     fn drop(&mut self) {
-        let mut usage = self.budget.inner.usage.lock().expect("memory budget lock");
+        let mut usage = lock(&self.budget.inner.usage);
         usage.resident -= self.bytes;
         drop(usage);
         self.budget.inner.available.notify_all();
     }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[must_use]

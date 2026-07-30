@@ -30,7 +30,6 @@ pub struct CsvDecoder;
 impl CsvDecoder {
     #[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding
     fn decode_reader_with_total<R: BufRead>(
-        &self,
         reader: R,
         total: Option<u64>,
         context: &mut DecodeContext<'_>,
@@ -103,7 +102,7 @@ impl CsvDecoder {
         reader: R,
         context: &mut DecodeContext<'_>,
     ) -> Result<DecodedSource, IngestError> {
-        self.decode_reader_with_total(reader, None, context)
+        Self::decode_reader_with_total(reader, None, context)
     }
 }
 
@@ -115,7 +114,7 @@ impl Decoder for CsvDecoder {
     ) -> Result<DecodedSource, IngestError> {
         let file = File::open(path)?;
         let total = file.metadata().ok().map(|metadata| metadata.len());
-        self.decode_reader_with_total(BufReader::new(file), total, context)
+        Self::decode_reader_with_total(BufReader::new(file), total, context)
     }
 }
 
@@ -144,14 +143,8 @@ impl<R: BufRead> Read for CommentFilter<R> {
                 return Ok(0);
             }
             let trimmed = self.pending.trim_ascii();
-            if trimmed.is_empty()
-                || matches!(
-                    trimmed.first().copied(),
-                    Some(b'#') | Some(b'%') | Some(b';')
-                )
-            {
+            if trimmed.is_empty() || matches!(trimmed.first().copied(), Some(b'#' | b'%' | b';')) {
                 self.pending.clear();
-                continue;
             }
         }
         let count = output.len().min(self.pending.len() - self.offset);

@@ -230,10 +230,9 @@ impl SignalStore {
         self.signals.insert(id, signal);
         self.signal_paths.insert(path, id);
         self.by_storage.insert(storage, id);
-        self.sources
-            .get_mut(&source_id)
-            .expect("source checked above")
-            .point_count += point_count;
+        if let Some(source) = self.sources.get_mut(&source_id) {
+            source.point_count += point_count;
+        }
         Ok(id)
     }
 

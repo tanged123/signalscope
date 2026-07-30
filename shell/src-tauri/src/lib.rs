@@ -60,14 +60,10 @@ impl RestoreGate {
             });
     }
 
-    fn autosave_allowed(&self) -> Result<(), String> {
-        (self.0.load(Ordering::Acquire) == 0)
+    fn save_allowed(&self, autosave: bool) -> Result<(), String> {
+        (!autosave || self.0.load(Ordering::Acquire) == 0)
             .then_some(())
             .ok_or_else(|| "restore in progress".into())
-    }
-
-    fn named_save_allowed(&self) -> Result<(), String> {
-        Ok(())
     }
 }
 
@@ -766,11 +762,7 @@ fn save_session(
     gate: State<'_, RestoreGate>,
 ) -> Result<Envelope<String>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    if request.path.is_none() {
-        gate.autosave_allowed()?;
-    } else {
-        gate.named_save_allowed()?;
-    }
+    gate.save_allowed(request.path.is_none())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
     let path = match request.path {
         Some(path) => normalized_session_save_path(PathBuf::from(path)),
@@ -1245,16 +1237,16 @@ mod tests {
     fn restore_gate_refuses_autosave_until_restore_settles() {
         let gate = RestoreGate::default();
         gate.begin();
-        assert!(gate.autosave_allowed().is_err());
+        assert!(gate.save_allowed(true).is_err());
         gate.settle();
-        assert!(gate.autosave_allowed().is_ok());
+        assert!(gate.save_allowed(true).is_ok());
     }
 
     #[test]
     fn restore_gate_never_blocks_named_saves() {
         let gate = RestoreGate::default();
         gate.begin();
-        assert!(gate.named_save_allowed().is_ok());
+        assert!(gate.save_allowed(false).is_ok());
     }
 
     #[test]
