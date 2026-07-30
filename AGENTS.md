@@ -67,6 +67,8 @@ Canonical commands:
 ./scripts/build.sh web|native         frontend or native bundles
 ./scripts/build.sh windows            Windows NSIS installer (Git Bash only)
 ./scripts/export.sh                   bake a self-contained HTML snapshot
+./scripts/demo.sh                     bake, record, and encode the demo artifacts
+./scripts/demo.sh publish <dir>       force-push staged demo artifacts to gh-pages
 ./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
 ./scripts/build.sh appimage           Ubuntu/FHS AppImage build
 ./scripts/coverage.sh                 Rust + frontend LCOV
