@@ -18,10 +18,18 @@ amendment): quoted names are signal references, functions are bare MATLAB
 names, and the transforms are `gradient`/`cumtrapz`/`movmean`. Derived signals
 materialize into the store under one synthetic source with an in-memory
 pyramid, so every tile, sample, and panel-mode consumer is unchanged. Sessions
-reached schema v10 with ordered derived definitions and source paths, and gained
-autosave with resume-on-launch plus named workspace files
+reached schema v11 with ordered derived definitions and durable source records,
+and gained autosave with resume-on-launch plus named workspace files
 ([ADR 0022](adr/0022-durable-session-persistence.md)). The `localStorage` theme
 key is gone; the session is the only durable store.
+
+Multi-source ingest now uses batch jobs with per-file outcomes,
+memory-weighted admission, streaming CSV decode, and off-lock pyramid
+construction ([ADR 0026](adr/0026-batch-ingest-and-off-lock-decode.md)).
+Durable source keys separate storage identity from display prefixes; legacy
+sessions reconcile provider-specific references after restore while autosave
+is paused
+([ADR 0027](adr/0027-durable-source-identity-and-restore-reconciliation.md)).
 
 ## Phase 4 — export and fidelity
 

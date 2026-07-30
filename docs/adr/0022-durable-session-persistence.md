@@ -1,6 +1,6 @@
 # ADR 0022: Durable session persistence
 
-- Status: Accepted
+- Status: Accepted; restore ordering superseded by ADR 0027
 - Date: 2026-07-27
 
 ## Context

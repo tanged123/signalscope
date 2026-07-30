@@ -27,5 +27,7 @@ Accepted decisions:
 23. [Global preferences file](0023-global-preferences-file.md)
 24. [Snapshot manifest and export budget](0024-snapshot-manifest-and-export-budget.md)
 25. [Orthogonal export range and fidelity](0025-orthogonal-export-range-and-fidelity.md)
+26. [Batch ingest and off-lock decode](0026-batch-ingest-and-off-lock-decode.md)
+27. [Durable source identity and restore reconciliation](0027-durable-source-identity-and-restore-reconciliation.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.
