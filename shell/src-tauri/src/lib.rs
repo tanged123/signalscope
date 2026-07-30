@@ -1,26 +1,32 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
-    thread,
+    time::Duration,
 };
 
 use base64::Engine;
 use scope_core::{
-    cache, compute, expr,
-    ingest::{CancelToken, DecodeContext, SUPPORTED_FORMATS},
-    naming, preferences,
+    compute, expr,
+    ingest::{
+        self, DecodedSource, IngestError, IngestSummary, SUPPORTED_FORMATS,
+        admission::{BudgetConfig, MemoryBudget},
+        batch::{BatchJobs, BatchOptions, CommitSink},
+    },
+    preferences,
     pyramid::Pyramid,
     session, snapshot,
+    sources::{SourceRecord, SourceRegistry},
     store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
 };
 use scope_protocol::{
-    DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
-    ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest, IngestJob, IngestRequest,
-    IngestResponse, IngestStage, IngestState, IngestStatus, LoadSessionRequest, LoadedSession,
+    BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob, BatchState,
+    BatchStatus, DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry,
+    ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest,
+    FileState, FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession,
     PickSessionRequest, RemoveSignalRequest, SampleRequest, SampleResponse, SampleSeries,
     SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode,
     SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
@@ -32,30 +38,18 @@ use tauri_plugin_dialog::DialogExt;
 struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
+    registry: SourceRegistry,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
 }
 
-#[derive(Default)]
-struct IngestJobs {
-    next_job_id: u64,
-    jobs: BTreeMap<u64, IngestStatus>,
-}
-
-fn running(stage: IngestStage, fraction: f64) -> IngestStatus {
-    IngestStatus {
-        state: IngestState::Running,
-        stage,
-        fraction,
-        response: None,
-        error: None,
-    }
-}
-
-fn signal_summary(signal: &Signal) -> SignalSummary {
+fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
+        source_id: signal.source_id.0,
+        source_key: source_key.0.to_string(),
+        local_path: signal.local_path.clone(),
         path: signal.path.clone(),
         unit: signal.unit.clone(),
         point_count: signal.len() as u64,
@@ -67,107 +61,61 @@ fn signal_summary(signal: &Signal) -> SignalSummary {
 fn source_summary(source: &Source) -> SourceSummary {
     SourceSummary {
         source_id: source.id.0,
+        source_key: source.key.0.to_string(),
+        prefix: source.prefix.clone(),
         path: source.path.display().to_string(),
         point_count: source.point_count as u64,
     }
 }
 
-fn set_job(app: &AppHandle, job_id: u64, status: IngestStatus) {
-    if let Ok(mut jobs) = app.state::<Mutex<IngestJobs>>().inner().lock() {
-        jobs.jobs.insert(job_id, status);
-    }
+struct ShellCommitSink {
+    state: Arc<Mutex<DataState>>,
 }
 
-fn run_ingest_job(app: &AppHandle, job_id: u64, path: &Path) {
-    let status = match ingest_with_cache(app, job_id, path) {
-        Ok(response) => IngestStatus {
-            state: IngestState::Done,
-            stage: IngestStage::Cache,
-            fraction: 1.0,
-            response: Some(response),
-            error: None,
-        },
-        Err(error) => {
-            let (stage, fraction) = last_progress(app, job_id);
-            IngestStatus {
-                state: IngestState::Failed,
-                stage,
-                fraction,
-                response: None,
-                error: Some(error),
-            }
+impl CommitSink for ShellCommitSink {
+    fn commit(
+        &self,
+        record: &SourceRecord,
+        decoded: DecodedSource,
+        pyramids: Vec<(String, Pyramid)>,
+    ) -> Result<IngestSummary, IngestError> {
+        let expected: BTreeSet<_> = decoded
+            .signals
+            .iter()
+            .map(|signal| signal.local_path.as_str())
+            .collect();
+        let mut pyramids: BTreeMap<_, _> = pyramids.into_iter().collect();
+        if expected.len() != pyramids.len()
+            || !expected.iter().all(|path| pyramids.contains_key(*path))
+        {
+            return Err(std::io::Error::other("pyramids do not match decoded signals").into());
         }
-    };
-    set_job(app, job_id, status);
-}
 
-fn last_progress(app: &AppHandle, job_id: u64) -> (IngestStage, f64) {
-    app.state::<Mutex<IngestJobs>>()
-        .inner()
-        .lock()
-        .ok()
-        .and_then(|jobs| {
-            jobs.jobs
-                .get(&job_id)
-                .map(|status| (status.stage, status.fraction))
-        })
-        .unwrap_or((IngestStage::Decode, 0.0))
-}
-
-fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<IngestResponse, String> {
-    let state = app.state::<Mutex<DataState>>();
-    let mut data = state.lock().map_err(|error| error.to_string())?;
-    let DataState {
-        store, pyramids, ..
-    } = &mut *data;
-
-    let cancel = CancelToken::default();
-    let mut on_decode = |fraction| {
-        set_job(
-            app,
-            job_id,
-            running(scope_protocol::IngestStage::Decode, fraction),
-        );
-    };
-    let mut context = DecodeContext {
-        progress: &mut on_decode,
-        cancel: &cancel,
-    };
-    let mut on_progress = |stage, fraction| set_job(app, job_id, running(stage, fraction));
-    let outcome = cache::ingest_or_load(
-        path,
-        store,
-        SourceKey(uuid::Uuid::new_v4()),
-        &naming::default_prefix(path),
-        &mut context,
-        &mut on_progress,
-    )
-    .map_err(|error| error.to_string())?;
-    if let Some(error) = outcome.sidecar_error {
-        eprintln!(
-            "pyramid sidecar not written for {}: {error}",
-            path.display()
-        );
+        let mut data = self.state.lock().expect("data state lock");
+        let mut registry = data.registry.clone();
+        registry.restore(record.clone())?;
+        let summary = ingest::commit(
+            &mut data.store,
+            record.key,
+            &record.prefix,
+            &record.path,
+            decoded,
+        )?;
+        for id in &summary.signals {
+            let local_path = data
+                .store
+                .signal(*id)
+                .expect("committed signal")
+                .local_path
+                .clone();
+            data.pyramids.insert(
+                *id,
+                pyramids.remove(&local_path).expect("validated pyramid"),
+            );
+        }
+        data.registry = registry;
+        Ok(summary)
     }
-    let summary = outcome.loaded.summary;
-    for (id, pyramid) in outcome.loaded.pyramids {
-        pyramids.insert(id, pyramid);
-    }
-
-    let source = store
-        .sources()
-        .find(|source| source.id == summary.source_id)
-        .ok_or_else(|| "ingested source is missing".to_owned())?;
-    let signals = summary
-        .signals
-        .iter()
-        .filter_map(|id| store.signal(*id))
-        .map(signal_summary)
-        .collect();
-    Ok(IngestResponse {
-        source: source_summary(source),
-        signals,
-    })
 }
 
 #[tauri::command]
@@ -205,43 +153,191 @@ async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn ingest_source(
-    request: Envelope<IngestRequest>,
+fn ingest_batch(
+    request: Envelope<IngestBatchRequest>,
     app: AppHandle,
-    jobs: State<'_, Mutex<IngestJobs>>,
-) -> Result<Envelope<IngestJob>, String> {
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<BatchJob>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    let job_id = {
-        let mut jobs = jobs.lock().map_err(|error| error.to_string())?;
-        jobs.next_job_id += 1;
-        let id = jobs.next_job_id;
-        jobs.jobs.insert(id, running(IngestStage::Decode, 0.0));
-        id
-    };
-    let path = PathBuf::from(request.path);
-    thread::spawn(move || run_ingest_job(&app, job_id, &path));
-    Ok(Envelope::new(IngestJob { job_id }))
+    let paths = expand_sources(request.paths)?;
+    let sink = Arc::new(ShellCommitSink {
+        state: Arc::clone(app.state::<Arc<Mutex<DataState>>>().inner()),
+    });
+    Ok(Envelope::new(BatchJob {
+        job_id: jobs.submit(paths, sink).0,
+    }))
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn ingest_status(
-    request: Envelope<IngestJob>,
-    jobs: State<'_, Mutex<IngestJobs>>,
-) -> Result<Envelope<IngestStatus>, String> {
+fn batch_status(
+    request: Envelope<BatchJob>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<BatchStatus>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    let jobs = jobs.lock().map_err(|error| error.to_string())?;
     let status = jobs
-        .jobs
-        .get(&request.job_id)
-        .ok_or_else(|| format!("unknown ingest job: {}", request.job_id))?;
-    Ok(Envelope::new(status.clone()))
+        .status(scope_core::ingest::batch::JobId(request.job_id))
+        .ok_or_else(|| format!("unknown batch job: {}", request.job_id))?;
+    Ok(Envelope::new(batch_status_response(status)))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn batch_detail(
+    request: Envelope<BatchDetailRequest>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<BatchDetail>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let detail = jobs
+        .detail(
+            scope_core::ingest::batch::JobId(request.job_id),
+            request.offset as usize,
+            request.limit as usize,
+        )
+        .ok_or_else(|| format!("unknown batch job: {}", request.job_id))?;
+    Ok(Envelope::new(BatchDetail {
+        total: detail.total,
+        entries: detail
+            .entries
+            .into_iter()
+            .map(|entry| BatchFileStatus {
+                path: entry.path.display().to_string(),
+                state: file_state(entry.state),
+                error: entry.error,
+            })
+            .collect(),
+    }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn cancel_batch(
+    request: Envelope<BatchJob>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    jobs.cancel(scope_core::ingest::batch::JobId(request.job_id));
+    Ok(Envelope::new(()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn release_batch(
+    request: Envelope<BatchJob>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    jobs.release(scope_core::ingest::batch::JobId(request.job_id));
+    Ok(Envelope::new(()))
+}
+
+#[tauri::command]
+fn list_formats() -> Envelope<Vec<FormatDescriptor>> {
+    Envelope::new(
+        SUPPORTED_FORMATS
+            .iter()
+            .map(|(label, extensions)| FormatDescriptor {
+                id: extensions.first().copied().unwrap_or_default().into(),
+                label: (*label).into(),
+                extensions: extensions
+                    .iter()
+                    .map(|extension| (*extension).into())
+                    .collect(),
+            })
+            .collect(),
+    )
+}
+
+fn batch_status_response(status: scope_core::ingest::batch::BatchStatus) -> BatchStatus {
+    BatchStatus {
+        state: batch_state(status.state),
+        fraction: status.fraction,
+        total: status.total,
+        done: status.done,
+        failed: status.failed,
+        recent_failures: status
+            .recent_failures
+            .into_iter()
+            .map(|failure| BatchFailure {
+                path: failure.path.display().to_string(),
+                error: failure.error,
+            })
+            .collect(),
+    }
+}
+
+fn batch_state(state: scope_core::ingest::batch::BatchState) -> BatchState {
+    use scope_core::ingest::batch::BatchState as Core;
+    match state {
+        Core::Running => BatchState::Running,
+        Core::Done => BatchState::Done,
+        Core::Partial => BatchState::Partial,
+        Core::Failed => BatchState::Failed,
+        Core::Cancelled => BatchState::Cancelled,
+    }
+}
+
+fn file_state(state: scope_core::ingest::batch::FileState) -> FileState {
+    use scope_core::ingest::batch::FileState as Core;
+    match state {
+        Core::Pending => FileState::Pending,
+        Core::Running => FileState::Running,
+        Core::Done => FileState::Done,
+        Core::Failed => FileState::Failed,
+        Core::Cancelled => FileState::Cancelled,
+    }
+}
+
+fn expand_sources(paths: Vec<String>) -> Result<Vec<PathBuf>, String> {
+    let mut expanded = Vec::new();
+    for path in paths {
+        expand_source(Path::new(&path), &mut expanded)?;
+    }
+    expanded.sort();
+    Ok(expanded)
+}
+
+fn expand_source(path: &Path, expanded: &mut Vec<PathBuf>) -> Result<(), String> {
+    if !path.is_dir() {
+        expanded.push(path.to_owned());
+        return Ok(());
+    }
+    let mut entries = std::fs::read_dir(path)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    entries.sort_by_key(std::fs::DirEntry::path);
+    for entry in entries {
+        let path = entry.path();
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            expand_source(&path, expanded)?;
+        } else if supported_path(&path) {
+            expanded.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn supported_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            SUPPORTED_FORMATS.iter().any(|(_, extensions)| {
+                extensions
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+            })
+        })
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn list_sources(
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<Vec<SourceSummary>>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(Envelope::new(
@@ -252,11 +348,22 @@ fn list_sources(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn list_signals(
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<Vec<SignalSummary>>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(Envelope::new(
-        data.store.signals().map(signal_summary).collect(),
+        data.store
+            .signals()
+            .map(|signal| {
+                let key = data
+                    .store
+                    .sources()
+                    .find(|source| source.id == signal.source_id)
+                    .expect("signal source")
+                    .key;
+                signal_summary(signal, key)
+            })
+            .collect(),
     ))
 }
 
@@ -264,7 +371,7 @@ fn list_signals(
 #[allow(clippy::needless_pass_by_value)]
 fn query_tiles(
     request: Envelope<TileRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<TileResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let data = state.lock().map_err(|error| error.to_string())?;
@@ -299,7 +406,7 @@ fn query_tiles(
 #[allow(clippy::needless_pass_by_value)]
 fn query_samples(
     request: Envelope<SampleRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<SampleResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let data = state.lock().map_err(|error| error.to_string())?;
@@ -418,7 +525,13 @@ impl DataState {
             .signal(signal_id)
             .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
         let pyramid = Pyramid::from_signal(signal);
-        let summary = signal_summary(signal);
+        let source_key = self
+            .store
+            .sources()
+            .find(|source| source.id == source_id)
+            .expect("derived source")
+            .key;
+        let summary = signal_summary(signal, source_key);
         self.pyramids.insert(signal_id, pyramid);
         self.derived_references.insert(path, references);
         Ok(summary)
@@ -447,7 +560,7 @@ impl DataState {
 #[allow(clippy::needless_pass_by_value)]
 fn create_derived(
     request: Envelope<DerivedRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<SignalSummary>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let mut data = state.lock().map_err(|error| error.to_string())?;
@@ -458,7 +571,7 @@ fn create_derived(
 #[allow(clippy::needless_pass_by_value)]
 fn remove_signal(
     request: Envelope<RemoveSignalRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<()>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let mut data = state.lock().map_err(|error| error.to_string())?;
@@ -531,7 +644,7 @@ fn load_session(
 #[allow(clippy::needless_pass_by_value)]
 fn reset_session(
     app: AppHandle,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<LoadedSession>, String> {
     let session = session::Session::default();
     let path = session_path(&app, None)?;
@@ -664,7 +777,7 @@ fn estimate_for(
 fn export_estimate(
     request: Envelope<ExportEstimateRequest>,
     app: AppHandle,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<ExportEstimate>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
@@ -703,7 +816,7 @@ async fn export_write(
         std::fs::read_to_string(template_path(&app)?).map_err(|error| error.to_string())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
     let manifest = {
-        let state = app.state::<Mutex<DataState>>();
+        let state = app.state::<Arc<Mutex<DataState>>>();
         let data = state.lock().map_err(|error| error.to_string())?;
         let export = snapshot::plan(
             &session,
@@ -828,14 +941,26 @@ fn save_preferences(request: Envelope<String>, app: AppHandle) -> Result<Envelop
 ///
 /// Panics when Tauri cannot initialize or run the application.
 pub fn run() {
+    let workers = std::thread::available_parallelism().map_or(1, usize::from);
+    let jobs = BatchJobs::new(BatchOptions {
+        worker_count: workers,
+        budget: Arc::new(MemoryBudget::new(BudgetConfig::from_available(
+            8 * 1024 * 1024 * 1024,
+        ))),
+        terminal_ttl: Duration::from_secs(300),
+    });
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Mutex::new(DataState::default()))
-        .manage(Mutex::new(IngestJobs::default()))
+        .manage(Arc::new(Mutex::new(DataState::default())))
+        .manage(jobs)
         .invoke_handler(tauri::generate_handler![
             pick_sources,
-            ingest_source,
-            ingest_status,
+            ingest_batch,
+            batch_status,
+            batch_detail,
+            cancel_batch,
+            release_batch,
+            list_formats,
             list_sources,
             list_signals,
             query_tiles,
@@ -862,6 +987,11 @@ pub fn run() {
 mod tests {
     use std::sync::Arc;
 
+    use scope_core::{
+        ingest::{DecodedSignal, DecodedSource, batch::CommitSink},
+        sources::SourceRecord,
+    };
+
     use super::*;
 
     fn data_with_signal(path: &str) -> (DataState, SourceId) {
@@ -885,6 +1015,61 @@ mod tests {
             )
             .expect("insert source signal");
         (data, source)
+    }
+
+    #[test]
+    fn commit_sink_registers_signals_and_pyramids_together() {
+        let state = Arc::new(Mutex::new(DataState::default()));
+        let sink = ShellCommitSink {
+            state: Arc::clone(&state),
+        };
+        let record = SourceRecord {
+            key: SourceKey(uuid::Uuid::from_bytes([3; 16])),
+            path: PathBuf::from("/a/run.csv"),
+            prefix: "run".into(),
+            provider_id: None,
+            decode_provenance: None,
+            reconcile_legacy: false,
+        };
+        let time: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0, 3.0]);
+        let pyramid = Pyramid::from_samples(&time, &[1.0, 2.0, 3.0, 4.0]);
+        let decoded = DecodedSource {
+            row_count: 4,
+            signals: vec![DecodedSignal {
+                local_path: "imu/ax".into(),
+                unit: None,
+                time,
+                values: Arc::from(vec![1.0, 2.0, 3.0, 4.0]),
+            }],
+        };
+
+        let summary = sink
+            .commit(&record, decoded, vec![("imu/ax".into(), pyramid)])
+            .expect("commit");
+        let data = state.lock().unwrap();
+        assert_eq!(
+            data.store
+                .signal_by_path("run/imu/ax")
+                .expect("signal")
+                .len(),
+            4
+        );
+        assert!(data.pyramids.contains_key(&summary.signals[0]));
+    }
+
+    #[test]
+    fn source_directories_expand_recursively_in_path_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(dir.path().join("b.csv"), "").unwrap();
+        std::fs::write(dir.path().join("ignored.json"), "").unwrap();
+        std::fs::write(nested.join("a.mcap"), "").unwrap();
+
+        assert_eq!(
+            expand_sources(vec![dir.path().display().to_string()]).unwrap(),
+            vec![dir.path().join("b.csv"), nested.join("a.mcap")]
+        );
     }
 
     #[test]

@@ -232,6 +232,7 @@ pub trait CommitSink: Send + Sync {
         &self,
         record: &SourceRecord,
         decoded: DecodedSource,
+        pyramids: Vec<(String, Pyramid)>,
     ) -> Result<IngestSummary, IngestError>;
 }
 
@@ -551,12 +552,18 @@ impl Worker {
             .iter()
             .map(|(_, pyramid)| pyramid_bytes(pyramid))
             .sum::<usize>();
+        let pyramids = outcome
+            .loaded
+            .pyramids
+            .into_iter()
+            .filter_map(|(id, pyramid)| Some((temporary.signal(id)?.local_path.clone(), pyramid)))
+            .collect();
         ticket
             .reconcile(decoded.column_bytes().saturating_add(pyramid_bytes))
             .map_err(failed)?;
         let charge = ticket.transfer_to_resident().map_err(failed)?;
         self.sink
-            .commit(record, decoded)
+            .commit(record, decoded, pyramids)
             .map_err(|error| match error {
                 IngestError::Cancelled => ProcessError::Cancelled,
                 error => ProcessError::Failed(error.to_string()),
@@ -635,6 +642,7 @@ mod tests {
             &self,
             record: &SourceRecord,
             decoded: DecodedSource,
+            _pyramids: Vec<(String, Pyramid)>,
         ) -> Result<IngestSummary, IngestError> {
             let depth = self.in_commit.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_concurrent_commits

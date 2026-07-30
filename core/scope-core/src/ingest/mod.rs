@@ -147,6 +147,8 @@ pub enum IngestError {
     NoSupportedChannels(String),
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error(transparent)]
+    Source(#[from] crate::sources::SourceError),
 }
 
 #[cfg(test)]

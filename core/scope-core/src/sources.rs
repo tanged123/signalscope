@@ -37,7 +37,7 @@ pub enum SourceError {
     UnknownKey,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceRegistry {
     by_key: BTreeMap<SourceKey, SourceRecord>,
     by_path: BTreeMap<PathBuf, SourceKey>,
