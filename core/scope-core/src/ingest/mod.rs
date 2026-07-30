@@ -3,6 +3,7 @@
 mod csv;
 mod decoded;
 mod mcap;
+pub mod provenance;
 
 pub use self::csv::CsvDecoder;
 pub use self::decoded::*;
@@ -48,12 +49,12 @@ pub const SUPPORTED_FORMATS: &[(&str, &[&str])] = &[
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SourceFormat {
+pub enum SourceFormat {
     Csv,
     Mcap,
 }
 
-fn sniff_format(path: &Path) -> Result<SourceFormat, IngestError> {
+pub(crate) fn sniff_format(path: &Path) -> Result<SourceFormat, IngestError> {
     let mut magic = Vec::with_capacity(MCAP_MAGIC.len());
     File::open(path)?
         .take(MCAP_MAGIC.len() as u64)
@@ -63,6 +64,20 @@ fn sniff_format(path: &Path) -> Result<SourceFormat, IngestError> {
     } else {
         SourceFormat::Csv
     })
+}
+
+#[must_use]
+pub fn provider_for(format: SourceFormat) -> provenance::ProviderInfo {
+    match format {
+        SourceFormat::Csv => provenance::ProviderInfo {
+            id: "csv",
+            cache_abi: provenance::CACHE_ABI_CSV,
+        },
+        SourceFormat::Mcap => provenance::ProviderInfo {
+            id: "mcap",
+            cache_abi: provenance::CACHE_ABI_MCAP,
+        },
+    }
 }
 
 /// Ingests a source file atomically, selecting the decoder by content.
