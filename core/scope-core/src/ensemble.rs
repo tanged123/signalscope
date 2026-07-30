@@ -3,9 +3,15 @@
 //! Each grid cell reduces every run to one overlap-weighted mean, then gives
 //! those means equal weight. Bin overlap assumes uniform in-bin spacing.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use scope_protocol::EnvelopeBin;
 
-use crate::sets::AffineTransform;
+use crate::{
+    pyramid::Pyramid,
+    sets::{AffineTransform, SetKey, SourceSet},
+    store::{SignalId, SignalStore, SourceKey},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grid {
@@ -46,6 +52,30 @@ pub struct EnsembleCell {
 pub enum EnsembleError {
     #[error("source set requires time alignment")]
     AlignmentRequired,
+    #[error("ensemble requested {requested} members; limit is {limit}")]
+    TooManyMembers { requested: usize, limit: usize },
+    #[error("a set member does not contain the requested signal")]
+    MissingSignal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Limits {
+    pub max_members: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self { max_members: 64 }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnsembleTile {
+    pub cells: Vec<EnsembleCell>,
+    pub generation: u64,
+    pub set_key: SetKey,
+    pub member_keys: Vec<SourceKey>,
+    pub level: u32,
 }
 
 #[must_use]
@@ -66,6 +96,79 @@ pub fn ensemble_cells(members: &[MemberBins], grid: &Grid) -> Vec<EnsembleCell> 
             )
         })
         .collect()
+}
+
+/// # Errors
+///
+/// Returns an error for unaligned, oversized, or incomplete member queries.
+#[allow(clippy::too_many_arguments)]
+pub fn query(
+    set: &SourceSet,
+    local_path: &str,
+    store: &SignalStore,
+    pyramids: &BTreeMap<SignalId, Pyramid>,
+    window: (f64, f64),
+    pixel_width: u32,
+    member_filter: Option<&BTreeSet<SourceKey>>,
+    limits: Limits,
+) -> Result<EnsembleTile, EnsembleError> {
+    set.alignment()
+        .map_err(|_| EnsembleError::AlignmentRequired)?;
+    let member_keys = set
+        .members
+        .keys()
+        .filter(|key| member_filter.is_none_or(|filter| filter.contains(key)))
+        .copied()
+        .collect::<Vec<_>>();
+    if member_keys.len() > limits.max_members {
+        return Err(EnsembleError::TooManyMembers {
+            requested: member_keys.len(),
+            limit: limits.max_members,
+        });
+    }
+
+    let mut level = 0;
+    let mut members = Vec::with_capacity(member_keys.len());
+    for key in &member_keys {
+        let transform = set
+            .transform(*key)
+            .ok_or(EnsembleError::AlignmentRequired)?;
+        if !transform.scale.is_finite() || transform.scale == 0.0 {
+            return Err(EnsembleError::AlignmentRequired);
+        }
+        let native_window = inverse_window(window, transform);
+        let source = store
+            .sources()
+            .find(|source| source.key == *key)
+            .ok_or(EnsembleError::MissingSignal)?;
+        let signal = store
+            .signals_of(source.id)
+            .find(|signal| signal.local_path == local_path)
+            .ok_or(EnsembleError::MissingSignal)?;
+        let pyramid = pyramids
+            .get(&signal.id)
+            .ok_or(EnsembleError::MissingSignal)?;
+        let selected = pyramid.query(native_window.0, native_window.1, pixel_width);
+        level = level.max(selected.level);
+        members.push(MemberBins {
+            bins: selected.bins,
+            transform,
+        });
+    }
+    let grid = Grid::new(window.0, window.1, pixel_width.saturating_mul(2).max(1));
+    Ok(EnsembleTile {
+        cells: ensemble_cells(&members, &grid),
+        generation: set.generation,
+        set_key: set.key,
+        member_keys,
+        level,
+    })
+}
+
+fn inverse_window(window: (f64, f64), transform: AffineTransform) -> (f64, f64) {
+    let left = (window.0 - transform.offset) / transform.scale;
+    let right = (window.1 - transform.offset) / transform.scale;
+    (left.min(right), left.max(right))
 }
 
 #[allow(clippy::cast_precision_loss, clippy::float_cmp)]
@@ -132,10 +235,16 @@ pub fn assert_not_merged(cells: &[EnsembleCell]) {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, sync::Arc};
+
     use scope_protocol::EnvelopeBin;
 
     use super::*;
-    use crate::sets::AffineTransform;
+    use crate::{
+        pyramid::Pyramid,
+        sets::{AffineTransform, OriginKind, SourceSet, propose_sets},
+        store::{SignalId, SignalStore, SourceKey},
+    };
 
     #[allow(clippy::cast_precision_loss)]
     fn bin(t0: f64, t1: f64, sum: f64, count: u64) -> EnvelopeBin {
@@ -166,6 +275,41 @@ mod tests {
 
     fn constant_member(value: f64) -> MemberBins {
         member(vec![bin(0.0, 10.0, value * 10.0, 10)])
+    }
+
+    fn key(index: u8) -> SourceKey {
+        SourceKey(uuid::Uuid::from_bytes([index; 16]))
+    }
+
+    fn set_with(count: u8) -> SourceSet {
+        propose_sets(
+            &(1..=count)
+                .map(|index| (key(index), vec!["value".to_owned()]))
+                .collect::<Vec<_>>(),
+        )
+        .pop()
+        .unwrap()
+    }
+
+    fn stored(count: u8) -> (SignalStore, BTreeMap<SignalId, Pyramid>) {
+        let mut store = SignalStore::new();
+        let mut pyramids = BTreeMap::new();
+        for index in 1..=count {
+            let source = store
+                .register_source(format!("{index}.csv"), key(index), format!("r{index}"))
+                .unwrap();
+            let signal = store
+                .insert_signal(
+                    source,
+                    "value",
+                    None,
+                    Arc::from([0.0, 0.5, 1.0]),
+                    Arc::from([f64::from(index); 3]),
+                )
+                .unwrap();
+            pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
+        }
+        (store, pyramids)
     }
 
     #[test]
@@ -229,5 +373,88 @@ mod tests {
             &Grid::new(0.0, 1.0, 1),
         );
         assert!((cells[0].mean_of_run_means - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn an_unaligned_set_fails_closed() {
+        let mut set = set_with(2);
+        set.set_member_origin(key(1), OriginKind::AbsoluteEpoch);
+        let (store, pyramids) = stored(2);
+        assert!(matches!(
+            query(
+                &set,
+                "value",
+                &store,
+                &pyramids,
+                (0.0, 1.0),
+                100,
+                None,
+                Limits::default()
+            ),
+            Err(EnsembleError::AlignmentRequired)
+        ));
+    }
+
+    #[test]
+    fn requests_above_the_member_limit_fail_with_an_actionable_error() {
+        let set = set_with(200);
+        let (store, pyramids) = stored(1);
+        let error = query(
+            &set,
+            "value",
+            &store,
+            &pyramids,
+            (0.0, 1.0),
+            100,
+            None,
+            Limits { max_members: 64 },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            EnsembleError::TooManyMembers {
+                requested: 200,
+                limit: 64
+            }
+        ));
+    }
+
+    #[test]
+    fn a_filter_restricts_contributing_runs_and_is_reported_back() {
+        let set = set_with(4);
+        let (store, pyramids) = stored(4);
+        let filter = BTreeSet::from([key(1), key(2)]);
+        let tile = query(
+            &set,
+            "value",
+            &store,
+            &pyramids,
+            (0.0, 1.0),
+            8,
+            Some(&filter),
+            Limits::default(),
+        )
+        .unwrap();
+        assert!(tile.cells.iter().all(|cell| cell.run_count <= 2));
+        assert_eq!(tile.member_keys, vec![key(1), key(2)]);
+        assert_eq!(tile.generation, set.generation);
+    }
+
+    #[test]
+    fn cells_are_bounded_by_pixel_width() {
+        let set = set_with(4);
+        let (store, pyramids) = stored(4);
+        let tile = query(
+            &set,
+            "value",
+            &store,
+            &pyramids,
+            (0.0, 1_000.0),
+            200,
+            None,
+            Limits::default(),
+        )
+        .unwrap();
+        assert!(tile.cells.len() <= 402);
     }
 }
