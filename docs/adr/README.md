@@ -29,5 +29,6 @@ Accepted decisions:
 25. [Orthogonal export range and fidelity](0025-orthogonal-export-range-and-fidelity.md)
 26. [Batch ingest and off-lock decode](0026-batch-ingest-and-off-lock-decode.md)
 27. [Durable source identity and restore reconciliation](0027-durable-source-identity-and-restore-reconciliation.md)
+28. [Ensemble run-mean envelope](0028-ensemble-run-mean-envelope.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

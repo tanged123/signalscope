@@ -18,7 +18,8 @@ amendment): quoted names are signal references, functions are bare MATLAB
 names, and the transforms are `gradient`/`cumtrapz`/`movmean`. Derived signals
 materialize into the store under one synthetic source with an in-memory
 pyramid, so every tile, sample, and panel-mode consumer is unchanged. Sessions
-reached schema v11 with ordered derived definitions and durable source records,
+reached schema v12 with ordered derived definitions, durable source records,
+and source-set membership,
 and gained autosave with resume-on-launch plus named workspace files
 ([ADR 0022](adr/0022-durable-session-persistence.md)). The `localStorage` theme
 key is gone; the session is the only durable store.
@@ -30,6 +31,13 @@ Durable source keys separate storage identity from display prefixes; legacy
 sessions reconcile provider-specific references after restore while autosave
 is paused
 ([ADR 0027](adr/0027-durable-source-identity-and-restore-reconciliation.md)).
+
+Source sets group partial runs by local schema and require explicit alignment
+for absolute or event time. Protocol v10 serves bounded run-mean envelopes
+with equal run weight, dropout counts, and optional membership filters.
+Snapshots persist the exact set generation and members instead of recomputing
+or widening a band
+([ADR 0028](adr/0028-ensemble-run-mean-envelope.md)).
 
 ## Phase 4 — export and fidelity
 
