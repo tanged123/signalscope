@@ -1,6 +1,6 @@
 # Manual Demo Workflow Design
 
-**Status:** Approved
+**Status:** Implemented by the [manual demo workflow plan](../plans/2026-07-30-manual-demo-workflow.md)
 
 **Date:** 2026-07-30
 
@@ -35,6 +35,9 @@ Manual branch runs receive read-only repository permissions and do not use the
 The deployment job keeps the serialized Pages concurrency lane and verifies
 that its checkout is still the current `origin/main` before either publishing
 path runs.
+
+Manual runs upload `release-demo` for inspection. They do not enter the
+`github-pages` environment, push `gh-pages`, or deploy the live site.
 
 ## Validation
 
