@@ -14,11 +14,12 @@ import {
 describe("preferences", () => {
   it("defaults match the spec", () => {
     const prefs = defaultPreferences();
-    expect(prefs.schema_version).toBe(1);
+    expect(prefs.schema_version).toBe(2);
     expect(prefs.ui_font_family).toBe("inter");
     expect(prefs.plot_font_family).toBe("jetbrains");
     expect(prefs.ui_font_size).toBe(13);
     expect(prefs.plot_font_size).toBe(9);
+    expect(prefs.cache_max_bytes).toBe("21474836480");
   });
 
   it("clamps sizes to their ranges and steps", () => {
@@ -33,6 +34,20 @@ describe("preferences", () => {
   it("parses a round-tripped document", () => {
     const prefs = { ...defaultPreferences(), plot_font_size: 11.5 };
     expect(parsePreferences(JSON.stringify(prefs))).toEqual(prefs);
+  });
+
+  it("migrates schema 1 with default budgets", () => {
+    const parsed = parsePreferences(
+      JSON.stringify({
+        schema_version: 1,
+        ui_font_family: "inter",
+        plot_font_family: "jetbrains",
+        ui_font_size: 13,
+        plot_font_size: 9,
+      }),
+    );
+
+    expect(parsed).toEqual(defaultPreferences());
   });
 
   it("rejects malformed json and future versions", () => {

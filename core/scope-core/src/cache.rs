@@ -19,10 +19,11 @@
 //! the caller rebuilds and rewrites.
 
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use scope_protocol::IngestStage;
@@ -35,6 +36,7 @@ use crate::{
         self, DecodeContext, IngestError, IngestSummary,
         provenance::{fingerprint, provenance_digest},
     },
+    preferences::Preferences,
     pyramid::Pyramid,
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
@@ -49,6 +51,108 @@ pub fn sidecar_path(source: &Path) -> PathBuf {
     let mut name = source.file_name().unwrap_or_default().to_os_string();
     name.push(".sspyr");
     source.with_file_name(name)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CacheRoot {
+    directory: PathBuf,
+    beside_entry: Option<PathBuf>,
+}
+
+impl CacheRoot {
+    #[must_use]
+    pub fn beside_source(source: &Path) -> Self {
+        Self {
+            directory: source.parent().unwrap_or_else(|| Path::new(".")).to_owned(),
+            beside_entry: Some(sidecar_path(source)),
+        }
+    }
+
+    #[must_use]
+    pub fn app_owned(directory: &Path) -> Self {
+        Self {
+            directory: directory.to_owned(),
+            beside_entry: None,
+        }
+    }
+
+    #[must_use]
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    #[must_use]
+    pub fn entry_path(&self, provenance: &str) -> PathBuf {
+        self.beside_entry
+            .clone()
+            .unwrap_or_else(|| self.directory.join(format!("{provenance}.sspyr")))
+    }
+
+    #[must_use]
+    pub fn is_app_owned(&self) -> bool {
+        self.beside_entry.is_none()
+    }
+}
+
+#[must_use]
+pub fn resolve_root(source: &Path, preferences: &Preferences) -> CacheRoot {
+    let directory = source.parent().unwrap_or_else(|| Path::new("."));
+    if directory_is_writable(directory) {
+        CacheRoot::beside_source(source)
+    } else {
+        let directory = preferences
+            .cache_root
+            .as_deref()
+            .map_or_else(|| default_cache_directory().to_owned(), PathBuf::from);
+        CacheRoot::app_owned(&directory)
+    }
+}
+
+fn default_cache_directory() -> &'static Path {
+    static DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+    DIRECTORY
+        .get_or_init(|| {
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+                })
+                .unwrap_or_else(std::env::temp_dir)
+                .join("signalscope/cache")
+        })
+        .as_path()
+}
+
+fn directory_is_writable(directory: &Path) -> bool {
+    static WRITABLE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+    let cache = WRITABLE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(writable) = cache.lock().expect("writability cache").get(directory) {
+        return *writable;
+    }
+    let writable = probe_writable(directory);
+    cache
+        .lock()
+        .expect("writability cache")
+        .insert(directory.to_owned(), writable);
+    writable
+}
+
+fn probe_writable(directory: &Path) -> bool {
+    if fs::metadata(directory).is_ok_and(|metadata| metadata.permissions().readonly()) {
+        return false;
+    }
+    let probe = directory.join(format!(".signalscope-write-{}.tmp", std::process::id()));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = fs::remove_file(probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -121,11 +225,37 @@ pub fn ingest_or_load(
     context: &mut DecodeContext<'_>,
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
+    ingest_or_load_at(
+        &CacheRoot::beside_source(source),
+        source,
+        store,
+        key,
+        prefix,
+        context,
+        progress,
+    )
+}
+
+/// Uses an explicit cache root for ingest and cache lookup.
+///
+/// # Errors
+///
+/// Returns [`CacheError`] when ingest fails or an app-owned cache cannot be
+/// written.
+pub fn ingest_or_load_at(
+    root: &CacheRoot,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
     let provider = ingest::provider_for(ingest::sniff_format(source)?);
     let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
     let mut on_cache = |fraction| progress(IngestStage::Cache, fraction);
     if let Some(loaded) =
-        try_load_with_provenance(source, store, key, prefix, &provenance, &mut on_cache)?
+        try_load_from_root(root, source, store, key, prefix, &provenance, &mut on_cache)?
     {
         return Ok(IngestOutcome {
             loaded,
@@ -150,14 +280,18 @@ pub fn ingest_or_load(
         .filter_map(|(id, pyramid)| Some((store.signal(*id)?, pyramid)))
         .collect();
     let mut on_write = |fraction| progress(IngestStage::Cache, fraction);
-    let sidecar_error = write(
-        source,
+    let write_result = write_at(
+        root,
         &provenance,
         summary.row_count as u64,
         &entries,
         &mut on_write,
-    )
-    .err();
+    );
+    let sidecar_error = match write_result {
+        Ok(_) => None,
+        Err(error) if root.is_app_owned() => return Err(error),
+        Err(error) => Some(error),
+    };
     Ok(IngestOutcome {
         loaded: LoadedCache { summary, pyramids },
         provider_id: provider.id.to_owned(),
@@ -179,6 +313,28 @@ pub fn write(
     signals: &[(&Signal, &Pyramid)],
     progress: &mut dyn FnMut(f64),
 ) -> Result<PathBuf, CacheError> {
+    write_at(
+        &CacheRoot::beside_source(source),
+        provenance,
+        row_count,
+        signals,
+        progress,
+    )
+}
+
+/// Writes a sidecar into `root`.
+///
+/// # Errors
+///
+/// Returns [`CacheError`] when the root cannot be created or written.
+pub fn write_at(
+    root: &CacheRoot,
+    provenance: &str,
+    row_count: u64,
+    signals: &[(&Signal, &Pyramid)],
+    progress: &mut dyn FnMut(f64),
+) -> Result<PathBuf, CacheError> {
+    let entry_name = provenance.to_owned();
     let provenance =
         digest_bytes(provenance).ok_or_else(|| CacheError::InvalidProvenance(provenance.into()))?;
     let mut payload: Vec<u8> = Vec::new();
@@ -226,7 +382,10 @@ pub fn write(
     header.extend_from_slice(&directory_json);
     pad_to_8(&mut header);
 
-    let target = sidecar_path(source);
+    if root.is_app_owned() {
+        fs::create_dir_all(root.directory())?;
+    }
+    let target = root.entry_path(&entry_name);
     let temporary = target.with_extension("sspyr.tmp");
     let mut file = File::create(&temporary)?;
     file.write_all(&header)?;
@@ -252,10 +411,19 @@ pub fn try_load(
 ) -> Result<Option<LoadedCache>, CacheError> {
     let provider = ingest::provider_for(ingest::sniff_format(source)?);
     let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
-    try_load_with_provenance(source, store, key, prefix, &provenance, progress)
+    try_load_from_root(
+        &CacheRoot::beside_source(source),
+        source,
+        store,
+        key,
+        prefix,
+        &provenance,
+        progress,
+    )
 }
 
-fn try_load_with_provenance(
+fn try_load_from_root(
+    root: &CacheRoot,
     source: &Path,
     store: &mut SignalStore,
     key: SourceKey,
@@ -263,7 +431,7 @@ fn try_load_with_provenance(
     provenance: &str,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LoadedCache>, CacheError> {
-    let path = sidecar_path(source);
+    let path = root.entry_path(provenance);
     let Ok(bytes) = fs::read(&path) else {
         return Ok(None);
     };
@@ -685,6 +853,51 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn root_falls_back_when_the_source_directory_is_read_only() {
+        let data = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let source = csv_source(&data);
+        let mut permissions = fs::metadata(data.path()).unwrap().permissions();
+        let original_permissions = permissions.clone();
+        permissions.set_readonly(true);
+        fs::set_permissions(data.path(), permissions).unwrap();
+        let preferences = Preferences {
+            cache_root: Some(cache.path().display().to_string()),
+            ..Preferences::default()
+        };
+
+        let root = resolve_root(&source, &preferences);
+
+        fs::set_permissions(data.path(), original_permissions).unwrap();
+        assert_eq!(root.directory(), cache.path());
+        assert!(root.is_app_owned());
+    }
+
+    #[test]
+    fn root_entries_use_the_provenance_digest() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = CacheRoot::app_owned(directory.path());
+        let digest = "a".repeat(64);
+
+        assert!(
+            root.entry_path(&digest)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&digest[..16])
+        );
+    }
+
+    #[test]
+    fn root_write_failures_are_reported() {
+        let directory = tempfile::NamedTempFile::new().unwrap();
+        let root = CacheRoot::app_owned(directory.path());
+        let error = write_at(&root, &"a".repeat(64), 0, &[], &mut |_| {}).unwrap_err();
+
+        assert!(matches!(error, CacheError::Io(_)));
     }
 
     #[test]

@@ -15,6 +15,8 @@ use std::{
 use serde::Deserialize;
 use thiserror::Error;
 
+pub const DEFAULT_CACHE_MAX_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -23,6 +25,10 @@ impl Default for Preferences {
             plot_font_family: FontFamily::Jetbrains,
             ui_font_size: 13.0,
             plot_font_size: 9.0,
+            cache_root: None,
+            cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
+            ingest_working_bytes: None,
+            ingest_resident_bytes: None,
         }
     }
 }
@@ -116,11 +122,11 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
     from_json(&std::fs::read_to_string(path)?)
 }
 
-/// Migration ladder (ADR 0005 pattern): v1 is current; each future bump adds
+/// Migration ladder (ADR 0005 pattern): v2 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION => Ok(repair_current(value)),
+        PREFERENCES_SCHEMA_VERSION | 1 => Ok(repair_current(value)),
         version => Err(PreferencesError::UnsupportedVersion(version)),
     }
 }
@@ -153,7 +159,23 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
         plot_font_family: family("plot_font_family", defaults.plot_font_family),
         ui_font_size: size("ui_font_size", defaults.ui_font_size, 10.0, 20.0, false),
         plot_font_size: size("plot_font_size", defaults.plot_font_size, 6.0, 16.0, true),
+        cache_root: value
+            .get("cache_root")
+            .and_then(serde_json::Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned),
+        cache_max_bytes: u64_value(value, "cache_max_bytes")
+            .filter(|bytes| *bytes > 0)
+            .unwrap_or(defaults.cache_max_bytes),
+        ingest_working_bytes: u64_value(value, "ingest_working_bytes").filter(|bytes| *bytes > 0),
+        ingest_resident_bytes: u64_value(value, "ingest_resident_bytes").filter(|bytes| *bytes > 0),
     }
+}
+
+fn u64_value(value: &serde_json::Value, field: &str) -> Option<u64> {
+    value
+        .get(field)
+        .and_then(|value| value.as_str().and_then(|value| value.parse().ok()))
 }
 
 #[derive(Debug, Error)]
@@ -275,6 +297,7 @@ mod tests {
         assert_eq!(preferences.plot_font_family, FontFamily::Arimo);
         assert!((preferences.ui_font_size - 20.0).abs() < f64::EPSILON);
         assert!((preferences.plot_font_size - 10.5).abs() < f64::EPSILON);
+        assert_eq!(preferences.cache_max_bytes, DEFAULT_CACHE_MAX_BYTES);
     }
 
     #[test]

@@ -18,6 +18,7 @@ export const FONT_FAMILIES: readonly FontFamily[] = [
   "arimo",
   "jetbrains",
 ];
+export const DEFAULT_CACHE_MAX_BYTES = String(20 * 1024 * 1024 * 1024);
 
 const FONT_META: Record<FontFamily, { label: string; stack: string }> = {
   inter: {
@@ -53,6 +54,10 @@ export function defaultPreferences(): Preferences {
     plot_font_family: "jetbrains",
     ui_font_size: UI_FONT_SIZE.default,
     plot_font_size: PLOT_FONT_SIZE.default,
+    cache_root: null,
+    cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
+    ingest_working_bytes: null,
+    ingest_resident_bytes: null,
   };
 }
 
@@ -86,7 +91,7 @@ export function parsePreferences(json: string): Preferences | null {
     return null;
   }
   const value = parsed as Partial<Preferences>;
-  if (value.schema_version !== PREFERENCES_SCHEMA_VERSION) return null;
+  if (value.schema_version !== 1 && value.schema_version !== 2) return null;
   const defaults = defaultPreferences();
   const family = (candidate: unknown, fallback: FontFamily): FontFamily =>
     FONT_FAMILIES.includes(candidate as FontFamily)
@@ -94,6 +99,10 @@ export function parsePreferences(json: string): Preferences | null {
       : fallback;
   const size = (candidate: unknown, fallback: number): number =>
     typeof candidate === "number" && Number.isFinite(candidate)
+      ? candidate
+      : fallback;
+  const bytes = (candidate: unknown, fallback: string | null): string | null =>
+    typeof candidate === "string" && /^[1-9]\d*$/.test(candidate)
       ? candidate
       : fallback;
   return {
@@ -106,6 +115,15 @@ export function parsePreferences(json: string): Preferences | null {
     plot_font_size: clampPlotFontSize(
       size(value.plot_font_size, defaults.plot_font_size),
     ),
+    cache_root:
+      typeof value.cache_root === "string" && value.cache_root.length > 0
+        ? value.cache_root
+        : null,
+    cache_max_bytes:
+      bytes(value.cache_max_bytes, defaults.cache_max_bytes) ??
+      defaults.cache_max_bytes,
+    ingest_working_bytes: bytes(value.ingest_working_bytes, null),
+    ingest_resident_bytes: bytes(value.ingest_resident_bytes, null),
   };
 }
 

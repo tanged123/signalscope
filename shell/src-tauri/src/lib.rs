@@ -1277,6 +1277,14 @@ fn preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(PREFERENCES_FILE))
 }
 
+fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("cache"))
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
@@ -1284,7 +1292,10 @@ fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> 
     if !path.exists() {
         return Ok(Envelope::new(None));
     }
-    let preferences = preferences::load_from_path(&path).map_err(|error| error.to_string())?;
+    let mut preferences = preferences::load_from_path(&path).map_err(|error| error.to_string())?;
+    if preferences.cache_root.is_none() {
+        preferences.cache_root = Some(cache_path(&app)?.display().to_string());
+    }
     Ok(Envelope::new(Some(
         serde_json::to_string(&preferences).map_err(|error| error.to_string())?,
     )))
@@ -1294,7 +1305,10 @@ fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> 
 #[allow(clippy::needless_pass_by_value)]
 fn save_preferences(request: Envelope<String>, app: AppHandle) -> Result<Envelope<()>, String> {
     let json = request.open().map_err(|error| error.to_string())?;
-    let preferences = preferences::from_json(&json).map_err(|error| error.to_string())?;
+    let mut preferences = preferences::from_json(&json).map_err(|error| error.to_string())?;
+    if preferences.cache_root.is_none() {
+        preferences.cache_root = Some(cache_path(&app)?.display().to_string());
+    }
     preferences::save_to_path(&preferences, &preferences_path(&app)?)
         .map_err(|error| error.to_string())?;
     Ok(Envelope::new(()))
