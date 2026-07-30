@@ -2117,7 +2117,7 @@ git commit -m "feat(session): v11 durable source records with deterministic lega
     }
 
     #[test]
-    fn an_unparseable_expression_is_rejected_rather_than_half_rewritten() {
+    fn an_unparsable_expression_is_rejected_rather_than_half_rewritten() {
         assert!(rename_references("'a' +", &BTreeMap::new()).is_err());
     }
 ```
@@ -2246,7 +2246,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unparseable_derived_expression_aborts_the_whole_rewrite() {
+    fn an_unparsable_derived_expression_aborts_the_whole_rewrite() {
         let mut session = session_with("imu/ax", "'imu/ax' +");
         let before = session.clone();
         let aliases = BTreeMap::from([("imu/ax".to_owned(), "run/imu/ax".to_owned())]);
