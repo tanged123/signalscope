@@ -110,6 +110,33 @@ describe("batch ingest port", () => {
   });
 });
 
+describe("restore port", () => {
+  it("submits and reconciles one restore batch", async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const plane = new TauriPlane((command, args) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(
+        command === "restore_sources"
+          ? (seal({ job_id: "9" }) as never)
+          : (seal({
+              session_json: "{}",
+              rewritten: "2",
+              conflicts: [],
+              unresolved: [],
+            }) as never),
+      );
+    });
+
+    const jobId = await plane.restore.start("{}");
+    const response = await plane.restore.reconcile("{}", jobId);
+    expect(response.rewritten).toBe("2");
+    expect(calls.map((call) => call.command)).toEqual([
+      "restore_sources",
+      "restore_reconcile",
+    ]);
+  });
+});
+
 describe("TauriPlane.querySamples", () => {
   it("normalizes JSON null gap samples back to NaN", async () => {
     const invoke = <T>(): Promise<T> =>

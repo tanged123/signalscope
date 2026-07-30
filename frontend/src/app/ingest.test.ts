@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BatchStatus } from "../generated/protocol";
 import type { IngestPort } from "./data-plane";
-import { runBatchIngest } from "./ingest";
+import { runBatchIngest, waitForBatch } from "./ingest";
 
 interface FakePort extends IngestPort {
   released: string[];
@@ -92,5 +92,20 @@ describe("runBatchIngest", () => {
     ]);
     await runBatchIngest(port, ["/a.csv"], () => undefined, 0);
     expect(port.released).toEqual(["1"]);
+  });
+
+  it("can wait without releasing before reconciliation", async () => {
+    const port = fakePort([
+      {
+        state: "done",
+        fraction: 1,
+        total: "1",
+        done: "1",
+        failed: "0",
+        recent_failures: [],
+      },
+    ]);
+    await waitForBatch(port, "1", () => undefined, 0);
+    expect(port.released).toEqual([]);
   });
 });

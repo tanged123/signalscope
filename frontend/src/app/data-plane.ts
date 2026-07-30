@@ -17,6 +17,9 @@ import {
   type LoadSessionRequest,
   type PickSessionRequest,
   type RemoveSignalRequest,
+  type RestoreReconcileRequest,
+  type RestoreReconcileResponse,
+  type RestoreSourcesRequest,
   type SampleRequest,
   type SampleResponse,
   type SaveSessionRequest,
@@ -59,6 +62,14 @@ export interface SessionPort {
   pick(mode: SessionDialogMode): Promise<string | null>;
 }
 
+export interface RestorePort {
+  start(sessionJson: string): Promise<string>;
+  reconcile(
+    sessionJson: string,
+    jobId: string,
+  ): Promise<RestoreReconcileResponse>;
+}
+
 export interface PreferencesPort {
   load(): Promise<string | null>;
   save(preferencesJson: string): Promise<void>;
@@ -90,6 +101,7 @@ export interface DataPlane {
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
   readonly session: SessionPort | null;
+  readonly restore: RestorePort | null;
   readonly preferences: PreferencesPort | null;
   readonly exporter: ExportPort | null;
   readonly bakedSessionJson?: string;
@@ -119,6 +131,8 @@ export class TauriPlane implements DataPlane {
   readonly derived: DerivedPort;
 
   readonly session: SessionPort;
+
+  readonly restore: RestorePort;
 
   readonly preferences: PreferencesPort;
 
@@ -205,6 +219,28 @@ export class TauriPlane implements DataPlane {
           await this.invoke<Envelope<string | null>>("pick_session_path", {
             request: seal<PickSessionRequest>({ mode }),
           }),
+        ),
+    };
+    this.restore = {
+      start: async (sessionJson: string) =>
+        open(
+          await this.invoke<Envelope<BatchJob>>("restore_sources", {
+            request: seal<RestoreSourcesRequest>({
+              session_json: sessionJson,
+            }),
+          }),
+        ).job_id,
+      reconcile: async (sessionJson: string, jobId: string) =>
+        open(
+          await this.invoke<Envelope<RestoreReconcileResponse>>(
+            "restore_reconcile",
+            {
+              request: seal<RestoreReconcileRequest>({
+                session_json: sessionJson,
+                job_id: jobId,
+              }),
+            },
+          ),
         ),
     };
     this.preferences = {
@@ -324,6 +360,8 @@ export class BakedPlane implements DataPlane {
   readonly derived = null;
 
   readonly session = null;
+
+  readonly restore = null;
 
   readonly preferences = null;
 

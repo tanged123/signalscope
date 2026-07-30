@@ -16,7 +16,7 @@ import {
   historySnapshot,
   restoreTransientSessionState,
 } from "../app/history";
-import { runBatchIngest } from "../app/ingest";
+import { runBatchIngest, waitForBatch } from "../app/ingest";
 import {
   applyPreferences,
   clampPlotFontSize,
@@ -1616,24 +1616,47 @@ export class AppShell {
     if (port === null) return;
     const progress = required<HTMLElement>(this.root, ".ingest-progress");
     try {
+      if (this.autosaveTimer !== null) {
+        window.clearTimeout(this.autosaveTimer);
+        this.autosaveTimer = null;
+      }
       const loaded = await port.load(path);
-      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      let sessionJson = loaded.session_json;
+      const ingestPort = this.plane.ingest;
+      const restorePort = this.plane.restore;
+      if (ingestPort !== null && restorePort !== null) {
+        progress.hidden = false;
+        const jobId = await restorePort.start(sessionJson);
+        let reconciliationAttempted = false;
+        try {
+          await waitForBatch(ingestPort, jobId, (status) => {
+            renderBatchProgress(progress, status, () => {
+              void ingestPort.cancelBatch(jobId);
+            });
+          });
+          const reconciled = await restorePort.reconcile(sessionJson, jobId);
+          reconciliationAttempted = true;
+          sessionJson = reconciled.session_json;
+          const conflict = reconciled.conflicts[0];
+          if (conflict !== undefined) {
+            this.showModeHelp(
+              `${conflict.legacy_path} is claimed by ${String(conflict.claimants.length)} sources — relink to finish restoring`,
+            );
+          }
+        } finally {
+          if (!reconciliationAttempted) {
+            await restorePort.reconcile(sessionJson, jobId).catch(() => {});
+          }
+          await ingestPort.releaseBatch(jobId);
+        }
+      }
+      this.workspace.replace(JSON.parse(sessionJson) as Session);
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = loaded.path;
       this.dirty = false;
       document.documentElement.dataset.theme = this.workspace.theme();
       this.workspaceView?.invalidateTheme();
 
-      const ingestPort = this.plane.ingest;
-      if (ingestPort !== null) {
-        progress.hidden = false;
-        const paths = this.workspace.sources().map((source) => source.path);
-        if (paths.length > 0) {
-          await runBatchIngest(ingestPort, paths, (status) => {
-            renderBatchProgress(progress, status, () => undefined);
-          });
-        }
-      }
       await this.reloadSignals();
 
       const derivedPort = this.plane.derived;
@@ -2108,6 +2131,13 @@ export class AppShell {
   private async updateSources(): Promise<void> {
     const sources = await this.plane.listSources();
     for (const source of sources) {
+      if (
+        this.workspace
+          .sources()
+          .some((saved) => saved.key === source.source_key)
+      ) {
+        continue;
+      }
       this.workspace.addSource({
         key: source.source_key,
         path: source.path,
