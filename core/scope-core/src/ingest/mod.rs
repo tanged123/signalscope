@@ -8,7 +8,10 @@ pub use self::mcap::McapDecoder;
 
 use std::{fs::File, io::Read, path::Path};
 
-use crate::store::{SignalId, SignalStore, SourceId, StoreError};
+use crate::{
+    naming::normalize_segment,
+    store::{SignalId, SignalStore, SourceId, StoreError},
+};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -116,14 +119,6 @@ pub(crate) fn sort_permutation(time: &[f64]) -> Option<Vec<usize>> {
 
 pub(crate) fn apply_permutation(order: &[usize], column: &[f64]) -> Vec<f64> {
     order.iter().map(|&index| column[index]).collect()
-}
-
-/// Lowercases a path segment and folds spaces/dots to underscores.
-pub(crate) fn normalize_segment(raw: &str) -> String {
-    raw.trim()
-        .trim_matches('"')
-        .replace([' ', '.'], "_")
-        .to_lowercase()
 }
 
 #[derive(Debug, Error)]
