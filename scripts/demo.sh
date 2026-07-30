@@ -93,6 +93,16 @@ check_demo() {
   pnpm --filter @signalscope/frontend check:demo
 }
 
+demo_publish_work=""
+
+cleanup_publish_work() {
+  local work="${demo_publish_work:-}"
+  demo_publish_work=""
+  if [ -n "$work" ]; then
+    rm -rf "$work"
+  fi
+}
+
 publish() {
   local asset_dir="${1:-}"
   if [ -z "$asset_dir" ]; then
@@ -108,27 +118,27 @@ publish() {
     exit 1
   fi
 
-  local origin_url work
+  local origin_url
   origin_url="$(git remote get-url origin)"
-  work="$(mktemp -d)"
-  trap 'rm -rf "$work"' EXIT
+  demo_publish_work="$(mktemp -d)"
+  trap cleanup_publish_work EXIT
 
-  cp "$asset_dir/demo.html" "$asset_dir/demo.gif" "$work/"
-  cp "$asset_dir/demo.html" "$work/index.html"
-  git init --quiet "$work"
-  git -C "$work" checkout --quiet --orphan gh-pages-publish
-  git -C "$work" remote add origin "$origin_url"
+  cp "$asset_dir/demo.html" "$asset_dir/demo.gif" "$demo_publish_work/"
+  cp "$asset_dir/demo.html" "$demo_publish_work/index.html"
+  git init --quiet "$demo_publish_work"
+  git -C "$demo_publish_work" checkout --quiet --orphan gh-pages-publish
+  git -C "$demo_publish_work" remote add origin "$origin_url"
   while read -r key value; do
-    git -C "$work" config --local --add "$key" "$value"
-  done < <(git config --local --get-regexp '^http\..*\.extraheader$' || true)
-  git -C "$work" add -- demo.html demo.gif index.html
-  git -C "$work" \
+    git -C "$demo_publish_work" config --local --add "$key" "$value"
+  done < <(git config --get-regexp '^http\..*\.extraheader$' || true)
+  git -C "$demo_publish_work" add -- demo.html demo.gif index.html
+  git -C "$demo_publish_work" \
     -c user.name="${GIT_AUTHOR_NAME:-github-actions[bot]}" \
     -c user.email="${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}" \
     commit --quiet --message "docs: publish SignalScope demo"
-  git -C "$work" push --force origin HEAD:gh-pages >/dev/null
+  git -C "$demo_publish_work" push --force origin HEAD:gh-pages >/dev/null
 
-  rm -rf "$work"
+  cleanup_publish_work
   trap - EXIT
 }
 
