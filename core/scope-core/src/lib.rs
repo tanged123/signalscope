@@ -4,6 +4,7 @@
 //! `pyramid`, `compute`, and `expr` may depend on `store`; `session` is an
 //! independent schema boundary; nothing depends on the shell.
 
+pub mod bins;
 pub mod cache;
 pub mod compute;
 pub mod ensemble;

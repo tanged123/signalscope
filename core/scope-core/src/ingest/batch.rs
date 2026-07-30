@@ -627,7 +627,7 @@ fn pyramid_bytes(pyramid: &Pyramid) -> usize {
         .map(|level| {
             level
                 .len()
-                .saturating_mul(size_of::<scope_protocol::EnvelopeBin>())
+                .saturating_mul(crate::bins::BinLevel::BYTES_PER_BIN)
         })
         .sum()
 }

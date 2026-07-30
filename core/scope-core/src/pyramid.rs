@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::bins::BinLevel;
 use crate::store::Signal;
 use scope_protocol::EnvelopeBin;
 
@@ -46,7 +47,7 @@ pub struct Pyramid {
     /// Logical level 0 is the raw columns, synthesized per query and never
     /// stored: materializing it would cost ~96 bytes per raw sample on top
     /// of the 16 the store already holds.
-    merged: Vec<Vec<EnvelopeBin>>,
+    merged: Vec<BinLevel>,
 }
 
 impl Pyramid {
@@ -80,21 +81,19 @@ impl Pyramid {
             })
             .collect();
         let mut merged = (!level_one.is_empty())
-            .then_some(level_one)
+            .then(|| BinLevel::from_wire(&level_one))
             .into_iter()
             .collect::<Vec<_>>();
         while merged.last().is_some_and(|level| level.len() > 1) {
             let previous = merged.last().expect("level exists");
-            let next = previous
-                .chunks(2)
-                .map(|chunk| {
-                    if chunk.len() == 2 {
-                        merge_bins(&chunk[0], &chunk[1])
-                    } else {
-                        chunk[0].clone()
-                    }
-                })
-                .collect();
+            let mut next = BinLevel::with_capacity(previous.len().div_ceil(2));
+            for index in (0..previous.len()).step_by(2) {
+                let left = previous.to_wire(index);
+                let bin = previous
+                    .get(index + 1)
+                    .map_or(left.clone(), |right| merge_bins(&left, &right.to_wire()));
+                next.push(&bin);
+            }
             merged.push(next);
         }
         Self {
@@ -112,10 +111,10 @@ impl Pyramid {
     /// does not pair the raw samples. Callers deserializing untrusted bytes
     /// must validate shapes first and treat mismatches as cache misses.
     #[must_use]
-    pub fn from_parts(time: Arc<[f64]>, values: Arc<[f64]>, merged: Vec<Vec<EnvelopeBin>>) -> Self {
+    pub fn from_parts(time: Arc<[f64]>, values: Arc<[f64]>, merged: Vec<BinLevel>) -> Self {
         assert_eq!(time.len(), values.len(), "time/value lengths differ");
         assert_eq!(
-            merged.first().map_or(0, Vec::len),
+            merged.first().map_or(0, BinLevel::len),
             time.len().div_ceil(2),
             "first merged level must pair raw samples"
         );
@@ -128,7 +127,7 @@ impl Pyramid {
 
     /// Stored merged levels; `merged_levels()[0]` is logical level 1.
     #[must_use]
-    pub fn merged_levels(&self) -> &[Vec<EnvelopeBin>] {
+    pub fn merged_levels(&self) -> &[BinLevel] {
         &self.merged
     }
 
@@ -144,7 +143,7 @@ impl Pyramid {
         if index == 0 {
             Some(self.synthesize_raw(0, self.time.len()))
         } else {
-            self.merged.get(index - 1).cloned()
+            self.merged.get(index - 1).map(BinLevel::to_wire_vec)
         }
     }
 
@@ -159,7 +158,8 @@ impl Pyramid {
         if index == 0 {
             Some(self.synthesize_raw(range.start, range.end))
         } else {
-            Some(self.merged[index - 1][range].to_vec())
+            let level = &self.merged[index - 1];
+            Some(range.map(|bin| level.to_wire(bin)).collect())
         }
     }
 
@@ -204,14 +204,18 @@ impl Pyramid {
             return Some(start..end);
         }
         let level = &self.merged[index - 1];
-        if level.first().is_none_or(|first| t1 < first.t0)
-            || level.last().is_none_or(|last| t0 > last.t1)
+        if level.t0s().first().is_none_or(|first| t1 < *first)
+            || level.t1s().last().is_none_or(|last| t0 > *last)
         {
             return Some(0..0);
         }
-        let start = level.partition_point(|bin| bin.t1 < t0).saturating_sub(1);
+        let start = level
+            .t1s()
+            .partition_point(|time| *time < t0)
+            .saturating_sub(1);
         let end = level
-            .partition_point(|bin| bin.t0 <= t1)
+            .t0s()
+            .partition_point(|time| *time <= t1)
             .saturating_add(1)
             .min(len);
         Some(start..end)
@@ -268,9 +272,9 @@ pub struct PyramidQuery {
     pub bins: Vec<EnvelopeBin>,
 }
 
-fn count_overlapping(level: &[EnvelopeBin], t0: f64, t1: f64) -> usize {
-    let start = level.partition_point(|bin| bin.t1 < t0);
-    let end = level.partition_point(|bin| bin.t0 <= t1);
+fn count_overlapping(level: &BinLevel, t0: f64, t1: f64) -> usize {
+    let start = level.t1s().partition_point(|time| *time < t0);
+    let end = level.t0s().partition_point(|time| *time <= t1);
     end.saturating_sub(start)
 }
 

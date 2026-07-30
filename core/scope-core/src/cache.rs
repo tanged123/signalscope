@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
+    bins::BinLevel,
     ingest::{
         self, DecodeContext, IngestError, IngestSummary,
         provenance::{fingerprint, provenance_digest},
@@ -305,7 +306,7 @@ struct DecodedSignal {
     unit: Option<String>,
     time: Arc<[f64]>,
     values: Arc<[f64]>,
-    merged: Vec<Vec<EnvelopeBin>>,
+    merged: Vec<BinLevel>,
 }
 
 fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
@@ -409,9 +410,10 @@ fn decode_column(bytes: &[u8]) -> Option<Vec<f64>> {
     )
 }
 
-fn encode_bins(bins: &[EnvelopeBin]) -> Vec<u8> {
+fn encode_bins(bins: &BinLevel) -> Vec<u8> {
     let mut out = Vec::with_capacity(bins.len() * BIN_RECORD_LEN);
-    for bin in bins {
+    for index in 0..bins.len() {
+        let bin = bins.to_wire(index);
         out.extend_from_slice(&bin.t0.to_le_bytes());
         out.extend_from_slice(&bin.t1.to_le_bytes());
         for value in [bin.first, bin.last, bin.min, bin.max] {
@@ -427,7 +429,7 @@ fn encode_bins(bins: &[EnvelopeBin]) -> Vec<u8> {
     out
 }
 
-fn decode_bins(bytes: &[u8]) -> Option<Vec<EnvelopeBin>> {
+fn decode_bins(bytes: &[u8]) -> Option<BinLevel> {
     if bytes.len() % BIN_RECORD_LEN != 0 {
         return None;
     }
@@ -438,24 +440,23 @@ fn decode_bins(bytes: &[u8]) -> Option<Vec<EnvelopeBin>> {
         let value = field(chunk, at);
         (!value.is_nan()).then_some(value)
     };
-    Some(
-        bytes
-            .chunks_exact(BIN_RECORD_LEN)
-            .map(|chunk| EnvelopeBin {
-                t0: field(chunk, 0),
-                t1: field(chunk, 8),
-                first: optional(chunk, 16),
-                last: optional(chunk, 24),
-                min: optional(chunk, 32),
-                max: optional(chunk, 40),
-                sum: field(chunk, 48),
-                sum_sq: field(chunk, 56),
-                sample_count: u64::from_le_bytes(chunk[64..72].try_into().expect("8-byte field")),
-                finite_count: u64::from_le_bytes(chunk[72..80].try_into().expect("8-byte field")),
-                has_gap: chunk[80] != 0,
-            })
-            .collect(),
-    )
+    let bins = bytes
+        .chunks_exact(BIN_RECORD_LEN)
+        .map(|chunk| EnvelopeBin {
+            t0: field(chunk, 0),
+            t1: field(chunk, 8),
+            first: optional(chunk, 16),
+            last: optional(chunk, 24),
+            min: optional(chunk, 32),
+            max: optional(chunk, 40),
+            sum: field(chunk, 48),
+            sum_sq: field(chunk, 56),
+            sample_count: u64::from_le_bytes(chunk[64..72].try_into().expect("8-byte field")),
+            finite_count: u64::from_le_bytes(chunk[72..80].try_into().expect("8-byte field")),
+            has_gap: chunk[80] != 0,
+        })
+        .collect::<Vec<_>>();
+    Some(BinLevel::from_wire(&bins))
 }
 
 fn pad_to_8(bytes: &mut Vec<u8>) {
