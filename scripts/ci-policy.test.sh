@@ -33,12 +33,6 @@ asset_dir="$test_root/empty-assets"
 mkdir -p "$asset_dir"
 expect_status 2 env GH_TOKEN=test \
   "$script_dir/release.sh" publish v1.2.3-trailing "$asset_dir"
-expect_status 2 "$script_dir/demo.sh" publish
-
-incomplete_demo_dir="$test_root/incomplete-demo"
-mkdir -p "$incomplete_demo_dir"
-: >"$incomplete_demo_dir/demo.html"
-expect_status 1 "$script_dir/demo.sh" publish "$incomplete_demo_dir"
 
 windows_asset_dir="$test_root/windows-assets"
 mkdir -p "$windows_asset_dir"

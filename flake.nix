@@ -72,7 +72,6 @@
               cargo-machete
               cargo-tauri
               clippy
-              ffmpeg
               llvmPackages.llvm
               nodejs_22
               pnpm

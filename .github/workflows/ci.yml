@@ -6,12 +6,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      run_demo:
-        description: Generate demo artifacts without publishing them
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -24,7 +18,7 @@ jobs:
   version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -37,7 +31,7 @@ jobs:
   flake:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -49,7 +43,7 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -60,7 +54,7 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -72,14 +66,14 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: ./scripts/ci.sh frontend
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: snapshot-template
           path: frontend/dist/snapshot-template.html
@@ -87,7 +81,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -100,7 +94,7 @@ jobs:
     env:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -109,7 +103,7 @@ jobs:
           cargo-cache-key: coverage
       - run: ./scripts/coverage.sh
       - if: env.CODECOV_TOKEN != ''
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ env.CODECOV_TOKEN }}
           files: ./build/coverage/rust.lcov,./build/coverage/frontend/lcov.info
@@ -121,7 +115,7 @@ jobs:
     needs: [version, flake, quality, rust, frontend, e2e, coverage]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - env:
@@ -143,7 +137,7 @@ jobs:
             bundles: target/release/bundle/dmg/*.dmg
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -151,7 +145,7 @@ jobs:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: build
       - run: ./scripts/ci.sh build
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.bundles }}
@@ -161,7 +155,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/cargo-cache
@@ -169,7 +163,7 @@ jobs:
           target-key: appimage
       - run: ./scripts/setup-appimage.sh
       - run: ./scripts/ci.sh appimage
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: release-linux-appimage
           path: target/release/bundle/appimage/*.AppImage
@@ -179,7 +173,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/cargo-cache
@@ -190,14 +184,14 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: ./scripts/ci.sh windows
         shell: bash
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: release-windows-nsis
           path: target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
 
   tag:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     needs:
       [version, flake, quality, rust, frontend, e2e, build, appimage, windows]
     runs-on: ubuntu-latest
@@ -207,7 +201,7 @@ jobs:
       tag: ${{ steps.release-tag.outputs.tag }}
     steps:
       # The release job needs the checkout credential to push its tag.
-      - uses: actions/checkout@v7 # zizmor: ignore[artipacked]
+      - uses: actions/checkout@v4 # zizmor: ignore[artipacked]
         with:
           fetch-depth: 0
       - id: release-tag
@@ -217,72 +211,6 @@ jobs:
           tag="$(./scripts/release.sh tag)"
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
-  demo:
-    if: >-
-      always() &&
-      (needs.tag.result == 'success' ||
-      (github.event_name == 'workflow_dispatch' && inputs.run_demo))
-    needs: [tag]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: ./scripts/demo.sh all
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-demo-${{ github.sha }}
-          path: build/demo
-          if-no-files-found: error
-
-  deploy-demo:
-    if: >-
-      always() &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.tag.result == 'success' &&
-      needs.demo.result == 'success'
-    needs: [tag, demo]
-    runs-on: ubuntu-latest
-    concurrency:
-      group: signalscope-demo-pages
-      cancel-in-progress: false
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      # The deployment job needs the checkout credential to push gh-pages.
-      - uses: actions/checkout@v7 # zizmor: ignore[artipacked]
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/setup
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          install-frontend: "false"
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-demo-${{ github.sha }}
-          path: build/demo
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: build/demo/pages
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          ./scripts/demo.sh publish build/demo
-      - id: deployment
-        uses: actions/deploy-pages@v5
-
   publish:
     needs: [tag, build, appimage, windows]
     runs-on: ubuntu-latest
@@ -291,10 +219,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: release-assets

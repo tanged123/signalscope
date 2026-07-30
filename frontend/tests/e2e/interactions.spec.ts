@@ -39,19 +39,18 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.press("s");
     await expect(panel.locator(".panel-stats")).toBeVisible();
     await expect(panel.locator(".panel-stats")).toContainText("μ");
-    const metricMargins = await panel
+    const metricGaps = await panel
       .locator(".stats-series")
       .first()
       .locator(".stats-item")
       .evaluateAll((items) =>
-        items
-          .slice(1)
-          .map((item) =>
-            getComputedStyle(item).getPropertyValue("margin-left"),
-          ),
+        items.slice(1).map((item, index) => {
+          const previous = items[index]?.getBoundingClientRect();
+          const current = item.getBoundingClientRect();
+          return previous === undefined ? 0 : current.left - previous.right;
+        }),
       );
-    expect(metricMargins.length).toBeGreaterThan(0);
-    expect(metricMargins.every((margin) => margin === "8px")).toBe(true);
+    expect(metricGaps.every((gap) => gap >= 8)).toBe(true);
   });
 
   test("the status-bar cursor button cycles the same three modes as C", async ({

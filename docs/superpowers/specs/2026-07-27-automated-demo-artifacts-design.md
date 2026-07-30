@@ -1,6 +1,6 @@
 # Automated Demo Artifacts Design
 
-**Status:** Implemented by the [automated demo artifacts plan](../plans/2026-07-30-automated-demo-artifacts.md)
+**Status:** Approved direction, deferred to Phase 4
 
 **Date:** 2026-07-27
 
@@ -74,12 +74,11 @@ fails the release job, which is the intended signal.
 A GIF size ceiling mirrors the ratcheted snapshot budget in
 `frontend/scripts/check-snapshot.mjs`.
 
-## Verified Capture
+## Risk
 
-The implementation spike confirmed that Playwright 1.57 records the canvas
-strokes in compositor output. Its 15-second, 800 px, 12 fps GIF measured
-2,572,004 bytes; the artifact check ratchets that result with ten percent
-headroom.
+The plan assumes Playwright video capture records canvas content. It records
+compositor output, so it should, but this is unverified and the whole design
+rests on it. Spike it first once export lands.
 
 ## Out Of Scope
 
