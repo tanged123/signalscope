@@ -12,6 +12,7 @@ import {
   type ExportFidelity,
   type ExportFileKind,
   type ExportRange,
+  type ExportSelection,
   type ExportWriteRequest,
   type FormatDescriptor,
   type IngestBatchRequest,
@@ -79,11 +80,15 @@ export interface PreferencesPort {
 }
 
 export interface ExportPort {
-  estimate(sessionJson: string): Promise<ExportEstimate>;
+  estimate(
+    sessionJson: string,
+    selection: ExportSelection,
+  ): Promise<ExportEstimate>;
   writeHtml(
     sessionJson: string,
     range: ExportRange,
     fidelity: ExportFidelity,
+    selection: ExportSelection,
   ): Promise<string | null>;
   saveFile(
     fileName: string,
@@ -262,11 +267,12 @@ export class TauriPlane implements DataPlane {
       },
     };
     this.exporter = {
-      estimate: async (sessionJson: string) =>
+      estimate: async (sessionJson: string, selection: ExportSelection) =>
         open(
           await this.invoke<Envelope<ExportEstimate>>("export_estimate", {
             request: seal<ExportEstimateRequest>({
               session_json: sessionJson,
+              selection,
             }),
           }),
         ),
@@ -274,6 +280,7 @@ export class TauriPlane implements DataPlane {
         sessionJson: string,
         range: ExportRange,
         fidelity: ExportFidelity,
+        selection: ExportSelection,
       ) =>
         open(
           await this.invoke<Envelope<string | null>>("export_write", {
@@ -281,6 +288,7 @@ export class TauriPlane implements DataPlane {
               session_json: sessionJson,
               range,
               fidelity,
+              selection,
             }),
           }),
         ),
@@ -444,7 +452,26 @@ export class BakedPlane implements DataPlane {
   }
 
   listSets(): Promise<SetSummary[]> {
-    return Promise.resolve([]);
+    const keys = [
+      ...new Set(this.payload.ensembles.map((item) => item.set_key)),
+    ];
+    return Promise.resolve(
+      keys.map((key, index) => {
+        const entries = this.payload.ensembles.filter(
+          (item) => item.set_key === key,
+        );
+        const members = new Set(entries.flatMap((item) => item.member_keys));
+        return {
+          set_id: String(index + 1),
+          set_key: key,
+          label: `Set ${String(index + 1)}`,
+          generation: entries[0]?.generation ?? "0",
+          member_count: members.size,
+          local_paths: entries.map((item) => item.local_path),
+          aligned: true,
+        };
+      }),
+    );
   }
 
   queryTiles(request: TileRequest): Promise<TileResponse> {
@@ -471,8 +498,43 @@ export class BakedPlane implements DataPlane {
     });
   }
 
-  queryEnsembleTiles(): Promise<EnsembleTileResponse> {
-    return Promise.reject(new Error("ensemble data was not baked"));
+  queryEnsembleTiles(
+    request: EnsembleTileRequest,
+  ): Promise<EnsembleTileResponse> {
+    const keys = [
+      ...new Set(this.payload.ensembles.map((item) => item.set_key)),
+    ];
+    const setKey = keys[Number(request.set_id) - 1];
+    const baked = this.payload.ensembles.find(
+      (item) =>
+        item.set_key === setKey && item.local_path === request.local_path,
+    );
+    if (baked === undefined) {
+      return Promise.reject(new Error("ensemble data was not baked"));
+    }
+    const requested = [...request.member_filter].sort();
+    const members = [...baked.member_keys].sort();
+    if (
+      requested.length > 0 &&
+      (requested.length !== members.length ||
+        requested.some((key, index) => key !== members[index]))
+    ) {
+      return Promise.reject(new Error("ensemble membership was not baked"));
+    }
+    const bins = baked.levels[0];
+    if (bins === undefined) {
+      return Promise.reject(new Error("ensemble level was not baked"));
+    }
+    return Promise.resolve({
+      request_id: request.request_id,
+      set_key: baked.set_key,
+      generation: baked.generation,
+      level: 0,
+      member_keys: baked.member_keys,
+      bins: bins.filter(
+        (bin) => bin.t1 >= request.window.t0 && bin.t0 <= request.window.t1,
+      ),
+    });
   }
 
   querySamples(request: SampleRequest): Promise<SampleResponse> {
@@ -588,6 +650,7 @@ function createDemoManifest(): BakedManifest {
       summary,
       levels: buildDemoLevels(makeBins(generate)),
     })),
+    ensembles: [],
   });
 }
 

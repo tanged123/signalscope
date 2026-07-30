@@ -407,6 +407,13 @@ pub enum ExportFidelity {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ExportEstimateRequest {
     pub session_json: String,
+    pub selection: ExportSelection,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportSelection {
+    pub source_keys: Vec<String>,
+    pub set_keys: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -435,6 +442,7 @@ pub struct ExportWriteRequest {
     pub session_json: String,
     pub range: ExportRange,
     pub fidelity: ExportFidelity,
+    pub selection: ExportSelection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -466,7 +474,18 @@ pub struct BakedSignal {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BakedEnsemble {
+    pub set_key: String,
+    #[serde(with = "u64_string")]
+    pub generation: u64,
+    pub local_path: String,
+    pub member_keys: Vec<String>,
+    pub levels: Vec<Vec<EnsembleBin>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SnapshotManifest {
     pub session_json: String,
     pub signals: Vec<BakedSignal>,
+    pub ensembles: Vec<BakedEnsemble>,
 }

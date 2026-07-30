@@ -43,6 +43,7 @@ describe("BakedPlane.querySamples", () => {
             ],
           },
         ],
+        ensembles: [],
       }),
     );
 
@@ -170,6 +171,58 @@ describe("TauriPlane.querySamples", () => {
   });
 });
 
+describe("BakedPlane.queryEnsembleTiles", () => {
+  it("serves only the baked generation and membership", async () => {
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [],
+        ensembles: [
+          {
+            set_key: "set-a",
+            generation: "4",
+            local_path: "imu/ax",
+            member_keys: ["run-1", "run-3"],
+            levels: [
+              [
+                {
+                  t0: 0,
+                  t1: 1,
+                  min_run_mean: 1,
+                  max_run_mean: 3,
+                  mean_of_run_means: 2,
+                  sigma: 1,
+                  run_count: 2,
+                },
+              ],
+            ],
+          },
+        ],
+      }),
+    );
+    const response = await plane.queryEnsembleTiles({
+      request_id: "r",
+      set_id: "1",
+      local_path: "imu/ax",
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+      member_filter: ["run-1", "run-3"],
+    });
+    expect(response.generation).toBe("4");
+    expect(response.member_keys).toEqual(["run-1", "run-3"]);
+    await expect(
+      plane.queryEnsembleTiles({
+        request_id: "r",
+        set_id: "1",
+        local_path: "imu/ax",
+        window: { t0: 0, t1: 1 },
+        pixel_width: 100,
+        member_filter: ["run-1"],
+      }),
+    ).rejects.toThrow("membership was not baked");
+  });
+});
+
 describe("derived port", () => {
   it("creates a derived signal through the native plane", async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
@@ -202,7 +255,9 @@ describe("derived port", () => {
   });
 
   it("has no derived port in a snapshot", () => {
-    const plane = new BakedPlane(seal({ session_json: "", signals: [] }));
+    const plane = new BakedPlane(
+      seal({ session_json: "", signals: [], ensembles: [] }),
+    );
     expect(plane.derived).toBeNull();
   });
 });
@@ -252,9 +307,10 @@ describe("export port", () => {
       return Promise.resolve(seal("/tmp/out.html") as never);
     });
 
-    const estimate = await plane.exporter.estimate("{}");
+    const selection = { source_keys: ["source"], set_keys: ["set"] };
+    const estimate = await plane.exporter.estimate("{}", selection);
     expect(estimate.entries[0]?.bytes).toBe("10");
-    await plane.exporter.writeHtml("{}", "visible", "standard");
+    await plane.exporter.writeHtml("{}", "visible", "standard", selection);
     expect(calls.map((call) => call.command)).toEqual([
       "export_estimate",
       "export_write",
@@ -264,6 +320,7 @@ describe("export port", () => {
         session_json: "{}",
         range: "visible",
         fidelity: "standard",
+        selection,
       }),
     );
   });
@@ -309,6 +366,7 @@ describe("export port", () => {
       seal({
         session_json: '{"app":"signalscope"}',
         signals: [],
+        ensembles: [],
       }),
     );
     expect(plane.bakedSessionJson).toBe('{"app":"signalscope"}');

@@ -5,10 +5,15 @@ use std::{
     io::Write,
 };
 
+use crate::ensemble;
 use crate::pyramid::Pyramid;
 use crate::session::{LinkedTime, PanelMode, PanelState, Session};
+use crate::sets::{SetId, SourceSet};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
-use scope_protocol::{BakedSignal, ExportFidelity, ExportRange, SignalSummary, SnapshotManifest};
+use scope_protocol::{
+    BakedEnsemble, BakedSignal, EnsembleBin, ExportFidelity, ExportRange, ExportSelection,
+    SignalSummary, SnapshotManifest,
+};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -44,6 +49,7 @@ impl SignalPlan<'_> {
 
 pub struct ExportPlan<'a> {
     pub signals: Vec<SignalPlan<'a>>,
+    pub ensembles: Vec<BakedEnsemble>,
     pub series_total: u64,
     pub series_decimated: u64,
     pub series_full_rate: u64,
@@ -60,6 +66,12 @@ pub enum SnapshotError {
     MissingPyramid(SignalId),
     #[error("signal {0:?} has no source")]
     MissingSource(SignalId),
+    #[error("selected set is missing: {0}")]
+    MissingSet(String),
+    #[error("selected set generation changed: {0}")]
+    StaleSet(String),
+    #[error("ensemble planning failed: {0}")]
+    Ensemble(#[from] ensemble::EnsembleError),
     #[error("manifest serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
     #[error("manifest output is not UTF-8: {0}")]
@@ -149,6 +161,7 @@ fn export_plan(signals: Vec<SignalPlan<'_>>) -> ExportPlan<'_> {
         .unwrap_or(1);
     ExportPlan {
         signals,
+        ensembles: Vec::new(),
         series_total,
         series_decimated,
         series_full_rate: series_total - series_decimated,
@@ -168,6 +181,39 @@ pub fn plan<'a>(
     range: ExportRange,
     fidelity: ExportFidelity,
 ) -> Result<ExportPlan<'a>, SnapshotError> {
+    let selection = ExportSelection {
+        source_keys: store
+            .sources()
+            .map(|source| source.key.0.to_string())
+            .collect(),
+        set_keys: Vec::new(),
+    };
+    plan_selected(
+        session,
+        store,
+        pyramids,
+        &BTreeMap::new(),
+        &selection,
+        range,
+        fidelity,
+    )
+}
+
+/// Plans only explicitly selected sources and sets.
+///
+/// # Errors
+///
+/// Returns an error when selected data or an exact set generation is absent.
+pub fn plan_selected<'a>(
+    session: &Session,
+    store: &'a SignalStore,
+    pyramids: &'a BTreeMap<SignalId, Pyramid>,
+    sets: &BTreeMap<SetId, SourceSet>,
+    selection: &ExportSelection,
+    range: ExportRange,
+    fidelity: ExportFidelity,
+) -> Result<ExportPlan<'a>, SnapshotError> {
+    let selected_sources = selection.source_keys.iter().collect::<BTreeSet<_>>();
     let mut needs_raw = BTreeSet::new();
     for tab in &session.tabs {
         for panel in &tab.panels {
@@ -182,9 +228,13 @@ pub fn plan<'a>(
     }
 
     if range == ExportRange::All {
-        return Ok(export_plan(
+        let mut plan = export_plan(
             store
                 .signals()
+                .filter(|signal| {
+                    source_key(store, signal)
+                        .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
+                })
                 .map(|signal| {
                     let pyramid = pyramids
                         .get(&signal.id)
@@ -199,7 +249,10 @@ pub fn plan<'a>(
                     ))
                 })
                 .collect::<Result<_, SnapshotError>>()?,
-        ));
+        );
+        plan.ensembles =
+            plan_ensembles(session, store, pyramids, sets, selection, range, fidelity)?;
+        return Ok(plan);
     }
 
     let mut window: Option<(f64, f64)> = None;
@@ -218,13 +271,17 @@ pub fn plan<'a>(
             }
         }
     }
-    let Some((t0, t1)) = window else {
-        return Ok(export_plan(Vec::new()));
-    };
+    let (t0, t1) = window.unwrap_or((session.linked_time.t0, session.linked_time.t1));
 
-    Ok(export_plan(
+    let mut plan = export_plan(
         wanted
             .into_iter()
+            .filter(|id| {
+                store.signal(*id).is_some_and(|signal| {
+                    source_key(store, signal)
+                        .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
+                })
+            })
             .map(|id| {
                 let signal = store.signal(id).ok_or(SnapshotError::MissingSignal(id))?;
                 let pyramid = pyramids.get(&id).ok_or(SnapshotError::MissingPyramid(id))?;
@@ -238,7 +295,115 @@ pub fn plan<'a>(
                 ))
             })
             .collect::<Result<_, SnapshotError>>()?,
-    ))
+    );
+    plan.ensembles = plan_ensembles(session, store, pyramids, sets, selection, range, fidelity)?;
+    Ok(plan)
+}
+
+fn plan_ensembles(
+    session: &Session,
+    store: &SignalStore,
+    pyramids: &BTreeMap<SignalId, Pyramid>,
+    sets: &BTreeMap<SetId, SourceSet>,
+    selection: &ExportSelection,
+    range: ExportRange,
+    fidelity: ExportFidelity,
+) -> Result<Vec<BakedEnsemble>, SnapshotError> {
+    let mut baked = Vec::new();
+    for selected in &selection.set_keys {
+        let set = sets
+            .values()
+            .find(|set| set.key.0.to_string() == *selected)
+            .ok_or_else(|| SnapshotError::MissingSet(selected.clone()))?;
+        let saved = session
+            .source_sets
+            .iter()
+            .find(|saved| saved.key == *selected)
+            .ok_or_else(|| SnapshotError::MissingSet(selected.clone()))?;
+        if saved.generation != set.generation {
+            return Err(SnapshotError::StaleSet(selected.clone()));
+        }
+        let members = saved
+            .members
+            .iter()
+            .map(|member| {
+                uuid::Uuid::parse_str(&member.source_key)
+                    .map(SourceKey)
+                    .map_err(|_| SnapshotError::MissingSet(selected.clone()))
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let window = ensemble_window(session, store, set, range);
+        let pixel_width = u32::try_from(ceiling(fidelity).unwrap_or(16_384) / 2)
+            .unwrap_or(u32::MAX)
+            .max(1);
+        for local_path in &set.fingerprint.local_paths {
+            let tile = ensemble::query(
+                set,
+                local_path,
+                store,
+                pyramids,
+                window,
+                pixel_width,
+                Some(&members),
+                ensemble::Limits::default(),
+            )?;
+            baked.push(BakedEnsemble {
+                set_key: selected.clone(),
+                generation: tile.generation,
+                local_path: local_path.clone(),
+                member_keys: tile
+                    .member_keys
+                    .into_iter()
+                    .map(|key| key.0.to_string())
+                    .collect(),
+                levels: vec![tile.cells.iter().map(ensemble_bin).collect()],
+            });
+        }
+    }
+    Ok(baked)
+}
+
+fn ensemble_window(
+    session: &Session,
+    store: &SignalStore,
+    set: &SourceSet,
+    range: ExportRange,
+) -> (f64, f64) {
+    if range == ExportRange::Visible {
+        return (session.linked_time.t0, session.linked_time.t1);
+    }
+    set.members
+        .keys()
+        .filter_map(|key| {
+            let source = store.sources().find(|source| source.key == *key)?;
+            let transform = set.transform(*key)?;
+            let bounds = store
+                .signals_of(source.id)
+                .next()
+                .map(Signal::time_bounds)?;
+            Some((transform.apply(bounds.0), transform.apply(bounds.1)))
+        })
+        .fold(None, |window, bounds| {
+            Some(window.map_or(bounds, |(t0, t1): (f64, f64)| {
+                (t0.min(bounds.0), t1.max(bounds.1))
+            }))
+        })
+        .unwrap_or((session.linked_time.t0, session.linked_time.t1))
+}
+
+fn ensemble_bin(cell: &ensemble::EnsembleCell) -> EnsembleBin {
+    EnsembleBin {
+        t0: cell.t0,
+        t1: cell.t1,
+        min_run_mean: cell.min_run_mean.is_finite().then_some(cell.min_run_mean),
+        max_run_mean: cell.max_run_mean.is_finite().then_some(cell.max_run_mean),
+        mean_of_run_means: cell
+            .mean_of_run_means
+            .is_finite()
+            .then_some(cell.mean_of_run_means),
+        sigma: cell.sigma.is_finite().then_some(cell.sigma),
+        run_count: cell.run_count,
+    }
 }
 
 fn source_key(store: &SignalStore, signal: &Signal) -> Result<SourceKey, SnapshotError> {
@@ -290,6 +455,7 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
     Ok(SnapshotManifest {
         session_json: serde_json::to_string(&baked_session)?,
         signals,
+        ensembles: plan.ensembles.clone(),
     })
 }
 
@@ -344,12 +510,20 @@ const BYTES_PER_BIN: u64 = 200;
 /// Estimates serialized data bytes from planned level metadata.
 #[must_use]
 pub fn estimated_bytes(plan: &ExportPlan) -> u64 {
-    plan.signals
+    let signal_bytes = plan
+        .signals
         .iter()
         .flat_map(|signal| &signal.levels)
         .map(|level| level.bin_count as u64)
         .sum::<u64>()
-        * BYTES_PER_BIN
+        * BYTES_PER_BIN;
+    let ensemble_bins = plan
+        .ensembles
+        .iter()
+        .flat_map(|ensemble| &ensemble.levels)
+        .map(Vec::len)
+        .sum::<usize>() as u64;
+    signal_bytes + ensemble_bins * BYTES_PER_BIN
 }
 
 #[cfg(test)]
@@ -358,7 +532,11 @@ mod tests {
 
     use super::*;
     use crate::pyramid::Pyramid;
-    use crate::session::{AxisStyle, DashStyle, PanelMode, PanelState, SeriesState, Session};
+    use crate::session::{
+        AxisStyle, DashStyle, OriginKindState, PanelMode, PanelState, SeriesState, Session,
+        SetMemberState, SourceSetState, TimeDomainState, TimeUnitState,
+    };
+    use crate::sets::{SetId, SourceSet, propose_sets};
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
 
@@ -418,6 +596,53 @@ mod tests {
         session
     }
 
+    fn store_with_set(count: u8) -> (SignalStore, BTreeMap<SignalId, Pyramid>, SourceSet) {
+        let mut store = SignalStore::new();
+        let mut pyramids = BTreeMap::new();
+        let mut candidates = Vec::new();
+        for index in 1..=count {
+            let key = SourceKey(uuid::Uuid::from_bytes([index; 16]));
+            let source = store
+                .register_source(format!("{index}.csv"), key, format!("run_{index}"))
+                .unwrap();
+            let signal = store
+                .insert_signal(
+                    source,
+                    "imu/ax",
+                    None,
+                    vec![0.0, 0.5, 1.0].into(),
+                    vec![f64::from(index); 3],
+                )
+                .unwrap();
+            pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
+            candidates.push((key, vec!["imu/ax".into()]));
+        }
+        let set = propose_sets(&candidates).pop().unwrap();
+        (store, pyramids, set)
+    }
+
+    fn set_state(set: &SourceSet, members: &[SourceKey]) -> SourceSetState {
+        SourceSetState {
+            key: set.key.0.to_string(),
+            label: set.label.clone(),
+            generation: set.generation,
+            time_domain: TimeDomainState {
+                unit: TimeUnitState::Seconds,
+                origin: OriginKindState::Relative,
+                alignment_origin: 0.0,
+            },
+            members: members
+                .iter()
+                .map(|key| SetMemberState {
+                    source_key: key.0.to_string(),
+                    missing: set.missing_for(*key).iter().cloned().collect(),
+                    scale: 1.0,
+                    offset: 0.0,
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn all_scope_bakes_every_signal_full_range_from_level_zero() {
         let (store, pyramids) = store_with(&[("a", 10), ("b", 10_000)]);
@@ -457,6 +682,7 @@ mod tests {
                     .map(|level| pyramid.level(level).expect("level"))
                     .collect(),
             }],
+            ensembles: Vec::new(),
         };
         assert_eq!(
             actual,
@@ -862,10 +1088,68 @@ mod tests {
         assert!(actual <= estimated * 2);
     }
 
+    #[test]
+    fn baking_captures_the_exact_generation_and_filtered_membership() {
+        let (store, pyramids, mut set) = store_with_set(5);
+        for _ in 0..3 {
+            set.bump_generation();
+        }
+        let members = [
+            SourceKey(uuid::Uuid::from_bytes([1; 16])),
+            SourceKey(uuid::Uuid::from_bytes([3; 16])),
+        ];
+        let session = Session {
+            source_sets: vec![set_state(&set, &members)],
+            ..Session::default()
+        };
+        let sets = BTreeMap::from([(SetId(1), set.clone())]);
+        let selection = ExportSelection {
+            source_keys: Vec::new(),
+            set_keys: vec![set.key.0.to_string()],
+        };
+        let plan = plan_selected(
+            &session,
+            &store,
+            &pyramids,
+            &sets,
+            &selection,
+            ExportRange::Visible,
+            ExportFidelity::Preview,
+        )
+        .unwrap();
+        let manifest = bake(&plan, &session).unwrap();
+        let baked = &manifest.ensembles[0];
+        assert_eq!(baked.member_keys.len(), 2);
+        assert_eq!(baked.generation, 4);
+        assert!(baked.levels[0].iter().all(|bin| bin.run_count <= 2));
+    }
+
+    #[test]
+    fn export_selection_filters_all_range_before_level_planning() {
+        let (store, pyramids, set) = store_with_set(4);
+        let selected = set.members.keys().next().unwrap().0.to_string();
+        let selection = ExportSelection {
+            source_keys: vec![selected],
+            set_keys: Vec::new(),
+        };
+        let plan = plan_selected(
+            &Session::default(),
+            &store,
+            &pyramids,
+            &BTreeMap::new(),
+            &selection,
+            ExportRange::All,
+            ExportFidelity::Full,
+        )
+        .unwrap();
+        assert_eq!(plan.series_total, 1);
+    }
+
     fn empty_manifest() -> scope_protocol::SnapshotManifest {
         scope_protocol::SnapshotManifest {
             session_json: "{}".to_owned(),
             signals: Vec::new(),
+            ensembles: Vec::new(),
         }
     }
 }

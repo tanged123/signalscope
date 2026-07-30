@@ -244,6 +244,12 @@ export type ExportFidelity = "preview" | "standard" | "high" | "full";
 
 export interface ExportEstimateRequest {
   session_json: string;
+  selection: ExportSelection;
+}
+
+export interface ExportSelection {
+  source_keys: string[];
+  set_keys: string[];
 }
 
 export interface ExportEstimate {
@@ -264,6 +270,7 @@ export interface ExportWriteRequest {
   session_json: string;
   range: ExportRange;
   fidelity: ExportFidelity;
+  selection: ExportSelection;
 }
 
 export type ExportFileKind = "png" | "csv";
@@ -286,7 +293,16 @@ export interface BakedSignal {
   levels: EnvelopeBin[][];
 }
 
+export interface BakedEnsemble {
+  set_key: string;
+  generation: string;
+  local_path: string;
+  member_keys: string[];
+  levels: EnsembleBin[][];
+}
+
 export interface SnapshotManifest {
   session_json: string;
   signals: BakedSignal[];
+  ensembles: BakedEnsemble[];
 }

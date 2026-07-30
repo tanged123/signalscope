@@ -326,7 +326,15 @@
     "ExportEstimateRequest": {
       "kind": "object",
       "fields": {
-        "session_json": "string"
+        "session_json": "string",
+        "selection": "ExportSelection"
+      }
+    },
+    "ExportSelection": {
+      "kind": "object",
+      "fields": {
+        "source_keys": "string[]",
+        "set_keys": "string[]"
       }
     },
     "ExportEstimate": {
@@ -352,7 +360,8 @@
       "fields": {
         "session_json": "string",
         "range": "ExportRange",
-        "fidelity": "ExportFidelity"
+        "fidelity": "ExportFidelity",
+        "selection": "ExportSelection"
       }
     },
     "ExportFileKind": {
@@ -383,11 +392,22 @@
         "levels": "EnvelopeBin[][]"
       }
     },
+    "BakedEnsemble": {
+      "kind": "object",
+      "fields": {
+        "set_key": "string",
+        "generation": "u64",
+        "local_path": "string",
+        "member_keys": "string[]",
+        "levels": "EnsembleBin[][]"
+      }
+    },
     "SnapshotManifest": {
       "kind": "object",
       "fields": {
         "session_json": "string",
-        "signals": "BakedSignal[]"
+        "signals": "BakedSignal[]",
+        "ensembles": "BakedEnsemble[]"
       }
     }
   }

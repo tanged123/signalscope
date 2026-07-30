@@ -28,12 +28,13 @@ use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
     BatchState, BatchStatus, CreateSetRequest, DerivedRequest, EnsembleBin, EnsembleTileRequest,
     EnsembleTileResponse, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
-    ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest, FileState, FormatDescriptor,
-    IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
-    RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
-    SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
-    SaveSessionRequest, SessionDialogMode, SetSummary, SetTimeAlignmentRequest, SignalSummary,
-    SignalTile, SourceSummary, TileRequest, TileResponse, UpdateSetMembersRequest,
+    ExportFidelity, ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState,
+    FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest,
+    RemoveSignalRequest, RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest,
+    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
+    SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode, SetSummary,
+    SetTimeAlignmentRequest, SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    UpdateSetMembersRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -1095,6 +1096,7 @@ fn estimate_for(
     session: &session::Session,
     session_json: &str,
     template_bytes: u64,
+    selection: &ExportSelection,
 ) -> Result<ExportEstimate, snapshot::SnapshotError> {
     let base = template_bytes + session_json.len() as u64;
     let mut entries = Vec::with_capacity(8);
@@ -1105,7 +1107,15 @@ fn estimate_for(
             ExportFidelity::High,
             ExportFidelity::Full,
         ] {
-            let plan = snapshot::plan(session, &data.store, &data.pyramids, range, fidelity)?;
+            let plan = snapshot::plan_selected(
+                session,
+                &data.store,
+                &data.pyramids,
+                &data.sets,
+                selection,
+                range,
+                fidelity,
+            )?;
             entries.push(ExportEstimateEntry {
                 range,
                 fidelity,
@@ -1134,8 +1144,14 @@ fn export_estimate(
         .len();
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(Envelope::new(
-        estimate_for(&data, &session, &request.session_json, template_bytes)
-            .map_err(|error| error.to_string())?,
+        estimate_for(
+            &data,
+            &session,
+            &request.session_json,
+            template_bytes,
+            &request.selection,
+        )
+        .map_err(|error| error.to_string())?,
     ))
 }
 
@@ -1166,10 +1182,12 @@ async fn export_write(
     let manifest = {
         let state = app.state::<Arc<Mutex<DataState>>>();
         let data = state.lock().map_err(|error| error.to_string())?;
-        let export = snapshot::plan(
+        let export = snapshot::plan_selected(
             &session,
             &data.store,
             &data.pyramids,
+            &data.sets,
+            &request.selection,
             request.range,
             request.fidelity,
         )
@@ -1556,7 +1574,15 @@ mod tests {
         data.pyramids
             .insert(signal.id, Pyramid::from_signal(signal));
         let session = session::Session::default();
-        let estimate = estimate_for(&data, &session, "{}", 1_000).expect("estimate");
+        let selection = ExportSelection {
+            source_keys: data
+                .store
+                .sources()
+                .map(|source| source.key.0.to_string())
+                .collect(),
+            set_keys: Vec::new(),
+        };
+        let estimate = estimate_for(&data, &session, "{}", 1_000, &selection).expect("estimate");
         assert_eq!(estimate.entries.len(), 8);
         for range in [ExportRange::Visible, ExportRange::All] {
             let entries: Vec<_> = estimate

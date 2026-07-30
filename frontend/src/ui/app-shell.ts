@@ -43,6 +43,7 @@ import {
   type BatchStatus,
   type ExportFidelity,
   type ExportRange,
+  type ExportSelection,
   type SampleResponse,
   type SampleSeries,
   type SignalSummary,
@@ -1353,18 +1354,23 @@ export class AppShell {
     this.exportPng = null;
     this.exportCsv.clear();
     this.exportDialog ??= new ExportDialog(this.root, {
-      estimateHtml: async () => {
+      estimateHtml: async (setKeys) => {
         const exporter = this.plane.exporter;
         if (exporter === null) return null;
         try {
           return await exporter.estimate(
             JSON.stringify(this.workspace.snapshot()),
+            this.exportSelection(setKeys),
           );
         } catch (error: unknown) {
           this.reportError(error);
           return null;
         }
       },
+      exportSets: () =>
+        this.workspace
+          .snapshot()
+          .source_sets.map((set) => ({ key: set.key, label: set.label })),
       pngBytes: async () => {
         const generation = this.exportGeneration;
         try {
@@ -1395,7 +1401,7 @@ export class AppShell {
           return null;
         }
       },
-      runExport: async (selected, range, fidelity, pngScope) => {
+      runExport: async (selected, range, fidelity, pngScope, setKeys) => {
         const cachedPng = this.exportPng;
         const cachedCsv = this.exportCsv.get(fidelity);
         this.exportGeneration += 1;
@@ -1407,6 +1413,7 @@ export class AppShell {
             pngScope,
             cachedPng,
             cachedCsv,
+            setKeys,
           );
         } catch (error: unknown) {
           this.reportError(error);
@@ -1424,6 +1431,7 @@ export class AppShell {
     pngScope: PngScope,
     cachedPng: Uint8Array | null,
     cachedCsv: CsvExport | undefined,
+    setKeys: readonly string[],
   ): Promise<void> {
     const exporter = this.plane.exporter;
     if (exporter === null) return;
@@ -1433,6 +1441,7 @@ export class AppShell {
         JSON.stringify(this.workspace.snapshot()),
         range,
         fidelity,
+        this.exportSelection(setKeys),
       );
     } else if (format === "png") {
       if (pngScope === "all") {
@@ -1462,6 +1471,14 @@ export class AppShell {
       );
     }
     if (path !== null) this.showModeHelp(`exported ${path}`);
+  }
+
+  private exportSelection(setKeys?: readonly string[]): ExportSelection {
+    const session = this.workspace.snapshot();
+    return {
+      source_keys: session.sources.map((source) => source.key),
+      set_keys: [...(setKeys ?? session.source_sets.map((set) => set.key))],
+    };
   }
 
   private async buildVisiblePng(): Promise<Uint8Array | null> {
