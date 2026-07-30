@@ -30,8 +30,8 @@ manual generation; only a successful `main` push can tag or deploy.
 **Interfaces:**
 
 - Consumes: `workflow_dispatch.inputs.run_demo`
-- Produces: `release-demo` artifact from `demo`
-- Produces: release-only `deploy-demo` consuming `release-demo`
+- Produces: `release-demo-<sha>` artifact from `demo`
+- Produces: release-only `deploy-demo` consuming that run's artifact
 
 - [x] **Step 1: Add the manual input and release guard**
 
@@ -42,14 +42,16 @@ Restrict `tag` to `push` events on `refs/heads/main`.
 
 Keep `needs: [tag]`, but use `always()` so the job runs when `tag` succeeds or
 when a manual dispatch sets `run_demo`. Give it read-only contents permission,
-run `./scripts/demo.sh all`, and upload `build/demo` as `release-demo`.
+run `./scripts/demo.sh all`, and upload `build/demo` as
+`release-demo-${{ github.sha }}`.
 
 - [x] **Step 3: Add release-only deployment**
 
 Create `deploy-demo` with `needs: [tag, demo]`, the `github-pages` environment,
 the existing serialized concurrency lane, and write/OIDC permissions. Download
-`release-demo`, run `./scripts/demo.sh current`, then publish `gh-pages` and
-deploy `build/demo/pages`.
+the commit-scoped demo artifact, then publish `gh-pages` and deploy
+`build/demo/pages`. Do not compare the release checkout with the current
+`origin/main`: a newer merge must not suppress the last successful release.
 
 - [x] **Step 4: Validate and document**
 

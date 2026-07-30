@@ -396,13 +396,16 @@ Expected: pass, including the new cases.
 
 Place it after `tag` and depend on it, so artifacts regenerate on release only —
 `release.sh tag` refuses an existing tag, so a `tag` success means a real
-release. The job needs `contents: write` and a checkout that keeps its
-credential to push `gh-pages`; copy the `# zizmor: ignore[artipacked]` comment
-and the bot identity configuration from the `tag` job. Use
-`./.github/actions/setup` with the Cachix token, then a single
-`./scripts/demo.sh all` step and a `./scripts/demo.sh publish build/demo` step.
-Also upload `build/demo` with `actions/upload-artifact@v4` so a failed publish
-still leaves the GIF inspectable.
+release. Give the job read-only contents permission and a checkout without
+persisted credentials. Use `./.github/actions/setup` with the Cachix token,
+then run `./scripts/demo.sh all` and upload `build/demo` with
+`actions/upload-artifact@v4`.
+
+Add a separate `deploy-demo` job after `tag` and `demo`. Give only this job the
+`github-pages` environment and Pages write/OIDC permissions. Download the
+commit-scoped demo artifact, publish `gh-pages` with
+`./scripts/demo.sh publish build/demo`, and deploy the same staged Pages
+content.
 
 Leave `ci-ok` alone. The demo job never runs on a pull request, and adding it to
 that needs list would make every PR's aggregate gate report a skip.
@@ -507,5 +510,5 @@ subject and the why.
 
 State at handoff: which commands ran and their results, that GitHub Pages must
 use GitHub Actions before the README links resolve, that the first real GIF only
-appears after the next release lands on main, and that the hosted demo uses the
-shipping export's pre-populated default workspace.
+appears after the next release lands on main, and that the hosted demo opens on
+the shipping export's empty default session.
