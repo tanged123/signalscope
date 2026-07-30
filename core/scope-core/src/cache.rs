@@ -28,14 +28,17 @@ use std::{
 
 use scope_protocol::IngestStage;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
     bins::BinLevel,
+    columns::TimebaseId,
     ingest::{
         self, DecodeContext, IngestError, IngestSummary,
         provenance::{fingerprint, provenance_digest},
     },
+    paging::{PageCache, PageError, PageHandle},
     preferences::Preferences,
     pyramid::Pyramid,
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
@@ -189,8 +192,58 @@ pub enum CacheError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Ingest(#[from] IngestError),
+    #[error(transparent)]
+    Page(#[from] PageError),
     #[error("invalid provenance digest: {0}")]
     InvalidProvenance(String),
+}
+
+const SPILL_MAGIC: [u8; 8] = *b"SSCOL001";
+const SPILL_HEADER_LEN: usize = 32;
+
+/// Writes a derived value column and returns its page-backed region.
+///
+/// # Errors
+///
+/// Returns an error when the cache root cannot be written.
+pub fn spill_columns(
+    root: &CacheRoot,
+    timebase_id: TimebaseId,
+    time: &[f64],
+    values: &[f64],
+) -> Result<PageHandle, CacheError> {
+    let mut hash = Sha256::new();
+    hash.update(timebase_id.0.to_le_bytes());
+    for column in [time, values] {
+        for value in column {
+            hash.update(value.to_le_bytes());
+        }
+    }
+    let directory = root.directory().join("derived");
+    fs::create_dir_all(&directory)?;
+    let target = directory.join(format!("{:x}.sscol", hash.finalize()));
+    let value_offset = SPILL_HEADER_LEN + size_of_val(time);
+    let value_bytes = size_of_val(values);
+    if !target.exists() {
+        let temporary = target.with_extension("sscol.tmp");
+        let mut file = File::create(&temporary)?;
+        file.write_all(&SPILL_MAGIC)?;
+        file.write_all(&1_u32.to_le_bytes())?;
+        file.write_all(&0_u32.to_le_bytes())?;
+        file.write_all(&timebase_id.0.to_le_bytes())?;
+        file.write_all(&(time.len() as u64).to_le_bytes())?;
+        file.write_all(&encode_column(time))?;
+        file.write_all(&encode_column(values))?;
+        file.sync_all()?;
+        fs::rename(temporary, &target)?;
+    }
+    let cache = PageCache::new(&directory, value_bytes.max(1));
+    Ok(PageHandle::cached(
+        cache,
+        target,
+        value_offset as u64,
+        value_bytes,
+    ))
 }
 
 pub struct LoadedCache {
@@ -815,6 +868,18 @@ mod tests {
                 .len(),
             500 * size_of::<f64>()
         );
+    }
+
+    #[test]
+    fn spilled_columns_reopen_from_the_cache_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = CacheRoot::app_owned(directory.path());
+        let handle = spill_columns(&root, TimebaseId(7), &[0.0, 1.0], &[2.0, 4.0]).unwrap();
+
+        assert_eq!(&*handle.values().unwrap(), &[2.0, 4.0]);
+        let reopened =
+            crate::paging::PageHandle::region(handle.path(), handle.offset(), handle.byte_len());
+        assert_eq!(&*reopened.values().unwrap(), &[2.0, 4.0]);
     }
 
     #[test]

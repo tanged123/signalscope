@@ -16,6 +16,7 @@ pub struct PageHandle {
     offset: u64,
     len: Option<usize>,
     memory: Option<Arc<[f64]>>,
+    cache: Option<PageCache>,
 }
 
 impl PageHandle {
@@ -26,6 +27,7 @@ impl PageHandle {
             offset: 0,
             len: None,
             memory: None,
+            cache: None,
         }
     }
 
@@ -36,6 +38,7 @@ impl PageHandle {
             offset,
             len: Some(len),
             memory: None,
+            cache: None,
         }
     }
 
@@ -46,6 +49,18 @@ impl PageHandle {
             offset: 0,
             len: Some(values.len().saturating_mul(size_of::<f64>())),
             memory: Some(values),
+            cache: None,
+        }
+    }
+
+    #[must_use]
+    pub fn cached(cache: PageCache, path: impl Into<PathBuf>, offset: u64, len: usize) -> Self {
+        Self {
+            path: path.into(),
+            offset,
+            len: Some(len),
+            memory: None,
+            cache: Some(cache),
         }
     }
 
@@ -54,14 +69,67 @@ impl PageHandle {
         &self.path
     }
 
-    pub(crate) fn memory_values(&self) -> Option<Arc<[f64]>> {
-        self.memory.as_ref().map(Arc::clone)
+    #[must_use]
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    #[must_use]
+    pub fn byte_len(&self) -> usize {
+        self.len.unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn value_len(&self) -> usize {
+        self.memory
+            .as_ref()
+            .map_or_else(|| self.byte_len() / size_of::<f64>(), |values| values.len())
+    }
+
+    /// Loads and decodes the complete f64 region.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid regions or failed page reads.
+    pub fn values(&self) -> Result<Arc<[f64]>, PageError> {
+        if let Some(values) = &self.memory {
+            return Ok(Arc::clone(values));
+        }
+        let len = self.len.ok_or(PageError::InvalidRange)?;
+        if len % size_of::<f64>() != 0 {
+            return Err(PageError::InvalidColumn);
+        }
+        let cache = self.cache.clone().unwrap_or_else(|| {
+            PageCache::new(self.path.parent().unwrap_or_else(|| Path::new(".")), len)
+        });
+        let lease = cache.read(self, 0..len)?;
+        Ok(lease
+            .bytes()
+            .chunks_exact(size_of::<f64>())
+            .map(|bytes| {
+                let mut value = [0; size_of::<f64>()];
+                value.copy_from_slice(bytes);
+                f64::from_le_bytes(value)
+            })
+            .collect::<Vec<_>>()
+            .into())
     }
 }
 
 #[derive(Clone)]
 pub struct PageCache {
     inner: Arc<Mutex<State>>,
+}
+
+impl std::fmt::Debug for PageCache {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = lock(&self.inner);
+        formatter
+            .debug_struct("PageCache")
+            .field("root", &state.root)
+            .field("capacity", &state.capacity)
+            .finish_non_exhaustive()
+    }
 }
 
 struct State {
@@ -312,6 +380,8 @@ pub enum PageError {
     InvalidRange,
     #[error("memory page handles are not file-backed")]
     MemoryHandle,
+    #[error("page is not a complete f64 column")]
+    InvalidColumn,
     #[error("page path is outside the cache root: {0}")]
     OutsideRoot(PathBuf),
     #[error("short page read: expected {expected} bytes, read {actual}")]

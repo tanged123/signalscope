@@ -137,6 +137,11 @@ impl Signal {
     }
 
     #[must_use]
+    pub fn is_paged(&self) -> bool {
+        matches!(self.values, Column::Paged(_))
+    }
+
+    #[must_use]
     pub fn timebase_id(&self) -> TimebaseId {
         self.timebase_id
     }

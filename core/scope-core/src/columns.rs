@@ -29,14 +29,12 @@ impl Column {
     #[must_use]
     /// # Panics
     ///
-    /// Panics for file-backed handles until a page reader is attached.
+    /// Panics when a page-backed column cannot be read.
     pub fn as_slice(&self) -> ColumnGuard {
         ColumnGuard {
             values: match self {
                 Self::Owned(values) => Arc::clone(values),
-                Self::Paged(handle) => handle
-                    .memory_values()
-                    .expect("paged column handle has no reader"),
+                Self::Paged(handle) => handle.values().expect("paged column read"),
             },
         }
     }
@@ -45,7 +43,7 @@ impl Column {
     pub fn len(&self) -> usize {
         match self {
             Self::Owned(values) => values.len(),
-            Self::Paged(handle) => handle.memory_values().map_or(0, |values| values.len()),
+            Self::Paged(handle) => handle.value_len(),
         }
     }
 
@@ -55,19 +53,10 @@ impl Column {
     }
 
     #[must_use]
-    /// # Panics
-    ///
-    /// Panics for file-backed handles until a page reader is attached.
     pub fn downgrade(&self) -> WeakColumn {
-        WeakColumn {
-            values: match self {
-                Self::Owned(values) => Arc::downgrade(values),
-                Self::Paged(handle) => Arc::downgrade(
-                    &handle
-                        .memory_values()
-                        .expect("paged column handle has no reader"),
-                ),
-            },
+        match self {
+            Self::Owned(values) => WeakColumn::Owned(Arc::downgrade(values)),
+            Self::Paged(handle) => WeakColumn::Paged(handle.clone()),
         }
     }
 
@@ -92,15 +81,19 @@ impl From<Vec<f64>> for Column {
 }
 
 #[derive(Clone, Debug)]
-pub struct WeakColumn {
-    values: Weak<[f64]>,
+pub enum WeakColumn {
+    Owned(Weak<[f64]>),
+    Paged(PageHandle),
 }
 
 impl WeakColumn {
     #[must_use]
     pub fn upgrade(&self) -> Option<ColumnGuard> {
         Some(ColumnGuard {
-            values: self.values.upgrade()?,
+            values: match self {
+                Self::Owned(values) => values.upgrade()?,
+                Self::Paged(handle) => handle.values().ok()?,
+            },
         })
     }
 }

@@ -10,12 +10,15 @@ use std::{
 
 use base64::Engine;
 use scope_core::{
+    cache::{self, CacheRoot},
+    columns::Column,
     compute, ensemble, expr,
     ingest::{
         self, DecodedSource, IngestError, IngestSummary, SUPPORTED_FORMATS,
-        admission::{BudgetConfig, MemoryBudget},
+        admission::{BudgetConfig, MemoryBudget, ResidentCharge},
         batch::{BatchJobs, BatchOptions, CommitSink},
     },
+    paging::PageHandle,
     preferences,
     pyramid::Pyramid,
     restore, session,
@@ -39,7 +42,6 @@ use scope_protocol::{
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
-#[derive(Default)]
 struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
@@ -48,6 +50,28 @@ struct DataState {
     next_set_id: u64,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
+    derived_spills: BTreeMap<String, PageHandle>,
+    derived_charges: BTreeMap<String, ResidentCharge>,
+    cache_root: PathBuf,
+    budget: MemoryBudget,
+}
+
+impl Default for DataState {
+    fn default() -> Self {
+        Self {
+            store: SignalStore::default(),
+            pyramids: BTreeMap::new(),
+            registry: SourceRegistry::default(),
+            sets: BTreeMap::new(),
+            next_set_id: 0,
+            derived_source: None,
+            derived_references: BTreeMap::new(),
+            derived_spills: BTreeMap::new(),
+            derived_charges: BTreeMap::new(),
+            cache_root: std::env::temp_dir().join("signalscope/cache"),
+            budget: MemoryBudget::new(BudgetConfig::from_available(8 * 1024 * 1024 * 1024)),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -792,7 +816,16 @@ const DERIVED_PREFIX: &str = "derived/";
 
 impl DataState {
     fn reset(&mut self) {
-        *self = Self::default();
+        for handle in self.derived_spills.values() {
+            let _ = std::fs::remove_file(handle.path());
+        }
+        let cache_root = self.cache_root.clone();
+        let budget = self.budget.clone();
+        *self = Self {
+            cache_root,
+            budget,
+            ..Self::default()
+        };
     }
 
     fn dependents(&self, path: &str) -> Vec<&str> {
@@ -824,6 +857,19 @@ impl DataState {
                 "cannot {action} {path}; dependent derived signals: {}",
                 dependents.join(", ")
             ))
+        }
+    }
+
+    fn remove_spill(&mut self, path: &str) {
+        let Some(handle) = self.derived_spills.remove(path) else {
+            return;
+        };
+        if !self
+            .derived_spills
+            .values()
+            .any(|other| other.path() == handle.path())
+        {
+            let _ = std::fs::remove_file(handle.path());
         }
     }
 
@@ -859,6 +905,31 @@ impl DataState {
         if let Some(previous) = self.store.remove_signal(&path) {
             self.pyramids.remove(&previous);
         }
+        self.remove_spill(&path);
+        self.derived_charges.remove(&path);
+        let bytes = evaluated.values.len().saturating_mul(size_of::<f64>());
+        let charge = self
+            .budget
+            .acquire_working(bytes)
+            .and_then(scope_core::ingest::admission::Ticket::transfer_to_resident)
+            .ok();
+        let (values, spill) = if charge.is_some() {
+            (Column::from(evaluated.values), None)
+        } else {
+            let timebase_id = references
+                .first()
+                .and_then(|reference| self.store.signal_by_path(reference))
+                .map(Signal::timebase_id)
+                .ok_or_else(|| "derived expression has no timebase".to_owned())?;
+            let handle = cache::spill_columns(
+                &CacheRoot::app_owned(&self.cache_root),
+                timebase_id,
+                &evaluated.time,
+                &evaluated.values,
+            )
+            .map_err(|error| error.to_string())?;
+            (Column::paged(handle.clone()), Some(handle))
+        };
         let signal_id = self
             .store
             .insert_signal(
@@ -866,7 +937,7 @@ impl DataState {
                 path.trim_start_matches(DERIVED_PREFIX),
                 None,
                 evaluated.time,
-                evaluated.values,
+                values,
             )
             .map_err(|error| error.to_string())?;
         let signal = self
@@ -883,6 +954,12 @@ impl DataState {
         let summary = signal_summary(signal, source_key);
         self.pyramids.insert(signal_id, pyramid);
         self.derived_references.insert(path, references);
+        if let Some(handle) = spill {
+            self.derived_spills.insert(summary.path.clone(), handle);
+        }
+        if let Some(charge) = charge {
+            self.derived_charges.insert(summary.path.clone(), charge);
+        }
         Ok(summary)
     }
 
@@ -900,6 +977,8 @@ impl DataState {
         if let Some(id) = self.store.remove_signal(path) {
             self.pyramids.remove(&id);
         }
+        self.remove_spill(path);
+        self.derived_charges.remove(path);
         self.derived_references.remove(path);
         Ok(())
     }
@@ -1336,6 +1415,14 @@ pub fn run() {
         .manage(Arc::new(Mutex::new(DataState::default())))
         .manage(jobs)
         .manage(RestoreGate::default())
+        .setup(|app| {
+            let root = cache_path(app.handle()).map_err(std::io::Error::other)?;
+            app.state::<Arc<Mutex<DataState>>>()
+                .lock()
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+                .cache_root = root;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             pick_sources,
             ingest_batch,
@@ -1513,6 +1600,47 @@ mod tests {
                 .values(),
             &[1.0, 2.0]
         );
+    }
+
+    #[test]
+    fn a_derived_signal_spills_when_it_exceeds_the_resident_budget() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.cache_root = tempfile::tempdir().unwrap().keep();
+        data.budget = MemoryBudget::new(BudgetConfig {
+            working_bytes: 1024,
+            resident_bytes: 1,
+        });
+
+        let summary = data
+            .create_derived_signal(DerivedRequest {
+                path: "derived/a".into(),
+                expr: "'input/x' * 2".into(),
+            })
+            .unwrap();
+        let signal = data.store.signal(SignalId(summary.signal_id)).unwrap();
+
+        assert!(signal.is_paged());
+        assert_eq!(&*signal.values(), &[2.0, 4.0]);
+    }
+
+    #[test]
+    fn removing_a_derived_signal_deletes_its_spill_file() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.cache_root = tempfile::tempdir().unwrap().keep();
+        data.budget = MemoryBudget::new(BudgetConfig {
+            working_bytes: 1024,
+            resident_bytes: 1,
+        });
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/a".into(),
+            expr: "'input/x' * 2".into(),
+        })
+        .unwrap();
+        let path = data.derived_spills["derived/a"].path().to_owned();
+
+        data.remove_derived_signal("derived/a").unwrap();
+
+        assert!(!path.exists());
     }
 
     #[test]
