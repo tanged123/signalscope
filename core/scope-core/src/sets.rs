@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::store::SourceKey;
 
-const MIN_SCHEMA_OVERLAP: f64 = 0.8;
+const MIN_SCHEMA_OVERLAP_NUMERATOR: usize = 4;
+const MIN_SCHEMA_OVERLAP_DENOMINATOR: usize = 5;
 const SET_NAMESPACE: Uuid = Uuid::from_bytes([
     0x0d, 0x69, 0x99, 0xb8, 0xc1, 0xf7, 0x4d, 0xd8, 0xb8, 0x1f, 0x0a, 0xb4, 0xf3, 0x1e, 0x82, 0xb2,
 ]);
@@ -44,11 +45,84 @@ pub struct AffineTransform {
     pub offset: f64,
 }
 
+impl AffineTransform {
+    #[must_use]
+    pub fn normalizing(unit: TimeUnit) -> Self {
+        Self {
+            scale: unit.to_seconds_scale(),
+            offset: 0.0,
+        }
+    }
+
+    #[must_use]
+    pub fn apply(self, time: f64) -> f64 {
+        self.scale.mul_add(time, self.offset)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TimeUnit {
+    Seconds,
+    Milliseconds,
+    Microseconds,
+    Nanoseconds,
+    Unsupported,
+}
+
+impl TimeUnit {
+    #[must_use]
+    pub fn to_seconds_scale(self) -> f64 {
+        match self {
+            Self::Seconds => 1.0,
+            Self::Milliseconds => 1e-3,
+            Self::Microseconds => 1e-6,
+            Self::Nanoseconds => 1e-9,
+            Self::Unsupported => f64::NAN,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OriginKind {
+    Relative,
+    AbsoluteEpoch,
+    EventAligned,
+    SyntheticIndex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimeDomain {
+    pub unit: TimeUnit,
+    pub origin: OriginKind,
+    pub alignment_origin: f64,
+}
+
+impl Default for TimeDomain {
+    fn default() -> Self {
+        Self {
+            unit: TimeUnit::Seconds,
+            origin: OriginKind::Relative,
+            alignment_origin: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, thiserror::Error, Eq, PartialEq)]
+pub enum AlignmentError {
+    #[error("synthetic index and physical time cannot share a set")]
+    MixedOrigins,
+    #[error("source {key:?} requires an explicit offset")]
+    OffsetRequired { key: SourceKey },
+    #[error("source {key:?} uses an unsupported time unit")]
+    UnsupportedUnit { key: SourceKey },
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetMember {
     pub source_key: SourceKey,
     pub local_paths: BTreeSet<String>,
     pub missing: BTreeSet<String>,
+    pub time_domain: TimeDomain,
     pub transform: Option<AffineTransform>,
 }
 
@@ -73,6 +147,7 @@ impl SourceSet {
                 source_key,
                 local_paths,
                 missing: BTreeSet::new(),
+                time_domain: TimeDomain::default(),
                 transform: Some(AffineTransform {
                     scale: 1.0,
                     offset: 0.0,
@@ -95,6 +170,62 @@ impl SourceSet {
             member.transform = Some(transform);
             self.bump_generation();
         }
+    }
+
+    pub fn set_time_domain(&mut self, source_key: SourceKey, domain: TimeDomain) {
+        if let Some(member) = self.members.get_mut(&source_key) {
+            member.time_domain = domain;
+            member.transform = default_transform(domain);
+            self.bump_generation();
+        }
+    }
+
+    pub fn set_member_origin(&mut self, source_key: SourceKey, origin: OriginKind) {
+        let Some(member) = self.members.get(&source_key) else {
+            return;
+        };
+        self.set_time_domain(
+            source_key,
+            TimeDomain {
+                origin,
+                ..member.time_domain
+            },
+        );
+    }
+
+    /// # Errors
+    ///
+    /// Returns an alignment error when members cannot share a time grid.
+    pub fn alignment(&self) -> Result<(), AlignmentError> {
+        let synthetic = self
+            .members
+            .values()
+            .filter(|member| member.time_domain.origin == OriginKind::SyntheticIndex)
+            .count();
+        if synthetic != 0 && synthetic != self.members.len() {
+            return Err(AlignmentError::MixedOrigins);
+        }
+        for member in self.members.values() {
+            let key = member.source_key;
+            if !member.time_domain.unit.to_seconds_scale().is_finite() {
+                return Err(AlignmentError::UnsupportedUnit { key });
+            }
+            if matches!(
+                member.time_domain.origin,
+                OriginKind::AbsoluteEpoch | OriginKind::EventAligned
+            ) && member.transform.is_none()
+            {
+                return Err(AlignmentError::OffsetRequired { key });
+            }
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn transform(&self, source_key: SourceKey) -> Option<AffineTransform> {
+        self.members
+            .get(&source_key)
+            .and_then(|member| member.transform)
     }
 
     #[must_use]
@@ -130,7 +261,7 @@ pub fn propose_sets(candidates: &[(SourceKey, Vec<String>)]) -> Vec<SourceSet> {
     let mut parents = (0..candidates.len()).collect::<Vec<_>>();
     for left in 0..schemas.len() {
         for right in left + 1..schemas.len() {
-            if schema_overlap(&schemas[left], &schemas[right]) >= MIN_SCHEMA_OVERLAP {
+            if schemas_match(&schemas[left], &schemas[right]) {
                 union(&mut parents, left, right);
             }
         }
@@ -167,6 +298,7 @@ pub fn propose_sets(candidates: &[(SourceKey, Vec<String>)]) -> Vec<SourceSet> {
                             source_key,
                             local_paths,
                             missing,
+                            time_domain: TimeDomain::default(),
                             transform: Some(AffineTransform {
                                 scale: 1.0,
                                 offset: 0.0,
@@ -186,12 +318,21 @@ pub fn propose_sets(candidates: &[(SourceKey, Vec<String>)]) -> Vec<SourceSet> {
         .collect()
 }
 
-fn schema_overlap(left: &BTreeSet<String>, right: &BTreeSet<String>) -> f64 {
+fn default_transform(domain: TimeDomain) -> Option<AffineTransform> {
+    matches!(
+        domain.origin,
+        OriginKind::Relative | OriginKind::SyntheticIndex
+    )
+    .then(|| AffineTransform::normalizing(domain.unit))
+}
+
+fn schemas_match(left: &BTreeSet<String>, right: &BTreeSet<String>) -> bool {
     let smaller = left.len().min(right.len());
     if smaller == 0 {
-        return f64::from(left.is_empty() && right.is_empty());
+        return left.is_empty() && right.is_empty();
     }
-    left.intersection(right).count() as f64 / smaller as f64
+    left.intersection(right).count() * MIN_SCHEMA_OVERLAP_DENOMINATOR
+        >= smaller * MIN_SCHEMA_OVERLAP_NUMERATOR
 }
 
 fn find(parents: &mut [usize], index: usize) -> usize {
@@ -216,6 +357,18 @@ mod tests {
 
     fn key(byte: u8) -> SourceKey {
         SourceKey(uuid::Uuid::from_bytes([byte; 16]))
+    }
+
+    fn two_member_set(origin: OriginKind) -> SourceSet {
+        let mut set = propose_sets(&[
+            (key(1), vec!["a".to_owned()]),
+            (key(2), vec!["a".to_owned()]),
+        ])
+        .pop()
+        .unwrap();
+        set.set_member_origin(key(1), origin);
+        set.set_member_origin(key(2), origin);
+        set
     }
 
     #[test]
@@ -267,5 +420,53 @@ mod tests {
             },
         );
         assert_eq!(set.generation, first + 2);
+    }
+
+    #[test]
+    fn supported_units_normalize_to_seconds_by_default() {
+        assert!((TimeUnit::Milliseconds.to_seconds_scale() - 1e-3).abs() < f64::EPSILON);
+        assert!((TimeUnit::Nanoseconds.to_seconds_scale() - 1e-9).abs() < f64::EPSILON);
+        let transform = AffineTransform::normalizing(TimeUnit::Milliseconds);
+        assert!((transform.apply(2_000.0) - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn absolute_epochs_require_an_explicit_offset() {
+        let mut set = two_member_set(OriginKind::AbsoluteEpoch);
+        assert!(matches!(
+            set.alignment(),
+            Err(AlignmentError::OffsetRequired { .. })
+        ));
+        set.set_transform(
+            key(1),
+            AffineTransform {
+                scale: 1.0,
+                offset: -1_700_000_000.0,
+            },
+        );
+        assert!(matches!(
+            set.alignment(),
+            Err(AlignmentError::OffsetRequired { .. })
+        ));
+        set.set_transform(
+            key(2),
+            AffineTransform {
+                scale: 1.0,
+                offset: -1_700_000_060.0,
+            },
+        );
+        assert!(set.alignment().is_ok());
+    }
+
+    #[test]
+    fn relative_origins_align_with_the_default_transform() {
+        assert!(two_member_set(OriginKind::Relative).alignment().is_ok());
+    }
+
+    #[test]
+    fn synthetic_index_and_physical_time_cannot_mix() {
+        let mut set = two_member_set(OriginKind::Relative);
+        set.set_member_origin(key(2), OriginKind::SyntheticIndex);
+        assert!(matches!(set.alignment(), Err(AlignmentError::MixedOrigins)));
     }
 }
