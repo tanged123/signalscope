@@ -30,7 +30,16 @@ if (html !== undefined) {
 
 let gifBytes;
 try {
-  gifBytes = (await stat(gifPath)).size;
+  const gifDetails = await stat(gifPath);
+  const gif = await readFile(gifPath);
+  gifBytes = gifDetails.size;
+  if (
+    !gifDetails.isFile() ||
+    gifBytes === 0 ||
+    !["GIF87a", "GIF89a"].includes(gif.subarray(0, 6).toString("ascii"))
+  ) {
+    failures.push("demo.gif is not a valid GIF file");
+  }
   if (gifBytes > maximumGifBytes) {
     failures.push(
       `demo GIF is ${gifBytes} bytes; budget is ${maximumGifBytes} bytes`,

@@ -214,8 +214,16 @@ jobs:
   demo:
     needs: [tag]
     runs-on: ubuntu-latest
+    concurrency:
+      group: signalscope-demo-pages
+      cancel-in-progress: true
     permissions:
       contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       # The demo job needs the checkout credential to push gh-pages.
       - uses: actions/checkout@v4 # zizmor: ignore[artipacked]
@@ -233,7 +241,13 @@ jobs:
           name: release-demo
           path: build/demo
           if-no-files-found: error
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: build/demo/pages
       - run: ./scripts/demo.sh publish build/demo
+      - id: deployment
+        uses: actions/deploy-pages@v4
 
   publish:
     needs: [tag, build, appimage, windows]

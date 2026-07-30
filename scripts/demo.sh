@@ -81,6 +81,14 @@ encode() {
   rm -f build/demo/palette.png
 }
 
+stage_pages() {
+  local pages_dir="$signalscope_root/build/demo/pages"
+  rm -rf "$pages_dir"
+  mkdir -p "$pages_dir"
+  cp build/demo/demo.html build/demo/demo.gif "$pages_dir/"
+  cp build/demo/demo.html "$pages_dir/index.html"
+}
+
 check_demo() {
   pnpm --filter @signalscope/frontend check:demo
 }
@@ -131,6 +139,7 @@ all)
   record
   encode
   check_demo
+  stage_pages
   ;;
 bake)
   bake
