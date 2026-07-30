@@ -11,10 +11,13 @@ const releaseFiles = {
   frontend: resolve(repositoryRoot, "frontend/package.json"),
   tauri: resolve(repositoryRoot, "shell/src-tauri/tauri.conf.json"),
   about: resolve(repositoryRoot, "frontend/src/ui/app-shell.ts"),
+  readme: resolve(repositoryRoot, "README.md"),
 };
 
 /** The version the About command shows; nothing else checks this literal. */
 const aboutPattern = /(showModeHelp\("SignalScope )(\d+\.\d+\.\d+)("\))/;
+const demoPattern =
+  /(https:\/\/tanged123\.github\.io\/signalscope\/demo\.gif\?v=)(\d+\.\d+\.\d+)/;
 
 async function workspacePackageNames() {
   const cargo = await readFile(releaseFiles.cargo, "utf8");
@@ -113,8 +116,14 @@ function aboutVersion(text) {
   return match[2];
 }
 
+function demoVersion(text) {
+  const match = demoPattern.exec(text);
+  if (!match) throw new Error("README.md has no versioned demo GIF URL");
+  return match[2];
+}
+
 async function readReleaseState(packageNames) {
-  const [cargoText, lockText, frontendText, tauriText, aboutText] =
+  const [cargoText, lockText, frontendText, tauriText, aboutText, readmeText] =
     await Promise.all(
       Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
     );
@@ -123,6 +132,7 @@ async function readReleaseState(packageNames) {
     ["frontend/package.json", JSON.parse(frontendText).version],
     ["shell/src-tauri/tauri.conf.json", JSON.parse(tauriText).version],
     ["frontend/src/ui/app-shell.ts About", aboutVersion(aboutText)],
+    ["README.md demo GIF", demoVersion(readmeText)],
   ]);
   for (const [name, version] of workspaceDependencyVersions(
     cargoText,
@@ -221,9 +231,16 @@ function setAboutVersion(text, version) {
   return updated;
 }
 
+function setDemoVersion(text, version) {
+  const updated = text.replace(demoPattern, `$1${version}`);
+  if (updated === text)
+    throw new Error("README.md demo GIF version was not updated");
+  return updated;
+}
+
 async function setVersion(version, packageNames) {
   parseVersion(version);
-  const [cargoText, lockText, frontendText, tauriText, aboutText] =
+  const [cargoText, lockText, frontendText, tauriText, aboutText, readmeText] =
     await Promise.all(
       Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
     );
@@ -245,6 +262,7 @@ async function setVersion(version, packageNames) {
       setJsonVersion(tauriText, version, "shell/src-tauri/tauri.conf.json"),
     ),
     writeFile(releaseFiles.about, setAboutVersion(aboutText, version)),
+    writeFile(releaseFiles.readme, setDemoVersion(readmeText, version)),
   ]);
   console.log(`SignalScope version set to ${version}`);
 }

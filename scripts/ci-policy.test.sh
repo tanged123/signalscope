@@ -31,7 +31,7 @@ if ! grep -q '^## Interactive demo$' "$readme"; then
   echo "README must give the hosted demo its own section" >&2
   failures=$((failures + 1))
 fi
-if ! grep -Fq '![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif)' "$readme"; then
+if ! grep -Eq '!\[SignalScope interactive demo\]\(https://tanged123\.github\.io/signalscope/demo\.gif\?v=[0-9]+\.[0-9]+\.[0-9]+\)' "$readme"; then
   echo "README must embed the release-generated demo GIF" >&2
   failures=$((failures + 1))
 fi
@@ -42,6 +42,45 @@ fi
 
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
+
+version_root="$test_root/version"
+mkdir -p \
+  "$version_root/core" \
+  "$version_root/frontend/src/ui" \
+  "$version_root/scripts" \
+  "$version_root/shell/src-tauri"
+cp "$script_dir/version.mjs" "$version_root/scripts/version.mjs"
+cat >"$version_root/Cargo.toml" <<'EOF'
+[workspace]
+members = ["core"]
+
+[workspace.package]
+version = "1.2.3"
+
+[workspace.dependencies]
+core = { path = "core", version = "1.2.3" }
+EOF
+cat >"$version_root/core/Cargo.toml" <<'EOF'
+[package]
+name = "core"
+EOF
+cat >"$version_root/Cargo.lock" <<'EOF'
+[[package]]
+name = "core"
+version = "1.2.3"
+EOF
+printf '{"version":"1.2.3"}\n' >"$version_root/frontend/package.json"
+printf '{"version":"1.2.3"}\n' >"$version_root/shell/src-tauri/tauri.conf.json"
+printf 'showModeHelp("SignalScope 1.2.3")\n' >"$version_root/frontend/src/ui/app-shell.ts"
+cat >"$version_root/README.md" <<'EOF'
+[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.2.2)](https://tanged123.github.io/signalscope/demo.html)
+EOF
+expect_status 1 node "$version_root/scripts/version.mjs" check
+expect_status 0 node "$version_root/scripts/version.mjs" set 2.0.0
+if ! grep -Fq 'demo.gif?v=2.0.0' "$version_root/README.md"; then
+  echo "version set must update the README demo cache key" >&2
+  failures=$((failures + 1))
+fi
 
 asset_dir="$test_root/empty-assets"
 mkdir -p "$asset_dir"
