@@ -11,8 +11,8 @@ use std::{
 use base64::Engine;
 use scope_core::{
     cache, compute, expr,
-    ingest::SUPPORTED_FORMATS,
-    preferences,
+    ingest::{CancelToken, DecodeContext, SUPPORTED_FORMATS},
+    naming, preferences,
     pyramid::Pyramid,
     session, snapshot,
     store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
@@ -121,9 +121,28 @@ fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<Ingest
         store, pyramids, ..
     } = &mut *data;
 
+    let cancel = CancelToken::default();
+    let mut on_decode = |fraction| {
+        set_job(
+            app,
+            job_id,
+            running(scope_protocol::IngestStage::Decode, fraction),
+        );
+    };
+    let mut context = DecodeContext {
+        progress: &mut on_decode,
+        cancel: &cancel,
+    };
     let mut on_progress = |stage, fraction| set_job(app, job_id, running(stage, fraction));
-    let outcome =
-        cache::ingest_or_load(path, store, &mut on_progress).map_err(|error| error.to_string())?;
+    let outcome = cache::ingest_or_load(
+        path,
+        store,
+        SourceKey(uuid::Uuid::new_v4()),
+        &naming::default_prefix(path),
+        &mut context,
+        &mut on_progress,
+    )
+    .map_err(|error| error.to_string())?;
     if let Some(error) = outcome.sidecar_error {
         eprintln!(
             "pyramid sidecar not written for {}: {error}",

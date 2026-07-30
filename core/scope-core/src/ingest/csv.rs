@@ -8,13 +8,9 @@ use std::{
 };
 
 use super::{
-    Decoder, IngestError, IngestSummary, apply_permutation, normalize_segment, sort_permutation,
+    DecodeContext, DecodedSignal, DecodedSource, Decoder, IngestError, apply_permutation,
+    normalize_segment, sort_permutation,
 };
-use crate::{
-    naming,
-    store::{SignalStore, SourceKey},
-};
-use uuid::Uuid;
 
 const TIME_NAMES: &[&str] = &[
     "t",
@@ -33,11 +29,10 @@ pub struct CsvDecoder;
 
 impl CsvDecoder {
     #[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding
-    fn ingest_unchecked(
+    fn decode_unchecked(
         path: &Path,
-        store: &mut SignalStore,
-        progress: &mut dyn FnMut(f64),
-    ) -> Result<IngestSummary, IngestError> {
+        context: &mut DecodeContext<'_>,
+    ) -> Result<DecodedSource, IngestError> {
         let input = filter_comment_lines(File::open(path)?)?;
         let probe = probe_first_data_line(&input)?;
 
@@ -72,8 +67,9 @@ impl CsvDecoder {
             let record = record?;
             records_seen += 1;
             if records_seen % 4096 == 0 {
+                context.check()?;
                 let byte = record.position().map_or(0, ::csv::Position::byte);
-                progress((byte as f64 / total).min(1.0));
+                context.report((byte as f64 / total).min(1.0));
             }
             if record.len() < 2 {
                 continue;
@@ -88,7 +84,8 @@ impl CsvDecoder {
                 column.push(value);
             }
         }
-        progress(1.0);
+        context.check()?;
+        context.report(1.0);
 
         let row_count = columns.first().map_or(0, Vec::len);
         if row_count == 0 {
@@ -108,26 +105,21 @@ impl CsvDecoder {
             |index| columns[index].clone(),
         );
 
-        let source_id = store.register_source(
-            path,
-            SourceKey(Uuid::new_v4()),
-            naming::default_prefix(path),
-        )?;
         let time: Arc<[f64]> = time.into();
         let mut signals = Vec::new();
         for (index, (header, values)) in headers.into_iter().zip(columns).enumerate() {
             if Some(index) == time_index || !values.iter().any(|value| value.is_finite()) {
                 continue;
             }
-            let path = normalize_segment(&header);
-            signals.push(store.insert_signal(source_id, path, None, Arc::clone(&time), values)?);
+            signals.push(DecodedSignal {
+                local_path: normalize_segment(&header),
+                unit: None,
+                time: Arc::clone(&time),
+                values: values.into(),
+            });
         }
 
-        Ok(IngestSummary {
-            source_id,
-            row_count,
-            signals,
-        })
+        Ok(DecodedSource { row_count, signals })
     }
 }
 
@@ -135,10 +127,9 @@ impl Decoder for CsvDecoder {
     fn decode(
         &self,
         path: &Path,
-        store: &mut SignalStore,
-        progress: &mut dyn FnMut(f64),
-    ) -> Result<IngestSummary, IngestError> {
-        Self::ingest_unchecked(path, store, progress)
+        context: &mut DecodeContext<'_>,
+    ) -> Result<DecodedSource, IngestError> {
+        Self::decode_unchecked(path, context)
     }
 }
 
@@ -229,8 +220,7 @@ fn is_monotonic_finite(column: &[f64]) -> bool {
 mod tests {
     use std::io::Write;
 
-    use super::*;
-    use crate::ingest::ingest_path;
+    use crate::{ingest::ingest_for_test, store::SignalStore};
 
     #[test]
     fn detects_header_delimiter_and_time_column() {
@@ -241,7 +231,7 @@ mod tests {
         writeln!(file, "0.1;11;").unwrap();
 
         let mut store = SignalStore::new();
-        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
         let paths = store
             .signals()
             .map(|signal| signal.path.as_str())
@@ -261,7 +251,7 @@ mod tests {
         writeln!(file, "2,7").unwrap();
 
         let mut store = SignalStore::new();
-        ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(store.signals().next().unwrap().time(), &[0.0, 1.0]);
     }
@@ -275,7 +265,7 @@ mod tests {
         writeln!(file, "1,10,150").unwrap();
 
         let mut store = SignalStore::new();
-        ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         let value = store
             .signals()
@@ -299,7 +289,7 @@ mod tests {
         writeln!(file, "0,4").unwrap();
 
         let mut store = SignalStore::new();
-        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 1);
         assert_eq!(summary.signals.len(), 1);
@@ -313,7 +303,7 @@ mod tests {
         writeln!(file, "0,4,5").unwrap();
 
         let mut store = SignalStore::new();
-        assert!(ingest_path(file.path(), &mut store, &mut |_| {}).is_err());
+        assert!(ingest_for_test(file.path(), &mut store, &mut |_| {}).is_err());
 
         assert_eq!(store.sources().count(), 0);
         assert_eq!(store.signals().count(), 0);

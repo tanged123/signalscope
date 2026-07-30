@@ -36,12 +36,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    ingest::{self, IngestError, IngestSummary},
-    naming,
+    ingest::{self, DecodeContext, IngestError, IngestSummary},
     pyramid::Pyramid,
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
-use uuid::Uuid;
 
 pub const CACHE_VERSION: u32 = 2;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
@@ -141,18 +139,20 @@ pub struct IngestOutcome {
 pub fn ingest_or_load(
     source: &Path,
     store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
     let mut on_cache = |fraction| progress(IngestStage::Cache, fraction);
-    if let Some(loaded) = try_load(source, store, &mut on_cache)? {
+    if let Some(loaded) = try_load(source, store, key, prefix, &mut on_cache)? {
         return Ok(IngestOutcome {
             loaded,
             sidecar_error: None,
         });
     }
 
-    let mut on_decode = |fraction| progress(IngestStage::Decode, fraction);
-    let summary = ingest::ingest_path(source, store, &mut on_decode)?;
+    let summary = ingest::ingest_path(source, store, key, prefix, context)?;
     let total = summary.signals.len().max(1);
     let mut pyramids = Vec::new();
     for (index, id) in summary.signals.iter().enumerate() {
@@ -243,6 +243,8 @@ pub fn write(
 pub fn try_load(
     source: &Path,
     store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LoadedCache>, CacheError> {
     let path = sidecar_path(source);
@@ -265,8 +267,7 @@ pub fn try_load(
     }
 
     let loaded = store.transaction(|store| {
-        let prefix = naming::default_prefix(source);
-        let source_id = store.register_source(source, SourceKey(Uuid::new_v4()), prefix.clone())?;
+        let source_id = store.register_source(source, key, prefix)?;
         let mut pyramids = Vec::new();
         let mut signals = Vec::new();
         for entry in decoded {
@@ -464,10 +465,54 @@ fn fraction(done: usize, total: usize) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
+    use std::{cell::RefCell, io::Write as _};
 
     use super::*;
-    use crate::ingest::ingest_path;
+    use crate::{
+        ingest::{CancelToken, DecodeContext, ingest_for_test},
+        naming,
+    };
+
+    fn key() -> SourceKey {
+        SourceKey(uuid::Uuid::new_v4())
+    }
+
+    fn try_load_test(
+        source: &Path,
+        store: &mut SignalStore,
+        progress: &mut dyn FnMut(f64),
+    ) -> Result<Option<LoadedCache>, CacheError> {
+        try_load(
+            source,
+            store,
+            key(),
+            &naming::default_prefix(source),
+            progress,
+        )
+    }
+
+    fn ingest_or_load_test(
+        source: &Path,
+        store: &mut SignalStore,
+        progress: &mut dyn FnMut(IngestStage, f64),
+    ) -> Result<IngestOutcome, CacheError> {
+        let sink = RefCell::new(progress);
+        let cancel = CancelToken::default();
+        let mut decode = |fraction| (sink.borrow_mut())(IngestStage::Decode, fraction);
+        let mut context = DecodeContext {
+            progress: &mut decode,
+            cancel: &cancel,
+        };
+        let mut stage = |stage, fraction| (sink.borrow_mut())(stage, fraction);
+        ingest_or_load(
+            source,
+            store,
+            key(),
+            &naming::default_prefix(source),
+            &mut context,
+            &mut stage,
+        )
+    }
 
     fn csv_source(dir: &tempfile::TempDir) -> PathBuf {
         let path = dir.path().join("flight.csv");
@@ -486,7 +531,7 @@ mod tests {
 
     fn build(source: &Path) -> (SignalStore, IngestSummary, Vec<(SignalId, Pyramid)>) {
         let mut store = SignalStore::new();
-        let summary = ingest_path(source, &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(source, &mut store, &mut |_| {}).unwrap();
         let pyramids: Vec<(SignalId, Pyramid)> = summary
             .signals
             .iter()
@@ -518,7 +563,7 @@ mod tests {
 
         let mut fresh = SignalStore::new();
         let mut fractions = Vec::new();
-        let loaded = try_load(&source, &mut fresh, &mut |f| fractions.push(f))
+        let loaded = try_load_test(&source, &mut fresh, &mut |f| fractions.push(f))
             .unwrap()
             .expect("cache hit");
         assert_eq!(loaded.summary.row_count, summary.row_count);
@@ -542,7 +587,7 @@ mod tests {
         let mut store = SignalStore::new();
         let mut stages = Vec::new();
         let outcome =
-            ingest_or_load(&source, &mut store, &mut |stage, _| stages.push(stage)).unwrap();
+            ingest_or_load_test(&source, &mut store, &mut |stage, _| stages.push(stage)).unwrap();
         assert!(outcome.sidecar_error.is_none());
         assert!(sidecar_path(&source).exists());
         assert!(stages.contains(&IngestStage::Decode));
@@ -551,7 +596,7 @@ mod tests {
         let mut fresh = SignalStore::new();
         stages.clear();
         let cached =
-            ingest_or_load(&source, &mut fresh, &mut |stage, _| stages.push(stage)).unwrap();
+            ingest_or_load_test(&source, &mut fresh, &mut |stage, _| stages.push(stage)).unwrap();
         assert_eq!(
             cached.loaded.summary.row_count,
             outcome.loaded.summary.row_count
@@ -566,7 +611,7 @@ mod tests {
         let source = csv_source(&dir);
         let mut store = SignalStore::new();
         assert!(
-            try_load(&source, &mut store, &mut |_| {})
+            try_load_test(&source, &mut store, &mut |_| {})
                 .unwrap()
                 .is_none()
         );
@@ -585,7 +630,7 @@ mod tests {
 
         let mut fresh = SignalStore::new();
         assert!(
-            try_load(&source, &mut fresh, &mut |_| {})
+            try_load_test(&source, &mut fresh, &mut |_| {})
                 .unwrap()
                 .is_none()
         );
@@ -607,14 +652,14 @@ mod tests {
         fs::write(&path, &corrupt).unwrap();
         let mut fresh = SignalStore::new();
         assert!(
-            try_load(&source, &mut fresh, &mut |_| {})
+            try_load_test(&source, &mut fresh, &mut |_| {})
                 .unwrap()
                 .is_none()
         );
 
         fs::write(&path, &original[..original.len() / 2]).unwrap();
         assert!(
-            try_load(&source, &mut fresh, &mut |_| {})
+            try_load_test(&source, &mut fresh, &mut |_| {})
                 .unwrap()
                 .is_none()
         );
@@ -623,7 +668,7 @@ mod tests {
         versioned[8..12].copy_from_slice(&3_u32.to_le_bytes());
         fs::write(&path, &versioned).unwrap();
         assert!(
-            try_load(&source, &mut fresh, &mut |_| {})
+            try_load_test(&source, &mut fresh, &mut |_| {})
                 .unwrap()
                 .is_none()
         );

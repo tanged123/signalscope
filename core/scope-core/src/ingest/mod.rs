@@ -1,16 +1,18 @@
 //! Streaming source decoders and format dispatch.
 
 mod csv;
+mod decoded;
 mod mcap;
 
 pub use self::csv::CsvDecoder;
+pub use self::decoded::*;
 pub use self::mcap::McapDecoder;
 
 use std::{fs::File, io::Read, path::Path};
 
 use crate::{
     naming::normalize_segment,
-    store::{SignalId, SignalStore, SourceId, StoreError},
+    store::{SignalId, SignalStore, SourceId, SourceKey, StoreError},
 };
 use thiserror::Error;
 
@@ -23,38 +25,14 @@ pub struct IngestSummary {
 
 /// Common boundary for file and future live decoders.
 pub trait Decoder {
-    /// Decodes `path` and registers its signals in `store`, reporting decode
-    /// progress as fractions in `0.0..=1.0`. Formats without a byte-accurate
-    /// total may report only `0.0` and `1.0`.
-    ///
-    /// Implementations may leave partial registrations behind on error;
-    /// callers get atomicity from [`Decoder::ingest`].
-    ///
     /// # Errors
     ///
-    /// Returns [`IngestError`] when the source cannot be read, decoded, or
-    /// registered.
+    /// Returns a decode or cancellation error.
     fn decode(
         &self,
         path: &Path,
-        store: &mut SignalStore,
-        progress: &mut dyn FnMut(f64),
-    ) -> Result<IngestSummary, IngestError>;
-
-    /// Decodes `path` atomically: on error the store is unchanged.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`IngestError`] when the source cannot be read, decoded, or
-    /// registered.
-    fn ingest(
-        &self,
-        path: &Path,
-        store: &mut SignalStore,
-        progress: &mut dyn FnMut(f64),
-    ) -> Result<IngestSummary, IngestError> {
-        store.transaction(|store| self.decode(path, store, progress))
-    }
+        context: &mut DecodeContext<'_>,
+    ) -> Result<DecodedSource, IngestError>;
 }
 
 const MCAP_MAGIC: [u8; 8] = *b"\x89MCAP0\r\n";
@@ -96,13 +74,16 @@ fn sniff_format(path: &Path) -> Result<SourceFormat, IngestError> {
 pub fn ingest_path(
     path: impl AsRef<Path>,
     store: &mut SignalStore,
-    progress: &mut dyn FnMut(f64),
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
 ) -> Result<IngestSummary, IngestError> {
     let path = path.as_ref();
-    match sniff_format(path)? {
-        SourceFormat::Csv => CsvDecoder.ingest(path, store, progress),
-        SourceFormat::Mcap => McapDecoder.ingest(path, store, progress),
-    }
+    let decoded = match sniff_format(path)? {
+        SourceFormat::Csv => CsvDecoder.decode(path, context)?,
+        SourceFormat::Mcap => McapDecoder.decode(path, context)?,
+    };
+    commit(store, key, prefix, path, decoded)
 }
 
 /// Returns the permutation that sorts `time` ascending (`total_cmp`), or
@@ -127,6 +108,8 @@ pub enum IngestError {
     TooFewColumns,
     #[error("source has no data rows")]
     NoDataRows,
+    #[error("ingest was cancelled")]
+    Cancelled,
     #[error(transparent)]
     Csv(#[from] ::csv::Error),
     #[error(transparent)]
@@ -140,6 +123,26 @@ pub enum IngestError {
 }
 
 #[cfg(test)]
+pub(crate) fn ingest_for_test(
+    path: &Path,
+    store: &mut SignalStore,
+    progress: &mut dyn FnMut(f64),
+) -> Result<IngestSummary, IngestError> {
+    let cancel = CancelToken::default();
+    let mut context = DecodeContext {
+        progress,
+        cancel: &cancel,
+    };
+    ingest_path(
+        path,
+        store,
+        SourceKey(uuid::Uuid::new_v4()),
+        &crate::naming::default_prefix(path),
+        &mut context,
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use std::io::Write;
 
@@ -150,7 +153,7 @@ mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(b"a,b\n1,2\n").unwrap();
         let mut store = SignalStore::new();
-        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
         assert_eq!(summary.row_count, 1);
     }
 
@@ -158,7 +161,7 @@ mod tests {
     fn bundled_demo_csv_stays_ingestible() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/demo_flight.csv");
         let mut store = SignalStore::new();
-        let summary = ingest_path(path, &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(&path, &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 201);
         assert_eq!(summary.signals.len(), 16);
@@ -191,7 +194,7 @@ mod tests {
         }
         let mut store = SignalStore::new();
         let mut fractions = Vec::new();
-        ingest_path(file.path(), &mut store, &mut |fraction| {
+        ingest_for_test(file.path(), &mut store, &mut |fraction| {
             fractions.push(fraction);
         })
         .unwrap();

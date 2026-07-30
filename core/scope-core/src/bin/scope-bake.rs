@@ -4,7 +4,13 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use scope_core::{ingest, pyramid::Pyramid, session, snapshot, store::SignalStore};
+use scope_core::{
+    ingest::{self, CancelToken, DecodeContext},
+    naming,
+    pyramid::Pyramid,
+    session, snapshot,
+    store::{SignalStore, SourceKey},
+};
 use scope_protocol::{ExportFidelity, ExportRange};
 
 struct Args {
@@ -75,8 +81,20 @@ fn run(args: &Args) -> Result<(), String> {
     let mut store = SignalStore::new();
     let mut pyramids = BTreeMap::new();
     for path in &args.data {
-        let summary = ingest::ingest_path(path, &mut store, &mut |_| ())
-            .map_err(|error| format!("ingest {}: {error}", path.display()))?;
+        let cancel = CancelToken::default();
+        let mut progress = |_| {};
+        let mut context = DecodeContext {
+            progress: &mut progress,
+            cancel: &cancel,
+        };
+        let summary = ingest::ingest_path(
+            path,
+            &mut store,
+            SourceKey(uuid::Uuid::new_v4()),
+            &naming::default_prefix(path),
+            &mut context,
+        )
+        .map_err(|error| format!("ingest {}: {error}", path.display()))?;
         for id in summary.signals {
             let signal = store.signal(id).ok_or("ingested signal vanished")?;
             pyramids.insert(id, Pyramid::from_signal(signal));

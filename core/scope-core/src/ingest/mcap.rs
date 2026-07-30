@@ -10,13 +10,9 @@ use std::{
 use serde_json::Value;
 
 use super::{
-    Decoder, IngestError, IngestSummary, apply_permutation, normalize_segment, sort_permutation,
+    DecodeContext, DecodedSignal, DecodedSource, Decoder, IngestError, apply_permutation,
+    normalize_segment, sort_permutation,
 };
-use crate::{
-    naming,
-    store::{SignalStore, SourceKey},
-};
-use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct McapDecoder;
@@ -63,16 +59,17 @@ impl Decoder for McapDecoder {
     fn decode(
         &self,
         path: &Path,
-        store: &mut SignalStore,
-        progress: &mut dyn FnMut(f64),
-    ) -> Result<IngestSummary, IngestError> {
-        progress(0.0);
+        context: &mut DecodeContext<'_>,
+    ) -> Result<DecodedSource, IngestError> {
+        context.check()?;
+        context.report(0.0);
         let data = fs::read(path)?;
         let mut topics: BTreeMap<String, TopicColumns> = BTreeMap::new();
         let mut encodings: BTreeSet<String> = BTreeSet::new();
         let mut topic_by_channel: HashMap<u16, String> = HashMap::new();
         let mut fields: Vec<(String, f64)> = Vec::new();
         for message in ::mcap::MessageStream::new(&data)? {
+            context.check()?;
             let message = message?;
             let channel = &message.channel;
             if !encodings.contains(channel.message_encoding.as_str()) {
@@ -97,11 +94,6 @@ impl Decoder for McapDecoder {
             columns.push_row(message.log_time as f64 * 1e-9, &fields);
         }
 
-        let source_id = store.register_source(
-            path,
-            SourceKey(Uuid::new_v4()),
-            naming::default_prefix(path),
-        )?;
         let mut signals = Vec::new();
         let mut row_count = 0;
         for (topic, columns) in topics {
@@ -117,13 +109,12 @@ impl Decoder for McapDecoder {
                 } else {
                     field
                 };
-                signals.push(store.insert_signal(
-                    source_id,
-                    format!("{topic}/{name}"),
-                    None,
-                    Arc::clone(&time),
-                    values,
-                )?);
+                signals.push(DecodedSignal {
+                    local_path: format!("{topic}/{name}"),
+                    unit: None,
+                    time: Arc::clone(&time),
+                    values: values.into(),
+                });
             }
         }
         if signals.is_empty() {
@@ -134,12 +125,8 @@ impl Decoder for McapDecoder {
             };
             return Err(IngestError::NoSupportedChannels(seen));
         }
-        progress(1.0);
-        Ok(IngestSummary {
-            source_id,
-            row_count,
-            signals,
-        })
+        context.report(1.0);
+        Ok(DecodedSource { row_count, signals })
     }
 }
 
@@ -190,7 +177,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::ingest::ingest_path;
+    use crate::{ingest::ingest_for_test, store::SignalStore};
 
     fn write_test_mcap(
         channels: &[(&str, &str)],
@@ -245,7 +232,7 @@ mod tests {
             ],
         );
         let mut store = SignalStore::new();
-        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 3);
         let x = store
@@ -277,7 +264,7 @@ mod tests {
     fn rejects_files_with_no_ingestible_channels() {
         let file = write_test_mcap(&[("/other", "protobuf")], &[(0, 1, "\x00")]);
         let mut store = SignalStore::new();
-        let error = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap_err();
+        let error = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap_err();
         assert!(matches!(error, IngestError::NoSupportedChannels(_)));
         assert_eq!(store.sources().count(), 0, "transaction must roll back");
     }
