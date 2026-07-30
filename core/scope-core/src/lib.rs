@@ -11,6 +11,7 @@ pub mod ingest;
 pub mod naming;
 pub mod preferences;
 pub mod pyramid;
+pub mod restore;
 pub mod session;
 pub mod snapshot;
 pub mod sources;
