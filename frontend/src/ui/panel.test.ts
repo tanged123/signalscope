@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { SampleResponse, SampleSeries } from "../generated/protocol";
+import type {
+  SampleResponse,
+  SampleSeries,
+  SignalSummary,
+} from "../generated/protocol";
 import type { PanelState, SeriesState } from "../generated/session";
+import type { PathRenderOptions, PlotPath } from "../render/canvas-renderer";
 
+import { AppShell } from "./app-shell";
 import {
   BUNDLE_DRAG_TYPE,
   MAX_SERIES_PER_PANEL,
@@ -12,11 +18,15 @@ import {
   xChipLabel,
 } from "./panel";
 
-function sample(path: string, values: number[]): SampleSeries {
+function sample(
+  path: string,
+  values: number[],
+  unit: string | null = null,
+): SampleSeries {
   return {
     signal_id: path,
     signal_path: path,
-    unit: null,
+    unit,
     time: [0, 1],
     values,
     stride: 1,
@@ -68,7 +78,11 @@ function xyState(xSignal: string, series: SeriesState[]): PanelState {
 
 interface PanelProbe {
   callbacks: typeof xyCallbacks;
-  renderer: { renderPaths(): number };
+  renderer: {
+    renderPaths(paths: readonly PlotPath[], options: PathRenderOptions): number;
+  };
+  renderedPaths: readonly PlotPath[];
+  renderedOptions: PathRenderOptions | null;
   xyTraces: Array<{
     path: string;
     trace: { time: number[]; x: number[]; y: number[] };
@@ -87,12 +101,54 @@ interface PanelProbe {
 function panelProbe(): PanelProbe {
   const view = Object.create(PanelView.prototype) as PanelProbe;
   view.callbacks = xyCallbacks;
-  view.renderer = { renderPaths: () => 1 };
+  view.renderedPaths = [];
+  view.renderedOptions = null;
+  view.renderer = {
+    renderPaths(paths, options) {
+      view.renderedPaths = paths;
+      view.renderedOptions = options;
+      return 1;
+    },
+  };
   view.resolvePlotRanges = () => ({
     x: { min: 0, max: 1 },
     y: { min: 0, max: 1 },
   });
   return view;
+}
+
+function summary(path: string): SignalSummary {
+  const sourceKey = sourceKeyFor(path);
+  const localPath = localPathFor(path);
+  if (sourceKey === null || localPath === null) {
+    throw new Error(`Expected source-backed path: ${path}`);
+  }
+  return {
+    signal_id: `id:${path}`,
+    source_id: `source:${sourceKey}`,
+    source_key: sourceKey,
+    local_path: localPath,
+    path,
+    unit: null,
+    point_count: "2",
+    t_min: 0,
+    t_max: 1,
+  };
+}
+
+interface AppShellProbe {
+  workspace: { derived(): { path: string }[] };
+  signals: SignalSummary[];
+  signalsByPath: Map<string, SignalSummary>;
+  panelSignalIds(panel: PanelState): { ids: string[]; missing: string[] };
+}
+
+function appShellProbe(...signals: SignalSummary[]): AppShellProbe {
+  const shell = Object.create(AppShell.prototype) as AppShellProbe;
+  shell.workspace = { derived: () => [{ path: "derived/score" }] };
+  shell.signals = signals;
+  shell.signalsByPath = new Map(signals.map((entry) => [entry.path, entry]));
+  return shell;
 }
 
 describe("panel series", () => {
@@ -166,6 +222,124 @@ describe("panel series", () => {
         trace: { time: [0, 1], x: [10, 20], y: [1, 2] },
       },
     ]);
+  });
+
+  it("colors each trace from its own source's color signal", () => {
+    const samples = response(
+      sample("run_01/t", [0, 1]),
+      sample("run_01/temp", [10, 20]),
+      sample("run_01/alt", [1, 2]),
+      sample("run_02/t", [0, 1]),
+      sample("run_02/temp", [100, 200]),
+      sample("run_02/alt", [3, 4]),
+    );
+    const state = xyState("run_01/t", [
+      visible("run_01/alt"),
+      visible("run_02/alt"),
+    ]);
+    state.color_signal = "run_01/temp";
+    const view = panelProbe();
+
+    view.renderXy(state, samples, { t0: 0, t1: 1 });
+
+    expect(view.renderedPaths[3]?.colorValues).toEqual([90 / 190, 1]);
+  });
+
+  it("leaves a trace uncolored when its source lacks the color local path", () => {
+    const samples = response(
+      sample("run_01/t", [0, 1]),
+      sample("run_01/temp", [10, 20]),
+      sample("run_01/alt", [1, 2]),
+      sample("run_02/t", [0, 1]),
+      sample("run_02/alt", [3, 4]),
+    );
+    const state = xyState("run_01/t", [
+      visible("run_01/alt"),
+      visible("run_02/alt"),
+    ]);
+    state.color_signal = "run_01/temp";
+    const view = panelProbe();
+
+    view.renderXy(state, samples, { t0: 0, t1: 1 });
+
+    expect(view.renderedPaths[2]?.colorValues).toEqual([0, 1]);
+    expect(view.renderedPaths[3]?.colorValues).toEqual([]);
+  });
+
+  it("uses the selected color signal directly for a derived Y trace", () => {
+    const samples = response(
+      sample("run_01/t", [0, 1]),
+      sample("run_01/temp", [10, 20]),
+      sample("derived/score", [1, 2]),
+    );
+    const state = xyState("run_01/t", [visible("derived/score")]);
+    state.color_signal = "run_01/temp";
+    const view = panelProbe();
+
+    view.renderXy(state, samples, { t0: 0, t1: 1 });
+
+    expect(view.renderedPaths[1]?.colorValues).toEqual([0, 1]);
+  });
+
+  it("uses local paths for multi-source XY axis and color labels", () => {
+    const samples = response(
+      sample("run_01/t", [0, 1], "s"),
+      sample("run_01/temp", [10, 20], "C"),
+      sample("run_01/alt", [1, 2]),
+      sample("run_02/t", [0, 1], "s"),
+      sample("run_02/temp", [30, 40], "C"),
+      sample("run_02/alt", [3, 4]),
+    );
+    const state = xyState("run_01/t", [
+      visible("run_01/alt"),
+      visible("run_02/alt"),
+    ]);
+    state.color_signal = "run_01/temp";
+    const view = panelProbe();
+
+    view.renderXy(state, samples, { t0: 0, t1: 1 });
+
+    expect(view.renderedOptions?.xLabel).toBe("t (s)");
+    expect(view.renderedOptions?.colorbar?.label).toBe("temp (C)");
+    expect(xChipLabel(state.color_signal, state.series, xyCallbacks)).toBe(
+      "temp",
+    );
+
+    state.x_label = "phase";
+    state.c_label = "temperature";
+    view.renderXy(state, samples, { t0: 0, t1: 1 });
+
+    expect(view.renderedOptions?.xLabel).toBe("phase");
+    expect(view.renderedOptions?.colorbar?.label).toBe("temperature");
+  });
+
+  it("requests each source's resolved color signal for XY samples", () => {
+    const shell = appShellProbe(
+      summary("run_01/t"),
+      summary("run_01/temp"),
+      summary("run_01/alt"),
+      summary("run_02/t"),
+      summary("run_02/temp"),
+      summary("run_02/alt"),
+    );
+    const state = xyState("run_01/t", [
+      visible("run_01/alt"),
+      visible("run_02/alt"),
+      visible("derived/score"),
+    ]);
+    state.color_signal = "run_01/temp";
+
+    expect(shell.panelSignalIds(state)).toEqual({
+      ids: [
+        "id:run_01/t",
+        "id:run_01/alt",
+        "id:run_02/alt",
+        "id:run_02/t",
+        "id:run_01/temp",
+        "id:run_02/temp",
+      ],
+      missing: ["derived/score"],
+    });
   });
 
   it("x chip shows the local path when visible series span multiple sources", () => {

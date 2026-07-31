@@ -1931,7 +1931,26 @@ export class AppShell {
           }
         }
       }
-      if (panel.color_signal !== null) paths.push(panel.color_signal);
+      if (panel.color_signal !== null) {
+        paths.push(panel.color_signal);
+        const cLocal = this.isDerivedPath(panel.color_signal)
+          ? undefined
+          : this.signalsByPath.get(panel.color_signal)?.local_path;
+        if (cLocal !== undefined) {
+          for (const series of panel.series) {
+            const sourceKey = this.isDerivedPath(series.path)
+              ? undefined
+              : this.signalsByPath.get(series.path)?.source_key;
+            if (sourceKey === undefined) continue;
+            const resolved = this.signals.find(
+              (candidate) =>
+                candidate.source_key === sourceKey &&
+                candidate.local_path === cLocal,
+            );
+            if (resolved !== undefined) paths.push(resolved.path);
+          }
+        }
+      }
     }
     const ids: string[] = [];
     const missing: string[] = [];

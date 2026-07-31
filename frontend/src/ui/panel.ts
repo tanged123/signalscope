@@ -163,13 +163,20 @@ export function xChipLabel(
   callbacks: XyPairingCallbacks,
 ): string {
   const xLocal = callbacks.localPathFor(xSignal);
-  const sources = new Set(
+  const sources = visibleSources(series, callbacks);
+  return xLocal !== null && sources.size > 1 ? xLocal : signalLabel(xSignal);
+}
+
+function visibleSources(
+  series: readonly PanelState["series"][number][],
+  callbacks: XyPairingCallbacks,
+): Set<string> {
+  return new Set(
     series
       .filter((entry) => entry.visible)
       .map((entry) => callbacks.sourceKeyFor(entry.path))
       .filter((key): key is string => key !== null),
   );
-  return xLocal !== null && sources.size > 1 ? xLocal : signalLabel(xSignal);
 }
 
 export function bundleXSignal(
@@ -501,7 +508,7 @@ export class PanelView {
             ? "time"
             : state.color_signal === null
               ? "none"
-              : signalLabel(state.color_signal),
+              : xChipLabel(state.color_signal, state.series, this.callbacks),
         ),
       );
       cChip.title = state.color_by_time
@@ -667,6 +674,7 @@ export class PanelView {
     );
     const xSeries = byPath.get(state.x_signal);
     if (xSeries === undefined) return 0;
+    const xLocal = this.callbacks.localPathFor(state.x_signal);
     for (const series of state.series) {
       if (!series.visible) continue;
       const ySeries = byPath.get(series.path);
@@ -695,14 +703,37 @@ export class PanelView {
         : state.color_signal === null
           ? null
           : (byPath.get(state.color_signal) ?? null);
-    const colorFor = (trace: XyTrace): number[] | null => {
-      if (colorSeries === null) return null;
-      if (colorSeries === "time") return [...trace.time];
-      return trace.time.map((time) =>
-        lerpSample(colorSeries.time, colorSeries.values, time),
+    const cLocal =
+      state.color_signal === null
+        ? null
+        : this.callbacks.localPathFor(state.color_signal);
+    const resolveColor = (
+      yPath: string,
+    ): SampleResponse["series"][number] | null => {
+      if (colorSeries === null || colorSeries === "time") return null;
+      if (cLocal === null) return colorSeries;
+      const sourceKey = this.callbacks.sourceKeyFor(yPath);
+      if (sourceKey === null) return colorSeries;
+      return (
+        samples.series.find(
+          (candidate) =>
+            this.callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
+            this.callbacks.localPathFor(candidate.signal_path) === cLocal,
+        ) ?? null
       );
     };
-    const colorColumns = this.xyTraces.map((entry) => colorFor(entry.trace));
+    const colorFor = (yPath: string, trace: XyTrace): number[] | null => {
+      if (colorSeries === null) return null;
+      if (colorSeries === "time") return [...trace.time];
+      const resolved = resolveColor(yPath);
+      if (resolved === null) return null;
+      return trace.time.map((time) =>
+        lerpSample(resolved.time, resolved.values, time),
+      );
+    };
+    const colorColumns = this.xyTraces.map((entry) =>
+      colorFor(entry.path, entry.trace),
+    );
     let colorMin = Number.POSITIVE_INFINITY;
     let colorMax = Number.NEGATIVE_INFINITY;
     for (const column of colorColumns) {
@@ -767,8 +798,15 @@ export class PanelView {
           : {}),
       });
     });
+    const sources = visibleSources(state.series, this.callbacks);
+    const localLabels = sources.size > 1;
     const options: PathRenderOptions = {
-      xLabel: state.x_label ?? axisName(state.x_signal, xSeries.unit),
+      xLabel:
+        state.x_label ??
+        axisName(
+          localLabels && xLocal !== null ? xLocal : state.x_signal,
+          xSeries.unit,
+        ),
       yLabel:
         state.y_label ??
         yLabel(
@@ -788,7 +826,12 @@ export class PanelView {
                 state.c_label ??
                 (colorSeries === "time"
                   ? "t (s)"
-                  : axisName(state.color_signal ?? "", colorSeries.unit)),
+                  : axisName(
+                      localLabels && cLocal !== null
+                        ? cLocal
+                        : (state.color_signal ?? ""),
+                      colorSeries.unit,
+                    )),
             },
           }
         : {}),
