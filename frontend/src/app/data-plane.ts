@@ -658,7 +658,35 @@ function createDemoManifest(): BakedManifest {
     },
   ];
   return seal({
-    session_json: "",
+    session_json: JSON.stringify({
+      app: "signalscope",
+      schema_version: 14,
+      theme: "dark",
+      linked_time: {
+        t0: 0,
+        t1: 1,
+        linked: true,
+        paused: false,
+        cursorT: null,
+        mode: "fixed",
+      },
+      active_tab_id: "workspace-1",
+      tabs: [
+        {
+          id: "workspace-1",
+          title: "Workspace 1",
+          cursor_mode: "none",
+          focused_panel_id: null,
+          maximized_panel_id: null,
+          panels: [],
+          layout: [],
+        },
+      ],
+      favorites: [],
+      derived: [],
+      sources: [],
+      source_sets: [],
+    }),
     signals: demoSignals.map(({ summary, generate }) => ({
       summary,
       levels: buildDemoLevels(makeBins(generate)),

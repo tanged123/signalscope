@@ -33,17 +33,12 @@ is paused
 ([ADR 0027](adr/0027-durable-source-identity-and-restore-reconciliation.md)).
 
 Source sets group partial runs by local schema and require explicit alignment
-for absolute or event time. Protocol v10 serves bounded run-mean envelopes
-with equal run weight, dropout counts, and optional membership filters.
-Snapshots persist the exact set generation and members instead of recomputing
-or widening a band
-([ADR 0028](adr/0028-ensemble-run-mean-envelope.md)).
+for absolute or event time. Bundles plot ordinary per-source member series and
+support one highlighted source per local signal path.
 
 Out-of-core storage now compacts pyramid bins, synthesizes levels 0–2, shares
 sidecar time sections, and pages columns and fine levels through a leased LRU.
-Derived columns spill under resident pressure, while unfiltered full-set
-ensemble levels materialize per exact generation
-([ADR 0029](adr/0029-out-of-core-storage.md)).
+Derived columns spill under resident pressure.
 
 ## Phase 4 — export and fidelity
 
