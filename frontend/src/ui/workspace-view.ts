@@ -1,10 +1,6 @@
 import { formatCombo } from "../app/commands";
 import type { WorkspaceModel } from "../app/workspace";
-import type {
-  EnsembleTileResponse,
-  SampleResponse,
-  TileResponse,
-} from "../generated/protocol";
+import type { SampleResponse, TileResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
@@ -113,10 +109,6 @@ export class WorkspaceView {
   renderData(
     tilesByPanel: ReadonlyMap<string, TileResponse>,
     samplesByPanel: ReadonlyMap<string, SampleResponse>,
-    ensemblesByPanel: ReadonlyMap<
-      string,
-      { response: EnsembleTileResponse; memberCount: number }
-    >,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
   ): number {
@@ -131,7 +123,6 @@ export class WorkspaceView {
             panel,
             tilesByPanel.get(panel.id) ?? null,
             samplesByPanel.get(panel.id) ?? null,
-            ensemblesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
           ) ?? 0;

@@ -41,7 +41,6 @@ import {
 } from "../app/plot-math";
 import {
   type BatchStatus,
-  type EnsembleTileResponse,
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
@@ -70,11 +69,7 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
-import {
-  spaghettiSeries,
-  type PanelSeriesKind,
-  type QuickTransform,
-} from "./panel";
+import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
@@ -106,10 +101,6 @@ export class AppShell {
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, TileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
-  private ensemblesByPanel = new Map<
-    string,
-    { response: EnsembleTileResponse; memberCount: number }
-  >();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -328,8 +319,8 @@ export class AppShell {
         onPlotSignal: (path) => {
           this.plotSignal(path);
         },
-        onPlotSet: (localPath, memberPaths, mode) => {
-          this.plotSet(localPath, memberPaths, mode);
+        onPlotBundle: (_localPath, memberPaths) => {
+          this.plotBundle(memberPaths);
         },
         onToggleFavorite: (path) => {
           this.workspace.toggleFavorite(path);
@@ -1110,8 +1101,6 @@ export class AppShell {
     if (target === null) {
       target = this.workspace.addPanelRow().id;
     }
-    const panel = this.workspace.panel(target);
-    if (panel !== undefined) panel.ensemble = null;
     if (this.workspace.addSeries(target, path)) {
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
@@ -1119,43 +1108,15 @@ export class AppShell {
     }
   }
 
-  private plotSet(
-    localPath: string,
-    memberPaths: readonly string[],
-    mode: PanelSeriesKind,
-  ): void {
-    if (mode === "single") {
-      const first = memberPaths[0];
-      if (first !== undefined) this.plotSignal(first);
-      return;
-    }
-    if (mode === "spaghetti") {
-      for (const path of spaghettiSeries({ members: memberPaths })) {
-        this.plotSignal(path);
-      }
-      return;
-    }
+  private plotBundle(memberPaths: readonly string[], panelId?: string): void {
     let target = this.workspace.focusedPanelId();
+    if (panelId !== undefined) target = panelId;
     if (target === null) target = this.workspace.addPanelRow().id;
-    const set = this.sets.find((candidate) =>
-      candidate.local_paths.includes(localPath),
-    );
-    const saved = this.workspace
-      .snapshot()
-      .source_sets.find((candidate) => candidate.key === set?.set_key);
-    if (set === undefined || saved === undefined) {
-      this.showModeHelp("set metadata is unavailable");
-      return;
+    if (this.workspace.addSeriesBatch(target, memberPaths)) {
+      this.workspace.focusPanel(target);
+      this.fitWindowToPlotted();
+      this.afterLayoutChange();
     }
-    const panel = this.workspace.panel(target);
-    if (panel === undefined) return;
-    panel.ensemble = {
-      set_key: set.set_key,
-      local_path: localPath,
-      member_filter: [],
-    };
-    this.workspace.focusPanel(target);
-    this.afterLayoutChange();
   }
 
   private async openFiles(): Promise<void> {
@@ -1858,39 +1819,9 @@ export class AppShell {
     );
     const nextTiles = new Map<string, TileResponse>();
     const nextSamples = new Map<string, SampleResponse>();
-    const nextEnsembles = new Map<
-      string,
-      { response: EnsembleTileResponse; memberCount: number }
-    >();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
-        const ensemble = panel.ensemble;
-        if (ensemble !== null) {
-          const set = this.sets.find(
-            (candidate) => candidate.set_key === ensemble.set_key,
-          );
-          if (set === undefined) return;
-          const window = this.effectiveWindow(panel);
-          const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? width;
-          try {
-            const response = await this.plane.queryEnsembleTiles({
-              request_id: crypto.randomUUID(),
-              set_id: set.set_id,
-              local_path: ensemble.local_path,
-              window,
-              pixel_width: Math.max(1, Math.round(panelWidth)),
-              member_filter: ensemble.member_filter,
-            });
-            nextEnsembles.set(panel.id, {
-              response,
-              memberCount: response.member_keys.length,
-            });
-          } catch (error: unknown) {
-            this.reportError(error);
-          }
-          return;
-        }
         const { ids, missing } = this.panelSignalIds(panel);
         nextMissing.set(panel.id, missing);
         if (ids.length === 0) return;
@@ -1941,7 +1872,6 @@ export class AppShell {
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
     this.samplesByPanel = nextSamples;
-    this.ensemblesByPanel = nextEnsembles;
     this.missingByPanel = nextMissing;
     this.renderTiles();
   }
@@ -1985,7 +1915,6 @@ export class AppShell {
       this.workspaceView?.renderData(
         this.tilesByPanel,
         this.samplesByPanel,
-        this.ensemblesByPanel,
         (panelId) => {
           const panel = this.workspace.panel(panelId);
           return panel === undefined

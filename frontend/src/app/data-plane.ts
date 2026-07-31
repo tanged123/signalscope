@@ -6,8 +6,6 @@ import {
   type CreateSetRequest,
   type DerivedRequest,
   type EnvelopeBin,
-  type EnsembleTileRequest,
-  type EnsembleTileResponse,
   type ExportEstimate,
   type ExportEstimateRequest,
   type ExportFidelity,
@@ -133,9 +131,6 @@ export interface DataPlane {
   listSources(): Promise<SourceSummary[]>;
   listSets(): Promise<SetSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
-  queryEnsembleTiles(
-    request: EnsembleTileRequest,
-  ): Promise<EnsembleTileResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
@@ -402,19 +397,6 @@ export class TauriPlane implements DataPlane {
     );
   }
 
-  async queryEnsembleTiles(
-    request: EnsembleTileRequest,
-  ): Promise<EnsembleTileResponse> {
-    return open(
-      await this.invoke<Envelope<EnsembleTileResponse>>(
-        "query_ensemble_tiles",
-        {
-          request: seal(request),
-        },
-      ),
-    );
-  }
-
   async querySamples(request: SampleRequest): Promise<SampleResponse> {
     const response = open(
       await this.invoke<Envelope<SampleResponse>>("query_samples", {
@@ -568,44 +550,6 @@ export class BakedPlane implements DataPlane {
     });
   }
 
-  queryEnsembleTiles(
-    request: EnsembleTileRequest,
-  ): Promise<EnsembleTileResponse> {
-    const keys = [
-      ...new Set(this.payload.ensembles.map((item) => item.set_key)),
-    ];
-    const setKey = keys[Number(request.set_id) - 1];
-    const requested = [...request.member_filter].sort();
-    const baked = this.payload.ensembles.find((item) => {
-      if (item.set_key !== setKey || item.local_path !== request.local_path) {
-        return false;
-      }
-      const filter = [...(item.member_filter ?? item.member_keys)].sort();
-      return (
-        (item.member_filter === null && requested.length === 0) ||
-        (requested.length === filter.length &&
-          requested.every((key, index) => key === filter[index]))
-      );
-    });
-    if (baked === undefined) {
-      return Promise.reject(new Error("ensemble membership was not baked"));
-    }
-    const bins = baked.levels[0];
-    if (bins === undefined) {
-      return Promise.reject(new Error("ensemble level was not baked"));
-    }
-    return Promise.resolve({
-      request_id: request.request_id,
-      set_key: baked.set_key,
-      generation: baked.generation,
-      level: 0,
-      member_keys: baked.member_keys,
-      bins: bins.filter(
-        (bin) => bin.t1 >= request.window.t0 && bin.t0 <= request.window.t1,
-      ),
-    });
-  }
-
   querySamples(request: SampleRequest): Promise<SampleResponse> {
     const requested = new Set(request.signal_ids);
     return Promise.resolve({
@@ -719,7 +663,6 @@ function createDemoManifest(): BakedManifest {
       summary,
       levels: buildDemoLevels(makeBins(generate)),
     })),
-    ensembles: [],
   });
 }
 

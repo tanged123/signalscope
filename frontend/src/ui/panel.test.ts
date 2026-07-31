@@ -1,19 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  MAX_SERIES_PER_PANEL,
-  spaghettiSeries,
-  type PanelSeriesKind,
-} from "./panel";
+import { MAX_SERIES_PER_PANEL } from "./panel";
 
-describe("set series modes", () => {
-  it("keeps spaghetti mode inside the panel budget", () => {
-    const members = Array.from({ length: 200 }, (_, index) => index);
-    expect(spaghettiSeries({ members })).toHaveLength(MAX_SERIES_PER_PANEL);
-  });
-
-  it("exposes each supported representation", () => {
-    const kinds: PanelSeriesKind[] = ["single", "spaghetti", "band"];
-    expect(kinds).toHaveLength(3);
+describe("panel series", () => {
+  it("keeps the panel member cap available for ordinary series", () => {
+    expect(MAX_SERIES_PER_PANEL).toBe(64);
   });
 });

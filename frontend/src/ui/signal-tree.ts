@@ -5,11 +5,7 @@ const FALLBACK_ROW_HEIGHT = 22;
 
 export interface SignalTreeCallbacks {
   onPlotSignal(path: string): void;
-  onPlotSet?(
-    localPath: string,
-    memberPaths: readonly string[],
-    mode: "single" | "spaghetti" | "band",
-  ): void;
+  onPlotBundle?(localPath: string, memberPaths: readonly string[]): void;
   onToggleFavorite(path: string): void;
   onRemoveDerived(path: string): void;
 }
@@ -174,7 +170,7 @@ export class SignalTreeView {
     });
     rowElement.addEventListener("dblclick", () => {
       if (memberPaths === undefined) this.callbacks.onPlotSignal(path);
-      else this.callbacks.onPlotSet?.(path, memberPaths, "band");
+      else this.callbacks.onPlotBundle?.(path, memberPaths);
     });
     rowElement.addEventListener("keydown", (event) => {
       if (
@@ -183,7 +179,7 @@ export class SignalTreeView {
       ) {
         event.preventDefault();
         if (memberPaths === undefined) this.callbacks.onPlotSignal(path);
-        else this.callbacks.onPlotSet?.(path, memberPaths, "band");
+        else this.callbacks.onPlotBundle?.(path, memberPaths);
       }
     });
     const star = document.createElement("button");
@@ -210,26 +206,7 @@ export class SignalTreeView {
       const badge = document.createElement("span");
       badge.className = "tree-run-count";
       badge.textContent = `${String(runCount)} runs`;
-      const mode = document.createElement("select");
-      mode.className = "tree-set-mode";
-      mode.setAttribute("aria-label", `Plot mode for ${path}`);
-      for (const value of ["band", "spaghetti", "single"] as const) {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = value;
-        mode.appendChild(option);
-      }
-      mode.addEventListener("click", (event) => {
-        event.stopPropagation();
-      });
-      mode.addEventListener("change", () => {
-        this.callbacks.onPlotSet?.(
-          path,
-          memberPaths,
-          mode.value as "single" | "spaghetti" | "band",
-        );
-      });
-      rowElement.append(badge, mode);
+      rowElement.append(badge);
     }
     if (path.startsWith("derived/")) {
       const mark = document.createElement("span");

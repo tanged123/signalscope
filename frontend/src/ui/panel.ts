@@ -1,9 +1,5 @@
 import { formatCombo } from "../app/commands";
-import type {
-  EnsembleTileResponse,
-  SampleResponse,
-  TileResponse,
-} from "../generated/protocol";
+import type { SampleResponse, TileResponse } from "../generated/protocol";
 import type {
   AxisStyle,
   DashStyle,
@@ -60,12 +56,6 @@ import {
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 export const MAX_SERIES_PER_PANEL = 64;
-
-export type PanelSeriesKind = "single" | "spaghetti" | "band";
-
-export function spaghettiSeries<T>(set: { members: readonly T[] }): T[] {
-  return set.members.slice(0, MAX_SERIES_PER_PANEL);
-}
 
 export type PanelCursor = PlotCursor;
 
@@ -150,10 +140,6 @@ export class PanelView {
   private lastState: PanelState | null = null;
   private lastTiles: TileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
-  private lastEnsemble: {
-    response: EnsembleTileResponse;
-    memberCount: number;
-  } | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private preparedPlot: PreparedPlot | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
@@ -461,22 +447,17 @@ export class PanelView {
     state: PanelState,
     tiles: TileResponse | null,
     samples: SampleResponse | null,
-    ensemble: { response: EnsembleTileResponse; memberCount: number } | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
   ): number {
     this.lastState = state;
     this.lastTiles = tiles;
     this.lastSamples = samples;
-    this.lastEnsemble = ensemble;
     this.lastWindow = { ...window };
     this.preparedPlot = null;
     this.domainSeries = [];
     this.hasColorbar = false;
-    const elapsed =
-      ensemble === null
-        ? this.renderForMode(state, tiles, samples, window)
-        : this.renderBand(state, ensemble, window);
+    const elapsed = this.renderForMode(state, tiles, samples, window);
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
@@ -488,34 +469,6 @@ export class PanelView {
       this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
     }
     return elapsed;
-  }
-
-  private renderBand(
-    state: PanelState,
-    ensemble: { response: EnsembleTileResponse; memberCount: number },
-    window: { t0: number; t1: number },
-  ): number {
-    const values = ensemble.response.bins.flatMap((bin) =>
-      bin.min_run_mean === null || bin.max_run_mean === null
-        ? []
-        : [bin.min_run_mean, bin.max_run_mean],
-    );
-    if (values.length === 0) return 0;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const pad = min === max ? Math.max(1, Math.abs(min) * 0.05) : 0;
-    return this.renderer.renderEnsemble(
-      ensemble.response,
-      { min: window.t0, max: window.t1 },
-      {
-        xLabel: state.x_label ?? "time (s)",
-        yLabel: state.y_label ?? "run mean",
-        yRange: [min - pad, max + pad],
-        memberCount: ensemble.memberCount,
-        colorSlot: 1,
-        axisStyle: state.axis_style,
-      },
-    );
   }
 
   private renderForMode(
@@ -1417,7 +1370,6 @@ export class PanelView {
         this.lastState,
         this.lastTiles,
         this.lastSamples,
-        this.lastEnsemble,
         this.lastWindow,
       );
     }
