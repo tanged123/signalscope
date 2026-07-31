@@ -14,6 +14,8 @@ function fakePort(statuses: BatchStatus[]): FakePort {
   return {
     released,
     pickSources: () => Promise.resolve([]),
+    pickSourceFolder: () => Promise.resolve(null),
+    scanSources: () => Promise.resolve({ files: [], total_bytes: "0", format_counts: [] }),
     startBatch: () => Promise.resolve("1"),
     batchStatus: () => {
       const status = queue.shift();
@@ -39,6 +41,7 @@ describe("runBatchIngest", () => {
         total: "2",
         done: "1",
         failed: "0",
+        current_paths: [],
         recent_failures: [],
       },
       {
@@ -47,6 +50,7 @@ describe("runBatchIngest", () => {
         total: "2",
         done: "1",
         failed: "1",
+        current_paths: [],
         recent_failures: [{ path: "/b.csv", error: "unsupported" }],
       },
     ]);
@@ -71,6 +75,7 @@ describe("runBatchIngest", () => {
         total: "1",
         done: "0",
         failed: "1",
+        current_paths: [],
         recent_failures: [{ path: "/a.csv", error: "boom" }],
       },
     ]);
@@ -87,6 +92,7 @@ describe("runBatchIngest", () => {
         total: "1",
         done: "1",
         failed: "0",
+        current_paths: [],
         recent_failures: [],
       },
     ]);
@@ -102,6 +108,7 @@ describe("runBatchIngest", () => {
         total: "1",
         done: "1",
         failed: "0",
+        current_paths: [],
         recent_failures: [],
       },
     ]);

@@ -21,6 +21,7 @@
     "@vitest/coverage-v8": "4.0.16",
     "ast-v8-to-istanbul": "0.3.12",
     "eslint": "9.39.1",
+    "jsdom": "26.1.0",
     "istanbul-lib-coverage": "3.2.2",
     "istanbul-lib-report": "3.0.1",
     "istanbul-reports": "3.2.0",

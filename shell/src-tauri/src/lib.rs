@@ -33,11 +33,13 @@ use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
     BatchState, BatchStatus, CreateSetRequest, DerivedRequest, Envelope, ExportEstimate,
     ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange,
-    ExportSelection, ExportWriteRequest, FileState, FormatDescriptor, IngestBatchRequest,
+    ExportSelection, ExportWriteRequest, FileState, FormatCount, FormatDescriptor,
+    IngestBatchRequest,
     LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
     RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
     SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
-    SaveSessionRequest, SessionDialogMode, SetMemberSummary, SetOriginKind, SetSummary,
+    SaveSessionRequest, ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode,
+    SetMemberSummary, SetOriginKind, SetSummary,
     SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit, SignalSummary, SignalTile,
     SourceSummary, TileRequest, TileResponse, UpdateSetMembersRequest,
 };
@@ -212,6 +214,19 @@ async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
             .filter_map(|file| file.into_path().ok())
             .map(|path| path.display().to_string())
             .collect(),
+    ))
+}
+
+#[tauri::command]
+async fn pick_source_folder(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        picked
+            .and_then(|folder| folder.into_path().ok())
+            .map(|path| path.display().to_string()),
     ))
 }
 
@@ -502,6 +517,11 @@ fn batch_status_response(status: scope_core::ingest::batch::BatchStatus) -> Batc
         total: status.total,
         done: status.done,
         failed: status.failed,
+        current_paths: status
+            .current_paths
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect(),
         recent_failures: status
             .recent_failures
             .into_iter()
@@ -538,13 +558,13 @@ fn file_state(state: scope_core::ingest::batch::FileState) -> FileState {
 fn expand_sources(paths: Vec<String>) -> Result<Vec<PathBuf>, String> {
     let mut expanded = Vec::new();
     for path in paths {
-        expand_source(Path::new(&path), &mut expanded)?;
+        expand_source(Path::new(&path), true, &mut expanded)?;
     }
     expanded.sort();
     Ok(expanded)
 }
 
-fn expand_source(path: &Path, expanded: &mut Vec<PathBuf>) -> Result<(), String> {
+fn expand_source(path: &Path, recursive: bool, expanded: &mut Vec<PathBuf>) -> Result<(), String> {
     if !path.is_dir() {
         expanded.push(path.to_owned());
         return Ok(());
@@ -561,7 +581,9 @@ fn expand_source(path: &Path, expanded: &mut Vec<PathBuf>) -> Result<(), String>
             .map_err(|error| error.to_string())?
             .is_dir()
         {
-            expand_source(&path, expanded)?;
+            if recursive {
+                expand_source(&path, true, expanded)?;
+            }
         } else if supported_path(&path) {
             expanded.push(path);
         }
@@ -569,14 +591,52 @@ fn expand_source(path: &Path, expanded: &mut Vec<PathBuf>) -> Result<(), String>
     Ok(())
 }
 
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn scan_sources(
+    request: Envelope<ScanSourcesRequest>,
+) -> Result<Envelope<ScanSourcesResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut paths = Vec::new();
+    expand_source(Path::new(&request.path), request.recursive, &mut paths)?;
+    paths.retain(|path| supported_path(path));
+    paths.sort();
+
+    let mut total_bytes = 0_u64;
+    let mut counts = BTreeMap::<String, u32>::new();
+    let files = paths
+        .into_iter()
+        .filter_map(|path| {
+            let metadata = std::fs::metadata(&path).ok()?;
+            total_bytes = total_bytes.saturating_add(metadata.len());
+            let label = format_label(&path)?;
+            *counts.entry(label.to_owned()).or_default() += 1;
+            Some(path.display().to_string())
+        })
+        .collect();
+    Ok(Envelope::new(ScanSourcesResponse {
+        files,
+        total_bytes,
+        format_counts: counts
+            .into_iter()
+            .map(|(label, count)| FormatCount { label, count })
+            .collect(),
+    }))
+}
+
 fn supported_path(path: &Path) -> bool {
+    format_label(path).is_some()
+}
+
+fn format_label(path: &Path) -> Option<&'static str> {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            SUPPORTED_FORMATS.iter().any(|(_, extensions)| {
+        .and_then(|extension| {
+            SUPPORTED_FORMATS.iter().find_map(|(label, extensions)| {
                 extensions
                     .iter()
                     .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+                    .then_some(*label)
             })
         })
 }
@@ -1516,6 +1576,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             pick_sources,
+            pick_source_folder,
+            scan_sources,
             ingest_batch,
             batch_status,
             batch_detail,
@@ -1640,6 +1702,68 @@ mod tests {
             expand_sources(vec![dir.path().display().to_string()]).unwrap(),
             vec![dir.path().join("b.csv"), nested.join("a.mcap")]
         );
+    }
+
+    #[test]
+    fn scan_sources_respects_recursion_and_reports_bytes_and_formats() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(dir.path().join("b.csv"), "12345").unwrap();
+        std::fs::write(dir.path().join("ignored.json"), "ignore").unwrap();
+        std::fs::write(nested.join("a.mcap"), "1234567").unwrap();
+
+        let flat = scan_sources(Envelope::new(ScanSourcesRequest {
+            path: dir.path().display().to_string(),
+            recursive: false,
+        }))
+        .unwrap()
+        .open()
+        .unwrap();
+        assert_eq!(flat.files, vec![dir.path().join("b.csv").display().to_string()]);
+        assert_eq!(flat.total_bytes, 5);
+        assert_eq!(flat.format_counts, vec![FormatCount {
+            label: "Delimited text (CSV, TSV, TXT, DAT)".into(),
+            count: 1,
+        }]);
+
+        let recursive = scan_sources(Envelope::new(ScanSourcesRequest {
+            path: dir.path().display().to_string(),
+            recursive: true,
+        }))
+        .unwrap()
+        .open()
+        .unwrap();
+        assert_eq!(recursive.total_bytes, 12);
+        assert_eq!(
+            recursive.format_counts,
+            vec![
+                FormatCount {
+                    label: "Delimited text (CSV, TSV, TXT, DAT)".into(),
+                    count: 1,
+                },
+                FormatCount {
+                    label: "MCAP recordings (MCAP)".into(),
+                    count: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_sources_reports_empty_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let scan = scan_sources(Envelope::new(ScanSourcesRequest {
+            path: dir.path().display().to_string(),
+            recursive: true,
+        }))
+        .unwrap()
+        .open()
+        .unwrap();
+
+        assert!(scan.files.is_empty());
+        assert_eq!(scan.total_bytes, 0);
+        assert!(scan.format_counts.is_empty());
     }
 
     #[test]

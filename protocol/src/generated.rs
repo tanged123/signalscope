@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -132,6 +132,26 @@ pub struct IngestBatchRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ScanSourcesRequest {
+    pub path: String,
+    pub recursive: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct FormatCount {
+    pub label: String,
+    pub count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ScanSourcesResponse {
+    pub files: Vec<String>,
+    #[serde(with = "u64_string")]
+    pub total_bytes: u64,
+    pub format_counts: Vec<FormatCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct BatchJob {
     #[serde(with = "u64_string")]
     pub job_id: u64,
@@ -173,6 +193,7 @@ pub struct BatchStatus {
     pub done: u64,
     #[serde(with = "u64_string")]
     pub failed: u64,
+    pub current_paths: Vec<String>,
     pub recent_failures: Vec<BatchFailure>,
 }
 

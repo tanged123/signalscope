@@ -4,7 +4,7 @@ import type {
   ExportFidelity,
   ExportRange,
 } from "../generated/protocol";
-import { required } from "./dom";
+import { formatBytes, required } from "./dom";
 
 export type ExportFormat = "html" | "png" | "csv";
 export type PngScope = "focused" | "all";
@@ -463,13 +463,4 @@ export class ExportDialog {
 
 function formatCount(value: number | string): string {
   return BigInt(value).toLocaleString("en-US");
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) {
-    return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  }
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
-  if (bytes >= 1_000) return `${Math.round(bytes / 1_000).toString()} kB`;
-  return `${bytes.toString()} B`;
 }

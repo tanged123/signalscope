@@ -69,6 +69,7 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
+import { FolderScanDialog } from "./folder-scan-dialog";
 import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
@@ -96,6 +97,7 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
+  private folderScanDialog: FolderScanDialog | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -447,6 +449,16 @@ export class AppShell {
       enabled: () => this.plane.ingest !== null,
       run: () => {
         void this.openFiles();
+      },
+    });
+    this.commands.register({
+      id: "open-folder",
+      title: "Open folder…",
+      section: "file",
+      group: "open",
+      enabled: () => this.plane.ingest !== null,
+      run: () => {
+        void this.openFolder();
       },
     });
     this.commands.register({
@@ -1143,11 +1155,39 @@ export class AppShell {
   private async openFiles(): Promise<void> {
     const port = this.plane.ingest;
     if (port === null) return;
+    try {
+      const paths = await port.pickSources();
+      if (paths.length > 0) await this.ingestPaths(paths);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async openFolder(): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null) return;
+    try {
+      const folder = await port.pickSourceFolder();
+      if (folder === null) return;
+      this.folderScanDialog ??= new FolderScanDialog(this.root);
+      this.folderScanDialog.open(
+        folder,
+        (recursive) => port.scanSources(folder, recursive),
+        (paths) => {
+          if (paths.length > 0) void this.ingestPaths(paths);
+        },
+      );
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async ingestPaths(paths: string[]): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null || paths.length === 0) return;
     const progress = required<HTMLElement>(this.root, ".ingest-progress");
     let keepProgress = false;
     try {
-      const paths = await port.pickSources();
-      if (paths.length === 0) return;
       progress.hidden = false;
       let jobId: string | null = null;
       const tracked: IngestPort = {
@@ -2438,14 +2478,33 @@ export class AppShell {
   }
 }
 
-function renderBatchProgress(
+export function renderBatchProgress(
   progress: HTMLElement,
   status: BatchStatus,
   cancel: () => void,
 ): void {
+  const percent = Math.round(status.fraction * 100);
   const summary = document.createElement("span");
-  summary.textContent = `${status.done}/${status.total} loaded · ${status.failed} failed`;
-  const children: HTMLElement[] = [summary];
+  summary.textContent = `${String(percent)}% · ${status.done}/${status.total} loaded · ${status.failed} failed`;
+  const children: HTMLElement[] = [];
+  if (status.state === "running") {
+    const bar = document.createElement("div");
+    bar.className = "ingest-bar";
+    const fill = document.createElement("div");
+    fill.className = "ingest-bar-fill";
+    fill.style.width = `${String(percent)}%`;
+    bar.append(fill);
+    children.push(bar);
+  }
+  children.push(summary);
+  if (status.state === "running" && status.current_paths.length > 0) {
+    const current = document.createElement("span");
+    const [path] = status.current_paths;
+    current.className = "ingest-current";
+    current.textContent = `${basename(path)}${status.current_paths.length > 1 ? ` +${String(status.current_paths.length - 1)}` : ""}`;
+    current.title = path;
+    children.push(current);
+  }
   if (status.state === "running") {
     const button = document.createElement("button");
     button.type = "button";

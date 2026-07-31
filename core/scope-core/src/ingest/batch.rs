@@ -60,6 +60,7 @@ pub struct BatchStatus {
     pub total: u64,
     pub done: u64,
     pub failed: u64,
+    pub current_paths: Vec<PathBuf>,
     pub recent_failures: Vec<FileFailure>,
 }
 
@@ -78,6 +79,7 @@ pub struct BatchDetail {
 
 struct FileEntry {
     path: PathBuf,
+    weight: u64,
     state: FileState,
     error: Option<String>,
 }
@@ -99,6 +101,7 @@ impl BatchProgress {
                 entries: paths
                     .into_iter()
                     .map(|path| FileEntry {
+                        weight: fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(1).max(1),
                         path,
                         state: FileState::Pending,
                         error: None,
@@ -138,6 +141,20 @@ impl BatchProgress {
         let failed = count(&inner, FileState::Failed);
         let cancelled = count(&inner, FileState::Cancelled);
         let settled = done + failed + cancelled;
+        let total_weight = inner
+            .entries
+            .iter()
+            .fold(0_u64, |total, entry| total.saturating_add(entry.weight));
+        let settled_weight = inner
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.state,
+                    FileState::Done | FileState::Failed | FileState::Cancelled
+                )
+            })
+            .fold(0_u64, |total, entry| total.saturating_add(entry.weight));
         let running = settled < total;
         let state = if running {
             BatchState::Running
@@ -165,17 +182,25 @@ impl BatchProgress {
             .into_iter()
             .rev()
             .collect();
+        let current_paths = inner
+            .entries
+            .iter()
+            .filter(|entry| entry.state == FileState::Running)
+            .take(3)
+            .map(|entry| entry.path.clone())
+            .collect();
 
         BatchStatus {
             state,
-            fraction: if total == 0 {
+            fraction: if total_weight == 0 {
                 1.0
             } else {
-                settled as f64 / total as f64
+                settled_weight as f64 / total_weight as f64
             },
             total,
             done,
             failed,
+            current_paths,
             recent_failures,
         }
     }
@@ -718,12 +743,46 @@ mod tests {
                 total: 3,
                 done: 2,
                 failed: 1,
+                current_paths: Vec::new(),
                 recent_failures: vec![FileFailure {
                     path: PathBuf::from("1.csv"),
                     error: "invalid".into(),
                 }],
             }
         );
+    }
+
+    #[test]
+    fn fraction_is_byte_weighted() {
+        let dir = tempfile::tempdir().unwrap();
+        let large = dir.path().join("large.csv");
+        let small = dir.path().join("small.csv");
+        std::fs::write(&large, vec![b'x'; 1_000_000]).unwrap();
+        std::fs::write(&small, vec![b'x'; 1_000]).unwrap();
+        let batch = BatchProgress::new(vec![large, small]);
+
+        batch.succeeded(1);
+        assert!(batch.status().fraction < 0.01);
+        batch.succeeded(0);
+        assert_eq!(batch.status().fraction, 1.0);
+    }
+
+    #[test]
+    fn current_paths_list_running_files_and_empty_when_terminal() {
+        let batch = BatchProgress::new(paths(4));
+        batch.started(0);
+        batch.started(1);
+        batch.started(2);
+        batch.started(3);
+
+        assert_eq!(
+            batch.status().current_paths,
+            paths(3),
+        );
+        for index in 0..4 {
+            batch.succeeded(index);
+        }
+        assert!(batch.status().current_paths.is_empty());
     }
 
     #[test]

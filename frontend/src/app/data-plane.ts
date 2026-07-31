@@ -25,6 +25,8 @@ import {
   type SampleRequest,
   type SampleResponse,
   type SaveSessionRequest,
+  type ScanSourcesRequest,
+  type ScanSourcesResponse,
   type SaveExportFileRequest,
   type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
@@ -44,6 +46,8 @@ import { binsToSamples, sampleWindow } from "./samples";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
+  pickSourceFolder(): Promise<string | null>;
+  scanSources(path: string, recursive: boolean): Promise<ScanSourcesResponse>;
   startBatch(paths: string[]): Promise<string>;
   batchStatus(jobId: string): Promise<BatchStatus>;
   batchDetail(
@@ -166,6 +170,14 @@ export class TauriPlane implements DataPlane {
     this.ingest = {
       pickSources: async () =>
         open(await this.invoke<Envelope<string[]>>("pick_sources")),
+      pickSourceFolder: async () =>
+        open(await this.invoke<Envelope<string | null>>("pick_source_folder")),
+      scanSources: async (path: string, recursive: boolean) =>
+        open(
+          await this.invoke<Envelope<ScanSourcesResponse>>("scan_sources", {
+            request: seal<ScanSourcesRequest>({ path, recursive }),
+          }),
+        ),
       startBatch: async (paths: string[]) =>
         open(
           await this.invoke<Envelope<BatchJob>>("ingest_batch", {

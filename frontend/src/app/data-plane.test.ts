@@ -182,6 +182,7 @@ describe("batch ingest port", () => {
           total: "2",
           done: "0",
           failed: "0",
+          current_paths: [],
           recent_failures: [],
         }) as never,
       );

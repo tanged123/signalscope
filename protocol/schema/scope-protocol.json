@@ -1,5 +1,5 @@
 {
-  "protocol_version": 11,
+  "protocol_version": 12,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -81,6 +81,28 @@
         "paths": "string[]"
       }
     },
+    "ScanSourcesRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "recursive": "bool"
+      }
+    },
+    "FormatCount": {
+      "kind": "object",
+      "fields": {
+        "label": "string",
+        "count": "u32"
+      }
+    },
+    "ScanSourcesResponse": {
+      "kind": "object",
+      "fields": {
+        "files": "string[]",
+        "total_bytes": "u64",
+        "format_counts": "FormatCount[]"
+      }
+    },
     "BatchJob": {
       "kind": "object",
       "fields": {
@@ -110,6 +132,7 @@
         "total": "u64",
         "done": "u64",
         "failed": "u64",
+        "current_paths": "string[]",
         "recent_failures": "BatchFailure[]"
       }
     },
