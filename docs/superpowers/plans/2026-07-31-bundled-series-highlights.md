@@ -1006,6 +1006,336 @@ Use `chipLabel` for the chip text node; keep the full `state.x_signal` in the `t
 
 ---
 
+## Addendum B (2026-07-31): bundle drops everywhere, per-source color, robust drop routing
+
+Tasks 1–14 are implemented. This addendum implements the spec's "Per-source
+color channel" and "Drop routing (binding)" sections plus the axis-label
+rule added to "Bundle-vs-bundle XY". Observed defects it fixes:
+
+- a. Bundles can't be dropped on the workspace background / empty state to
+  create a new panel (only `SIGNAL_DRAG_TYPE` is accepted,
+  `workspace-view.ts` `bindWorkspaceDrop`).
+- b. The XY bottom axis label shows the stored sorted-first member path
+  (`axisName(state.x_signal, …)`) instead of the local path when pairing
+  is per-source.
+- c. The color chip only accepts `SIGNAL_DRAG_TYPE`, so bundle drags fall
+  through to the panel body and get added as series; color values are also
+  lerped from one shared series across all traces (cross-source coloring).
+
+### Task 15: Bundle drops on every target; exclusive channel routing
+
+**Files:**
+
+- Modify: `frontend/src/ui/panel.ts` (bundle payload helper near `bundleXSignal` at :175; color chip handlers at :339-360; panel body handlers at :372-421), `frontend/src/ui/workspace-view.ts` (`bindWorkspaceDrop` at :247-271, `WorkspaceViewCallbacks`), `frontend/src/ui/app-shell.ts` (callback wiring near `onDropSignalNewPanel` at :312)
+- Test: `frontend/src/ui/panel.test.ts` (payload helper), plus the existing drop-routing tests if any (`grep -rn "onDropBundle\|onSetXSignal" frontend/src --include=*.test.ts`)
+
+**Interfaces:**
+
+- Produces: `export function parseBundlePayload(data: string): { member_paths: string[] } | null` in `panel.ts` (replaces the inline parse; `bundleXSignal` stays); `WorkspaceViewCallbacks.onDropBundleNewPanel(memberPaths: readonly string[]): void`.
+- Consumes: `AppShell.plotBundle(memberPaths, panelId?)`, `onSetColorSignal(id, path)` — existing.
+
+- [ ] **Step 1: Write the failing tests:**
+
+```ts
+it("parseBundlePayload accepts only string-array member payloads", () => {
+  expect(
+    parseBundlePayload(
+      JSON.stringify({ local_path: "alt", member_paths: ["a/alt", "b/alt"] }),
+    ),
+  ).toEqual({ member_paths: ["a/alt", "b/alt"] });
+  expect(parseBundlePayload("not json")).toBeNull();
+  expect(parseBundlePayload(JSON.stringify({ member_paths: [1] }))).toBeNull();
+  expect(parseBundlePayload(JSON.stringify({}))).toBeNull();
+});
+```
+
+- [ ] **Step 2: Run** `./scripts/test.sh unit panel` — expect FAIL (`parseBundlePayload` not exported).
+- [ ] **Step 3: Extract the helper** in `panel.ts` (module level, next to `bundleXSignal`):
+
+```ts
+export function parseBundlePayload(
+  data: string,
+): { member_paths: string[] } | null {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "member_paths" in payload &&
+      Array.isArray(payload.member_paths) &&
+      payload.member_paths.every((path) => typeof path === "string")
+    ) {
+      return { member_paths: payload.member_paths };
+    }
+  } catch {
+    // Malformed external drag payloads are not bundles.
+  }
+  return null;
+}
+```
+
+Rewrite the panel-body drop handler's bundle branch (:391-415) to use it.
+
+- [ ] **Step 4: Color chip accepts bundles, exclusively.** Extend the `cChip` handlers (:343-360): `dragover` accepts `SIGNAL_DRAG_TYPE` **or** `BUNDLE_DRAG_TYPE` (keep `preventDefault` + `stopPropagation` in both `dragover` and `drop` for both types — this is what stops the panel body underneath from claiming the drag). In `drop`, check the bundle payload first:
+
+```ts
+const bundle = dragData(event, BUNDLE_DRAG_TYPE);
+if (bundle !== null) {
+  const payload = parseBundlePayload(bundle);
+  const first =
+    payload === null ? undefined : [...payload.member_paths].sort()[0];
+  cChip.classList.remove("drop-target");
+  if (first === undefined) return;
+  event.preventDefault();
+  event.stopPropagation();
+  this.callbacks.onSetColorSignal(this.id, first);
+  return;
+}
+// existing SIGNAL_DRAG_TYPE path unchanged
+```
+
+Apply the same exclusive-routing treatment to the X chip if it is a drop target; if only the strip is, the strip's existing handling from Task 14 already routes exclusively (verify: a bundle dropped `overStrip` must set X and never also add series).
+
+- [ ] **Step 5: Workspace background accepts bundles.** In `bindWorkspaceDrop` (workspace-view.ts:247-271): `dragover` also accepts `BUNDLE_DRAG_TYPE` over the background; in `drop`, check `dragData(event, BUNDLE_DRAG_TYPE)` first, parse with `parseBundlePayload` (import from `./panel`), and call `this.callbacks.onDropBundleNewPanel(payload.member_paths)`. Add the callback to `WorkspaceViewCallbacks` (:17). In `app-shell.ts`, wire it next to `onDropSignalNewPanel` (:312):
+
+```ts
+onDropBundleNewPanel: (memberPaths) => {
+  this.plotBundle(memberPaths, this.workspace.addPanelRow().id);
+},
+```
+
+(Check `onDropSignalNewPanel`'s body first and mirror its focus/history idiom exactly — if it calls a helper that also fits the window, use the same helper.)
+
+- [ ] **Step 6: Run** `./scripts/test.sh frontend` — expect PASS.
+- [ ] **Step 7: Commit** — `git commit -m "feat(ui): route bundle drops to every signal drop target"`
+
+---
+
+### Task 16: Per-source color resolution and local-path axis labels
+
+**Files:**
+
+- Modify: `frontend/src/ui/panel.ts` (`renderXy` — color resolution around the `colorFor` closure; X axis label at :746; color label at :766; chip label logic from Task 14), `frontend/src/ui/app-shell.ts` (`panelSignalIds` — request resolved color paths like resolved X paths)
+- Test: the XY pairing test file from Tasks 12/14
+
+**Interfaces:**
+
+- Consumes: `localPathFor` / `sourceKeyFor` callbacks, Task 14's `resolveX` pattern.
+- Produces: no new interfaces; behavior and labels only.
+
+- [ ] **Step 1: Write the failing tests** (same harness as Task 14; stub `sourceKeyFor`/`localPathFor` as before):
+
+```ts
+it("colors each trace from its own source's color signal", () => {
+  // samples: run_01/temp, run_01/alt, run_02/temp, run_02/alt
+  // state: color_signal = "run_01/temp", series = [run_01/alt, run_02/alt]
+  // give run_01/temp and run_02/temp distinguishable values;
+  // assert run_02/alt's colorValues derive from run_02/temp, not run_01/temp.
+});
+
+it("a trace whose source lacks the color local path renders uncolored", () => {
+  // run_02 has no temp: assert run_02/alt's colorValues are null while
+  // run_01/alt's are populated; no cross-source color pairing.
+});
+
+it("x axis and color labels use the local path when series span sources", () => {
+  // x_signal = "run_01/t", color_signal = "run_01/temp", series from k1+k2:
+  // assert the prepared plot's xLabel is axisName("t", unit) and the color
+  // label is "temp"; with a user-set x_label, the override wins.
+});
+```
+
+Fill in the real assertions against the harness's prepared-plot accessor (Task 14's tests already inspect `xyTraces`; the label test inspects the `prepareXyPlot` input or the rendered label, whichever the harness exposes).
+
+- [ ] **Step 2: Run** the targeted filter — expect FAIL.
+- [ ] **Step 3: Implement color resolution** in `renderXy`, mirroring `resolveX`:
+
+```ts
+const cLocal =
+  state.color_signal === null
+    ? null
+    : this.callbacks.localPathFor(state.color_signal);
+const resolveColor = (
+  yPath: string,
+): SampleResponse["series"][number] | null => {
+  if (colorSeries === null || colorSeries === "time") return null; // handled by caller
+  if (cLocal === null) return colorSeries; // shared color
+  const sourceKey = this.callbacks.sourceKeyFor(yPath);
+  if (sourceKey === null) return colorSeries; // derived Y: shared
+  return (
+    samples.series.find(
+      (candidate) =>
+        this.callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
+        this.callbacks.localPathFor(candidate.signal_path) === cLocal,
+    ) ?? null // uncolored, never cross-paired
+  );
+};
+```
+
+Change `colorFor` so the `"time"` case is unchanged, and the signal case lerps against `resolveColor(trace.path)`, returning `null` when it resolves to `null` (the existing `colorColumns[index] ?? null` plumbing already tolerates per-trace nulls — verify `hasColor` still computes over non-null columns only).
+
+- [ ] **Step 4: Labels.** Compute the multi-source condition once (Task 14 already computes the visible-source set for the chip; reuse it): when `xLocal !== null && sources.size > 1`, the X axis label becomes `state.x_label ?? axisName(xLocal, xSeries.unit)` (:746) and the color label becomes `state.c_label ?? axisName(cLocal, colorSeries.unit)` under the same condition with `cLocal` (:766). Apply the same local-path rule to the color chip's text (mirror the X chip change from Task 14; tooltip keeps the full path).
+- [ ] **Step 5: Query union.** In `panelSignalIds` (app-shell.ts), extend the XY branch to also push each series' resolved color path (same-source signal whose local path equals `color_signal`'s local path), exactly parallel to the resolved-X loop.
+- [ ] **Step 6: Run** `./scripts/test.sh frontend` — expect PASS.
+- [ ] **Step 7: Gate + version.** `./scripts/format.sh`, `./scripts/test.sh full`, then `./scripts/version.sh bump minor && ./scripts/version.sh check`.
+- [ ] **Step 8: Commit** — `git commit -m "feat(xy): per-source color channel and local-path axis labels"`
+
+---
+
+## Addendum C (2026-07-31): folder ingest and loading progress
+
+Implements `docs/superpowers/specs/2026-07-31-folder-ingest-design.md`.
+Tasks 1–16 are implemented. Key context: `ingest_batch` already expands
+directories recursively (`shell/src-tauri/src/lib.rs:226`, `expand_source`
+at :547); what's missing is the folder picker, a scan-preview step with an
+optional-recursion toggle, and byte-weighted progress.
+
+### Task 17: Protocol v12 — scan types and byte-weighted batch status
+
+**Files:**
+
+- Modify: `protocol/schema/scope-protocol.json`, `core/scope-core/src/ingest/batch.rs` (`BatchStatus` build at :160-181; job/work-item creation — read `submit`), `shell/src-tauri/src/lib.rs` (`expand_source` :547, `supported_path` :572, new `scan_sources` + `pick_source_folder` commands, registration list :1524 area)
+- Regenerate: via `./scripts/codegen.sh`
+- Test: `core/scope-core/src/ingest/batch.rs` inline tests; shell inline tests (an `expand_sources` test already exists at lib.rs:1640 — follow its tempdir pattern)
+
+**Interfaces:**
+
+- Produces (schema): `ScanSourcesRequest { path: string, recursive: bool }`; `ScanSourcesResponse { files: string[], total_bytes: u64, format_counts: FormatCount[] }`; `FormatCount { label: string, count: u32 }`; `BatchStatus` gains `current_paths: string[]`; `"protocol_version": 12`.
+- Produces (commands): `scan_sources(request) -> Envelope<ScanSourcesResponse>`; `pick_source_folder() -> Option<String>` (mirror the existing file-picker dialog command at :188-206, using the dialog plugin's folder picker).
+- Task 18 consumes both commands; Task 19 consumes `fraction` + `current_paths`.
+
+- [ ] **Step 1: Schema.** Add the three types, add `"current_paths": "string[]"` to `BatchStatus`, set `"protocol_version": 12`. Run `./scripts/codegen.sh`. (`u64` stays plain — strings on the TS side per the existing convention.)
+- [ ] **Step 2: Write failing core tests** in `batch.rs`'s test module (follow its existing job-fixture helpers):
+
+```rust
+#[test]
+fn fraction_is_byte_weighted() {
+    // two files: 1_000_000 bytes and 1_000 bytes (write real temp files via
+    // the module's existing fixture helper); after only the small file
+    // settles, status().fraction < 0.01, not 0.5; after both, 1.0.
+}
+
+#[test]
+fn current_paths_lists_running_files_and_empties_when_terminal() {
+    // while a file is in FileState::Running, status().current_paths contains
+    // its path (≤ 3 entries); after the job reaches a terminal state it is [].
+}
+```
+
+- [ ] **Step 3: Implement.** At job creation, stat each path: `weight = fs::metadata(path).map(|m| m.len()).unwrap_or(1).max(1)`; store per work item. In the status build (:171), replace the settled/total file-count fraction with `settled_weight as f64 / total_weight as f64` (total 0 ⇒ 1.0, as today), and collect `current_paths` from running items (first 3, deterministic order). Run `./scripts/test.sh core batch` — expect PASS.
+- [ ] **Step 4: Shell scan command.** Add a `recursive: bool` parameter to the directory walk (skip the `expand_source(&path, …)` recursion into subdirectories when false — top-level files only) without changing `ingest_batch`'s always-recursive call. Then:
+
+```rust
+#[tauri::command]
+fn scan_sources(request: ScanSourcesRequest) -> Result<Envelope<ScanSourcesResponse>, String> {
+    // walk request.path with request.recursive; for each supported file,
+    // accumulate fs::metadata(...).len() (skip unreadable entries) and a
+    // per-SUPPORTED_FORMATS-label count; sort files; return the envelope.
+}
+```
+
+Write it fully (the walk is ~30 lines; reuse `supported_path` and match the error style of the neighboring commands), register both new commands, and add shell tests beside the existing `expand_sources` test: nested tempdir with supported + unsupported files, recursive vs. not, counts and byte totals, empty dir.
+
+- [ ] **Step 5: Run** `./scripts/test.sh core batch && ./scripts/test.sh shell && ./scripts/test.sh frontend` (codegen check) — expect PASS.
+- [ ] **Step 6: Commit** — `git commit -m "feat(protocol): v12 folder scans and byte-weighted batch progress"`
+
+---
+
+### Task 18: Open Folder flow with scan-preview dialog
+
+**Files:**
+
+- Create: `frontend/src/ui/folder-scan-dialog.ts` (follow `export-dialog.ts`'s structure: markup string, open/close, Escape handling, focus)
+- Modify: `frontend/src/app/data-plane.ts` (`IngestPort` at :46-56 and the Tauri implementations at :167-206), `frontend/src/ui/app-shell.ts` (palette entry beside `open-files` at :442; `openFolder()` beside `openFiles()` at :1147), `frontend/src/styles/app.css` (dialog styles from existing dialog tokens)
+- Test: `frontend/src/ui/folder-scan-dialog.test.ts`
+
+**Interfaces:**
+
+- Consumes: `scan_sources` / `pick_source_folder` from Task 17; existing `runBatchIngest(port, paths, onProgress)` and the `.ingest-progress` wiring inside `openFiles`.
+- Produces: `IngestPort.pickSourceFolder(): Promise<string | null>`; `IngestPort.scanSources(path: string, recursive: boolean): Promise<ScanSourcesResponse>`; `FolderScanDialog.open(folder: string, scan: (recursive: boolean) => Promise<ScanSourcesResponse>, onLoad: (files: string[]) => void): void`.
+
+- [ ] **Step 1: Write the failing dialog tests** (jsdom, mirroring how other UI tests mount components):
+
+```ts
+it("shows counts, size, and format breakdown, and re-scans on toggle", async () => {
+  const scans: boolean[] = [];
+  const scan = async (recursive: boolean) => {
+    scans.push(recursive);
+    return recursive
+      ? {
+          files: ["a.csv", "sub/b.csv"],
+          total_bytes: "2048",
+          format_counts: [
+            { label: "Delimited text (CSV, TSV, TXT, DAT)", count: 2 },
+          ],
+        }
+      : {
+          files: ["a.csv"],
+          total_bytes: "1024",
+          format_counts: [
+            { label: "Delimited text (CSV, TSV, TXT, DAT)", count: 1 },
+          ],
+        };
+  };
+  // open(folder, scan, onLoad); await the initial (recursive) scan;
+  // assert "2 loadable files" appears and scans === [true];
+  // uncheck the checkbox; assert scans === [true, false] and "1 loadable file";
+  // click Load; assert onLoad received ["a.csv"] and the dialog closed.
+});
+
+it("disables Load when the scan finds nothing", async () => {
+  // scan resolves { files: [], total_bytes: "0", format_counts: [] };
+  // assert "No loadable files found." and the Load button is disabled.
+});
+```
+
+- [ ] **Step 2: Run** `./scripts/test.sh unit folder-scan` — expect FAIL (module missing).
+- [ ] **Step 3: Implement the dialog.** All text via `textContent`; the folder path is untrusted display data. Body per the spec: title = folder basename (title attribute = full path); `N loadable files · <size>` using an existing byte-formatting helper if one exists (`grep -rn "formatBytes\|toFixed(1)} MB" frontend/src` first — reuse, don't duplicate); per-format counts joined with `" · "`; checkbox labeled `Include subfolders`, checked by default, re-invoking `scan` on change with a stale-response guard (ignore out-of-order resolutions); `Load` disabled while a scan is in flight or when zero files.
+- [ ] **Step 4: Port + shell wiring.** Add the two `IngestPort` methods and their Tauri implementations (mirror `pickSources`/`listFormats` envelope handling at :167-206). Then in `app-shell.ts` add the palette entry `open-folder` ("Open folder…") beside `open-files` and:
+
+```ts
+private async openFolder(): Promise<void> {
+  const port = this.plane.ingest;
+  if (port === null) return;
+  const folder = await port.pickSourceFolder();
+  if (folder === null) return;
+  this.folderScanDialog.open(
+    folder,
+    (recursive) => port.scanSources(folder, recursive),
+    (files) => {
+      if (files.length > 0) void this.ingestPaths(files);
+    },
+  );
+}
+```
+
+where `ingestPaths(paths: string[])` is `openFiles`'s existing body from the point after `pickSources()` returned, factored out so both flows share the progress rendering, error handling, and post-batch reload (refactor `openFiles` to call it; do not duplicate the flow).
+
+- [ ] **Step 5: Run** `./scripts/test.sh frontend` — expect PASS.
+- [ ] **Step 6: Commit** — `git commit -m "feat(ingest): open folders with a scan preview and optional recursion"`
+
+---
+
+### Task 19: Progress bar with byte-weighted percent and current file
+
+**Files:**
+
+- Modify: `frontend/src/ui/app-shell.ts` (`renderBatchProgress` at :2426-2457), `frontend/src/styles/app.css`
+- Test: extract `renderBatchProgress` into a testable unit only if a test file for app-shell helpers already exists — otherwise assert via the existing ingest tests in `frontend/src/app/ingest.test.ts` if they render progress, else add a small DOM test file for the function (export it for testing)
+
+**Interfaces:**
+
+- Consumes: `BatchStatus.fraction` (now byte-weighted) and `BatchStatus.current_paths` from Task 17. No new interfaces.
+
+- [ ] **Step 1: Write the failing test:** render a running status `{ state: "running", fraction: 0.37, total: "12", done: "4", failed: "1", current_paths: ["/data/run_07.csv"], recent_failures: [] }` into a container and assert: a `.ingest-bar-fill` element has `style.width === "37%"`, the text includes `37%`, `4/12`, and `run_07.csv` (basename only), and a Cancel button is present; render a `done` status and assert no bar/cancel remain.
+- [ ] **Step 2: Run** the targeted unit filter — expect FAIL.
+- [ ] **Step 3: Implement.** Extend `renderBatchProgress`: prepend a bar (`div.ingest-bar` containing `div.ingest-bar-fill` with `style.width = `${Math.round(status.fraction \* 100)}%``) and a percent + `done/total`summary; when`current_paths`is non-empty and the state is`running`, show `basename(current_paths[0])`(append` +N`when more are running) with the full path as`title`. Keep the failure list and Cancel exactly as they are. Style `.ingest-bar`/`.ingest-bar-fill`in`app.css` with existing tokens (height from an existing spacing token, fill color from an existing accent token; no raw colors, no animation beyond width).
+- [ ] **Step 4: Run** `./scripts/test.sh frontend` — expect PASS.
+- [ ] **Step 5: Gate + version.** `./scripts/format.sh`, `./scripts/test.sh full`, then `./scripts/version.sh bump minor && ./scripts/version.sh check`. Manual check per the spec: `./scripts/run.sh`, open a nested folder with and without recursion, cancel mid-load.
+- [ ] **Step 6: Commit** — `git commit -m "feat(ingest): byte-weighted progress bar with current file"`
+
+---
+
 ## Deferred (explicitly out of scope for this plan)
 
 - Dimming in XY/FFT/histogram vertex rendering if the vertex path doesn't already thread per-series flags (Task 11 notes the restriction; a follow-up can extend it).

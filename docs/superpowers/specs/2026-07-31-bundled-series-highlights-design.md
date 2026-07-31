@@ -100,15 +100,53 @@ When `x_signal` belongs to a source, its **local path is the pairing key**:
     the X series with the **same `source_key`** and local path `xLocal`;
     if that source has no such signal, the trace is **omitted** — two
     different sources are never cross-paired.
-- **X chip label.** When `xLocal` is non-null and the panel's visible
-  series span more than one source, the chip shows the local path (the
-  tooltip keeps the stored full path); otherwise it shows the full label
-  as today.
+- **X chip and axis labels.** When `xLocal` is non-null and the panel's
+  visible series span more than one source, the chip **and the rendered X
+  axis label** show the local path (the chip tooltip keeps the stored full
+  path); otherwise both show the full label as today. A user-set `x_label`
+  always wins, as today.
 - The sample query for an XY panel requests the union of resolved X paths
   plus Y paths; `renderXy` pairs each Y against its resolved X.
 
+### Per-source color channel
+
+The XY color channel follows the same rules as X. `color_signal` remains a
+single full path; setting it from a bundle stores the sorted-first member.
+Let `cLocal = localPathFor(color_signal)`:
+
+- `cLocal === null` (derived or unknown): one shared color series for all
+  traces, as today.
+- Otherwise each sourced trace takes its color values from the signal with
+  the **same `source_key`** and local path `cLocal`. A trace whose source
+  has no such signal renders **uncolored** (its ordinary series color) —
+  color values are never cross-paired between sources. Unsourced (derived)
+  traces use `color_signal` directly.
+- The color chip and colorbar label show `cLocal` under the same
+  multi-source condition as the X labels; a user-set `c_label` wins.
+- The XY sample query requests the union of resolved color paths as well.
+
 `FFT` and `H` modes need no pairing rule: each member series is computed
 independently, exactly like any other multi-series panel today.
+
+### Drop routing (binding)
+
+Every drop target that accepts a signal drag accepts a bundle drag, and
+routing is **exclusive by target** — a drop consumed by a channel target
+never falls through to a series add, in any panel mode:
+
+| Target                             | Signal drop                               | Bundle drop                                 |
+| ---------------------------------- | ----------------------------------------- | ------------------------------------------- |
+| Panel body                         | add series                                | add all members as series                   |
+| X-axis strip                       | set `x_signal` (switches to XY, as today) | set `x_signal` to sorted-first member       |
+| Color chip                         | set `color_signal`                        | set `color_signal` to sorted-first member   |
+| Workspace background / empty state | new panel + plot signal                   | new panel + plot all members                |
+| Favorites bar                      | toggle favorite                           | not a target (favorites stay leaf-oriented) |
+
+Channel targets (`X` strip, color chip) must accept both drag types in
+`dragover` and stop propagation in both `dragover` and `drop`, so a drag
+hovering a chip can never be claimed by the panel body underneath. The
+bundle payload parse lives in one shared helper rather than being repeated
+per target.
 
 ### Data plane
 
@@ -217,6 +255,11 @@ serve tree bundling, restore, and snapshot planning, not just ensembles.
   member; a source lacking the X local path has its trace omitted, never
   cross-paired; derived X or derived Y pairs against `x_signal` directly;
   the chip shows the local path when visible series span multiple sources.
+- Drop-routing tests cover every row of the routing table for both drag
+  types: bundle to workspace background creates one panel with all members;
+  bundle to the color chip sets `color_signal` without adding series in any
+  panel mode; per-source color pairing, the uncolored-trace rule, and
+  local-path X/color axis labels.
 - Session tests cover the v13 → 14 rung: band panel expands to sorted
   member series, `member_filter` respected, missing members skipped,
   duplicates avoided, unresolvable `set_key` degrades gracefully.
