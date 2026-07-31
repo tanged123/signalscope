@@ -249,22 +249,6 @@ pub fn spill_columns(
     ))
 }
 
-pub(crate) fn write_page(
-    root: &CacheRoot,
-    name: &str,
-    bytes: &[u8],
-    cache: &PageCache,
-) -> Result<PageHandle, CacheError> {
-    fs::create_dir_all(root.directory())?;
-    let target = root.directory().join(name);
-    let temporary = target.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
-    let mut file = File::create(&temporary)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(temporary, &target)?;
-    Ok(PageHandle::cached(cache.clone(), target, 0, bytes.len()))
-}
-
 pub struct LoadedCache {
     pub summary: IngestSummary,
     pub pyramids: Vec<(SignalId, Pyramid)>,
