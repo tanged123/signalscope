@@ -27,7 +27,9 @@ describe("panel mode transitions", () => {
     expect(workspace.panel(panel.id)?.x_signal).toBe("run_01/time");
     expect(workspace.panel(panel.id)?.series).toHaveLength(8);
     expect(
-      workspace.panel(panel.id)?.series.some((series) => series.path === "run_01/time"),
+      workspace
+        .panel(panel.id)
+        ?.series.some((series) => series.path === "run_01/time"),
     ).toBe(false);
 
     shell.transitionPanelMode(panel.id, "xy");
@@ -35,7 +37,9 @@ describe("panel mode transitions", () => {
     expect(workspace.panel(panel.id)?.x_signal).toBe("run_01/time");
     expect(workspace.panel(panel.id)?.series).toHaveLength(8);
     expect(
-      workspace.panel(panel.id)?.series.some((series) => series.path === "run_01/time"),
+      workspace
+        .panel(panel.id)
+        ?.series.some((series) => series.path === "run_01/time"),
     ).toBe(false);
   });
 });

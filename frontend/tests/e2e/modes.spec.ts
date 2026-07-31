@@ -104,7 +104,7 @@ test.describe("panel modes", () => {
     await expect(panel.locator(".panel-empty")).toBeHidden();
 
     await panel.locator(".mode-pill", { hasText: "FFT" }).click();
-    await expect(panel.locator(".legend-chip")).toHaveCount(2);
+    await expect(panel.locator(".legend-chip")).toHaveCount(1);
 
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     await expect(panel.locator(".legend-chip")).toHaveCount(1);
@@ -112,7 +112,7 @@ test.describe("panel modes", () => {
     await page.keyboard.type("switch to histogram");
     await page.keyboard.press("Enter");
     await expect(panel.locator(".mode-pill.active")).toHaveText("H");
-    await expect(panel.locator(".legend-chip")).toHaveCount(2);
+    await expect(panel.locator(".legend-chip")).toHaveCount(1);
   });
 
   test("the x chip and the palette both reach XY mode", async ({ page }) => {
