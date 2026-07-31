@@ -78,17 +78,32 @@ emphasis remains transient and takes precedence while the pointer is over a
 legend chip. Visibility, style, and remove actions continue to operate on
 individual series.
 
-### Per-source X resolution in XY mode
+### Bundle-vs-bundle XY (per-source X resolution)
 
-A panel's `x_signal` remains a single full path, but XY pairing is resolved
-per source so bundle members never pair against another run's X values:
+XY plots must support bundle-versus-bundle intrinsically: putting
+"temperature" on X while a bundle is on Y means _each source's_ temperature
+against _that source's_ Y signal — never one run's temperature shared
+across runs.
 
-- For each visible Y series, look up its `source_key` from the signal
-  summaries. Resolve that series' X as the signal with the **same
-  `source_key`** and the **`local_path` of `x_signal`**.
-- If no such signal exists for a series' source (including derived signals
-  and signals without summaries), fall back to `x_signal` itself — the
-  current single-source behavior.
+`x_signal` remains a single full path and no new panel state is added.
+When `x_signal` belongs to a source, its **local path is the pairing key**:
+
+- **Setting X from a bundle.** Dropping a bundle on the X-axis strip is
+  allowed and stores the bundle's sorted-first member path as `x_signal`.
+  Dropping a single member or leaf keeps today's behavior. No other way to
+  set X is added.
+- **Pairing (exact rules).** Let `xLocal = localPathFor(x_signal)`.
+  - `xLocal === null` (derived or unknown X): every Y pairs against
+    `x_signal` directly — a shared X.
+  - Otherwise, for each visible Y series: if the Y has no source (derived),
+    it pairs against `x_signal` directly. If the Y has a source, resolve
+    the X series with the **same `source_key`** and local path `xLocal`;
+    if that source has no such signal, the trace is **omitted** — two
+    different sources are never cross-paired.
+- **X chip label.** When `xLocal` is non-null and the panel's visible
+  series span more than one source, the chip shows the local path (the
+  tooltip keeps the stored full path); otherwise it shows the full label
+  as today.
 - The sample query for an XY panel requests the union of resolved X paths
   plus Y paths; `renderXy` pairs each Y against its resolved X.
 
@@ -197,8 +212,11 @@ serve tree bundling, restore, and snapshot planning, not just ensembles.
   unhighlighted members.
 - Panel/data-plane tests cover a two-source bundle in `T`, `XY`, `FFT`, and
   `H`, ensuring ordinary tile/sample requests are used, and that XY pairs
-  each member against its own source's X (with fallback when a source
-  lacks the X local path).
+  each member against its own source's X. Bundle-vs-bundle XY tests cover:
+  dropping a bundle on the X strip sets `x_signal` to the sorted-first
+  member; a source lacking the X local path has its trace omitted, never
+  cross-paired; derived X or derived Y pairs against `x_signal` directly;
+  the chip shows the local path when visible series span multiple sources.
 - Session tests cover the v13 → 14 rung: band panel expands to sorted
   member series, `member_filter` respected, missing members skipped,
   duplicates avoided, unresolvable `set_key` degrades gracefully.

@@ -897,6 +897,115 @@ grep -rn "Ensemble" protocol/schema
 
 ---
 
+## Addendum A (2026-07-31): bundle-vs-bundle XY
+
+Tasks 1–13 are implemented (commits `9192419`…`bb3c586`). This addendum is
+the only outstanding work. It implements the spec's "Bundle-vs-bundle XY"
+section: putting "temperature" on X while a bundle is on Y must mean each
+source's temperature against that source's Y — and two sources must never
+be cross-paired. No schema change; `x_signal` stays a single full path.
+
+### Task 14: Bundle X drops, strict per-source pairing, local-path X chip
+
+**Files:**
+
+- Modify: `frontend/src/ui/panel.ts` (dragover at :326-339, drop at :344-374, X chip at :410-417, `resolveX` at :595-618)
+- Test: the XY pairing tests Task 12 added (find them: `grep -rn "resolveX\|pairs bundle members" frontend/src --include=*.test.ts`) plus the panel drop tests
+
+**Interfaces:**
+
+- Consumes: `PanelCallbacks.onSetXSignal(id, path)`, `localPathFor`, `sourceKeyFor` — all existing.
+- Produces: no new interfaces. Behavior changes only.
+
+- [ ] **Step 1: Write the failing tests** in the file that holds Task 12's XY pairing test, following its harness (stub `sourceKeyFor` mapping `run_01/*`→`"k1"`, `run_02/*`→`"k2"`; `localPathFor` strips the prefix; derived paths return null from both):
+
+```ts
+it("omits the trace when a source lacks the X local path instead of cross-pairing", () => {
+  // samples: run_01/temp, run_01/alt, run_02/alt (run_02 has NO temp)
+  // state: x_signal = "run_01/temp", series = [run_01/alt, run_02/alt]
+  // expect exactly ONE xy trace (run_01/alt); run_02/alt is omitted, and
+  // no trace contains run_01/temp values paired with run_02/alt values.
+});
+
+it("derived Y pairs against x_signal directly", () => {
+  // samples: run_01/temp, derived/score; x_signal = "run_01/temp",
+  // series = [derived/score] — expect one trace paired against run_01/temp.
+});
+
+it("x chip shows the local path when visible series span multiple sources", () => {
+  // state: x_signal = "run_01/temp", visible series from k1 and k2 —
+  // expect the .x-chip text to be "temp" and its title to contain "run_01/temp".
+  // With series from k1 only, expect the current signalLabel text.
+});
+```
+
+Fill in real assertions using the harness's existing accessors (the Task 12 tests already assert on `xyTraces` pairing; the chip test queries `.x-chip` on the panel element).
+
+- [ ] **Step 2: Run** the targeted unit filter — expect FAIL (today the first case falls back to `run_01/temp` and the chip always shows the full label).
+- [ ] **Step 3: Strict pairing.** In `renderXy` (panel.ts:595-618), make `resolveX` return `undefined` instead of falling back when a _sourced_ Y has no same-source X, and skip those traces:
+
+```ts
+const xLocal = this.callbacks.localPathFor(state.x_signal);
+const resolveX = (yPath: string): typeof xSeries | undefined => {
+  if (xLocal === null) return xSeries; // derived/unknown X: shared X
+  const sourceKey = this.callbacks.sourceKeyFor(yPath);
+  if (sourceKey === null) return xSeries; // derived Y: shared X
+  return samples.series.find(
+    (candidate) =>
+      this.callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
+      this.callbacks.localPathFor(candidate.signal_path) === xLocal,
+  ); // undefined ⇒ never cross-pair two sources
+};
+```
+
+and in the series loop:
+
+```ts
+const resolved = resolveX(series.path);
+if (resolved === undefined) continue;
+// ...
+trace: pairSamples(resolved, ySeries),
+```
+
+- [ ] **Step 4: Bundle drops on the X strip.** In the `dragover` handler (:335-338), drop the bundle exclusion so the strip highlights for bundles too:
+
+```ts
+this.element.classList.toggle("drop-x", this.overStrip(event));
+```
+
+In the `drop` handler, compute `const asX = this.overStrip(event);` **before** the bundle branch, and inside the validated bundle branch route strip drops to the X signal (sorted-first member, matching the spec):
+
+```ts
+const first = [...payload.member_paths].sort()[0];
+if (asX && first !== undefined) {
+  this.callbacks.onSetXSignal(this.id, first);
+} else {
+  this.callbacks.onDropBundle(this.id, payload.member_paths);
+}
+```
+
+- [ ] **Step 5: X chip label.** In the header update (:410-417), show the local path when pairing is per-source across sources:
+
+```ts
+const xLocal = this.callbacks.localPathFor(state.x_signal);
+const sources = new Set(
+  state.series
+    .filter((series) => series.visible)
+    .map((series) => this.callbacks.sourceKeyFor(series.path))
+    .filter((key): key is string => key !== null),
+);
+const chipLabel =
+  xLocal !== null && sources.size > 1 ? xLocal : signalLabel(state.x_signal);
+```
+
+Use `chipLabel` for the chip text node; keep the full `state.x_signal` in the `title`. Text via `textContent`/`createTextNode` only.
+
+- [ ] **Step 6: Run** `./scripts/test.sh frontend` — expect PASS (Task 12's old fallback test asserted cross-pair fallback for a _sourced_ Y; update that expectation to the omit rule — the derived fallback cases stay).
+- [ ] **Step 7: Gate + version.** `./scripts/format.sh`, `./scripts/test.sh full`, then `./scripts/version.sh bump minor && ./scripts/version.sh check` (behavioral change, no schema break).
+- [ ] **Step 8: Commit** — `git commit -m "feat(xy): bundle-vs-bundle pairing with strict per-source resolution"`
+
+---
+
 ## Deferred (explicitly out of scope for this plan)
 
 - Dimming in XY/FFT/histogram vertex rendering if the vertex path doesn't already thread per-series flags (Task 11 notes the restriction; a follow-up can extend it).
