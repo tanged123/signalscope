@@ -1,45 +1,11 @@
 {
-  "protocol_version": 10,
+  "protocol_version": 11,
   "types": {
     "TimeWindow": {
       "kind": "object",
       "fields": {
         "t0": "f64",
         "t1": "f64"
-      }
-    },
-    "EnsembleBin": {
-      "kind": "object",
-      "fields": {
-        "t0": "f64",
-        "t1": "f64",
-        "min_run_mean": "f64?",
-        "max_run_mean": "f64?",
-        "mean_of_run_means": "f64?",
-        "sigma": "f64?",
-        "run_count": "u32"
-      }
-    },
-    "EnsembleTileRequest": {
-      "kind": "object",
-      "fields": {
-        "request_id": "string",
-        "set_id": "u64",
-        "local_path": "string",
-        "window": "TimeWindow",
-        "pixel_width": "u32",
-        "member_filter": "string[]"
-      }
-    },
-    "EnsembleTileResponse": {
-      "kind": "object",
-      "fields": {
-        "request_id": "string",
-        "set_key": "string",
-        "generation": "u64",
-        "level": "u32",
-        "member_keys": "string[]",
-        "bins": "EnsembleBin[]"
       }
     },
     "SetMemberSummary": {
@@ -424,23 +390,11 @@
         "levels": "EnvelopeBin[][]"
       }
     },
-    "BakedEnsemble": {
-      "kind": "object",
-      "fields": {
-        "set_key": "string",
-        "generation": "u64",
-        "local_path": "string",
-        "member_filter": "string[]?",
-        "member_keys": "string[]",
-        "levels": "EnsembleBin[][]"
-      }
-    },
     "SnapshotManifest": {
       "kind": "object",
       "fields": {
         "session_json": "string",
-        "signals": "BakedSignal[]",
-        "ensembles": "BakedEnsemble[]"
+        "signals": "BakedSignal[]"
       }
     }
   }

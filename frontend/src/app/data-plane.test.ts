@@ -43,7 +43,6 @@ describe("BakedPlane.querySamples", () => {
             ],
           },
         ],
-        ensembles: [],
       }),
     );
 
@@ -130,7 +129,6 @@ describe("BakedPlane.listSets", () => {
           { summary: summary("2", "k2", "alt"), levels: [[bin(0, 2)]] },
           { summary: summary("3", "k1", "solo"), levels: [[bin(0, 3)]] },
         ],
-        ensembles: [],
       }),
     );
 
@@ -288,9 +286,7 @@ describe("derived port", () => {
   });
 
   it("has no derived port in a snapshot", () => {
-    const plane = new BakedPlane(
-      seal({ session_json: "", signals: [], ensembles: [] }),
-    );
+    const plane = new BakedPlane(seal({ session_json: "", signals: [] }));
     expect(plane.derived).toBeNull();
   });
 });
@@ -399,7 +395,6 @@ describe("export port", () => {
       seal({
         session_json: '{"app":"signalscope"}',
         signals: [],
-        ensembles: [],
       }),
     );
     expect(plane.bakedSessionJson).toBe('{"app":"signalscope"}');
