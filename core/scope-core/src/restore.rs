@@ -219,7 +219,6 @@ mod tests {
                 width: 1.0,
                 visible: true,
             }],
-            ensemble: None,
             y_range: None,
             x_range: None,
             x_label: None,

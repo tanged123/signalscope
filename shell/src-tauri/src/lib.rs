@@ -12,7 +12,7 @@ use base64::Engine;
 use scope_core::{
     cache::{self, CacheRoot},
     columns::Column,
-    compute, ensemble, expr,
+    compute, expr,
     ingest::{
         self, DecodedSource, IngestError, IngestSummary, SUPPORTED_FORMATS,
         admission::{BudgetConfig, MemoryBudget, ResidentCharge},
@@ -31,15 +31,15 @@ use scope_core::{
 };
 use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
-    BatchState, BatchStatus, CreateSetRequest, DerivedRequest, EnsembleBin, EnsembleTileRequest,
-    EnsembleTileResponse, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
-    ExportFidelity, ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState,
-    FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest,
-    RemoveSignalRequest, RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest,
-    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
-    SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode, SetMemberSummary,
-    SetOriginKind, SetSummary, SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit,
-    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse, UpdateSetMembersRequest,
+    BatchState, BatchStatus, CreateSetRequest, DerivedRequest, Envelope, ExportEstimate,
+    ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange,
+    ExportSelection, ExportWriteRequest, FileState, FormatDescriptor, IngestBatchRequest,
+    LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
+    RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
+    SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
+    SaveSessionRequest, SessionDialogMode, SetMemberSummary, SetOriginKind, SetSummary,
+    SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit, SignalSummary, SignalTile,
+    SourceSummary, TileRequest, TileResponse, UpdateSetMembersRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -49,7 +49,6 @@ struct DataState {
     pyramids: BTreeMap<SignalId, Pyramid>,
     registry: SourceRegistry,
     sets: BTreeMap<SetId, SourceSet>,
-    materialized_sets: BTreeMap<SetId, ensemble::MaterializedSet>,
     next_set_id: u64,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
@@ -66,7 +65,6 @@ impl Default for DataState {
             pyramids: BTreeMap::new(),
             registry: SourceRegistry::default(),
             sets: BTreeMap::new(),
-            materialized_sets: BTreeMap::new(),
             next_set_id: 0,
             derived_source: None,
             derived_references: BTreeMap::new(),
@@ -430,7 +428,6 @@ fn restore_reconcile(
 
 fn restore_sets(session: &session::Session, data: &mut DataState) -> Result<(), String> {
     data.sets.clear();
-    data.materialized_sets.clear();
     data.next_set_id = 0;
     for saved in &session.source_sets {
         let keys = saved
@@ -750,7 +747,6 @@ fn create_set(
     let set = build_set(&data.store, &keys, id, request.label)?;
     let summary = set_summary(&set);
     data.sets.insert(id, set);
-    data.materialized_sets.remove(&id);
     Ok(Envelope::new(summary))
 }
 
@@ -780,7 +776,6 @@ fn update_set_members(
     }
     let summary = set_summary(&set);
     data.sets.insert(id, set);
-    data.materialized_sets.remove(&id);
     Ok(Envelope::new(summary))
 }
 
@@ -810,99 +805,7 @@ fn set_time_alignment(
         );
         set_summary(set)
     };
-    data.materialized_sets.remove(&id);
     Ok(Envelope::new(summary))
-}
-
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn query_ensemble_tiles(
-    request: Envelope<EnsembleTileRequest>,
-    state: State<'_, Arc<Mutex<DataState>>>,
-) -> Result<Envelope<EnsembleTileResponse>, String> {
-    let request = request.open().map_err(|error| error.to_string())?;
-    let filter = parse_source_keys(request.member_filter)?;
-    let id = SetId(request.set_id);
-    if filter.is_empty() {
-        let build = {
-            let data = state.lock().map_err(|error| error.to_string())?;
-            let set = data
-                .sets
-                .get(&id)
-                .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
-            data.materialized_sets
-                .get(&id)
-                .is_none_or(|materialized| materialized.generation() != set.generation)
-                .then(|| {
-                    (
-                        set.clone(),
-                        data.store.clone(),
-                        data.pyramids.clone(),
-                        data.cache_root.clone(),
-                    )
-                })
-        };
-        if let Some((set, store, pyramids, cache_root)) = build {
-            let materialized =
-                ensemble::materialize(&set, &store, &pyramids, &CacheRoot::app_owned(&cache_root))
-                    .map_err(|error| error.to_string())?;
-            let mut data = state.lock().map_err(|error| error.to_string())?;
-            if data
-                .sets
-                .get(&id)
-                .is_some_and(|current| current.generation == materialized.generation())
-            {
-                data.materialized_sets.insert(id, materialized);
-            }
-        }
-    }
-    let data = state.lock().map_err(|error| error.to_string())?;
-    let set = data
-        .sets
-        .get(&id)
-        .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
-    let tile = ensemble::query_with_materialization(
-        set,
-        &request.local_path,
-        &data.store,
-        &data.pyramids,
-        (request.window.t0, request.window.t1),
-        request.pixel_width,
-        (!filter.is_empty()).then_some(&filter),
-        ensemble::Limits::default(),
-        filter
-            .is_empty()
-            .then(|| data.materialized_sets.get(&id))
-            .flatten(),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(Envelope::new(EnsembleTileResponse {
-        request_id: request.request_id,
-        set_key: tile.set_key.0.to_string(),
-        generation: tile.generation,
-        level: tile.level,
-        member_keys: tile
-            .member_keys
-            .into_iter()
-            .map(|key| key.0.to_string())
-            .collect(),
-        bins: tile
-            .cells
-            .into_iter()
-            .map(|cell| EnsembleBin {
-                t0: cell.t0,
-                t1: cell.t1,
-                min_run_mean: cell.min_run_mean.is_finite().then_some(cell.min_run_mean),
-                max_run_mean: cell.max_run_mean.is_finite().then_some(cell.max_run_mean),
-                mean_of_run_means: cell
-                    .mean_of_run_means
-                    .is_finite()
-                    .then_some(cell.mean_of_run_means),
-                sigma: cell.sigma.is_finite().then_some(cell.sigma),
-                run_count: cell.run_count,
-            })
-            .collect(),
-    }))
 }
 
 #[tauri::command]
@@ -1359,7 +1262,6 @@ fn estimate_for(
                 session,
                 &data.store,
                 &data.pyramids,
-                &data.sets,
                 selection,
                 range,
                 fidelity,
@@ -1434,7 +1336,6 @@ async fn export_write(
             &session,
             &data.store,
             &data.pyramids,
-            &data.sets,
             &request.selection,
             request.range,
             request.fidelity,
@@ -1629,7 +1530,6 @@ pub fn run() {
             create_set,
             update_set_members,
             set_time_alignment,
-            query_ensemble_tiles,
             query_tiles,
             query_samples,
             create_derived,

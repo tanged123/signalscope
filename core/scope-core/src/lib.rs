@@ -8,7 +8,6 @@ pub mod bins;
 pub mod cache;
 pub mod columns;
 pub mod compute;
-pub mod ensemble;
 pub mod expr;
 pub mod ingest;
 pub mod naming;
