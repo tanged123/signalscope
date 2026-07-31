@@ -54,6 +54,17 @@ describe("derived definitions", () => {
     ]);
   });
 
+  it("round-trips derived bundle definitions", () => {
+    const model = new WorkspaceModel();
+    model.addDerivedBundle("score", "'temp' + 'alt'");
+    expect(model.derivedBundles()).toEqual([
+      { name: "score", expr: "'temp' + 'alt'" },
+    ]);
+
+    model.removeDerivedBundle("score");
+    expect(model.derivedBundles()).toEqual([]);
+  });
+
   it("replaces a redefined path in place", () => {
     const model = new WorkspaceModel();
     model.addDerived("derived/speed", "'a/x'");

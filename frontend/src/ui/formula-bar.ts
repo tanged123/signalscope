@@ -8,14 +8,20 @@ import {
   completionContext,
   formulaCompletions,
   type CompletionContext,
+  type FormulaBundleCompletion,
   type FormulaCompletion,
 } from "../app/formula-completion";
 import { required } from "./dom";
-import { SIGNAL_DRAG_TYPE } from "./panel";
+import {
+  BUNDLE_DRAG_TYPE,
+  parseBundleLocalPath,
+  parseBundlePayload,
+  SIGNAL_DRAG_TYPE,
+} from "./panel";
 
 const HELP_SEEN_KEY = "signalscope.formulaHelpSeen";
 const ERROR_GUIDANCE =
-  "Signal references use quoted full paths. Drag from the tree to insert.";
+  "Signal and bundle references use quoted paths. Drag from the tree to insert.";
 
 function helpWasSeen(): boolean {
   try {
@@ -47,6 +53,7 @@ export class FormulaBar {
   private readonly helpExample: HTMLElement;
   private readonly completionList: HTMLElement;
   private signals: readonly string[] = [];
+  private bundles: readonly FormulaBundleCompletion[] = [];
   private history: string[] = [];
   private historyIndex = 0;
   private derivedCounter = 0;
@@ -82,7 +89,12 @@ export class FormulaBar {
       if (event.key === "Escape") this.onKeyDown(event);
     });
     element.addEventListener("dragover", (event) => {
-      if (event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) !== true) return;
+      if (
+        event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) !== true &&
+        event.dataTransfer?.types.includes(BUNDLE_DRAG_TYPE) !== true
+      ) {
+        return;
+      }
       event.preventDefault();
       element.classList.add("drop-target");
     });
@@ -93,12 +105,25 @@ export class FormulaBar {
     });
     element.addEventListener("drop", (event) => {
       const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
+      const bundleData = event.dataTransfer?.getData(BUNDLE_DRAG_TYPE) ?? "";
+      const localPath =
+        parseBundlePayload(bundleData) === null
+          ? null
+          : parseBundleLocalPath(bundleData);
       element.classList.remove("drop-target");
-      if (path === undefined || path === "") return;
+      const reference = path || localPath;
+      if (reference === null || reference === "") {
+        return;
+      }
       event.preventDefault();
       const start = this.input.selectionStart ?? this.input.value.length;
       const end = this.input.selectionEnd ?? start;
-      const edit = insertSignalReference(this.input.value, path, start, end);
+      const edit = insertSignalReference(
+        this.input.value,
+        reference,
+        start,
+        end,
+      );
       this.input.value = edit.text;
       this.input.focus();
       this.input.setSelectionRange(edit.caret, edit.caret);
@@ -120,6 +145,10 @@ export class FormulaBar {
   setSignals(paths: readonly string[]): void {
     this.signals = [...paths];
     this.renderHelpExample();
+  }
+
+  setBundles(bundles: readonly FormulaBundleCompletion[]): void {
+    this.bundles = bundles.map((bundle) => ({ ...bundle }));
   }
 
   private onKeyDown(event: KeyboardEvent): void {
@@ -216,7 +245,9 @@ export class FormulaBar {
     const caret = this.input.selectionStart ?? this.input.value.length;
     const context = completionContext(this.input.value, caret, manual);
     const completions =
-      context === null ? [] : formulaCompletions(context, this.signals);
+      context === null
+        ? []
+        : formulaCompletions(context, this.signals, this.bundles);
     if (context === null || completions.length === 0) {
       this.clearCompletions();
       return;
@@ -306,7 +337,7 @@ export function formulaBarMarkup(): string {
     <div class="formula-help-popover" id="formula-help" role="dialog" aria-label="Derived formula help" hidden>
       <strong>Derived formulas</strong>
       <code>derived/name = expression</code>
-      <span>Signals use quoted full paths. Drag from the tree to insert.</span>
+      <span>Signals and bundles use quoted paths. Drag from the tree to insert.</span>
       <code class="formula-help-example"></code>
       <code>gradient(x) · cumtrapz(x) · movmean(x, 51)</code>
       <code>abs(x) · hypot(x, y) · rad2deg(x) · deg2rad(x)</code>

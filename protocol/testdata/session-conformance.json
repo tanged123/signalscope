@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 15,
+  "schema_version": 16,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -30,6 +30,7 @@
       "expr": "hypot('imu/vx', 'imu/vy')"
     }
   ],
+  "derived_bundles": [],
   "sources": [
     {
       "key": "37a8f7d6-862d-5107-a0d7-6ad27b3bb161",

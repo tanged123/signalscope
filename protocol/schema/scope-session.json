@@ -1,5 +1,5 @@
 {
-  "schema_version": 15,
+  "schema_version": 16,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -120,6 +120,13 @@
         "expr": "string"
       }
     },
+    "DerivedBundleState": {
+      "kind": "object",
+      "fields": {
+        "name": "string",
+        "expr": "string"
+      }
+    },
     "SourceRecord": {
       "kind": "object",
       "fields": {
@@ -183,6 +190,7 @@
         "favorites": "string[]",
         "favorite_bundles": "string[]",
         "derived": "DerivedSignal[]",
+        "derived_bundles": "DerivedBundleState[]",
         "sources": "SourceRecord[]",
         "source_sets": "SourceSetState[]"
       }

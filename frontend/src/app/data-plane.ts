@@ -4,6 +4,8 @@ import {
   type BatchJob,
   type BatchStatus,
   type CreateSetRequest,
+  type CreateDerivedBundleRequest,
+  type DerivedBundleResponse,
   type DerivedRequest,
   type EnvelopeBin,
   type ExportEstimate,
@@ -19,6 +21,7 @@ import {
   type LoadSessionRequest,
   type PickSessionRequest,
   type RemoveSignalRequest,
+  type RemoveDerivedBundleRequest,
   type RestoreReconcileRequest,
   type RestoreReconcileResponse,
   type RestoreSourcesRequest,
@@ -63,6 +66,8 @@ export interface IngestPort {
 export interface DerivedPort {
   create(path: string, expr: string): Promise<SignalSummary>;
   remove(path: string): Promise<void>;
+  createBundle(name: string, expr: string): Promise<DerivedBundleResponse>;
+  removeBundle(name: string): Promise<void>;
 }
 
 export interface SetPort {
@@ -228,6 +233,22 @@ export class TauriPlane implements DataPlane {
         open(
           await this.invoke<Envelope<null>>("remove_signal", {
             request: seal<RemoveSignalRequest>({ path }),
+          }),
+        );
+      },
+      createBundle: async (name: string, expr: string) =>
+        open(
+          await this.invoke<Envelope<DerivedBundleResponse>>(
+            "create_derived_bundle",
+            {
+              request: seal<CreateDerivedBundleRequest>({ name, expr }),
+            },
+          ),
+        ),
+      removeBundle: async (name: string) => {
+        open(
+          await this.invoke<Envelope<null>>("remove_derived_bundle", {
+            request: seal<RemoveDerivedBundleRequest>({ name }),
           }),
         );
       },
@@ -672,7 +693,7 @@ function createDemoManifest(): BakedManifest {
   return seal({
     session_json: JSON.stringify({
       app: "signalscope",
-      schema_version: 15,
+      schema_version: 16,
       theme: "dark",
       linked_time: {
         t0: 0,
@@ -697,6 +718,7 @@ function createDemoManifest(): BakedManifest {
       favorites: [],
       favorite_bundles: [],
       derived: [],
+      derived_bundles: [],
       sources: [],
       source_sets: [],
     }),

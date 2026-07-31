@@ -34,6 +34,7 @@ impl Default for Session {
             favorites: Vec::new(),
             favorite_bundles: Vec::new(),
             derived: Vec::new(),
+            derived_bundles: Vec::new(),
             sources: Vec::new(),
             source_sets: Vec::new(),
         }
@@ -217,6 +218,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["favorite_bundles"] = serde_json::json!([]);
             value["schema_version"] = serde_json::json!(15);
             migrate(15, value)
+        }
+        15 => {
+            value["derived_bundles"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(16);
+            migrate(16, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
@@ -746,6 +752,18 @@ mod tests {
             .remove("favorite_bundles");
         let session = from_json(&value.to_string()).expect("v14 migrates");
         assert!(session.favorite_bundles.is_empty());
+    }
+
+    #[test]
+    fn v15_sessions_gain_empty_derived_bundles() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(15);
+        value
+            .as_object_mut()
+            .expect("session object")
+            .remove("derived_bundles");
+        let session = from_json(&value.to_string()).expect("v15 migrates");
+        assert!(session.derived_bundles.is_empty());
     }
 
     #[test]

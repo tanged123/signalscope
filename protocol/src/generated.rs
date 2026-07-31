@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -373,6 +373,30 @@ pub struct DerivedRequest {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct RemoveSignalRequest {
     pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CreateDerivedBundleRequest {
+    pub name: String,
+    pub expr: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RemoveDerivedBundleRequest {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SkippedMemberSummary {
+    pub prefix: String,
+    pub missing: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DerivedBundleResponse {
+    pub local_path: String,
+    pub created: Vec<SignalSummary>,
+    pub skipped: Vec<SkippedMemberSummary>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]

@@ -378,7 +378,7 @@ test("formula component creates and recalls accepted formulas", async ({
   await input.press("Enter");
   await expect(host.locator(".formula-error")).toContainText("unknown signal");
   await expect(host.locator(".formula-error-guidance")).toHaveText(
-    "Signal references use quoted full paths. Drag from the tree to insert.",
+    "Signal and bundle references use quoted paths. Drag from the tree to insert.",
   );
   await expect(input).toHaveValue("derived/bad = 'missing/path'");
 

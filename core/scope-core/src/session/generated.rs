@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 15;
+pub const SESSION_SCHEMA_VERSION: u32 = 16;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -180,6 +180,12 @@ pub struct DerivedSignal {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DerivedBundleState {
+    pub name: String,
+    pub expr: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SourceRecord {
     pub key: String,
     pub path: String,
@@ -245,6 +251,7 @@ pub struct Session {
     pub favorites: Vec<String>,
     pub favorite_bundles: Vec<String>,
     pub derived: Vec<DerivedSignal>,
+    pub derived_bundles: Vec<DerivedBundleState>,
     pub sources: Vec<SourceRecord>,
     pub source_sets: Vec<SourceSetState>,
 }

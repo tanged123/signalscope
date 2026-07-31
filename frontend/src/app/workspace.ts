@@ -1,6 +1,7 @@
 import type {
   Annotation,
   DashStyle,
+  DerivedBundleState,
   DerivedSignal,
   LayoutRow,
   LinkedTime,
@@ -42,6 +43,7 @@ export function emptySession(): Session {
     favorites: [],
     favorite_bundles: [],
     derived: [],
+    derived_bundles: [],
     sources: [],
     source_sets: [],
   };
@@ -211,6 +213,10 @@ export class WorkspaceModel {
     return this.session.derived;
   }
 
+  derivedBundles(): readonly DerivedBundleState[] {
+    return this.session.derived_bundles;
+  }
+
   /** Records a definition, replacing any existing one for the same path. */
   addDerived(path: string, expr: string): void {
     const existing = this.session.derived.findIndex(
@@ -221,6 +227,23 @@ export class WorkspaceModel {
     } else {
       this.session.derived[existing] = { path, expr };
     }
+  }
+
+  addDerivedBundle(name: string, expr: string): void {
+    const normalized = name.startsWith("derived/") ? name.slice(8) : name;
+    const existing = this.session.derived_bundles.findIndex(
+      (entry) => entry.name === normalized,
+    );
+    const definition = { name: normalized, expr };
+    if (existing === -1) this.session.derived_bundles.push(definition);
+    else this.session.derived_bundles[existing] = definition;
+  }
+
+  removeDerivedBundle(name: string): void {
+    const normalized = name.startsWith("derived/") ? name.slice(8) : name;
+    this.session.derived_bundles = this.session.derived_bundles.filter(
+      (entry) => entry.name !== normalized,
+    );
   }
 
   removeSignal(path: string): void {

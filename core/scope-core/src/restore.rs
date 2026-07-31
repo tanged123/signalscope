@@ -153,6 +153,9 @@ pub fn reconcile(
     for derived in &mut next.derived {
         derived.expr = expr::rename_references(&derived.expr, aliases)?;
     }
+    for derived in &mut next.derived_bundles {
+        derived.expr = expr::rename_references(&derived.expr, aliases)?;
+    }
     for record in &mut next.sources {
         let Ok(uuid) = uuid::Uuid::parse_str(&record.key) else {
             continue;
@@ -274,6 +277,23 @@ mod tests {
         let aliases = BTreeMap::from([("imu/ax".into(), "run/imu/ax".into())]);
         assert!(reconcile(&mut session, &aliases, &BTreeSet::new()).is_err());
         assert_eq!(session, before);
+    }
+
+    #[test]
+    fn rewrites_full_paths_inside_derived_bundle_definitions() {
+        let mut session = Session {
+            derived_bundles: vec![crate::session::DerivedBundleState {
+                name: "score".into(),
+                expr: "'vehicle/imu/ax' + 'temp'".into(),
+            }],
+            ..Session::default()
+        };
+        let aliases = BTreeMap::from([("vehicle/imu/ax".into(), "run/vehicle/imu/ax".into())]);
+        reconcile(&mut session, &aliases, &BTreeSet::new()).unwrap();
+        assert_eq!(
+            session.derived_bundles[0].expr,
+            "'run/vehicle/imu/ax' + 'temp'"
+        );
     }
 
     #[test]

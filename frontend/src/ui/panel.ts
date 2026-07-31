@@ -206,6 +206,24 @@ export function parseBundlePayload(
   return null;
 }
 
+export function parseBundleLocalPath(data: string): string | null {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "local_path" in payload &&
+      typeof payload.local_path === "string" &&
+      payload.local_path !== ""
+    ) {
+      return payload.local_path;
+    }
+  } catch {
+    // Malformed external drag payloads are not bundles.
+  }
+  return null;
+}
+
 export class PanelView {
   readonly element: HTMLElement;
   private readonly renderer: CanvasRenderer;

@@ -31,15 +31,16 @@ use scope_core::{
 };
 use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
-    BatchState, BatchStatus, CreateSetRequest, DerivedRequest, Envelope, ExportEstimate,
-    ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange,
-    ExportSelection, ExportWriteRequest, FileState, FormatCount, FormatDescriptor,
-    IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
-    RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
-    SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
-    SaveSessionRequest, ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode,
-    SetMemberSummary, SetOriginKind, SetSummary, SetTimeAlignmentRequest, SetTimeDomainSummary,
-    SetTimeUnit, SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    BatchState, BatchStatus, CreateDerivedBundleRequest, CreateSetRequest, DerivedBundleResponse,
+    DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
+    ExportFidelity, ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState,
+    FormatCount, FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession,
+    PickSessionRequest, RemoveDerivedBundleRequest, RemoveSignalRequest, RestoreReconcileRequest,
+    RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries,
+    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest,
+    ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SetMemberSummary, SetOriginKind,
+    SetSummary, SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit, SignalSummary,
+    SignalTile, SkippedMemberSummary, SourceSummary, TileRequest, TileResponse,
     UpdateSetMembersRequest,
 };
 use tauri::{AppHandle, Manager, State};
@@ -53,6 +54,7 @@ struct DataState {
     next_set_id: u64,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
+    derived_bundles: BTreeMap<String, String>,
     derived_spills: BTreeMap<String, PageHandle>,
     derived_charges: BTreeMap<String, ResidentCharge>,
     cache_root: PathBuf,
@@ -69,6 +71,7 @@ impl Default for DataState {
             next_set_id: 0,
             derived_source: None,
             derived_references: BTreeMap::new(),
+            derived_bundles: BTreeMap::new(),
             derived_spills: BTreeMap::new(),
             derived_charges: BTreeMap::new(),
             cache_root: std::env::temp_dir().join("signalscope/cache"),
@@ -656,7 +659,9 @@ fn list_sources(
 fn list_signals(
     state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<Vec<SignalSummary>>, String> {
-    let data = state.lock().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.ensure_sets();
+    data.reexpand_derived_bundles();
     Ok(Envelope::new(
         data.store
             .signals()
@@ -767,25 +772,8 @@ fn build_set(
 #[allow(clippy::needless_pass_by_value)]
 fn list_sets(state: State<'_, Arc<Mutex<DataState>>>) -> Result<Envelope<Vec<SetSummary>>, String> {
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    if data.sets.is_empty() {
-        let candidates = data
-            .store
-            .sources()
-            .map(|source| {
-                (
-                    source.key,
-                    data.store
-                        .signals_of(source.id)
-                        .map(|signal| signal.local_path.clone())
-                        .collect(),
-                )
-            })
-            .collect::<Vec<_>>();
-        for set in propose_sets(&candidates) {
-            data.next_set_id = data.next_set_id.max(set.id.0);
-            data.sets.insert(set.id, set);
-        }
-    }
+    data.ensure_sets();
+    data.reexpand_derived_bundles();
     Ok(Envelope::new(data.sets.values().map(set_summary).collect()))
 }
 
@@ -1002,6 +990,122 @@ impl DataState {
         }
     }
 
+    fn bundle_inputs(
+        &self,
+    ) -> (
+        BTreeSet<String>,
+        BTreeMap<SourceKey, (String, BTreeSet<String>)>,
+    ) {
+        let full_paths = self
+            .store
+            .signals()
+            .map(|signal| signal.path.clone())
+            .collect();
+        let mut locals = BTreeMap::new();
+        for set in self.sets.values() {
+            for member in set.members.values() {
+                let Some(source) = self
+                    .store
+                    .sources()
+                    .find(|source| source.key == member.source_key)
+                else {
+                    continue;
+                };
+                locals.entry(source.key).or_insert_with(|| {
+                    (
+                        source.prefix.clone(),
+                        self.store
+                            .signals_of(source.id)
+                            .map(|signal| signal.local_path.clone())
+                            .collect(),
+                    )
+                });
+            }
+        }
+        (full_paths, locals)
+    }
+
+    fn ensure_sets(&mut self) {
+        if !self.sets.is_empty() {
+            return;
+        }
+        let candidates = self
+            .store
+            .sources()
+            .map(|source| {
+                (
+                    source.key,
+                    self.store
+                        .signals_of(source.id)
+                        .map(|signal| signal.local_path.clone())
+                        .collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for set in propose_sets(&candidates) {
+            self.next_set_id = self.next_set_id.max(set.id.0);
+            self.sets.insert(set.id, set);
+        }
+    }
+
+    fn materialize_derived(
+        &mut self,
+        path: String,
+        source_id: SourceId,
+        evaluated: expr::Evaluated,
+        references: Vec<String>,
+    ) -> Result<SignalSummary, String> {
+        let bytes = evaluated.values.len().saturating_mul(size_of::<f64>());
+        let charge = self
+            .budget
+            .acquire_working(bytes)
+            .and_then(scope_core::ingest::admission::Ticket::transfer_to_resident)
+            .ok();
+        let (values, spill) = if charge.is_some() {
+            (Column::from(evaluated.values), None)
+        } else {
+            let timebase_id = references
+                .first()
+                .and_then(|reference| self.store.signal_by_path(reference))
+                .map(Signal::timebase_id)
+                .ok_or_else(|| "derived expression has no timebase".to_owned())?;
+            let handle = cache::spill_columns(
+                &CacheRoot::app_owned(&self.cache_root),
+                timebase_id,
+                &evaluated.time,
+                &evaluated.values,
+            )
+            .map_err(|error| error.to_string())?;
+            (Column::paged(handle.clone()), Some(handle))
+        };
+        let signal_id = self
+            .store
+            .insert_signal(source_id, path, None, evaluated.time, values)
+            .map_err(|error| error.to_string())?;
+        let signal = self
+            .store
+            .signal(signal_id)
+            .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
+        let source_key = self
+            .store
+            .sources()
+            .find(|source| source.id == source_id)
+            .expect("derived source")
+            .key;
+        let summary = signal_summary(signal, source_key);
+        self.pyramids
+            .insert(signal_id, Pyramid::from_signal(signal));
+        self.derived_references
+            .insert(summary.path.clone(), references);
+        if let Some(handle) = spill {
+            self.derived_spills.insert(summary.path.clone(), handle);
+        }
+        if let Some(charge) = charge {
+            self.derived_charges.insert(summary.path.clone(), charge);
+        }
+        Ok(summary)
+    }
+
     fn create_derived_signal(&mut self, request: DerivedRequest) -> Result<SignalSummary, String> {
         let path = if request.path.starts_with(DERIVED_PREFIX) {
             request.path
@@ -1036,60 +1140,157 @@ impl DataState {
         }
         self.remove_spill(&path);
         self.derived_charges.remove(&path);
-        let bytes = evaluated.values.len().saturating_mul(size_of::<f64>());
-        let charge = self
-            .budget
-            .acquire_working(bytes)
-            .and_then(scope_core::ingest::admission::Ticket::transfer_to_resident)
-            .ok();
-        let (values, spill) = if charge.is_some() {
-            (Column::from(evaluated.values), None)
-        } else {
-            let timebase_id = references
-                .first()
-                .and_then(|reference| self.store.signal_by_path(reference))
-                .map(Signal::timebase_id)
-                .ok_or_else(|| "derived expression has no timebase".to_owned())?;
-            let handle = cache::spill_columns(
-                &CacheRoot::app_owned(&self.cache_root),
-                timebase_id,
-                &evaluated.time,
-                &evaluated.values,
-            )
-            .map_err(|error| error.to_string())?;
-            (Column::paged(handle.clone()), Some(handle))
-        };
-        let signal_id = self
-            .store
-            .insert_signal(
-                source_id,
-                path.trim_start_matches(DERIVED_PREFIX),
-                None,
-                evaluated.time,
-                values,
-            )
-            .map_err(|error| error.to_string())?;
-        let signal = self
-            .store
-            .signal(signal_id)
-            .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
-        let pyramid = Pyramid::from_signal(signal);
-        let source_key = self
-            .store
-            .sources()
-            .find(|source| source.id == source_id)
-            .expect("derived source")
-            .key;
-        let summary = signal_summary(signal, source_key);
-        self.pyramids.insert(signal_id, pyramid);
-        self.derived_references.insert(path, references);
-        if let Some(handle) = spill {
-            self.derived_spills.insert(summary.path.clone(), handle);
+        self.materialize_derived(
+            path.trim_start_matches(DERIVED_PREFIX).to_owned(),
+            source_id,
+            evaluated,
+            references,
+        )
+    }
+
+    fn create_derived_bundle(
+        &mut self,
+        request: CreateDerivedBundleRequest,
+    ) -> Result<DerivedBundleResponse, String> {
+        let name = request
+            .name
+            .strip_prefix(DERIVED_PREFIX)
+            .unwrap_or(&request.name)
+            .to_owned();
+        if name.is_empty() {
+            return Err("derived bundle name is empty".into());
         }
-        if let Some(charge) = charge {
-            self.derived_charges.insert(summary.path.clone(), charge);
+        if self.derived_bundles.contains_key(&name) {
+            return Err(format!("derived bundle already exists: {name}"));
         }
-        Ok(summary)
+        let (full_paths, locals) = self.bundle_inputs();
+        let expansion = scope_core::derived_bundle::expand(&request.expr, &full_paths, &locals)
+            .map_err(|error| error.to_string())?;
+        let mut skipped: Vec<SkippedMemberSummary> = expansion
+            .skipped
+            .into_iter()
+            .map(|member| SkippedMemberSummary {
+                prefix: member.prefix,
+                missing: member.missing,
+            })
+            .collect();
+        let local_path = format!("{DERIVED_PREFIX}{name}");
+        let mut created = Vec::new();
+        for member in expansion.members {
+            let Some(source_id) = self
+                .store
+                .sources()
+                .find(|source| source.key == member.source_key)
+                .map(|source| source.id)
+            else {
+                continue;
+            };
+            let parsed = match expr::parse(&member.expr) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    skipped.push(SkippedMemberSummary {
+                        prefix: member.prefix,
+                        missing: vec![error.to_string()],
+                    });
+                    continue;
+                }
+            };
+            let references = expr::references(&parsed);
+            let evaluated = match expr::evaluate(&parsed, &self.store) {
+                Ok(evaluated) => evaluated,
+                Err(error) => {
+                    skipped.push(SkippedMemberSummary {
+                        prefix: member.prefix,
+                        missing: vec![error.to_string()],
+                    });
+                    continue;
+                }
+            };
+            match self.materialize_derived(local_path.clone(), source_id, evaluated, references) {
+                Ok(summary) => created.push(summary),
+                Err(error) => skipped.push(SkippedMemberSummary {
+                    prefix: member.prefix,
+                    missing: vec![error],
+                }),
+            }
+        }
+        skipped.sort_by(|left, right| left.prefix.cmp(&right.prefix));
+        self.derived_bundles.insert(name, request.expr);
+        Ok(DerivedBundleResponse {
+            local_path,
+            created,
+            skipped,
+        })
+    }
+
+    fn reexpand_derived_bundles(&mut self) {
+        let definitions: Vec<(String, String)> = self
+            .derived_bundles
+            .iter()
+            .map(|(name, expr)| (name.clone(), expr.clone()))
+            .collect();
+        for (name, expression) in definitions {
+            let (full_paths, locals) = self.bundle_inputs();
+            let Ok(expansion) =
+                scope_core::derived_bundle::expand(&expression, &full_paths, &locals)
+            else {
+                continue;
+            };
+            for member in expansion.members {
+                let Some(source_id) = self
+                    .store
+                    .sources()
+                    .find(|source| source.key == member.source_key)
+                    .map(|source| source.id)
+                else {
+                    continue;
+                };
+                let display_path = format!("{}/{}{}", member.prefix, DERIVED_PREFIX, name);
+                if self.store.signal_by_path(&display_path).is_some() {
+                    continue;
+                }
+                let Ok(parsed) = expr::parse(&member.expr) else {
+                    continue;
+                };
+                let references = expr::references(&parsed);
+                let Ok(evaluated) = expr::evaluate(&parsed, &self.store) else {
+                    continue;
+                };
+                let _ = self.materialize_derived(
+                    format!("{DERIVED_PREFIX}{name}"),
+                    source_id,
+                    evaluated,
+                    references,
+                );
+            }
+        }
+    }
+
+    fn remove_derived_bundle(&mut self, request: RemoveDerivedBundleRequest) -> Result<(), String> {
+        let name = request
+            .name
+            .strip_prefix(DERIVED_PREFIX)
+            .unwrap_or(&request.name);
+        let local_path = format!("{DERIVED_PREFIX}{name}");
+        let paths: Vec<String> = self
+            .store
+            .signals()
+            .filter(|signal| signal.local_path == local_path)
+            .map(|signal| signal.path.clone())
+            .collect();
+        for path in &paths {
+            self.ensure_without_dependents(path, "remove")?;
+        }
+        for path in paths {
+            if let Some(id) = self.store.remove_signal(&path) {
+                self.pyramids.remove(&id);
+            }
+            self.remove_spill(&path);
+            self.derived_charges.remove(&path);
+            self.derived_references.remove(&path);
+        }
+        self.derived_bundles.remove(name);
+        Ok(())
     }
 
     fn remove_derived_signal(&mut self, path: &str) -> Result<(), String> {
@@ -1122,6 +1323,29 @@ fn create_derived(
     let request = request.open().map_err(|error| error.to_string())?;
     let mut data = state.lock().map_err(|error| error.to_string())?;
     data.create_derived_signal(request).map(Envelope::new)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn create_derived_bundle(
+    request: Envelope<CreateDerivedBundleRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<DerivedBundleResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.create_derived_bundle(request).map(Envelope::new)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn remove_derived_bundle(
+    request: Envelope<RemoveDerivedBundleRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.remove_derived_bundle(request)?;
+    Ok(Envelope::new(()))
 }
 
 #[tauri::command]
@@ -1594,6 +1818,8 @@ pub fn run() {
             query_tiles,
             query_samples,
             create_derived,
+            create_derived_bundle,
+            remove_derived_bundle,
             remove_signal,
             save_session,
             load_session,
@@ -1643,6 +1869,47 @@ mod tests {
             )
             .expect("insert source signal");
         (data, source)
+    }
+
+    fn data_with_bundle_sources() -> DataState {
+        let mut data = DataState::default();
+        let source_specs = [
+            (1_u8, "run_01", true),
+            (2_u8, "run_02", true),
+            (3_u8, "run_03", false),
+        ];
+        let mut keys = BTreeSet::new();
+        for (byte, prefix, has_alt) in source_specs {
+            let key = SourceKey(uuid::Uuid::from_bytes([byte; 16]));
+            keys.insert(key);
+            let source = data
+                .store
+                .register_source(format!("{prefix}.csv"), key, prefix)
+                .unwrap();
+            data.store
+                .insert_signal(
+                    source,
+                    "temp",
+                    None,
+                    Arc::from(vec![0.0, 1.0]),
+                    vec![1.0, 2.0],
+                )
+                .unwrap();
+            if has_alt {
+                data.store
+                    .insert_signal(
+                        source,
+                        "alt",
+                        None,
+                        Arc::from(vec![0.0, 1.0]),
+                        vec![3.0, 4.0],
+                    )
+                    .unwrap();
+            }
+        }
+        let set = build_set(&data.store, &keys, SetId(1), "Runs".into()).unwrap();
+        data.sets.insert(set.id, set);
+        data
     }
 
     #[test]
@@ -1819,6 +2086,40 @@ mod tests {
                 .values(),
             &[1.0, 2.0]
         );
+    }
+
+    #[test]
+    fn creates_partial_derived_bundles_and_removes_all_members() {
+        let mut data = data_with_bundle_sources();
+        let response = data
+            .create_derived_bundle(CreateDerivedBundleRequest {
+                name: "score".into(),
+                expr: "'temp' + 'alt'".into(),
+            })
+            .expect("create bundle");
+        assert_eq!(response.local_path, "derived/score");
+        assert_eq!(response.created.len(), 2);
+        assert_eq!(response.skipped.len(), 1);
+        assert_eq!(response.skipped[0].prefix, "run_03");
+        assert_eq!(response.skipped[0].missing, ["alt"]);
+        assert!(data.store.signal_by_path("run_01/derived/score").is_some());
+        assert!(data.store.signal_by_path("run_02/derived/score").is_some());
+        assert!(data.store.signal_by_path("run_03/derived/score").is_none());
+        assert!(
+            data.create_derived_bundle(CreateDerivedBundleRequest {
+                name: "score".into(),
+                expr: "'temp'".into(),
+            })
+            .is_err()
+        );
+
+        data.remove_derived_bundle(RemoveDerivedBundleRequest {
+            name: "score".into(),
+        })
+        .expect("remove bundle");
+        assert!(data.store.signal_by_path("run_01/derived/score").is_none());
+        assert!(data.store.signal_by_path("run_02/derived/score").is_none());
+        assert!(!data.derived_bundles.contains_key("score"));
     }
 
     #[test]

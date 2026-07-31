@@ -85,6 +85,33 @@ const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
 
+export function bundleCompletionEntries(
+  signals: readonly SignalSummary[],
+  sets: readonly SetSummary[],
+): { localPath: string; runCount: number }[] {
+  const members = new Map<string, Set<string>>();
+  for (const set of sets) {
+    const sourceKeys = new Set(set.members.map((member) => member.source_key));
+    const setMembers = new Map<string, Set<string>>();
+    for (const signal of signals) {
+      if (!sourceKeys.has(signal.source_key)) continue;
+      const paths = setMembers.get(signal.local_path) ?? new Set<string>();
+      paths.add(signal.path);
+      setMembers.set(signal.local_path, paths);
+    }
+    for (const [localPath, paths] of setMembers) {
+      if (paths.size < 2) continue;
+      const allMembers = members.get(localPath) ?? new Set<string>();
+      for (const path of paths) allMembers.add(path);
+      members.set(localPath, allMembers);
+    }
+  }
+  return [...members]
+    .filter(([, paths]) => paths.size >= 2)
+    .map(([localPath, paths]) => ({ localPath, runCount: paths.size }))
+    .sort((left, right) => left.localPath.localeCompare(right.localPath));
+}
+
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
@@ -364,6 +391,9 @@ export class AppShell {
         },
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
+        },
+        onRemoveDerivedBundle: (localPath) => {
+          void this.removeDerivedBundle(localPath);
         },
       },
     );
@@ -1764,6 +1794,14 @@ export class AppShell {
 
       const derivedPort = this.plane.derived;
       if (derivedPort !== null) {
+        for (const definition of [...this.workspace.derivedBundles()]) {
+          try {
+            await derivedPort.createBundle(definition.name, definition.expr);
+          } catch {
+            // Unresolved definitions stay recorded for a later source retry.
+          }
+        }
+        await this.reloadSignals();
         for (const definition of [...this.workspace.derived()]) {
           try {
             await derivedPort.create(definition.path, definition.expr);
@@ -1799,6 +1837,38 @@ export class AppShell {
   async createDerived(path: string, expr: string): Promise<void> {
     const port = this.plane.derived;
     if (port === null) throw new Error("This snapshot cannot create signals");
+    if (this.hasBundleReference(expr)) {
+      const response = await port.createBundle(path, expr);
+      this.workspace.addDerivedBundle(response.local_path, expr);
+      await this.reloadSignals();
+      const focused = this.workspace.focusedPanelId();
+      if (focused !== null) {
+        this.workspace.addSeriesBatch(
+          focused,
+          response.created.map((summary) => summary.path),
+        );
+      }
+      if (response.skipped.length > 0) {
+        const missing = response.skipped
+          .map(
+            (entry) =>
+              entry.prefix +
+              " missing " +
+              entry.missing
+                .map((missingPath) => "'" + missingPath + "'")
+                .join(", "),
+          )
+          .join("; ");
+        this.showModeHelp(
+          "created for " +
+            String(response.created.length) +
+            " runs; " +
+            missing,
+        );
+      }
+      this.afterLayoutChange();
+      return;
+    }
     const summary = await port.create(path, expr);
     this.workspace.addDerived(summary.path, expr);
     await this.reloadSignals();
@@ -1818,6 +1888,45 @@ export class AppShell {
     } catch (error: unknown) {
       this.reportError(error);
     }
+  }
+
+  private async removeDerivedBundle(localPath: string): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) return;
+    try {
+      await port.removeBundle(localPath);
+      for (const signal of this.signals.filter(
+        (summary) => summary.local_path === localPath,
+      )) {
+        this.workspace.removeSignal(signal.path);
+      }
+      this.workspace.removeDerivedBundle(localPath);
+      await this.reloadSignals();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private hasBundleReference(expression: string): boolean {
+    const fullPaths = new Set(this.signals.map((signal) => signal.path));
+    const bundlePaths = new Set(
+      bundleCompletionEntries(this.signals, this.sets).map(
+        (bundle) => bundle.localPath,
+      ),
+    );
+    for (const match of expression.matchAll(
+      /'((?:''|[^'])*)'|"((?:""|[^"])*)"/g,
+    )) {
+      const quote = match[1] !== undefined ? "''" : '""';
+      const replacement = quote === "''" ? "'" : '"';
+      const reference = (match[1] ?? match[2] ?? "").replaceAll(
+        quote,
+        replacement,
+      );
+      if (!fullPaths.has(reference) && bundlePaths.has(reference)) return true;
+    }
+    return false;
   }
 
   private async applyQuickTransform(
@@ -1887,6 +1996,9 @@ export class AppShell {
         .filter((set) => set.prefixes.length > 0),
     );
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
+    this.formulaBar?.setBundles(
+      bundleCompletionEntries(this.signals, this.sets),
+    );
     this.tree?.setFavorites(this.workspace.favorites());
     this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     this.updateStatus();

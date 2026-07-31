@@ -1,5 +1,5 @@
 {
-  "protocol_version": 12,
+  "protocol_version": 13,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -304,6 +304,34 @@
       "kind": "object",
       "fields": {
         "path": "string"
+      }
+    },
+    "CreateDerivedBundleRequest": {
+      "kind": "object",
+      "fields": {
+        "name": "string",
+        "expr": "string"
+      }
+    },
+    "RemoveDerivedBundleRequest": {
+      "kind": "object",
+      "fields": {
+        "name": "string"
+      }
+    },
+    "SkippedMemberSummary": {
+      "kind": "object",
+      "fields": {
+        "prefix": "string",
+        "missing": "string[]"
+      }
+    },
+    "DerivedBundleResponse": {
+      "kind": "object",
+      "fields": {
+        "local_path": "string",
+        "created": "SignalSummary[]",
+        "skipped": "SkippedMemberSummary[]"
       }
     },
     "SessionDialogMode": {

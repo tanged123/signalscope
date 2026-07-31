@@ -217,6 +217,13 @@ function isSession(value: JsonObject): value is JsonObject & Session {
         typeof item.path === "string" &&
         typeof item.expr === "string",
     ) &&
+    Array.isArray(value.derived_bundles) &&
+    value.derived_bundles.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.name === "string" &&
+        typeof item.expr === "string",
+    ) &&
     Array.isArray(value.sources) &&
     value.sources.every(isSource) &&
     Array.isArray(value.source_sets) &&

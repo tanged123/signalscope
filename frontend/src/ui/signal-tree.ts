@@ -4,7 +4,12 @@ import {
   type TreeRow,
   type TreeSet,
 } from "../app/tree-model";
-import { BUNDLE_DRAG_TYPE, SIGNAL_DRAG_TYPE } from "./panel";
+import {
+  BUNDLE_DRAG_TYPE,
+  parseBundleLocalPath,
+  parseBundlePayload,
+  SIGNAL_DRAG_TYPE,
+} from "./panel";
 
 const FALLBACK_ROW_HEIGHT = 22;
 
@@ -14,6 +19,7 @@ export interface SignalTreeCallbacks {
   onToggleFavorite(path: string): void;
   onToggleFavoriteBundle?(localPath: string): void;
   onRemoveDerived(path: string): void;
+  onRemoveDerivedBundle?(localPath: string): void;
 }
 
 export class SignalTreeView {
@@ -47,7 +53,10 @@ export class SignalTreeView {
       this.renderRows();
     });
     favoritesElement.addEventListener("dragover", (event) => {
-      if (event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) === true) {
+      if (
+        event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) === true ||
+        event.dataTransfer?.types.includes(BUNDLE_DRAG_TYPE) === true
+      ) {
         event.preventDefault();
         favoritesElement.classList.add("drop-target");
       }
@@ -57,6 +66,15 @@ export class SignalTreeView {
     });
     favoritesElement.addEventListener("drop", (event) => {
       favoritesElement.classList.remove("drop-target");
+      const bundleData = event.dataTransfer?.getData(BUNDLE_DRAG_TYPE) ?? "";
+      const bundle = parseBundlePayload(bundleData);
+      const localPath =
+        bundle === null ? null : parseBundleLocalPath(bundleData);
+      if (localPath !== null && !this.favoriteBundles.includes(localPath)) {
+        event.preventDefault();
+        this.callbacks.onToggleFavoriteBundle?.(localPath);
+        return;
+      }
       const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
       if (path !== undefined && path !== "" && !this.favorites.includes(path)) {
         event.preventDefault();
@@ -221,6 +239,21 @@ export class SignalTreeView {
         this.callbacks.onToggleFavoriteBundle?.(row.path);
       });
       element.append(caret, star, name, badge);
+      if (row.path.startsWith("derived/")) {
+        const mark = document.createElement("span");
+        mark.className = "tree-derived-mark";
+        mark.textContent = "ƒx";
+        mark.title = "derived bundle";
+        const remove = document.createElement("button");
+        remove.className = "tree-derived-remove";
+        remove.textContent = "✕";
+        remove.title = "Remove " + row.path;
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.callbacks.onRemoveDerivedBundle?.(row.path);
+        });
+        element.append(mark, remove);
+      }
       return element;
     }
     return this.leafElement(row.path, row.label, row.depth);
@@ -269,7 +302,9 @@ export class SignalTreeView {
     value.className = "signal-value";
     value.textContent = this.liveValues.get(path) ?? "—";
     rowElement.append(star, name);
-    if (path.startsWith("derived/")) {
+    const isDerivedMember =
+      path.startsWith("derived/") || path.includes("/derived/");
+    if (isDerivedMember) {
       const mark = document.createElement("span");
       mark.className = "tree-derived-mark";
       mark.textContent = "ƒx";
