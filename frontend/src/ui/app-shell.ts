@@ -184,7 +184,9 @@ export class AppShell {
           this.plotBundle(memberPaths, id);
         },
         onToggleHighlight: (id, path) => {
-          const localPath = this.signalsByPath.get(path)?.local_path;
+          const localPath = this.isDerivedPath(path)
+            ? undefined
+            : this.signalsByPath.get(path)?.local_path;
           if (localPath === undefined) return;
           this.workspace.toggleHighlight(id, path, localPath);
           this.commitHistory();
@@ -192,9 +194,13 @@ export class AppShell {
           this.renderTiles();
         },
         localPathFor: (path) =>
-          this.signalsByPath.get(path)?.local_path ?? null,
+          this.isDerivedPath(path)
+            ? null
+            : (this.signalsByPath.get(path)?.local_path ?? null),
         sourceKeyFor: (path) =>
-          this.signalsByPath.get(path)?.source_key ?? null,
+          this.isDerivedPath(path)
+            ? null
+            : (this.signalsByPath.get(path)?.source_key ?? null),
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
           this.workspace.setXSignal(id, path);
@@ -1903,10 +1909,14 @@ export class AppShell {
     if (panel.mode === "xy") {
       if (panel.x_signal !== null) {
         paths.unshift(panel.x_signal);
-        const xLocal = this.signalsByPath.get(panel.x_signal)?.local_path;
+        const xLocal = this.isDerivedPath(panel.x_signal)
+          ? undefined
+          : this.signalsByPath.get(panel.x_signal)?.local_path;
         if (xLocal !== undefined) {
           for (const series of panel.series) {
-            const sourceKey = this.signalsByPath.get(series.path)?.source_key;
+            const sourceKey = this.isDerivedPath(series.path)
+              ? undefined
+              : this.signalsByPath.get(series.path)?.source_key;
             if (sourceKey === undefined) continue;
             const resolved = this.signals.find(
               (candidate) =>
@@ -1927,6 +1937,10 @@ export class AppShell {
       else ids.push(id);
     }
     return { ids, missing };
+  }
+
+  private isDerivedPath(path: string): boolean {
+    return this.workspace.derived().some((entry) => entry.path === path);
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
