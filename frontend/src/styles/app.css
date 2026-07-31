@@ -1467,6 +1467,10 @@ button {
   opacity: 0.35;
 }
 
+.legend-chip.highlighted .legend-line {
+  box-shadow: 0 0 0 1px var(--fg-1);
+}
+
 .ingest-progress {
   display: flex;
   flex-wrap: wrap;

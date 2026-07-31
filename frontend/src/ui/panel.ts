@@ -85,6 +85,8 @@ export interface PanelCallbacks {
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignal(id: string, path: string): void;
   onDropBundle(id: string, memberPaths: string[]): void;
+  onToggleHighlight(id: string, path: string): void;
+  localPathFor(path: string): string | null;
   onSetXSignal(id: string, path: string): void;
   onSetColorSignal(id: string, path: string | null): void;
   onClearXSignal(id: string): void;
@@ -550,6 +552,18 @@ export class PanelView {
       yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       widths: shown.map((tile) => bySeries.get(tile.signal_path)?.width ?? 1.4),
+      dimmed: shown.map((tile) => {
+        const localPath = this.callbacks.localPathFor(tile.signal_path);
+        const highlighted =
+          localPath === null
+            ? undefined
+            : state.highlighted_sources.find(
+                (entry) => entry.local_path === localPath,
+              );
+        return (
+          highlighted !== undefined && highlighted.path !== tile.signal_path
+        );
+      }),
       ...(this.emphasizePath !== null &&
       shown.some((tile) => tile.signal_path === this.emphasizePath)
         ? {
@@ -1351,6 +1365,12 @@ export class PanelView {
   private legendChip(series: PanelState["series"][number]): HTMLElement {
     const chip = document.createElement("span");
     chip.className = `legend-chip ${series.visible ? "" : "muted"}`;
+    chip.classList.toggle(
+      "highlighted",
+      this.lastState?.highlighted_sources.some(
+        (entry) => entry.path === series.path,
+      ) ?? false,
+    );
     const body = document.createElement("button");
     body.className = "legend-chip-body";
     body.title = `${series.path} — click to toggle visibility`;
@@ -1483,6 +1503,21 @@ export class PanelView {
       });
       transforms.append(button);
     }
+    const localPath = this.callbacks.localPathFor(path);
+    const highlight =
+      localPath === null ? null : document.createElement("button");
+    if (highlight !== null) {
+      const active =
+        this.lastState?.highlighted_sources.some(
+          (entry) => entry.path === path,
+        ) ?? false;
+      highlight.className = "inspector-action";
+      highlight.textContent = active ? "Clear highlight" : "Highlight";
+      highlight.addEventListener("click", () => {
+        this.closeInspector();
+        this.callbacks.onToggleHighlight(this.id, path);
+      });
+    }
     const useAsX = document.createElement("button");
     useAsX.className = "inspector-action";
     useAsX.textContent = "use as X";
@@ -1497,7 +1532,15 @@ export class PanelView {
       this.closeInspector();
       this.callbacks.onRemoveSeries(this.id, path);
     });
-    popover.append(pathRow, slots, dashes, transforms, useAsX, remove);
+    popover.append(
+      pathRow,
+      slots,
+      dashes,
+      transforms,
+      ...(highlight === null ? [] : [highlight]),
+      useAsX,
+      remove,
+    );
     this.element.append(popover);
     const panelRect = this.element.getBoundingClientRect();
     popover.style.left = `${String(

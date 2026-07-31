@@ -183,6 +183,16 @@ export class AppShell {
         onDropBundle: (id, memberPaths) => {
           this.plotBundle(memberPaths, id);
         },
+        onToggleHighlight: (id, path) => {
+          const localPath = this.signalsByPath.get(path)?.local_path;
+          if (localPath === undefined) return;
+          this.workspace.toggleHighlight(id, path, localPath);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        localPathFor: (path) =>
+          this.signalsByPath.get(path)?.local_path ?? null,
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
           this.workspace.setXSignal(id, path);
