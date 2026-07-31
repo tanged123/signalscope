@@ -1336,6 +1336,375 @@ where `ingestPaths(paths: string[])` is `openFiles`'s existing body from the poi
 
 ---
 
+## Addendum D (2026-07-31): tree at hundreds of sources, bundle favorites
+
+Implements the spec's "Scale rules (hundreds of sources)" and "Bundle
+favorites" sections. Tasks 1–19 are implemented. Defects this fixes:
+bundles merge across sets (`tree-model.ts` flattens all `setPrefixes`);
+bundle rows are a flat depth-0 list with full local-path labels (no
+segment hierarchy); the sources footer renders one static DOM row per
+source; bundles cannot be favorited.
+
+### Task 20: Tree model — per-set bundles with segment hierarchy
+
+**Files:**
+
+- Modify: `frontend/src/app/tree-model.ts` (the `options` branch of `buildTreeRows`, :38-91; `TreeBundle`, :16-24)
+- Test: `frontend/src/app/tree-model.test.ts`
+
+**Interfaces:**
+
+- Produces:
+
+```ts
+export interface TreeBundle {
+  kind: "bundle";
+  path: string;      // local path
+  setKey: string;
+  bundleKey: string; // `${setKey}//${localPath}` — expansion/star keying
+  label: string;     // final segment (full local path while searching)
+  depth: number;
+  runCount: number;
+  memberPaths: string[];
+  expanded: boolean;
+}
+buildTreeRows(paths, collapsed, filter, options?: {
+  sets: readonly { key: string; label: string; prefixes: readonly string[] }[];
+  expandedBundles: ReadonlySet<string>; // bundleKey entries
+}): TreeRow[]
+```
+
+Set headers and local-path groups are ordinary `TreeGroup` rows with
+namespaced collapse keys (`set:<key>` and `<setKey>//<groupPath>`), so the
+view's existing group rendering and collapse toggling work untouched.
+Task 21 consumes `bundleKey` and the new `sets` option.
+
+- [ ] **Step 1: Write the failing tests** (replace the flat-bundle expectations; keep the search and single-set cases):
+
+```ts
+const sets = [
+  { key: "sA", label: "Campaign A", prefixes: ["a1", "a2"] },
+  { key: "sB", label: "Campaign B", prefixes: ["b1", "b2"] },
+];
+const none = new Set<string>();
+
+it("keys bundles per set and adds headers only when several sets have bundles", () => {
+  const rows = buildTreeRows(
+    ["a1/temp", "a2/temp", "b1/temp", "b2/temp"],
+    none, "", { sets, expandedBundles: none },
+  );
+  const headers = rows.filter((row) => row.kind === "group" && row.path.startsWith("set:"));
+  expect(headers.map((row) => row.label)).toEqual(["Campaign A", "Campaign B"]);
+  const bundles = rows.filter((row) => row.kind === "bundle");
+  expect(bundles.map((row) => [row.setKey, row.runCount])).toEqual([["sA", 2], ["sB", 2]]);
+  // single set: no header, bundle at depth 0 — today's shape exactly
+  const single = buildTreeRows(["a1/temp", "a2/temp"], none, "", {
+    sets: [sets[0]], expandedBundles: none,
+  });
+  expect(single.filter((row) => row.kind === "group")).toHaveLength(0);
+  expect(single[0]).toMatchObject({ kind: "bundle", depth: 0 });
+});
+
+it("nested local paths produce collapsible group rows", () => {
+  const paths = ["a1/imu/accel/x", "a2/imu/accel/x", "a1/imu/accel/y", "a2/imu/accel/y"];
+  const rows = buildTreeRows(paths, none, "", { sets: [sets[0]], expandedBundles: none });
+  expect(rows.map((row) => [row.kind, row.label, row.depth])).toEqual([
+    ["group", "imu", 0],
+    ["group", "accel", 1],
+    ["bundle", "x", 2],
+    ["bundle", "y", 2],
+  ]);
+  const collapsed = buildTreeRows(paths, new Set(["sA//imu"]), "", {
+    sets: [sets[0]], expandedBundles: none,
+  });
+  expect(collapsed).toHaveLength(1); // just the collapsed "imu" group row
+});
+
+it("bundle group keys never collide with source-prefix groups", () => {
+  // a non-bundled source literally named "imu" keeps its own group row and
+  // collapse state even when "sA//imu" is collapsed.
+  const rows = buildTreeRows(
+    ["a1/imu/accel/x", "a2/imu/accel/x", "imu/standalone"],
+    new Set(["sA//imu"]), "", { sets: [sets[0]], expandedBundles: none },
+  );
+  expect(rows.some((row) => row.kind === "leaf" && row.path === "imu/standalone")).toBe(true);
+});
+```
+
+- [ ] **Step 2: Run** `./scripts/test.sh unit tree-model` — expect FAIL.
+- [ ] **Step 3: Implement.** Replace the options branch:
+  1. Build `prefixToSet` (first set to claim a prefix wins). Partition `paths` into per-set `Map<localPath, string[]>` plus `rest` (unclaimed paths and single-member local paths go to `rest`).
+  2. Collect `setsWithBundles` in input order; `multi = setsWithBundles.length > 1`.
+  3. Per set: when `multi`, emit a `TreeGroup` `{ path: "set:" + set.key, label: set.label, depth: 0, expanded: !collapsed.has(...) }` and skip the set's rows when collapsed; `base = multi ? 1 : 0`.
+  4. **No query:** walk the set's bundle local paths sorted, emitting segment `TreeGroup` rows exactly like the plain-tree walk at :98-128 but with collapse keys `${set.key}//${groupPath}` and depths offset by `base`; the bundle row sits at the final segment (`label` = last segment, `depth = base + segments - 1`, `bundleKey = ${set.key}//${localPath}`); expanded bundles emit member leaves one level deeper, labeled by source prefix as today.
+  5. **With a query:** keep today's flat-per-bundle behavior (full local path as `label`, member filtering unchanged) under the set header.
+  6. Append `buildTreeRows(rest.sort(), collapsed, filter)` as today.
+- [ ] **Step 4: Run** `./scripts/test.sh unit tree-model` — expect PASS. Fix type fallout in `signal-tree.ts` minimally (Task 21 finishes it).
+- [ ] **Step 5: Run** `./scripts/test.sh frontend`, commit — `git commit -m "feat(tree): per-set bundles with segment hierarchy"`
+
+---
+
+### Task 21: Tree view — set-aware wiring and bundle expansion keys
+
+**Files:**
+
+- Modify: `frontend/src/ui/signal-tree.ts` (`setSetPrefixes` :68-71 becomes `setSets`; bundle row rendering; `expandedBundles` keying), `frontend/src/ui/app-shell.ts` (the `setSetPrefixes` call site at :1839-1847)
+- Test: covered by Task 20's model tests plus one view test for the toggle keying if a view test harness exists (`grep -rn "SignalTreeView" frontend/src --include=*.test.ts`)
+
+**Interfaces:**
+
+- Produces: `SignalTreeView.setSets(sets: readonly { key: string; label: string; prefixes: readonly string[] }[]): void` (replaces `setSetPrefixes`).
+- Consumes: `TreeBundle.bundleKey` from Task 20.
+
+- [ ] **Step 1:** Replace `setSetPrefixes` with `setSets`; store and pass through to `buildTreeRows` as the `sets` option. Key `expandedBundles` by `row.bundleKey` (the caret toggle adds/deletes `bundleKey`, not the local path).
+- [ ] **Step 2:** In `app-shell.ts`, build per-set prefixes where the flat list is built today (:1839-1847): for each of `this.sets`, collect member `source_key`s, map them through `this.signals` to prefixes exactly as the current code does, and pass `{ key: set.set_key, label: set.label, prefixes }`. Sets with no loaded signals contribute nothing.
+- [ ] **Step 3: Run** `./scripts/test.sh frontend` — expect PASS. Commit — `git commit -m "feat(tree): set-aware bundle rendering"`
+
+---
+
+### Task 22: Session v15 — bundle favorites
+
+**Files:**
+
+- Modify: `protocol/schema/scope-session.json` (v15, `Session.favorite_bundles`), `core/scope-core/src/session.rs` (rung + test), `protocol/testdata/session-conformance.json`, `frontend/src/app/baked-session.ts` (validator), `frontend/src/app/workspace.ts` (mutations), `frontend/src/ui/signal-tree.ts` (bundle star + favorites-bar chips), `frontend/src/ui/app-shell.ts` (wiring)
+- Regenerate: `./scripts/codegen.sh`
+- Test: `core/scope-core/src/session.rs`, `frontend/src/app/workspace.test.ts`
+
+**Interfaces:**
+
+- Produces: `Session.favorite_bundles: string[]` (bundle local paths); `Workspace.favoriteBundles(): readonly string[]`; `Workspace.toggleFavoriteBundle(localPath: string): void`; `SignalTreeView.setFavoriteBundles(list: readonly string[]): void`; `SignalTreeCallbacks.onToggleFavoriteBundle(localPath: string): void`.
+
+- [ ] **Step 1: Schema + rung.** Add `"favorite_bundles": "string[]"` to `Session`, bump to 15, run `./scripts/codegen.sh`. In `session.rs`, add the arm (a required field needs a real rung — do **not** fold 14 into the `3 | 4 | 7 | 12` pass-through group):
+
+```rust
+14 => {
+    value["favorite_bundles"] = serde_json::json!([]);
+    value["schema_version"] = serde_json::json!(15);
+    migrate(15, value)
+}
+```
+
+with a test asserting a v14 session migrates with an empty `favorite_bundles` and that the existing v13 fixture still chains through cleanly. Update the conformance fixture to v15 and the `baked-session.ts` validator (string array, same style as `favorites`).
+- [ ] **Step 2: Workspace mutations (failing test first):**
+
+```ts
+it("toggles bundle favorites by local path", () => {
+  const workspace = new WorkspaceModel();
+  workspace.toggleFavoriteBundle("imu/accel/x");
+  expect(workspace.favoriteBundles()).toEqual(["imu/accel/x"]);
+  workspace.toggleFavoriteBundle("imu/accel/x");
+  expect(workspace.favoriteBundles()).toEqual([]);
+});
+```
+
+Implement exactly like the existing leaf `toggleFavorite`/`favorites` pair.
+- [ ] **Step 3: Tree UI.** Bundle rows gain the same star button as leaves (`active` when the local path is in the favorite-bundles list; click → `onToggleFavoriteBundle(row.path)`, stopPropagation as the leaf star does). In `renderFavorites`, render bundle chips before leaf rows: label = local path, badge = current member count, activation and dragstart behave exactly like the bundle tree row (same `BUNDLE_DRAG_TYPE` payload); membership is the union across current sets — compute a `Map<localPath, string[]>` during `refresh()` from the same partition the model uses and store it for the favorites bar. Zero members ⇒ chip gets the existing `muted` class, no handlers.
+- [ ] **Step 4: Wire app-shell:** pass `workspace.favoriteBundles()` into the tree wherever `setFavorites` is called; `onToggleFavoriteBundle` mirrors the leaf `onToggleFavorite` wiring (:336-341) including `commitHistory()`.
+- [ ] **Step 5: Run** `./scripts/test.sh quick` — expect PASS (core rung + frontend suites). Commit — `git commit -m "feat(session)!: v15 bundle favorites"`
+
+---
+
+### Task 23: Sources footer — summary line with virtualized expansion
+
+**Files:**
+
+- Modify: `frontend/src/ui/app-shell.ts` (source rows render at :2280-2291, markup at :2511), `frontend/src/styles/app.css`
+- Test: a DOM test for the render helper (export it like `renderBatchProgress` if Task 19 established that pattern; otherwise add alongside)
+
+**Interfaces:** none new.
+
+- [ ] **Step 1: Write the failing test:** with 3 sources, the footer renders 3 rows and no toggle (today's behavior); with 20 sources, it renders one summary line `20 sources · <total> pts` plus a collapsed-by-default toggle; expanding renders a virtualized window (assert the DOM row count is bounded by the viewport math from `virtualSlice`, not 20... use a row count large enough to exceed the overscan window, e.g. 200).
+- [ ] **Step 2: Run** the targeted filter — expect FAIL.
+- [ ] **Step 3: Implement.** Threshold 8 (spec): at or under it, render exactly today's rows. Above it, render the summary line (total points = sum of `Number(source.point_count)`, locale-formatted) and a chevron toggle (reuse the tree-group `▸`/`▾` affordance and existing tokens); the expanded list reuses `virtualSlice` with the tree's `--tree-row-height` token and a scroll container class in `app.css`.
+- [ ] **Step 4: Run** `./scripts/test.sh frontend` — expect PASS.
+- [ ] **Step 5: Gate + version.** `./scripts/format.sh`, `./scripts/test.sh full`, then `./scripts/version.sh bump major && ./scripts/version.sh check` (session v15 is breaking). Manual: `./scripts/run.sh`, load `examples/monte_carlo`, star the `command` bundle, reload, confirm the chip resolves and plots.
+- [ ] **Step 6: Commit** — `git commit -m "feat(tree): scale to hundreds of sources with bundle favorites"`
+
+---
+
+## Addendum E (2026-07-31): derived bundles and the partial-bundle rule
+
+Implements the spec's "Derived bundles" and "Partial-bundle rule"
+sections. Tasks 1–23 are implemented. Background: expressions already use
+quoted signal references (`hypot('imu/vx','imu/vy')`, `expr.rs` tokenizer
+`Token::Signal`), `restore.rs` already rewrites references by token span,
+and the shell already tracks derived bookkeeping (`derived_references`,
+`derived_spills` in `DataState`). A derived bundle is therefore: resolve
+quoted refs that name bundle local paths, intersect eligible sources,
+span-rewrite per member, and run the existing single-signal evaluation N
+times, registering each output under its member source with local path
+`derived/<name>`.
+
+### Task 24: Core — bundle reference resolution and per-member expansion; session v16
+
+**Files:**
+
+- Create: `core/scope-core/src/derived_bundle.rs` (+ `pub mod` in `lib.rs`)
+- Modify: `protocol/schema/scope-session.json` (v16), `core/scope-core/src/session.rs` (rung + test), `protocol/testdata/session-conformance.json`, `frontend/src/app/baked-session.ts` (validator)
+- Regenerate: `./scripts/codegen.sh`
+- Test: inline in `derived_bundle.rs`, `session.rs`
+
+**Interfaces:**
+
+- Consumes: `expr`'s public reference-listing and span-rewrite helpers — the same ones `restore.rs:91-132` uses; read them first and reuse, do not re-tokenize by hand. Set membership and per-source local paths come from the same inputs `sets.rs`/the registry already expose (read how `shell` builds `SetSummary.local_paths`).
+- Produces:
+
+```rust
+pub struct MemberExpansion {
+    pub source_key: SourceKey,
+    pub prefix: String,
+    pub expr: String, // bundle refs rewritten to this source's full paths
+}
+pub struct SkippedMember {
+    pub prefix: String,
+    pub missing: Vec<String>, // bundle local paths this source lacks
+}
+pub struct BundleExpansion {
+    pub members: Vec<MemberExpansion>,
+    pub skipped: Vec<SkippedMember>,
+    pub bundle_refs: Vec<String>, // resolved bundle local paths, for bookkeeping
+}
+/// Errors when `expr` is invalid, references nothing, or no source has
+/// every bundle-referenced local path. An expression with zero bundle
+/// refs returns an error variant the caller uses to fall back to the
+/// ordinary single-signal path.
+pub fn expand(
+    expr: &str,
+    full_paths: &BTreeSet<String>,
+    locals_by_source: &BTreeMap<SourceKey, (String, BTreeSet<String>)>, // key -> (prefix, local paths)
+) -> Result<BundleExpansion, DerivedBundleError>
+```
+
+- [ ] **Step 1: Write the failing tests** in `derived_bundle.rs` — resolution precedence (a quoted ref matching a full path is NOT a bundle ref), intersection with skip reporting (3 sources, one missing a referenced local → 2 members + 1 skipped with the missing path named), mixed full-path + bundle refs (full-path ref appears verbatim in every rewritten member expr), deterministic member order (sorted by prefix), zero-bundle-refs error, zero-eligible-sources error.
+- [ ] **Step 2: Run** `./scripts/test.sh core derived_bundle` — expect FAIL, then implement `expand` per the interface: list quoted refs with `expr`'s helper; classify each (full path → leave; else bundle local if any source has it; else `UnknownIdentifier` bubbles from the existing engine later); intersect; span-rewrite per member (`prefix + "/" + local`). Run again — expect PASS.
+- [ ] **Step 3: Session v16.** Add `DerivedBundleState { "name": "string", "expr": "string" }` and required `"derived_bundles": "DerivedBundleState[]"` to `Session`; bump to 16; `./scripts/codegen.sh`; rung (own arm, not the pass-through group):
+
+```rust
+15 => {
+    value["derived_bundles"] = serde_json::json!([]);
+    value["schema_version"] = serde_json::json!(16);
+    migrate(16, value)
+}
+```
+
+with a v15→16 test and the v13 fixture still chaining; update the conformance fixture and the `baked-session.ts` validator.
+- [ ] **Step 4: Run** `./scripts/test.sh quick` — expect PASS. Commit — `git commit -m "feat(core): derived bundle expansion with session v16"`
+
+---
+
+### Task 25: Protocol v13 — shell commands and dynamic re-expansion
+
+**Files:**
+
+- Modify: `protocol/schema/scope-protocol.json` (v13), `shell/src-tauri/src/lib.rs` (new commands beside `create_derived`; re-expansion hooks where batch completion and restore already reload signals)
+- Regenerate: `./scripts/codegen.sh`
+- Test: shell inline tests (follow the existing `create_derived` test's fixture pattern)
+
+**Interfaces:**
+
+- Produces (schema, v13): `CreateDerivedBundleRequest { name: string, expr: string }`; `SkippedMemberSummary { prefix: string, missing: string[] }`; `DerivedBundleResponse { local_path: string, created: SignalSummary[], skipped: SkippedMemberSummary[] }`; `RemoveDerivedBundleRequest { name: string }`.
+- Produces (commands): `create_derived_bundle`, `remove_derived_bundle`.
+- Consumes: `derived_bundle::expand` (Task 24) and the existing single-derived evaluation/registration path inside `create_derived` — factor its body so both commands share evaluation, spill, and charge bookkeeping; register each member under its **member source's** `SourceId` with local path `derived/<name>` (read how `create_derived` registers under `derived_source` and generalize the source parameter).
+
+- [ ] **Step 1:** Schema changes + codegen.
+- [ ] **Step 2: Failing shell test:** two CSV sources sharing `temp` and `alt`, one source with only `temp`; `create_derived_bundle { name: "score", expr: "'temp' .* 2" }` → 3 created (all have `temp`); with `expr: "'temp' + 'alt'"` → 2 created, 1 skipped naming `alt`; members are queryable via ordinary tiles; `remove_derived_bundle` removes every member and the definition; a second `create_derived_bundle` with the same name errors.
+- [ ] **Step 3: Implement** the two commands. Store the definition in `DataState` next to the session-persisted `derived_bundles` (the session save path must include it — read where `derived` signals are folded into the saved session and mirror it). Registration per member is transactional per source: a member whose evaluation fails (e.g. length mismatch inside one source) becomes a `skipped` entry with the error text as `missing`-style detail — the partial-bundle rule, not a command failure.
+- [ ] **Step 4: Re-expansion.** Where the shell reloads signals after a terminal batch and after restore reconciliation, re-run every stored definition: create members for newly eligible sources, leave existing members untouched (idempotent — skip sources that already have `derived/<name>`). Removing a source already removes its signals; verify with a test that a re-expansion after removal does not resurrect anything.
+- [ ] **Step 5: Run** `./scripts/test.sh shell && ./scripts/test.sh frontend` (codegen check) — expect PASS. Commit — `git commit -m "feat(protocol): v13 derived bundles"`
+
+---
+
+### Task 26: Frontend — formula bar bundles, tree rows, workspace state
+
+**Files:**
+
+- Modify: `frontend/src/app/data-plane.ts` (`DerivedPort` :59 gains the two calls), `frontend/src/app/formula-completion.ts` (bundle locals in completions), `frontend/src/ui/formula-bar.ts` + `frontend/src/ui/signal-tree.ts` (bundle drag inserts quoted local path), `frontend/src/ui/app-shell.ts` (`createDerived` :1750 routes to the bundle port when the response is a bundle; skip-report toast via the existing error/status surface), `frontend/src/app/workspace.ts` (`addDerivedBundle`/`removeDerivedBundle` mirroring `addDerived`)
+- Test: `frontend/src/app/formula-completion.test.ts`, `frontend/src/app/workspace.test.ts`
+
+**Interfaces:**
+
+- Produces: `DerivedPort.createBundle(name: string, expr: string): Promise<DerivedBundleResponse>`; `DerivedPort.removeBundle(name: string): Promise<void>`; `Workspace.addDerivedBundle(name: string, expr: string)` / `.removeDerivedBundle(name)` / `.derivedBundles()`.
+- Consumes: Task 25's commands; `quoteSignalPath` / `insertSignalReference` (`formula.ts:60-65`).
+
+- [ ] **Step 1 (failing tests):** completions offer bundle local paths labeled with run counts when the input prefix matches (`formula-completion.test.ts`, mirroring the existing signal-completion cases); workspace add/remove/round-trip for `derived_bundles`.
+- [ ] **Step 2:** Implement completions (the completion source already receives signal paths from `app-shell:1830`; extend it to also receive `{ localPath, runCount }` bundle entries built from the same membership map Task 22 added to the tree view). Dragging a bundle row into the formula input inserts `quoteSignalPath(localPath)` via the same handler leaves use.
+- [ ] **Step 3:** Route creation: `createDerived` first calls the ordinary `create` and falls back to `createBundle` **only** on the shell's zero-bundle-refs/bundle-refs-present signal — simplest is to try `createBundle` when any quoted ref in the expression matches a known bundle local path (the frontend has the membership map; keep the decision in one small function with a unit test). On success: `workspace.addDerivedBundle`, reload signals (members arrive as ordinary signals; the tree bundles them automatically), and surface `skipped` as a non-blocking notice: `created for 6 of 8 runs — run_03 missing 'response'`.
+- [ ] **Step 4:** Tree: a bundle row whose local path starts with `derived/` shows the existing ƒx mark and a remove control that calls `removeDerivedBundle` (definition + members); member rows show ƒx but no remove. Reuse the existing derived-leaf affordances (`signal-tree.ts:234-252` pattern).
+- [ ] **Step 5: Run** `./scripts/test.sh frontend` — expect PASS. Commit — `git commit -m "feat(ui): derived bundles from the formula bar"`
+
+---
+
+### Task 27: Partial-bundle audit tests
+
+**Files:**
+
+- Create: `frontend/src/app/partial-bundle.test.ts` (one fixture, every operation)
+- Modify: none (this task only adds tests; any failure it finds is fixed where it lives, with the fix noted in the commit)
+
+**Interfaces:** none new.
+
+- [ ] **Step 1:** Build one shared fixture: sets with sources `run_01..run_03`, local paths `temp` (3 runs), `alt` (2 runs — `run_03` lacks it). Assert, against the real modules (not mocks) wherever a unit seam exists:
+  - plotting the `alt` bundle adds exactly 2 series;
+  - XY with `x_signal` resolving to `alt` omits `run_03`'s trace (Task 14 rule);
+  - color resolving to `alt` leaves `run_03`'s trace uncolored (Task 16 rule);
+  - a highlight entry whose `path` is no longer in the panel is ignored;
+  - a favorite bundle for a local path with zero members renders muted;
+  - `derived_bundle::expand`-backed creation over `'temp' + 'alt'` skips `run_03` (already covered in Rust — here assert the frontend notice formatting).
+- [ ] **Step 2:** Run `./scripts/test.sh frontend`; fix anything the audit exposes at its source.
+- [ ] **Step 3: Gate + version.** `./scripts/format.sh`, `./scripts/test.sh full`, `./scripts/version.sh bump major && ./scripts/version.sh check` (session v16 + protocol v13). Manual: `./scripts/run.sh`, load `examples/monte_carlo`, create `score = 'command' - 'response'`, confirm a ƒx bundle appears and plots per-source; remove it; reload the session.
+- [ ] **Step 4: Commit** — `git commit -m "feat!: derived bundles with the partial-bundle rule"`
+
+---
+
+## Addendum F (2026-07-31): reserved `derived/` prefix in the tree
+
+Implements the spec's "Derived rows and reserved prefixes" section.
+Tasks 1–27 are implemented. Observed defect: the segment hierarchy from
+Task 20 treats `derived/` as an ordinary segment, so derived bundles nest
+under a collapsible `derived` group sandwiched among flat bundle rows,
+and the plain tree emits a second, unrelated `derived` group for
+unsourced derived leaves.
+
+### Task 28: Flatten derived rows; single-segment derived bundle names
+
+**Files:**
+
+- Modify: `frontend/src/app/tree-model.ts` (both the bundle-hierarchy walk from Task 20 and the plain-tree walk at the group-emission step), the derived-bundle name validation (wherever Task 25's `create_derived_bundle` validates `name` — shell side — plus the frontend creation path from Task 26)
+- Test: `frontend/src/app/tree-model.test.ts`; the shell `create_derived_bundle` tests
+
+**Interfaces:** none new. Behavior:
+
+- In the bundle segment hierarchy: a local path starting with `"derived/"` emits **no group rows**; the bundle row sits at the section's base depth with `label` = the path minus the `"derived/"` prefix, and sorts among sibling bundles by that label.
+- In the plain tree: a path starting with `"derived/"` skips group emission and renders as a top-level leaf labeled past the prefix (the ƒx mark rendering in `signal-tree.ts` keys off the full path and is unchanged).
+- `create_derived_bundle` rejects names containing `/` with a clear error; the frontend surfaces it verbatim.
+
+- [ ] **Step 1: Write the failing tests:**
+
+```ts
+it("derived bundles render top-level, labeled by name, sorted among bundles", () => {
+  // paths: run_01/command, run_02/command, run_01/derived/temp,
+  // run_02/derived/temp, run_01/response, run_02/response (one set)
+  // expect rows in order: command, response, temp — all kind "bundle",
+  // all depth 0, and NO group row with label "derived" anywhere.
+});
+
+it("unsourced derived leaves are ungrouped", () => {
+  // paths: ["derived/score"] with no sets — expect exactly one leaf,
+  // depth 0, label "score"; no "derived" group row.
+});
+```
+
+(Adjust the first test's expected label for `temp` to `"temp"` — the label is the local path minus `"derived/"`.)
+
+- [ ] **Step 2: Run** `./scripts/test.sh unit tree-model` — expect FAIL (today both cases emit a `derived` group).
+- [ ] **Step 3: Implement** the two rendering rules in `tree-model.ts`. Keep the change at the segmentation step (treat the whole `derived/<name>` as a single leaf/bundle segment when it starts with the reserved prefix) rather than special-casing row emission in two places. Update any Task 20 tests that asserted the old nesting.
+- [ ] **Step 4: Name validation.** In the shell command, reject `name.contains('/')` with `"derived bundle names are a single segment"` (test it); mirror the check in the frontend creation function from Task 26 so the error surfaces before a round trip.
+- [ ] **Step 5: Run** `./scripts/test.sh quick && ./scripts/test.sh shell` — expect PASS.
+- [ ] **Step 6: Gate + version.** `./scripts/format.sh`, `./scripts/test.sh full`, `./scripts/version.sh bump patch && ./scripts/version.sh check` (rendering + validation only, no schema change). Manual: `./scripts/run.sh`, recreate the screenshot scenario — `command`, `response`, `temp ƒx`, `temperature` as four flat rows.
+- [ ] **Step 7: Commit** — `git commit -m "fix(tree): flatten derived rows under a reserved prefix"`
+
+---
+
 ## Deferred (explicitly out of scope for this plan)
 
 - Dimming in XY/FFT/histogram vertex rendering if the vertex path doesn't already thread per-series flags (Task 11 notes the restriction; a follow-up can extend it).

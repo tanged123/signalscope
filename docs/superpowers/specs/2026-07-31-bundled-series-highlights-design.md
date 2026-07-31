@@ -43,10 +43,77 @@ show individual source members.
 - Dragging or activating a bundle plots every available member.
 - Dragging or activating a child plots only that member.
 - Search matches bundle paths and member labels.
-- Virtual scrolling and favorites remain leaf-oriented.
+- Virtual scrolling remains row-oriented; favorites accept leaves **and
+  bundles** (see "Bundle favorites").
 
 Bundle and member drag payloads stay distinct so a panel can handle either
 operation without inspecting display labels.
+
+### Scale rules (hundreds of sources)
+
+The signals list grows with distinct local paths, not with source count —
+that is the point of bundles — but three rules keep it usable at hundreds
+of sources:
+
+- **Bundles are keyed per set** — `(set, local_path)`, never merged across
+  sets. When exactly one set exists, rendering is unchanged from today.
+  When more than one set exists, each set contributes a collapsible
+  depth-0 header row (its `SetSummary.label`; ordinary group-row
+  affordance, no new control) with its bundles nested beneath.
+- **Bundle local paths join the segment hierarchy.** Nested local paths
+  (`imu/accel/x`) produce the same collapsible group rows as the plain
+  tree, with the bundle row as the leaf (its label is the final segment,
+  badge unchanged). A flat list of full local paths is only acceptable
+  because it falls out of single-segment paths, not as the general shape.
+  Group and set collapse keys are namespaced (`set:<key>`,
+  `<set_key>//<group_path>`) so they can never collide with source-prefix
+  group keys in the non-bundled tree.
+- **The sources footer collapses.** The per-source rows
+  (`run_01.csv · 3,003 pts`) are replaced by a one-line summary
+  (`N sources · M pts`) that expands on demand; the expanded list is
+  virtualized with the same `virtualSlice` machinery as the tree and is
+  collapsed by default when there are more than 8 sources.
+
+Member expansion needs no cap: rows are virtualized, so a 300-member
+bundle is cheap.
+
+### Derived rows and reserved prefixes (deconfliction)
+
+`derived/` is a **reserved prefix that never creates a group row**,
+anywhere in the tree — neither in the bundle segment hierarchy nor in the
+plain (non-bundled) tree. Derived rows render at top level of their
+section, labeled by their name, with the ƒx mark carrying the
+derived-ness; they sort by that label among their siblings:
+
+- A derived bundle (`derived/<name>` shared across sources) is a
+  top-level bundle row labeled `<name>` with the ƒx mark and its remove
+  control — never nested under a `derived` group. Its only expansion is
+  member expansion.
+- An unsourced derived leaf (`derived/<name>`) is a top-level leaf
+  labeled `<name>` with the ƒx mark, likewise ungrouped.
+- Derived bundle names are **single segments** (no `/`), enforced at
+  creation, so `derived/<name>` is always exactly two segments and the
+  flat rendering has no residue.
+- Rationale: a group row must communicate tree structure. A permanent
+  one-child-kind group under a reserved segment communicates nothing the
+  ƒx mark doesn't, and stacking group expansion on top of bundle
+  expansion made two unrelated caret affordances look like one.
+
+### Bundle favorites
+
+Favorites accept whole bundles. A bundle favorite is a **local path** —
+it re-resolves against the currently loaded sets every render, which keeps
+it meaningful across sessions and campaigns:
+
+- The bundle row gets the same star affordance as leaves. Starring stores
+  the local path in a new `favorite_bundles: string[]` (session v15);
+  leaf favorites in `favorites` are unchanged.
+- The favorites bar renders a bundle chip with the local path and a run
+  count. Activating or dragging it plots the union of current members
+  across all sets containing that local path; with zero current members
+  the chip renders muted and inert rather than erroring.
+- Bundle favorites survive session and snapshot round trips like leaf
+  favorites.
 
 Implementation notes (the current code cannot be extended in place):
 
@@ -127,6 +194,70 @@ Let `cLocal = localPathFor(color_signal)`:
 
 `FFT` and `H` modes need no pairing rule: each member series is computed
 independently, exactly like any other multi-series panel today.
+
+### Derived bundles
+
+Derived signals gain bundle semantics without new expression-language
+syntax: a quoted reference in an expression resolves first as a full
+signal path (today's behavior), and otherwise as a **bundle local path**.
+
+- An expression containing at least one bundle reference defines a
+  **derived bundle** named `derived/<name>`. For every source that has
+  **all** of the expression's bundle-referenced local paths (the
+  intersection — this is the partial-bundle rule below), the bundle
+  references are rewritten by token span to that source's full paths and
+  the expression is evaluated with the existing engine. Each result
+  registers under that source with local path `derived/<name>` and
+  display path `<prefix>/derived/<name>`.
+- Because members are ordinary per-source signals sharing a local path,
+  everything downstream works with **zero new code paths**: the tree shows
+  a `derived/<name>` bundle (with the ƒx mark), highlights, XY/color
+  per-source pairing, favorites, export, and snapshots all apply
+  unchanged. Referencing `'derived/<name>'` in another expression
+  composes for free — it is just another bundle local path.
+- Full-path references mixed into a bundle expression bind the same
+  signal for every member (e.g. `'temperature' - 'run_01/temperature'`
+  plots each run's deviation from run 1).
+- Membership is **dynamic**: derived bundles re-expand when set
+  membership changes (after batch ingest or restore); newly loaded
+  sources gain members, and removing a source removes its member.
+- Creation reports partiality instead of failing: "created for 6 of 8
+  runs" plus which sources were skipped and which local path they lack.
+  Zero eligible sources is the only creation error.
+- Removing the derived bundle removes the definition and every member;
+  members are outputs and are not individually removable.
+- The session persists only the definition: `DerivedBundleState { name,
+  expr }` in a required `derived_bundles` array (session v16, rung
+  defaults `[]`). Per-member results are recomputed, never persisted.
+- Protocol v13 adds `create_derived_bundle` / `remove_derived_bundle`
+  with a result carrying created member summaries and skipped members;
+  the existing single-signal `create_derived` is unchanged.
+- Formula bar: dragging a bundle row inserts its quoted local path
+  (reusing `quoteSignalPath`/`insertSignalReference`); completions list
+  bundle local paths alongside full paths, labeled with a run count. No
+  other UI is added.
+
+### Partial-bundle rule (binding)
+
+Bundles legitimately contain different member counts (`temperature` in 7
+of 8 runs). Every operation that resolves a local path across sources
+must degrade gracefully, uniformly:
+
+1. Resolve **per source**; never bind one source's signal to another
+   source's operation (no cross-pairing, no cross-coloring, no
+   cross-evaluation).
+2. **Skip** sources that lack a required local path; never fail the whole
+   operation because membership is partial.
+3. Surface partiality as counts or muted states, never as errors: the
+   bundle badge (`7 runs`), the omitted XY trace, the uncolored trace,
+   the muted favorite chip, the derived-bundle skip report.
+4. Multi-input operations (derived bundles, bundle-vs-bundle XY) use the
+   **intersection** of eligible sources.
+
+This rule already governs plotting (available members), XY X resolution
+(trace omitted), the color channel (trace uncolored), highlights (stale
+entries ignored), and bundle favorites (muted chip); derived bundles and
+any future operation (export selection, statistics) must follow it.
 
 ### Drop routing (binding)
 
@@ -211,6 +342,23 @@ Workspace mutations enforce the one-highlight-per-local-path rule, clear
 entries when their series is removed, and preserve the state through session
 and snapshot round trips.
 
+**Session** bumps 14 → 15 (bundle favorites):
+
+- Add a required `favorite_bundles: string[]` to `Session` (bundle local
+  paths; `favorites` keeps full signal paths, unchanged).
+- The v14 → 15 rung defaults the array to `[]` — no other rewriting.
+- Stale entries are harmless by construction (a local path with no current
+  members renders muted), so no cleanup pass is needed.
+
+**Session** bumps 15 → 16 (derived bundles):
+
+- Add `DerivedBundleState { name: string, expr: string }` and a required
+  `derived_bundles: DerivedBundleState[]` to `Session`.
+- The v15 → 16 rung defaults the array to `[]`.
+- **Protocol** bumps 12 → 13: `create_derived_bundle` /
+  `remove_derived_bundle` request/response types (created member
+  summaries plus skipped members with their missing local paths).
+
 ## Deletions (binding checklist)
 
 The following are removed entirely; keeping any of it "for later" defeats
@@ -260,6 +408,29 @@ serve tree bundling, restore, and snapshot planning, not just ensembles.
   bundle to the color chip sets `color_signal` without adding series in any
   panel mode; per-source color pairing, the uncolored-trace rule, and
   local-path X/color axis labels.
+- Scale tests cover per-set bundle keying (two sets sharing a local path
+  yield two bundles under two set headers; one set yields no header),
+  nested local paths producing group rows with collapse, namespaced
+  collapse keys not colliding with source-prefix groups, and the sources
+  footer summary/expansion.
+- Bundle-favorite tests cover starring a bundle row, the v14 → 15 rung,
+  favorites-bar chips resolving current members (including the
+  zero-member muted state), and session/snapshot round trips.
+- Derived-bundle tests cover reference resolution precedence (full path
+  wins over local path), intersection eligibility with skip reporting,
+  mixed full-path + bundle references, span rewriting per member,
+  re-expansion after ingest, composition (`'derived/<name>'` as a bundle
+  reference), removal cascade, the v15 → 16 rung, and formula-bar
+  completions/drag insertion for bundles.
+- Partial-bundle audit tests assert the skip-never-fail rule across every
+  operation in one place: plot, XY X, color, highlights, favorites, and
+  derived bundles against a fixture where one source lacks the shared
+  local path.
+- Reserved-prefix tests: a derived bundle renders as a top-level bundle
+  row labeled by name (no `derived` group row anywhere in the output),
+  sorts by its label among sibling bundles, and an unsourced derived leaf
+  is likewise ungrouped; creation rejects derived bundle names containing
+  `/`.
 - Session tests cover the v13 → 14 rung: band panel expands to sorted
   member series, `member_filter` respected, missing members skipped,
   duplicates avoided, unresolvable `set_key` degrades gracefully.
