@@ -434,6 +434,14 @@ export class WorkspaceModel {
     return true;
   }
 
+  addSeriesBatch(panelId: string, paths: readonly string[]): boolean {
+    let added = false;
+    for (const path of paths) {
+      if (this.addSeries(panelId, path)) added = true;
+    }
+    return added;
+  }
+
   toggleSeriesVisible(panelId: string, path: string): void {
     const series = this.panel(panelId)?.series.find(
       (entry) => entry.path === path,

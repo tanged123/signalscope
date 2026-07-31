@@ -353,6 +353,26 @@ describe("WorkspaceModel", () => {
     expect(slots).toEqual([1, 2]);
   });
 
+  it("addSeriesBatch adds all new paths in one call and skips duplicates", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeries(panel.id, "run_01/alt");
+    const added = model.addSeriesBatch(panel.id, [
+      "run_01/alt",
+      "run_02/alt",
+      "run_03/alt",
+    ]);
+    expect(added).toBe(true);
+    const series = model.panel(panel.id)?.series ?? [];
+    expect(series.map((entry) => entry.path)).toEqual([
+      "run_01/alt",
+      "run_02/alt",
+      "run_03/alt",
+    ]);
+    expect(new Set(series.map((entry) => entry.color_slot)).size).toBe(3);
+    expect(model.addSeriesBatch(panel.id, ["run_02/alt"])).toBe(false);
+  });
+
   it("allocates slots past 8 instead of wrapping onto slot 1", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
