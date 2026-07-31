@@ -64,7 +64,7 @@ describe("BakedPlane.listSets", () => {
   it("derives bundle paths from baked signals and session membership", async () => {
     const session = {
       app: "signalscope",
-      schema_version: 13,
+      schema_version: 14,
       theme: "dark",
       linked_time: {
         t0: 0,
