@@ -373,6 +373,25 @@ describe("WorkspaceModel", () => {
     expect(model.addSeriesBatch(panel.id, ["run_02/alt"])).toBe(false);
   });
 
+  it("keeps at most one highlight per local path and toggles off", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeriesBatch(panel.id, ["run_01/alt", "run_02/alt", "run_01/gyro"]);
+    model.toggleHighlight(panel.id, "run_01/alt", "alt");
+    model.toggleHighlight(panel.id, "run_01/gyro", "gyro");
+    model.toggleHighlight(panel.id, "run_02/alt", "alt");
+    expect(model.panel(panel.id)?.highlighted_sources).toEqual([
+      { local_path: "gyro", path: "run_01/gyro" },
+      { local_path: "alt", path: "run_02/alt" },
+    ]);
+    model.toggleHighlight(panel.id, "run_02/alt", "alt");
+    expect(model.panel(panel.id)?.highlighted_sources).toEqual([
+      { local_path: "gyro", path: "run_01/gyro" },
+    ]);
+    model.toggleHighlight(panel.id, "not/plotted", "alt");
+    expect(model.panel(panel.id)?.highlighted_sources).toHaveLength(1);
+  });
+
   it("allocates slots past 8 instead of wrapping onto slot 1", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -539,6 +558,7 @@ describe("WorkspaceModel", () => {
     model.removeSeries(panel.id, "a/b");
     expect(model.panel(panel.id)?.series).toEqual([]);
     expect(model.panel(panel.id)?.annotations).toEqual([]);
+    expect(model.panel(panel.id)?.highlighted_sources).toEqual([]);
   });
 
   it("ignores a y range for an unknown panel", () => {

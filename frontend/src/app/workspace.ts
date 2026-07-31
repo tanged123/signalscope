@@ -449,6 +449,25 @@ export class WorkspaceModel {
     if (series !== undefined) series.visible = !series.visible;
   }
 
+  toggleHighlight(panelId: string, path: string, localPath: string): void {
+    const panel = this.panel(panelId);
+    if (
+      panel === undefined ||
+      !panel.series.some((series) => series.path === path)
+    ) {
+      return;
+    }
+    const current = panel.highlighted_sources.find(
+      (entry) => entry.local_path === localPath,
+    );
+    panel.highlighted_sources = panel.highlighted_sources.filter(
+      (entry) => entry.local_path !== localPath,
+    );
+    if (current?.path !== path) {
+      panel.highlighted_sources.push({ local_path: localPath, path });
+    }
+  }
+
   setPanelYRange(panelId: string, range: [number, number]): void {
     const panel = this.panel(panelId);
     if (panel !== undefined) panel.y_range = range;
@@ -546,6 +565,9 @@ export class WorkspaceModel {
     panel.series = panel.series.filter((series) => series.path !== path);
     panel.annotations = panel.annotations.filter(
       (annotation) => annotation.series_path !== path,
+    );
+    panel.highlighted_sources = panel.highlighted_sources.filter(
+      (entry) => entry.path !== path,
     );
   }
 
