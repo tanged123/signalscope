@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 14,
+  "schema_version": 15,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -23,6 +23,7 @@
     }
   ],
   "favorites": ["imu/vx"],
+  "favorite_bundles": ["imu/accel/x"],
   "derived": [
     {
       "path": "derived/speed",

@@ -54,7 +54,7 @@ describe("buildTreeRows", () => {
   it("collapsed bundles show one row with a count; non-bundled paths keep the tree", () => {
     const paths = ["run_01/alt", "run_02/alt", "run_01/solo", "misc/other"];
     const rows = buildTreeRows(paths, new Set(), "", {
-      setPrefixes: ["run_01", "run_02"],
+      sets: [{ key: "runs", label: "Runs", prefixes: ["run_01", "run_02"] }],
       expandedBundles: new Set<string>(),
     });
     const bundle = rows.find((row) => row.kind === "bundle");
@@ -73,8 +73,8 @@ describe("buildTreeRows", () => {
       new Set(),
       "",
       {
-        setPrefixes: ["run_01", "run_02"],
-        expandedBundles: new Set(["alt"]),
+        sets: [{ key: "runs", label: "Runs", prefixes: ["run_01", "run_02"] }],
+        expandedBundles: new Set(["runs//alt"]),
       },
     );
     const children = rows.filter(
@@ -90,18 +90,90 @@ describe("buildTreeRows", () => {
   it("search matches bundle paths and member labels", () => {
     const paths = ["run_01/alt", "run_02/alt", "run_01/solo", "misc/other"];
     const byBundle = buildTreeRows(paths, new Set(), "alt", {
-      setPrefixes: ["run_01", "run_02"],
+      sets: [{ key: "runs", label: "Runs", prefixes: ["run_01", "run_02"] }],
       expandedBundles: new Set<string>(),
     });
     expect(byBundle.some((row) => row.kind === "bundle")).toBe(true);
     const byMember = buildTreeRows(paths, new Set(), "run_02", {
-      setPrefixes: ["run_01", "run_02"],
-      expandedBundles: new Set(["alt"]),
+      sets: [{ key: "runs", label: "Runs", prefixes: ["run_01", "run_02"] }],
+      expandedBundles: new Set(["runs//alt"]),
     });
     const children = byMember.filter(
       (row) => row.kind === "leaf" && row.depth === 1,
     );
     expect(children.map((row) => row.path)).toEqual(["run_02/alt"]);
+  });
+
+  it("keys bundles per set and adds headers only when several sets have bundles", () => {
+    const sets = [
+      { key: "sA", label: "Campaign A", prefixes: ["a1", "a2"] },
+      { key: "sB", label: "Campaign B", prefixes: ["b1", "b2"] },
+    ];
+    const rows = buildTreeRows(
+      ["a1/temp", "a2/temp", "b1/temp", "b2/temp"],
+      new Set(),
+      "",
+      { sets, expandedBundles: new Set() },
+    );
+    const headers = rows.filter(
+      (row) => row.kind === "group" && row.path.startsWith("set:"),
+    );
+    expect(headers.map((row) => row.label)).toEqual([
+      "Campaign A",
+      "Campaign B",
+    ]);
+    const bundles = rows.filter((row) => row.kind === "bundle");
+    expect(bundles.map((row) => [row.setKey, row.runCount])).toEqual([
+      ["sA", 2],
+      ["sB", 2],
+    ]);
+
+    const single = buildTreeRows(["a1/temp", "a2/temp"], new Set(), "", {
+      sets: sets.slice(0, 1),
+      expandedBundles: new Set(),
+    });
+    expect(single.filter((row) => row.kind === "group")).toHaveLength(0);
+    expect(single[0]).toMatchObject({ kind: "bundle", depth: 0 });
+  });
+
+  it("nested local paths produce collapsible group rows", () => {
+    const sets = [{ key: "sA", label: "Campaign A", prefixes: ["a1", "a2"] }];
+    const paths = [
+      "a1/imu/accel/x",
+      "a2/imu/accel/x",
+      "a1/imu/accel/y",
+      "a2/imu/accel/y",
+    ];
+    const rows = buildTreeRows(paths, new Set(), "", {
+      sets,
+      expandedBundles: new Set(),
+    });
+    expect(rows.map((row) => [row.kind, row.label, row.depth])).toEqual([
+      ["group", "imu", 0],
+      ["group", "accel", 1],
+      ["bundle", "x", 2],
+      ["bundle", "y", 2],
+    ]);
+    const collapsed = buildTreeRows(paths, new Set(["sA//imu"]), "", {
+      sets,
+      expandedBundles: new Set(),
+    });
+    expect(collapsed).toHaveLength(1);
+  });
+
+  it("bundle group keys never collide with source-prefix groups", () => {
+    const rows = buildTreeRows(
+      ["a1/imu/accel/x", "a2/imu/accel/x", "imu/standalone"],
+      new Set(["sA//imu"]),
+      "",
+      {
+        sets: [{ key: "sA", label: "Campaign A", prefixes: ["a1", "a2"] }],
+        expandedBundles: new Set(),
+      },
+    );
+    expect(
+      rows.some((row) => row.kind === "leaf" && row.path === "imu/standalone"),
+    ).toBe(true);
   });
 });
 

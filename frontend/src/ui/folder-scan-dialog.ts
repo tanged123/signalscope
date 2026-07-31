@@ -9,7 +9,8 @@ export class FolderScanDialog {
   private readonly title: HTMLElement;
   private readonly formats: HTMLElement;
   private files: string[] = [];
-  private scan: ((recursive: boolean) => Promise<ScanSourcesResponse>) | null = null;
+  private scan: ((recursive: boolean) => Promise<ScanSourcesResponse>) | null =
+    null;
   private onLoad: ((files: string[]) => void) | null = null;
   private token = 0;
   private returnFocus: HTMLElement | null = null;
@@ -41,9 +42,12 @@ export class FolderScanDialog {
       this.onLoad?.(this.files);
       this.close();
     });
-    required(this.element, ".folder-scan-cancel").addEventListener("click", () => {
-      this.close();
-    });
+    required(this.element, ".folder-scan-cancel").addEventListener(
+      "click",
+      () => {
+        this.close();
+      },
+    );
     this.element.addEventListener("pointerdown", (event) => {
       if (event.target === this.element) this.close();
     });
@@ -54,7 +58,10 @@ export class FolderScanDialog {
     scan: (recursive: boolean) => Promise<ScanSourcesResponse>,
     onLoad: (files: string[]) => void,
   ): void {
-    this.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.returnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     this.scan = scan;
     this.onLoad = onLoad;
     this.files = [];
@@ -86,11 +93,15 @@ export class FolderScanDialog {
         if (token !== this.token || this.element.hidden) return;
         this.files = result.files;
         const count = result.files.length;
-        this.details.textContent = count === 0
-          ? "No loadable files found."
-          : `${count.toLocaleString()} loadable file${count === 1 ? "" : "s"} · ${formatBytes(Number(result.total_bytes))}`;
+        this.details.textContent =
+          count === 0
+            ? "No loadable files found."
+            : `${count.toLocaleString()} loadable file${count === 1 ? "" : "s"} · ${formatBytes(Number(result.total_bytes))}`;
         this.formats.textContent = result.format_counts
-          .map(({ label, count: formatCount }) => `${label}: ${formatCount.toLocaleString()}`)
+          .map(
+            ({ label, count: formatCount }) =>
+              `${label}: ${formatCount.toLocaleString()}`,
+          )
           .join(" · ");
         this.load.disabled = count === 0;
       },

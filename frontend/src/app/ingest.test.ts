@@ -15,7 +15,8 @@ function fakePort(statuses: BatchStatus[]): FakePort {
     released,
     pickSources: () => Promise.resolve([]),
     pickSourceFolder: () => Promise.resolve(null),
-    scanSources: () => Promise.resolve({ files: [], total_bytes: "0", format_counts: [] }),
+    scanSources: () =>
+      Promise.resolve({ files: [], total_bytes: "0", format_counts: [] }),
     startBatch: () => Promise.resolve("1"),
     batchStatus: () => {
       const status = queue.shift();

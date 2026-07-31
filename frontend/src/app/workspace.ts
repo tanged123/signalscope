@@ -40,6 +40,7 @@ export function emptySession(): Session {
     active_tab_id: "workspace-1",
     tabs: [createWorkspaceTab(1)],
     favorites: [],
+    favorite_bundles: [],
     derived: [],
     sources: [],
     source_sets: [],
@@ -200,6 +201,10 @@ export class WorkspaceModel {
 
   favorites(): readonly string[] {
     return this.session.favorites;
+  }
+
+  favoriteBundles(): readonly string[] {
+    return this.session.favorite_bundles;
   }
 
   derived(): readonly DerivedSignal[] {
@@ -617,6 +622,15 @@ export class WorkspaceModel {
       this.session.favorites.push(path);
     } else {
       this.session.favorites.splice(index, 1);
+    }
+  }
+
+  toggleFavoriteBundle(localPath: string): void {
+    const index = this.session.favorite_bundles.indexOf(localPath);
+    if (index === -1) {
+      this.session.favorite_bundles.push(localPath);
+    } else {
+      this.session.favorite_bundles.splice(index, 1);
     }
   }
 

@@ -69,7 +69,11 @@ describe("renderBatchProgress", () => {
     expect(progress.textContent).toContain("run_07.csv");
     expect(progress.querySelector(".ingest-cancel")).not.toBeNull();
 
-    renderBatchProgress(progress, { ...running, state: "done", fraction: 1 }, () => undefined);
+    renderBatchProgress(
+      progress,
+      { ...running, state: "done", fraction: 1 },
+      () => undefined,
+    );
     expect(progress.querySelector(".ingest-bar")).toBeNull();
     expect(progress.querySelector(".ingest-cancel")).toBeNull();
   });

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 14;
+pub const SESSION_SCHEMA_VERSION: u32 = 15;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -243,6 +243,7 @@ pub struct Session {
     pub active_tab_id: String,
     pub tabs: Vec<WorkspaceTab>,
     pub favorites: Vec<String>,
+    pub favorite_bundles: Vec<String>,
     pub derived: Vec<DerivedSignal>,
     pub sources: Vec<SourceRecord>,
     pub source_sets: Vec<SourceSetState>,

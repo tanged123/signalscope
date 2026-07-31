@@ -209,6 +209,7 @@ function isSession(value: JsonObject): value is JsonObject & Session {
     Array.isArray(value.tabs) &&
     value.tabs.every(isTab) &&
     isStringArray(value.favorites) &&
+    isStringArray(value.favorite_bundles) &&
     Array.isArray(value.derived) &&
     value.derived.every(
       (item) =>

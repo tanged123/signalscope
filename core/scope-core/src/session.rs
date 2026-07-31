@@ -32,6 +32,7 @@ impl Default for Session {
                 layout: Vec::new(),
             }],
             favorites: Vec::new(),
+            favorite_bundles: Vec::new(),
             derived: Vec::new(),
             sources: Vec::new(),
             source_sets: Vec::new(),
@@ -211,6 +212,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate_v13_ensembles(&mut value);
             value["schema_version"] = serde_json::json!(14);
             migrate(14, value)
+        }
+        14 => {
+            value["favorite_bundles"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(15);
+            migrate(15, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
@@ -483,6 +489,7 @@ mod tests {
             }],
             sources: vec![source("/data/run.csv")],
             favorites: vec!["imu/vx".into()],
+            favorite_bundles: vec!["imu/accel/x".into()],
             ..Session::default()
         };
         let current = format!(
@@ -727,6 +734,18 @@ mod tests {
             restored.source_sets[0].members[0].missing,
             vec!["imu/ay".to_owned()]
         );
+    }
+
+    #[test]
+    fn v14_sessions_gain_empty_bundle_favorites() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(14);
+        value
+            .as_object_mut()
+            .expect("session object")
+            .remove("favorite_bundles");
+        let session = from_json(&value.to_string()).expect("v14 migrates");
+        assert!(session.favorite_bundles.is_empty());
     }
 
     #[test]

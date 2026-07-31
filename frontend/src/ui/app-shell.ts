@@ -31,6 +31,7 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
+import { virtualSlice } from "../app/tree-model";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
 import {
@@ -48,6 +49,7 @@ import {
   type SampleSeries,
   type SetSummary,
   type SignalSummary,
+  type SourceSummary,
   type TileResponse,
 } from "../generated/protocol";
 import type {
@@ -98,6 +100,7 @@ export class AppShell {
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
   private folderScanDialog: FolderScanDialog | null = null;
+  private sourcesExpanded = false;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -353,6 +356,11 @@ export class AppShell {
           this.workspace.toggleFavorite(path);
           this.commitHistory();
           this.tree?.setFavorites(this.workspace.favorites());
+        },
+        onToggleFavoriteBundle: (localPath) => {
+          this.workspace.toggleFavoriteBundle(localPath);
+          this.commitHistory();
+          this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
         },
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
@@ -1293,6 +1301,7 @@ export class AppShell {
         this.workspace.linkedTime().linked,
       );
       this.tree?.setFavorites(this.workspace.favorites());
+      this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     } finally {
       this.restoringHistory = false;
     }
@@ -1851,24 +1860,35 @@ export class AppShell {
       this.signals.map((summary) => [summary.path, summary]),
     );
     this.tree?.setSignals(this.signals.map((summary) => summary.path));
-    const memberKeys = new Set(
-      this.workspace
-        .snapshot()
-        .source_sets.flatMap((set) =>
-          set.members.map((member) => member.source_key),
-        ),
-    );
-    this.tree?.setSetPrefixes(
-      this.signals
-        .filter((signal) => memberKeys.has(signal.source_key))
-        .map((signal) =>
+    const prefixesBySource = new Map<string, string>();
+    for (const signal of this.signals) {
+      if (!prefixesBySource.has(signal.source_key)) {
+        prefixesBySource.set(
+          signal.source_key,
           signal.path.endsWith(`/${signal.local_path}`)
             ? signal.path.slice(0, -signal.local_path.length - 1)
             : signal.path,
-        ),
+        );
+      }
+    }
+    this.tree?.setSets(
+      this.sets
+        .map((set) => ({
+          key: set.set_key,
+          label: set.label,
+          prefixes: [
+            ...new Set(
+              set.members
+                .map((member) => prefixesBySource.get(member.source_key))
+                .filter((prefix): prefix is string => prefix !== undefined),
+            ),
+          ],
+        }))
+        .filter((set) => set.prefixes.length > 0),
     );
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.tree?.setFavorites(this.workspace.favorites());
+    this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     this.updateStatus();
   }
 
@@ -2317,22 +2337,12 @@ export class AppShell {
       firstName === ""
         ? ""
         : `${firstName} — ${this.signals.length.toLocaleString()} signals`;
-    const rows = required(this.root, ".source-rows");
-    rows.replaceChildren(
-      ...sources.map((source) => {
-        const row = document.createElement("div");
-        row.className = "source-row";
-        const name = document.createElement("span");
-        name.className = "signal-path";
-        name.textContent = basename(source.path);
-        name.title = source.path;
-        const points = document.createElement("span");
-        points.className = "source-points";
-        points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
-        row.append(name, points);
-        return row;
-      }),
-    );
+    const rows = required<HTMLElement>(this.root, ".source-rows");
+    const toggleSources = (): void => {
+      this.sourcesExpanded = !this.sourcesExpanded;
+      renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
+    };
+    renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
   }
 
   private toggleLinked(): void {
@@ -2500,10 +2510,12 @@ export function renderBatchProgress(
   if (status.state === "running" && status.current_paths.length > 0) {
     const current = document.createElement("span");
     const [path] = status.current_paths;
-    current.className = "ingest-current";
-    current.textContent = `${basename(path)}${status.current_paths.length > 1 ? ` +${String(status.current_paths.length - 1)}` : ""}`;
-    current.title = path;
-    children.push(current);
+    if (path !== undefined) {
+      current.className = "ingest-current";
+      current.textContent = `${basename(path)}${status.current_paths.length > 1 ? ` +${String(status.current_paths.length - 1)}` : ""}`;
+      current.title = path;
+      children.push(current);
+    }
   }
   if (status.state === "running") {
     const button = document.createElement("button");
@@ -2528,6 +2540,74 @@ export function renderBatchProgress(
     children.push(failures);
   }
   progress.replaceChildren(...children);
+}
+
+export function renderSourceRows(
+  container: HTMLElement,
+  sources: readonly SourceSummary[],
+  expanded: boolean,
+  onToggle: () => void,
+): void {
+  const previousScrollTop =
+    container.querySelector<HTMLElement>(".source-scroll")?.scrollTop ?? 0;
+  const totalPoints = sources.reduce(
+    (total, source) => total + Number(source.point_count),
+    0,
+  );
+  if (sources.length <= 8) {
+    container.replaceChildren(...sources.map(sourceRow));
+    return;
+  }
+  const summary = document.createElement("button");
+  summary.type = "button";
+  summary.className = "source-summary";
+  summary.ariaExpanded = String(expanded);
+  summary.textContent = `${String(sources.length)} sources · ${totalPoints.toLocaleString()} pts ${expanded ? "▾" : "▸"}`;
+  summary.addEventListener("click", onToggle);
+  const children: HTMLElement[] = [summary];
+  if (expanded) {
+    const scroll = document.createElement("div");
+    scroll.className = "source-scroll";
+    const rowHeight = 22;
+    const slice = virtualSlice(
+      sources.length,
+      previousScrollTop,
+      scroll.clientHeight > 0 ? scroll.clientHeight : 176,
+      rowHeight,
+    );
+    const spacer = document.createElement("div");
+    spacer.className = "source-spacer";
+    spacer.style.height = `${String(slice.totalHeight)}px`;
+    const windowElement = document.createElement("div");
+    windowElement.className = "source-window";
+    windowElement.style.transform = `translateY(${String(slice.topPadding)}px)`;
+    windowElement.append(
+      ...sources.slice(slice.start, slice.end).map(sourceRow),
+    );
+    spacer.append(windowElement);
+    scroll.append(spacer);
+    scroll.addEventListener("scroll", () => {
+      renderSourceRows(container, sources, true, onToggle);
+      const next = container.querySelector<HTMLElement>(".source-scroll");
+      if (next !== null) next.scrollTop = scroll.scrollTop;
+    });
+    children.push(scroll);
+  }
+  container.replaceChildren(...children);
+}
+
+function sourceRow(source: SourceSummary): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "source-row";
+  const name = document.createElement("span");
+  name.className = "signal-path";
+  name.textContent = basename(source.path);
+  name.title = source.path;
+  const points = document.createElement("span");
+  points.className = "source-points";
+  points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
+  row.append(name, points);
+  return row;
 }
 
 /** Explains why a listed command cannot run, or nothing when it can. */

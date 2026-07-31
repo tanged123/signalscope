@@ -34,14 +34,13 @@ use scope_protocol::{
     BatchState, BatchStatus, CreateSetRequest, DerivedRequest, Envelope, ExportEstimate,
     ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange,
     ExportSelection, ExportWriteRequest, FileState, FormatCount, FormatDescriptor,
-    IngestBatchRequest,
-    LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
+    IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveSignalRequest,
     RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
     SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
     SaveSessionRequest, ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode,
-    SetMemberSummary, SetOriginKind, SetSummary,
-    SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit, SignalSummary, SignalTile,
-    SourceSummary, TileRequest, TileResponse, UpdateSetMembersRequest,
+    SetMemberSummary, SetOriginKind, SetSummary, SetTimeAlignmentRequest, SetTimeDomainSummary,
+    SetTimeUnit, SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    UpdateSetMembersRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -1720,12 +1719,18 @@ mod tests {
         .unwrap()
         .open()
         .unwrap();
-        assert_eq!(flat.files, vec![dir.path().join("b.csv").display().to_string()]);
+        assert_eq!(
+            flat.files,
+            vec![dir.path().join("b.csv").display().to_string()]
+        );
         assert_eq!(flat.total_bytes, 5);
-        assert_eq!(flat.format_counts, vec![FormatCount {
-            label: "Delimited text (CSV, TSV, TXT, DAT)".into(),
-            count: 1,
-        }]);
+        assert_eq!(
+            flat.format_counts,
+            vec![FormatCount {
+                label: "Delimited text (CSV, TSV, TXT, DAT)".into(),
+                count: 1,
+            }]
+        );
 
         let recursive = scan_sources(Envelope::new(ScanSourcesRequest {
             path: dir.path().display().to_string(),

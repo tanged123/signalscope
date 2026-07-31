@@ -644,6 +644,14 @@ describe("WorkspaceModel", () => {
     expect([...model.favorites()]).toEqual(["a/two"]);
   });
 
+  it("toggles bundle favorites by local path", () => {
+    const model = new WorkspaceModel();
+    model.toggleFavoriteBundle("imu/accel/x");
+    expect(model.favoriteBundles()).toEqual(["imu/accel/x"]);
+    model.toggleFavoriteBundle("imu/accel/x");
+    expect(model.favoriteBundles()).toEqual([]);
+  });
+
   it("never reuses an id already present in a loaded session", () => {
     const session = emptySession();
     const tab = session.tabs[0];

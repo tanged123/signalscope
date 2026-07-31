@@ -17,21 +17,23 @@ describe("FolderScanDialog", () => {
       "/data/runs",
       (recursive) => {
         scans.push(recursive);
-        return Promise.resolve(recursive
-          ? {
-              files: ["a.csv", "sub/b.csv"],
-              total_bytes: "2048",
-              format_counts: [
-                { label: "Delimited text (CSV, TSV, TXT, DAT)", count: 2 },
-              ],
-            }
-          : {
-              files: ["a.csv"],
-              total_bytes: "1024",
-              format_counts: [
-                { label: "Delimited text (CSV, TSV, TXT, DAT)", count: 1 },
-              ],
-            });
+        return Promise.resolve(
+          recursive
+            ? {
+                files: ["a.csv", "sub/b.csv"],
+                total_bytes: "2048",
+                format_counts: [
+                  { label: "Delimited text (CSV, TSV, TXT, DAT)", count: 2 },
+                ],
+              }
+            : {
+                files: ["a.csv"],
+                total_bytes: "1024",
+                format_counts: [
+                  { label: "Delimited text (CSV, TSV, TXT, DAT)", count: 1 },
+                ],
+              },
+        );
       },
       (files) => loaded.push(files),
     );
@@ -50,7 +52,9 @@ describe("FolderScanDialog", () => {
 
     document.querySelector<HTMLButtonElement>(".folder-scan-load")?.click();
     expect(loaded).toEqual([["a.csv"]]);
-    expect(document.querySelector(".folder-scan-overlay")?.hasAttribute("hidden")).toBe(true);
+    expect(
+      document.querySelector(".folder-scan-overlay")?.hasAttribute("hidden"),
+    ).toBe(true);
   });
 
   it("disables loading when no files are found", async () => {

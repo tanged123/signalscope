@@ -101,7 +101,10 @@ impl BatchProgress {
                 entries: paths
                     .into_iter()
                     .map(|path| FileEntry {
-                        weight: fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(1).max(1),
+                        weight: fs::metadata(&path)
+                            .map(|metadata| metadata.len())
+                            .unwrap_or(1)
+                            .max(1),
                         path,
                         state: FileState::Pending,
                         error: None,
@@ -775,10 +778,7 @@ mod tests {
         batch.started(2);
         batch.started(3);
 
-        assert_eq!(
-            batch.status().current_paths,
-            paths(3),
-        );
+        assert_eq!(batch.status().current_paths, paths(3),);
         for index in 0..4 {
             batch.succeeded(index);
         }

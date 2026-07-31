@@ -1520,6 +1520,22 @@ button {
   color: var(--status-error);
 }
 
+.source-summary {
+  display: block;
+  width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  font: 0.7692rem var(--font-mono);
+  text-align: left;
+}
+
+.source-scroll {
+  max-height: 176px;
+  overflow: auto;
+}
+
 .folder-scan-overlay {
   position: fixed;
   z-index: 30;

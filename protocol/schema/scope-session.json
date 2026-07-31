@@ -1,5 +1,5 @@
 {
-  "schema_version": 14,
+  "schema_version": 15,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -181,6 +181,7 @@
         "active_tab_id": "string",
         "tabs": "WorkspaceTab[]",
         "favorites": "string[]",
+        "favorite_bundles": "string[]",
         "derived": "DerivedSignal[]",
         "sources": "SourceRecord[]",
         "source_sets": "SourceSetState[]"

@@ -672,7 +672,7 @@ function createDemoManifest(): BakedManifest {
   return seal({
     session_json: JSON.stringify({
       app: "signalscope",
-      schema_version: 14,
+      schema_version: 15,
       theme: "dark",
       linked_time: {
         t0: 0,
@@ -695,6 +695,7 @@ function createDemoManifest(): BakedManifest {
         },
       ],
       favorites: [],
+      favorite_bundles: [],
       derived: [],
       sources: [],
       source_sets: [],

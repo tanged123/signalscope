@@ -17,10 +17,18 @@ export interface TreeBundle {
   kind: "bundle";
   path: string;
   label: string;
-  depth: 0;
+  setKey: string;
+  bundleKey: string;
+  depth: number;
   runCount: number;
   memberPaths: string[];
   expanded: boolean;
+}
+
+export interface TreeSet {
+  key: string;
+  label: string;
+  prefixes: readonly string[];
 }
 
 export type TreeRow = TreeLeaf | TreeGroup | TreeBundle;
@@ -30,61 +38,118 @@ export function buildTreeRows(
   collapsed: ReadonlySet<string>,
   filter: string,
   options?: {
-    setPrefixes: readonly string[];
+    sets: readonly TreeSet[];
     expandedBundles: ReadonlySet<string>;
   },
 ): TreeRow[] {
   const query = filter.trim().toLowerCase();
-  if (options !== undefined && options.setPrefixes.length > 0) {
-    const grouped = new Map<string, string[]>();
+  if (options !== undefined && options.sets.length > 0) {
+    const prefixToSet = new Map<string, (typeof options.sets)[number]>();
+    for (const set of options.sets) {
+      for (const prefix of set.prefixes) {
+        if (!prefixToSet.has(prefix)) prefixToSet.set(prefix, set);
+      }
+    }
+    const grouped = new Map<string, Map<string, string[]>>();
     const rest: string[] = [];
     for (const path of paths) {
-      const prefix = options.setPrefixes.find((item) =>
+      const prefix = [...prefixToSet.keys()].find((item) =>
         path.startsWith(`${item}/`),
       );
-      if (prefix === undefined) {
+      const set = prefix === undefined ? undefined : prefixToSet.get(prefix);
+      if (prefix === undefined || set === undefined) {
         rest.push(path);
         continue;
       }
       const localPath = path.slice(prefix.length + 1);
-      const members = grouped.get(localPath) ?? [];
+      const setGroups = grouped.get(set.key) ?? new Map<string, string[]>();
+      const members = setGroups.get(localPath) ?? [];
       members.push(path);
-      grouped.set(localPath, members);
+      setGroups.set(localPath, members);
+      grouped.set(set.key, setGroups);
     }
     const rows: TreeRow[] = [];
-    for (const [localPath, memberPaths] of [...grouped].sort(
-      ([left], [right]) => left.localeCompare(right),
-    )) {
-      if (memberPaths.length < 2) {
-        rest.push(...memberPaths);
-        continue;
+    const bundleSets: TreeSet[] = [];
+    for (const set of options.sets) {
+      const setGroups = grouped.get(set.key);
+      if (setGroups === undefined) continue;
+      for (const [, members] of setGroups) {
+        if (members.length < 2) rest.push(...members);
       }
-      const bundleMatches =
-        query === "" || localPath.toLowerCase().includes(query);
-      const matchingMembers = bundleMatches
-        ? memberPaths
-        : memberPaths.filter((path) => path.toLowerCase().includes(query));
-      if (!bundleMatches && matchingMembers.length === 0) continue;
-      const sorted = [...memberPaths].sort();
-      const expanded = options.expandedBundles.has(localPath);
-      rows.push({
-        kind: "bundle",
-        path: localPath,
-        label: localPath,
-        depth: 0,
-        runCount: sorted.length,
-        memberPaths: sorted,
-        expanded,
-      });
-      if (expanded) {
-        for (const member of [...matchingMembers].sort()) {
-          rows.push({
-            kind: "leaf",
-            path: member,
-            label: member.slice(0, member.length - localPath.length - 1),
-            depth: 1,
-          });
+      let hasBundle = false;
+      for (const [, members] of setGroups) {
+        if (members.length >= 2) {
+          hasBundle = true;
+          break;
         }
+      }
+      if (hasBundle) bundleSets.push(set);
+    }
+    const multi = bundleSets.length > 1;
+    for (const set of bundleSets) {
+      const setGroups = grouped.get(set.key);
+      if (setGroups === undefined) continue;
+      const setCollapsed = multi && collapsed.has(`set:${set.key}`);
+      const base = multi ? 1 : 0;
+      if (multi) {
+        rows.push({
+          kind: "group",
+          path: `set:${set.key}`,
+          label: set.label,
+          depth: 0,
+          expanded: !setCollapsed,
+        });
+      }
+      if (setCollapsed) continue;
+      const emittedGroups = new Set<string>();
+
+      for (const [localPath, memberPaths] of [...setGroups].sort(
+        ([left], [right]) => left.localeCompare(right),
+      )) {
+        if (memberPaths.length < 2) continue;
+        const sorted = [...memberPaths].sort();
+        const bundleMatches =
+          query === "" || localPath.toLowerCase().includes(query);
+        const matchingMembers = bundleMatches
+          ? sorted
+          : sorted.filter((path) => path.toLowerCase().includes(query));
+        if (!bundleMatches && matchingMembers.length === 0) continue;
+        const bundleKey = `${set.key}//${localPath}`;
+        const expanded = options.expandedBundles.has(bundleKey);
+        if (query !== "") {
+          rows.push({
+            kind: "bundle",
+            path: localPath,
+            label: localPath,
+            setKey: set.key,
+            bundleKey,
+            depth: base,
+            runCount: sorted.length,
+            memberPaths: sorted,
+            expanded,
+          });
+          if (expanded) {
+            for (const member of matchingMembers) {
+              rows.push({
+                kind: "leaf",
+                path: member,
+                label: member.slice(0, member.length - localPath.length - 1),
+                depth: base + 1,
+              });
+            }
+          }
+          continue;
+        }
+        appendBundleTree(
+          rows,
+          localPath,
+          sorted,
+          set.key,
+          base,
+          collapsed,
+          options.expandedBundles,
+          emittedGroups,
+        );
       }
     }
     return [...rows, ...buildTreeRows(rest.sort(), collapsed, filter)];
@@ -126,6 +191,60 @@ export function buildTreeRows(
     }
   }
   return rows;
+}
+
+function appendBundleTree(
+  rows: TreeRow[],
+  localPath: string,
+  memberPaths: string[],
+  setKey: string,
+  base: number,
+  collapsed: ReadonlySet<string>,
+  expandedBundles: ReadonlySet<string>,
+  emitted: Set<string>,
+): void {
+  const segments = localPath.split("/");
+  let prefix = "";
+  let hidden = false;
+  for (let depth = 0; depth < segments.length - 1; depth += 1) {
+    const segment = segments[depth] ?? "";
+    prefix = prefix === "" ? segment : `${prefix}/${segment}`;
+    const key = `${setKey}//${prefix}`;
+    if (!hidden && !emitted.has(key)) {
+      rows.push({
+        kind: "group",
+        path: key,
+        label: segment,
+        depth: base + depth,
+        expanded: !collapsed.has(key),
+      });
+      emitted.add(key);
+    }
+    if (collapsed.has(key)) hidden = true;
+  }
+  if (hidden) return;
+  const bundleKey = `${setKey}//${localPath}`;
+  const expanded = expandedBundles.has(bundleKey);
+  rows.push({
+    kind: "bundle",
+    path: localPath,
+    label: segments[segments.length - 1] ?? localPath,
+    setKey,
+    bundleKey,
+    depth: base + segments.length - 1,
+    runCount: memberPaths.length,
+    memberPaths,
+    expanded,
+  });
+  if (!expanded) return;
+  for (const member of memberPaths) {
+    rows.push({
+      kind: "leaf",
+      path: member,
+      label: member.slice(0, member.length - localPath.length - 1),
+      depth: base + segments.length,
+    });
+  }
 }
 
 export interface VirtualSlice {
