@@ -13,7 +13,7 @@ function panel(id: string, title: string): PanelState {
     color_signal: null,
     color_by_time: false,
     series: [],
-    ensemble: null,
+    highlighted_sources: [],
     y_range: null,
     x_range: null,
     x_label: null,

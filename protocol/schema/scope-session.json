@@ -1,5 +1,5 @@
 {
-  "schema_version": 13,
+  "schema_version": 14,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -58,12 +58,11 @@
         "label": "string"
       }
     },
-    "EnsembleSeriesState": {
+    "HighlightedSourceState": {
       "kind": "object",
       "fields": {
-        "set_key": "string",
         "local_path": "string",
-        "member_filter": "string[]"
+        "path": "string"
       }
     },
     "PanelState": {
@@ -77,7 +76,7 @@
         "color_signal": "string?",
         "color_by_time": "bool",
         "series": "SeriesState[]",
-        "ensemble": "EnsembleSeriesState?",
+        "highlighted_sources": "HighlightedSourceState[]",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
         "x_label": "string?",

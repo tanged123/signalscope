@@ -207,6 +207,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(12);
             migrate(12, value)
         }
+        13 => {
+            migrate_v13_ensembles(&mut value);
+            value["schema_version"] = serde_json::json!(14);
+            migrate(14, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -258,6 +263,113 @@ fn migrate_v10_sources(value: &mut serde_json::Value) {
         object.remove("source_paths");
         object.insert("sources".into(), serde_json::Value::Array(records));
     }
+}
+
+fn migrate_v13_ensembles(value: &mut serde_json::Value) {
+    let prefixes: std::collections::BTreeMap<String, String> = value
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| {
+                    Some((
+                        source.get("key")?.as_str()?.to_owned(),
+                        source.get("prefix")?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let sets = value
+        .get("source_sets")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for_each_panel(value, |panel| {
+        let ensemble = panel.remove("ensemble").unwrap_or(serde_json::Value::Null);
+        panel.insert("highlighted_sources".into(), serde_json::json!([]));
+        let Some(ensemble) = ensemble.as_object() else {
+            return;
+        };
+        let (Some(set_key), Some(local_path)) = (
+            ensemble.get("set_key").and_then(serde_json::Value::as_str),
+            ensemble
+                .get("local_path")
+                .and_then(serde_json::Value::as_str),
+        ) else {
+            return;
+        };
+        let member_filter: Vec<&str> = ensemble
+            .get("member_filter")
+            .and_then(serde_json::Value::as_array)
+            .map(|keys| keys.iter().filter_map(serde_json::Value::as_str).collect())
+            .unwrap_or_default();
+        let Some(set) = sets
+            .iter()
+            .find(|set| set.get("key").and_then(serde_json::Value::as_str) == Some(set_key))
+        else {
+            return;
+        };
+        let mut member_paths: Vec<String> = set
+            .get("members")
+            .and_then(serde_json::Value::as_array)
+            .map(|members| {
+                members
+                    .iter()
+                    .filter_map(|member| {
+                        let source_key = member.get("source_key")?.as_str()?;
+                        if !member_filter.is_empty() && !member_filter.contains(&source_key) {
+                            return None;
+                        }
+                        let missing = member.get("missing")?.as_array()?;
+                        if missing
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .any(|path| path == local_path)
+                        {
+                            return None;
+                        }
+                        let prefix = prefixes.get(source_key)?;
+                        Some(format!("{prefix}/{local_path}"))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        member_paths.sort();
+        let Some(series) = panel
+            .get_mut("series")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            return;
+        };
+        let existing: std::collections::BTreeSet<String> = series
+            .iter()
+            .filter_map(|entry| entry.get("path").and_then(serde_json::Value::as_str))
+            .map(str::to_owned)
+            .collect();
+        let mut used: std::collections::BTreeSet<u64> = series
+            .iter()
+            .filter_map(|entry| entry.get("color_slot").and_then(serde_json::Value::as_u64))
+            .collect();
+        for path in member_paths {
+            if existing.contains(&path) {
+                continue;
+            }
+            let mut slot = 1;
+            while used.contains(&slot) {
+                slot += 1;
+            }
+            used.insert(slot);
+            series.push(serde_json::json!({
+                "path": path,
+                "color_slot": slot,
+                "dash": "solid",
+                "width": 1.4,
+                "visible": true
+            }));
+        }
+    });
 }
 
 #[derive(Debug, Error)]
@@ -451,11 +563,7 @@ mod tests {
                         width: 1.5,
                         visible: true,
                     }],
-                    ensemble: Some(EnsembleSeriesState {
-                        set_key: "set-a".into(),
-                        local_path: "velocity_body/x".into(),
-                        member_filter: vec!["run-a".into(), "run-b".into()],
-                    }),
+                    highlighted_sources: Vec::new(),
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -478,6 +586,76 @@ mod tests {
 
         let json = serde_json::to_string(&session).unwrap();
         assert_eq!(from_json(&json).unwrap(), session);
+    }
+
+    #[test]
+    fn v13_band_panels_expand_to_member_series() {
+        let json = serde_json::json!({
+            "app": "signalscope", "schema_version": 13,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true, "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "tab-1",
+            "tabs": [{
+                "id": "tab-1", "title": "Tab", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [],
+                "panels": [{
+                    "id": "p1", "title": "Band", "mode": "time", "axis_style": "gutter",
+                    "x_signal": null, "color_signal": null, "color_by_time": false,
+                    "series": [{"path": "run_01/alt", "color_slot": 1, "dash": "solid", "width": 1.4, "visible": true}],
+                    "ensemble": {"set_key": "set-1", "local_path": "alt", "member_filter": []},
+                    "y_range": null, "x_range": null, "x_label": null, "y_label": null,
+                    "c_label": null, "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }],
+            "favorites": [], "derived": [],
+            "sources": [
+                {"key": "k1", "path": "/data/run_01.csv", "prefix": "run_01", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false},
+                {"key": "k2", "path": "/data/run_02.csv", "prefix": "run_02", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false},
+                {"key": "k3", "path": "/data/run_03.csv", "prefix": "run_03", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false}
+            ],
+            "source_sets": [{
+                "key": "set-1", "label": "Runs", "generation": "1",
+                "time_domain": {"unit": "seconds", "origin": "relative", "alignment_origin": 0.0},
+                "members": [
+                    {"source_key": "k1", "missing": [], "scale": 1.0, "offset": 0.0},
+                    {"source_key": "k2", "missing": [], "scale": 1.0, "offset": 0.0},
+                    {"source_key": "k3", "missing": ["alt"], "scale": 1.0, "offset": 0.0}
+                ]
+            }]
+        });
+        let session = from_json(&json.to_string()).expect("v13 migrates");
+        let panel = &session.tabs[0].panels[0];
+        let paths: Vec<&str> = panel
+            .series
+            .iter()
+            .map(|series| series.path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["run_01/alt", "run_02/alt"]);
+        assert_eq!(panel.series[1].color_slot, 2);
+        assert!(panel.highlighted_sources.is_empty());
+    }
+
+    #[test]
+    fn v13_band_with_unknown_set_keeps_explicit_series() {
+        let json = serde_json::json!({
+            "app": "signalscope", "schema_version": 13, "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true, "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1", "favorites": [], "derived": [], "sources": [],
+            "source_sets": [],
+            "tabs": [{"id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null, "layout": [], "panels": [{
+                    "id": "p1", "title": "Band", "mode": "time", "axis_style": "gutter",
+                    "x_signal": null, "color_signal": null, "color_by_time": false,
+                    "series": [{"path": "run_01/alt", "color_slot": 1, "dash": "solid", "width": 1.4, "visible": true}],
+                    "ensemble": {"set_key": "missing", "local_path": "alt", "member_filter": []},
+                    "y_range": null, "x_range": null, "x_label": null, "y_label": null,
+                    "c_label": null, "time_window": null, "annotations": [], "show_stats": false
+                }]}]
+        });
+        let session = from_json(&json.to_string()).expect("v13 migrates");
+        assert_eq!(session.tabs[0].panels[0].series.len(), 1);
+        assert!(session.tabs[0].panels[0].highlighted_sources.is_empty());
     }
 
     #[test]

@@ -439,7 +439,7 @@ mod tests {
             color_signal: None,
             color_by_time: false,
             series: paths.iter().map(|path| series(path)).collect(),
-            ensemble: None,
+            highlighted_sources: Vec::new(),
             y_range: None,
             x_range: None,
             x_label: None,
@@ -903,7 +903,21 @@ mod tests {
 
     #[test]
     fn export_selection_filters_all_range_before_level_planning() {
-        let (store, pyramids) = store_with(&[("a", 10), ("b", 10)]);
+        let mut store = SignalStore::new();
+        let mut pyramids = BTreeMap::new();
+        for key in [1_u8, 2] {
+            let source = store
+                .register_source(
+                    format!("run-{key}.csv"),
+                    SourceKey(uuid::Uuid::from_bytes([key; 16])),
+                    format!("run-{key}"),
+                )
+                .unwrap();
+            let signal = store
+                .insert_signal(source, "a", None, vec![0.0, 1.0], vec![0.0, 1.0])
+                .unwrap();
+            pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
+        }
         let selected = store.sources().next().unwrap().key.0.to_string();
         let selection = ExportSelection {
             source_keys: vec![selected],

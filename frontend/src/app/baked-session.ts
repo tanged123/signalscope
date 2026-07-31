@@ -130,6 +130,14 @@ function isAnnotation(value: unknown): boolean {
   );
 }
 
+function isHighlightedSource(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.local_path === "string" &&
+    typeof value.path === "string"
+  );
+}
+
 function isPanel(value: unknown): boolean {
   const stringOrNull = (item: unknown): item is string =>
     typeof item === "string";
@@ -144,6 +152,8 @@ function isPanel(value: unknown): boolean {
     typeof value.color_by_time === "boolean" &&
     Array.isArray(value.series) &&
     value.series.every(isSeries) &&
+    Array.isArray(value.highlighted_sources) &&
+    value.highlighted_sources.every(isHighlightedSource) &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&

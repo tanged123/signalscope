@@ -219,7 +219,7 @@ mod tests {
                 width: 1.0,
                 visible: true,
             }],
-            ensemble: None,
+            highlighted_sources: Vec::new(),
             y_range: None,
             x_range: None,
             x_label: None,
