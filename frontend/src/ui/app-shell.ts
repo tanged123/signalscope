@@ -180,6 +180,9 @@ export class AppShell {
         onDropSignal: (id, path) => {
           this.plotSignal(path, id);
         },
+        onDropBundle: (id, memberPaths) => {
+          this.plotBundle(memberPaths, id);
+        },
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
           this.workspace.setXSignal(id, path);

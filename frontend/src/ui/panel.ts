@@ -54,6 +54,7 @@ import {
 } from "./plot-interactions";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
+export const BUNDLE_DRAG_TYPE = "application/x-signalscope-bundle";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 export const MAX_SERIES_PER_PANEL = 64;
 
@@ -83,6 +84,7 @@ export interface PanelCallbacks {
   onMaximize(id: string): void;
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignal(id: string, path: string): void;
+  onDropBundle(id: string, memberPaths: string[]): void;
   onSetXSignal(id: string, path: string): void;
   onSetColorSignal(id: string, path: string | null): void;
   onClearXSignal(id: string): void;
@@ -319,7 +321,11 @@ export class PanelView {
       event.dataTransfer?.setData(PANEL_DRAG_TYPE, this.id);
     });
     this.element.addEventListener("dragover", (event) => {
-      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      if (
+        !hasDragType(event, SIGNAL_DRAG_TYPE) &&
+        !hasDragType(event, BUNDLE_DRAG_TYPE)
+      )
+        return;
       event.preventDefault();
       this.element.classList.add("drop-target");
       this.setDropStripVisible(true);
@@ -330,9 +336,29 @@ export class PanelView {
       this.setDropStripVisible(false);
     });
     this.element.addEventListener("drop", (event) => {
-      const asX = this.overStrip(event);
       this.element.classList.remove("drop-target", "drop-x");
       this.setDropStripVisible(false);
+      const bundle = dragData(event, BUNDLE_DRAG_TYPE);
+      if (bundle !== null) {
+        try {
+          const payload: unknown = JSON.parse(bundle);
+          if (
+            typeof payload === "object" &&
+            payload !== null &&
+            "member_paths" in payload &&
+            Array.isArray(payload.member_paths) &&
+            payload.member_paths.every((path) => typeof path === "string")
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.callbacks.onDropBundle(this.id, payload.member_paths);
+          }
+        } catch {
+          // Ignore malformed external drag payloads.
+        }
+        return;
+      }
+      const asX = this.overStrip(event);
       const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path === null) return;
       event.preventDefault();

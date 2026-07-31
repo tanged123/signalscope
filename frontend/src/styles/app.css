@@ -1394,6 +1394,18 @@ button {
   font-family: var(--font-mono);
 }
 
+.tree-bundle {
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+}
+
+.tree-bundle-caret {
+  width: 14px;
+  flex: none;
+  color: var(--fg-3);
+  text-align: center;
+}
+
 .tree-star {
   flex: none;
   padding: 0 2px;
