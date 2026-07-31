@@ -504,6 +504,22 @@ describe("render", () => {
     expect(strokes).toContain("#edb120");
   });
 
+  it("dims series from explicit per-series flags", () => {
+    const calls = renderOnce(
+      [
+        tile("a", [{ t0: 0, t1: 1, v: 1 }]),
+        tile("b", [{ t0: 0, t1: 1, v: 2 }]),
+      ],
+      { dimmed: [false, true] },
+    );
+    expect(
+      calls.filter(
+        (call) =>
+          call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.fg3,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("dashes the first slot after the MATLAB color cycle", () => {
     const calls = renderOnce(
       [
