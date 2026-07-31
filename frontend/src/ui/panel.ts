@@ -790,7 +790,7 @@ export class PanelView {
         dash: entry.dash,
         width: entry.width + 0.4,
         markers: true,
-        ...(hasColor && colorValues !== null
+        ...(hasColor && colorValues !== null && colorValues !== undefined
           ? {
               colorValues: colorValues.map(
                 (value) => (value - colorDomainMin) / colorSpan,
