@@ -193,6 +193,8 @@ export class AppShell {
         },
         localPathFor: (path) =>
           this.signalsByPath.get(path)?.local_path ?? null,
+        sourceKeyFor: (path) =>
+          this.signalsByPath.get(path)?.source_key ?? null,
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
           this.workspace.setXSignal(id, path);
@@ -1899,7 +1901,22 @@ export class AppShell {
   } {
     const paths = panel.series.map((series) => series.path);
     if (panel.mode === "xy") {
-      if (panel.x_signal !== null) paths.unshift(panel.x_signal);
+      if (panel.x_signal !== null) {
+        paths.unshift(panel.x_signal);
+        const xLocal = this.signalsByPath.get(panel.x_signal)?.local_path;
+        if (xLocal !== undefined) {
+          for (const series of panel.series) {
+            const sourceKey = this.signalsByPath.get(series.path)?.source_key;
+            if (sourceKey === undefined) continue;
+            const resolved = this.signals.find(
+              (candidate) =>
+                candidate.source_key === sourceKey &&
+                candidate.local_path === xLocal,
+            );
+            if (resolved !== undefined) paths.push(resolved.path);
+          }
+        }
+      }
       if (panel.color_signal !== null) paths.push(panel.color_signal);
     }
     const ids: string[] = [];

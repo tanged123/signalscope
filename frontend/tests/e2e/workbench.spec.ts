@@ -168,6 +168,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onDropBundle: () => {},
       onToggleHighlight: () => {},
       localPathFor: () => null,
+      sourceKeyFor: () => null,
       onSetXSignal: () => {},
       onSetColorSignal: () => {},
       onClearXSignal: () => {},

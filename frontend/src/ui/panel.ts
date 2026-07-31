@@ -87,6 +87,7 @@ export interface PanelCallbacks {
   onDropBundle(id: string, memberPaths: string[]): void;
   onToggleHighlight(id: string, path: string): void;
   localPathFor(path: string): string | null;
+  sourceKeyFor(path: string): string | null;
   onSetXSignal(id: string, path: string): void;
   onSetColorSignal(id: string, path: string | null): void;
   onClearXSignal(id: string): void;
@@ -588,6 +589,19 @@ export class PanelView {
     );
     const xSeries = byPath.get(state.x_signal);
     if (xSeries === undefined) return 0;
+    const xLocal = this.callbacks.localPathFor(state.x_signal);
+    const resolveX = (yPath: string): typeof xSeries => {
+      if (xLocal === null) return xSeries;
+      const sourceKey = this.callbacks.sourceKeyFor(yPath);
+      if (sourceKey === null) return xSeries;
+      return (
+        samples.series.find(
+          (candidate) =>
+            this.callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
+            this.callbacks.localPathFor(candidate.signal_path) === xLocal,
+        ) ?? xSeries
+      );
+    };
     for (const series of state.series) {
       if (!series.visible) continue;
       const ySeries = byPath.get(series.path);
@@ -598,7 +612,7 @@ export class PanelView {
         colorIndex: style.colorIndex,
         dash: style.dash,
         width: series.width,
-        trace: pairSamples(xSeries, ySeries),
+        trace: pairSamples(resolveX(series.path), ySeries),
       });
     }
     if (this.xyTraces.length === 0) return 0;
