@@ -51,16 +51,57 @@ describe("buildTreeRows", () => {
     ]);
   });
 
-  it("collapses set members into one local-path row", () => {
+  it("collapsed bundles show one row with a count; non-bundled paths keep the tree", () => {
+    const paths = ["run_01/alt", "run_02/alt", "run_01/solo", "misc/other"];
+    const rows = buildTreeRows(paths, new Set(), "", {
+      setPrefixes: ["run_01", "run_02"],
+      expandedBundles: new Set<string>(),
+    });
+    const bundle = rows.find((row) => row.kind === "bundle");
+    expect(bundle).toMatchObject({ path: "alt", runCount: 2, expanded: false });
+    expect(
+      rows.some((row) => row.kind === "leaf" && row.path === "run_01/solo"),
+    ).toBe(true);
+    expect(
+      rows.some((row) => row.kind === "leaf" && row.path === "misc/other"),
+    ).toBe(true);
+  });
+
+  it("expanded bundles list members labeled by source prefix", () => {
     const rows = buildTreeRows(
-      ["run_a/imu/ax", "run_b/imu/ax"],
+      ["run_01/alt", "run_02/alt", "run_01/solo", "misc/other"],
       new Set(),
       "",
-      { setPrefixes: ["run_a", "run_b"] },
+      {
+        setPrefixes: ["run_01", "run_02"],
+        expandedBundles: new Set(["alt"]),
+      },
     );
-    const leaf = rows.find((row) => row.kind === "leaf");
-    expect(leaf?.label).toBe("imu/ax");
-    expect(leaf?.runCount).toBe(2);
+    const children = rows.filter(
+      (row) =>
+        row.kind === "leaf" && row.depth === 1 && row.path.endsWith("/alt"),
+    );
+    expect(children.map((row) => [row.path, row.label])).toEqual([
+      ["run_01/alt", "run_01"],
+      ["run_02/alt", "run_02"],
+    ]);
+  });
+
+  it("search matches bundle paths and member labels", () => {
+    const paths = ["run_01/alt", "run_02/alt", "run_01/solo", "misc/other"];
+    const byBundle = buildTreeRows(paths, new Set(), "alt", {
+      setPrefixes: ["run_01", "run_02"],
+      expandedBundles: new Set<string>(),
+    });
+    expect(byBundle.some((row) => row.kind === "bundle")).toBe(true);
+    const byMember = buildTreeRows(paths, new Set(), "run_02", {
+      setPrefixes: ["run_01", "run_02"],
+      expandedBundles: new Set(["alt"]),
+    });
+    const children = byMember.filter(
+      (row) => row.kind === "leaf" && row.depth === 1,
+    );
+    expect(children.map((row) => row.path)).toEqual(["run_02/alt"]);
   });
 });
 
