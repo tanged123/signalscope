@@ -8,6 +8,7 @@ import {
   PanelView,
   SIGNAL_DRAG_TYPE,
   bundleXSignal,
+  parseBundlePayload,
   xChipLabel,
 } from "./panel";
 
@@ -102,6 +103,22 @@ describe("panel series", () => {
   it("bundle drag type is distinct from the signal drag type", () => {
     expect(BUNDLE_DRAG_TYPE).not.toBe(SIGNAL_DRAG_TYPE);
     expect(BUNDLE_DRAG_TYPE.startsWith("application/x-signalscope")).toBe(true);
+  });
+
+  it("parses only string-array bundle member payloads", () => {
+    expect(
+      parseBundlePayload(
+        JSON.stringify({
+          local_path: "alt",
+          member_paths: ["a/alt", "b/alt"],
+        }),
+      ),
+    ).toEqual({ member_paths: ["a/alt", "b/alt"] });
+    expect(parseBundlePayload("not json")).toBeNull();
+    expect(
+      parseBundlePayload(JSON.stringify({ member_paths: [1] })),
+    ).toBeNull();
+    expect(parseBundlePayload(JSON.stringify({}))).toBeNull();
   });
 
   it("omits the trace when a source lacks the X local path instead of cross-pairing", () => {

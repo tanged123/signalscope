@@ -319,6 +319,10 @@ export class AppShell {
           const panel = this.workspace.addPanelRow();
           this.plotSignal(path, panel.id);
         },
+        onDropBundleNewPanel: (memberPaths) => {
+          const panel = this.workspace.addPanelRow();
+          this.plotBundle(memberPaths, panel.id);
+        },
         onMovePanel: (id, rowIndex, cellIndex) => {
           this.workspace.movePanel(id, rowIndex, cellIndex);
           this.afterLayoutChange();

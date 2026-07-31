@@ -3,11 +3,13 @@ import type { WorkspaceModel } from "../app/workspace";
 import type { SampleResponse, TileResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
 import {
+  BUNDLE_DRAG_TYPE,
   PANEL_DRAG_TYPE,
   PanelView,
   SIGNAL_DRAG_TYPE,
   dragData,
   hasDragType,
+  parseBundlePayload,
   type PanelCallbacks,
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
@@ -15,6 +17,7 @@ import type { CursorMode } from "../render/overlay-renderer";
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
   onDropSignalNewPanel(path: string): void;
+  onDropBundleNewPanel(memberPaths: readonly string[]): void;
   onMovePanel(
     id: string,
     targetRowIndex: number,
@@ -247,7 +250,8 @@ export class WorkspaceView {
   private bindWorkspaceDrop(): void {
     this.root.addEventListener("dragover", (event) => {
       if (
-        hasDragType(event, SIGNAL_DRAG_TYPE) &&
+        (hasDragType(event, SIGNAL_DRAG_TYPE) ||
+          hasDragType(event, BUNDLE_DRAG_TYPE)) &&
         this.isWorkspaceBackground(event.target)
       ) {
         event.preventDefault();
@@ -262,6 +266,14 @@ export class WorkspaceView {
     this.root.addEventListener("drop", (event) => {
       this.root.classList.remove("drop-target");
       if (!this.isWorkspaceBackground(event.target)) return;
+      const bundle = dragData(event, BUNDLE_DRAG_TYPE);
+      if (bundle !== null) {
+        const payload = parseBundlePayload(bundle);
+        if (payload === null) return;
+        event.preventDefault();
+        this.callbacks.onDropBundleNewPanel(payload.member_paths);
+        return;
+      }
       const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path !== null) {
         event.preventDefault();

@@ -179,6 +179,26 @@ export function bundleXSignal(
   return asX ? [...memberPaths].sort()[0] : undefined;
 }
 
+export function parseBundlePayload(
+  data: string,
+): { member_paths: string[] } | null {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "member_paths" in payload &&
+      Array.isArray(payload.member_paths) &&
+      payload.member_paths.every((path) => typeof path === "string")
+    ) {
+      return { member_paths: payload.member_paths };
+    }
+  } catch {
+    // Malformed external drag payloads are not bundles.
+  }
+  return null;
+}
+
 export class PanelView {
   readonly element: HTMLElement;
   private readonly renderer: CanvasRenderer;
@@ -341,7 +361,11 @@ export class PanelView {
       this.callbacks.onSetColorSignal(this.id, null);
     });
     cChip.addEventListener("dragover", (event) => {
-      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      if (
+        !hasDragType(event, SIGNAL_DRAG_TYPE) &&
+        !hasDragType(event, BUNDLE_DRAG_TYPE)
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
       cChip.classList.add("drop-target");
@@ -351,8 +375,19 @@ export class PanelView {
       cChip.classList.remove("drop-target");
     });
     cChip.addEventListener("drop", (event) => {
-      const path = dragData(event, SIGNAL_DRAG_TYPE);
       cChip.classList.remove("drop-target");
+      const bundle = dragData(event, BUNDLE_DRAG_TYPE);
+      if (bundle !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        const payload = parseBundlePayload(bundle);
+        const first =
+          payload === null ? undefined : [...payload.member_paths].sort()[0];
+        if (first === undefined) return;
+        this.callbacks.onSetColorSignal(this.id, first);
+        return;
+      }
+      const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path === null) return;
       event.preventDefault();
       event.stopPropagation();
@@ -390,26 +425,16 @@ export class PanelView {
       this.setDropStripVisible(false);
       const bundle = dragData(event, BUNDLE_DRAG_TYPE);
       if (bundle !== null) {
-        try {
-          const payload: unknown = JSON.parse(bundle);
-          if (
-            typeof payload === "object" &&
-            payload !== null &&
-            "member_paths" in payload &&
-            Array.isArray(payload.member_paths) &&
-            payload.member_paths.every((path) => typeof path === "string")
-          ) {
-            event.preventDefault();
-            event.stopPropagation();
-            const first = bundleXSignal(payload.member_paths, asX);
-            if (first !== undefined) {
-              this.callbacks.onSetXSignal(this.id, first);
-            } else {
-              this.callbacks.onDropBundle(this.id, payload.member_paths);
-            }
+        const payload = parseBundlePayload(bundle);
+        if (payload !== null) {
+          event.preventDefault();
+          event.stopPropagation();
+          const first = bundleXSignal(payload.member_paths, asX);
+          if (first !== undefined) {
+            this.callbacks.onSetXSignal(this.id, first);
+          } else {
+            this.callbacks.onDropBundle(this.id, payload.member_paths);
           }
-        } catch {
-          // Ignore malformed external drag payloads.
         }
         return;
       }
