@@ -332,7 +332,10 @@ export class PanelView {
       event.preventDefault();
       this.element.classList.add("drop-target");
       this.setDropStripVisible(true);
-      this.element.classList.toggle("drop-x", this.overStrip(event));
+      this.element.classList.toggle(
+        "drop-x",
+        !hasDragType(event, BUNDLE_DRAG_TYPE) && this.overStrip(event),
+      );
     });
     this.element.addEventListener("dragleave", () => {
       this.element.classList.remove("drop-target", "drop-x");

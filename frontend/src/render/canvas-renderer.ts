@@ -224,9 +224,9 @@ export class CanvasRenderer {
         style.dash,
         (options.widths?.[index] ?? 1.4) +
           (options.emphasisIndex === index ? 0.4 : 0),
-        options.dimmed?.[index] ??
-          (options.emphasisIndex !== undefined &&
-            options.emphasisIndex !== index),
+        options.emphasisIndex !== undefined
+          ? options.emphasisIndex !== index
+          : (options.dimmed?.[index] ?? false),
       );
     });
     finishAxes();

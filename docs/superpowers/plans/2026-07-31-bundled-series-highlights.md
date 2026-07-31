@@ -21,29 +21,31 @@
 
 ## File Structure
 
-| File | Responsibility after this plan |
-| --- | --- |
-| `frontend/src/app/tree-model.ts` | Expandable bundle rows + member children + hierarchical leaves |
-| `frontend/src/ui/signal-tree.ts` | Bundle row rendering, expansion state, bundle drag payload |
-| `frontend/src/app/workspace.ts` | `addSeriesBatch`, `toggleHighlight`, highlight cleanup in `removeSeries` |
-| `frontend/src/ui/app-shell.ts` | `plotBundle` (replaces `plotSet`), per-source X resolution, highlight wiring |
-| `frontend/src/ui/panel.ts` | Bundle drop target, highlight dimming, legend highlight mark, inspector action |
-| `frontend/src/render/canvas-renderer.ts` | `dimmed` per-series flags (band code deleted) |
-| `frontend/src/app/data-plane.ts` | `BakedPlane.listSets` derived from baked session (ensemble ports deleted) |
-| `core/scope-core/src/session.rs` | v13→14 migration rung expanding band panels |
-| `protocol/schema/scope-protocol.json` | v11, no ensemble types |
-| `protocol/schema/scope-session.json` | v14, `highlighted_sources`, no `ensemble` |
-| Deleted | `core/scope-core/src/ensemble.rs`, band renderer, `query_ensemble_tiles`, tri-state select |
+| File                                     | Responsibility after this plan                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `frontend/src/app/tree-model.ts`         | Expandable bundle rows + member children + hierarchical leaves                             |
+| `frontend/src/ui/signal-tree.ts`         | Bundle row rendering, expansion state, bundle drag payload                                 |
+| `frontend/src/app/workspace.ts`          | `addSeriesBatch`, `toggleHighlight`, highlight cleanup in `removeSeries`                   |
+| `frontend/src/ui/app-shell.ts`           | `plotBundle` (replaces `plotSet`), per-source X resolution, highlight wiring               |
+| `frontend/src/ui/panel.ts`               | Bundle drop target, highlight dimming, legend highlight mark, inspector action             |
+| `frontend/src/render/canvas-renderer.ts` | `dimmed` per-series flags (band code deleted)                                              |
+| `frontend/src/app/data-plane.ts`         | `BakedPlane.listSets` derived from baked session (ensemble ports deleted)                  |
+| `core/scope-core/src/session.rs`         | v13→14 migration rung expanding band panels                                                |
+| `protocol/schema/scope-protocol.json`    | v11, no ensemble types                                                                     |
+| `protocol/schema/scope-session.json`     | v14, `highlighted_sources`, no `ensemble`                                                  |
+| Deleted                                  | `core/scope-core/src/ensemble.rs`, band renderer, `query_ensemble_tiles`, tri-state select |
 
 ---
 
 ### Task 1: `Workspace.addSeriesBatch`
 
 **Files:**
+
 - Modify: `frontend/src/app/workspace.ts` (next to `addSeries`, currently line 416)
 - Test: `frontend/src/app/workspace.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `addSeries(panelId: string, path: string): boolean` (slot allocation: smallest unused `color_slot` starting at 1).
 - Produces: `addSeriesBatch(panelId: string, paths: readonly string[]): boolean` — adds every path not already present, one method call so callers get one history entry; returns true if anything was added. Task 2's `plotBundle` calls this.
 
@@ -92,13 +94,15 @@ addSeriesBatch(panelId: string, paths: readonly string[]): boolean {
 
 ### Task 2: Plot bundles as member series; delete the band/spaghetti/single UI and ensemble render path
 
-This is a deletion-plus-rewire task. The generated ensemble *types* still exist until Task 5; this task removes every frontend *use* of them.
+This is a deletion-plus-rewire task. The generated ensemble _types_ still exist until Task 5; this task removes every frontend _use_ of them.
 
 **Files:**
+
 - Modify: `frontend/src/ui/app-shell.ts`, `frontend/src/ui/signal-tree.ts`, `frontend/src/ui/panel.ts`, `frontend/src/ui/workspace-view.ts`, `frontend/src/render/canvas-renderer.ts`, `frontend/src/app/data-plane.ts`
 - Test: `frontend/src/ui/panel.test.ts`, `frontend/src/render/canvas-renderer.test.ts`, `frontend/src/app/data-plane.test.ts`
 
 **Interfaces:**
+
 - Consumes: `addSeriesBatch` from Task 1.
 - Produces: `SignalTreeCallbacks.onPlotBundle(localPath: string, memberPaths: readonly string[]): void` (replaces `onPlotSet`); `AppShell.plotBundle(memberPaths: readonly string[], panelId?: string): void`; `PanelView.renderData(state, tiles, samples, window)` (no ensemble parameter); `WorkspaceView.renderData(tiles, samples, windowFor, missingFor)` (no ensembles map). Tasks 8 and 11 build on these.
 
@@ -143,10 +147,12 @@ private plotBundle(memberPaths: readonly string[], panelId?: string): void {
 ### Task 3: Re-source `BakedPlane.listSets` from the baked session
 
 **Files:**
+
 - Modify: `frontend/src/app/data-plane.ts:508-545`, `frontend/src/app/baked-session.ts:133-157`
 - Test: `frontend/src/app/data-plane.test.ts`
 
 **Interfaces:**
+
 - Consumes: `parseBakedSession(json).source_sets` (`SourceSetState[]`: `key`, `label`, `generation`, `time_domain`, `members: {source_key, missing, scale, offset}[]`), `this.payload.signals[].summary` (`SignalSummary`: `source_key`, `local_path`, `path`).
 - Produces: `BakedPlane.listSets(): Promise<SetSummary[]>` with the same shape as the live plane, derived without baked ensembles. Bundle rows in snapshots depend on this.
 
@@ -212,10 +218,12 @@ listSets(): Promise<SetSummary[]> {
 ### Task 4: Delete the ensemble core module, snapshot planning, benchmark, and shell command
 
 **Files:**
+
 - Delete: `core/scope-core/src/ensemble.rs`
 - Modify: `core/scope-core/src/lib.rs:11`, `core/scope-core/src/snapshot.rs`, `core/scope-core/src/benchmarks.rs`, `core/scope-core/src/restore.rs:222`, `shell/src-tauri/src/lib.rs`, `core/scope-core/src/bin/scope-bake.rs` (compile fallout only)
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `SnapshotPlan` without an `ensembles` field; `scope-core` without `pub mod ensemble`. Task 5 removes the wire types these used.
 
@@ -230,10 +238,12 @@ listSets(): Promise<SetSummary[]> {
 ### Task 5: Protocol v11 — remove ensemble wire types
 
 **Files:**
+
 - Modify: `protocol/schema/scope-protocol.json`, `protocol/src/lib.rs:9-24`
 - Regenerate: `protocol/src/generated.rs`, `frontend/src/generated/protocol.ts` (via `./scripts/codegen.sh` only)
 
 **Interfaces:**
+
 - Produces: protocol v11 with no `EnsembleBin`, `EnsembleTileRequest`, `EnsembleTileResponse`, `BakedEnsemble`; `SnapshotManifest` = `{session_json, signals}`.
 
 - [ ] **Step 1:** In `scope-protocol.json`: set `"protocol_version": 11` (line 2); delete the `EnsembleBin` (:11-22), `EnsembleTileRequest` (:23-33), `EnsembleTileResponse` (:34-43), and `BakedEnsemble` (:427-437) type definitions; delete `"ensembles": "BakedEnsemble[]"` from `SnapshotManifest` (:443).
@@ -256,6 +266,7 @@ fn tile_request_round_trips() {
 ```
 
 (Adjust field names to match `protocol/src/generated.rs` exactly — read the regenerated `TileRequest` before writing the test.)
+
 - [ ] **Step 4: Fix fallout.** Run `grep -rn "ensembles" frontend shell core protocol --include=*.ts --include=*.rs --include=*.mjs | grep -v node_modules | grep -v generated` and remove every remaining consumer of the manifest field (the baked payload construction in the shell export path and `frontend/scripts/build-snapshot.mjs` if it stubs the field; `BakedPlane`'s payload type comes from codegen and needs no edit).
 - [ ] **Step 5: Run** `./scripts/test.sh quick && ./scripts/test.sh shell` — expect PASS.
 - [ ] **Step 6: Commit** — `git commit -m "feat(protocol)!: v11 removes ensemble tiles and baking"`
@@ -265,11 +276,13 @@ fn tile_request_round_trips() {
 ### Task 6: Session v14 — `highlighted_sources`, drop `ensemble`, migrate band panels
 
 **Files:**
+
 - Modify: `protocol/schema/scope-session.json`, `core/scope-core/src/session.rs`, `protocol/testdata/session-conformance.json`, `frontend/src/app/baked-session.ts`, `frontend/src/app/workspace.ts` (panel construction site that sets `ensemble: null`), `core/scope-core/src/restore.rs` (if not already clean from Task 4)
 - Regenerate: session generated Rust/TS via `./scripts/codegen.sh`
 - Test: `core/scope-core/src/session.rs` (inline), `frontend/src/app/session-conformance.test.ts` (existing, updated fixture)
 
 **Interfaces:**
+
 - Produces: `PanelState.highlighted_sources: HighlightedSourceState[]` (required), `HighlightedSourceState { local_path: string, path: string }`; no `PanelState.ensemble`, no `EnsembleSeriesState`. Tasks 9–11 consume `highlighted_sources`.
 
 - [ ] **Step 1:** In `scope-session.json`: set `"schema_version": 14`; delete `EnsembleSeriesState` (:61-68); in `PanelState` delete `"ensemble": "EnsembleSeriesState?"` and add `"highlighted_sources": "HighlightedSourceState[]"`; add:
@@ -464,10 +477,12 @@ fn migrate_v13_ensembles(value: &mut serde_json::Value) {
 ### Task 7: Tree model — expandable bundles with member children
 
 **Files:**
+
 - Modify: `frontend/src/app/tree-model.ts`
 - Test: `frontend/src/app/tree-model.test.ts`
 
 **Interfaces:**
+
 - Produces:
 
 ```ts
@@ -492,7 +507,10 @@ Member children are `TreeLeaf` rows with `depth: 1`, `path` = full path, `label`
 
 ```ts
 const paths = ["run_01/alt", "run_02/alt", "run_01/solo", "misc/other"];
-const opts = { setPrefixes: ["run_01", "run_02"], expandedBundles: new Set<string>() };
+const opts = {
+  setPrefixes: ["run_01", "run_02"],
+  expandedBundles: new Set<string>(),
+};
 
 it("collapsed bundles show one row with a count; non-bundled paths keep the tree", () => {
   const rows = buildTreeRows(paths, new Set(), "", opts);
@@ -500,12 +518,19 @@ it("collapsed bundles show one row with a count; non-bundled paths keep the tree
   expect(bundle).toMatchObject({ path: "alt", runCount: 2, expanded: false });
   // run_01/solo has one member; misc/other has no set prefix — both fall through
   // to the ordinary hierarchical rows.
-  expect(rows.some((row) => row.kind === "leaf" && row.path === "run_01/solo")).toBe(true);
-  expect(rows.some((row) => row.kind === "leaf" && row.path === "misc/other")).toBe(true);
+  expect(
+    rows.some((row) => row.kind === "leaf" && row.path === "run_01/solo"),
+  ).toBe(true);
+  expect(
+    rows.some((row) => row.kind === "leaf" && row.path === "misc/other"),
+  ).toBe(true);
 });
 
 it("expanded bundles list members labeled by source prefix", () => {
-  const rows = buildTreeRows(paths, new Set(), "", { ...opts, expandedBundles: new Set(["alt"]) });
+  const rows = buildTreeRows(paths, new Set(), "", {
+    ...opts,
+    expandedBundles: new Set(["alt"]),
+  });
   const children = rows.filter((row) => row.kind === "leaf" && row.depth === 1);
   expect(children.map((row) => [row.path, row.label])).toEqual([
     ["run_01/alt", "run_01"],
@@ -516,8 +541,13 @@ it("expanded bundles list members labeled by source prefix", () => {
 it("search matches bundle paths and member labels", () => {
   const byBundle = buildTreeRows(paths, new Set(), "alt", opts);
   expect(byBundle.some((row) => row.kind === "bundle")).toBe(true);
-  const byMember = buildTreeRows(paths, new Set(), "run_02", { ...opts, expandedBundles: new Set(["alt"]) });
-  const children = byMember.filter((row) => row.kind === "leaf" && row.depth === 1);
+  const byMember = buildTreeRows(paths, new Set(), "run_02", {
+    ...opts,
+    expandedBundles: new Set(["alt"]),
+  });
+  const children = byMember.filter(
+    (row) => row.kind === "leaf" && row.depth === 1,
+  );
   expect(children.map((row) => row.path)).toEqual(["run_02/alt"]);
 });
 ```
@@ -530,7 +560,9 @@ if (options !== undefined && options.setPrefixes.length > 0) {
   const grouped = new Map<string, string[]>();
   const rest: string[] = [];
   for (const path of paths) {
-    const prefix = options.setPrefixes.find((item) => path.startsWith(`${item}/`));
+    const prefix = options.setPrefixes.find((item) =>
+      path.startsWith(`${item}/`),
+    );
     if (prefix === undefined) {
       rest.push(path);
       continue;
@@ -588,10 +620,12 @@ if (options !== undefined && options.setPrefixes.length > 0) {
 ### Task 8: Tree view — bundle rows, expansion, drag payloads; panel accepts bundle drops
 
 **Files:**
+
 - Modify: `frontend/src/ui/signal-tree.ts`, `frontend/src/ui/panel.ts` (drop handling, :335-356; `SIGNAL_DRAG_TYPE` is at :60), `frontend/src/ui/app-shell.ts` (callback wiring), `frontend/src/styles/app.css` (bundle row caret/badge styling reusing existing tree tokens)
 - Test: `frontend/src/ui/panel.test.ts` (drag-payload constants), tree behavior is covered by Task 7's model tests plus e2e in Task 13
 
 **Interfaces:**
+
 - Produces: `export const BUNDLE_DRAG_TYPE = "application/x-signalscope-bundle"` (in `panel.ts` next to `SIGNAL_DRAG_TYPE`); drag payload is `JSON.stringify({ local_path: string, member_paths: string[] })`; `PanelCallbacks.onDropBundle(id: string, memberPaths: string[]): void`.
 
 - [ ] **Step 1:** In `signal-tree.ts`, render `kind === "bundle"` rows in `rowElement`: a div styled like `tree-leaf` with a leading caret button (`▸`/`▾`) that toggles a new `private readonly expandedBundles = new Set<string>()` (add/delete `row.path`, then `this.refresh()`), the local-path label, and the existing `tree-run-count` badge. Pass `expandedBundles` through `refresh()` into `buildTreeRows`'s options. The row: `draggable = true`; on `dragstart`, `event.dataTransfer?.setData(BUNDLE_DRAG_TYPE, JSON.stringify({ local_path: row.path, member_paths: row.memberPaths }))`; on dblclick/Enter, `this.callbacks.onPlotBundle?.(row.path, row.memberPaths)`. All text via `textContent`. Member rows are plain leaves (Task 7 already labels them); the favorites star keeps working on them (leaf `path` is the full path).
@@ -613,10 +647,12 @@ it("bundle drag type is distinct from the signal drag type", () => {
 ### Task 9: Workspace highlight mutations
 
 **Files:**
+
 - Modify: `frontend/src/app/workspace.ts` (`removeSeries` is at :535)
 - Test: `frontend/src/app/workspace.test.ts`
 
 **Interfaces:**
+
 - Produces: `toggleHighlight(panelId: string, path: string, localPath: string): void` — sets `{local_path: localPath, path}` as the panel's single highlight for that local path; toggling the already-highlighted path clears it; ignores paths not in `panel.series`. `removeSeries` clears highlight entries whose `path` matches. Tasks 10–11 consume `panel.highlighted_sources`.
 
 - [ ] **Step 1: Write the failing tests:**
@@ -625,7 +661,11 @@ it("bundle drag type is distinct from the signal drag type", () => {
 it("keeps at most one highlight per local path and toggles off", () => {
   const workspace = new WorkspaceModel();
   const panel = workspace.addPanelRow();
-  workspace.addSeriesBatch(panel.id, ["run_01/alt", "run_02/alt", "run_01/gyro"]);
+  workspace.addSeriesBatch(panel.id, [
+    "run_01/alt",
+    "run_02/alt",
+    "run_01/gyro",
+  ]);
   workspace.toggleHighlight(panel.id, "run_01/alt", "alt");
   workspace.toggleHighlight(panel.id, "run_01/gyro", "gyro");
   workspace.toggleHighlight(panel.id, "run_02/alt", "alt"); // replaces run_01/alt
@@ -680,10 +720,12 @@ and inside `removeSeries` (after the series is removed): `panel.highlighted_sour
 ### Task 10: Renderer — per-series dim flags
 
 **Files:**
+
 - Modify: `frontend/src/render/canvas-renderer.ts` (`render` at :274-308; the dim decision is the last two arguments to `drawSeries` at :301-304)
 - Test: `frontend/src/render/canvas-renderer.test.ts`
 
 **Interfaces:**
+
 - Produces: `RenderOptions.dimmed?: readonly boolean[]` — series `i` draws dimmed when `dimmed[i]` is true; `emphasisIndex` (hover) keeps its existing behavior and takes precedence when set. Task 11 supplies the array.
 
 - [ ] **Step 1: Write the failing test** (follow the file's existing pattern of rendering into a stub context and asserting on recorded draw calls — read the surviving tests first; they already assert on per-series alpha/width):
@@ -719,10 +761,12 @@ and pass `dim` as `drawSeries`'s final argument; the `+0.4` width bonus stays ti
 ### Task 11: Highlight UI — legend mark, inspector action, dim wiring
 
 **Files:**
+
 - Modify: `frontend/src/ui/panel.ts` (`updateLegend`/`legendChip` at :1326-1410, `openInspector` at :1426, time-mode render options at :574-578), `frontend/src/ui/app-shell.ts` (panel callback wiring near :189), `frontend/src/styles/app.css`
 - Test: `frontend/src/ui/panel.test.ts`
 
 **Interfaces:**
+
 - Consumes: `toggleHighlight` (Task 9), `RenderOptions.dimmed` (Task 10), `panel.highlighted_sources` (Task 6).
 - Produces: `PanelCallbacks.onToggleHighlight(id: string, path: string): void` and `PanelCallbacks.localPathFor(path: string): string | null`. Task 12 adds `sourceKeyFor` beside `localPathFor`.
 
@@ -740,6 +784,7 @@ onToggleHighlight: (id, path) => {
 ```
 
 (Match the exact history/commit idiom of the neighboring callbacks — e.g. `onToggleSeries` — before writing; use the same one.)
+
 - [ ] **Step 2: Dimming.** In the time-mode render path (where `emphasisIndex` is computed from `emphasizePath`, :574-578), compute and pass the dim array:
 
 ```ts
@@ -755,6 +800,7 @@ const dimmed = shown.map((tile) => {
 ```
 
 Pass `dimmed` in the options object alongside the existing `emphasisIndex` (hover precedence is already handled inside the renderer by Task 10). Apply the same `dimmed` computation to the XY/FFT/histogram vertex path if the renderer's `renderPaths`-style entry point gains the option cheaply; if it does not already thread per-series dim flags, restrict dimming to time mode in this task and note it in the commit message — do not redesign the vertex renderer.
+
 - [ ] **Step 3: Legend mark + inspector action.** In `legendChip`, add `chip.classList.toggle("highlighted", state.highlighted_sources.some((entry) => entry.path === series.path))` — `updateLegend` already receives `state`; pass it through to `legendChip`. In `openInspector`, add one action button labeled `Highlight` / `Clear highlight` (based on whether the series path is currently highlighted) that calls `this.callbacks.onToggleHighlight(this.id, path)` and closes the inspector — follow the inspector's existing action-button structure exactly. Hide the action when `this.callbacks.localPathFor(path)` is null (non-source series can't be highlighted). In `app.css`, style `.legend-chip.highlighted .legend-line` with a visible ring using existing tokens (e.g. `box-shadow: 0 0 0 1px var(--fg-1)`); follow the file's token discipline — no raw colors.
 - [ ] **Step 4: Write the failing test** in `panel.test.ts`: construct a `PanelView` per the file's existing harness, give its state two series sharing local path `alt` (via a `localPathFor` stub) and `highlighted_sources = [{local_path: "alt", path: "run_01/alt"}]`, call the legend update, and assert the `run_01/alt` chip has class `highlighted` and the `run_02/alt` chip does not.
 - [ ] **Step 5: Run** `./scripts/test.sh frontend` — expect PASS. Commit — `git commit -m "feat(ui): per-bundle member highlights in legend and inspector"`
@@ -764,10 +810,12 @@ Pass `dimmed` in the options object alongside the existing `emphasisIndex` (hove
 ### Task 12: XY per-source X resolution
 
 **Files:**
+
 - Modify: `frontend/src/ui/app-shell.ts` (`panelSignalIds` at :1953-1970), `frontend/src/ui/panel.ts` (`renderXy` at :586-610, `PanelCallbacks`)
 - Test: `frontend/src/ui/panel.test.ts` or `frontend/src/app/` — wherever `renderXy` pairing is already exercised; extend that harness
 
 **Interfaces:**
+
 - Consumes: `localPathFor` (Task 11).
 - Produces: `PanelCallbacks.sourceKeyFor(path: string): string | null` (app-shell: `this.signalsByPath.get(path)?.source_key ?? null`). XY pairing rule: each Y series pairs against the sample series from **its own source** whose local path equals `x_signal`'s local path, falling back to `x_signal`'s own series.
 
@@ -792,6 +840,7 @@ const resolveX = (yPath: string): typeof xSeries => {
 ```
 
 and change the pairing at :608 to `trace: pairSamples(resolveX(series.path) ?? xSeries, ySeries)`.
+
 - [ ] **Step 4: Implement in `panelSignalIds`** so the resolved X signals are actually fetched — replace the XY branch:
 
 ```ts
@@ -817,6 +866,7 @@ if (panel.mode === "xy") {
 ```
 
 (`this.signals` is the `SignalSummary[]` the shell already holds; the `new Set(paths)` dedup below the branch already handles repeats.)
+
 - [ ] **Step 5: Run** `./scripts/test.sh frontend` — expect PASS. Commit — `git commit -m "fix(xy): pair bundle members against their own source's x signal"`
 
 ---
@@ -824,6 +874,7 @@ if (panel.mode === "xy") {
 ### Task 13: End-to-end flow, docs, grep gates, version bump
 
 **Files:**
+
 - Modify: `frontend/tests/e2e/workbench.spec.ts` (read it and its `fixtures.ts` first; follow its ingest/panel helpers), `docs/adr/0028-ensemble-run-mean-envelope.md`, `docs/adr/README.md`, `README.md`, `docs/implementation-roadmap.md`
 
 **Interfaces:** none new.
@@ -840,6 +891,7 @@ grep -rn "Ensemble" protocol/schema
 ```
 
 (`session.rs` hits must be only `migrate_v13_ensembles` and its tests.)
+
 - [ ] **Step 4: Gate + version.** Run `./scripts/format.sh`, then `./scripts/test.sh full`. Then `./scripts/version.sh bump major && ./scripts/version.sh check` (protocol v11 and session v14 are breaking).
 - [ ] **Step 5: Commit** — `git commit -m "feat(ui)!: bundled series highlights replace ensemble bands"`
 

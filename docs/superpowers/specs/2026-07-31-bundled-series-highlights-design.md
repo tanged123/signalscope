@@ -50,7 +50,7 @@ operation without inspecting display labels.
 
 Implementation notes (the current code cannot be extended in place):
 
-- `tree-model.ts` currently returns a *flat, bundle-only* row list whenever
+- `tree-model.ts` currently returns a _flat, bundle-only_ row list whenever
   set prefixes exist, which makes per-source rows unreachable. That branch
   is replaced wholesale by the expandable bundle/member model above.
 - Bundle rows are currently `draggable = false`; they become draggable with
@@ -107,8 +107,8 @@ and both planes' `queryEnsembleTiles` ports are deleted.
 Snapshot export stops baking ensembles. `SnapshotManifest.ensembles` and
 `BakedEnsemble` are removed from the protocol schema.
 
-`BakedPlane.listSets()` currently reconstructs set metadata *from baked
-ensembles*; with baking gone, bundle rows would vanish from snapshot trees.
+`BakedPlane.listSets()` currently reconstructs set metadata _from baked
+ensembles_; with baking gone, bundle rows would vanish from snapshot trees.
 It is re-sourced instead from data the snapshot already contains:
 
 - set identity, label, and membership from the baked session's
