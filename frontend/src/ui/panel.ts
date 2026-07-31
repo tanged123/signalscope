@@ -783,15 +783,16 @@ export class PanelView {
       });
     }
     this.xyTraces.forEach((entry, index) => {
+      const colorValues = colorColumns[index];
       paths.push({
         points: flattenTrace(entry.trace, window),
         colorIndex: entry.colorIndex,
         dash: entry.dash,
         width: entry.width + 0.4,
         markers: true,
-        ...(hasColor
+        ...(hasColor && colorValues !== null
           ? {
-              colorValues: (colorColumns[index] ?? []).map(
+              colorValues: colorValues.map(
                 (value) => (value - colorDomainMin) / colorSpan,
               ),
             }

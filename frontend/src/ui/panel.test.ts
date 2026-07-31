@@ -263,7 +263,7 @@ describe("panel series", () => {
     view.renderXy(state, samples, { t0: 0, t1: 1 });
 
     expect(view.renderedPaths[2]?.colorValues).toEqual([0, 1]);
-    expect(view.renderedPaths[3]?.colorValues).toEqual([]);
+    expect(view.renderedPaths[3]?.colorValues).toBeUndefined();
   });
 
   it("uses the selected color signal directly for a derived Y trace", () => {
