@@ -488,38 +488,38 @@ export class BakedPlane implements DataPlane {
   }
 
   listSets(): Promise<SetSummary[]> {
-    const keys = [
-      ...new Set(this.payload.ensembles.map((item) => item.set_key)),
-    ];
+    const saved = parseBakedSession(this.bakedSessionJson).source_sets;
     return Promise.resolve(
-      keys.map((key, index) => {
-        const entries = this.payload.ensembles.filter(
-          (item) => item.set_key === key,
+      saved.map((set, index) => {
+        const memberKeys = new Set(
+          set.members.map((member) => member.source_key),
         );
-        const members = new Set(entries.flatMap((item) => item.member_keys));
-        const saved = parseBakedSession(this.bakedSessionJson).source_sets.find(
-          (set) => set.key === key,
-        );
+        const localsBySource = new Map<string, Set<string>>();
+        for (const signal of this.payload.signals) {
+          if (!memberKeys.has(signal.summary.source_key)) continue;
+          const locals =
+            localsBySource.get(signal.summary.source_key) ?? new Set<string>();
+          locals.add(signal.summary.local_path);
+          localsBySource.set(signal.summary.source_key, locals);
+        }
+        const counts = new Map<string, number>();
+        for (const locals of localsBySource.values()) {
+          for (const local of locals) {
+            counts.set(local, (counts.get(local) ?? 0) + 1);
+          }
+        }
         return {
           set_id: String(index + 1),
-          set_key: key,
-          label: `Set ${String(index + 1)}`,
-          generation: entries[0]?.generation ?? "0",
-          member_count: members.size,
-          members:
-            saved?.members ??
-            [...members].map((source_key) => ({
-              source_key,
-              missing: [],
-              scale: 1,
-              offset: 0,
-            })),
-          time_domain: saved?.time_domain ?? {
-            unit: "seconds",
-            origin: "relative",
-            alignment_origin: 0,
-          },
-          local_paths: entries.map((item) => item.local_path),
+          set_key: set.key,
+          label: set.label,
+          generation: set.generation,
+          member_count: set.members.length,
+          members: set.members,
+          time_domain: set.time_domain,
+          local_paths: [...counts]
+            .filter(([, count]) => count >= 2)
+            .map(([local]) => local)
+            .sort((left, right) => left.localeCompare(right)),
           aligned: true,
         };
       }),

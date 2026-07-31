@@ -130,16 +130,6 @@ function isAnnotation(value: unknown): boolean {
   );
 }
 
-function isEnsemble(value: unknown): value is JsonObject {
-  return (
-    isRecord(value) &&
-    typeof value.set_key === "string" &&
-    typeof value.local_path === "string" &&
-    Array.isArray(value.member_filter) &&
-    value.member_filter.every((key) => typeof key === "string")
-  );
-}
-
 function isPanel(value: unknown): boolean {
   const stringOrNull = (item: unknown): item is string =>
     typeof item === "string";
@@ -154,7 +144,6 @@ function isPanel(value: unknown): boolean {
     typeof value.color_by_time === "boolean" &&
     Array.isArray(value.series) &&
     value.series.every(isSeries) &&
-    isNullable(value.ensemble, isEnsemble) &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&
