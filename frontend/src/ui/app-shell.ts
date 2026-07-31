@@ -897,10 +897,6 @@ export class AppShell {
 
   /** Moves between panel domains without dropping the assigned XY x series. */
   private transitionPanelMode(panelId: string, mode: PanelMode): void {
-    const panel = this.workspace.panel(panelId);
-    if (panel?.mode === "xy" && mode !== "xy") {
-      this.workspace.setXSignal(panelId, null);
-    }
     this.workspace.setMode(panelId, mode);
     if (mode === "xy") this.workspace.promoteSeriesToX(panelId);
   }
