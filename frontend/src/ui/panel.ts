@@ -1,5 +1,9 @@
 import { formatCombo } from "../app/commands";
-import type { SampleResponse, TileResponse } from "../generated/protocol";
+import type {
+  SampleResponse,
+  SampleSeries,
+  TileResponse,
+} from "../generated/protocol";
 import type {
   AxisStyle,
   DashStyle,
@@ -131,6 +135,48 @@ export function hasDragType(event: DragEvent, type: string): boolean {
 export function dragData(event: DragEvent, type: string): string | null {
   const value = event.dataTransfer?.getData(type);
   return value !== undefined && value !== "" ? value : null;
+}
+
+type XyPairingCallbacks = Pick<PanelCallbacks, "localPathFor" | "sourceKeyFor">;
+
+export function resolveXSeries(
+  samples: SampleResponse,
+  xSeries: SampleSeries,
+  xSignal: string,
+  yPath: string,
+  callbacks: XyPairingCallbacks,
+): SampleSeries | undefined {
+  const xLocal = callbacks.localPathFor(xSignal);
+  if (xLocal === null) return xSeries;
+  const sourceKey = callbacks.sourceKeyFor(yPath);
+  if (sourceKey === null) return xSeries;
+  return samples.series.find(
+    (candidate) =>
+      callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
+      callbacks.localPathFor(candidate.signal_path) === xLocal,
+  );
+}
+
+export function xChipLabel(
+  xSignal: string,
+  series: readonly PanelState["series"][number][],
+  callbacks: XyPairingCallbacks,
+): string {
+  const xLocal = callbacks.localPathFor(xSignal);
+  const sources = new Set(
+    series
+      .filter((entry) => entry.visible)
+      .map((entry) => callbacks.sourceKeyFor(entry.path))
+      .filter((key): key is string => key !== null),
+  );
+  return xLocal !== null && sources.size > 1 ? xLocal : signalLabel(xSignal);
+}
+
+export function bundleXSignal(
+  memberPaths: readonly string[],
+  asX: boolean,
+): string | undefined {
+  return asX ? [...memberPaths].sort()[0] : undefined;
 }
 
 export class PanelView {
@@ -332,16 +378,14 @@ export class PanelView {
       event.preventDefault();
       this.element.classList.add("drop-target");
       this.setDropStripVisible(true);
-      this.element.classList.toggle(
-        "drop-x",
-        !hasDragType(event, BUNDLE_DRAG_TYPE) && this.overStrip(event),
-      );
+      this.element.classList.toggle("drop-x", this.overStrip(event));
     });
     this.element.addEventListener("dragleave", () => {
       this.element.classList.remove("drop-target", "drop-x");
       this.setDropStripVisible(false);
     });
     this.element.addEventListener("drop", (event) => {
+      const asX = this.overStrip(event);
       this.element.classList.remove("drop-target", "drop-x");
       this.setDropStripVisible(false);
       const bundle = dragData(event, BUNDLE_DRAG_TYPE);
@@ -357,14 +401,18 @@ export class PanelView {
           ) {
             event.preventDefault();
             event.stopPropagation();
-            this.callbacks.onDropBundle(this.id, payload.member_paths);
+            const first = bundleXSignal(payload.member_paths, asX);
+            if (first !== undefined) {
+              this.callbacks.onSetXSignal(this.id, first);
+            } else {
+              this.callbacks.onDropBundle(this.id, payload.member_paths);
+            }
           }
         } catch {
           // Ignore malformed external drag payloads.
         }
         return;
       }
-      const asX = this.overStrip(event);
       const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path === null) return;
       event.preventDefault();
@@ -412,7 +460,9 @@ export class PanelView {
     if (!xChip.hidden && state.x_signal !== null) {
       xChip.replaceChildren(
         chipPrefix("x:"),
-        document.createTextNode(signalLabel(state.x_signal)),
+        document.createTextNode(
+          xChipLabel(state.x_signal, state.series, this.callbacks),
+        ),
       );
       xChip.title = `X axis: ${state.x_signal} — click to remove`;
     }
@@ -592,30 +642,25 @@ export class PanelView {
     );
     const xSeries = byPath.get(state.x_signal);
     if (xSeries === undefined) return 0;
-    const xLocal = this.callbacks.localPathFor(state.x_signal);
-    const resolveX = (yPath: string): typeof xSeries => {
-      if (xLocal === null) return xSeries;
-      const sourceKey = this.callbacks.sourceKeyFor(yPath);
-      if (sourceKey === null) return xSeries;
-      return (
-        samples.series.find(
-          (candidate) =>
-            this.callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
-            this.callbacks.localPathFor(candidate.signal_path) === xLocal,
-        ) ?? xSeries
-      );
-    };
     for (const series of state.series) {
       if (!series.visible) continue;
       const ySeries = byPath.get(series.path);
       if (ySeries === undefined) continue;
+      const resolved = resolveXSeries(
+        samples,
+        xSeries,
+        state.x_signal,
+        series.path,
+        this.callbacks,
+      );
+      if (resolved === undefined) continue;
       const style = resolveSeriesStyle(series.color_slot, series.dash);
       this.xyTraces.push({
         path: series.path,
         colorIndex: style.colorIndex,
         dash: style.dash,
         width: series.width,
-        trace: pairSamples(resolveX(series.path), ySeries),
+        trace: pairSamples(resolved, ySeries),
       });
     }
     if (this.xyTraces.length === 0) return 0;
