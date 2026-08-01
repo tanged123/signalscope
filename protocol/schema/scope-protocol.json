@@ -1,5 +1,5 @@
 {
-  "protocol_version": 8,
+  "protocol_version": 13,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -8,10 +8,192 @@
         "t1": "f64"
       }
     },
-    "IngestRequest": {
+    "SetMemberSummary": {
       "kind": "object",
       "fields": {
-        "path": "string"
+        "source_key": "string",
+        "missing": "string[]",
+        "scale": "f64",
+        "offset": "f64"
+      }
+    },
+    "SetTimeUnit": {
+      "kind": "enum",
+      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
+    },
+    "SetOriginKind": {
+      "kind": "enum",
+      "variants": [
+        "relative",
+        "absolute_epoch",
+        "event_aligned",
+        "synthetic_index"
+      ]
+    },
+    "SetTimeDomainSummary": {
+      "kind": "object",
+      "fields": {
+        "unit": "SetTimeUnit",
+        "origin": "SetOriginKind",
+        "alignment_origin": "f64"
+      }
+    },
+    "SetSummary": {
+      "kind": "object",
+      "fields": {
+        "set_id": "u64",
+        "set_key": "string",
+        "label": "string",
+        "generation": "u64",
+        "member_count": "u32",
+        "members": "SetMemberSummary[]",
+        "time_domain": "SetTimeDomainSummary",
+        "local_paths": "string[]",
+        "aligned": "bool"
+      }
+    },
+    "CreateSetRequest": {
+      "kind": "object",
+      "fields": {
+        "label": "string",
+        "member_keys": "string[]"
+      }
+    },
+    "UpdateSetMembersRequest": {
+      "kind": "object",
+      "fields": {
+        "set_id": "u64",
+        "member_keys": "string[]"
+      }
+    },
+    "SetTimeAlignmentRequest": {
+      "kind": "object",
+      "fields": {
+        "set_id": "u64",
+        "source_key": "string",
+        "scale": "f64",
+        "offset": "f64"
+      }
+    },
+    "IngestBatchRequest": {
+      "kind": "object",
+      "fields": {
+        "paths": "string[]"
+      }
+    },
+    "ScanSourcesRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "recursive": "bool"
+      }
+    },
+    "FormatCount": {
+      "kind": "object",
+      "fields": {
+        "label": "string",
+        "count": "u32"
+      }
+    },
+    "ScanSourcesResponse": {
+      "kind": "object",
+      "fields": {
+        "files": "string[]",
+        "total_bytes": "u64",
+        "format_counts": "FormatCount[]"
+      }
+    },
+    "BatchJob": {
+      "kind": "object",
+      "fields": {
+        "job_id": "u64"
+      }
+    },
+    "BatchState": {
+      "kind": "enum",
+      "variants": ["running", "done", "partial", "failed", "cancelled"]
+    },
+    "FileState": {
+      "kind": "enum",
+      "variants": ["pending", "running", "done", "failed", "cancelled"]
+    },
+    "BatchFailure": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "error": "string"
+      }
+    },
+    "BatchStatus": {
+      "kind": "object",
+      "fields": {
+        "state": "BatchState",
+        "fraction": "f64",
+        "total": "u64",
+        "done": "u64",
+        "failed": "u64",
+        "current_paths": "string[]",
+        "recent_failures": "BatchFailure[]"
+      }
+    },
+    "BatchDetailRequest": {
+      "kind": "object",
+      "fields": {
+        "job_id": "u64",
+        "offset": "u32",
+        "limit": "u32"
+      }
+    },
+    "BatchFileStatus": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "state": "FileState",
+        "error": "string?"
+      }
+    },
+    "BatchDetail": {
+      "kind": "object",
+      "fields": {
+        "entries": "BatchFileStatus[]",
+        "total": "u64"
+      }
+    },
+    "FormatDescriptor": {
+      "kind": "object",
+      "fields": {
+        "id": "string",
+        "label": "string",
+        "extensions": "string[]"
+      }
+    },
+    "RestoreSourcesRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string"
+      }
+    },
+    "RestoreReconcileRequest": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "job_id": "u64"
+      }
+    },
+    "AliasConflictSummary": {
+      "kind": "object",
+      "fields": {
+        "legacy_path": "string",
+        "claimants": "string[]"
+      }
+    },
+    "RestoreReconcileResponse": {
+      "kind": "object",
+      "fields": {
+        "session_json": "string",
+        "rewritten": "u64",
+        "conflicts": "AliasConflictSummary[]",
+        "unresolved": "string[]"
       }
     },
     "TileRequest": {
@@ -87,6 +269,9 @@
       "kind": "object",
       "fields": {
         "signal_id": "u64",
+        "source_id": "u64",
+        "source_key": "string",
+        "local_path": "string",
         "path": "string",
         "unit": "string?",
         "point_count": "u64",
@@ -98,40 +283,15 @@
       "kind": "object",
       "fields": {
         "source_id": "u64",
+        "source_key": "string",
+        "prefix": "string",
         "path": "string",
         "point_count": "u64"
-      }
-    },
-    "IngestResponse": {
-      "kind": "object",
-      "fields": {
-        "source": "SourceSummary",
-        "signals": "SignalSummary[]"
-      }
-    },
-    "IngestJob": {
-      "kind": "object",
-      "fields": {
-        "job_id": "u64"
       }
     },
     "IngestStage": {
       "kind": "enum",
       "variants": ["decode", "pyramid", "cache"]
-    },
-    "IngestState": {
-      "kind": "enum",
-      "variants": ["running", "done", "failed"]
-    },
-    "IngestStatus": {
-      "kind": "object",
-      "fields": {
-        "state": "IngestState",
-        "stage": "IngestStage",
-        "fraction": "f64",
-        "response": "IngestResponse?",
-        "error": "string?"
-      }
     },
     "DerivedRequest": {
       "kind": "object",
@@ -144,6 +304,34 @@
       "kind": "object",
       "fields": {
         "path": "string"
+      }
+    },
+    "CreateDerivedBundleRequest": {
+      "kind": "object",
+      "fields": {
+        "name": "string",
+        "expr": "string"
+      }
+    },
+    "RemoveDerivedBundleRequest": {
+      "kind": "object",
+      "fields": {
+        "name": "string"
+      }
+    },
+    "SkippedMemberSummary": {
+      "kind": "object",
+      "fields": {
+        "prefix": "string",
+        "missing": "string[]"
+      }
+    },
+    "DerivedBundleResponse": {
+      "kind": "object",
+      "fields": {
+        "local_path": "string",
+        "created": "SignalSummary[]",
+        "skipped": "SkippedMemberSummary[]"
       }
     },
     "SessionDialogMode": {
@@ -187,7 +375,15 @@
     "ExportEstimateRequest": {
       "kind": "object",
       "fields": {
-        "session_json": "string"
+        "session_json": "string",
+        "selection": "ExportSelection"
+      }
+    },
+    "ExportSelection": {
+      "kind": "object",
+      "fields": {
+        "source_keys": "string[]",
+        "set_keys": "string[]"
       }
     },
     "ExportEstimate": {
@@ -213,7 +409,8 @@
       "fields": {
         "session_json": "string",
         "range": "ExportRange",
-        "fidelity": "ExportFidelity"
+        "fidelity": "ExportFidelity",
+        "selection": "ExportSelection"
       }
     },
     "ExportFileKind": {

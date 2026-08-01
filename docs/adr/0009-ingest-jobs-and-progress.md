@@ -1,6 +1,6 @@
 # ADR 0009: Ingest jobs, progress reporting, and MCAP scope
 
-- Status: Accepted
+- Status: Accepted; amended by ADR 0026
 - Date: 2026-07-24
 
 ## Context

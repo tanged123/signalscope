@@ -7,8 +7,10 @@ use std::{
 
 use crate::pyramid::Pyramid;
 use crate::session::{LinkedTime, PanelMode, PanelState, Session};
-use crate::store::{Signal, SignalId, SignalStore};
-use scope_protocol::{BakedSignal, ExportFidelity, ExportRange, SignalSummary, SnapshotManifest};
+use crate::store::{Signal, SignalId, SignalStore, SourceKey};
+use scope_protocol::{
+    BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
+};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -29,6 +31,7 @@ pub struct LevelPlan {
 
 pub struct SignalPlan<'a> {
     pub signal: &'a Signal,
+    pub source_key: SourceKey,
     pub pyramid: &'a Pyramid,
     pub window: Option<(f64, f64)>,
     pub levels: Vec<LevelPlan>,
@@ -57,6 +60,8 @@ pub enum SnapshotError {
     MissingSignal(SignalId),
     #[error("signal {0:?} is missing its pyramid")]
     MissingPyramid(SignalId),
+    #[error("signal {0:?} has no source")]
+    MissingSource(SignalId),
     #[error("manifest serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
     #[error("manifest output is not UTF-8: {0}")]
@@ -92,6 +97,7 @@ fn panel_signal_paths(panel: &PanelState) -> Vec<&str> {
 
 fn signal_plan<'a>(
     signal: &'a Signal,
+    source_key: SourceKey,
     pyramid: &'a Pyramid,
     window: Option<(f64, f64)>,
     needs_raw: bool,
@@ -120,6 +126,7 @@ fn signal_plan<'a>(
         .collect();
     SignalPlan {
         signal,
+        source_key,
         pyramid,
         window,
         levels,
@@ -163,6 +170,30 @@ pub fn plan<'a>(
     range: ExportRange,
     fidelity: ExportFidelity,
 ) -> Result<ExportPlan<'a>, SnapshotError> {
+    let selection = ExportSelection {
+        source_keys: store
+            .sources()
+            .map(|source| source.key.0.to_string())
+            .collect(),
+        set_keys: Vec::new(),
+    };
+    plan_selected(session, store, pyramids, &selection, range, fidelity)
+}
+
+/// Plans only explicitly selected sources.
+///
+/// # Errors
+///
+/// Returns an error when selected data or an exact set generation is absent.
+pub fn plan_selected<'a>(
+    session: &Session,
+    store: &'a SignalStore,
+    pyramids: &'a BTreeMap<SignalId, Pyramid>,
+    selection: &ExportSelection,
+    range: ExportRange,
+    fidelity: ExportFidelity,
+) -> Result<ExportPlan<'a>, SnapshotError> {
+    let selected_sources = selection.source_keys.iter().collect::<BTreeSet<_>>();
     let mut needs_raw = BTreeSet::new();
     for tab in &session.tabs {
         for panel in &tab.panels {
@@ -177,15 +208,20 @@ pub fn plan<'a>(
     }
 
     if range == ExportRange::All {
-        return Ok(export_plan(
+        let plan = export_plan(
             store
                 .signals()
+                .filter(|signal| {
+                    source_key(store, signal)
+                        .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
+                })
                 .map(|signal| {
                     let pyramid = pyramids
                         .get(&signal.id)
                         .ok_or(SnapshotError::MissingPyramid(signal.id))?;
                     Ok(signal_plan(
                         signal,
+                        source_key(store, signal)?,
                         pyramid,
                         None,
                         needs_raw.contains(&signal.id),
@@ -193,7 +229,8 @@ pub fn plan<'a>(
                     ))
                 })
                 .collect::<Result<_, SnapshotError>>()?,
-        ));
+        );
+        return Ok(plan);
     }
 
     let mut window: Option<(f64, f64)> = None;
@@ -212,18 +249,23 @@ pub fn plan<'a>(
             }
         }
     }
-    let Some((t0, t1)) = window else {
-        return Ok(export_plan(Vec::new()));
-    };
+    let (t0, t1) = window.unwrap_or((session.linked_time.t0, session.linked_time.t1));
 
-    Ok(export_plan(
+    let plan = export_plan(
         wanted
             .into_iter()
+            .filter(|id| {
+                store.signal(*id).is_some_and(|signal| {
+                    source_key(store, signal)
+                        .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
+                })
+            })
             .map(|id| {
                 let signal = store.signal(id).ok_or(SnapshotError::MissingSignal(id))?;
                 let pyramid = pyramids.get(&id).ok_or(SnapshotError::MissingPyramid(id))?;
                 Ok(signal_plan(
                     signal,
+                    source_key(store, signal)?,
                     pyramid,
                     Some((t0, t1)),
                     needs_raw.contains(&id),
@@ -231,13 +273,25 @@ pub fn plan<'a>(
                 ))
             })
             .collect::<Result<_, SnapshotError>>()?,
-    ))
+    );
+    Ok(plan)
 }
 
-fn signal_summary(signal: &Signal) -> SignalSummary {
+fn source_key(store: &SignalStore, signal: &Signal) -> Result<SourceKey, SnapshotError> {
+    store
+        .sources()
+        .find(|source| source.id == signal.source_id)
+        .map(|source| source.key)
+        .ok_or(SnapshotError::MissingSource(signal.id))
+}
+
+fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
+        source_id: signal.source_id.0,
+        source_key: source_key.0.to_string(),
+        local_path: signal.local_path.clone(),
         path: signal.path.clone(),
         unit: signal.unit.clone(),
         point_count: signal.len() as u64,
@@ -253,7 +307,7 @@ fn signal_summary(signal: &Signal) -> SignalSummary {
 /// Returns [`SnapshotError::Serialize`] when the session cannot be encoded.
 pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, SnapshotError> {
     let mut baked_session = session.clone();
-    baked_session.source_paths.clear();
+    baked_session.sources.clear();
 
     let mut signals = Vec::new();
     for entry in &plan.signals {
@@ -263,7 +317,7 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
             .filter_map(|level| entry.pyramid.level_window(level.index, entry.window))
             .collect();
         signals.push(BakedSignal {
-            summary: signal_summary(entry.signal),
+            summary: signal_summary(entry.signal, entry.source_key),
             levels,
         });
     }
@@ -341,19 +395,21 @@ mod tests {
     use super::*;
     use crate::pyramid::Pyramid;
     use crate::session::{AxisStyle, DashStyle, PanelMode, PanelState, SeriesState, Session};
-    use crate::store::{SignalId, SignalStore};
+    use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
 
     fn store_with(signals: &[(&str, usize)]) -> (SignalStore, BTreeMap<SignalId, Pyramid>) {
         let mut store = SignalStore::new();
-        let source = store.register_source("test.csv");
+        let source = store
+            .register_source("test.csv", SourceKey(uuid::Uuid::from_bytes([1; 16])), "")
+            .unwrap();
         let mut pyramids = BTreeMap::new();
         for (path, count) in signals {
             let count = u32::try_from(*count).expect("test signal is small");
             let time: Vec<f64> = (0..count).map(f64::from).collect();
             let values: Vec<f64> = time.iter().map(|time| time * 0.5).collect();
             let id = store
-                .insert_signal(source, (*path).to_owned(), None, time.into(), values)
+                .insert_signal(source, (*path).to_owned(), None, time, values)
                 .expect("insert");
             let signal = store.signal(id).expect("signal");
             pyramids.insert(id, Pyramid::from_signal(signal));
@@ -381,6 +437,7 @@ mod tests {
             color_signal: None,
             color_by_time: false,
             series: paths.iter().map(|path| series(path)).collect(),
+            highlighted_sources: Vec::new(),
             y_range: None,
             x_range: None,
             x_label: None,
@@ -432,7 +489,7 @@ mod tests {
         let expected = SnapshotManifest {
             session_json: serde_json::to_string(&session).expect("session"),
             signals: vec![BakedSignal {
-                summary: signal_summary(signal),
+                summary: signal_summary(signal, source_key(&store, signal).expect("source")),
                 levels: (0..pyramid.level_count())
                     .map(|level| pyramid.level(level).expect("level"))
                     .collect(),
@@ -622,10 +679,17 @@ mod tests {
     }
 
     #[test]
-    fn bake_clears_source_paths_and_orders_signals_by_id() {
+    fn bake_clears_sources_and_orders_signals_by_id() {
         let (store, pyramids) = store_with(&[("b", 100), ("a", 100)]);
         let session = Session {
-            source_paths: vec!["/home/user/secret.csv".to_owned()],
+            sources: vec![crate::session::SourceRecord {
+                key: uuid::Uuid::nil().to_string(),
+                path: "/home/user/secret.csv".into(),
+                prefix: "secret".into(),
+                provider_id: None,
+                decode_provenance: None,
+                reconcile_legacy: false,
+            }],
             ..Session::default()
         };
         let export = plan(
@@ -808,11 +872,13 @@ mod tests {
     #[test]
     fn estimate_stays_within_two_times_the_serialized_manifest() {
         let mut store = SignalStore::new();
-        let source = store.register_source("test.csv");
+        let source = store
+            .register_source("test.csv", SourceKey(uuid::Uuid::from_bytes([2; 16])), "")
+            .unwrap();
         let time: Vec<f64> = (0..10_000).map(|value| f64::from(value) / 7.0).collect();
         let values: Vec<f64> = time.iter().map(|time| time.sin() * 13.0).collect();
         let id = store
-            .insert_signal(source, "a".to_owned(), None, time.into(), values)
+            .insert_signal(source, "a".to_owned(), None, time, values)
             .expect("insert");
         let mut pyramids = BTreeMap::new();
         pyramids.insert(id, Pyramid::from_signal(store.signal(id).expect("signal")));
@@ -831,6 +897,40 @@ mod tests {
             .len() as u64;
         assert!(estimated <= actual * 2);
         assert!(actual <= estimated * 2);
+    }
+
+    #[test]
+    fn export_selection_filters_all_range_before_level_planning() {
+        let mut store = SignalStore::new();
+        let mut pyramids = BTreeMap::new();
+        for key in [1_u8, 2] {
+            let source = store
+                .register_source(
+                    format!("run-{key}.csv"),
+                    SourceKey(uuid::Uuid::from_bytes([key; 16])),
+                    format!("run-{key}"),
+                )
+                .unwrap();
+            let signal = store
+                .insert_signal(source, "a", None, vec![0.0, 1.0], vec![0.0, 1.0])
+                .unwrap();
+            pyramids.insert(signal, Pyramid::from_signal(store.signal(signal).unwrap()));
+        }
+        let selected = store.sources().next().unwrap().key.0.to_string();
+        let selection = ExportSelection {
+            source_keys: vec![selected],
+            set_keys: Vec::new(),
+        };
+        let plan = plan_selected(
+            &Session::default(),
+            &store,
+            &pyramids,
+            &selection,
+            ExportRange::All,
+            ExportFidelity::Full,
+        )
+        .unwrap();
+        assert_eq!(plan.series_total, 1);
     }
 
     fn empty_manifest() -> scope_protocol::SnapshotManifest {

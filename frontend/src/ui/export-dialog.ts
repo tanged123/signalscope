@@ -4,7 +4,7 @@ import type {
   ExportFidelity,
   ExportRange,
 } from "../generated/protocol";
-import { required } from "./dom";
+import { formatBytes, required } from "./dom";
 
 export type ExportFormat = "html" | "png" | "csv";
 export type PngScope = "focused" | "all";
@@ -16,7 +16,8 @@ export interface CsvEstimate {
 }
 
 export interface ExportDelegate {
-  estimateHtml(): Promise<ExportEstimate | null>;
+  estimateHtml(setKeys: readonly string[]): Promise<ExportEstimate | null>;
+  exportSets?(): { key: string; label: string }[];
   pngBytes(): Promise<number | null>;
   pngPanelCount(): number;
   csvEstimate(fidelity: ExportFidelity): Promise<CsvEstimate | null>;
@@ -25,6 +26,7 @@ export interface ExportDelegate {
     range: ExportRange,
     fidelity: ExportFidelity,
     pngScope: PngScope,
+    setKeys: readonly string[],
   ): Promise<void>;
 }
 
@@ -45,8 +47,10 @@ export class ExportDialog {
   private csvLoaded = false;
   private csvFidelity: ExportFidelity = "high";
   private loadToken = 0;
+  private pngLoadToken = 0;
   private csvLoadToken = 0;
   private returnFocus: HTMLElement | null = null;
+  private selectedSetKeys = new Set<string>();
   private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== "Escape" || this.element.hidden) return;
     event.preventDefault();
@@ -85,6 +89,10 @@ export class ExportDialog {
             <button class="export-option active" data-png-scope="focused" aria-pressed="true">focused panel</button>
             <button class="export-option" data-png-scope="all" aria-pressed="false">all panels</button>
           </div>
+        </div>
+        <div class="export-set-selection" hidden>
+          <span class="export-control-title">SETS</span>
+          <div class="export-set-options"></div>
         </div>
         <span class="export-control-title">RANGE</span>
         <div class="export-options export-range" role="radiogroup" aria-label="Export range">
@@ -173,16 +181,14 @@ export class ExportDialog {
     this.pngLoaded = false;
     this.csv = null;
     this.csvLoaded = false;
+    this.renderSetOptions();
     this.element.hidden = false;
     document.addEventListener("keydown", this.onDocumentKeyDown);
     this.renderSelection();
-    const token = ++this.loadToken;
-    void Promise.all([
-      this.delegate.estimateHtml(),
-      this.delegate.pngBytes(),
-    ]).then(([html, png]) => {
-      if (token !== this.loadToken || this.element.hidden) return;
-      this.htmlEstimate = html;
+    void this.loadHtmlEstimate();
+    const pngToken = ++this.pngLoadToken;
+    void this.delegate.pngBytes().then((png) => {
+      if (pngToken !== this.pngLoadToken || this.element.hidden) return;
       this.pngSize = png;
       this.pngLoaded = true;
       this.renderSelection();
@@ -197,6 +203,7 @@ export class ExportDialog {
   close(): void {
     this.element.hidden = true;
     this.loadToken += 1;
+    this.pngLoadToken += 1;
     this.csvLoadToken += 1;
     document.removeEventListener("keydown", this.onDocumentKeyDown);
     this.returnFocus?.focus();
@@ -228,6 +235,7 @@ export class ExportDialog {
         this.range,
         this.fidelity,
         this.pngScope,
+        [...this.selectedSetKeys],
       );
       this.close();
     } catch {
@@ -235,6 +243,44 @@ export class ExportDialog {
     } finally {
       this.confirm.disabled = false;
     }
+  }
+
+  private renderSetOptions(): void {
+    const sets = this.delegate.exportSets?.() ?? [];
+    this.selectedSetKeys = new Set(sets.map((set) => set.key));
+    const container = required<HTMLElement>(
+      this.element,
+      ".export-set-selection",
+    );
+    container.hidden = sets.length === 0;
+    const options = required<HTMLElement>(container, ".export-set-options");
+    options.replaceChildren(
+      ...sets.map((set) => {
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = true;
+        input.addEventListener("change", () => {
+          if (input.checked) this.selectedSetKeys.add(set.key);
+          else this.selectedSetKeys.delete(set.key);
+          void this.loadHtmlEstimate();
+        });
+        label.append(input, set.label);
+        return label;
+      }),
+    );
+  }
+
+  private async loadHtmlEstimate(): Promise<void> {
+    const token = ++this.loadToken;
+    this.htmlEstimate = undefined;
+    this.renderSelection();
+    const estimate = await this.delegate.estimateHtml([
+      ...this.selectedSetKeys,
+    ]);
+    if (token !== this.loadToken || this.element.hidden) return;
+    this.htmlEstimate = estimate;
+    this.renderSelection();
   }
 
   private entry(
@@ -417,13 +463,4 @@ export class ExportDialog {
 
 function formatCount(value: number | string): string {
   return BigInt(value).toLocaleString("en-US");
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) {
-    return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  }
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
-  if (bytes >= 1_000) return `${Math.round(bytes / 1_000).toString()} kB`;
-  return `${bytes.toString()} B`;
 }

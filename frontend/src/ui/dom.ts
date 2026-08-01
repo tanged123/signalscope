@@ -14,6 +14,13 @@ export function basename(path: string): string {
   return path.split(/[\\/]/).at(-1) ?? path;
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  if (bytes >= 1_000) return `${Math.round(bytes / 1_000).toString()} kB`;
+  return `${bytes.toString()} B`;
+}
+
 /**
  * A signal's short display name: the last two path segments, which keeps the
  * group that disambiguates same-named signals without the full path.

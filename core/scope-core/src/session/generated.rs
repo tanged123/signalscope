@@ -2,7 +2,28 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 10;
+pub const SESSION_SCHEMA_VERSION: u32 = 16;
+
+mod u64_string {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(D::Error::custom)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -93,6 +114,12 @@ pub struct Annotation {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct HighlightedSourceState {
+    pub local_path: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct PanelState {
     pub id: String,
     pub title: String,
@@ -104,6 +131,7 @@ pub struct PanelState {
     pub color_signal: Option<String>,
     pub color_by_time: bool,
     pub series: Vec<SeriesState>,
+    pub highlighted_sources: Vec<HighlightedSourceState>,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
     #[serde(default)]
@@ -152,6 +180,67 @@ pub struct DerivedSignal {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DerivedBundleState {
+    pub name: String,
+    pub expr: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SourceRecord {
+    pub key: String,
+    pub path: String,
+    pub prefix: String,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub decode_provenance: Option<String>,
+    pub reconcile_legacy: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TimeUnitState {
+    Seconds,
+    Milliseconds,
+    Microseconds,
+    Nanoseconds,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginKindState {
+    Relative,
+    AbsoluteEpoch,
+    EventAligned,
+    SyntheticIndex,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TimeDomainState {
+    pub unit: TimeUnitState,
+    pub origin: OriginKindState,
+    pub alignment_origin: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetMemberState {
+    pub source_key: String,
+    pub missing: Vec<String>,
+    pub scale: f64,
+    pub offset: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SourceSetState {
+    pub key: String,
+    pub label: String,
+    #[serde(with = "u64_string")]
+    pub generation: u64,
+    pub time_domain: TimeDomainState,
+    pub members: Vec<SetMemberState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Session {
     pub app: String,
     pub schema_version: u32,
@@ -160,6 +249,9 @@ pub struct Session {
     pub active_tab_id: String,
     pub tabs: Vec<WorkspaceTab>,
     pub favorites: Vec<String>,
+    pub favorite_bundles: Vec<String>,
     pub derived: Vec<DerivedSignal>,
-    pub source_paths: Vec<String>,
+    pub derived_bundles: Vec<DerivedBundleState>,
+    pub sources: Vec<SourceRecord>,
+    pub source_sets: Vec<SourceSetState>,
 }

@@ -8,7 +8,7 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
-import type { DataPlane } from "../app/data-plane";
+import type { DataPlane, IngestPort } from "../app/data-plane";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -16,7 +16,7 @@ import {
   historySnapshot,
   restoreTransientSessionState,
 } from "../app/history";
-import { runIngest } from "../app/ingest";
+import { runBatchIngest, waitForBatch } from "../app/ingest";
 import {
   applyPreferences,
   clampPlotFontSize,
@@ -31,6 +31,7 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
+import { virtualSlice } from "../app/tree-model";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
 import {
@@ -40,11 +41,15 @@ import {
   zoomRange,
 } from "../app/plot-math";
 import {
+  type BatchStatus,
   type ExportFidelity,
   type ExportRange,
+  type ExportSelection,
   type SampleResponse,
   type SampleSeries,
+  type SetSummary,
   type SignalSummary,
+  type SourceSummary,
   type TileResponse,
 } from "../generated/protocol";
 import type {
@@ -66,7 +71,8 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
-import type { QuickTransform } from "./panel";
+import { FolderScanDialog } from "./folder-scan-dialog";
+import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { WorkspaceTabsView } from "./workspace-tabs";
@@ -78,6 +84,43 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
+const DERIVED_PREFIX = "derived/";
+
+export function validateDerivedBundleName(path: string): void {
+  const name = path.startsWith(DERIVED_PREFIX)
+    ? path.slice(DERIVED_PREFIX.length)
+    : path;
+  if (name.includes("/")) {
+    throw new Error("derived bundle names are a single segment");
+  }
+}
+
+export function bundleCompletionEntries(
+  signals: readonly SignalSummary[],
+  sets: readonly SetSummary[],
+): { localPath: string; runCount: number }[] {
+  const members = new Map<string, Set<string>>();
+  for (const set of sets) {
+    const sourceKeys = new Set(set.members.map((member) => member.source_key));
+    const setMembers = new Map<string, Set<string>>();
+    for (const signal of signals) {
+      if (!sourceKeys.has(signal.source_key)) continue;
+      const paths = setMembers.get(signal.local_path) ?? new Set<string>();
+      paths.add(signal.path);
+      setMembers.set(signal.local_path, paths);
+    }
+    for (const [localPath, paths] of setMembers) {
+      if (paths.size < 2) continue;
+      const allMembers = members.get(localPath) ?? new Set<string>();
+      for (const path of paths) allMembers.add(path);
+      members.set(localPath, allMembers);
+    }
+  }
+  return [...members]
+    .filter(([, paths]) => paths.size >= 2)
+    .map(([localPath, paths]) => ({ localPath, runCount: paths.size }))
+    .sort((left, right) => left.localPath.localeCompare(right.localPath));
+}
 
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
@@ -85,6 +128,7 @@ export class AppShell {
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private signals: SignalSummary[] = [];
+  private sets: SetSummary[] = [];
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
@@ -92,6 +136,8 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
+  private folderScanDialog: FolderScanDialog | null = null;
+  private sourcesExpanded = false;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -176,6 +222,27 @@ export class AppShell {
         onDropSignal: (id, path) => {
           this.plotSignal(path, id);
         },
+        onDropBundle: (id, memberPaths) => {
+          this.plotBundle(memberPaths, id);
+        },
+        onToggleHighlight: (id, path) => {
+          const localPath = this.isDerivedPath(path)
+            ? undefined
+            : this.signalsByPath.get(path)?.local_path;
+          if (localPath === undefined) return;
+          this.workspace.toggleHighlight(id, path, localPath);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        localPathFor: (path) =>
+          this.isDerivedPath(path)
+            ? null
+            : (this.signalsByPath.get(path)?.local_path ?? null),
+        sourceKeyFor: (path) =>
+          this.isDerivedPath(path)
+            ? null
+            : (this.signalsByPath.get(path)?.source_key ?? null),
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
           this.workspace.setXSignal(id, path);
@@ -294,6 +361,10 @@ export class AppShell {
           const panel = this.workspace.addPanelRow();
           this.plotSignal(path, panel.id);
         },
+        onDropBundleNewPanel: (memberPaths) => {
+          const panel = this.workspace.addPanelRow();
+          this.plotBundle(memberPaths, panel.id);
+        },
         onMovePanel: (id, rowIndex, cellIndex) => {
           this.workspace.movePanel(id, rowIndex, cellIndex);
           this.afterLayoutChange();
@@ -315,13 +386,24 @@ export class AppShell {
         onPlotSignal: (path) => {
           this.plotSignal(path);
         },
+        onPlotBundle: (_localPath, memberPaths) => {
+          this.plotBundle(memberPaths);
+        },
         onToggleFavorite: (path) => {
           this.workspace.toggleFavorite(path);
           this.commitHistory();
           this.tree?.setFavorites(this.workspace.favorites());
         },
+        onToggleFavoriteBundle: (localPath) => {
+          this.workspace.toggleFavoriteBundle(localPath);
+          this.commitHistory();
+          this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
+        },
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
+        },
+        onRemoveDerivedBundle: (localPath) => {
+          void this.removeDerivedBundle(localPath);
         },
       },
     );
@@ -415,6 +497,16 @@ export class AppShell {
       enabled: () => this.plane.ingest !== null,
       run: () => {
         void this.openFiles();
+      },
+    });
+    this.commands.register({
+      id: "open-folder",
+      title: "Open folder…",
+      section: "file",
+      group: "open",
+      enabled: () => this.plane.ingest !== null,
+      run: () => {
+        void this.openFolder();
       },
     });
     this.commands.register({
@@ -761,7 +853,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.12.5");
+        this.showModeHelp("SignalScope 0.14.3");
       },
     });
     this.commands.register({
@@ -865,10 +957,6 @@ export class AppShell {
 
   /** Moves between panel domains without dropping the assigned XY x series. */
   private transitionPanelMode(panelId: string, mode: PanelMode): void {
-    const panel = this.workspace.panel(panelId);
-    if (panel?.mode === "xy" && mode !== "xy") {
-      this.workspace.setXSignal(panelId, null);
-    }
     this.workspace.setMode(panelId, mode);
     if (mode === "xy") this.workspace.promoteSeriesToX(panelId);
   }
@@ -1101,30 +1189,74 @@ export class AppShell {
     }
   }
 
+  private plotBundle(memberPaths: readonly string[], panelId?: string): void {
+    let target = this.workspace.focusedPanelId();
+    if (panelId !== undefined) target = panelId;
+    if (target === null) target = this.workspace.addPanelRow().id;
+    if (this.workspace.addSeriesBatch(target, memberPaths)) {
+      this.workspace.focusPanel(target);
+      this.fitWindowToPlotted();
+      this.afterLayoutChange();
+    }
+  }
+
   private async openFiles(): Promise<void> {
     const port = this.plane.ingest;
     if (port === null) return;
-    const progress = required<HTMLElement>(this.root, ".ingest-progress");
     try {
       const paths = await port.pickSources();
-      for (const path of paths) {
-        const name = basename(path);
-        progress.hidden = false;
-        await runIngest(port, path, (status) => {
-          const percent =
-            status.fraction > 0
-              ? `${String(Math.round(status.fraction * 100))}%`
-              : "…";
-          progress.textContent = `${name} · ${status.stage} ${percent}`;
+      if (paths.length > 0) await this.ingestPaths(paths);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async openFolder(): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null) return;
+    try {
+      const folder = await port.pickSourceFolder();
+      if (folder === null) return;
+      this.folderScanDialog ??= new FolderScanDialog(this.root);
+      this.folderScanDialog.open(
+        folder,
+        (recursive) => port.scanSources(folder, recursive),
+        (paths) => {
+          if (paths.length > 0) void this.ingestPaths(paths);
+        },
+      );
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private async ingestPaths(paths: string[]): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null || paths.length === 0) return;
+    const progress = required<HTMLElement>(this.root, ".ingest-progress");
+    let keepProgress = false;
+    try {
+      progress.hidden = false;
+      let jobId: string | null = null;
+      const tracked: IngestPort = {
+        ...port,
+        startBatch: async (batchPaths) => {
+          jobId = await port.startBatch(batchPaths);
+          return jobId;
+        },
+      };
+      const status = await runBatchIngest(tracked, paths, (current) => {
+        renderBatchProgress(progress, current, () => {
+          if (jobId !== null) void port.cancelBatch(jobId);
         });
-        this.workspace.addSourcePath(path);
-      }
+      });
+      keepProgress = status.recent_failures.length > 0;
       await this.reloadSignals();
       this.afterLayoutChange();
     } catch (error: unknown) {
       this.reportError(error);
     } finally {
-      progress.hidden = true;
+      progress.hidden = !keepProgress;
     }
   }
 
@@ -1209,6 +1341,7 @@ export class AppShell {
         this.workspace.linkedTime().linked,
       );
       this.tree?.setFavorites(this.workspace.favorites());
+      this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     } finally {
       this.restoringHistory = false;
     }
@@ -1347,18 +1480,23 @@ export class AppShell {
     this.exportPng = null;
     this.exportCsv.clear();
     this.exportDialog ??= new ExportDialog(this.root, {
-      estimateHtml: async () => {
+      estimateHtml: async (setKeys) => {
         const exporter = this.plane.exporter;
         if (exporter === null) return null;
         try {
           return await exporter.estimate(
             JSON.stringify(this.workspace.snapshot()),
+            this.exportSelection(setKeys),
           );
         } catch (error: unknown) {
           this.reportError(error);
           return null;
         }
       },
+      exportSets: () =>
+        this.workspace
+          .snapshot()
+          .source_sets.map((set) => ({ key: set.key, label: set.label })),
       pngBytes: async () => {
         const generation = this.exportGeneration;
         try {
@@ -1389,7 +1527,7 @@ export class AppShell {
           return null;
         }
       },
-      runExport: async (selected, range, fidelity, pngScope) => {
+      runExport: async (selected, range, fidelity, pngScope, setKeys) => {
         const cachedPng = this.exportPng;
         const cachedCsv = this.exportCsv.get(fidelity);
         this.exportGeneration += 1;
@@ -1401,6 +1539,7 @@ export class AppShell {
             pngScope,
             cachedPng,
             cachedCsv,
+            setKeys,
           );
         } catch (error: unknown) {
           this.reportError(error);
@@ -1418,6 +1557,7 @@ export class AppShell {
     pngScope: PngScope,
     cachedPng: Uint8Array | null,
     cachedCsv: CsvExport | undefined,
+    setKeys: readonly string[],
   ): Promise<void> {
     const exporter = this.plane.exporter;
     if (exporter === null) return;
@@ -1427,6 +1567,7 @@ export class AppShell {
         JSON.stringify(this.workspace.snapshot()),
         range,
         fidelity,
+        this.exportSelection(setKeys),
       );
     } else if (format === "png") {
       if (pngScope === "all") {
@@ -1456,6 +1597,14 @@ export class AppShell {
       );
     }
     if (path !== null) this.showModeHelp(`exported ${path}`);
+  }
+
+  private exportSelection(setKeys?: readonly string[]): ExportSelection {
+    const session = this.workspace.snapshot();
+    return {
+      source_keys: session.sources.map((source) => source.key),
+      set_keys: [...(setKeys ?? session.source_sets.map((set) => set.key))],
+    };
   }
 
   private async buildVisiblePng(): Promise<Uint8Array | null> {
@@ -1610,36 +1759,59 @@ export class AppShell {
     if (port === null) return;
     const progress = required<HTMLElement>(this.root, ".ingest-progress");
     try {
+      if (this.autosaveTimer !== null) {
+        window.clearTimeout(this.autosaveTimer);
+        this.autosaveTimer = null;
+      }
       const loaded = await port.load(path);
-      this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      let sessionJson = loaded.session_json;
+      const ingestPort = this.plane.ingest;
+      const restorePort = this.plane.restore;
+      if (ingestPort !== null && restorePort !== null) {
+        progress.hidden = false;
+        const jobId = await restorePort.start(sessionJson);
+        let reconciliationAttempted = false;
+        try {
+          await waitForBatch(ingestPort, jobId, (status) => {
+            renderBatchProgress(progress, status, () => {
+              void ingestPort.cancelBatch(jobId);
+            });
+          });
+          const reconciled = await restorePort.reconcile(sessionJson, jobId);
+          reconciliationAttempted = true;
+          sessionJson = reconciled.session_json;
+          const conflict = reconciled.conflicts[0];
+          if (conflict !== undefined) {
+            this.showModeHelp(
+              `${conflict.legacy_path} is claimed by ${String(conflict.claimants.length)} sources — relink to finish restoring`,
+            );
+          }
+        } finally {
+          if (!reconciliationAttempted) {
+            await restorePort.reconcile(sessionJson, jobId).catch(() => {});
+          }
+          await ingestPort.releaseBatch(jobId);
+        }
+      }
+      this.workspace.replace(JSON.parse(sessionJson) as Session);
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = loaded.path;
       this.dirty = false;
       document.documentElement.dataset.theme = this.workspace.theme();
       this.workspaceView?.invalidateTheme();
 
-      const ingestPort = this.plane.ingest;
-      if (ingestPort !== null) {
-        progress.hidden = false;
-        for (const source of this.workspace.sourcePaths()) {
-          const name = basename(source);
-          try {
-            await runIngest(ingestPort, source, (status) => {
-              const percent =
-                status.fraction > 0
-                  ? `${String(Math.round(status.fraction * 100))}%`
-                  : "…";
-              progress.textContent = `${name} · ${status.stage} ${percent}`;
-            });
-          } catch {
-            progress.textContent = `${name} · unavailable`;
-          }
-        }
-      }
       await this.reloadSignals();
 
       const derivedPort = this.plane.derived;
       if (derivedPort !== null) {
+        for (const definition of [...this.workspace.derivedBundles()]) {
+          try {
+            await derivedPort.createBundle(definition.name, definition.expr);
+          } catch {
+            // Unresolved definitions stay recorded for a later source retry.
+          }
+        }
+        await this.reloadSignals();
         for (const definition of [...this.workspace.derived()]) {
           try {
             await derivedPort.create(definition.path, definition.expr);
@@ -1675,6 +1847,39 @@ export class AppShell {
   async createDerived(path: string, expr: string): Promise<void> {
     const port = this.plane.derived;
     if (port === null) throw new Error("This snapshot cannot create signals");
+    if (this.hasBundleReference(expr)) {
+      validateDerivedBundleName(path);
+      const response = await port.createBundle(path, expr);
+      this.workspace.addDerivedBundle(response.local_path, expr);
+      await this.reloadSignals();
+      const focused = this.workspace.focusedPanelId();
+      if (focused !== null) {
+        this.workspace.addSeriesBatch(
+          focused,
+          response.created.map((summary) => summary.path),
+        );
+      }
+      if (response.skipped.length > 0) {
+        const missing = response.skipped
+          .map(
+            (entry) =>
+              entry.prefix +
+              " missing " +
+              entry.missing
+                .map((missingPath) => "'" + missingPath + "'")
+                .join(", "),
+          )
+          .join("; ");
+        this.showModeHelp(
+          "created for " +
+            String(response.created.length) +
+            " runs; " +
+            missing,
+        );
+      }
+      this.afterLayoutChange();
+      return;
+    }
     const summary = await port.create(path, expr);
     this.workspace.addDerived(summary.path, expr);
     await this.reloadSignals();
@@ -1694,6 +1899,45 @@ export class AppShell {
     } catch (error: unknown) {
       this.reportError(error);
     }
+  }
+
+  private async removeDerivedBundle(localPath: string): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) return;
+    try {
+      await port.removeBundle(localPath);
+      for (const signal of this.signals.filter(
+        (summary) => summary.local_path === localPath,
+      )) {
+        this.workspace.removeSignal(signal.path);
+      }
+      this.workspace.removeDerivedBundle(localPath);
+      await this.reloadSignals();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private hasBundleReference(expression: string): boolean {
+    const fullPaths = new Set(this.signals.map((signal) => signal.path));
+    const bundlePaths = new Set(
+      bundleCompletionEntries(this.signals, this.sets).map(
+        (bundle) => bundle.localPath,
+      ),
+    );
+    for (const match of expression.matchAll(
+      /'((?:''|[^'])*)'|"((?:""|[^"])*)"/g,
+    )) {
+      const quote = match[1] !== undefined ? "''" : '""';
+      const replacement = quote === "''" ? "'" : '"';
+      const reference = (match[1] ?? match[2] ?? "").replaceAll(
+        quote,
+        replacement,
+      );
+      if (!fullPaths.has(reference) && bundlePaths.has(reference)) return true;
+    }
+    return false;
   }
 
   private async applyQuickTransform(
@@ -1719,13 +1963,55 @@ export class AppShell {
   }
 
   private async reloadSignals(): Promise<void> {
-    this.signals = await this.plane.listSignals();
+    [this.signals, this.sets] = await Promise.all([
+      this.plane.listSignals(),
+      this.plane.listSets(),
+    ]);
+    this.workspace.setSourceSets(
+      this.sets.map((set) => ({
+        key: set.set_key,
+        label: set.label,
+        generation: set.generation,
+        time_domain: set.time_domain,
+        members: set.members,
+      })),
+    );
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
     this.tree?.setSignals(this.signals.map((summary) => summary.path));
+    const prefixesBySource = new Map<string, string>();
+    for (const signal of this.signals) {
+      if (!prefixesBySource.has(signal.source_key)) {
+        prefixesBySource.set(
+          signal.source_key,
+          signal.path.endsWith(`/${signal.local_path}`)
+            ? signal.path.slice(0, -signal.local_path.length - 1)
+            : signal.path,
+        );
+      }
+    }
+    this.tree?.setSets(
+      this.sets
+        .map((set) => ({
+          key: set.set_key,
+          label: set.label,
+          prefixes: [
+            ...new Set(
+              set.members
+                .map((member) => prefixesBySource.get(member.source_key))
+                .filter((prefix): prefix is string => prefix !== undefined),
+            ),
+          ],
+        }))
+        .filter((set) => set.prefixes.length > 0),
+    );
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
+    this.formulaBar?.setBundles(
+      bundleCompletionEntries(this.signals, this.sets),
+    );
     this.tree?.setFavorites(this.workspace.favorites());
+    this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     this.updateStatus();
   }
 
@@ -1804,8 +2090,46 @@ export class AppShell {
   } {
     const paths = panel.series.map((series) => series.path);
     if (panel.mode === "xy") {
-      if (panel.x_signal !== null) paths.unshift(panel.x_signal);
-      if (panel.color_signal !== null) paths.push(panel.color_signal);
+      if (panel.x_signal !== null) {
+        paths.unshift(panel.x_signal);
+        const xLocal = this.isDerivedPath(panel.x_signal)
+          ? undefined
+          : this.signalsByPath.get(panel.x_signal)?.local_path;
+        if (xLocal !== undefined) {
+          for (const series of panel.series) {
+            const sourceKey = this.isDerivedPath(series.path)
+              ? undefined
+              : this.signalsByPath.get(series.path)?.source_key;
+            if (sourceKey === undefined) continue;
+            const resolved = this.signals.find(
+              (candidate) =>
+                candidate.source_key === sourceKey &&
+                candidate.local_path === xLocal,
+            );
+            if (resolved !== undefined) paths.push(resolved.path);
+          }
+        }
+      }
+      if (panel.color_signal !== null) {
+        paths.push(panel.color_signal);
+        const cLocal = this.isDerivedPath(panel.color_signal)
+          ? undefined
+          : this.signalsByPath.get(panel.color_signal)?.local_path;
+        if (cLocal !== undefined) {
+          for (const series of panel.series) {
+            const sourceKey = this.isDerivedPath(series.path)
+              ? undefined
+              : this.signalsByPath.get(series.path)?.source_key;
+            if (sourceKey === undefined) continue;
+            const resolved = this.signals.find(
+              (candidate) =>
+                candidate.source_key === sourceKey &&
+                candidate.local_path === cLocal,
+            );
+            if (resolved !== undefined) paths.push(resolved.path);
+          }
+        }
+      }
     }
     const ids: string[] = [];
     const missing: string[] = [];
@@ -1815,6 +2139,10 @@ export class AppShell {
       else ids.push(id);
     }
     return { ids, missing };
+  }
+
+  private isDerivedPath(path: string): boolean {
+    return this.workspace.derived().some((entry) => entry.path === path);
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
@@ -2109,28 +2437,35 @@ export class AppShell {
 
   private async updateSources(): Promise<void> {
     const sources = await this.plane.listSources();
+    for (const source of sources) {
+      if (
+        this.workspace
+          .sources()
+          .some((saved) => saved.key === source.source_key)
+      ) {
+        continue;
+      }
+      this.workspace.addSource({
+        key: source.source_key,
+        path: source.path,
+        prefix: source.prefix,
+        provider_id: null,
+        decode_provenance: null,
+        reconcile_legacy: false,
+      });
+    }
     const firstName = sources[0] === undefined ? "" : basename(sources[0].path);
     required(this.root, ".source-name").textContent = firstName;
     required(this.root, ".session-identity").textContent =
       firstName === ""
         ? ""
         : `${firstName} — ${this.signals.length.toLocaleString()} signals`;
-    const rows = required(this.root, ".source-rows");
-    rows.replaceChildren(
-      ...sources.map((source) => {
-        const row = document.createElement("div");
-        row.className = "source-row";
-        const name = document.createElement("span");
-        name.className = "signal-path";
-        name.textContent = basename(source.path);
-        name.title = source.path;
-        const points = document.createElement("span");
-        points.className = "source-points";
-        points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
-        row.append(name, points);
-        return row;
-      }),
-    );
+    const rows = required<HTMLElement>(this.root, ".source-rows");
+    const toggleSources = (): void => {
+      this.sourcesExpanded = !this.sourcesExpanded;
+      renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
+    };
+    renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
   }
 
   private toggleLinked(): void {
@@ -2274,6 +2609,128 @@ export class AppShell {
     required(this.root, ".render-ms").textContent = `error: ${message}`;
     console.error(error);
   }
+}
+
+export function renderBatchProgress(
+  progress: HTMLElement,
+  status: BatchStatus,
+  cancel: () => void,
+): void {
+  const percent = Math.round(status.fraction * 100);
+  const summary = document.createElement("span");
+  summary.textContent = `${String(percent)}% · ${status.done}/${status.total} loaded · ${status.failed} failed`;
+  const children: HTMLElement[] = [];
+  if (status.state === "running") {
+    const bar = document.createElement("div");
+    bar.className = "ingest-bar";
+    const fill = document.createElement("div");
+    fill.className = "ingest-bar-fill";
+    fill.style.width = `${String(percent)}%`;
+    bar.append(fill);
+    children.push(bar);
+  }
+  children.push(summary);
+  if (status.state === "running" && status.current_paths.length > 0) {
+    const current = document.createElement("span");
+    const [path] = status.current_paths;
+    if (path !== undefined) {
+      current.className = "ingest-current";
+      current.textContent = `${basename(path)}${status.current_paths.length > 1 ? ` +${String(status.current_paths.length - 1)}` : ""}`;
+      current.title = path;
+      children.push(current);
+    }
+  }
+  if (status.state === "running") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ingest-cancel";
+    button.textContent = "Cancel";
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      cancel();
+    });
+    children.push(button);
+  }
+  if (status.recent_failures.length > 0) {
+    const failures = document.createElement("div");
+    failures.className = "ingest-failures";
+    for (const failure of status.recent_failures) {
+      const row = document.createElement("div");
+      row.textContent = `${basename(failure.path)} — ${failure.error}`;
+      row.title = failure.path;
+      failures.append(row);
+    }
+    children.push(failures);
+  }
+  progress.replaceChildren(...children);
+}
+
+export function renderSourceRows(
+  container: HTMLElement,
+  sources: readonly SourceSummary[],
+  expanded: boolean,
+  onToggle: () => void,
+): void {
+  const previousScrollTop =
+    container.querySelector<HTMLElement>(".source-scroll")?.scrollTop ?? 0;
+  const totalPoints = sources.reduce(
+    (total, source) => total + Number(source.point_count),
+    0,
+  );
+  if (sources.length <= 8) {
+    container.replaceChildren(...sources.map(sourceRow));
+    return;
+  }
+  const summary = document.createElement("button");
+  summary.type = "button";
+  summary.className = "source-summary";
+  summary.ariaExpanded = String(expanded);
+  summary.textContent = `${String(sources.length)} sources · ${totalPoints.toLocaleString()} pts ${expanded ? "▾" : "▸"}`;
+  summary.addEventListener("click", onToggle);
+  const children: HTMLElement[] = [summary];
+  if (expanded) {
+    const scroll = document.createElement("div");
+    scroll.className = "source-scroll";
+    const rowHeight = 22;
+    const slice = virtualSlice(
+      sources.length,
+      previousScrollTop,
+      scroll.clientHeight > 0 ? scroll.clientHeight : 176,
+      rowHeight,
+    );
+    const spacer = document.createElement("div");
+    spacer.className = "source-spacer";
+    spacer.style.height = `${String(slice.totalHeight)}px`;
+    const windowElement = document.createElement("div");
+    windowElement.className = "source-window";
+    windowElement.style.transform = `translateY(${String(slice.topPadding)}px)`;
+    windowElement.append(
+      ...sources.slice(slice.start, slice.end).map(sourceRow),
+    );
+    spacer.append(windowElement);
+    scroll.append(spacer);
+    scroll.addEventListener("scroll", () => {
+      renderSourceRows(container, sources, true, onToggle);
+      const next = container.querySelector<HTMLElement>(".source-scroll");
+      if (next !== null) next.scrollTop = scroll.scrollTop;
+    });
+    children.push(scroll);
+  }
+  container.replaceChildren(...children);
+}
+
+function sourceRow(source: SourceSummary): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "source-row";
+  const name = document.createElement("span");
+  name.className = "signal-path";
+  name.textContent = basename(source.path);
+  name.title = source.path;
+  const points = document.createElement("span");
+  points.className = "source-points";
+  points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
+  row.append(name, points);
+  return row;
 }
 
 /** Explains why a listed command cannot run, or nothing when it can. */

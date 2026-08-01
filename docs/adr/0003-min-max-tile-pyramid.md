@@ -46,3 +46,9 @@ envelope values are finite by construction). Every section carries its own
 crc32. Raw columns are cached alongside levels so a hit skips decode
 entirely. Corrupt or stale sidecars are cache _misses_ that trigger rebuild
 and rewrite; write failures (e.g. read-only directories) are non-fatal.
+
+## Amendment (2026-07-30)
+
+ADR 0029 supersedes the storage details: sidecar v4 shares time sections,
+stores compact struct-of-arrays bins from level 3 onward, and pages columns and
+fine levels with positioned reads.

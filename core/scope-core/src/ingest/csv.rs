@@ -2,15 +2,15 @@
 
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Cursor},
+    io::{BufRead, BufReader, Cursor, Read},
     path::Path,
     sync::Arc,
 };
 
 use super::{
-    Decoder, IngestError, IngestSummary, apply_permutation, normalize_segment, sort_permutation,
+    DecodeContext, DecodedSignal, DecodedSource, Decoder, IngestError, apply_permutation_in_place,
+    normalize_segment, sort_permutation,
 };
-use crate::store::SignalStore;
 
 const TIME_NAMES: &[&str] = &[
     "t",
@@ -29,101 +29,80 @@ pub struct CsvDecoder;
 
 impl CsvDecoder {
     #[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding
-    fn ingest_unchecked(
-        path: &Path,
-        store: &mut SignalStore,
-        progress: &mut dyn FnMut(f64),
-    ) -> Result<IngestSummary, IngestError> {
-        let input = filter_comment_lines(File::open(path)?)?;
-        let probe = probe_first_data_line(&input)?;
-
+    fn decode_reader_with_total<R: BufRead>(
+        reader: R,
+        total: Option<u64>,
+        context: &mut DecodeContext<'_>,
+    ) -> Result<DecodedSource, IngestError> {
+        let mut filtered = BufReader::new(CommentFilter::new(reader));
+        let mut probe = String::new();
+        if filtered.read_line(&mut probe)? == 0 {
+            return Err(IngestError::NoDataRows);
+        }
+        let probe = probe.trim().to_owned();
         let delimiter = detect_delimiter(&probe);
         let has_headers = detect_header(&probe, delimiter);
-        let mut reader = ::csv::ReaderBuilder::new()
-            .delimiter(delimiter)
-            .has_headers(has_headers)
-            .flexible(true)
-            .trim(::csv::Trim::All)
-            .from_reader(Cursor::new(input));
-
         let headers = if has_headers {
-            reader
-                .headers()?
-                .iter()
-                .map(str::to_owned)
+            split_probe(&probe, delimiter)
+                .into_iter()
+                .map(|header| header.trim_matches('"').to_owned())
                 .collect::<Vec<_>>()
         } else {
-            let count = split_probe(&probe, delimiter).len();
-            (1..=count).map(|index| format!("col{index}")).collect()
+            (1..=split_probe(&probe, delimiter).len())
+                .map(|index| format!("col{index}"))
+                .collect()
         };
-
         if headers.len() < 2 {
             return Err(IngestError::TooFewColumns);
         }
 
-        let total = reader.get_ref().get_ref().len().max(1) as f64;
+        let prefix = if has_headers {
+            Vec::new()
+        } else {
+            let mut bytes = probe.into_bytes();
+            bytes.push(b'\n');
+            bytes
+        };
+        let mut reader = ::csv::ReaderBuilder::new()
+            .delimiter(delimiter)
+            .has_headers(false)
+            .flexible(true)
+            .comment(None)
+            .trim(::csv::Trim::All)
+            .from_reader(Cursor::new(prefix).chain(filtered));
         let mut columns = vec![Vec::<f64>::new(); headers.len()];
         let mut records_seen = 0_usize;
-        for record in reader.records() {
-            let record = record?;
+        let mut record = ::csv::StringRecord::new();
+        while reader.read_record(&mut record)? {
             records_seen += 1;
             if records_seen % 4096 == 0 {
-                let byte = record.position().map_or(0, ::csv::Position::byte);
-                progress((byte as f64 / total).min(1.0));
+                context.check()?;
+                let fraction = total.map_or(0.0, |total| {
+                    reader.position().byte() as f64 / total.max(1) as f64
+                });
+                context.report(fraction);
             }
             if record.len() < 2 {
                 continue;
             }
             for (index, column) in columns.iter_mut().enumerate() {
-                let value = record
-                    .get(index)
-                    .map(str::trim)
-                    .filter(|cell| !cell.is_empty())
-                    .and_then(|cell| cell.parse::<f64>().ok())
-                    .unwrap_or(f64::NAN);
-                column.push(value);
+                column.push(parse_cell(record.get(index)));
             }
         }
-        progress(1.0);
+        context.check()?;
+        context.report(1.0);
+        finish(headers, columns)
+    }
 
-        let row_count = columns.first().map_or(0, Vec::len);
-        if row_count == 0 {
-            return Err(IngestError::NoDataRows);
-        }
-
-        let time_index = select_time_column(&headers, &columns);
-        if let Some(index) = time_index {
-            sort_columns_by_time(&mut columns, index);
-        }
-        let time = time_index.map_or_else(
-            || {
-                std::iter::successors(Some(0.0), |value| Some(value + 1.0))
-                    .take(row_count)
-                    .collect()
-            },
-            |index| columns[index].clone(),
-        );
-
-        let source_id = store.register_source(path);
-        let time: Arc<[f64]> = time.into();
-        let base = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("source");
-        let mut signals = Vec::new();
-        for (index, (header, values)) in headers.into_iter().zip(columns).enumerate() {
-            if Some(index) == time_index || !values.iter().any(|value| value.is_finite()) {
-                continue;
-            }
-            let path = normalize_signal_path(base, &header);
-            signals.push(store.insert_signal(source_id, path, None, Arc::clone(&time), values)?);
-        }
-
-        Ok(IngestSummary {
-            source_id,
-            row_count,
-            signals,
-        })
+    /// # Errors
+    ///
+    /// Returns a decode or cancellation error.
+    pub fn decode_reader<R: BufRead>(
+        &self,
+        reader: R,
+        context: &mut DecodeContext<'_>,
+    ) -> Result<DecodedSource, IngestError> {
+        Self::decode_reader_with_total(reader, None, context)
     }
 }
 
@@ -131,43 +110,89 @@ impl Decoder for CsvDecoder {
     fn decode(
         &self,
         path: &Path,
-        store: &mut SignalStore,
-        progress: &mut dyn FnMut(f64),
-    ) -> Result<IngestSummary, IngestError> {
-        Self::ingest_unchecked(path, store, progress)
+        context: &mut DecodeContext<'_>,
+    ) -> Result<DecodedSource, IngestError> {
+        let file = File::open(path)?;
+        let total = file.metadata().ok().map(|metadata| metadata.len());
+        Self::decode_reader_with_total(BufReader::new(file), total, context)
     }
 }
 
-fn filter_comment_lines(file: File) -> Result<Vec<u8>, IngestError> {
-    let mut filtered = Vec::new();
-    for line in BufReader::new(file).lines() {
-        let line = line?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() || matches!(trimmed.as_bytes().first(), Some(b'#' | b'%' | b';')) {
-            continue;
+struct CommentFilter<R> {
+    inner: R,
+    pending: Vec<u8>,
+    offset: usize,
+}
+
+impl<R> CommentFilter<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            pending: Vec::new(),
+            offset: 0,
         }
-        filtered.extend_from_slice(line.as_bytes());
-        filtered.push(b'\n');
     }
-    if filtered.is_empty() {
+}
+
+impl<R: BufRead> Read for CommentFilter<R> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        while self.offset == self.pending.len() {
+            self.pending.clear();
+            self.offset = 0;
+            if self.inner.read_until(b'\n', &mut self.pending)? == 0 {
+                return Ok(0);
+            }
+            let trimmed = self.pending.trim_ascii();
+            if trimmed.is_empty() || matches!(trimmed.first().copied(), Some(b'#' | b'%' | b';')) {
+                self.pending.clear();
+            }
+        }
+        let count = output.len().min(self.pending.len() - self.offset);
+        output[..count].copy_from_slice(&self.pending[self.offset..self.offset + count]);
+        self.offset += count;
+        Ok(count)
+    }
+}
+
+fn parse_cell(cell: Option<&str>) -> f64 {
+    cell.map(str::trim)
+        .filter(|cell| !cell.is_empty())
+        .and_then(|cell| cell.parse::<f64>().ok())
+        .unwrap_or(f64::NAN)
+}
+
+fn finish(headers: Vec<String>, mut columns: Vec<Vec<f64>>) -> Result<DecodedSource, IngestError> {
+    let row_count = columns.first().map_or(0, Vec::len);
+    if row_count == 0 {
         return Err(IngestError::NoDataRows);
     }
-    Ok(filtered)
-}
 
-fn probe_first_data_line(input: &[u8]) -> Result<String, IngestError> {
-    let mut reader = BufReader::new(input);
-    let mut line = String::new();
-    loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
-            return Err(IngestError::NoDataRows);
-        }
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
+    let time_index = select_time_column(&headers, &columns);
+    if let Some(index) = time_index {
+        sort_columns_by_time(&mut columns, index);
     }
+    let time = time_index.map_or_else(
+        || {
+            std::iter::successors(Some(0.0), |value| Some(value + 1.0))
+                .take(row_count)
+                .collect()
+        },
+        |index| columns[index].clone(),
+    );
+    let time: Arc<[f64]> = time.into();
+    let mut signals = Vec::new();
+    for (index, (header, values)) in headers.into_iter().zip(columns).enumerate() {
+        if Some(index) == time_index || !values.iter().any(|value| value.is_finite()) {
+            continue;
+        }
+        signals.push(DecodedSignal {
+            local_path: normalize_segment(&header),
+            unit: None,
+            time: Arc::clone(&time).into(),
+            values: values.into(),
+        });
+    }
+    Ok(DecodedSource { row_count, signals })
 }
 
 fn detect_delimiter(probe: &str) -> u8 {
@@ -212,8 +237,9 @@ fn sort_columns_by_time(columns: &mut [Vec<f64>], time_index: usize) {
     else {
         return;
     };
+    let mut scratch = Vec::new();
     for column in columns {
-        *column = apply_permutation(&order, column);
+        apply_permutation_in_place(&order, column, &mut scratch);
     }
 }
 
@@ -221,16 +247,88 @@ fn is_monotonic_finite(column: &[f64]) -> bool {
     column.iter().all(|value| value.is_finite()) && column.windows(2).all(|pair| pair[1] >= pair[0])
 }
 
-fn normalize_signal_path(base: &str, header: &str) -> String {
-    format!("{base}/{}", normalize_segment(header))
-}
-
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::{
+        cell::RefCell,
+        io::{Read, Write},
+        rc::Rc,
+    };
 
     use super::*;
-    use crate::ingest::ingest_path;
+    use crate::{
+        ingest::{CancelToken, ingest_for_test},
+        store::SignalStore,
+    };
+
+    struct LoggingReader<'a> {
+        inner: std::io::Cursor<Vec<u8>>,
+        log: Rc<RefCell<Vec<&'a str>>>,
+    }
+
+    impl Read for LoggingReader<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let read = self.inner.read(buffer)?;
+            if read > 0 {
+                self.log.borrow_mut().push("read");
+            }
+            Ok(read)
+        }
+    }
+
+    #[test]
+    fn decoding_is_interleaved_with_reading() {
+        let mut bytes = b"time,value\n".to_vec();
+        for row in 0..40_000 {
+            bytes.extend_from_slice(format!("{row},{}\n", row * 2).as_bytes());
+        }
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let reader = std::io::BufReader::with_capacity(
+            8 * 1024,
+            LoggingReader {
+                inner: std::io::Cursor::new(bytes),
+                log: Rc::clone(&log),
+            },
+        );
+        let cancel = CancelToken::default();
+        let sink = Rc::clone(&log);
+        let mut progress = move |_: f64| sink.borrow_mut().push("progress");
+        let mut context = DecodeContext {
+            progress: &mut progress,
+            cancel: &cancel,
+        };
+
+        let decoded = CsvDecoder.decode_reader(reader, &mut context).unwrap();
+        assert_eq!(decoded.row_count, 40_000);
+        let entries = log.borrow();
+        let first_progress = entries
+            .iter()
+            .position(|entry| *entry == "progress")
+            .unwrap();
+        let last_read = entries.iter().rposition(|entry| *entry == "read").unwrap();
+        assert!(first_progress < last_read);
+    }
+
+    #[test]
+    fn cancellation_stops_a_long_decode() {
+        let mut bytes = b"time,value\n".to_vec();
+        for row in 0..40_000 {
+            bytes.extend_from_slice(format!("{row},{row}\n").as_bytes());
+        }
+        let cancel = CancelToken::default();
+        let mut progress = |_: f64| cancel.cancel();
+        let mut context = DecodeContext {
+            progress: &mut progress,
+            cancel: &cancel,
+        };
+        let error = CsvDecoder
+            .decode_reader(
+                std::io::BufReader::new(std::io::Cursor::new(bytes)),
+                &mut context,
+            )
+            .unwrap_err();
+        assert!(matches!(error, IngestError::Cancelled));
+    }
 
     #[test]
     fn detects_header_delimiter_and_time_column() {
@@ -241,7 +339,7 @@ mod tests {
         writeln!(file, "0.1;11;").unwrap();
 
         let mut store = SignalStore::new();
-        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
         let paths = store
             .signals()
             .map(|signal| signal.path.as_str())
@@ -261,7 +359,7 @@ mod tests {
         writeln!(file, "2,7").unwrap();
 
         let mut store = SignalStore::new();
-        ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(store.signals().next().unwrap().time(), &[0.0, 1.0]);
     }
@@ -275,7 +373,7 @@ mod tests {
         writeln!(file, "1,10,150").unwrap();
 
         let mut store = SignalStore::new();
-        ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         let value = store
             .signals()
@@ -299,7 +397,7 @@ mod tests {
         writeln!(file, "0,4").unwrap();
 
         let mut store = SignalStore::new();
-        let summary = ingest_path(file.path(), &mut store, &mut |_| {}).unwrap();
+        let summary = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 1);
         assert_eq!(summary.signals.len(), 1);
@@ -313,7 +411,7 @@ mod tests {
         writeln!(file, "0,4,5").unwrap();
 
         let mut store = SignalStore::new();
-        assert!(ingest_path(file.path(), &mut store, &mut |_| {}).is_err());
+        assert!(ingest_for_test(file.path(), &mut store, &mut |_| {}).is_err());
 
         assert_eq!(store.sources().count(), 0);
         assert_eq!(store.signals().count(), 0);

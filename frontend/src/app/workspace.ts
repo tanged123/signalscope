@@ -1,12 +1,15 @@
 import type {
   Annotation,
   DashStyle,
+  DerivedBundleState,
   DerivedSignal,
   LayoutRow,
   LinkedTime,
   PanelMode,
   PanelState,
   Session,
+  SourceSetState,
+  SourceRecord,
   WorkspaceTab,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
@@ -38,8 +41,11 @@ export function emptySession(): Session {
     active_tab_id: "workspace-1",
     tabs: [createWorkspaceTab(1)],
     favorites: [],
+    favorite_bundles: [],
     derived: [],
-    source_paths: [],
+    derived_bundles: [],
+    sources: [],
+    source_sets: [],
   };
 }
 
@@ -63,6 +69,10 @@ export class WorkspaceModel {
 
   snapshot(): Readonly<Session> {
     return this.session;
+  }
+
+  setSourceSets(sets: SourceSetState[]): void {
+    this.session.source_sets = structuredClone(sets);
   }
 
   /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
@@ -195,8 +205,16 @@ export class WorkspaceModel {
     return this.session.favorites;
   }
 
+  favoriteBundles(): readonly string[] {
+    return this.session.favorite_bundles;
+  }
+
   derived(): readonly DerivedSignal[] {
     return this.session.derived;
+  }
+
+  derivedBundles(): readonly DerivedBundleState[] {
+    return this.session.derived_bundles;
   }
 
   /** Records a definition, replacing any existing one for the same path. */
@@ -209,6 +227,23 @@ export class WorkspaceModel {
     } else {
       this.session.derived[existing] = { path, expr };
     }
+  }
+
+  addDerivedBundle(name: string, expr: string): void {
+    const normalized = name.startsWith("derived/") ? name.slice(8) : name;
+    const existing = this.session.derived_bundles.findIndex(
+      (entry) => entry.name === normalized,
+    );
+    const definition = { name: normalized, expr };
+    if (existing === -1) this.session.derived_bundles.push(definition);
+    else this.session.derived_bundles[existing] = definition;
+  }
+
+  removeDerivedBundle(name: string): void {
+    const normalized = name.startsWith("derived/") ? name.slice(8) : name;
+    this.session.derived_bundles = this.session.derived_bundles.filter(
+      (entry) => entry.name !== normalized,
+    );
   }
 
   removeSignal(path: string): void {
@@ -236,14 +271,22 @@ export class WorkspaceModel {
     }
   }
 
-  sourcePaths(): readonly string[] {
-    return this.session.source_paths;
+  sources(): readonly SourceRecord[] {
+    return this.session.sources;
   }
 
-  addSourcePath(path: string): void {
-    if (!this.session.source_paths.includes(path)) {
-      this.session.source_paths.push(path);
-    }
+  addSource(record: SourceRecord): void {
+    const index = this.session.sources.findIndex(
+      (source) => source.key === record.key,
+    );
+    if (index === -1) this.session.sources.push(record);
+    else this.session.sources[index] = record;
+  }
+
+  removeSource(key: string): void {
+    this.session.sources = this.session.sources.filter(
+      (source) => source.key !== key,
+    );
   }
 
   cursorMode(): WorkspaceTab["cursor_mode"] {
@@ -419,11 +462,38 @@ export class WorkspaceModel {
     return true;
   }
 
+  addSeriesBatch(panelId: string, paths: readonly string[]): boolean {
+    let added = false;
+    for (const path of paths) {
+      if (this.addSeries(panelId, path)) added = true;
+    }
+    return added;
+  }
+
   toggleSeriesVisible(panelId: string, path: string): void {
     const series = this.panel(panelId)?.series.find(
       (entry) => entry.path === path,
     );
     if (series !== undefined) series.visible = !series.visible;
+  }
+
+  toggleHighlight(panelId: string, path: string, localPath: string): void {
+    const panel = this.panel(panelId);
+    if (
+      panel === undefined ||
+      !panel.series.some((series) => series.path === path)
+    ) {
+      return;
+    }
+    const current = panel.highlighted_sources.find(
+      (entry) => entry.local_path === localPath,
+    );
+    panel.highlighted_sources = panel.highlighted_sources.filter(
+      (entry) => entry.local_path !== localPath,
+    );
+    if (current?.path !== path) {
+      panel.highlighted_sources.push({ local_path: localPath, path });
+    }
   }
 
   setPanelYRange(panelId: string, range: [number, number]): void {
@@ -524,6 +594,9 @@ export class WorkspaceModel {
     panel.annotations = panel.annotations.filter(
       (annotation) => annotation.series_path !== path,
     );
+    panel.highlighted_sources = panel.highlighted_sources.filter(
+      (entry) => entry.path !== path,
+    );
   }
 
   resizeRows(seamIndex: number, delta: number): void {
@@ -572,6 +645,15 @@ export class WorkspaceModel {
       this.session.favorites.push(path);
     } else {
       this.session.favorites.splice(index, 1);
+    }
+  }
+
+  toggleFavoriteBundle(localPath: string): void {
+    const index = this.session.favorite_bundles.indexOf(localPath);
+    if (index === -1) {
+      this.session.favorite_bundles.push(localPath);
+    } else {
+      this.session.favorite_bundles.splice(index, 1);
     }
   }
 
@@ -626,6 +708,7 @@ export class WorkspaceModel {
       color_signal: null,
       color_by_time: false,
       series: [],
+      highlighted_sources: [],
       y_range: null,
       x_range: null,
       x_label: null,

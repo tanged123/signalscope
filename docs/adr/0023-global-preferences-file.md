@@ -30,3 +30,18 @@ Two durable stores exist with a clear split: session for workspace state and
 preferences for user appearance. Every preferences schema change needs a
 schema bump, migration rung, and TypeScript-to-Rust conformance fixture, like
 the session.
+
+## 2026-07-30 amendment: cache and ingest budgets
+
+Schema 2 adds the app-owned cache root, its byte limit, and optional ingest
+working and resident limits. Missing limits retain automatic sizing. Native
+preferences resolve a missing cache root to the app data `cache/` directory.
+
+Writable source directories may keep beside-source sidecars. Read-only
+directories use the app-owned root, where entries are keyed by decode
+provenance so relocation does not invalidate them. App-owned cache writes are
+required; beside-source write failures remain non-fatal.
+
+ADR 0029 extends this root to page-backed columns, derived spills, and
+generation-keyed ensemble materializations. Live page leases prevent eviction
+and deletion.

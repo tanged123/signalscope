@@ -165,6 +165,10 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onMaximize: () => {},
       onSelectMode: () => {},
       onDropSignal: () => {},
+      onDropBundle: () => {},
+      onToggleHighlight: () => {},
+      localPathFor: () => null,
+      sourceKeyFor: () => null,
       onSetXSignal: () => {},
       onSetColorSignal: () => {},
       onClearXSignal: () => {},
@@ -206,6 +210,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
           width: 1.4,
           visible: true,
         })),
+        highlighted_sources: [],
         y_range: null,
         x_range: null,
         x_label: null,
@@ -373,7 +378,7 @@ test("formula component creates and recalls accepted formulas", async ({
   await input.press("Enter");
   await expect(host.locator(".formula-error")).toContainText("unknown signal");
   await expect(host.locator(".formula-error-guidance")).toHaveText(
-    "Signal references use quoted full paths. Drag from the tree to insert.",
+    "Signal and bundle references use quoted paths. Drag from the tree to insert.",
   );
   await expect(input).toHaveValue("derived/bad = 'missing/path'");
 

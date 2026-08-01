@@ -54,6 +54,17 @@ describe("derived definitions", () => {
     ]);
   });
 
+  it("round-trips derived bundle definitions", () => {
+    const model = new WorkspaceModel();
+    model.addDerivedBundle("score", "'temp' + 'alt'");
+    expect(model.derivedBundles()).toEqual([
+      { name: "score", expr: "'temp' + 'alt'" },
+    ]);
+
+    model.removeDerivedBundle("score");
+    expect(model.derivedBundles()).toEqual([]);
+  });
+
   it("replaces a redefined path in place", () => {
     const model = new WorkspaceModel();
     model.addDerived("derived/speed", "'a/x'");
@@ -112,12 +123,21 @@ describe("derived definitions", () => {
     }
   });
 
-  it("records each source path once", () => {
+  it("adds, updates, and removes sources by durable key", () => {
     const model = new WorkspaceModel();
-    model.addSourcePath("/data/run.csv");
-    model.addSourcePath("/data/run.csv");
-    model.addSourcePath("/data/bench.csv");
-    expect(model.sourcePaths()).toEqual(["/data/run.csv", "/data/bench.csv"]);
+    const source = {
+      key: "00000000-0000-0000-0000-000000000001",
+      path: "/data/run.csv",
+      prefix: "run",
+      provider_id: null,
+      decode_provenance: null,
+      reconcile_legacy: false,
+    };
+    model.addSource(source);
+    model.addSource({ ...source, path: "/moved/run.csv" });
+    expect(model.sources()).toEqual([{ ...source, path: "/moved/run.csv" }]);
+    model.removeSource(source.key);
+    expect(model.sources()).toEqual([]);
   });
 });
 
@@ -344,6 +364,45 @@ describe("WorkspaceModel", () => {
     expect(slots).toEqual([1, 2]);
   });
 
+  it("addSeriesBatch adds all new paths in one call and skips duplicates", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeries(panel.id, "run_01/alt");
+    const added = model.addSeriesBatch(panel.id, [
+      "run_01/alt",
+      "run_02/alt",
+      "run_03/alt",
+    ]);
+    expect(added).toBe(true);
+    const series = model.panel(panel.id)?.series ?? [];
+    expect(series.map((entry) => entry.path)).toEqual([
+      "run_01/alt",
+      "run_02/alt",
+      "run_03/alt",
+    ]);
+    expect(new Set(series.map((entry) => entry.color_slot)).size).toBe(3);
+    expect(model.addSeriesBatch(panel.id, ["run_02/alt"])).toBe(false);
+  });
+
+  it("keeps at most one highlight per local path and toggles off", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addSeriesBatch(panel.id, ["run_01/alt", "run_02/alt", "run_01/gyro"]);
+    model.toggleHighlight(panel.id, "run_01/alt", "alt");
+    model.toggleHighlight(panel.id, "run_01/gyro", "gyro");
+    model.toggleHighlight(panel.id, "run_02/alt", "alt");
+    expect(model.panel(panel.id)?.highlighted_sources).toEqual([
+      { local_path: "gyro", path: "run_01/gyro" },
+      { local_path: "alt", path: "run_02/alt" },
+    ]);
+    model.toggleHighlight(panel.id, "run_02/alt", "alt");
+    expect(model.panel(panel.id)?.highlighted_sources).toEqual([
+      { local_path: "gyro", path: "run_01/gyro" },
+    ]);
+    model.toggleHighlight(panel.id, "not/plotted", "alt");
+    expect(model.panel(panel.id)?.highlighted_sources).toHaveLength(1);
+  });
+
   it("allocates slots past 8 instead of wrapping onto slot 1", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -510,6 +569,7 @@ describe("WorkspaceModel", () => {
     model.removeSeries(panel.id, "a/b");
     expect(model.panel(panel.id)?.series).toEqual([]);
     expect(model.panel(panel.id)?.annotations).toEqual([]);
+    expect(model.panel(panel.id)?.highlighted_sources).toEqual([]);
   });
 
   it("ignores a y range for an unknown panel", () => {
@@ -595,6 +655,14 @@ describe("WorkspaceModel", () => {
     expect([...model.favorites()]).toEqual(["a/two"]);
   });
 
+  it("toggles bundle favorites by local path", () => {
+    const model = new WorkspaceModel();
+    model.toggleFavoriteBundle("imu/accel/x");
+    expect(model.favoriteBundles()).toEqual(["imu/accel/x"]);
+    model.toggleFavoriteBundle("imu/accel/x");
+    expect(model.favoriteBundles()).toEqual([]);
+  });
+
   it("never reuses an id already present in a loaded session", () => {
     const session = emptySession();
     const tab = session.tabs[0];
@@ -608,6 +676,7 @@ describe("WorkspaceModel", () => {
       color_signal: null,
       color_by_time: false,
       series: [],
+      highlighted_sources: [],
       y_range: null,
       x_range: null,
       x_label: null,

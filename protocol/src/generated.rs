@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -57,8 +57,201 @@ pub struct TimeWindow {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestRequest {
+pub struct SetMemberSummary {
+    pub source_key: String,
+    pub missing: Vec<String>,
+    pub scale: f64,
+    pub offset: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SetTimeUnit {
+    Seconds,
+    Milliseconds,
+    Microseconds,
+    Nanoseconds,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetOriginKind {
+    Relative,
+    AbsoluteEpoch,
+    EventAligned,
+    SyntheticIndex,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetTimeDomainSummary {
+    pub unit: SetTimeUnit,
+    pub origin: SetOriginKind,
+    pub alignment_origin: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetSummary {
+    #[serde(with = "u64_string")]
+    pub set_id: u64,
+    pub set_key: String,
+    pub label: String,
+    #[serde(with = "u64_string")]
+    pub generation: u64,
+    pub member_count: u32,
+    pub members: Vec<SetMemberSummary>,
+    pub time_domain: SetTimeDomainSummary,
+    pub local_paths: Vec<String>,
+    pub aligned: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CreateSetRequest {
+    pub label: String,
+    pub member_keys: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct UpdateSetMembersRequest {
+    #[serde(with = "u64_string")]
+    pub set_id: u64,
+    pub member_keys: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SetTimeAlignmentRequest {
+    #[serde(with = "u64_string")]
+    pub set_id: u64,
+    pub source_key: String,
+    pub scale: f64,
+    pub offset: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IngestBatchRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ScanSourcesRequest {
     pub path: String,
+    pub recursive: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct FormatCount {
+    pub label: String,
+    pub count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ScanSourcesResponse {
+    pub files: Vec<String>,
+    #[serde(with = "u64_string")]
+    pub total_bytes: u64,
+    pub format_counts: Vec<FormatCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchJob {
+    #[serde(with = "u64_string")]
+    pub job_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BatchState {
+    Running,
+    Done,
+    Partial,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileState {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchFailure {
+    pub path: String,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchStatus {
+    pub state: BatchState,
+    pub fraction: f64,
+    #[serde(with = "u64_string")]
+    pub total: u64,
+    #[serde(with = "u64_string")]
+    pub done: u64,
+    #[serde(with = "u64_string")]
+    pub failed: u64,
+    pub current_paths: Vec<String>,
+    pub recent_failures: Vec<BatchFailure>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchDetailRequest {
+    #[serde(with = "u64_string")]
+    pub job_id: u64,
+    pub offset: u32,
+    pub limit: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchFileStatus {
+    pub path: String,
+    pub state: FileState,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BatchDetail {
+    pub entries: Vec<BatchFileStatus>,
+    #[serde(with = "u64_string")]
+    pub total: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct FormatDescriptor {
+    pub id: String,
+    pub label: String,
+    pub extensions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RestoreSourcesRequest {
+    pub session_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RestoreReconcileRequest {
+    pub session_json: String,
+    #[serde(with = "u64_string")]
+    pub job_id: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct AliasConflictSummary {
+    pub legacy_path: String,
+    pub claimants: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RestoreReconcileResponse {
+    pub session_json: String,
+    #[serde(with = "u64_string")]
+    pub rewritten: u64,
+    pub conflicts: Vec<AliasConflictSummary>,
+    pub unresolved: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -139,6 +332,10 @@ pub struct SampleResponse {
 pub struct SignalSummary {
     #[serde(with = "u64_string")]
     pub signal_id: u64,
+    #[serde(with = "u64_string")]
+    pub source_id: u64,
+    pub source_key: String,
+    pub local_path: String,
     pub path: String,
     #[serde(default)]
     pub unit: Option<String>,
@@ -152,21 +349,11 @@ pub struct SignalSummary {
 pub struct SourceSummary {
     #[serde(with = "u64_string")]
     pub source_id: u64,
+    pub source_key: String,
+    pub prefix: String,
     pub path: String,
     #[serde(with = "u64_string")]
     pub point_count: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestResponse {
-    pub source: SourceSummary,
-    pub signals: Vec<SignalSummary>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestJob {
-    #[serde(with = "u64_string")]
-    pub job_id: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -175,25 +362,6 @@ pub enum IngestStage {
     Decode,
     Pyramid,
     Cache,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum IngestState {
-    Running,
-    Done,
-    Failed,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IngestStatus {
-    pub state: IngestState,
-    pub stage: IngestStage,
-    pub fraction: f64,
-    #[serde(default)]
-    pub response: Option<IngestResponse>,
-    #[serde(default)]
-    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -205,6 +373,30 @@ pub struct DerivedRequest {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct RemoveSignalRequest {
     pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CreateDerivedBundleRequest {
+    pub name: String,
+    pub expr: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RemoveDerivedBundleRequest {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SkippedMemberSummary {
+    pub prefix: String,
+    pub missing: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DerivedBundleResponse {
+    pub local_path: String,
+    pub created: Vec<SignalSummary>,
+    pub skipped: Vec<SkippedMemberSummary>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -258,6 +450,13 @@ pub enum ExportFidelity {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ExportEstimateRequest {
     pub session_json: String,
+    pub selection: ExportSelection,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportSelection {
+    pub source_keys: Vec<String>,
+    pub set_keys: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -286,6 +485,7 @@ pub struct ExportWriteRequest {
     pub session_json: String,
     pub range: ExportRange,
     pub fidelity: ExportFidelity,
+    pub selection: ExportSelection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]

@@ -168,6 +168,12 @@ it("holds exact series identity across themes", () => {
   expect(series(":root")).toEqual(series(':root[data-theme="light"]'));
 });
 
+it("keeps a bundled fallback for mono control glyphs", () => {
+  expect(TOKENS).toMatch(
+    /--font-mono:\s*JetBrains Mono,\s*"DejaVu Sans",\s*ui-monospace/,
+  );
+});
+
 describe("sequential colormap", () => {
   const stops = SEQ_TOKENS.map((name) => token(":root", name));
 

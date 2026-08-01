@@ -1,61 +1,123 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{
-        Mutex,
-        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    thread,
+    time::Duration,
 };
 
 use base64::Engine;
 use scope_core::{
-    cache, compute, expr,
-    ingest::SUPPORTED_FORMATS,
+    cache::{self, CacheRoot},
+    columns::Column,
+    compute, expr,
+    ingest::{
+        self, DecodedSource, IngestError, IngestSummary, SUPPORTED_FORMATS,
+        admission::{BudgetConfig, MemoryBudget, ResidentCharge},
+        batch::{BatchJobs, BatchOptions, CommitSink},
+    },
+    paging::PageHandle,
     preferences,
     pyramid::Pyramid,
-    session, snapshot,
-    store::{Signal, SignalId, SignalStore, Source, SourceId},
+    restore, session,
+    sets::{
+        AffineTransform, OriginKind, SetId, SetKey, SourceSet, TimeDomain, TimeUnit, propose_sets,
+    },
+    snapshot,
+    sources::{SourceRecord, SourceRegistry},
+    store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
 };
 use scope_protocol::{
+    AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
+    BatchState, BatchStatus, CreateDerivedBundleRequest, CreateSetRequest, DerivedBundleResponse,
     DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
-    ExportFidelity, ExportFileKind, ExportRange, ExportWriteRequest, IngestJob, IngestRequest,
-    IngestResponse, IngestStage, IngestState, IngestStatus, LoadSessionRequest, LoadedSession,
-    PickSessionRequest, RemoveSignalRequest, SampleRequest, SampleResponse, SampleSeries,
-    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest, SessionDialogMode,
-    SignalSummary, SignalTile, SourceSummary, TileRequest, TileResponse,
+    ExportFidelity, ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState,
+    FormatCount, FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession,
+    PickSessionRequest, RemoveDerivedBundleRequest, RemoveSignalRequest, RestoreReconcileRequest,
+    RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries,
+    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest,
+    ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SetMemberSummary, SetOriginKind,
+    SetSummary, SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit, SignalSummary,
+    SignalTile, SkippedMemberSummary, SourceSummary, TileRequest, TileResponse,
+    UpdateSetMembersRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
-#[derive(Default)]
 struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
+    registry: SourceRegistry,
+    sets: BTreeMap<SetId, SourceSet>,
+    next_set_id: u64,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
+    derived_bundles: BTreeMap<String, String>,
+    derived_spills: BTreeMap<String, PageHandle>,
+    derived_charges: BTreeMap<String, ResidentCharge>,
+    cache_root: PathBuf,
+    budget: MemoryBudget,
 }
 
-#[derive(Default)]
-struct IngestJobs {
-    next_job_id: u64,
-    jobs: BTreeMap<u64, IngestStatus>,
-}
-
-fn running(stage: IngestStage, fraction: f64) -> IngestStatus {
-    IngestStatus {
-        state: IngestState::Running,
-        stage,
-        fraction,
-        response: None,
-        error: None,
+impl Default for DataState {
+    fn default() -> Self {
+        Self {
+            store: SignalStore::default(),
+            pyramids: BTreeMap::new(),
+            registry: SourceRegistry::default(),
+            sets: BTreeMap::new(),
+            next_set_id: 0,
+            derived_source: None,
+            derived_references: BTreeMap::new(),
+            derived_bundles: BTreeMap::new(),
+            derived_spills: BTreeMap::new(),
+            derived_charges: BTreeMap::new(),
+            cache_root: std::env::temp_dir().join("signalscope/cache"),
+            budget: MemoryBudget::new(BudgetConfig::from_available(8 * 1024 * 1024 * 1024)),
+        }
     }
 }
 
-fn signal_summary(signal: &Signal) -> SignalSummary {
+#[derive(Default)]
+struct RestoreGate(AtomicUsize);
+
+impl RestoreGate {
+    fn begin(&self) {
+        self.0.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn settle(&self) {
+        let _ = self
+            .0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                Some(count.saturating_sub(1))
+            });
+    }
+
+    fn save_allowed(&self, autosave: bool) -> Result<(), String> {
+        (!autosave || self.0.load(Ordering::Acquire) == 0)
+            .then_some(())
+            .ok_or_else(|| "restore in progress".into())
+    }
+}
+
+struct RestoreSettlement<'a>(&'a RestoreGate);
+
+impl Drop for RestoreSettlement<'_> {
+    fn drop(&mut self) {
+        self.0.settle();
+    }
+}
+
+fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
+        source_id: signal.source_id.0,
+        source_key: source_key.0.to_string(),
+        local_path: signal.local_path.clone(),
         path: signal.path.clone(),
         unit: signal.unit.clone(),
         point_count: signal.len() as u64,
@@ -67,88 +129,61 @@ fn signal_summary(signal: &Signal) -> SignalSummary {
 fn source_summary(source: &Source) -> SourceSummary {
     SourceSummary {
         source_id: source.id.0,
+        source_key: source.key.0.to_string(),
+        prefix: source.prefix.clone(),
         path: source.path.display().to_string(),
         point_count: source.point_count as u64,
     }
 }
 
-fn set_job(app: &AppHandle, job_id: u64, status: IngestStatus) {
-    if let Ok(mut jobs) = app.state::<Mutex<IngestJobs>>().inner().lock() {
-        jobs.jobs.insert(job_id, status);
-    }
+struct ShellCommitSink {
+    state: Arc<Mutex<DataState>>,
 }
 
-fn run_ingest_job(app: &AppHandle, job_id: u64, path: &Path) {
-    let status = match ingest_with_cache(app, job_id, path) {
-        Ok(response) => IngestStatus {
-            state: IngestState::Done,
-            stage: IngestStage::Cache,
-            fraction: 1.0,
-            response: Some(response),
-            error: None,
-        },
-        Err(error) => {
-            let (stage, fraction) = last_progress(app, job_id);
-            IngestStatus {
-                state: IngestState::Failed,
-                stage,
-                fraction,
-                response: None,
-                error: Some(error),
-            }
+impl CommitSink for ShellCommitSink {
+    fn commit(
+        &self,
+        record: &SourceRecord,
+        decoded: DecodedSource,
+        pyramids: Vec<(String, Pyramid)>,
+    ) -> Result<IngestSummary, IngestError> {
+        let expected: BTreeSet<_> = decoded
+            .signals
+            .iter()
+            .map(|signal| signal.local_path.as_str())
+            .collect();
+        let mut pyramids: BTreeMap<_, _> = pyramids.into_iter().collect();
+        if expected.len() != pyramids.len()
+            || !expected.iter().all(|path| pyramids.contains_key(*path))
+        {
+            return Err(std::io::Error::other("pyramids do not match decoded signals").into());
         }
-    };
-    set_job(app, job_id, status);
-}
 
-fn last_progress(app: &AppHandle, job_id: u64) -> (IngestStage, f64) {
-    app.state::<Mutex<IngestJobs>>()
-        .inner()
-        .lock()
-        .ok()
-        .and_then(|jobs| {
-            jobs.jobs
-                .get(&job_id)
-                .map(|status| (status.stage, status.fraction))
-        })
-        .unwrap_or((IngestStage::Decode, 0.0))
-}
-
-fn ingest_with_cache(app: &AppHandle, job_id: u64, path: &Path) -> Result<IngestResponse, String> {
-    let state = app.state::<Mutex<DataState>>();
-    let mut data = state.lock().map_err(|error| error.to_string())?;
-    let DataState {
-        store, pyramids, ..
-    } = &mut *data;
-
-    let mut on_progress = |stage, fraction| set_job(app, job_id, running(stage, fraction));
-    let outcome =
-        cache::ingest_or_load(path, store, &mut on_progress).map_err(|error| error.to_string())?;
-    if let Some(error) = outcome.sidecar_error {
-        eprintln!(
-            "pyramid sidecar not written for {}: {error}",
-            path.display()
-        );
+        let mut data = self.state.lock().expect("data state lock");
+        let mut registry = data.registry.clone();
+        registry.restore(record.clone())?;
+        let summary = ingest::commit(
+            &mut data.store,
+            record.key,
+            &record.prefix,
+            &record.path,
+            decoded,
+        )?;
+        for id in &summary.signals {
+            let local_path = data
+                .store
+                .signal(*id)
+                .expect("committed signal")
+                .local_path
+                .clone();
+            data.pyramids.insert(
+                *id,
+                pyramids.remove(&local_path).expect("validated pyramid"),
+            );
+        }
+        data.registry = registry;
+        Ok(summary)
     }
-    let summary = outcome.loaded.summary;
-    for (id, pyramid) in outcome.loaded.pyramids {
-        pyramids.insert(id, pyramid);
-    }
-
-    let source = store
-        .sources()
-        .find(|source| source.id == summary.source_id)
-        .ok_or_else(|| "ingested source is missing".to_owned())?;
-    let signals = summary
-        .signals
-        .iter()
-        .filter_map(|id| store.signal(*id))
-        .map(signal_summary)
-        .collect();
-    Ok(IngestResponse {
-        source: source_summary(source),
-        signals,
-    })
 }
 
 #[tauri::command]
@@ -185,44 +220,433 @@ async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn ingest_source(
-    request: Envelope<IngestRequest>,
-    app: AppHandle,
-    jobs: State<'_, Mutex<IngestJobs>>,
-) -> Result<Envelope<IngestJob>, String> {
-    let request = request.open().map_err(|error| error.to_string())?;
-    let job_id = {
-        let mut jobs = jobs.lock().map_err(|error| error.to_string())?;
-        jobs.next_job_id += 1;
-        let id = jobs.next_job_id;
-        jobs.jobs.insert(id, running(IngestStage::Decode, 0.0));
-        id
-    };
-    let path = PathBuf::from(request.path);
-    thread::spawn(move || run_ingest_job(&app, job_id, &path));
-    Ok(Envelope::new(IngestJob { job_id }))
+async fn pick_source_folder(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        picked
+            .and_then(|folder| folder.into_path().ok())
+            .map(|path| path.display().to_string()),
+    ))
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn ingest_status(
-    request: Envelope<IngestJob>,
-    jobs: State<'_, Mutex<IngestJobs>>,
-) -> Result<Envelope<IngestStatus>, String> {
+fn ingest_batch(
+    request: Envelope<IngestBatchRequest>,
+    app: AppHandle,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<BatchJob>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    let jobs = jobs.lock().map_err(|error| error.to_string())?;
+    let paths = expand_sources(request.paths)?;
+    let sink = Arc::new(ShellCommitSink {
+        state: Arc::clone(app.state::<Arc<Mutex<DataState>>>().inner()),
+    });
+    Ok(Envelope::new(BatchJob {
+        job_id: jobs.submit(paths, sink).0,
+    }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn batch_status(
+    request: Envelope<BatchJob>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<BatchStatus>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
     let status = jobs
-        .jobs
-        .get(&request.job_id)
-        .ok_or_else(|| format!("unknown ingest job: {}", request.job_id))?;
-    Ok(Envelope::new(status.clone()))
+        .status(scope_core::ingest::batch::JobId(request.job_id))
+        .ok_or_else(|| format!("unknown batch job: {}", request.job_id))?;
+    Ok(Envelope::new(batch_status_response(status)))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn batch_detail(
+    request: Envelope<BatchDetailRequest>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<BatchDetail>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let detail = jobs
+        .detail(
+            scope_core::ingest::batch::JobId(request.job_id),
+            request.offset as usize,
+            request.limit as usize,
+        )
+        .ok_or_else(|| format!("unknown batch job: {}", request.job_id))?;
+    Ok(Envelope::new(BatchDetail {
+        total: detail.total,
+        entries: detail
+            .entries
+            .into_iter()
+            .map(|entry| BatchFileStatus {
+                path: entry.path.display().to_string(),
+                state: file_state(entry.state),
+                error: entry.error,
+            })
+            .collect(),
+    }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn cancel_batch(
+    request: Envelope<BatchJob>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    jobs.cancel(scope_core::ingest::batch::JobId(request.job_id));
+    Ok(Envelope::new(()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn release_batch(
+    request: Envelope<BatchJob>,
+    jobs: State<'_, BatchJobs>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    jobs.release(scope_core::ingest::batch::JobId(request.job_id));
+    Ok(Envelope::new(()))
+}
+
+#[tauri::command]
+fn list_formats() -> Envelope<Vec<FormatDescriptor>> {
+    Envelope::new(
+        SUPPORTED_FORMATS
+            .iter()
+            .map(|(label, extensions)| FormatDescriptor {
+                id: extensions.first().copied().unwrap_or_default().into(),
+                label: (*label).into(),
+                extensions: extensions
+                    .iter()
+                    .map(|extension| (*extension).into())
+                    .collect(),
+            })
+            .collect(),
+    )
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_sources(
+    request: Envelope<RestoreSourcesRequest>,
+    app: AppHandle,
+    jobs: State<'_, BatchJobs>,
+    gate: State<'_, RestoreGate>,
+) -> Result<Envelope<BatchJob>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let restored = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let records = restored
+        .sources
+        .iter()
+        .map(core_source_record)
+        .collect::<Result<Vec<_>, _>>()?;
+    jobs.replace_sources(records.clone())
+        .map_err(|error| error.to_string())?;
+    let state = Arc::clone(app.state::<Arc<Mutex<DataState>>>().inner());
+    state.lock().map_err(|error| error.to_string())?.reset();
+    gate.begin();
+    let job = jobs.submit(
+        records.iter().map(|record| record.path.clone()).collect(),
+        Arc::new(ShellCommitSink { state }),
+    );
+    Ok(Envelope::new(BatchJob { job_id: job.0 }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_reconcile(
+    request: Envelope<RestoreReconcileRequest>,
+    jobs: State<'_, BatchJobs>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+    gate: State<'_, RestoreGate>,
+) -> Result<Envelope<RestoreReconcileResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let _settlement = RestoreSettlement(&gate);
+    jobs.join(scope_core::ingest::batch::JobId(request.job_id))
+        .ok_or_else(|| format!("unknown batch job: {}", request.job_id))?;
+    let mut restored =
+        session::from_json(&request.session_json).map_err(|error| error.to_string())?;
+    let mut builder = restore::AliasBuilder::default();
+    let mut missing = BTreeSet::new();
+    {
+        let data = state.lock().map_err(|error| error.to_string())?;
+        for record in &mut restored.sources {
+            let Ok(uuid) = uuid::Uuid::parse_str(&record.key) else {
+                continue;
+            };
+            let key = SourceKey(uuid);
+            let Some(current) = data.registry.record(key) else {
+                missing.insert(key);
+                continue;
+            };
+            record.path = current.path.display().to_string();
+            record.prefix.clone_from(&current.prefix);
+            record.provider_id.clone_from(&current.provider_id);
+            record
+                .decode_provenance
+                .clone_from(&current.decode_provenance);
+            let Some(source) = data.store.sources().find(|source| source.key == key) else {
+                missing.insert(key);
+                continue;
+            };
+            let Some(provider) = current.provider_id.as_deref() else {
+                missing.insert(key);
+                continue;
+            };
+            if !record.reconcile_legacy {
+                continue;
+            }
+            let local_paths = data
+                .store
+                .signals_of(source.id)
+                .map(|signal| signal.local_path.clone())
+                .collect::<Vec<_>>();
+            for (legacy, path) in restore::legacy_aliases(provider, current, &local_paths) {
+                builder.add(key, legacy, path);
+            }
+        }
+    }
+    let built = builder.build();
+    missing.extend(
+        built
+            .conflicts
+            .iter()
+            .flat_map(|conflict| conflict.claimants.iter().copied()),
+    );
+    let mut outcome = restore::reconcile(&mut restored, &built.aliases, &missing)
+        .map_err(|error| error.to_string())?;
+    outcome.conflicts = built.conflicts;
+    {
+        let mut data = state.lock().map_err(|error| error.to_string())?;
+        restore_sets(&restored, &mut data)?;
+    }
+    Ok(Envelope::new(RestoreReconcileResponse {
+        session_json: serde_json::to_string(&restored).map_err(|error| error.to_string())?,
+        rewritten: outcome.rewritten,
+        conflicts: outcome
+            .conflicts
+            .into_iter()
+            .map(|conflict| AliasConflictSummary {
+                legacy_path: conflict.legacy_path,
+                claimants: conflict
+                    .claimants
+                    .into_iter()
+                    .map(|key| key.0.to_string())
+                    .collect(),
+            })
+            .collect(),
+        unresolved: outcome.unresolved,
+    }))
+}
+
+fn restore_sets(session: &session::Session, data: &mut DataState) -> Result<(), String> {
+    data.sets.clear();
+    data.next_set_id = 0;
+    for saved in &session.source_sets {
+        let keys = saved
+            .members
+            .iter()
+            .map(|member| {
+                uuid::Uuid::parse_str(&member.source_key)
+                    .map(SourceKey)
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        if keys
+            .iter()
+            .any(|key| !data.store.sources().any(|source| source.key == *key))
+        {
+            continue;
+        }
+        data.next_set_id = data.next_set_id.saturating_add(1);
+        let id = SetId(data.next_set_id);
+        let mut set = build_set(&data.store, &keys, id, saved.label.clone())?;
+        set.key = SetKey(uuid::Uuid::parse_str(&saved.key).map_err(|error| error.to_string())?);
+        set.generation = saved.generation;
+        let domain = TimeDomain {
+            unit: match saved.time_domain.unit {
+                session::TimeUnitState::Seconds => TimeUnit::Seconds,
+                session::TimeUnitState::Milliseconds => TimeUnit::Milliseconds,
+                session::TimeUnitState::Microseconds => TimeUnit::Microseconds,
+                session::TimeUnitState::Nanoseconds => TimeUnit::Nanoseconds,
+            },
+            origin: match saved.time_domain.origin {
+                session::OriginKindState::Relative => OriginKind::Relative,
+                session::OriginKindState::AbsoluteEpoch => OriginKind::AbsoluteEpoch,
+                session::OriginKindState::EventAligned => OriginKind::EventAligned,
+                session::OriginKindState::SyntheticIndex => OriginKind::SyntheticIndex,
+            },
+            alignment_origin: saved.time_domain.alignment_origin,
+        };
+        for saved_member in &saved.members {
+            let key = SourceKey(
+                uuid::Uuid::parse_str(&saved_member.source_key)
+                    .map_err(|error| error.to_string())?,
+            );
+            if let Some(member) = set.members.get_mut(&key) {
+                member.missing = saved_member.missing.iter().cloned().collect();
+                member.time_domain = domain;
+                member.transform = Some(AffineTransform {
+                    scale: saved_member.scale,
+                    offset: saved_member.offset,
+                });
+            }
+        }
+        data.sets.insert(id, set);
+    }
+    Ok(())
+}
+
+fn core_source_record(record: &session::SourceRecord) -> Result<SourceRecord, String> {
+    Ok(SourceRecord {
+        key: SourceKey(uuid::Uuid::parse_str(&record.key).map_err(|error| error.to_string())?),
+        path: PathBuf::from(&record.path),
+        prefix: record.prefix.clone(),
+        provider_id: record.provider_id.clone(),
+        decode_provenance: record.decode_provenance.clone(),
+        reconcile_legacy: record.reconcile_legacy,
+    })
+}
+
+fn batch_status_response(status: scope_core::ingest::batch::BatchStatus) -> BatchStatus {
+    BatchStatus {
+        state: batch_state(status.state),
+        fraction: status.fraction,
+        total: status.total,
+        done: status.done,
+        failed: status.failed,
+        current_paths: status
+            .current_paths
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+        recent_failures: status
+            .recent_failures
+            .into_iter()
+            .map(|failure| BatchFailure {
+                path: failure.path.display().to_string(),
+                error: failure.error,
+            })
+            .collect(),
+    }
+}
+
+fn batch_state(state: scope_core::ingest::batch::BatchState) -> BatchState {
+    use scope_core::ingest::batch::BatchState as Core;
+    match state {
+        Core::Running => BatchState::Running,
+        Core::Done => BatchState::Done,
+        Core::Partial => BatchState::Partial,
+        Core::Failed => BatchState::Failed,
+        Core::Cancelled => BatchState::Cancelled,
+    }
+}
+
+fn file_state(state: scope_core::ingest::batch::FileState) -> FileState {
+    use scope_core::ingest::batch::FileState as Core;
+    match state {
+        Core::Pending => FileState::Pending,
+        Core::Running => FileState::Running,
+        Core::Done => FileState::Done,
+        Core::Failed => FileState::Failed,
+        Core::Cancelled => FileState::Cancelled,
+    }
+}
+
+fn expand_sources(paths: Vec<String>) -> Result<Vec<PathBuf>, String> {
+    let mut expanded = Vec::new();
+    for path in paths {
+        expand_source(Path::new(&path), true, &mut expanded)?;
+    }
+    expanded.sort();
+    Ok(expanded)
+}
+
+fn expand_source(path: &Path, recursive: bool, expanded: &mut Vec<PathBuf>) -> Result<(), String> {
+    if !path.is_dir() {
+        expanded.push(path.to_owned());
+        return Ok(());
+    }
+    let mut entries = std::fs::read_dir(path)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    entries.sort_by_key(std::fs::DirEntry::path);
+    for entry in entries {
+        let path = entry.path();
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            if recursive {
+                expand_source(&path, true, expanded)?;
+            }
+        } else if supported_path(&path) {
+            expanded.push(path);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn scan_sources(
+    request: Envelope<ScanSourcesRequest>,
+) -> Result<Envelope<ScanSourcesResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut paths = Vec::new();
+    expand_source(Path::new(&request.path), request.recursive, &mut paths)?;
+    paths.retain(|path| supported_path(path));
+    paths.sort();
+
+    let mut total_bytes = 0_u64;
+    let mut counts = BTreeMap::<String, u32>::new();
+    let files = paths
+        .into_iter()
+        .filter_map(|path| {
+            let metadata = std::fs::metadata(&path).ok()?;
+            total_bytes = total_bytes.saturating_add(metadata.len());
+            let label = format_label(&path)?;
+            *counts.entry(label.to_owned()).or_default() += 1;
+            Some(path.display().to_string())
+        })
+        .collect();
+    Ok(Envelope::new(ScanSourcesResponse {
+        files,
+        total_bytes,
+        format_counts: counts
+            .into_iter()
+            .map(|(label, count)| FormatCount { label, count })
+            .collect(),
+    }))
+}
+
+fn supported_path(path: &Path) -> bool {
+    format_label(path).is_some()
+}
+
+fn format_label(path: &Path) -> Option<&'static str> {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(|extension| {
+            SUPPORTED_FORMATS.iter().find_map(|(label, extensions)| {
+                extensions
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+                    .then_some(*label)
+            })
+        })
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn list_sources(
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<Vec<SourceSummary>>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(Envelope::new(
@@ -233,19 +657,209 @@ fn list_sources(
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn list_signals(
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<Vec<SignalSummary>>, String> {
-    let data = state.lock().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.ensure_sets();
+    data.reexpand_derived_bundles();
     Ok(Envelope::new(
-        data.store.signals().map(signal_summary).collect(),
+        data.store
+            .signals()
+            .map(|signal| {
+                let key = data
+                    .store
+                    .sources()
+                    .find(|source| source.id == signal.source_id)
+                    .expect("signal source")
+                    .key;
+                signal_summary(signal, key)
+            })
+            .collect(),
     ))
+}
+
+fn set_summary(set: &SourceSet) -> SetSummary {
+    let domain = set
+        .members
+        .values()
+        .next()
+        .map_or_else(TimeDomain::default, |member| member.time_domain);
+    SetSummary {
+        set_id: set.id.0,
+        set_key: set.key.0.to_string(),
+        label: set.label.clone(),
+        generation: set.generation,
+        member_count: u32::try_from(set.members.len()).unwrap_or(u32::MAX),
+        members: set
+            .members
+            .values()
+            .map(|member| {
+                let transform = member.transform.unwrap_or(AffineTransform {
+                    scale: 1.0,
+                    offset: 0.0,
+                });
+                SetMemberSummary {
+                    source_key: member.source_key.0.to_string(),
+                    missing: member.missing.iter().cloned().collect(),
+                    scale: transform.scale,
+                    offset: transform.offset,
+                }
+            })
+            .collect(),
+        time_domain: SetTimeDomainSummary {
+            unit: match domain.unit {
+                TimeUnit::Seconds | TimeUnit::Unsupported => SetTimeUnit::Seconds,
+                TimeUnit::Milliseconds => SetTimeUnit::Milliseconds,
+                TimeUnit::Microseconds => SetTimeUnit::Microseconds,
+                TimeUnit::Nanoseconds => SetTimeUnit::Nanoseconds,
+            },
+            origin: match domain.origin {
+                OriginKind::Relative => SetOriginKind::Relative,
+                OriginKind::AbsoluteEpoch => SetOriginKind::AbsoluteEpoch,
+                OriginKind::EventAligned => SetOriginKind::EventAligned,
+                OriginKind::SyntheticIndex => SetOriginKind::SyntheticIndex,
+            },
+            alignment_origin: domain.alignment_origin,
+        },
+        local_paths: set.fingerprint.local_paths.iter().cloned().collect(),
+        aligned: set.alignment().is_ok(),
+    }
+}
+
+fn parse_source_keys(keys: Vec<String>) -> Result<BTreeSet<SourceKey>, String> {
+    keys.into_iter()
+        .map(|key| {
+            uuid::Uuid::parse_str(&key)
+                .map(SourceKey)
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+fn build_set(
+    store: &SignalStore,
+    keys: &BTreeSet<SourceKey>,
+    id: SetId,
+    label: String,
+) -> Result<SourceSet, String> {
+    let candidates = keys
+        .iter()
+        .map(|key| {
+            let source = store
+                .sources()
+                .find(|source| source.key == *key)
+                .ok_or_else(|| format!("unknown source key: {}", key.0))?;
+            Ok((
+                *key,
+                store
+                    .signals_of(source.id)
+                    .map(|signal| signal.local_path.clone())
+                    .collect(),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut proposed = propose_sets(&candidates);
+    if proposed.len() != 1 {
+        return Err("set members must share a schema".into());
+    }
+    let mut set = proposed.remove(0);
+    set.id = id;
+    set.label = label;
+    Ok(set)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn list_sets(state: State<'_, Arc<Mutex<DataState>>>) -> Result<Envelope<Vec<SetSummary>>, String> {
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.ensure_sets();
+    data.reexpand_derived_bundles();
+    Ok(Envelope::new(data.sets.values().map(set_summary).collect()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn create_set(
+    request: Envelope<CreateSetRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<SetSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let keys = parse_source_keys(request.member_keys)?;
+    if keys.is_empty() {
+        return Err("a set requires at least one source".into());
+    }
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.next_set_id = data.next_set_id.saturating_add(1);
+    let id = SetId(data.next_set_id);
+    let set = build_set(&data.store, &keys, id, request.label)?;
+    let summary = set_summary(&set);
+    data.sets.insert(id, set);
+    Ok(Envelope::new(summary))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_set_members(
+    request: Envelope<UpdateSetMembersRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<SetSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let keys = parse_source_keys(request.member_keys)?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    let id = SetId(request.set_id);
+    let previous = data
+        .sets
+        .get(&id)
+        .ok_or_else(|| format!("unknown set id: {}", id.0))?
+        .clone();
+    let mut set = build_set(&data.store, &keys, id, previous.label)?;
+    set.key = previous.key;
+    set.generation = previous.generation.saturating_add(1);
+    for (key, member) in &mut set.members {
+        if let Some(saved) = previous.members.get(key) {
+            member.time_domain = saved.time_domain;
+            member.transform = saved.transform;
+        }
+    }
+    let summary = set_summary(&set);
+    data.sets.insert(id, set);
+    Ok(Envelope::new(summary))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_time_alignment(
+    request: Envelope<SetTimeAlignmentRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<SetSummary>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let key = uuid::Uuid::parse_str(&request.source_key)
+        .map(SourceKey)
+        .map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    let id = SetId(request.set_id);
+    let summary = {
+        let set = data
+            .sets
+            .get_mut(&id)
+            .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
+        set.set_transform(
+            key,
+            AffineTransform {
+                scale: request.scale,
+                offset: request.offset,
+            },
+        );
+        set_summary(set)
+    };
+    Ok(Envelope::new(summary))
 }
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn query_tiles(
     request: Envelope<TileRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<TileResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let data = state.lock().map_err(|error| error.to_string())?;
@@ -280,7 +894,7 @@ fn query_tiles(
 #[allow(clippy::needless_pass_by_value)]
 fn query_samples(
     request: Envelope<SampleRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<SampleResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let data = state.lock().map_err(|error| error.to_string())?;
@@ -290,9 +904,11 @@ fn query_samples(
             .store
             .signal(SignalId(raw_id))
             .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
+        let time = signal.time();
+        let values = signal.values();
         let slice = compute::sample_window(
-            signal.time(),
-            signal.values(),
+            &time,
+            &values,
             request.window.t0,
             request.window.t1,
             request.max_points,
@@ -314,10 +930,23 @@ fn query_samples(
 }
 
 const DERIVED_PREFIX: &str = "derived/";
+type BundleInputs = (
+    BTreeSet<String>,
+    BTreeMap<SourceKey, (String, BTreeSet<String>)>,
+);
 
 impl DataState {
     fn reset(&mut self) {
-        *self = Self::default();
+        for handle in self.derived_spills.values() {
+            let _ = std::fs::remove_file(handle.path());
+        }
+        let cache_root = self.cache_root.clone();
+        let budget = self.budget.clone();
+        *self = Self {
+            cache_root,
+            budget,
+            ..Self::default()
+        };
     }
 
     fn dependents(&self, path: &str) -> Vec<&str> {
@@ -352,6 +981,130 @@ impl DataState {
         }
     }
 
+    fn remove_spill(&mut self, path: &str) {
+        let Some(handle) = self.derived_spills.remove(path) else {
+            return;
+        };
+        if !self
+            .derived_spills
+            .values()
+            .any(|other| other.path() == handle.path())
+        {
+            let _ = std::fs::remove_file(handle.path());
+        }
+    }
+
+    fn bundle_inputs(&self) -> BundleInputs {
+        let full_paths = self
+            .store
+            .signals()
+            .map(|signal| signal.path.clone())
+            .collect();
+        let mut locals = BTreeMap::new();
+        for set in self.sets.values() {
+            for member in set.members.values() {
+                let Some(source) = self
+                    .store
+                    .sources()
+                    .find(|source| source.key == member.source_key)
+                else {
+                    continue;
+                };
+                locals.entry(source.key).or_insert_with(|| {
+                    (
+                        source.prefix.clone(),
+                        self.store
+                            .signals_of(source.id)
+                            .map(|signal| signal.local_path.clone())
+                            .collect(),
+                    )
+                });
+            }
+        }
+        (full_paths, locals)
+    }
+
+    fn ensure_sets(&mut self) {
+        if !self.sets.is_empty() {
+            return;
+        }
+        let candidates = self
+            .store
+            .sources()
+            .map(|source| {
+                (
+                    source.key,
+                    self.store
+                        .signals_of(source.id)
+                        .map(|signal| signal.local_path.clone())
+                        .collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for set in propose_sets(&candidates) {
+            self.next_set_id = self.next_set_id.max(set.id.0);
+            self.sets.insert(set.id, set);
+        }
+    }
+
+    fn materialize_derived(
+        &mut self,
+        path: String,
+        source_id: SourceId,
+        evaluated: expr::Evaluated,
+        references: Vec<String>,
+    ) -> Result<SignalSummary, String> {
+        let bytes = evaluated.values.len().saturating_mul(size_of::<f64>());
+        let charge = self
+            .budget
+            .acquire_working(bytes)
+            .and_then(scope_core::ingest::admission::Ticket::transfer_to_resident)
+            .ok();
+        let (values, spill) = if charge.is_some() {
+            (Column::from(evaluated.values), None)
+        } else {
+            let timebase_id = references
+                .first()
+                .and_then(|reference| self.store.signal_by_path(reference))
+                .map(Signal::timebase_id)
+                .ok_or_else(|| "derived expression has no timebase".to_owned())?;
+            let handle = cache::spill_columns(
+                &CacheRoot::app_owned(&self.cache_root),
+                timebase_id,
+                &evaluated.time,
+                &evaluated.values,
+            )
+            .map_err(|error| error.to_string())?;
+            (Column::paged(handle.clone()), Some(handle))
+        };
+        let signal_id = self
+            .store
+            .insert_signal(source_id, path, None, evaluated.time, values)
+            .map_err(|error| error.to_string())?;
+        let signal = self
+            .store
+            .signal(signal_id)
+            .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
+        let source_key = self
+            .store
+            .sources()
+            .find(|source| source.id == source_id)
+            .expect("derived source")
+            .key;
+        let summary = signal_summary(signal, source_key);
+        self.pyramids
+            .insert(signal_id, Pyramid::from_signal(signal));
+        self.derived_references
+            .insert(summary.path.clone(), references);
+        if let Some(handle) = spill {
+            self.derived_spills.insert(summary.path.clone(), handle);
+        }
+        if let Some(charge) = charge {
+            self.derived_charges.insert(summary.path.clone(), charge);
+        }
+        Ok(summary)
+    }
+
     fn create_derived_signal(&mut self, request: DerivedRequest) -> Result<SignalSummary, String> {
         let path = if request.path.starts_with(DERIVED_PREFIX) {
             request.path
@@ -370,32 +1123,179 @@ impl DataState {
         let source_id = if let Some(id) = self.derived_source {
             id
         } else {
-            let id = self.store.register_source(DERIVED_PREFIX);
+            let id = self
+                .store
+                .register_source(
+                    DERIVED_PREFIX,
+                    SourceKey(uuid::Uuid::new_v4()),
+                    DERIVED_PREFIX.trim_end_matches('/'),
+                )
+                .map_err(|error| error.to_string())?;
             self.derived_source = Some(id);
             id
         };
         if let Some(previous) = self.store.remove_signal(&path) {
             self.pyramids.remove(&previous);
         }
-        let signal_id = self
-            .store
-            .insert_signal(
-                source_id,
-                path.clone(),
-                None,
-                evaluated.time,
-                evaluated.values,
-            )
+        self.remove_spill(&path);
+        self.derived_charges.remove(&path);
+        self.materialize_derived(
+            path.trim_start_matches(DERIVED_PREFIX).to_owned(),
+            source_id,
+            evaluated,
+            references,
+        )
+    }
+
+    fn create_derived_bundle(
+        &mut self,
+        request: CreateDerivedBundleRequest,
+    ) -> Result<DerivedBundleResponse, String> {
+        let name = request
+            .name
+            .strip_prefix(DERIVED_PREFIX)
+            .unwrap_or(&request.name)
+            .to_owned();
+        if name.is_empty() {
+            return Err("derived bundle name is empty".into());
+        }
+        if name.contains('/') {
+            return Err("derived bundle names are a single segment".into());
+        }
+        if self.derived_bundles.contains_key(&name) {
+            return Err(format!("derived bundle already exists: {name}"));
+        }
+        let (full_paths, locals) = self.bundle_inputs();
+        let expansion = scope_core::derived_bundle::expand(&request.expr, &full_paths, &locals)
             .map_err(|error| error.to_string())?;
-        let signal = self
+        let mut skipped: Vec<SkippedMemberSummary> = expansion
+            .skipped
+            .into_iter()
+            .map(|member| SkippedMemberSummary {
+                prefix: member.prefix,
+                missing: member.missing,
+            })
+            .collect();
+        let local_path = format!("{DERIVED_PREFIX}{name}");
+        let mut created = Vec::new();
+        for member in expansion.members {
+            let Some(source_id) = self
+                .store
+                .sources()
+                .find(|source| source.key == member.source_key)
+                .map(|source| source.id)
+            else {
+                continue;
+            };
+            let parsed = match expr::parse(&member.expr) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    skipped.push(SkippedMemberSummary {
+                        prefix: member.prefix,
+                        missing: vec![error.to_string()],
+                    });
+                    continue;
+                }
+            };
+            let references = expr::references(&parsed);
+            let evaluated = match expr::evaluate(&parsed, &self.store) {
+                Ok(evaluated) => evaluated,
+                Err(error) => {
+                    skipped.push(SkippedMemberSummary {
+                        prefix: member.prefix,
+                        missing: vec![error.to_string()],
+                    });
+                    continue;
+                }
+            };
+            match self.materialize_derived(local_path.clone(), source_id, evaluated, references) {
+                Ok(summary) => created.push(summary),
+                Err(error) => skipped.push(SkippedMemberSummary {
+                    prefix: member.prefix,
+                    missing: vec![error],
+                }),
+            }
+        }
+        skipped.sort_by(|left, right| left.prefix.cmp(&right.prefix));
+        self.derived_bundles.insert(name, request.expr);
+        Ok(DerivedBundleResponse {
+            local_path,
+            created,
+            skipped,
+        })
+    }
+
+    fn reexpand_derived_bundles(&mut self) {
+        let definitions: Vec<(String, String)> = self
+            .derived_bundles
+            .iter()
+            .map(|(name, expr)| (name.clone(), expr.clone()))
+            .collect();
+        for (name, expression) in definitions {
+            let (full_paths, locals) = self.bundle_inputs();
+            let Ok(expansion) =
+                scope_core::derived_bundle::expand(&expression, &full_paths, &locals)
+            else {
+                continue;
+            };
+            for member in expansion.members {
+                let Some(source_id) = self
+                    .store
+                    .sources()
+                    .find(|source| source.key == member.source_key)
+                    .map(|source| source.id)
+                else {
+                    continue;
+                };
+                let display_path = format!("{}/{}{}", member.prefix, DERIVED_PREFIX, name);
+                if self.store.signal_by_path(&display_path).is_some() {
+                    continue;
+                }
+                let Ok(parsed) = expr::parse(&member.expr) else {
+                    continue;
+                };
+                let references = expr::references(&parsed);
+                let Ok(evaluated) = expr::evaluate(&parsed, &self.store) else {
+                    continue;
+                };
+                let _ = self.materialize_derived(
+                    format!("{DERIVED_PREFIX}{name}"),
+                    source_id,
+                    evaluated,
+                    references,
+                );
+            }
+        }
+    }
+
+    fn remove_derived_bundle(
+        &mut self,
+        request: &RemoveDerivedBundleRequest,
+    ) -> Result<(), String> {
+        let name = request
+            .name
+            .strip_prefix(DERIVED_PREFIX)
+            .unwrap_or(&request.name);
+        let local_path = format!("{DERIVED_PREFIX}{name}");
+        let paths: Vec<String> = self
             .store
-            .signal(signal_id)
-            .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
-        let pyramid = Pyramid::from_signal(signal);
-        let summary = signal_summary(signal);
-        self.pyramids.insert(signal_id, pyramid);
-        self.derived_references.insert(path, references);
-        Ok(summary)
+            .signals()
+            .filter(|signal| signal.local_path == local_path)
+            .map(|signal| signal.path.clone())
+            .collect();
+        for path in &paths {
+            self.ensure_without_dependents(path, "remove")?;
+        }
+        for path in paths {
+            if let Some(id) = self.store.remove_signal(&path) {
+                self.pyramids.remove(&id);
+            }
+            self.remove_spill(&path);
+            self.derived_charges.remove(&path);
+            self.derived_references.remove(&path);
+        }
+        self.derived_bundles.remove(name);
+        Ok(())
     }
 
     fn remove_derived_signal(&mut self, path: &str) -> Result<(), String> {
@@ -412,6 +1312,8 @@ impl DataState {
         if let Some(id) = self.store.remove_signal(path) {
             self.pyramids.remove(&id);
         }
+        self.remove_spill(path);
+        self.derived_charges.remove(path);
         self.derived_references.remove(path);
         Ok(())
     }
@@ -421,7 +1323,7 @@ impl DataState {
 #[allow(clippy::needless_pass_by_value)]
 fn create_derived(
     request: Envelope<DerivedRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<SignalSummary>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let mut data = state.lock().map_err(|error| error.to_string())?;
@@ -430,9 +1332,32 @@ fn create_derived(
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
+fn create_derived_bundle(
+    request: Envelope<CreateDerivedBundleRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<DerivedBundleResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.create_derived_bundle(request).map(Envelope::new)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn remove_derived_bundle(
+    request: Envelope<RemoveDerivedBundleRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<Envelope<()>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.remove_derived_bundle(&request)?;
+    Ok(Envelope::new(()))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn remove_signal(
     request: Envelope<RemoveSignalRequest>,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<()>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let mut data = state.lock().map_err(|error| error.to_string())?;
@@ -467,8 +1392,10 @@ fn normalized_session_save_path(mut path: PathBuf) -> PathBuf {
 fn save_session(
     request: Envelope<SaveSessionRequest>,
     app: AppHandle,
+    gate: State<'_, RestoreGate>,
 ) -> Result<Envelope<String>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
+    gate.save_allowed(request.path.is_none())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
     let path = match request.path {
         Some(path) => normalized_session_save_path(PathBuf::from(path)),
@@ -505,7 +1432,7 @@ fn load_session(
 #[allow(clippy::needless_pass_by_value)]
 fn reset_session(
     app: AppHandle,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<LoadedSession>, String> {
     let session = session::Session::default();
     let path = session_path(&app, None)?;
@@ -608,6 +1535,7 @@ fn estimate_for(
     session: &session::Session,
     session_json: &str,
     template_bytes: u64,
+    selection: &ExportSelection,
 ) -> Result<ExportEstimate, snapshot::SnapshotError> {
     let base = template_bytes + session_json.len() as u64;
     let mut entries = Vec::with_capacity(8);
@@ -618,7 +1546,14 @@ fn estimate_for(
             ExportFidelity::High,
             ExportFidelity::Full,
         ] {
-            let plan = snapshot::plan(session, &data.store, &data.pyramids, range, fidelity)?;
+            let plan = snapshot::plan_selected(
+                session,
+                &data.store,
+                &data.pyramids,
+                selection,
+                range,
+                fidelity,
+            )?;
             entries.push(ExportEstimateEntry {
                 range,
                 fidelity,
@@ -638,7 +1573,7 @@ fn estimate_for(
 fn export_estimate(
     request: Envelope<ExportEstimateRequest>,
     app: AppHandle,
-    state: State<'_, Mutex<DataState>>,
+    state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<ExportEstimate>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
@@ -647,8 +1582,14 @@ fn export_estimate(
         .len();
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(Envelope::new(
-        estimate_for(&data, &session, &request.session_json, template_bytes)
-            .map_err(|error| error.to_string())?,
+        estimate_for(
+            &data,
+            &session,
+            &request.session_json,
+            template_bytes,
+            &request.selection,
+        )
+        .map_err(|error| error.to_string())?,
     ))
 }
 
@@ -677,12 +1618,13 @@ async fn export_write(
         std::fs::read_to_string(template_path(&app)?).map_err(|error| error.to_string())?;
     let session = session::from_json(&request.session_json).map_err(|error| error.to_string())?;
     let manifest = {
-        let state = app.state::<Mutex<DataState>>();
+        let state = app.state::<Arc<Mutex<DataState>>>();
         let data = state.lock().map_err(|error| error.to_string())?;
-        let export = snapshot::plan(
+        let export = snapshot::plan_selected(
             &session,
             &data.store,
             &data.pyramids,
+            &request.selection,
             request.range,
             request.fidelity,
         )
@@ -772,6 +1714,14 @@ fn preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(PREFERENCES_FILE))
 }
 
+fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("cache"))
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
@@ -779,7 +1729,10 @@ fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> 
     if !path.exists() {
         return Ok(Envelope::new(None));
     }
-    let preferences = preferences::load_from_path(&path).map_err(|error| error.to_string())?;
+    let mut preferences = preferences::load_from_path(&path).map_err(|error| error.to_string())?;
+    if preferences.cache_root.is_none() {
+        preferences.cache_root = Some(cache_path(&app)?.display().to_string());
+    }
     Ok(Envelope::new(Some(
         serde_json::to_string(&preferences).map_err(|error| error.to_string())?,
     )))
@@ -789,7 +1742,10 @@ fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> 
 #[allow(clippy::needless_pass_by_value)]
 fn save_preferences(request: Envelope<String>, app: AppHandle) -> Result<Envelope<()>, String> {
     let json = request.open().map_err(|error| error.to_string())?;
-    let preferences = preferences::from_json(&json).map_err(|error| error.to_string())?;
+    let mut preferences = preferences::from_json(&json).map_err(|error| error.to_string())?;
+    if preferences.cache_root.is_none() {
+        preferences.cache_root = Some(cache_path(&app)?.display().to_string());
+    }
     preferences::save_to_path(&preferences, &preferences_path(&app)?)
         .map_err(|error| error.to_string())?;
     Ok(Envelope::new(()))
@@ -802,19 +1758,73 @@ fn save_preferences(request: Envelope<String>, app: AppHandle) -> Result<Envelop
 ///
 /// Panics when Tauri cannot initialize or run the application.
 pub fn run() {
+    let workers = std::thread::available_parallelism().map_or(1, usize::from);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Mutex::new(DataState::default()))
-        .manage(Mutex::new(IngestJobs::default()))
+        .manage(Arc::new(Mutex::new(DataState::default())))
+        .manage(RestoreGate::default())
+        .setup(move |app| {
+            let path = preferences_path(app.handle()).map_err(std::io::Error::other)?;
+            let preferences = if path.exists() {
+                preferences::load_from_path(&path).map_err(std::io::Error::other)?
+            } else {
+                preferences::Preferences::default()
+            };
+            let root = preferences
+                .cache_root
+                .map(PathBuf::from)
+                .unwrap_or(cache_path(app.handle()).map_err(std::io::Error::other)?);
+            let defaults = BudgetConfig::from_available(8 * 1024 * 1024 * 1024);
+            let config = BudgetConfig {
+                working_bytes: preferences
+                    .ingest_working_bytes
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or(defaults.working_bytes),
+                resident_bytes: preferences
+                    .ingest_resident_bytes
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or(defaults.resident_bytes),
+            };
+            let budget = MemoryBudget::new(config);
+            {
+                let state = app.state::<Arc<Mutex<DataState>>>();
+                let mut data = state
+                    .lock()
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                data.cache_root.clone_from(&root);
+                data.budget = budget.clone();
+            }
+            app.manage(BatchJobs::new(BatchOptions {
+                worker_count: workers,
+                budget: Arc::new(budget),
+                terminal_ttl: Duration::from_secs(300),
+                cache_directory: Some(root),
+            }));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             pick_sources,
-            ingest_source,
-            ingest_status,
+            pick_source_folder,
+            scan_sources,
+            ingest_batch,
+            batch_status,
+            batch_detail,
+            cancel_batch,
+            release_batch,
+            list_formats,
+            restore_sources,
+            restore_reconcile,
             list_sources,
             list_signals,
+            list_sets,
+            create_set,
+            update_set_members,
+            set_time_alignment,
             query_tiles,
             query_samples,
             create_derived,
+            create_derived_bundle,
+            remove_derived_bundle,
             remove_signal,
             save_session,
             load_session,
@@ -836,21 +1846,217 @@ pub fn run() {
 mod tests {
     use std::sync::Arc;
 
+    use scope_core::{
+        ingest::{DecodedSignal, DecodedSource, batch::CommitSink},
+        sources::SourceRecord,
+    };
+
     use super::*;
 
     fn data_with_signal(path: &str) -> (DataState, SourceId) {
         let mut data = DataState::default();
-        let source = data.store.register_source("input.csv");
+        let (prefix, local_path) = path.split_once('/').unwrap_or(("", path));
+        let source = data
+            .store
+            .register_source(
+                "input.csv",
+                SourceKey(uuid::Uuid::from_bytes([1; 16])),
+                prefix,
+            )
+            .unwrap();
         data.store
             .insert_signal(
                 source,
-                path,
+                local_path,
                 None,
                 Arc::from(vec![0.0, 1.0]),
                 vec![1.0, 2.0],
             )
             .expect("insert source signal");
         (data, source)
+    }
+
+    fn data_with_bundle_sources() -> DataState {
+        let mut data = DataState::default();
+        let source_specs = [
+            (1_u8, "run_01", true),
+            (2_u8, "run_02", true),
+            (3_u8, "run_03", false),
+        ];
+        let mut keys = BTreeSet::new();
+        for (byte, prefix, has_alt) in source_specs {
+            let key = SourceKey(uuid::Uuid::from_bytes([byte; 16]));
+            keys.insert(key);
+            let source = data
+                .store
+                .register_source(format!("{prefix}.csv"), key, prefix)
+                .unwrap();
+            data.store
+                .insert_signal(
+                    source,
+                    "temp",
+                    None,
+                    Arc::from(vec![0.0, 1.0]),
+                    vec![1.0, 2.0],
+                )
+                .unwrap();
+            if has_alt {
+                data.store
+                    .insert_signal(
+                        source,
+                        "alt",
+                        None,
+                        Arc::from(vec![0.0, 1.0]),
+                        vec![3.0, 4.0],
+                    )
+                    .unwrap();
+            }
+        }
+        let set = build_set(&data.store, &keys, SetId(1), "Runs".into()).unwrap();
+        data.sets.insert(set.id, set);
+        data
+    }
+
+    #[test]
+    fn commit_sink_registers_signals_and_pyramids_together() {
+        let state = Arc::new(Mutex::new(DataState::default()));
+        let sink = ShellCommitSink {
+            state: Arc::clone(&state),
+        };
+        let record = SourceRecord {
+            key: SourceKey(uuid::Uuid::from_bytes([3; 16])),
+            path: PathBuf::from("/a/run.csv"),
+            prefix: "run".into(),
+            provider_id: Some("csv".into()),
+            decode_provenance: Some("abc".into()),
+            reconcile_legacy: false,
+        };
+        let time: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0, 3.0]);
+        let pyramid = Pyramid::from_samples(&time, &[1.0, 2.0, 3.0, 4.0]);
+        let decoded = DecodedSource {
+            row_count: 4,
+            signals: vec![DecodedSignal {
+                local_path: "imu/ax".into(),
+                unit: None,
+                time: time.into(),
+                values: vec![1.0, 2.0, 3.0, 4.0].into(),
+            }],
+        };
+
+        let summary = sink
+            .commit(&record, decoded, vec![("imu/ax".into(), pyramid)])
+            .expect("commit");
+        let data = state.lock().unwrap();
+        assert_eq!(
+            data.store
+                .signal_by_path("run/imu/ax")
+                .expect("signal")
+                .len(),
+            4
+        );
+        assert!(data.pyramids.contains_key(&summary.signals[0]));
+        let restored = data.registry.record(record.key).expect("source record");
+        assert_eq!(restored.provider_id.as_deref(), Some("csv"));
+        assert_eq!(restored.decode_provenance.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn source_directories_expand_recursively_in_path_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(dir.path().join("b.csv"), "").unwrap();
+        std::fs::write(dir.path().join("ignored.json"), "").unwrap();
+        std::fs::write(nested.join("a.mcap"), "").unwrap();
+
+        assert_eq!(
+            expand_sources(vec![dir.path().display().to_string()]).unwrap(),
+            vec![dir.path().join("b.csv"), nested.join("a.mcap")]
+        );
+    }
+
+    #[test]
+    fn scan_sources_respects_recursion_and_reports_bytes_and_formats() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(dir.path().join("b.csv"), "12345").unwrap();
+        std::fs::write(dir.path().join("ignored.json"), "ignore").unwrap();
+        std::fs::write(nested.join("a.mcap"), "1234567").unwrap();
+
+        let flat = scan_sources(Envelope::new(ScanSourcesRequest {
+            path: dir.path().display().to_string(),
+            recursive: false,
+        }))
+        .unwrap()
+        .open()
+        .unwrap();
+        assert_eq!(
+            flat.files,
+            vec![dir.path().join("b.csv").display().to_string()]
+        );
+        assert_eq!(flat.total_bytes, 5);
+        assert_eq!(
+            flat.format_counts,
+            vec![FormatCount {
+                label: "Delimited text (CSV, TSV, TXT, DAT)".into(),
+                count: 1,
+            }]
+        );
+
+        let recursive = scan_sources(Envelope::new(ScanSourcesRequest {
+            path: dir.path().display().to_string(),
+            recursive: true,
+        }))
+        .unwrap()
+        .open()
+        .unwrap();
+        assert_eq!(recursive.total_bytes, 12);
+        assert_eq!(
+            recursive.format_counts,
+            vec![
+                FormatCount {
+                    label: "Delimited text (CSV, TSV, TXT, DAT)".into(),
+                    count: 1,
+                },
+                FormatCount {
+                    label: "MCAP recordings (MCAP)".into(),
+                    count: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_sources_reports_empty_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let scan = scan_sources(Envelope::new(ScanSourcesRequest {
+            path: dir.path().display().to_string(),
+            recursive: true,
+        }))
+        .unwrap()
+        .open()
+        .unwrap();
+
+        assert!(scan.files.is_empty());
+        assert_eq!(scan.total_bytes, 0);
+        assert!(scan.format_counts.is_empty());
+    }
+
+    #[test]
+    fn restore_gate_refuses_autosave_until_restore_settles() {
+        let gate = RestoreGate::default();
+        gate.begin();
+        assert!(gate.save_allowed(true).is_err());
+        gate.settle();
+        assert!(gate.save_allowed(true).is_ok());
+    }
+
+    #[test]
+    fn restore_gate_never_blocks_named_saves() {
+        let gate = RestoreGate::default();
+        gate.begin();
+        assert!(gate.save_allowed(false).is_ok());
     }
 
     #[test]
@@ -885,6 +2091,93 @@ mod tests {
                 .values(),
             &[1.0, 2.0]
         );
+    }
+
+    #[test]
+    fn creates_partial_derived_bundles_and_removes_all_members() {
+        let mut data = data_with_bundle_sources();
+        let response = data
+            .create_derived_bundle(CreateDerivedBundleRequest {
+                name: "score".into(),
+                expr: "'temp' + 'alt'".into(),
+            })
+            .expect("create bundle");
+        assert_eq!(response.local_path, "derived/score");
+        assert_eq!(response.created.len(), 2);
+        assert_eq!(response.skipped.len(), 1);
+        assert_eq!(response.skipped[0].prefix, "run_03");
+        assert_eq!(response.skipped[0].missing, ["alt"]);
+        assert!(data.store.signal_by_path("run_01/derived/score").is_some());
+        assert!(data.store.signal_by_path("run_02/derived/score").is_some());
+        assert!(data.store.signal_by_path("run_03/derived/score").is_none());
+        assert!(
+            data.create_derived_bundle(CreateDerivedBundleRequest {
+                name: "score".into(),
+                expr: "'temp'".into(),
+            })
+            .is_err()
+        );
+
+        data.remove_derived_bundle(&RemoveDerivedBundleRequest {
+            name: "score".into(),
+        })
+        .expect("remove bundle");
+        assert!(data.store.signal_by_path("run_01/derived/score").is_none());
+        assert!(data.store.signal_by_path("run_02/derived/score").is_none());
+        assert!(!data.derived_bundles.contains_key("score"));
+    }
+
+    #[test]
+    fn rejects_derived_bundle_names_with_nested_paths() {
+        let mut data = data_with_bundle_sources();
+        let error = data
+            .create_derived_bundle(CreateDerivedBundleRequest {
+                name: "derived/score/extra".into(),
+                expr: "'temp'".into(),
+            })
+            .expect_err("nested name must be rejected");
+        assert_eq!(error, "derived bundle names are a single segment");
+    }
+
+    #[test]
+    fn a_derived_signal_spills_when_it_exceeds_the_resident_budget() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.cache_root = tempfile::tempdir().unwrap().keep();
+        data.budget = MemoryBudget::new(BudgetConfig {
+            working_bytes: 1024,
+            resident_bytes: 1,
+        });
+
+        let summary = data
+            .create_derived_signal(DerivedRequest {
+                path: "derived/a".into(),
+                expr: "'input/x' * 2".into(),
+            })
+            .unwrap();
+        let signal = data.store.signal(SignalId(summary.signal_id)).unwrap();
+
+        assert!(signal.is_paged());
+        assert_eq!(&*signal.values(), &[2.0, 4.0]);
+    }
+
+    #[test]
+    fn removing_a_derived_signal_deletes_its_spill_file() {
+        let (mut data, _) = data_with_signal("input/x");
+        data.cache_root = tempfile::tempdir().unwrap().keep();
+        data.budget = MemoryBudget::new(BudgetConfig {
+            working_bytes: 1024,
+            resident_bytes: 1,
+        });
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/a".into(),
+            expr: "'input/x' * 2".into(),
+        })
+        .unwrap();
+        let path = data.derived_spills["derived/a"].path().to_owned();
+
+        data.remove_derived_signal("derived/a").unwrap();
+
+        assert!(!path.exists());
     }
 
     #[test]
@@ -962,7 +2255,15 @@ mod tests {
         data.pyramids
             .insert(signal.id, Pyramid::from_signal(signal));
         let session = session::Session::default();
-        let estimate = estimate_for(&data, &session, "{}", 1_000).expect("estimate");
+        let selection = ExportSelection {
+            source_keys: data
+                .store
+                .sources()
+                .map(|source| source.key.0.to_string())
+                .collect(),
+            set_keys: Vec::new(),
+        };
+        let estimate = estimate_for(&data, &session, "{}", 1_000, &selection).expect("estimate");
         assert_eq!(estimate.entries.len(), 8);
         for range in [ExportRange::Visible, ExportRange::All] {
             let entries: Vec<_> = estimate
@@ -1020,5 +2321,57 @@ mod tests {
         assert!(data.pyramids.is_empty());
         assert!(data.derived_source.is_none());
         assert!(data.derived_references.is_empty());
+    }
+
+    #[test]
+    fn restored_sets_keep_durable_identity_membership_and_alignment() {
+        let mut data = DataState::default();
+        let keys = [
+            SourceKey(uuid::Uuid::from_u128(1)),
+            SourceKey(uuid::Uuid::from_u128(2)),
+        ];
+        for (index, key) in keys.into_iter().enumerate() {
+            let source = data
+                .store
+                .register_source(format!("{index}.csv"), key, format!("run_{index}"))
+                .unwrap();
+            data.store
+                .insert_signal(
+                    source,
+                    "value",
+                    None,
+                    Arc::from([0.0, 1.0]),
+                    Arc::from([1.0, 2.0]),
+                )
+                .unwrap();
+        }
+        let mut restored = session::Session::default();
+        restored.source_sets.push(session::SourceSetState {
+            key: uuid::Uuid::from_u128(9).to_string(),
+            label: "Monte Carlo".into(),
+            generation: 7,
+            time_domain: session::TimeDomainState {
+                unit: session::TimeUnitState::Seconds,
+                origin: session::OriginKindState::Relative,
+                alignment_origin: 0.0,
+            },
+            members: keys
+                .into_iter()
+                .enumerate()
+                .map(|(index, key)| session::SetMemberState {
+                    source_key: key.0.to_string(),
+                    missing: Vec::new(),
+                    scale: 1.0,
+                    offset: f64::from(u32::try_from(index).unwrap()) * 0.25,
+                })
+                .collect(),
+        });
+
+        restore_sets(&restored, &mut data).unwrap();
+
+        let set = data.sets.values().next().unwrap();
+        assert_eq!(set.key, SetKey(uuid::Uuid::from_u128(9)));
+        assert_eq!(set.generation, 7);
+        assert!((set.transform(keys[1]).unwrap().offset - 0.25).abs() < f64::EPSILON);
     }
 }

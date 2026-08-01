@@ -1,72 +1,119 @@
 import { describe, expect, it } from "vitest";
 
-import type { IngestResponse, IngestStatus } from "../generated/protocol";
+import type { BatchStatus } from "../generated/protocol";
 import type { IngestPort } from "./data-plane";
-import { runIngest } from "./ingest";
+import { runBatchIngest, waitForBatch } from "./ingest";
 
-const response: IngestResponse = {
-  source: { source_id: "1", path: "/tmp/flight.csv", point_count: "10" },
-  signals: [],
-};
+interface FakePort extends IngestPort {
+  released: string[];
+}
 
-function fakePort(statuses: IngestStatus[]): IngestPort {
+function fakePort(statuses: BatchStatus[]): FakePort {
   const queue = [...statuses];
+  const released: string[] = [];
   return {
+    released,
     pickSources: () => Promise.resolve([]),
-    start: () => Promise.resolve("7"),
-    status: () => {
-      const next = queue.shift();
-      if (next === undefined) throw new Error("status queue exhausted");
-      return Promise.resolve(next);
+    pickSourceFolder: () => Promise.resolve(null),
+    scanSources: () =>
+      Promise.resolve({ files: [], total_bytes: "0", format_counts: [] }),
+    startBatch: () => Promise.resolve("1"),
+    batchStatus: () => {
+      const status = queue.shift();
+      if (status === undefined) throw new Error("status queue exhausted");
+      return Promise.resolve(status);
     },
+    batchDetail: () => Promise.resolve({ entries: [], total: "0" }),
+    cancelBatch: () => Promise.resolve(),
+    releaseBatch: (jobId) => {
+      released.push(jobId);
+      return Promise.resolve();
+    },
+    listFormats: () => Promise.resolve([]),
   };
 }
 
-const running = (
-  stage: IngestStatus["stage"],
-  fraction: number,
-): IngestStatus => ({
-  state: "running",
-  stage,
-  fraction,
-  response: null,
-  error: null,
-});
-
-describe("runIngest", () => {
-  it("polls until done and reports every status", async () => {
-    const seen: IngestStatus[] = [];
+describe("runBatchIngest", () => {
+  it("resolves partial batches and surfaces failures", async () => {
     const port = fakePort([
-      running("decode", 0.5),
-      running("pyramid", 1),
-      { state: "done", stage: "cache", fraction: 1, response, error: null },
+      {
+        state: "running",
+        fraction: 0.5,
+        total: "2",
+        done: "1",
+        failed: "0",
+        current_paths: [],
+        recent_failures: [],
+      },
+      {
+        state: "partial",
+        fraction: 1,
+        total: "2",
+        done: "1",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [{ path: "/b.csv", error: "unsupported" }],
+      },
     ]);
-    const result = await runIngest(
+    const seen: string[] = [];
+    const status = await runBatchIngest(
       port,
-      "/tmp/flight.csv",
-      (status) => seen.push(status),
+      ["/a.csv", "/b.csv"],
+      (progress) => seen.push(progress.state),
       0,
     );
-    expect(result).toEqual(response);
-    expect(seen.map((status) => status.stage)).toEqual([
-      "decode",
-      "pyramid",
-      "cache",
-    ]);
+
+    expect(status.state).toBe("partial");
+    expect(status.recent_failures[0]?.error).toBe("unsupported");
+    expect(seen).toEqual(["running", "partial"]);
   });
 
-  it("throws the job error on failure", async () => {
+  it("does not throw when every file fails", async () => {
     const port = fakePort([
       {
         state: "failed",
-        stage: "decode",
-        fraction: 0,
-        response: null,
-        error: "boom",
+        fraction: 1,
+        total: "1",
+        done: "0",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [{ path: "/a.csv", error: "boom" }],
       },
     ]);
     await expect(
-      runIngest(port, "/tmp/flight.csv", () => undefined, 0),
-    ).rejects.toThrow("boom");
+      runBatchIngest(port, ["/a.csv"], () => undefined, 0),
+    ).resolves.toMatchObject({ state: "failed" });
+  });
+
+  it("releases terminal jobs", async () => {
+    const port = fakePort([
+      {
+        state: "done",
+        fraction: 1,
+        total: "1",
+        done: "1",
+        failed: "0",
+        current_paths: [],
+        recent_failures: [],
+      },
+    ]);
+    await runBatchIngest(port, ["/a.csv"], () => undefined, 0);
+    expect(port.released).toEqual(["1"]);
+  });
+
+  it("can wait without releasing before reconciliation", async () => {
+    const port = fakePort([
+      {
+        state: "done",
+        fraction: 1,
+        total: "1",
+        done: "1",
+        failed: "0",
+        current_paths: [],
+        recent_failures: [],
+      },
+    ]);
+    await waitForBatch(port, "1", () => undefined, 0);
+    expect(port.released).toEqual([]);
   });
 });

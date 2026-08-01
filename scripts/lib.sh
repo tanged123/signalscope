@@ -41,6 +41,7 @@ rust_checks() {
 quality_checks() {
   shellcheck scripts/*.sh .github/hooks/pre-commit
   "$signalscope_scripts_dir/ci-policy.test.sh"
+  node "$signalscope_scripts_dir/generate-monte-carlo-demo.mjs" --check
   actionlint
   typos
   cargo deny check

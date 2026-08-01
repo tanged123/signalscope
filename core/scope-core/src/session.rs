@@ -32,8 +32,11 @@ impl Default for Session {
                 layout: Vec::new(),
             }],
             favorites: Vec::new(),
+            favorite_bundles: Vec::new(),
             derived: Vec::new(),
-            source_paths: Vec::new(),
+            derived_bundles: Vec::new(),
+            sources: Vec::new(),
+            source_sets: Vec::new(),
         }
     }
 }
@@ -110,34 +113,7 @@ pub fn load_from_path(path: &Path) -> Result<Session, SessionError> {
 fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, SessionError> {
     match version {
         1 => {
-            let panel_ids: Vec<String> = value
-                .get("panels")
-                .and_then(serde_json::Value::as_array)
-                .map(|panels| {
-                    panels
-                        .iter()
-                        .filter_map(|panel| {
-                            panel
-                                .get("id")
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_owned)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            #[allow(clippy::cast_precision_loss)]
-            let width = 1.0 / panel_ids.len().max(1) as f64;
-            let layout = if panel_ids.is_empty() {
-                serde_json::json!([])
-            } else {
-                let cells: Vec<serde_json::Value> = panel_ids
-                    .iter()
-                    .map(|id| serde_json::json!({ "panel_id": id, "width": width }))
-                    .collect();
-                serde_json::json!([{ "height": 1.0, "panels": cells }])
-            };
-            value["layout"] = layout;
-            value["favorites"] = serde_json::json!([]);
+            migrate_v1_layout(&mut value);
             value["schema_version"] = serde_json::json!(2);
             migrate(2, value)
         }
@@ -168,7 +144,7 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             object.insert("schema_version".into(), serde_json::json!(3));
             migrate(3, value)
         }
-        3 | 4 | 7 => {
+        3 | 4 | 7 | 12 => {
             // Purely additive optional panel fields; #[serde(default)] restores
             // absent fields, so no rewrite is needed.
             let next = version + 1;
@@ -186,16 +162,7 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate(7, value)
         }
         8 => {
-            for_each_panel(&mut value, |panel| {
-                let by_time = panel
-                    .get("color_signal")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("time");
-                if by_time {
-                    panel.insert("color_signal".into(), serde_json::Value::Null);
-                }
-                panel.insert("color_by_time".into(), serde_json::json!(by_time));
-            });
+            migrate_v8_color(&mut value);
             value["schema_version"] = serde_json::json!(9);
             migrate(9, value)
         }
@@ -205,9 +172,224 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(10);
             migrate(10, value)
         }
+        10 => {
+            migrate_v10_sources(&mut value);
+            value["schema_version"] = serde_json::json!(11);
+            migrate(11, value)
+        }
+        11 => {
+            value["source_sets"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(12);
+            migrate(12, value)
+        }
+        13 => {
+            migrate_v13_ensembles(&mut value);
+            value["schema_version"] = serde_json::json!(14);
+            migrate(14, value)
+        }
+        14 => {
+            value["favorite_bundles"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(15);
+            migrate(15, value)
+        }
+        15 => {
+            value["derived_bundles"] = serde_json::json!([]);
+            value["schema_version"] = serde_json::json!(16);
+            migrate(16, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
+}
+
+fn migrate_v1_layout(value: &mut serde_json::Value) {
+    let panel_ids: Vec<String> = value
+        .get("panels")
+        .and_then(serde_json::Value::as_array)
+        .map(|panels| {
+            panels
+                .iter()
+                .filter_map(|panel| {
+                    panel
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    #[allow(clippy::cast_precision_loss)]
+    let width = 1.0 / panel_ids.len().max(1) as f64;
+    let layout = if panel_ids.is_empty() {
+        serde_json::json!([])
+    } else {
+        let cells: Vec<serde_json::Value> = panel_ids
+            .iter()
+            .map(|id| serde_json::json!({ "panel_id": id, "width": width }))
+            .collect();
+        serde_json::json!([{ "height": 1.0, "panels": cells }])
+    };
+    value["layout"] = layout;
+    value["favorites"] = serde_json::json!([]);
+}
+
+fn migrate_v8_color(value: &mut serde_json::Value) {
+    for_each_panel(value, |panel| {
+        let by_time = panel
+            .get("color_signal")
+            .and_then(serde_json::Value::as_str)
+            == Some("time");
+        if by_time {
+            panel.insert("color_signal".into(), serde_json::Value::Null);
+        }
+        panel.insert("color_by_time".into(), serde_json::json!(by_time));
+    });
+}
+
+fn migrate_v10_sources(value: &mut serde_json::Value) {
+    let paths = value
+        .get("source_paths")
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut taken = std::collections::BTreeSet::new();
+    let records = paths
+        .into_iter()
+        .map(|path| {
+            let key = crate::naming::legacy_source_key(&path);
+            let prefix = crate::naming::allocate_prefix(&taken, Path::new(&path), key)
+                .unwrap_or_else(|| key.simple().to_string());
+            taken.insert(prefix.clone());
+            serde_json::json!({
+                "key": key.to_string(),
+                "path": path,
+                "prefix": prefix,
+                "provider_id": null,
+                "decode_provenance": null,
+                "reconcile_legacy": true
+            })
+        })
+        .collect();
+    if let Some(object) = value.as_object_mut() {
+        object.remove("source_paths");
+        object.insert("sources".into(), serde_json::Value::Array(records));
+    }
+}
+
+fn migrate_v13_ensembles(value: &mut serde_json::Value) {
+    let prefixes = source_prefixes(value);
+    let sets = value
+        .get("source_sets")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for_each_panel(value, |panel| {
+        let ensemble = panel.remove("ensemble").unwrap_or(serde_json::Value::Null);
+        panel.insert("highlighted_sources".into(), serde_json::json!([]));
+        let Some(ensemble) = ensemble.as_object() else {
+            return;
+        };
+        let (Some(set_key), Some(local_path)) = (
+            ensemble.get("set_key").and_then(serde_json::Value::as_str),
+            ensemble
+                .get("local_path")
+                .and_then(serde_json::Value::as_str),
+        ) else {
+            return;
+        };
+        let member_filter: Vec<&str> = ensemble
+            .get("member_filter")
+            .and_then(serde_json::Value::as_array)
+            .map(|keys| keys.iter().filter_map(serde_json::Value::as_str).collect())
+            .unwrap_or_default();
+        let Some(set) = sets
+            .iter()
+            .find(|set| set.get("key").and_then(serde_json::Value::as_str) == Some(set_key))
+        else {
+            return;
+        };
+        let mut member_paths: Vec<String> = set
+            .get("members")
+            .and_then(serde_json::Value::as_array)
+            .map(|members| {
+                members
+                    .iter()
+                    .filter_map(|member| {
+                        let source_key = member.get("source_key")?.as_str()?;
+                        if !member_filter.is_empty() && !member_filter.contains(&source_key) {
+                            return None;
+                        }
+                        let missing = member.get("missing")?.as_array()?;
+                        if missing
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .any(|path| path == local_path)
+                        {
+                            return None;
+                        }
+                        let prefix = prefixes.get(source_key)?;
+                        Some(format!("{prefix}/{local_path}"))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        member_paths.sort();
+        let Some(series) = panel
+            .get_mut("series")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            return;
+        };
+        let existing: std::collections::BTreeSet<String> = series
+            .iter()
+            .filter_map(|entry| entry.get("path").and_then(serde_json::Value::as_str))
+            .map(str::to_owned)
+            .collect();
+        let mut used: std::collections::BTreeSet<u64> = series
+            .iter()
+            .filter_map(|entry| entry.get("color_slot").and_then(serde_json::Value::as_u64))
+            .collect();
+        for path in member_paths {
+            if existing.contains(&path) {
+                continue;
+            }
+            let mut slot = 1;
+            while used.contains(&slot) {
+                slot += 1;
+            }
+            used.insert(slot);
+            series.push(serde_json::json!({
+                "path": path,
+                "color_slot": slot,
+                "dash": "solid",
+                "width": 1.4,
+                "visible": true
+            }));
+        }
+    });
+}
+
+fn source_prefixes(value: &serde_json::Value) -> std::collections::BTreeMap<String, String> {
+    value
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| {
+                    Some((
+                        source.get("key")?.as_str()?.to_owned(),
+                        source.get("prefix")?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Error)]
@@ -300,6 +482,18 @@ mod tests {
         "/../../protocol/testdata/session-conformance.json"
     );
 
+    fn source(path: &str) -> SourceRecord {
+        let key = crate::naming::legacy_source_key(path);
+        SourceRecord {
+            key: key.to_string(),
+            path: path.into(),
+            prefix: crate::naming::default_prefix(Path::new(path)),
+            provider_id: None,
+            decode_provenance: None,
+            reconcile_legacy: false,
+        }
+    }
+
     #[test]
     fn session_conformance_fixture_matches_rust() {
         let session = Session {
@@ -307,8 +501,9 @@ mod tests {
                 path: "derived/speed".into(),
                 expr: "hypot('imu/vx', 'imu/vy')".into(),
             }],
-            source_paths: vec!["/data/run.csv".into()],
+            sources: vec![source("/data/run.csv")],
             favorites: vec!["imu/vx".into()],
+            favorite_bundles: vec!["imu/accel/x".into()],
             ..Session::default()
         };
         let current = format!(
@@ -332,13 +527,13 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp dir");
         let path = directory.path().join("session.json");
         let session = Session {
-            source_paths: vec!["/data/run.csv".into()],
+            sources: vec![source("/data/run.csv")],
             ..Session::default()
         };
 
         save_to_path(&session, &path).expect("saves");
         let restored = load_from_path(&path).expect("loads");
-        assert_eq!(restored.source_paths, session.source_paths);
+        assert_eq!(restored.sources, session.sources);
         assert!(
             !directory.path().join("session.json.tmp").exists(),
             "the temporary file is renamed, not left behind"
@@ -389,6 +584,7 @@ mod tests {
                         width: 1.5,
                         visible: true,
                     }],
+                    highlighted_sources: Vec::new(),
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -414,6 +610,171 @@ mod tests {
     }
 
     #[test]
+    fn v13_band_panels_expand_to_member_series() {
+        let json = serde_json::json!({
+            "app": "signalscope", "schema_version": 13,
+            "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true, "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "tab-1",
+            "tabs": [{
+                "id": "tab-1", "title": "Tab", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [],
+                "panels": [{
+                    "id": "p1", "title": "Band", "mode": "time", "axis_style": "gutter",
+                    "x_signal": null, "color_signal": null, "color_by_time": false,
+                    "series": [{"path": "run_01/alt", "color_slot": 1, "dash": "solid", "width": 1.4, "visible": true}],
+                    "ensemble": {"set_key": "set-1", "local_path": "alt", "member_filter": []},
+                    "y_range": null, "x_range": null, "x_label": null, "y_label": null,
+                    "c_label": null, "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }],
+            "favorites": [], "derived": [],
+            "sources": [
+                {"key": "k1", "path": "/data/run_01.csv", "prefix": "run_01", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false},
+                {"key": "k2", "path": "/data/run_02.csv", "prefix": "run_02", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false},
+                {"key": "k3", "path": "/data/run_03.csv", "prefix": "run_03", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false}
+            ],
+            "source_sets": [{
+                "key": "set-1", "label": "Runs", "generation": "1",
+                "time_domain": {"unit": "seconds", "origin": "relative", "alignment_origin": 0.0},
+                "members": [
+                    {"source_key": "k1", "missing": [], "scale": 1.0, "offset": 0.0},
+                    {"source_key": "k2", "missing": [], "scale": 1.0, "offset": 0.0},
+                    {"source_key": "k3", "missing": ["alt"], "scale": 1.0, "offset": 0.0}
+                ]
+            }]
+        });
+        let session = from_json(&json.to_string()).expect("v13 migrates");
+        let panel = &session.tabs[0].panels[0];
+        let paths: Vec<&str> = panel
+            .series
+            .iter()
+            .map(|series| series.path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["run_01/alt", "run_02/alt"]);
+        assert_eq!(panel.series[1].color_slot, 2);
+        assert!(panel.highlighted_sources.is_empty());
+    }
+
+    #[test]
+    fn v13_band_with_unknown_set_keeps_explicit_series() {
+        let json = serde_json::json!({
+            "app": "signalscope", "schema_version": 13, "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true, "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1", "favorites": [], "derived": [], "sources": [],
+            "source_sets": [],
+            "tabs": [{"id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null, "layout": [], "panels": [{
+                    "id": "p1", "title": "Band", "mode": "time", "axis_style": "gutter",
+                    "x_signal": null, "color_signal": null, "color_by_time": false,
+                    "series": [{"path": "run_01/alt", "color_slot": 1, "dash": "solid", "width": 1.4, "visible": true}],
+                    "ensemble": {"set_key": "missing", "local_path": "alt", "member_filter": []},
+                    "y_range": null, "x_range": null, "x_label": null, "y_label": null,
+                    "c_label": null, "time_window": null, "annotations": [], "show_stats": false
+                }]}]
+        });
+        let session = from_json(&json.to_string()).expect("v13 migrates");
+        assert_eq!(session.tabs[0].panels[0].series.len(), 1);
+        assert!(session.tabs[0].panels[0].highlighted_sources.is_empty());
+    }
+
+    #[test]
+    fn v10_source_paths_migrate_to_deterministic_keyed_records() {
+        let json = serde_json::json!({
+            "app": "signalscope", "schema_version": 10, "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true,
+                            "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1", "favorites": [], "derived": [],
+            "source_paths": ["/data/run.csv", "/other/run.csv"],
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [], "panels": []
+            }]
+        })
+        .to_string();
+
+        let session = from_json(&json).expect("v10 migrates");
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(session.sources.len(), 2);
+        assert_eq!(
+            session.sources[0].key,
+            crate::naming::legacy_source_key("/data/run.csv").to_string()
+        );
+        assert_eq!(session.sources[0].prefix, "run");
+        assert!(session.sources[1].prefix.starts_with("run_"));
+        assert!(session.sources.iter().all(|record| record.reconcile_legacy));
+        assert!(
+            session
+                .sources
+                .iter()
+                .all(|record| record.provider_id.is_none())
+        );
+        assert_eq!(from_json(&json).unwrap().sources, session.sources);
+    }
+
+    #[test]
+    fn v11_sessions_gain_an_empty_set_list_and_round_trip_membership() {
+        let mut value = serde_json::to_value(Session::default()).unwrap();
+        value["schema_version"] = serde_json::json!(11);
+        value.as_object_mut().unwrap().remove("source_sets");
+        let json = serde_json::to_string(&value).unwrap();
+        let session = from_json(&json).expect("v11 migrates");
+        assert!(session.source_sets.is_empty());
+
+        let with_sets = Session {
+            source_sets: vec![SourceSetState {
+                key: uuid::Uuid::nil().to_string(),
+                label: "Runs".into(),
+                generation: 4,
+                time_domain: TimeDomainState {
+                    unit: TimeUnitState::Seconds,
+                    origin: OriginKindState::Relative,
+                    alignment_origin: 0.0,
+                },
+                members: vec![SetMemberState {
+                    source_key: uuid::Uuid::nil().to_string(),
+                    missing: vec!["imu/ay".into()],
+                    scale: 1.0,
+                    offset: 0.0,
+                }],
+            }],
+            ..session
+        };
+        let restored = from_json(&serde_json::to_string(&with_sets).unwrap()).unwrap();
+        assert_eq!(restored.source_sets, with_sets.source_sets);
+        assert_eq!(
+            restored.source_sets[0].members[0].missing,
+            vec!["imu/ay".to_owned()]
+        );
+    }
+
+    #[test]
+    fn v14_sessions_gain_empty_bundle_favorites() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(14);
+        value
+            .as_object_mut()
+            .expect("session object")
+            .remove("favorite_bundles");
+        let session = from_json(&value.to_string()).expect("v14 migrates");
+        assert!(session.favorite_bundles.is_empty());
+    }
+
+    #[test]
+    fn v15_sessions_gain_empty_derived_bundles() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(15);
+        value
+            .as_object_mut()
+            .expect("session object")
+            .remove("derived_bundles");
+        let session = from_json(&value.to_string()).expect("v15 migrates");
+        assert!(session.derived_bundles.is_empty());
+    }
+
+    #[test]
     fn v9_sessions_gain_empty_derived_and_source_lists() {
         let json = serde_json::json!({
             "app": "signalscope",
@@ -433,7 +794,7 @@ mod tests {
         let session = from_json(&json).expect("v9 session migrates");
         assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
         assert!(session.derived.is_empty());
-        assert!(session.source_paths.is_empty());
+        assert!(session.sources.is_empty());
     }
 
     #[test]
@@ -449,13 +810,13 @@ mod tests {
                     expr: "gradient('derived/speed')".into(),
                 },
             ],
-            source_paths: vec!["/data/run.csv".into()],
+            sources: vec![source("/data/run.csv")],
             ..Session::default()
         };
         let restored =
             from_json(&serde_json::to_string(&session).expect("serializes")).expect("round trips");
         assert_eq!(restored.derived, session.derived);
-        assert_eq!(restored.source_paths, session.source_paths);
+        assert_eq!(restored.sources, session.sources);
     }
 
     #[test]

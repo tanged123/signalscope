@@ -1,7 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "ui_font_family": "inter",
   "plot_font_family": "jetbrains",
   "ui_font_size": 13.0,
-  "plot_font_size": 9.0
+  "plot_font_size": 9.0,
+  "cache_root": null,
+  "cache_max_bytes": "21474836480",
+  "ingest_working_bytes": null,
+  "ingest_resident_bytes": null
 }

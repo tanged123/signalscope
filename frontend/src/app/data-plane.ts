@@ -1,4 +1,11 @@
 import {
+  type BatchDetail,
+  type BatchDetailRequest,
+  type BatchJob,
+  type BatchStatus,
+  type CreateSetRequest,
+  type CreateDerivedBundleRequest,
+  type DerivedBundleResponse,
   type DerivedRequest,
   type EnvelopeBin,
   type ExportEstimate,
@@ -6,39 +13,72 @@ import {
   type ExportFidelity,
   type ExportFileKind,
   type ExportRange,
+  type ExportSelection,
   type ExportWriteRequest,
-  type IngestJob,
-  type IngestRequest,
-  type IngestStatus,
+  type FormatDescriptor,
+  type IngestBatchRequest,
   type LoadedSession,
   type LoadSessionRequest,
   type PickSessionRequest,
   type RemoveSignalRequest,
+  type RemoveDerivedBundleRequest,
+  type RestoreReconcileRequest,
+  type RestoreReconcileResponse,
+  type RestoreSourcesRequest,
   type SampleRequest,
   type SampleResponse,
   type SaveSessionRequest,
+  type ScanSourcesRequest,
+  type ScanSourcesResponse,
   type SaveExportFileRequest,
   type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
+  type SetSummary,
+  type SetTimeAlignmentRequest,
   type SignalSummary,
   type SnapshotManifest,
   type SourceSummary,
   type TileRequest,
   type TileResponse,
+  type UpdateSetMembersRequest,
 } from "../generated/protocol";
 import { open, seal, type Envelope } from "./envelope";
+import { parseBakedSession } from "./baked-session";
 import { queryPyramid } from "./pyramid-query";
 import { binsToSamples, sampleWindow } from "./samples";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
-  start(path: string): Promise<string>;
-  status(jobId: string): Promise<IngestStatus>;
+  pickSourceFolder(): Promise<string | null>;
+  scanSources(path: string, recursive: boolean): Promise<ScanSourcesResponse>;
+  startBatch(paths: string[]): Promise<string>;
+  batchStatus(jobId: string): Promise<BatchStatus>;
+  batchDetail(
+    jobId: string,
+    offset: number,
+    limit: number,
+  ): Promise<BatchDetail>;
+  cancelBatch(jobId: string): Promise<void>;
+  releaseBatch(jobId: string): Promise<void>;
+  listFormats(): Promise<FormatDescriptor[]>;
 }
 
 export interface DerivedPort {
   create(path: string, expr: string): Promise<SignalSummary>;
   remove(path: string): Promise<void>;
+  createBundle(name: string, expr: string): Promise<DerivedBundleResponse>;
+  removeBundle(name: string): Promise<void>;
+}
+
+export interface SetPort {
+  create(label: string, memberKeys: string[]): Promise<SetSummary>;
+  updateMembers(setId: string, memberKeys: string[]): Promise<SetSummary>;
+  setAlignment(
+    setId: string,
+    sourceKey: string,
+    scale: number,
+    offset: number,
+  ): Promise<SetSummary>;
 }
 
 export interface SessionPort {
@@ -48,17 +88,29 @@ export interface SessionPort {
   pick(mode: SessionDialogMode): Promise<string | null>;
 }
 
+export interface RestorePort {
+  start(sessionJson: string): Promise<string>;
+  reconcile(
+    sessionJson: string,
+    jobId: string,
+  ): Promise<RestoreReconcileResponse>;
+}
+
 export interface PreferencesPort {
   load(): Promise<string | null>;
   save(preferencesJson: string): Promise<void>;
 }
 
 export interface ExportPort {
-  estimate(sessionJson: string): Promise<ExportEstimate>;
+  estimate(
+    sessionJson: string,
+    selection: ExportSelection,
+  ): Promise<ExportEstimate>;
   writeHtml(
     sessionJson: string,
     range: ExportRange,
     fidelity: ExportFidelity,
+    selection: ExportSelection,
   ): Promise<string | null>;
   saveFile(
     fileName: string,
@@ -78,12 +130,15 @@ export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
+  readonly sets: SetPort | null;
   readonly session: SessionPort | null;
+  readonly restore: RestorePort | null;
   readonly preferences: PreferencesPort | null;
   readonly exporter: ExportPort | null;
   readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
+  listSets(): Promise<SetSummary[]>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
@@ -106,8 +161,11 @@ export class TauriPlane implements DataPlane {
   readonly ingest: IngestPort;
 
   readonly derived: DerivedPort;
+  readonly sets: SetPort;
 
   readonly session: SessionPort;
+
+  readonly restore: RestorePort;
 
   readonly preferences: PreferencesPort;
 
@@ -117,18 +175,52 @@ export class TauriPlane implements DataPlane {
     this.ingest = {
       pickSources: async () =>
         open(await this.invoke<Envelope<string[]>>("pick_sources")),
-      start: async (path: string) =>
+      pickSourceFolder: async () =>
+        open(await this.invoke<Envelope<string | null>>("pick_source_folder")),
+      scanSources: async (path: string, recursive: boolean) =>
         open(
-          await this.invoke<Envelope<IngestJob>>("ingest_source", {
-            request: seal<IngestRequest>({ path }),
-          }),
-        ).job_id,
-      status: async (jobId: string) =>
-        open(
-          await this.invoke<Envelope<IngestStatus>>("ingest_status", {
-            request: seal<IngestJob>({ job_id: jobId }),
+          await this.invoke<Envelope<ScanSourcesResponse>>("scan_sources", {
+            request: seal<ScanSourcesRequest>({ path, recursive }),
           }),
         ),
+      startBatch: async (paths: string[]) =>
+        open(
+          await this.invoke<Envelope<BatchJob>>("ingest_batch", {
+            request: seal<IngestBatchRequest>({ paths }),
+          }),
+        ).job_id,
+      batchStatus: async (jobId: string) =>
+        open(
+          await this.invoke<Envelope<BatchStatus>>("batch_status", {
+            request: seal<BatchJob>({ job_id: jobId }),
+          }),
+        ),
+      batchDetail: async (jobId: string, offset: number, limit: number) =>
+        open(
+          await this.invoke<Envelope<BatchDetail>>("batch_detail", {
+            request: seal<BatchDetailRequest>({
+              job_id: jobId,
+              offset,
+              limit,
+            }),
+          }),
+        ),
+      cancelBatch: async (jobId: string) => {
+        open(
+          await this.invoke<Envelope<null>>("cancel_batch", {
+            request: seal<BatchJob>({ job_id: jobId }),
+          }),
+        );
+      },
+      releaseBatch: async (jobId: string) => {
+        open(
+          await this.invoke<Envelope<null>>("release_batch", {
+            request: seal<BatchJob>({ job_id: jobId }),
+          }),
+        );
+      },
+      listFormats: async () =>
+        open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
     };
     this.derived = {
       create: async (path: string, expr: string) =>
@@ -144,6 +236,58 @@ export class TauriPlane implements DataPlane {
           }),
         );
       },
+      createBundle: async (name: string, expr: string) =>
+        open(
+          await this.invoke<Envelope<DerivedBundleResponse>>(
+            "create_derived_bundle",
+            {
+              request: seal<CreateDerivedBundleRequest>({ name, expr }),
+            },
+          ),
+        ),
+      removeBundle: async (name: string) => {
+        open(
+          await this.invoke<Envelope<null>>("remove_derived_bundle", {
+            request: seal<RemoveDerivedBundleRequest>({ name }),
+          }),
+        );
+      },
+    };
+    this.sets = {
+      create: async (label: string, memberKeys: string[]) =>
+        open(
+          await this.invoke<Envelope<SetSummary>>("create_set", {
+            request: seal<CreateSetRequest>({
+              label,
+              member_keys: memberKeys,
+            }),
+          }),
+        ),
+      updateMembers: async (setId: string, memberKeys: string[]) =>
+        open(
+          await this.invoke<Envelope<SetSummary>>("update_set_members", {
+            request: seal<UpdateSetMembersRequest>({
+              set_id: setId,
+              member_keys: memberKeys,
+            }),
+          }),
+        ),
+      setAlignment: async (
+        setId: string,
+        sourceKey: string,
+        scale: number,
+        offset: number,
+      ) =>
+        open(
+          await this.invoke<Envelope<SetSummary>>("set_time_alignment", {
+            request: seal<SetTimeAlignmentRequest>({
+              set_id: setId,
+              source_key: sourceKey,
+              scale,
+              offset,
+            }),
+          }),
+        ),
     };
     this.session = {
       save: async (sessionJson: string, path: string | null) =>
@@ -170,6 +314,28 @@ export class TauriPlane implements DataPlane {
           }),
         ),
     };
+    this.restore = {
+      start: async (sessionJson: string) =>
+        open(
+          await this.invoke<Envelope<BatchJob>>("restore_sources", {
+            request: seal<RestoreSourcesRequest>({
+              session_json: sessionJson,
+            }),
+          }),
+        ).job_id,
+      reconcile: async (sessionJson: string, jobId: string) =>
+        open(
+          await this.invoke<Envelope<RestoreReconcileResponse>>(
+            "restore_reconcile",
+            {
+              request: seal<RestoreReconcileRequest>({
+                session_json: sessionJson,
+                job_id: jobId,
+              }),
+            },
+          ),
+        ),
+    };
     this.preferences = {
       load: async () =>
         open(await this.invoke<Envelope<string | null>>("load_preferences")),
@@ -182,11 +348,12 @@ export class TauriPlane implements DataPlane {
       },
     };
     this.exporter = {
-      estimate: async (sessionJson: string) =>
+      estimate: async (sessionJson: string, selection: ExportSelection) =>
         open(
           await this.invoke<Envelope<ExportEstimate>>("export_estimate", {
             request: seal<ExportEstimateRequest>({
               session_json: sessionJson,
+              selection,
             }),
           }),
         ),
@@ -194,6 +361,7 @@ export class TauriPlane implements DataPlane {
         sessionJson: string,
         range: ExportRange,
         fidelity: ExportFidelity,
+        selection: ExportSelection,
       ) =>
         open(
           await this.invoke<Envelope<string | null>>("export_write", {
@@ -201,6 +369,7 @@ export class TauriPlane implements DataPlane {
               session_json: sessionJson,
               range,
               fidelity,
+              selection,
             }),
           }),
         ),
@@ -249,6 +418,10 @@ export class TauriPlane implements DataPlane {
     return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
   }
 
+  async listSets(): Promise<SetSummary[]> {
+    return open(await this.invoke<Envelope<SetSummary[]>>("list_sets"));
+  }
+
   async queryTiles(request: TileRequest): Promise<TileResponse> {
     return open(
       await this.invoke<Envelope<TileResponse>>("query_tiles", {
@@ -285,8 +458,11 @@ export class BakedPlane implements DataPlane {
   readonly ingest = null;
 
   readonly derived = null;
+  readonly sets = null;
 
   readonly session = null;
+
+  readonly restore = null;
 
   readonly preferences = null;
 
@@ -334,8 +510,53 @@ export class BakedPlane implements DataPlane {
       0,
     );
     return Promise.resolve([
-      { source_id: "0", path: this.sourceLabel, point_count: String(points) },
+      {
+        source_id: "0",
+        source_key: "00000000-0000-0000-0000-000000000000",
+        prefix: this.payload.signals[0]?.summary.path.split("/")[0] ?? "demo",
+        path: this.sourceLabel,
+        point_count: String(points),
+      },
     ]);
+  }
+
+  listSets(): Promise<SetSummary[]> {
+    const saved = parseBakedSession(this.bakedSessionJson).source_sets;
+    return Promise.resolve(
+      saved.map((set, index) => {
+        const memberKeys = new Set(
+          set.members.map((member) => member.source_key),
+        );
+        const localsBySource = new Map<string, Set<string>>();
+        for (const signal of this.payload.signals) {
+          if (!memberKeys.has(signal.summary.source_key)) continue;
+          const locals =
+            localsBySource.get(signal.summary.source_key) ?? new Set<string>();
+          locals.add(signal.summary.local_path);
+          localsBySource.set(signal.summary.source_key, locals);
+        }
+        const counts = new Map<string, number>();
+        for (const locals of localsBySource.values()) {
+          for (const local of locals) {
+            counts.set(local, (counts.get(local) ?? 0) + 1);
+          }
+        }
+        return {
+          set_id: String(index + 1),
+          set_key: set.key,
+          label: set.label,
+          generation: set.generation,
+          member_count: set.members.length,
+          members: set.members,
+          time_domain: set.time_domain,
+          local_paths: [...counts]
+            .filter(([, count]) => count >= 2)
+            .map(([local]) => local)
+            .sort((left, right) => left.localeCompare(right)),
+          aligned: true,
+        };
+      }),
+    );
   }
 
   queryTiles(request: TileRequest): Promise<TileResponse> {
@@ -441,6 +662,9 @@ function createDemoManifest(): BakedManifest {
     {
       summary: {
         signal_id: "1",
+        source_id: "0",
+        source_key: "00000000-0000-0000-0000-000000000000",
+        local_path: "velocity_body/x",
         path: "rocket/velocity_body/x",
         unit: "m/s",
         point_count: String(pointCount),
@@ -453,6 +677,9 @@ function createDemoManifest(): BakedManifest {
     {
       summary: {
         signal_id: "2",
+        source_id: "0",
+        source_key: "00000000-0000-0000-0000-000000000000",
+        local_path: "velocity_body/y",
         path: "rocket/velocity_body/y",
         unit: "m/s",
         point_count: String(pointCount),
@@ -464,7 +691,37 @@ function createDemoManifest(): BakedManifest {
     },
   ];
   return seal({
-    session_json: "",
+    session_json: JSON.stringify({
+      app: "signalscope",
+      schema_version: 16,
+      theme: "dark",
+      linked_time: {
+        t0: 0,
+        t1: 1,
+        linked: true,
+        paused: false,
+        cursorT: null,
+        mode: "fixed",
+      },
+      active_tab_id: "workspace-1",
+      tabs: [
+        {
+          id: "workspace-1",
+          title: "Workspace 1",
+          cursor_mode: "none",
+          focused_panel_id: null,
+          maximized_panel_id: null,
+          panels: [],
+          layout: [],
+        },
+      ],
+      favorites: [],
+      favorite_bundles: [],
+      derived: [],
+      derived_bundles: [],
+      sources: [],
+      source_sets: [],
+    }),
     signals: demoSignals.map(({ summary, generate }) => ({
       summary,
       levels: buildDemoLevels(makeBins(generate)),

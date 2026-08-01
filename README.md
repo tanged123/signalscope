@@ -18,7 +18,7 @@ panel grids over the same loaded sources and linked time window.
 
 ## Interactive demo
 
-[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=0.12.5)](https://tanged123.github.io/signalscope/demo.html)
+[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=0.14.3)](https://tanged123.github.io/signalscope/demo.html)
 
 **[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)**
 to zoom, inspect values, and explore the exported workspace in your browser.
@@ -50,6 +50,12 @@ and plotting workflow. The demo contains 16 signals spanning smooth and signed
 telemetry, paired XY position, angular values, steps and setpoints, boolean and
 discrete state, high-frequency vibration, thermal drift, and intentional GPS
 gaps. Plot nine or more together to exercise the colour-plus-dash identities.
+
+For bundled multi-source plotting, open all eight files in
+[`examples/monte_carlo`](examples/monte_carlo). The deterministic runs vary
+response and thermal parameters; run 8 omits `temperature` to demonstrate a
+partial bundle member. Expand a bundle in the signal tree to plot all members,
+then highlight one source from the panel legend.
 
 ### Derived signals
 

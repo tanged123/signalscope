@@ -104,18 +104,27 @@ describe("HistoryStack", () => {
 });
 
 describe("history session projection", () => {
-  it("excludes cursor, focus, and ingested source paths", () => {
+  const source = {
+    key: "00000000-0000-0000-0000-000000000001",
+    path: "/data/run.csv",
+    prefix: "run",
+    provider_id: null,
+    decode_provenance: null,
+    reconcile_legacy: false,
+  };
+
+  it("excludes cursor, focus, and ingested sources", () => {
     const session = emptySession();
     const tab = session.tabs[0];
     if (tab === undefined) throw new Error("expected a workspace tab");
     session.linked_time.cursorT = 12;
-    session.source_paths = ["/data/run.csv"];
+    session.sources = [source];
     tab.focused_panel_id = "panel-1";
 
     const snapshot = historySnapshot(session);
 
     expect(snapshot.linked_time.cursorT).toBeNull();
-    expect(snapshot.source_paths).toEqual([]);
+    expect(snapshot.sources).toEqual([]);
     expect(snapshot.tabs[0]?.focused_panel_id).toBeNull();
   });
 
@@ -130,12 +139,12 @@ describe("history session projection", () => {
     historicalTab.focused_panel_id = null;
     currentTab.focused_panel_id = currentTab.panels[0]?.id ?? null;
     current.linked_time.cursorT = 8;
-    current.source_paths = ["/data/run.csv"];
+    current.sources = [source];
 
     const restored = restoreTransientSessionState(historical, current);
 
     expect(restored.linked_time.cursorT).toBe(8);
-    expect(restored.source_paths).toEqual(["/data/run.csv"]);
+    expect(restored.sources).toEqual([source]);
     expect(restored.tabs[0]?.focused_panel_id).toBe(
       currentTab.focused_panel_id,
     );

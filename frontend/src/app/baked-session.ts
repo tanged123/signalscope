@@ -31,6 +31,50 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
+function isSource(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.key === "string" &&
+    typeof value.path === "string" &&
+    typeof value.prefix === "string" &&
+    isNullable(
+      value.provider_id,
+      (item): item is string => typeof item === "string",
+    ) &&
+    isNullable(
+      value.decode_provenance,
+      (item): item is string => typeof item === "string",
+    ) &&
+    typeof value.reconcile_legacy === "boolean"
+  );
+}
+
+function isSourceSet(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.key === "string" &&
+    typeof value.label === "string" &&
+    typeof value.generation === "string" &&
+    isRecord(value.time_domain) &&
+    ["seconds", "milliseconds", "microseconds", "nanoseconds"].includes(
+      String(value.time_domain.unit),
+    ) &&
+    ["relative", "absolute_epoch", "event_aligned", "synthetic_index"].includes(
+      String(value.time_domain.origin),
+    ) &&
+    typeof value.time_domain.alignment_origin === "number" &&
+    Array.isArray(value.members) &&
+    value.members.every(
+      (member) =>
+        isRecord(member) &&
+        typeof member.source_key === "string" &&
+        isStringArray(member.missing) &&
+        typeof member.scale === "number" &&
+        typeof member.offset === "number",
+    )
+  );
+}
+
 function isNumberPair(value: unknown): value is [number, number] {
   return (
     Array.isArray(value) &&
@@ -86,6 +130,14 @@ function isAnnotation(value: unknown): boolean {
   );
 }
 
+function isHighlightedSource(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.local_path === "string" &&
+    typeof value.path === "string"
+  );
+}
+
 function isPanel(value: unknown): boolean {
   const stringOrNull = (item: unknown): item is string =>
     typeof item === "string";
@@ -100,6 +152,8 @@ function isPanel(value: unknown): boolean {
     typeof value.color_by_time === "boolean" &&
     Array.isArray(value.series) &&
     value.series.every(isSeries) &&
+    Array.isArray(value.highlighted_sources) &&
+    value.highlighted_sources.every(isHighlightedSource) &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&
@@ -155,6 +209,7 @@ function isSession(value: JsonObject): value is JsonObject & Session {
     Array.isArray(value.tabs) &&
     value.tabs.every(isTab) &&
     isStringArray(value.favorites) &&
+    isStringArray(value.favorite_bundles) &&
     Array.isArray(value.derived) &&
     value.derived.every(
       (item) =>
@@ -162,6 +217,16 @@ function isSession(value: JsonObject): value is JsonObject & Session {
         typeof item.path === "string" &&
         typeof item.expr === "string",
     ) &&
-    isStringArray(value.source_paths)
+    Array.isArray(value.derived_bundles) &&
+    value.derived_bundles.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.name === "string" &&
+        typeof item.expr === "string",
+    ) &&
+    Array.isArray(value.sources) &&
+    value.sources.every(isSource) &&
+    Array.isArray(value.source_sets) &&
+    value.source_sets.every(isSourceSet)
   );
 }

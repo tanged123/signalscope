@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 10,
+  "schema_version": 16,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -23,11 +23,23 @@
     }
   ],
   "favorites": ["imu/vx"],
+  "favorite_bundles": ["imu/accel/x"],
   "derived": [
     {
       "path": "derived/speed",
       "expr": "hypot('imu/vx', 'imu/vy')"
     }
   ],
-  "source_paths": ["/data/run.csv"]
+  "derived_bundles": [],
+  "sources": [
+    {
+      "key": "37a8f7d6-862d-5107-a0d7-6ad27b3bb161",
+      "path": "/data/run.csv",
+      "prefix": "run",
+      "provider_id": null,
+      "decode_provenance": null,
+      "reconcile_legacy": false
+    }
+  ],
+  "source_sets": []
 }

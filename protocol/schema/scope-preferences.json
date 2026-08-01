@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "types": {
     "FontFamily": {
       "kind": "enum",
@@ -13,7 +13,11 @@
         "ui_font_family": "FontFamily",
         "plot_font_family": "FontFamily",
         "ui_font_size": "f64",
-        "plot_font_size": "f64"
+        "plot_font_size": "f64",
+        "cache_root": "string?",
+        "cache_max_bytes": "u64",
+        "ingest_working_bytes": "u64?",
+        "ingest_resident_bytes": "u64?"
       }
     }
   }

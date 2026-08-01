@@ -1,22 +1,39 @@
-import { buildTreeRows, virtualSlice, type TreeRow } from "../app/tree-model";
-import { SIGNAL_DRAG_TYPE } from "./panel";
+import {
+  buildTreeRows,
+  virtualSlice,
+  type TreeRow,
+  type TreeSet,
+} from "../app/tree-model";
+import {
+  BUNDLE_DRAG_TYPE,
+  parseBundleLocalPath,
+  parseBundlePayload,
+  SIGNAL_DRAG_TYPE,
+} from "./panel";
 
 const FALLBACK_ROW_HEIGHT = 22;
 
 export interface SignalTreeCallbacks {
   onPlotSignal(path: string): void;
+  onPlotBundle?(localPath: string, memberPaths: readonly string[]): void;
   onToggleFavorite(path: string): void;
+  onToggleFavoriteBundle?(localPath: string): void;
   onRemoveDerived(path: string): void;
+  onRemoveDerivedBundle?(localPath: string): void;
 }
 
 export class SignalTreeView {
   private paths: string[] = [];
   private favorites: readonly string[] = [];
   private readonly collapsed = new Set<string>();
+  private readonly expandedBundles = new Set<string>();
   private filter = "";
   private rows: TreeRow[] = [];
   private readonly rowHeight: number;
   private liveValues: ReadonlyMap<string, string> = new Map();
+  private sets: TreeSet[] = [];
+  private favoriteBundles: readonly string[] = [];
+  private bundleMembers = new Map<string, string[]>();
 
   constructor(
     private readonly listElement: HTMLElement,
@@ -36,7 +53,10 @@ export class SignalTreeView {
       this.renderRows();
     });
     favoritesElement.addEventListener("dragover", (event) => {
-      if (event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) === true) {
+      if (
+        event.dataTransfer?.types.includes(SIGNAL_DRAG_TYPE) === true ||
+        event.dataTransfer?.types.includes(BUNDLE_DRAG_TYPE) === true
+      ) {
         event.preventDefault();
         favoritesElement.classList.add("drop-target");
       }
@@ -46,6 +66,15 @@ export class SignalTreeView {
     });
     favoritesElement.addEventListener("drop", (event) => {
       favoritesElement.classList.remove("drop-target");
+      const bundleData = event.dataTransfer?.getData(BUNDLE_DRAG_TYPE) ?? "";
+      const bundle = parseBundlePayload(bundleData);
+      const localPath =
+        bundle === null ? null : parseBundleLocalPath(bundleData);
+      if (localPath !== null && !this.favoriteBundles.includes(localPath)) {
+        event.preventDefault();
+        this.callbacks.onToggleFavoriteBundle?.(localPath);
+        return;
+      }
       const path = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE);
       if (path !== undefined && path !== "" && !this.favorites.includes(path)) {
         event.preventDefault();
@@ -59,8 +88,19 @@ export class SignalTreeView {
     this.refresh();
   }
 
+  setSets(sets: readonly TreeSet[]): void {
+    this.sets = sets.map((set) => ({ ...set, prefixes: [...set.prefixes] }));
+    this.refresh();
+  }
+
   setFavorites(favorites: readonly string[]): void {
     this.favorites = favorites;
+    this.renderFavorites();
+    this.renderRows();
+  }
+
+  setFavoriteBundles(favorites: readonly string[]): void {
+    this.favoriteBundles = favorites;
     this.renderFavorites();
     this.renderRows();
   }
@@ -77,7 +117,18 @@ export class SignalTreeView {
   }
 
   private refresh(): void {
-    this.rows = buildTreeRows(this.paths, this.collapsed, this.filter);
+    this.bundleMembers = this.collectBundleMembers();
+    this.rows = buildTreeRows(
+      this.paths,
+      this.collapsed,
+      this.filter,
+      this.sets.length > 0
+        ? {
+            sets: this.sets,
+            expandedBundles: this.expandedBundles,
+          }
+        : undefined,
+    );
     this.renderRows();
   }
 
@@ -125,6 +176,86 @@ export class SignalTreeView {
       });
       return button;
     }
+    if (row.kind === "bundle") {
+      const element = document.createElement("div");
+      element.className = "tree-row tree-bundle";
+      element.style.paddingLeft = `${String(8 + row.depth * 12)}px`;
+      element.dataset.bundlePath = row.path;
+      element.draggable = true;
+      element.tabIndex = 0;
+      element.setAttribute("role", "button");
+      element.setAttribute("aria-label", `Plot bundle ${row.path}`);
+      const caret = document.createElement("button");
+      caret.className = "tree-bundle-caret";
+      caret.textContent = row.expanded ? "▾" : "▸";
+      caret.setAttribute(
+        "aria-label",
+        `${row.expanded ? "Collapse" : "Expand"} ${row.path}`,
+      );
+      caret.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (this.expandedBundles.has(row.bundleKey)) {
+          this.expandedBundles.delete(row.bundleKey);
+        } else {
+          this.expandedBundles.add(row.bundleKey);
+        }
+        this.refresh();
+      });
+      element.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData(
+          BUNDLE_DRAG_TYPE,
+          JSON.stringify({
+            local_path: row.path,
+            member_paths: row.memberPaths,
+          }),
+        );
+      });
+      const plot = () =>
+        this.callbacks.onPlotBundle?.(row.path, row.memberPaths);
+      element.addEventListener("dblclick", plot);
+      element.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          plot();
+        }
+      });
+      const name = document.createElement("span");
+      name.className = "signal-path";
+      name.textContent = row.label;
+      const badge = document.createElement("span");
+      badge.className = "tree-run-count";
+      badge.textContent = `${String(row.runCount)} runs`;
+      const star = document.createElement("button");
+      const favorite = this.favoriteBundles.includes(row.path);
+      star.className = `tree-star ${favorite ? "active" : ""}`;
+      star.textContent = "★";
+      star.title = "Toggle bundle favorite";
+      star.setAttribute(
+        "aria-label",
+        `${favorite ? "Remove" : "Add"} ${row.path} ${favorite ? "from" : "to"} favorites`,
+      );
+      star.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.callbacks.onToggleFavoriteBundle?.(row.path);
+      });
+      element.append(caret, star, name, badge);
+      if (row.path.startsWith("derived/")) {
+        const mark = document.createElement("span");
+        mark.className = "tree-derived-mark";
+        mark.textContent = "ƒx";
+        mark.title = "derived bundle";
+        const remove = document.createElement("button");
+        remove.className = "tree-derived-remove";
+        remove.textContent = "✕";
+        remove.title = "Remove " + row.path;
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.callbacks.onRemoveDerivedBundle?.(row.path);
+        });
+        element.append(mark, remove);
+      }
+      return element;
+    }
     return this.leafElement(row.path, row.label, row.depth);
   }
 
@@ -171,7 +302,9 @@ export class SignalTreeView {
     value.className = "signal-value";
     value.textContent = this.liveValues.get(path) ?? "—";
     rowElement.append(star, name);
-    if (path.startsWith("derived/")) {
+    const isDerivedMember =
+      path.startsWith("derived/") || path.includes("/derived/");
+    if (isDerivedMember) {
       const mark = document.createElement("span");
       mark.className = "tree-derived-mark";
       mark.textContent = "ƒx";
@@ -194,7 +327,10 @@ export class SignalTreeView {
   }
 
   private renderFavorites(): void {
-    if (this.favorites.length === 0) {
+    const bundleRows = this.favoriteBundles.map((path) =>
+      this.favoriteBundleElement(path, this.bundleMembers.get(path) ?? []),
+    );
+    if (bundleRows.length === 0 && this.favorites.length === 0) {
       const none = document.createElement("div");
       none.className = "tree-empty";
       none.textContent = "Star a signal or drop it here";
@@ -202,7 +338,65 @@ export class SignalTreeView {
       return;
     }
     this.favoritesElement.replaceChildren(
+      ...bundleRows,
       ...this.favorites.map((path) => this.leafElement(path, path, 0)),
     );
+  }
+
+  private favoriteBundleElement(
+    path: string,
+    memberPaths: readonly string[],
+  ): HTMLElement {
+    const element = document.createElement("div");
+    element.className = "tree-row tree-bundle favorite-bundle";
+    element.dataset.bundlePath = path;
+    element.tabIndex = 0;
+    element.setAttribute("role", "button");
+    element.setAttribute("aria-label", `Plot bundle ${path}`);
+    const name = document.createElement("span");
+    name.className = "signal-path";
+    name.textContent = path;
+    const badge = document.createElement("span");
+    badge.className = "tree-run-count";
+    badge.textContent = `${String(memberPaths.length)} runs`;
+    element.append(name, badge);
+    if (memberPaths.length === 0) {
+      element.classList.add("muted");
+      return element;
+    }
+    element.draggable = true;
+    element.addEventListener("dragstart", (event) => {
+      event.dataTransfer?.setData(
+        BUNDLE_DRAG_TYPE,
+        JSON.stringify({ local_path: path, member_paths: memberPaths }),
+      );
+    });
+    const plot = () => this.callbacks.onPlotBundle?.(path, memberPaths);
+    element.addEventListener("dblclick", plot);
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        plot();
+      }
+    });
+    return element;
+  }
+
+  private collectBundleMembers(): Map<string, string[]> {
+    const byPath = new Map<string, string[]>();
+    const prefixes = new Set(this.sets.flatMap((set) => set.prefixes));
+    for (const path of this.paths) {
+      const prefix = [...prefixes].find((item) => path.startsWith(`${item}/`));
+      if (prefix === undefined) continue;
+      const localPath = path.slice(prefix.length + 1);
+      const members = byPath.get(localPath) ?? [];
+      members.push(path);
+      byPath.set(localPath, members);
+    }
+    for (const [path, members] of byPath) {
+      if (members.length < 2) byPath.delete(path);
+      else byPath.set(path, members.sort());
+    }
+    return byPath;
   }
 }

@@ -38,6 +38,7 @@ export interface RenderOptions {
   axisStyle?: AxisStyle;
   widths?: readonly number[];
   emphasisIndex?: number;
+  dimmed?: readonly boolean[];
 }
 
 export interface PlotPath {
@@ -223,7 +224,9 @@ export class CanvasRenderer {
         style.dash,
         (options.widths?.[index] ?? 1.4) +
           (options.emphasisIndex === index ? 0.4 : 0),
-        options.emphasisIndex !== undefined && options.emphasisIndex !== index,
+        options.emphasisIndex !== undefined
+          ? options.emphasisIndex !== index
+          : (options.dimmed?.[index] ?? false),
       );
     });
     finishAxes();

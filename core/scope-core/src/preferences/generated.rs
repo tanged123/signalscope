@@ -2,7 +2,52 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: u32 = 1;
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 2;
+
+mod u64_string {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(D::Error::custom)
+    }
+}
+
+mod optional_u64_string {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    #[allow(clippy::ref_option)]
+    pub fn serialize<S>(value: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(value) => serializer.serialize_some(&value.to_string()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<String>::deserialize(deserializer)?
+            .map(|value| value.parse().map_err(D::Error::custom))
+            .transpose()
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -21,4 +66,14 @@ pub struct Preferences {
     pub plot_font_family: FontFamily,
     pub ui_font_size: f64,
     pub plot_font_size: f64,
+    #[serde(default)]
+    pub cache_root: Option<String>,
+    #[serde(with = "u64_string")]
+    pub cache_max_bytes: u64,
+    #[serde(default)]
+    #[serde(with = "optional_u64_string")]
+    pub ingest_working_bytes: Option<u64>,
+    #[serde(default)]
+    #[serde(with = "optional_u64_string")]
+    pub ingest_resident_bytes: Option<u64>,
 }

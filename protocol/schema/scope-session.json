@@ -1,5 +1,5 @@
 {
-  "schema_version": 10,
+  "schema_version": 16,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -58,6 +58,13 @@
         "label": "string"
       }
     },
+    "HighlightedSourceState": {
+      "kind": "object",
+      "fields": {
+        "local_path": "string",
+        "path": "string"
+      }
+    },
     "PanelState": {
       "kind": "object",
       "fields": {
@@ -69,6 +76,7 @@
         "color_signal": "string?",
         "color_by_time": "bool",
         "series": "SeriesState[]",
+        "highlighted_sources": "HighlightedSourceState[]",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
         "x_label": "string?",
@@ -112,6 +120,64 @@
         "expr": "string"
       }
     },
+    "DerivedBundleState": {
+      "kind": "object",
+      "fields": {
+        "name": "string",
+        "expr": "string"
+      }
+    },
+    "SourceRecord": {
+      "kind": "object",
+      "fields": {
+        "key": "string",
+        "path": "string",
+        "prefix": "string",
+        "provider_id": "string?",
+        "decode_provenance": "string?",
+        "reconcile_legacy": "bool"
+      }
+    },
+    "TimeUnitState": {
+      "kind": "enum",
+      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
+    },
+    "OriginKindState": {
+      "kind": "enum",
+      "variants": [
+        "relative",
+        "absolute_epoch",
+        "event_aligned",
+        "synthetic_index"
+      ]
+    },
+    "TimeDomainState": {
+      "kind": "object",
+      "fields": {
+        "unit": "TimeUnitState",
+        "origin": "OriginKindState",
+        "alignment_origin": "f64"
+      }
+    },
+    "SetMemberState": {
+      "kind": "object",
+      "fields": {
+        "source_key": "string",
+        "missing": "string[]",
+        "scale": "f64",
+        "offset": "f64"
+      }
+    },
+    "SourceSetState": {
+      "kind": "object",
+      "fields": {
+        "key": "string",
+        "label": "string",
+        "generation": "u64",
+        "time_domain": "TimeDomainState",
+        "members": "SetMemberState[]"
+      }
+    },
     "Session": {
       "kind": "object",
       "fields": {
@@ -122,8 +188,11 @@
         "active_tab_id": "string",
         "tabs": "WorkspaceTab[]",
         "favorites": "string[]",
+        "favorite_bundles": "string[]",
         "derived": "DerivedSignal[]",
-        "source_paths": "string[]"
+        "derived_bundles": "DerivedBundleState[]",
+        "sources": "SourceRecord[]",
+        "source_sets": "SourceSetState[]"
       }
     }
   }
