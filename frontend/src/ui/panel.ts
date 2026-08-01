@@ -61,6 +61,7 @@ export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const BUNDLE_DRAG_TYPE = "application/x-signalscope-bundle";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 export const MAX_SERIES_PER_PANEL = 64;
+export const MAXIMIZE_GLYPH = "↗";
 
 export type PanelCursor = PlotCursor;
 
@@ -1877,7 +1878,7 @@ function panelMarkup(): string {
           <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right">→</button>
           <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down (N)">↓</button>
         </span>
-        <button class="panel-action panel-maximize" title="Maximize panel">⤢</button>
+        <button class="panel-action panel-maximize" title="Maximize panel">${MAXIMIZE_GLYPH}</button>
         <button class="panel-action panel-close" title="Close panel">✕</button>
       </span>
     </header>

@@ -11,6 +11,7 @@ import { AppShell } from "./app-shell";
 import {
   BUNDLE_DRAG_TYPE,
   MAX_SERIES_PER_PANEL,
+  MAXIMIZE_GLYPH,
   PanelView,
   SIGNAL_DRAG_TYPE,
   bundleXSignal,
@@ -152,6 +153,10 @@ function appShellProbe(...signals: SignalSummary[]): AppShellProbe {
 }
 
 describe("panel series", () => {
+  it("uses a fallback-safe maximize glyph", () => {
+    expect(MAXIMIZE_GLYPH).toBe("↗");
+  });
+
   it("keeps the panel member cap available for ordinary series", () => {
     expect(MAX_SERIES_PER_PANEL).toBe(64);
   });
