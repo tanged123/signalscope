@@ -930,6 +930,10 @@ fn query_samples(
 }
 
 const DERIVED_PREFIX: &str = "derived/";
+type BundleInputs = (
+    BTreeSet<String>,
+    BTreeMap<SourceKey, (String, BTreeSet<String>)>,
+);
 
 impl DataState {
     fn reset(&mut self) {
@@ -990,12 +994,7 @@ impl DataState {
         }
     }
 
-    fn bundle_inputs(
-        &self,
-    ) -> (
-        BTreeSet<String>,
-        BTreeMap<SourceKey, (String, BTreeSet<String>)>,
-    ) {
+    fn bundle_inputs(&self) -> BundleInputs {
         let full_paths = self
             .store
             .signals()
@@ -1269,7 +1268,10 @@ impl DataState {
         }
     }
 
-    fn remove_derived_bundle(&mut self, request: RemoveDerivedBundleRequest) -> Result<(), String> {
+    fn remove_derived_bundle(
+        &mut self,
+        request: &RemoveDerivedBundleRequest,
+    ) -> Result<(), String> {
         let name = request
             .name
             .strip_prefix(DERIVED_PREFIX)
@@ -1347,7 +1349,7 @@ fn remove_derived_bundle(
 ) -> Result<Envelope<()>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    data.remove_derived_bundle(request)?;
+    data.remove_derived_bundle(&request)?;
     Ok(Envelope::new(()))
 }
 
@@ -2116,7 +2118,7 @@ mod tests {
             .is_err()
         );
 
-        data.remove_derived_bundle(RemoveDerivedBundleRequest {
+        data.remove_derived_bundle(&RemoveDerivedBundleRequest {
             name: "score".into(),
         })
         .expect("remove bundle");

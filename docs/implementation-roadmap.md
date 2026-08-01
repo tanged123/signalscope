@@ -42,7 +42,7 @@ Derived columns spill under resident pressure.
 
 ## Phase 4 — export and fidelity
 
-Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. Once export can bake a manifest, generate the README demo GIF and hosted live demo from that same path, per [the demo artifacts design](superpowers/specs/2026-07-27-automated-demo-artifacts-design.md).
+Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. The release-generated README GIF and hosted live demo now ship from the export path per the [automated demo artifacts plan](superpowers/plans/2026-07-30-automated-demo-artifacts.md).
 
 ## Phase 5 — performance and hardening
 

@@ -140,7 +140,7 @@ export function dragData(event: DragEvent, type: string): string | null {
 
 type XyPairingCallbacks = Pick<PanelCallbacks, "localPathFor" | "sourceKeyFor">;
 
-export function resolveXSeries(
+function resolveXSeries(
   samples: SampleResponse,
   xSeries: SampleSeries,
   xSignal: string,

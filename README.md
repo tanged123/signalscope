@@ -16,6 +16,15 @@ progress reporting, multi-panel layouts, a virtualized signal tree, and the
 shared snapshot presentation plane. Workspace tabs retain multiple independent
 panel grids over the same loaded sources and linked time window.
 
+## Interactive demo
+
+[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=0.14.3)](https://tanged123.github.io/signalscope/demo.html)
+
+**[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)**
+to zoom, inspect values, and explore the exported workspace in your browser.
+The preview and snapshot are regenerated from SignalScope's export path on
+every release, so this view tracks the shipping UI.
+
 ## Quick start
 
 ```bash
@@ -121,6 +130,7 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/build.sh native   # native bundle + shared frontend
 ./scripts/setup-appimage.sh # install AppImage dependencies on Ubuntu
 ./scripts/build.sh appimage # portable Linux AppImage (Ubuntu/FHS only)
+./scripts/build.sh windows  # Windows NSIS installer (Git Bash only)
 ./scripts/coverage.sh       # Rust + merged Vitest/Playwright frontend LCOV
 ./scripts/version.sh check  # verify synchronized release manifests
 ./scripts/release.sh version # validate release metadata

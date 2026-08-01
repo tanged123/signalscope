@@ -9,6 +9,6 @@ export default defineConfig({
       reporter: ["text", "json", "lcov"],
       reportsDirectory: "../build/coverage/frontend",
     },
-    exclude: ["tests/e2e/**", "node_modules/**", "dist/**"],
+    exclude: ["tests/e2e/**", "tests/demo/**", "node_modules/**", "dist/**"],
   },
 });

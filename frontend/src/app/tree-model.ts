@@ -1,11 +1,11 @@
-export interface TreeLeaf {
+interface TreeLeaf {
   kind: "leaf";
   path: string;
   label: string;
   depth: number;
 }
 
-export interface TreeGroup {
+interface TreeGroup {
   kind: "group";
   path: string;
   label: string;
@@ -13,7 +13,7 @@ export interface TreeGroup {
   expanded: boolean;
 }
 
-export interface TreeBundle {
+interface TreeBundle {
   kind: "bundle";
   path: string;
   label: string;

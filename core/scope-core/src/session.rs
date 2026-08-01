@@ -113,34 +113,7 @@ pub fn load_from_path(path: &Path) -> Result<Session, SessionError> {
 fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, SessionError> {
     match version {
         1 => {
-            let panel_ids: Vec<String> = value
-                .get("panels")
-                .and_then(serde_json::Value::as_array)
-                .map(|panels| {
-                    panels
-                        .iter()
-                        .filter_map(|panel| {
-                            panel
-                                .get("id")
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_owned)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            #[allow(clippy::cast_precision_loss)]
-            let width = 1.0 / panel_ids.len().max(1) as f64;
-            let layout = if panel_ids.is_empty() {
-                serde_json::json!([])
-            } else {
-                let cells: Vec<serde_json::Value> = panel_ids
-                    .iter()
-                    .map(|id| serde_json::json!({ "panel_id": id, "width": width }))
-                    .collect();
-                serde_json::json!([{ "height": 1.0, "panels": cells }])
-            };
-            value["layout"] = layout;
-            value["favorites"] = serde_json::json!([]);
+            migrate_v1_layout(&mut value);
             value["schema_version"] = serde_json::json!(2);
             migrate(2, value)
         }
@@ -229,6 +202,37 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
     }
 }
 
+fn migrate_v1_layout(value: &mut serde_json::Value) {
+    let panel_ids: Vec<String> = value
+        .get("panels")
+        .and_then(serde_json::Value::as_array)
+        .map(|panels| {
+            panels
+                .iter()
+                .filter_map(|panel| {
+                    panel
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    #[allow(clippy::cast_precision_loss)]
+    let width = 1.0 / panel_ids.len().max(1) as f64;
+    let layout = if panel_ids.is_empty() {
+        serde_json::json!([])
+    } else {
+        let cells: Vec<serde_json::Value> = panel_ids
+            .iter()
+            .map(|id| serde_json::json!({ "panel_id": id, "width": width }))
+            .collect();
+        serde_json::json!([{ "height": 1.0, "panels": cells }])
+    };
+    value["layout"] = layout;
+    value["favorites"] = serde_json::json!([]);
+}
+
 fn migrate_v8_color(value: &mut serde_json::Value) {
     for_each_panel(value, |panel| {
         let by_time = panel
@@ -278,21 +282,7 @@ fn migrate_v10_sources(value: &mut serde_json::Value) {
 }
 
 fn migrate_v13_ensembles(value: &mut serde_json::Value) {
-    let prefixes: std::collections::BTreeMap<String, String> = value
-        .get("sources")
-        .and_then(serde_json::Value::as_array)
-        .map(|sources| {
-            sources
-                .iter()
-                .filter_map(|source| {
-                    Some((
-                        source.get("key")?.as_str()?.to_owned(),
-                        source.get("prefix")?.as_str()?.to_owned(),
-                    ))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let prefixes = source_prefixes(value);
     let sets = value
         .get("source_sets")
         .and_then(serde_json::Value::as_array)
@@ -382,6 +372,24 @@ fn migrate_v13_ensembles(value: &mut serde_json::Value) {
             }));
         }
     });
+}
+
+fn source_prefixes(value: &serde_json::Value) -> std::collections::BTreeMap<String, String> {
+    value
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| {
+                    Some((
+                        source.get("key")?.as_str()?.to_owned(),
+                        source.get("prefix")?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Error)]

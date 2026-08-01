@@ -34,6 +34,12 @@ pub enum DerivedBundleError {
     NoEligibleSources,
 }
 
+/// Expands an expression containing bundle-local paths across eligible sources.
+///
+/// # Errors
+///
+/// Returns [`DerivedBundleError`] when the expression is invalid or no source
+/// can satisfy its bundle-local references.
 pub fn expand(
     source: &str,
     full_paths: &BTreeSet<String>,

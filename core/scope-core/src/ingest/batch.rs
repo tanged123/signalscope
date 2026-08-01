@@ -102,8 +102,7 @@ impl BatchProgress {
                     .into_iter()
                     .map(|path| FileEntry {
                         weight: fs::metadata(&path)
-                            .map(|metadata| metadata.len())
-                            .unwrap_or(1)
+                            .map_or(1, |metadata| metadata.len())
                             .max(1),
                         path,
                         state: FileState::Pending,
@@ -767,7 +766,7 @@ mod tests {
         batch.succeeded(1);
         assert!(batch.status().fraction < 0.01);
         batch.succeeded(0);
-        assert_eq!(batch.status().fraction, 1.0);
+        assert!((batch.status().fraction - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

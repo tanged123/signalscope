@@ -380,14 +380,12 @@ const BYTES_PER_BIN: u64 = 200;
 /// Estimates serialized data bytes from planned level metadata.
 #[must_use]
 pub fn estimated_bytes(plan: &ExportPlan) -> u64 {
-    let signal_bytes = plan
-        .signals
+    plan.signals
         .iter()
         .flat_map(|signal| &signal.levels)
         .map(|level| level.bin_count as u64)
         .sum::<u64>()
-        * BYTES_PER_BIN;
-    signal_bytes
+        * BYTES_PER_BIN
 }
 
 #[cfg(test)]
