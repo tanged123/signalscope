@@ -1391,23 +1391,39 @@ const none = new Set<string>();
 it("keys bundles per set and adds headers only when several sets have bundles", () => {
   const rows = buildTreeRows(
     ["a1/temp", "a2/temp", "b1/temp", "b2/temp"],
-    none, "", { sets, expandedBundles: none },
+    none,
+    "",
+    { sets, expandedBundles: none },
   );
-  const headers = rows.filter((row) => row.kind === "group" && row.path.startsWith("set:"));
+  const headers = rows.filter(
+    (row) => row.kind === "group" && row.path.startsWith("set:"),
+  );
   expect(headers.map((row) => row.label)).toEqual(["Campaign A", "Campaign B"]);
   const bundles = rows.filter((row) => row.kind === "bundle");
-  expect(bundles.map((row) => [row.setKey, row.runCount])).toEqual([["sA", 2], ["sB", 2]]);
+  expect(bundles.map((row) => [row.setKey, row.runCount])).toEqual([
+    ["sA", 2],
+    ["sB", 2],
+  ]);
   // single set: no header, bundle at depth 0 — today's shape exactly
   const single = buildTreeRows(["a1/temp", "a2/temp"], none, "", {
-    sets: [sets[0]], expandedBundles: none,
+    sets: [sets[0]],
+    expandedBundles: none,
   });
   expect(single.filter((row) => row.kind === "group")).toHaveLength(0);
   expect(single[0]).toMatchObject({ kind: "bundle", depth: 0 });
 });
 
 it("nested local paths produce collapsible group rows", () => {
-  const paths = ["a1/imu/accel/x", "a2/imu/accel/x", "a1/imu/accel/y", "a2/imu/accel/y"];
-  const rows = buildTreeRows(paths, none, "", { sets: [sets[0]], expandedBundles: none });
+  const paths = [
+    "a1/imu/accel/x",
+    "a2/imu/accel/x",
+    "a1/imu/accel/y",
+    "a2/imu/accel/y",
+  ];
+  const rows = buildTreeRows(paths, none, "", {
+    sets: [sets[0]],
+    expandedBundles: none,
+  });
   expect(rows.map((row) => [row.kind, row.label, row.depth])).toEqual([
     ["group", "imu", 0],
     ["group", "accel", 1],
@@ -1415,7 +1431,8 @@ it("nested local paths produce collapsible group rows", () => {
     ["bundle", "y", 2],
   ]);
   const collapsed = buildTreeRows(paths, new Set(["sA//imu"]), "", {
-    sets: [sets[0]], expandedBundles: none,
+    sets: [sets[0]],
+    expandedBundles: none,
   });
   expect(collapsed).toHaveLength(1); // just the collapsed "imu" group row
 });
@@ -1425,9 +1442,13 @@ it("bundle group keys never collide with source-prefix groups", () => {
   // collapse state even when "sA//imu" is collapsed.
   const rows = buildTreeRows(
     ["a1/imu/accel/x", "a2/imu/accel/x", "imu/standalone"],
-    new Set(["sA//imu"]), "", { sets: [sets[0]], expandedBundles: none },
+    new Set(["sA//imu"]),
+    "",
+    { sets: [sets[0]], expandedBundles: none },
   );
-  expect(rows.some((row) => row.kind === "leaf" && row.path === "imu/standalone")).toBe(true);
+  expect(
+    rows.some((row) => row.kind === "leaf" && row.path === "imu/standalone"),
+  ).toBe(true);
 });
 ```
 
@@ -1485,6 +1506,7 @@ it("bundle group keys never collide with source-prefix groups", () => {
 ```
 
 with a test asserting a v14 session migrates with an empty `favorite_bundles` and that the existing v13 fixture still chains through cleanly. Update the conformance fixture to v15 and the `baked-session.ts` validator (string array, same style as `favorites`).
+
 - [ ] **Step 2: Workspace mutations (failing test first):**
 
 ```ts
@@ -1498,6 +1520,7 @@ it("toggles bundle favorites by local path", () => {
 ```
 
 Implement exactly like the existing leaf `toggleFavorite`/`favorites` pair.
+
 - [ ] **Step 3: Tree UI.** Bundle rows gain the same star button as leaves (`active` when the local path is in the favorite-bundles list; click → `onToggleFavoriteBundle(row.path)`, stopPropagation as the leaf star does). In `renderFavorites`, render bundle chips before leaf rows: label = local path, badge = current member count, activation and dragstart behave exactly like the bundle tree row (same `BUNDLE_DRAG_TYPE` payload); membership is the union across current sets — compute a `Map<localPath, string[]>` during `refresh()` from the same partition the model uses and store it for the favorites bar. Zero members ⇒ chip gets the existing `muted` class, no handlers.
 - [ ] **Step 4: Wire app-shell:** pass `workspace.favoriteBundles()` into the tree wherever `setFavorites` is called; `onToggleFavoriteBundle` mirrors the leaf `onToggleFavorite` wiring (:336-341) including `commitHistory()`.
 - [ ] **Step 5: Run** `./scripts/test.sh quick` — expect PASS (core rung + frontend suites). Commit — `git commit -m "feat(session)!: v15 bundle favorites"`
@@ -1588,6 +1611,7 @@ pub fn expand(
 ```
 
 with a v15→16 test and the v13 fixture still chaining; update the conformance fixture and the `baked-session.ts` validator.
+
 - [ ] **Step 4: Run** `./scripts/test.sh quick` — expect PASS. Commit — `git commit -m "feat(core): derived bundle expansion with session v16"`
 
 ---

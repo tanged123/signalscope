@@ -8,7 +8,7 @@ already does the hard parts — `ingest_batch` expands directories
 recursively with extension filtering, and batch jobs already report
 progress, per-file failures, and cancellation. This design adds the
 missing UX: a folder picker, a scan-preview step so the user sees what a
-folder drop will load *before* it loads, and a progress bar whose fraction
+folder drop will load _before_ it loads, and a progress bar whose fraction
 is byte-weighted so large files don't render as a frozen 0%.
 
 What this is not: a file manager. One picker, one preview dialog, one

@@ -227,7 +227,7 @@ signal path (today's behavior), and otherwise as a **bundle local path**.
 - Removing the derived bundle removes the definition and every member;
   members are outputs and are not individually removable.
 - The session persists only the definition: `DerivedBundleState { name,
-  expr }` in a required `derived_bundles` array (session v16, rung
+expr }` in a required `derived_bundles` array (session v16, rung
   defaults `[]`). Per-member results are recomputed, never persisted.
 - Protocol v13 adds `create_derived_bundle` / `remove_derived_bundle`
   with a result carrying created member summaries and skipped members;
