@@ -84,6 +84,16 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
+const DERIVED_PREFIX = "derived/";
+
+export function validateDerivedBundleName(path: string): void {
+  const name = path.startsWith(DERIVED_PREFIX)
+    ? path.slice(DERIVED_PREFIX.length)
+    : path;
+  if (name.includes("/")) {
+    throw new Error("derived bundle names are a single segment");
+  }
+}
 
 export function bundleCompletionEntries(
   signals: readonly SignalSummary[],
@@ -843,7 +853,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.14.1");
+        this.showModeHelp("SignalScope 0.14.2");
       },
     });
     this.commands.register({
@@ -1838,6 +1848,7 @@ export class AppShell {
     const port = this.plane.derived;
     if (port === null) throw new Error("This snapshot cannot create signals");
     if (this.hasBundleReference(expr)) {
+      validateDerivedBundleName(path);
       const response = await port.createBundle(path, expr);
       this.workspace.addDerivedBundle(response.local_path, expr);
       await this.reloadSignals();

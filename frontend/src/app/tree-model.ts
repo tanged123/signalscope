@@ -33,6 +33,14 @@ export interface TreeSet {
 
 export type TreeRow = TreeLeaf | TreeGroup | TreeBundle;
 
+const DERIVED_PREFIX = "derived/";
+
+function displayBundlePath(path: string): string {
+  return path.startsWith(DERIVED_PREFIX)
+    ? path.slice(DERIVED_PREFIX.length)
+    : path;
+}
+
 export function buildTreeRows(
   paths: readonly string[],
   collapsed: ReadonlySet<string>,
@@ -104,7 +112,8 @@ export function buildTreeRows(
       const emittedGroups = new Set<string>();
 
       for (const [localPath, memberPaths] of [...setGroups].sort(
-        ([left], [right]) => left.localeCompare(right),
+        ([left], [right]) =>
+          displayBundlePath(left).localeCompare(displayBundlePath(right)),
       )) {
         if (memberPaths.length < 2) continue;
         const sorted = [...memberPaths].sort();
@@ -120,7 +129,7 @@ export function buildTreeRows(
           rows.push({
             kind: "bundle",
             path: localPath,
-            label: localPath,
+            label: displayBundlePath(localPath),
             setKey: set.key,
             bundleKey,
             depth: base,
@@ -163,7 +172,9 @@ export function buildTreeRows(
   const rows: TreeRow[] = [];
   const emitted = new Set<string>();
   for (const path of [...paths].sort()) {
-    const segments = path.split("/");
+    const segments = path.startsWith(DERIVED_PREFIX)
+      ? [displayBundlePath(path)]
+      : path.split("/");
     let prefix = "";
     let hidden = false;
     for (let depth = 0; depth < segments.length - 1; depth += 1) {
@@ -203,7 +214,9 @@ function appendBundleTree(
   expandedBundles: ReadonlySet<string>,
   emitted: Set<string>,
 ): void {
-  const segments = localPath.split("/");
+  const segments = localPath.startsWith(DERIVED_PREFIX)
+    ? [displayBundlePath(localPath)]
+    : localPath.split("/");
   let prefix = "";
   let hidden = false;
   for (let depth = 0; depth < segments.length - 1; depth += 1) {

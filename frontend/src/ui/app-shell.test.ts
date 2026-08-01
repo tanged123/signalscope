@@ -5,7 +5,11 @@ import { describe, expect, it } from "vitest";
 import { WorkspaceModel } from "../app/workspace";
 import type { BatchStatus } from "../generated/protocol";
 import type { PanelMode } from "../generated/session";
-import { AppShell, renderBatchProgress } from "./app-shell";
+import {
+  AppShell,
+  renderBatchProgress,
+  validateDerivedBundleName,
+} from "./app-shell";
 
 interface ShellProbe {
   workspace: WorkspaceModel;
@@ -76,5 +80,14 @@ describe("renderBatchProgress", () => {
     );
     expect(progress.querySelector(".ingest-bar")).toBeNull();
     expect(progress.querySelector(".ingest-cancel")).toBeNull();
+  });
+});
+
+describe("derived bundle names", () => {
+  it("rejects nested names before creating a bundle", () => {
+    expect(() => validateDerivedBundleName("derived/score/extra")).toThrow(
+      "derived bundle names are a single segment",
+    );
+    expect(() => validateDerivedBundleName("score")).not.toThrow();
   });
 });

@@ -1160,6 +1160,9 @@ impl DataState {
         if name.is_empty() {
             return Err("derived bundle name is empty".into());
         }
+        if name.contains('/') {
+            return Err("derived bundle names are a single segment".into());
+        }
         if self.derived_bundles.contains_key(&name) {
             return Err(format!("derived bundle already exists: {name}"));
         }
@@ -2120,6 +2123,18 @@ mod tests {
         assert!(data.store.signal_by_path("run_01/derived/score").is_none());
         assert!(data.store.signal_by_path("run_02/derived/score").is_none());
         assert!(!data.derived_bundles.contains_key("score"));
+    }
+
+    #[test]
+    fn rejects_derived_bundle_names_with_nested_paths() {
+        let mut data = data_with_bundle_sources();
+        let error = data
+            .create_derived_bundle(CreateDerivedBundleRequest {
+                name: "derived/score/extra".into(),
+                expr: "'temp'".into(),
+            })
+            .expect_err("nested name must be rejected");
+        assert_eq!(error, "derived bundle names are a single segment");
     }
 
     #[test]

@@ -175,6 +175,38 @@ describe("buildTreeRows", () => {
       rows.some((row) => row.kind === "leaf" && row.path === "imu/standalone"),
     ).toBe(true);
   });
+
+  it("derived bundles render top-level, labeled by name, sorted among bundles", () => {
+    const rows = buildTreeRows(
+      [
+        "run_01/command",
+        "run_02/command",
+        "run_01/derived/temp",
+        "run_02/derived/temp",
+        "run_01/response",
+        "run_02/response",
+      ],
+      new Set(),
+      "",
+      {
+        sets: [{ key: "runs", label: "Runs", prefixes: ["run_01", "run_02"] }],
+        expandedBundles: new Set(),
+      },
+    );
+
+    expect(rows.map((row) => [row.kind, row.label, row.depth])).toEqual([
+      ["bundle", "command", 0],
+      ["bundle", "response", 0],
+      ["bundle", "temp", 0],
+    ]);
+    expect(rows.some((row) => row.path === "derived")).toBe(false);
+  });
+
+  it("unsourced derived leaves are ungrouped", () => {
+    expect(buildTreeRows(["derived/score"], new Set(), "")).toEqual([
+      { kind: "leaf", path: "derived/score", label: "score", depth: 0 },
+    ]);
+  });
 });
 
 describe("virtualSlice", () => {
