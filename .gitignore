@@ -17,3 +17,5 @@
 /frontend/test-results/**/*.png
 /shell/src-tauri/gen/**/*.png
 /Screenshot*.png
+.worktrees/
+*.html

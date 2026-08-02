@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 16,
+  "schema_version": 19,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -22,8 +22,27 @@
       "layout": []
     }
   ],
-  "favorites": ["imu/vx"],
-  "favorite_bundles": ["imu/accel/x"],
+  "named_sets": [
+    {
+      "id": "set-1",
+      "name": "imu/vx",
+      "kind": "pick",
+      "selector": null,
+      "refs": [
+        {
+          "source_key": "37a8f7d6-862d-5107-a0d7-6ad27b3bb161",
+          "channel": "vx"
+        }
+      ]
+    },
+    {
+      "id": "set-2",
+      "name": "imu/accel/x",
+      "kind": "query",
+      "selector": "imu/accel/x",
+      "refs": []
+    }
+  ],
   "derived": [
     {
       "path": "derived/speed",
@@ -40,6 +59,5 @@
       "decode_provenance": null,
       "reconcile_legacy": false
     }
-  ],
-  "source_sets": []
+  ]
 }

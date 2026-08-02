@@ -1,23 +1,34 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi } from "vitest";
 import type {
   SampleResponse,
   SampleSeries,
   SignalSummary,
 } from "../generated/protocol";
-import type { PanelState, SeriesState } from "../generated/session";
+import type { FocusEntry, PanelState } from "../generated/session";
 import type { PathRenderOptions, PlotPath } from "../render/canvas-renderer";
+import { Catalog } from "../app/catalog";
+import type { PreparedPlot } from "../app/plot-capabilities";
+import type { PlotLayout } from "../app/plot-math";
 
 import { AppShell } from "./app-shell";
 import {
-  BUNDLE_DRAG_TYPE,
   MAX_SERIES_PER_PANEL,
   MAXIMIZE_GLYPH,
   PanelView,
-  SIGNAL_DRAG_TYPE,
-  bundleXSignal,
-  parseBundlePayload,
+  bindingChipEntries,
+  focusChips,
+  legendTokenLabel,
+  matrixLegendRows,
+  parseSetPayload,
+  parseSignalPayload,
+  parseSignalRefsPayload,
+  type RenderPanelState,
+  type RenderSeries,
   xChipLabel,
 } from "./panel";
+import type { PanelCallbacks } from "./panel";
 
 function sample(
   path: string,
@@ -39,9 +50,8 @@ function response(...series: SampleSeries[]): SampleResponse {
 }
 
 function sourceKeyFor(path: string): string | null {
-  if (path.startsWith("run_01/")) return "k1";
-  if (path.startsWith("run_02/")) return "k2";
-  return null;
+  const match = /^run_0*(\d+)\//.exec(path);
+  return match === null ? null : `k${String(match[1])}`;
 }
 
 function localPathFor(path: string): string | null {
@@ -51,21 +61,93 @@ function localPathFor(path: string): string | null {
 
 const xyCallbacks = { localPathFor, sourceKeyFor };
 
-function visible(path: string): SeriesState {
-  return { path, color_slot: 1, dash: "solid", width: 1.4, visible: true };
+const gestureLayout: PlotLayout = {
+  plot: { x: 0, y: 0, width: 100, height: 100 },
+  xRange: { min: 0, max: 10 },
+  yRange: { min: 0, max: 10 },
+};
+
+function visible(path: string): RenderSeries {
+  return {
+    ref: {
+      source_key: sourceKeyFor(path) ?? "",
+      channel: localPathFor(path) ?? path,
+    },
+    path,
+    display: "focus",
+    hue: 1,
+    dash: "solid",
+    width: 1.4,
+    opacity: 1,
+    visible: true,
+    focused: true,
+    overridden: false,
+  };
 }
 
-function xyState(xSignal: string, series: SeriesState[]): PanelState {
+function xyState(xSignal: string, series: RenderSeries[]): RenderPanelState {
   return {
     id: "panel",
     title: "XY",
     mode: "xy",
     axis_style: "gutter",
+    color_axis: "none",
+    color_by: "source",
+    ghost_mode: "all",
+    split_by: "none",
     x_signal: xSignal,
     color_signal: null,
     color_by_time: false,
+    bindings: [],
+    overrides: [],
+    focus: [],
     series,
-    highlighted_sources: [],
+    y_range: null,
+    x_range: null,
+    x_label: null,
+    y_label: null,
+    c_label: null,
+    time_window: null,
+    annotations: [],
+    show_stats: false,
+  };
+}
+
+function sessionXyState(
+  xSignal: string,
+  series: RenderSeries[],
+  colorSignal: string | null,
+): PanelState {
+  const ref = (path: string) => {
+    const [prefix, ...channel] = path.split("/");
+    const sourcePrefix = prefix ?? "";
+    return {
+      source_key:
+        sourceKeyFor(`${sourcePrefix}/${channel.join("/")}`) ?? sourcePrefix,
+      channel: channel.join("/"),
+    };
+  };
+  return {
+    id: "panel",
+    title: "XY",
+    mode: "xy",
+    axis_style: "gutter",
+    x_ref: ref(xSignal),
+    color_axis: colorSignal === null ? "none" : "signal",
+    color_ref: colorSignal === null ? null : ref(colorSignal),
+    bindings: [
+      {
+        kind: "pick",
+        selector: null,
+        refs: series.map((entry) => ref(entry.path)),
+        set_id: null,
+      },
+    ],
+    color_by: "source",
+    overrides: [],
+    focus: [],
+    ghost_mode: "all",
+    split_by: "none",
     y_range: null,
     x_range: null,
     x_label: null,
@@ -93,7 +175,7 @@ interface PanelProbe {
     y: { min: number; max: number };
   };
   renderXy(
-    state: PanelState,
+    state: RenderPanelState,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number;
@@ -134,21 +216,30 @@ function summary(path: string): SignalSummary {
     point_count: "2",
     t_min: 0,
     t_max: 1,
+    last_value: null,
   };
 }
 
 interface AppShellProbe {
-  workspace: { derived(): { path: string }[] };
+  workspace: {
+    derived(): { path: string }[];
+    namedSets(): never[];
+  };
   signals: SignalSummary[];
   signalsByPath: Map<string, SignalSummary>;
+  catalog: Catalog;
   panelSignalIds(panel: PanelState): { ids: string[]; missing: string[] };
 }
 
 function appShellProbe(...signals: SignalSummary[]): AppShellProbe {
   const shell = Object.create(AppShell.prototype) as AppShellProbe;
-  shell.workspace = { derived: () => [{ path: "derived/score" }] };
+  shell.workspace = {
+    derived: () => [{ path: "derived/score" }],
+    namedSets: () => [],
+  };
   shell.signals = signals;
   shell.signalsByPath = new Map(signals.map((entry) => [entry.path, entry]));
+  shell.catalog = Catalog.build(signals);
   return shell;
 }
 
@@ -161,25 +252,124 @@ describe("panel series", () => {
     expect(MAX_SERIES_PER_PANEL).toBe(64);
   });
 
-  it("bundle drag type is distinct from the signal drag type", () => {
-    expect(BUNDLE_DRAG_TYPE).not.toBe(SIGNAL_DRAG_TYPE);
-    expect(BUNDLE_DRAG_TYPE.startsWith("application/x-signalscope")).toBe(true);
+  describe.each(["time", "xy", "fft", "histogram"] as const)(
+    "%s plot gestures",
+    (mode) => {
+      it("uses shift-click for focus and alt-click for mute", () => {
+        const onFocusToggle = vi.fn();
+        const onMuteSeries = vi.fn();
+        const callbacks = {
+          onFocusToggle,
+          onMuteSeries,
+        } as unknown as PanelCallbacks;
+        const view = Object.create(PanelView.prototype) as unknown as {
+          callbacks: PanelCallbacks;
+          renderer: { lastLayout(): PlotLayout };
+          lastState: RenderPanelState;
+          preparedPlot: PreparedPlot;
+          hitAdapter: PreparedPlot["hitAdapter"];
+          plotClick(
+            x: number,
+            y: number,
+            modifiers: { alt: boolean; shift: boolean },
+          ): void;
+        };
+        const series = visible("run_01/temp");
+        view.callbacks = callbacks;
+        view.renderer = { lastLayout: () => gestureLayout };
+        view.lastState = { ...xyState("run_01/temp", [series]), mode };
+        view.preparedPlot = {
+          annotationAt: () => null,
+          hitAdapter: {
+            seriesAt: () => ({ path: series.path, distance: 0 }),
+          },
+        } as unknown as PreparedPlot;
+        view.hitAdapter = view.preparedPlot.hitAdapter;
+
+        view.plotClick(50, 50, { alt: false, shift: false });
+        expect(onFocusToggle).not.toHaveBeenCalled();
+        expect(onMuteSeries).not.toHaveBeenCalled();
+
+        view.plotClick(50, 50, { alt: false, shift: true });
+        expect(onFocusToggle).toHaveBeenCalledTimes(1);
+
+        view.plotClick(50, 50, { alt: true, shift: false });
+        expect(onMuteSeries).toHaveBeenCalledTimes(1);
+      });
+    },
+  );
+
+  it("keeps annotation pinning on plain click while shift-click bypasses it", () => {
+    const onPinAnnotation = vi.fn();
+    const onFocusToggle = vi.fn();
+    const callbacks = {
+      onPinAnnotation,
+      onFocusToggle,
+    } as unknown as PanelCallbacks;
+    const series = visible("run_01/temp");
+    const view = Object.create(PanelView.prototype) as unknown as {
+      callbacks: PanelCallbacks;
+      renderer: { lastLayout(): PlotLayout };
+      lastState: RenderPanelState;
+      preparedPlot: PreparedPlot;
+      hitAdapter: PreparedPlot["hitAdapter"];
+      plotClick(
+        x: number,
+        y: number,
+        modifiers: { alt: boolean; shift: boolean },
+      ): void;
+    };
+    view.callbacks = callbacks;
+    view.renderer = { lastLayout: () => gestureLayout };
+    view.lastState = xyState("run_01/temp", [series]);
+    view.preparedPlot = {
+      annotationAt: () => ({
+        path: series.path,
+        domain: "time",
+        anchor: 1,
+        pinnedValue: 2,
+      }),
+      resolveAnnotation: () => null,
+      hitAdapter: { seriesAt: () => ({ path: series.path, distance: 0 }) },
+    } as unknown as PreparedPlot;
+    view.hitAdapter = view.preparedPlot.hitAdapter;
+
+    view.plotClick(50, 50, { alt: false, shift: false });
+    expect(onPinAnnotation).toHaveBeenCalledTimes(1);
+    expect(onFocusToggle).not.toHaveBeenCalled();
+
+    view.plotClick(50, 50, { alt: false, shift: true });
+    expect(onPinAnnotation).toHaveBeenCalledTimes(1);
+    expect(onFocusToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("parses only string-array bundle member payloads", () => {
+  it("parses signal drag paths", () => {
     expect(
-      parseBundlePayload(
+      parseSignalPayload(JSON.stringify({ paths: ["a/alt", "b/alt"] })),
+    ).toEqual(["a/alt", "b/alt"]);
+    expect(parseSignalPayload("not json")).toEqual(["not json"]);
+    expect(parseSignalPayload(JSON.stringify({ paths: [1] }))).toEqual([]);
+  });
+
+  it("parses signal drag refs", () => {
+    expect(
+      parseSignalRefsPayload(
         JSON.stringify({
-          local_path: "alt",
-          member_paths: ["a/alt", "b/alt"],
+          refs: [{ source_key: "run-01", channel: "temp" }],
+          paths: ["run-01/temp"],
         }),
       ),
-    ).toEqual({ member_paths: ["a/alt", "b/alt"] });
-    expect(parseBundlePayload("not json")).toBeNull();
+    ).toEqual([{ source_key: "run-01", channel: "temp" }]);
+    expect(parseSignalRefsPayload("not json")).toEqual([]);
     expect(
-      parseBundlePayload(JSON.stringify({ member_paths: [1] })),
-    ).toBeNull();
-    expect(parseBundlePayload(JSON.stringify({}))).toBeNull();
+      parseSignalRefsPayload(JSON.stringify({ refs: [{ source_key: 1 }] })),
+    ).toEqual([]);
+  });
+
+  it("parses named set drag payloads", () => {
+    expect(parseSetPayload(JSON.stringify({ set_id: "set-3" }))).toBe("set-3");
+    expect(parseSetPayload(JSON.stringify({ set_id: 3 }))).toBeNull();
+    expect(parseSetPayload("not json")).toBeNull();
   });
 
   it("omits the trace when a source lacks the X local path instead of cross-pairing", () => {
@@ -201,8 +391,10 @@ describe("panel series", () => {
       {
         path: "run_01/alt",
         colorIndex: 0,
+        hue: 1,
         dash: "solid",
         width: 1.4,
+        opacity: 1,
         trace: { time: [0, 1], x: [10, 20], y: [1, 2] },
       },
     ]);
@@ -222,8 +414,10 @@ describe("panel series", () => {
       {
         path: "derived/score",
         colorIndex: 0,
+        hue: 1,
         dash: "solid",
         width: 1.4,
+        opacity: 1,
         trace: { time: [0, 1], x: [10, 20], y: [1, 2] },
       },
     ]);
@@ -327,12 +521,11 @@ describe("panel series", () => {
       summary("run_02/temp"),
       summary("run_02/alt"),
     );
-    const state = xyState("run_01/t", [
-      visible("run_01/alt"),
-      visible("run_02/alt"),
-      visible("derived/score"),
-    ]);
-    state.color_signal = "run_01/temp";
+    const state = sessionXyState(
+      "run_01/t",
+      [visible("run_01/alt"), visible("run_02/alt"), visible("derived/score")],
+      "run_01/temp",
+    );
 
     expect(shell.panelSignalIds(state)).toEqual({
       ids: [
@@ -343,7 +536,7 @@ describe("panel series", () => {
         "id:run_01/temp",
         "id:run_02/temp",
       ],
-      missing: ["derived/score"],
+      missing: [],
     });
   });
 
@@ -360,10 +553,334 @@ describe("panel series", () => {
     ).toBe("run_01/temp");
   });
 
-  it("uses a bundle's sorted-first member as X when dropped on the strip", () => {
-    expect(bundleXSignal(["run_02/alt", "run_01/alt"], true)).toBe(
-      "run_01/alt",
+  it("builds bounded matrix roster rows with selector filtering", () => {
+    const catalog = Catalog.build(
+      ["run_01", "run_02", "run_03"].flatMap((source) =>
+        ["temp", "speed"].map((channel) => ({
+          signal_id: `${source}-${channel}`,
+          source_id: `k${source.slice(-2).replace(/^0/, "")}`,
+          source_key: `k${source.slice(-2).replace(/^0/, "")}`,
+          local_path: channel,
+          path: `${source}/${channel}`,
+          unit: channel === "temp" ? "K" : "m/s",
+          point_count: "2",
+          t_min: 0,
+          t_max: 1,
+          last_value: null,
+        })),
+      ),
     );
-    expect(bundleXSignal(["run_02/alt", "run_01/alt"], false)).toBeUndefined();
+    const state = xyState("run_01/temp", [
+      visible("run_01/temp"),
+      visible("run_01/speed"),
+      visible("run_02/temp"),
+      visible("run_03/temp"),
+    ]);
+    state.focus = [
+      {
+        kind: "source",
+        ref: null,
+        source_key: "k2",
+        channel: null,
+      },
+    ];
+    expect(matrixLegendRows(catalog, state, "source")).toEqual([
+      expect.objectContaining({
+        value: "run_01",
+        count: 2,
+        selector: "* @ run_01",
+      }),
+      expect.objectContaining({
+        value: "run_02",
+        count: 1,
+        focused: true,
+      }),
+      expect.objectContaining({ value: "run_03", count: 1 }),
+    ]);
+    expect(
+      matrixLegendRows(catalog, state, "channel", "temp @ *").map(
+        (row) => row.value,
+      ),
+    ).toEqual(["temp"]);
+  });
+
+  it("keeps only the first eight focus chips and reports overflow", () => {
+    const catalog = Catalog.build(
+      Array.from({ length: 10 }, (_, index) => ({
+        signal_id: `run_0${String(index + 1)}-temp`,
+        source_id: `k${String(index + 1)}`,
+        source_key: `k${String(index + 1)}`,
+        local_path: "temp",
+        path: `run_0${String(index + 1)}/temp`,
+        unit: null,
+        point_count: "2",
+        t_min: 0,
+        t_max: 1,
+        last_value: null,
+      })),
+    );
+    const state = xyState(
+      "run_01/temp",
+      Array.from({ length: 10 }, (_, index) =>
+        visible(`run_0${String(index + 1)}/temp`),
+      ),
+    );
+    state.focus = state.series.map(
+      (series): FocusEntry => ({
+        kind: "series",
+        ref: series.ref,
+        source_key: null,
+        channel: null,
+      }),
+    );
+    const result = focusChips(catalog, state);
+    expect(result.chips).toHaveLength(8);
+    expect(result.overflow).toBe(2);
+  });
+
+  it("compresses a focused dimension into a value plus remainder count", () => {
+    const catalog = Catalog.build(
+      Array.from({ length: 12 }, (_, index) => ({
+        signal_id: `run-${String(index + 1)}-temp`,
+        source_id: `k${String(index + 1)}`,
+        source_key: `k${String(index + 1)}`,
+        local_path: "temp",
+        path: `run_${String(index + 1).padStart(2, "0")}/temp`,
+        unit: "K",
+        point_count: "2",
+        t_min: 0,
+        t_max: 1,
+        last_value: null,
+      })),
+    );
+    const state = xyState(
+      "run_01/temp",
+      Array.from({ length: 12 }, (_, index) =>
+        visible(`run_${String(index + 1).padStart(2, "0")}/temp`),
+      ),
+    );
+    state.focus = [
+      { kind: "channel", ref: null, source_key: null, channel: "temp" },
+    ];
+    expect(legendTokenLabel(catalog, state, "channel", 12)).toBe("temp +11 ▾");
+    state.focus = [];
+    expect(legendTokenLabel(catalog, state, "channel", 12)).toBe("12 ▾");
+  });
+
+  it("renders one dash key per rendered channel in a focused source chip", () => {
+    const catalog = Catalog.build([
+      summary("run_07/temp"),
+      summary("run_07/temp_sp"),
+    ]);
+    const state = xyState("run_07/temp", [
+      visible("run_07/temp"),
+      visible("run_07/temp_sp"),
+    ]);
+    state.focus = [
+      { kind: "source", ref: null, source_key: "k7", channel: null },
+    ];
+    const view = Object.create(PanelView.prototype) as unknown as {
+      callbacks: Pick<PanelCallbacks, "catalog">;
+      focusChipElements(current: RenderPanelState): HTMLElement[];
+    };
+    view.callbacks = { catalog: () => catalog };
+    const [chip] = view.focusChipElements(state);
+    expect(chip?.querySelectorAll(".matrix-focus-key")).toHaveLength(2);
+  });
+
+  it("shows line-style state and opens a ghost-filtered roster", () => {
+    const catalog = Catalog.build([
+      summary("run_07/temp"),
+      summary("run_08/temp"),
+    ]);
+    const state = xyState("run_07/temp", [
+      visible("run_07/temp"),
+      { ...visible("run_08/temp"), display: "ghost", focused: false },
+    ]);
+    state.ghost_mode = "ghost";
+    const view = Object.create(PanelView.prototype) as unknown as {
+      callbacks: Pick<PanelCallbacks, "catalog">;
+      element: HTMLElement;
+      updateLegend(current: RenderPanelState): void;
+    };
+    view.callbacks = { catalog: () => catalog };
+    view.element = document.createElement("article");
+    view.element.innerHTML =
+      '<div class="panel-legend"></div><span class="panel-gesture-hint"></span>';
+    view.updateLegend(state);
+    expect(view.element.querySelector(".panel-gesture-hint")?.textContent).toBe(
+      "· line style flat · hover explore · ⇧click focus · ⌥ mute · esc clear",
+    );
+    state.overrides = [
+      {
+        target_ref: { source_key: "run-07", channel: "temp" },
+        target_selector: null,
+        color_slot: null,
+        dash: "dash",
+        width: null,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    view.updateLegend(state);
+    expect(
+      view.element.querySelector(".panel-gesture-hint")?.textContent,
+    ).toContain("line style ◆ overridden");
+    const ghost = view.element.querySelector<HTMLButtonElement>(
+      ".legend-ghost-token",
+    );
+    expect(ghost?.textContent).toBe("1 ghosts ▾");
+    ghost?.click();
+    expect(
+      view.element.querySelector<HTMLElement>(".matrix-roster")?.dataset.filter,
+    ).toBe("ghost");
+    expect(
+      view.element.querySelector(".matrix-roster-row")?.textContent,
+    ).toContain("run_08");
+  });
+
+  it("lays out style rules with a palette, static line rules, and override actions", () => {
+    const catalog = Catalog.build([summary("run_07/temp")]);
+    const state = xyState("run_07/temp", [visible("run_07/temp")]);
+    state.overrides = [
+      {
+        target_ref: { source_key: "k7", channel: "temp" },
+        target_selector: null,
+        color_slot: 2,
+        dash: null,
+        width: 2.5,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    const onSetColorBy = vi.fn();
+    const onRemoveOverride = vi.fn();
+    const onClearOverrides = vi.fn();
+    const view = Object.create(PanelView.prototype) as unknown as {
+      id: string;
+      callbacks: Pick<
+        PanelCallbacks,
+        | "catalog"
+        | "namedSets"
+        | "pathForRef"
+        | "onSetColorBy"
+        | "onRemoveOverride"
+        | "onClearOverrides"
+      >;
+      element: HTMLElement;
+      lastInputState: PanelState;
+      openRulesPopover(current: RenderPanelState, anchor: HTMLElement): void;
+    };
+    view.id = "panel-1";
+    view.callbacks = {
+      catalog: () => catalog,
+      namedSets: () => [],
+      pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
+      onSetColorBy,
+      onRemoveOverride,
+      onClearOverrides,
+    };
+    view.element = document.createElement("article");
+    const anchor = document.createElement("button");
+    view.element.append(anchor);
+    view.lastInputState = {
+      ...state,
+      x_ref: null,
+      color_ref: null,
+    } as unknown as PanelState;
+    view.openRulesPopover(state, anchor);
+
+    expect(
+      view.element.querySelector(".rules-popover-title")?.textContent,
+    ).toBe("STYLE RULES — PANEL 1");
+    expect(view.element.querySelectorAll(".rules-rule-row")).toHaveLength(3);
+    expect(view.element.querySelectorAll(".rules-palette-swatch")).toHaveLength(
+      8,
+    );
+    expect(view.element.querySelector(".rules-rule-static")?.textContent).toBe(
+      "dash ← — flat",
+    );
+    expect(view.element.querySelector(".rules-override-key")?.textContent).toBe(
+      "color",
+    );
+    expect(
+      view.element.querySelector(".rules-override-target")?.textContent,
+    ).toBe("k7/temp");
+    expect(
+      view.element.querySelector(".rules-override-fields")?.textContent,
+    ).toBe("width 2.5 · highlight");
+    view.element
+      .querySelector<HTMLButtonElement>(".rules-override-row button")
+      ?.click();
+    expect(onRemoveOverride).toHaveBeenCalledWith("panel-1", 0);
+    view.openRulesPopover(state, anchor);
+    view.element.querySelector<HTMLButtonElement>(".rules-revert-all")?.click();
+    expect(onClearOverrides).toHaveBeenCalledWith("panel-1");
+    view.openRulesPopover(state, anchor);
+    view.element
+      .querySelector<HTMLButtonElement>(".rules-color-dimension")
+      ?.click();
+    expect(view.element.querySelectorAll(".rules-dimension")).toHaveLength(5);
+    view.element
+      .querySelector<HTMLButtonElement>(
+        '.rules-dimension[data-dimension="channel"]',
+      )
+      ?.click();
+    expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
+    view.openRulesPopover(state, anchor);
+    view.element
+      .querySelector<HTMLButtonElement>(".rules-channel-shortcut")
+      ?.click();
+    expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
+  });
+
+  it("groups pick bindings and counts live query and set members", () => {
+    const catalog = Catalog.build(
+      ["run_01", "run_02", "run_03"].flatMap((source) =>
+        ["temp", "speed"].map((channel) => ({
+          signal_id: `${source}-${channel}`,
+          source_id: `k${source.slice(-1)}`,
+          source_key: `k${source.slice(-1)}`,
+          local_path: channel,
+          path: `${source}/${channel}`,
+          unit: null,
+          point_count: "2",
+          t_min: 0,
+          t_max: 1,
+          last_value: null,
+        })),
+      ),
+    );
+    const state = xyState("run_01/temp", [visible("run_01/temp")]);
+    state.bindings = [
+      {
+        kind: "pick",
+        selector: null,
+        refs: [
+          { source_key: "k1", channel: "temp" },
+          { source_key: "k2", channel: "temp" },
+          { source_key: "k3", channel: "speed" },
+        ],
+        set_id: null,
+      },
+      { kind: "query", selector: "temp", refs: [], set_id: null },
+      { kind: "set", selector: null, refs: [], set_id: "live" },
+    ];
+    expect(
+      bindingChipEntries(catalog, state, [
+        {
+          id: "live",
+          name: "Live temps",
+          kind: "query",
+          selector: "temp",
+          refs: [],
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({ label: "temp ×2", bindingIndex: 0 }),
+      expect.objectContaining({ label: "speed ×1", bindingIndex: 0 }),
+      expect.objectContaining({ label: "temp · 3", bindingIndex: 1 }),
+      expect.objectContaining({ label: "★ Live temps · 3", bindingIndex: 2 }),
+    ]);
   });
 });

@@ -1,78 +1,11 @@
 {
-  "protocol_version": 13,
+  "protocol_version": 14,
   "types": {
     "TimeWindow": {
       "kind": "object",
       "fields": {
         "t0": "f64",
         "t1": "f64"
-      }
-    },
-    "SetMemberSummary": {
-      "kind": "object",
-      "fields": {
-        "source_key": "string",
-        "missing": "string[]",
-        "scale": "f64",
-        "offset": "f64"
-      }
-    },
-    "SetTimeUnit": {
-      "kind": "enum",
-      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
-    },
-    "SetOriginKind": {
-      "kind": "enum",
-      "variants": [
-        "relative",
-        "absolute_epoch",
-        "event_aligned",
-        "synthetic_index"
-      ]
-    },
-    "SetTimeDomainSummary": {
-      "kind": "object",
-      "fields": {
-        "unit": "SetTimeUnit",
-        "origin": "SetOriginKind",
-        "alignment_origin": "f64"
-      }
-    },
-    "SetSummary": {
-      "kind": "object",
-      "fields": {
-        "set_id": "u64",
-        "set_key": "string",
-        "label": "string",
-        "generation": "u64",
-        "member_count": "u32",
-        "members": "SetMemberSummary[]",
-        "time_domain": "SetTimeDomainSummary",
-        "local_paths": "string[]",
-        "aligned": "bool"
-      }
-    },
-    "CreateSetRequest": {
-      "kind": "object",
-      "fields": {
-        "label": "string",
-        "member_keys": "string[]"
-      }
-    },
-    "UpdateSetMembersRequest": {
-      "kind": "object",
-      "fields": {
-        "set_id": "u64",
-        "member_keys": "string[]"
-      }
-    },
-    "SetTimeAlignmentRequest": {
-      "kind": "object",
-      "fields": {
-        "set_id": "u64",
-        "source_key": "string",
-        "scale": "f64",
-        "offset": "f64"
       }
     },
     "IngestBatchRequest": {
@@ -276,7 +209,8 @@
         "unit": "string?",
         "point_count": "u64",
         "t_min": "f64",
-        "t_max": "f64"
+        "t_max": "f64",
+        "last_value": "f64?"
       }
     },
     "SourceSummary": {
@@ -382,8 +316,7 @@
     "ExportSelection": {
       "kind": "object",
       "fields": {
-        "source_keys": "string[]",
-        "set_keys": "string[]"
+        "source_keys": "string[]"
       }
     },
     "ExportEstimate": {

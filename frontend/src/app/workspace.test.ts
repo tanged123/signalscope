@@ -1,6 +1,91 @@
 import { describe, expect, it } from "vitest";
 
 import { WorkspaceModel, emptySession } from "./workspace";
+import type {
+  PanelState,
+  Session,
+  SourceRecord,
+  StyleDimension,
+} from "../generated/session";
+
+interface TestSeries {
+  path: string;
+  color_slot: number;
+  dash: "solid" | "dash" | "dot";
+  width: number;
+  visible: boolean;
+}
+
+function pathForRef(ref: { source_key: string; channel: string }): string {
+  return ref.source_key === "derived"
+    ? `derived/${ref.channel}`
+    : `${ref.source_key}/${ref.channel}`;
+}
+
+function refForPath(path: string): { source_key: string; channel: string } {
+  const separator = path.indexOf("/");
+  if (separator === -1) throw new Error(`invalid series path: ${path}`);
+  return {
+    source_key: path.startsWith("derived/")
+      ? "derived"
+      : path.slice(0, separator),
+    channel: path.slice(separator + 1),
+  };
+}
+
+function legacySeries(panel: PanelState | undefined): TestSeries[] {
+  if (panel === undefined) return [];
+  return panel.bindings
+    .filter((binding) => binding.kind === "pick")
+    .flatMap((binding) => binding.refs)
+    .map((ref) => {
+      const override = panel.overrides.find(
+        (entry) =>
+          entry.target_ref?.source_key === ref.source_key &&
+          entry.target_ref.channel === ref.channel,
+      );
+      return {
+        path: pathForRef(ref),
+        color_slot: override?.color_slot ?? 1,
+        dash: override?.dash ?? "solid",
+        width: override?.width ?? 1.4,
+        visible: override?.visible ?? true,
+      };
+    });
+}
+
+function xPath(panel: PanelState | undefined): string | null {
+  return panel?.x_ref === null || panel?.x_ref === undefined
+    ? null
+    : pathForRef(panel.x_ref);
+}
+
+function colorPath(panel: PanelState | undefined): string | null {
+  return panel?.color_ref === null || panel?.color_ref === undefined
+    ? null
+    : pathForRef(panel.color_ref);
+}
+
+function focusPaths(
+  panel: PanelState | undefined,
+): { local_path: string; path: string }[] {
+  return (panel?.focus ?? []).map((entry) => ({
+    local_path: entry.channel ?? entry.ref?.channel ?? "",
+    path: entry.ref === null ? "" : pathForRef(entry.ref),
+  }));
+}
+
+function sourceRecord(overrides: Partial<SourceRecord> = {}): SourceRecord {
+  return {
+    key: "00000000-0000-0000-0000-000000000001",
+    path: "/data/run.csv",
+    prefix: "run",
+    provider_id: null,
+    decode_provenance: null,
+    reconcile_legacy: false,
+    ...overrides,
+  };
+}
 
 function heights(model: WorkspaceModel): number[] {
   return model.layout().map((row) => row.height);
@@ -48,7 +133,7 @@ describe("derived definitions", () => {
       { path: "derived/jerk", expr: "gradient('derived/speed')" },
     ]);
 
-    model.removeSignal("derived/speed");
+    model.removeSignalRef(refForPath("derived/speed"), "derived/speed");
     expect(model.snapshot().derived.map((entry) => entry.path)).toEqual([
       "derived/jerk",
     ]);
@@ -78,7 +163,7 @@ describe("derived definitions", () => {
     const model = new WorkspaceModel();
     const path = "derived/speed";
     const first = model.addPanelRow();
-    model.addSeries(first.id, path);
+    model.addSeriesRef(first.id, refForPath(path));
     model.addAnnotation(first.id, {
       id: "ann-1",
       series_path: path,
@@ -88,14 +173,20 @@ describe("derived definitions", () => {
       label: "",
     });
     const axes = model.addPanelRow();
-    model.setXSignal(axes.id, path);
-    model.setColorSignal(axes.id, path);
-    model.toggleFavorite(path);
+    model.setXRef(axes.id, refForPath(path));
+    model.setColorRef(axes.id, refForPath(path));
+    model.addNamedSet({
+      id: "set-1",
+      name: path,
+      kind: "pick",
+      selector: null,
+      refs: [refForPath(path)],
+    });
     model.addDerived(path, "'imu/x'");
 
     model.addTab();
     const second = model.addPanelRow();
-    model.addSeries(second.id, path);
+    model.addSeriesRef(second.id, refForPath(path));
     model.addAnnotation(second.id, {
       id: "ann-2",
       series_path: path,
@@ -105,34 +196,29 @@ describe("derived definitions", () => {
       label: "",
     });
 
-    model.removeSignal(path);
+    model.removeSignalRef(refForPath(path), path);
 
     expect(model.snapshot().derived).toEqual([]);
-    expect(model.snapshot().favorites).toEqual([]);
+    expect(model.snapshot().named_sets).toEqual([]);
     for (const tab of model.tabs()) {
       for (const panel of tab.panels) {
-        expect(panel.series.some((series) => series.path === path)).toBe(false);
+        expect(legacySeries(panel).some((series) => series.path === path)).toBe(
+          false,
+        );
         expect(
           panel.annotations.some(
             (annotation) => annotation.series_path === path,
           ),
         ).toBe(false);
-        expect(panel.x_signal).not.toBe(path);
-        expect(panel.color_signal).not.toBe(path);
+        expect(xPath(panel)).not.toBe(path);
+        expect(colorPath(panel)).not.toBe(path);
       }
     }
   });
 
   it("adds, updates, and removes sources by durable key", () => {
     const model = new WorkspaceModel();
-    const source = {
-      key: "00000000-0000-0000-0000-000000000001",
-      path: "/data/run.csv",
-      prefix: "run",
-      provider_id: null,
-      decode_provenance: null,
-      reconcile_legacy: false,
-    };
+    const source = sourceRecord();
     model.addSource(source);
     model.addSource({ ...source, path: "/moved/run.csv" });
     expect(model.sources()).toEqual([{ ...source, path: "/moved/run.csv" }]);
@@ -352,117 +438,241 @@ describe("WorkspaceModel", () => {
     expect(widths(model, 0)).toEqual([1]);
   });
 
-  it("assigns the lowest unused color slot per panel", () => {
+  it("adds series refs without allocating manual overrides", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    expect(model.addSeries(panel.id, "a/one")).toBe(true);
-    expect(model.addSeries(panel.id, "a/two")).toBe(true);
-    expect(model.addSeries(panel.id, "a/one")).toBe(false);
-    const slots = model
-      .panel(panel.id)
-      ?.series.map((series) => series.color_slot);
-    expect(slots).toEqual([1, 2]);
+    expect(model.addSeriesRef(panel.id, refForPath("a/one"))).toBe(true);
+    expect(model.addSeriesRef(panel.id, refForPath("a/two"))).toBe(true);
+    expect(model.addSeriesRef(panel.id, refForPath("a/one"))).toBe(false);
+    expect(model.panel(panel.id)?.overrides).toEqual([]);
   });
 
-  it("addSeriesBatch adds all new paths in one call and skips duplicates", () => {
+  it("addSeriesRefs adds all new refs in one call and skips duplicates", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.addSeries(panel.id, "run_01/alt");
-    const added = model.addSeriesBatch(panel.id, [
-      "run_01/alt",
-      "run_02/alt",
-      "run_03/alt",
+    model.addSeriesRef(panel.id, refForPath("run_01/alt"));
+    const added = model.addSeriesRefs(panel.id, [
+      refForPath("run_01/alt"),
+      refForPath("run_02/alt"),
+      refForPath("run_03/alt"),
     ]);
     expect(added).toBe(true);
-    const series = model.panel(panel.id)?.series ?? [];
+    const series = legacySeries(model.panel(panel.id));
     expect(series.map((entry) => entry.path)).toEqual([
       "run_01/alt",
       "run_02/alt",
       "run_03/alt",
     ]);
-    expect(new Set(series.map((entry) => entry.color_slot)).size).toBe(3);
-    expect(model.addSeriesBatch(panel.id, ["run_02/alt"])).toBe(false);
+    expect(model.panel(panel.id)?.overrides).toEqual([]);
+    expect(model.addSeriesRefs(panel.id, [refForPath("run_02/alt")])).toBe(
+      false,
+    );
   });
 
-  it("keeps at most one highlight per local path and toggles off", () => {
+  it("toggles focus entries", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.addSeriesBatch(panel.id, ["run_01/alt", "run_02/alt", "run_01/gyro"]);
-    model.toggleHighlight(panel.id, "run_01/alt", "alt");
-    model.toggleHighlight(panel.id, "run_01/gyro", "gyro");
-    model.toggleHighlight(panel.id, "run_02/alt", "alt");
-    expect(model.panel(panel.id)?.highlighted_sources).toEqual([
-      { local_path: "gyro", path: "run_01/gyro" },
-      { local_path: "alt", path: "run_02/alt" },
-    ]);
-    model.toggleHighlight(panel.id, "run_02/alt", "alt");
-    expect(model.panel(panel.id)?.highlighted_sources).toEqual([
-      { local_path: "gyro", path: "run_01/gyro" },
-    ]);
-    model.toggleHighlight(panel.id, "not/plotted", "alt");
-    expect(model.panel(panel.id)?.highlighted_sources).toHaveLength(1);
+    const entry = {
+      kind: "series" as const,
+      ref: refForPath("run_01/alt"),
+      source_key: null,
+      channel: null,
+    };
+    model.toggleFocus(panel.id, entry);
+    expect(model.panel(panel.id)?.focus).toEqual([entry]);
+    expect(model.focusEntries(panel.id)).toEqual([entry]);
+    model.clearFocus(panel.id);
+    expect(model.focusEntries(panel.id)).toEqual([]);
+    model.toggleFocus(panel.id, entry);
+    expect(model.focusEntries(panel.id)).toEqual([entry]);
+    model.toggleFocus(panel.id, entry);
+    expect(model.panel(panel.id)?.focus).toEqual([]);
   });
 
-  it("allocates slots past 8 instead of wrapping onto slot 1", () => {
+  it("removes source and channel focus entries when toggled again", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    for (let index = 0; index < 10; index += 1) {
-      model.addSeries(panel.id, `rocket/sig_${String(index)}`);
+    const entries = [
+      {
+        kind: "source" as const,
+        ref: null,
+        source_key: "run_01",
+        channel: null,
+      },
+      {
+        kind: "channel" as const,
+        ref: null,
+        source_key: null,
+        channel: "temp",
+      },
+    ];
+
+    for (const entry of entries) {
+      model.toggleFocus(panel.id, entry);
+      model.toggleFocus(panel.id, entry);
     }
-    const slots = model.panels()[0]?.series.map((series) => series.color_slot);
-    expect(slots).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+    expect(model.focusEntries(panel.id)).toEqual([]);
   });
 
   it("colour-by-time replaces the colour signal", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.setColorSignal(panel.id, "demo/speed");
+    model.setColorRef(panel.id, refForPath("demo/speed"));
     model.setColorByTime(panel.id);
-    expect(model.panel(panel.id)?.color_by_time).toBe(true);
-    expect(model.panel(panel.id)?.color_signal).toBeNull();
-    model.setColorSignal(panel.id, null);
-    expect(model.panel(panel.id)?.color_by_time).toBe(false);
+    expect(model.panel(panel.id)?.color_axis).toBe("time");
+    expect(colorPath(model.panel(panel.id))).toBeNull();
+    model.setColorRef(panel.id, null);
+    expect(model.panel(panel.id)?.color_axis).toBe("none");
+  });
+
+  it("normalizes legacy facet split state when restoring a session", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.split_by = "source";
+
+    const restored = new WorkspaceModel(
+      structuredClone(model.snapshot()) as Session,
+    );
+
+    expect(restored.panel(panel.id)?.split_by).toBe("none");
   });
 
   it("keeps the user dash default solid and writes the spec width", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.addSeries(panel.id, "rocket/velocity_body/x");
-    expect(model.panels()[0]?.series[0]?.dash).toBe("solid");
-    expect(model.panels()[0]?.series[0]?.width).toBe(1.4);
+    model.addSeriesRef(panel.id, refForPath("rocket/velocity_body/x"));
+    expect(legacySeries(model.panels()[0])[0]?.dash).toBe("solid");
+    expect(legacySeries(model.panels()[0])[0]?.width).toBe(1.4);
   });
 
   it("toggles series visibility", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.addSeries(panel.id, "a/one");
-    model.toggleSeriesVisible(panel.id, "a/one");
-    expect(model.panel(panel.id)?.series[0]?.visible).toBe(false);
+    model.addSeriesRef(panel.id, refForPath("a/one"));
+    model.toggleSeriesVisible(panel.id, { source_key: "a", channel: "one" });
+    expect(legacySeries(model.panel(panel.id))[0]?.visible).toBe(false);
+  });
+
+  it("stores color rules, ghost mode, and selector overrides", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const dimensions: StyleDimension[] = [
+      "focus",
+      "source",
+      "channel",
+      "set",
+      "attr",
+    ];
+    for (const dimension of dimensions) model.setColorBy(panel.id, dimension);
+    expect(model.panel(panel.id)?.color_by).toBe("attr");
+
+    model.setGhostMode(panel.id, "ghost");
+    expect(model.panel(panel.id)?.ghost_mode).toBe("ghost");
+    model.toggleGhostMode(panel.id);
+    expect(model.panel(panel.id)?.ghost_mode).toBe("all");
+
+    model.addSelectorOverride(panel.id, "temp* @ run_01", {
+      color_slot: 3,
+      opacity: 0.5,
+      visible: false,
+    });
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      {
+        target_ref: null,
+        target_selector: "temp* @ run_01",
+        color_slot: 3,
+        dash: null,
+        width: null,
+        opacity: 0.5,
+        visible: false,
+      },
+    ]);
+  });
+
+  it("merges target-ref styles and manages the override stack", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("a/one");
+    model.setSeriesOverride(panel.id, ref, {
+      color_slot: 5,
+      dash: "dot",
+      width: 2.5,
+    });
+    model.setSeriesOverride(panel.id, ref, {
+      color_slot: 2,
+      dash: "solid",
+      width: 3,
+    });
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      {
+        target_ref: ref,
+        target_selector: null,
+        color_slot: 2,
+        dash: "solid",
+        width: 3,
+        opacity: null,
+        visible: null,
+      },
+    ]);
+
+    model.addSelectorOverride(panel.id, "one", { width: 4 });
+    model.removeOverride(panel.id, 1);
+    expect(model.panel(panel.id)?.overrides).toHaveLength(1);
+    model.addSelectorOverride(panel.id, "one", { width: 4 });
+    model.clearOverrides(panel.id);
+    expect(model.panel(panel.id)?.overrides).toEqual([]);
   });
 
   it("promotes a plotted series to the XY x axis", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.addSeries(panel.id, "position/east");
-    model.addSeries(panel.id, "position/north");
+    model.addSeriesRef(panel.id, refForPath("position/east"));
+    model.addSeriesRef(panel.id, refForPath("position/north"));
     model.promoteSeriesToX(panel.id);
-    expect(model.panel(panel.id)?.x_signal).toBe("position/east");
-    expect(model.panel(panel.id)?.series.map((series) => series.path)).toEqual([
-      "position/north",
-    ]);
+    expect(xPath(model.panel(panel.id))).toBe("position/east");
+    expect(
+      legacySeries(model.panel(panel.id)).map((series) => series.path),
+    ).toEqual(["position/north"]);
   });
 
   it("returns an outgoing x signal to the plotted series", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.addSeries(panel.id, "position/east");
-    model.addSeries(panel.id, "position/north");
-    model.setXSignal(panel.id, "position/east");
-    model.setXSignal(panel.id, "position/north");
-    expect(model.panel(panel.id)?.x_signal).toBe("position/north");
-    expect(model.panel(panel.id)?.series.map((series) => series.path)).toEqual([
-      "position/east",
-    ]);
+    model.addSeriesRef(panel.id, refForPath("position/east"));
+    model.addSeriesRef(panel.id, refForPath("position/north"));
+    model.setXRef(panel.id, refForPath("position/east"));
+    model.setXRef(panel.id, refForPath("position/north"));
+    expect(xPath(model.panel(panel.id))).toBe("position/north");
+    expect(
+      legacySeries(model.panel(panel.id)).map((series) => series.path),
+    ).toEqual(["position/east"]);
+  });
+
+  it("keeps state when setting the current x ref and preserves promoted metadata", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const east = refForPath("position/east");
+    model.addSeriesRef(panel.id, east);
+    model.setSeriesOverride(panel.id, east, {
+      color_slot: 1,
+      dash: "solid",
+      width: 3,
+    });
+    model.toggleFocus(panel.id, {
+      kind: "series",
+      ref: east,
+      source_key: null,
+      channel: east.channel,
+    });
+    model.setXRef(panel.id, east);
+    model.setPanelXRange(panel.id, [1, 2]);
+
+    model.setXRef(panel.id, east);
+
+    expect(model.panel(panel.id)?.x_range).toEqual([1, 2]);
+    expect(model.panel(panel.id)?.overrides).toHaveLength(1);
+    expect(model.panel(panel.id)?.focus).toHaveLength(1);
   });
 
   it("stores and clears a panel y range", () => {
@@ -547,8 +757,9 @@ describe("WorkspaceModel", () => {
   it("updates series style and prunes annotations when removing it", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.addSeries(panel.id, "a/b");
-    model.setSeriesStyle(panel.id, "a/b", {
+    const ref = refForPath("a/b");
+    model.addSeriesRef(panel.id, ref);
+    model.setSeriesOverride(panel.id, ref, {
       color_slot: 5,
       dash: "dot",
       width: 2.5,
@@ -561,15 +772,15 @@ describe("WorkspaceModel", () => {
       pinned_value: 0,
       label: "",
     });
-    expect(model.panel(panel.id)?.series[0]).toMatchObject({
+    expect(legacySeries(model.panel(panel.id))[0]).toMatchObject({
       color_slot: 5,
       dash: "dot",
       width: 2.5,
     });
-    model.removeSeries(panel.id, "a/b");
-    expect(model.panel(panel.id)?.series).toEqual([]);
+    model.removeSeriesRef(panel.id, ref, "a/b");
+    expect(legacySeries(model.panel(panel.id))).toEqual([]);
     expect(model.panel(panel.id)?.annotations).toEqual([]);
-    expect(model.panel(panel.id)?.highlighted_sources).toEqual([]);
+    expect(focusPaths(model.panel(panel.id))).toEqual([]);
   });
 
   it("ignores a y range for an unknown panel", () => {
@@ -583,8 +794,11 @@ describe("WorkspaceModel", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
     model.setPanelYRange(panel.id, [-100, 300]);
-    model.addSeries(panel.id, "rocket/velocity_body/x");
-    model.toggleSeriesVisible(panel.id, "rocket/velocity_body/x");
+    model.addSeriesRef(panel.id, refForPath("rocket/velocity_body/x"));
+    model.toggleSeriesVisible(panel.id, {
+      source_key: "rocket",
+      channel: "velocity_body/x",
+    });
     expect(model.panels()[0]?.y_range).toEqual([-100, 300]);
   });
 
@@ -647,20 +861,98 @@ describe("WorkspaceModel", () => {
     expect(model.maximizedPanelId()).toBeNull();
   });
 
-  it("toggles favorites", () => {
+  it("adds and removes named sets", () => {
     const model = new WorkspaceModel();
-    model.toggleFavorite("a/one");
-    model.toggleFavorite("a/two");
-    model.toggleFavorite("a/one");
-    expect([...model.favorites()]).toEqual(["a/two"]);
+    model.addNamedSet({
+      id: "set-1",
+      name: "temperature",
+      kind: "pick",
+      selector: null,
+      refs: [refForPath("a/one")],
+    });
+    model.addNamedSet({
+      id: "set-2",
+      name: "velocity",
+      kind: "query",
+      selector: "velocity",
+      refs: [],
+    });
+    expect(model.namedSets().map((set) => set.name)).toEqual([
+      "temperature",
+      "velocity",
+    ]);
+    model.removeNamedSet("set-1");
+    expect(model.namedSets().map((set) => set.name)).toEqual(["velocity"]);
+    model.removeNamedSet("set-2");
+    expect(model.namedSets()).toEqual([]);
   });
 
-  it("toggles bundle favorites by local path", () => {
+  it("adds query and set bindings without duplicates", () => {
     const model = new WorkspaceModel();
-    model.toggleFavoriteBundle("imu/accel/x");
-    expect(model.favoriteBundles()).toEqual(["imu/accel/x"]);
-    model.toggleFavoriteBundle("imu/accel/x");
-    expect(model.favoriteBundles()).toEqual([]);
+    const panel = model.addPanelRow();
+    expect(model.addQueryBinding(panel.id, "temp*")).toBe(true);
+    expect(model.addQueryBinding(panel.id, "temp*")).toBe(false);
+    expect(model.addSetBinding(panel.id, "set-1")).toBe(true);
+    expect(model.addSetBinding(panel.id, "set-1")).toBe(false);
+    expect(model.panel(panel.id)?.bindings).toEqual([
+      { kind: "query", selector: "temp*", refs: [], set_id: null },
+      { kind: "set", selector: null, refs: [], set_id: "set-1" },
+    ]);
+  });
+
+  it("removes a binding by its serialized index", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addQueryBinding(panel.id, "temp");
+    model.addSetBinding(panel.id, "set-1");
+    model.removeBinding(panel.id, 0);
+    expect(model.panel(panel.id)?.bindings).toEqual([
+      { kind: "set", selector: null, refs: [], set_id: "set-1" },
+    ]);
+  });
+
+  it("allocates the next set id across current and migrated ids", () => {
+    const empty = new WorkspaceModel();
+    expect(empty.nextSetId()).toBe("set-1");
+    empty.addNamedSet({
+      id: "set-3",
+      name: "three",
+      kind: "pick",
+      selector: null,
+      refs: [],
+    });
+    empty.addNamedSet({
+      id: "set-fav-7",
+      name: "seven",
+      kind: "pick",
+      selector: null,
+      refs: [],
+    });
+    empty.addNamedSet({
+      id: "other",
+      name: "other",
+      kind: "pick",
+      selector: null,
+      refs: [],
+    });
+    expect(empty.nextSetId()).toBe("set-8");
+  });
+
+  it("removes a named set binding from every tab", () => {
+    const model = new WorkspaceModel();
+    const first = model.addPanelRow();
+    model.addSetBinding(first.id, "set-1");
+    model.addSetBinding(first.id, "set-2");
+    model.addTab();
+    const second = model.addPanelRow();
+    model.addSetBinding(second.id, "set-1");
+    model.removeNamedSet("set-1");
+    expect(
+      model
+        .tabs()
+        .flatMap((tab) => tab.panels)
+        .flatMap((panel) => panel.bindings),
+    ).toEqual([{ kind: "set", selector: null, refs: [], set_id: "set-2" }]);
   });
 
   it("never reuses an id already present in a loaded session", () => {
@@ -672,11 +964,15 @@ describe("WorkspaceModel", () => {
       title: "Panel 1",
       mode: "time",
       axis_style: "gutter",
-      x_signal: null,
-      color_signal: null,
-      color_by_time: false,
-      series: [],
-      highlighted_sources: [],
+      x_ref: null,
+      color_axis: "none",
+      color_ref: null,
+      bindings: [],
+      color_by: "source",
+      overrides: [],
+      focus: [],
+      ghost_mode: "all",
+      split_by: "none",
       y_range: null,
       x_range: null,
       x_label: null,

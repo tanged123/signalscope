@@ -1,4 +1,13 @@
 import { formatCombo } from "../app/commands";
+import type { Catalog } from "../app/catalog";
+import {
+  appliedOverrides,
+  dimensionCounts,
+  overrideFor,
+  type ResolvedSeries,
+} from "../app/resolution";
+import { virtualSlice } from "../app/outline-model";
+import { evaluateSelector } from "../app/selector";
 import type {
   SampleResponse,
   SampleSeries,
@@ -6,9 +15,15 @@ import type {
 } from "../generated/protocol";
 import type {
   AxisStyle,
+  Binding,
   DashStyle,
+  FocusEntry,
+  NamedSet,
   PanelMode,
   PanelState,
+  SeriesRef,
+  SeriesOverride,
+  StyleDimension,
 } from "../generated/session";
 import {
   clamp,
@@ -33,13 +48,13 @@ import {
   type PlotCursor,
   type PreparedPlot,
   type ResolvedAnnotation,
+  type SeriesHitAdapter,
 } from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
 import { lerpSample, pairSamples, type XyTrace } from "../app/xy";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
-  resolveSeriesStyle,
   type PathRenderOptions,
   type PlotPath,
   type RenderOptions,
@@ -58,7 +73,7 @@ import {
 } from "./plot-interactions";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
-export const BUNDLE_DRAG_TYPE = "application/x-signalscope-bundle";
+export const SET_DRAG_TYPE = "application/x-signalscope-set";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 export const MAX_SERIES_PER_PANEL = 64;
 export const MAXIMIZE_GLYPH = "↗";
@@ -79,6 +94,11 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
 
 const XY_HOVER_RADIUS = 40;
 
+function colorIndexForHue(hue: number | null): number {
+  if (hue === null) return 0;
+  return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
+}
+
 export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
 
 export interface PanelCallbacks {
@@ -88,15 +108,24 @@ export interface PanelCallbacks {
   onSplitDown(id: string): void;
   onMaximize(id: string): void;
   onSelectMode(id: string, mode: PanelMode): void;
-  onDropSignal(id: string, path: string): void;
-  onDropBundle(id: string, memberPaths: string[]): void;
-  onToggleHighlight(id: string, path: string): void;
+  onDropSignals(id: string, paths: string[]): void;
+  onDropSet(id: string, setId: string): void;
+  onFocusToggle(id: string, entry: FocusEntry): void;
+  onClearFocus(id: string): void;
+  onMuteSelector(id: string, selector: string): void;
+  onMuteSeries(id: string, ref: SeriesRef): void;
+  onRemoveBinding(id: string, index: number): void;
+  onToggleGhostMode(id: string): void;
   localPathFor(path: string): string | null;
   sourceKeyFor(path: string): string | null;
+  pathForRef(ref: { source_key: string; channel: string }): string | null;
+  catalog(): Catalog;
+  namedSets(): readonly NamedSet[];
+  resolveSeries(state: PanelState): readonly ResolvedSeries[];
   onSetXSignal(id: string, path: string): void;
   onSetColorSignal(id: string, path: string | null): void;
   onClearXSignal(id: string): void;
-  onToggleSeries(id: string, path: string): void;
+  onToggleSeries(id: string, ref: SeriesRef): void;
   onResized(id: string): void;
   onGesture(id: string, hint: string | null): void;
   onCursor(
@@ -119,12 +148,15 @@ export interface PanelCallbacks {
     axis: "x" | "y" | "c",
     label: string | null,
   ): void;
+  onSetColorBy(id: string, dimension: StyleDimension): void;
+  onRemoveOverride(id: string, index: number): void;
+  onClearOverrides(id: string): void;
   onSetSeriesStyle(
     id: string,
-    path: string,
+    ref: SeriesRef,
     style: { color_slot: number; dash: DashStyle; width: number },
   ): void;
-  onRemoveSeries(id: string, path: string): void;
+  onRemoveSeries(id: string, ref: SeriesRef): void;
   onQuickTransform(id: string, path: string, kind: QuickTransform): void;
 }
 
@@ -139,6 +171,281 @@ export function dragData(event: DragEvent, type: string): string | null {
 }
 
 type XyPairingCallbacks = Pick<PanelCallbacks, "localPathFor" | "sourceKeyFor">;
+
+export interface RenderSeries {
+  ref: SeriesRef;
+  path: string;
+  display: ResolvedSeries["display"];
+  hue: number | null;
+  dash: DashStyle;
+  width: number;
+  opacity: number;
+  visible: boolean;
+  focused: boolean;
+  overridden: boolean;
+}
+
+export type RenderPanelState = Omit<PanelState, "x_ref" | "color_ref"> & {
+  x_signal: string | null;
+  color_signal: string | null;
+  color_by_time: boolean;
+  series: RenderSeries[];
+};
+
+export type LegendDimension = "source" | "channel";
+
+export interface MatrixLegendRow {
+  value: string;
+  label: string;
+  count: number;
+  selector: string;
+  focused: boolean;
+  ghosted: boolean;
+  overridden: boolean;
+  hue: number | null;
+}
+
+export interface FocusChip {
+  entry: FocusEntry;
+  label: string;
+  hue: number | null;
+  overridden: boolean;
+}
+
+export interface BindingChipEntry {
+  label: string;
+  bindingIndex: number;
+  kind: Binding["kind"];
+  refs: SeriesRef[];
+  selector: string | null;
+}
+
+export function matrixLegendRows(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "series" | "focus" | "color_by">,
+  dimension: LegendDimension,
+  query = "",
+): MatrixLegendRow[] {
+  const evaluation =
+    query.trim() === "" ? null : evaluateSelector(catalog, query);
+  const matching =
+    evaluation === null
+      ? null
+      : new Set(
+          evaluation.series.map((series) =>
+            catalog.refKey({
+              source_key: series.sourceKey,
+              channel: series.channel,
+            }),
+          ),
+        );
+  const rows = new Map<string, MatrixLegendRow>();
+  for (const series of state.series) {
+    const catalogSeries = catalog.get(series.ref);
+    if (matching !== null && !matching.has(catalog.refKey(series.ref))) {
+      continue;
+    }
+    const value =
+      dimension === "source"
+        ? (catalogSeries?.sourceName ?? series.ref.source_key)
+        : series.ref.channel;
+    const existing = rows.get(value);
+    const focus = state.focus.some((entry) => focusMatches(entry, series.ref));
+    if (existing === undefined) {
+      rows.set(value, {
+        value,
+        label: value,
+        count: 1,
+        selector: dimension === "source" ? `* @ ${value}` : `${value} @ *`,
+        focused: focus,
+        ghosted: series.display === "ghost",
+        overridden: series.overridden,
+        hue: state.color_by === dimension ? series.hue : null,
+      });
+    } else {
+      existing.count += 1;
+      existing.focused ||= focus;
+      existing.ghosted ||= series.display === "ghost";
+      existing.overridden ||= series.overridden;
+      if (existing.hue === null && state.color_by === dimension) {
+        existing.hue = series.hue;
+      }
+    }
+  }
+  return [...rows.values()];
+}
+
+export function focusChips(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "series" | "focus">,
+  limit = 8,
+): { chips: FocusChip[]; overflow: number } {
+  const chips = state.focus.map((entry) => {
+    const matching = state.series.filter((series) =>
+      focusMatches(entry, series.ref),
+    );
+    const first = matching[0];
+    const label =
+      entry.kind === "series"
+        ? (first?.path ?? entry.ref?.channel ?? "series")
+        : entry.kind === "source"
+          ? (catalog.get(
+              first?.ref ?? { source_key: entry.source_key ?? "", channel: "" },
+            )?.sourceName ??
+            entry.source_key ??
+            "source")
+          : (entry.channel ?? "channel");
+    return {
+      entry,
+      label,
+      hue: first?.hue ?? null,
+      overridden: matching.some((series) => series.overridden),
+    };
+  });
+  return {
+    chips: chips.slice(0, limit),
+    overflow: Math.max(0, chips.length - limit),
+  };
+}
+
+export function legendTokenLabel(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "series" | "focus">,
+  dimension: LegendDimension,
+  count: number,
+): string {
+  const focusedValues = new Set(
+    state.series
+      .filter((series) =>
+        state.focus.some((entry) => focusMatches(entry, series.ref)),
+      )
+      .map((series) =>
+        dimension === "source"
+          ? (catalog.get(series.ref)?.sourceName ?? series.ref.source_key)
+          : series.ref.channel,
+      ),
+  );
+  const [focused] = focusedValues;
+  return focused !== undefined && focusedValues.size === 1 && count > 1
+    ? `${focused} +${String(count - 1)} ▾`
+    : `${String(count)} ▾`;
+}
+
+export function bindingChipEntries(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "bindings">,
+  namedSets: readonly NamedSet[],
+): BindingChipEntry[] {
+  const entries: BindingChipEntry[] = [];
+  for (const [bindingIndex, binding] of state.bindings.entries()) {
+    if (binding.kind === "pick") {
+      const groups = new Map<string, SeriesRef[]>();
+      for (const ref of binding.refs) {
+        const group = groups.get(ref.channel) ?? [];
+        group.push(ref);
+        groups.set(ref.channel, group);
+      }
+      for (const [channel, refs] of groups) {
+        entries.push({
+          label: `${channel} ×${String(refs.length)}`,
+          bindingIndex,
+          kind: binding.kind,
+          refs,
+          selector: null,
+        });
+      }
+      continue;
+    }
+
+    const selector =
+      binding.kind === "query"
+        ? binding.selector
+        : (namedSets.find((set) => set.id === binding.set_id)?.selector ??
+          null);
+    const set =
+      binding.kind === "set"
+        ? namedSets.find((entry) => entry.id === binding.set_id)
+        : null;
+    const refs =
+      binding.kind === "set" && set?.kind === "pick"
+        ? set.refs
+        : selector === null
+          ? []
+          : (evaluateSelector(catalog, selector)?.series ?? []).map(
+              (series) =>
+                catalog.refFromPath(series.path) ?? {
+                  source_key: series.sourceKey,
+                  channel: series.channel,
+                },
+            );
+    const label =
+      binding.kind === "set"
+        ? `★ ${set?.name ?? binding.set_id ?? "missing set"} · ${String(refs.length)}`
+        : `${binding.selector ?? "invalid selector"} · ${String(refs.length)}`;
+    entries.push({
+      label,
+      bindingIndex,
+      kind: binding.kind,
+      refs,
+      selector,
+    });
+  }
+  return entries;
+}
+
+function setsEqual(
+  left: ReadonlySet<string> | null,
+  right: ReadonlySet<string> | null,
+): boolean {
+  if (left === right) return true;
+  if (left === null || right === null || left.size !== right.size) return false;
+  for (const value of left) if (!right.has(value)) return false;
+  return true;
+}
+
+function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
+  if (entry.kind === "series") {
+    return (
+      entry.ref !== null &&
+      entry.ref.source_key === ref.source_key &&
+      entry.ref.channel === ref.channel
+    );
+  }
+  return entry.kind === "source"
+    ? entry.source_key === ref.source_key
+    : entry.channel === ref.channel;
+}
+
+function renderState(
+  state: PanelState,
+  callbacks: Pick<
+    PanelCallbacks,
+    "resolveSeries" | "pathForRef" | "localPathFor"
+  >,
+): RenderPanelState {
+  const resolved = callbacks.resolveSeries(state);
+  const pathForRef = (
+    ref: { source_key: string; channel: string } | null,
+  ): string | null => (ref === null ? null : callbacks.pathForRef(ref));
+  return {
+    ...state,
+    x_signal: pathForRef(state.x_ref),
+    color_signal: pathForRef(state.color_ref),
+    color_by_time: state.color_axis === "time",
+    series: resolved.map((entry) => ({
+      ref: entry.ref,
+      path: entry.path,
+      display: entry.display,
+      hue: entry.hue,
+      dash: entry.dash,
+      width: entry.width,
+      opacity: entry.opacity,
+      visible: entry.visible,
+      focused: entry.focused,
+      overridden: entry.overridden,
+    })),
+  };
+}
 
 function resolveXSeries(
   samples: SampleResponse,
@@ -160,7 +467,7 @@ function resolveXSeries(
 
 export function xChipLabel(
   xSignal: string,
-  series: readonly PanelState["series"][number][],
+  series: readonly RenderSeries[],
   callbacks: XyPairingCallbacks,
 ): string {
   const xLocal = callbacks.localPathFor(xSignal);
@@ -169,7 +476,7 @@ export function xChipLabel(
 }
 
 function visibleSources(
-  series: readonly PanelState["series"][number][],
+  series: readonly RenderSeries[],
   callbacks: XyPairingCallbacks,
 ): Set<string> {
   return new Set(
@@ -180,47 +487,65 @@ function visibleSources(
   );
 }
 
-export function bundleXSignal(
-  memberPaths: readonly string[],
-  asX: boolean,
-): string | undefined {
-  return asX ? [...memberPaths].sort()[0] : undefined;
-}
-
-export function parseBundlePayload(
-  data: string,
-): { member_paths: string[] } | null {
+export function parseSignalPayload(data: string): string[] {
   try {
     const payload: unknown = JSON.parse(data);
     if (
       typeof payload === "object" &&
       payload !== null &&
-      "member_paths" in payload &&
-      Array.isArray(payload.member_paths) &&
-      payload.member_paths.every((path) => typeof path === "string")
+      "paths" in payload &&
+      Array.isArray(payload.paths) &&
+      payload.paths.every((path) => typeof path === "string")
     ) {
-      return { member_paths: payload.member_paths };
+      return payload.paths;
     }
+    return [];
   } catch {
-    // Malformed external drag payloads are not bundles.
+    // Malformed external drag payloads are ignored.
   }
-  return null;
+  return data === "" ? [] : [data];
 }
 
-export function parseBundleLocalPath(data: string): string | null {
+export function parseSignalRefsPayload(data: string): SeriesRef[] {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (typeof payload !== "object" || payload === null) return [];
+    const refs = (payload as { refs?: unknown }).refs;
+    if (!Array.isArray(refs)) return [];
+    if (
+      refs.every((ref: unknown) => {
+        if (typeof ref !== "object" || ref === null) return false;
+        const candidate = ref as {
+          source_key?: unknown;
+          channel?: unknown;
+        };
+        return (
+          typeof candidate.source_key === "string" &&
+          typeof candidate.channel === "string"
+        );
+      })
+    ) {
+      return refs as SeriesRef[];
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+export function parseSetPayload(data: string): string | null {
   try {
     const payload: unknown = JSON.parse(data);
     if (
       typeof payload === "object" &&
       payload !== null &&
-      "local_path" in payload &&
-      typeof payload.local_path === "string" &&
-      payload.local_path !== ""
+      "set_id" in payload &&
+      typeof payload.set_id === "string"
     ) {
-      return payload.local_path;
+      return payload.set_id;
     }
   } catch {
-    // Malformed external drag payloads are not bundles.
+    // Malformed external drag payloads are ignored.
   }
   return null;
 }
@@ -233,32 +558,42 @@ export class PanelView {
   private readonly overlayRenderer: OverlayRenderer;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
-  private legendChips: HTMLElement[] = [];
-  private lastState: PanelState | null = null;
+  private lastState: RenderPanelState | null = null;
+  private lastInputState: PanelState | null = null;
   private lastTiles: TileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private preparedPlot: PreparedPlot | null = null;
+  private hitAdapter: SeriesHitAdapter | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
   private xyTraces: {
     path: string;
     colorIndex: number;
+    hue: number | null;
     dash: DashStyle;
     width: number;
+    opacity: number;
     trace: XyTrace;
   }[] = [];
   private domainSeries: {
     path: string;
     colorIndex: number;
+    hue: number | null;
+    opacity: number;
     x: number[];
     y: number[];
   }[] = [];
   private cursorT: number | null = null;
   private cursorMode: CursorMode = "none";
   private box: InteractionBox | null = null;
-  private emphasizePath: string | null = null;
+  private emphasizePaths: ReadonlySet<string> | null = null;
+  private hoverPoint: { x: number; y: number } | null = null;
+  private hoverTag: HTMLElement | null = null;
   private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
+  private rosterCleanup: (() => void) | null = null;
+  private bindingCleanup: (() => void) | null = null;
+  private rulesCleanup: (() => void) | null = null;
   private hasColorbar = false;
 
   constructor(
@@ -268,6 +603,7 @@ export class PanelView {
     this.element = document.createElement("article");
     this.element.className = "panel";
     this.element.dataset.panelId = id;
+    this.element.tabIndex = 0;
     this.element.innerHTML = panelMarkup();
     this.canvas = required<HTMLCanvasElement>(this.element, ".plot-canvas");
     this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
@@ -285,8 +621,8 @@ export class PanelView {
       fitView: () => {
         this.callbacks.onFitView(this.id);
       },
-      plotClick: (x, y) => {
-        this.plotClick(x, y);
+      plotClick: (x, y, modifiers) => {
+        this.plotClick(x, y, modifiers);
       },
       setGesture: (hint) => {
         this.callbacks.onGesture(this.id, hint);
@@ -313,24 +649,13 @@ export class PanelView {
       },
     });
     new ResizeObserver(() => {
-      this.layoutLegend();
-    }).observe(required(this.element, ".panel-header"));
-    new ResizeObserver(() => {
       this.callbacks.onResized(this.id);
     }).observe(this.canvas);
   }
 
   private bind(): void {
-    this.element.addEventListener("pointerdown", (event) => {
+    this.element.addEventListener("pointerdown", () => {
       this.callbacks.onFocus(this.id);
-      const target = event.target;
-      if (
-        target instanceof Node &&
-        !required(this.element, ".legend-overflow-menu").contains(target) &&
-        !required(this.element, ".legend-overflow").contains(target)
-      ) {
-        this.closeLegendOverflow();
-      }
     });
     required(this.element, ".panel-close").addEventListener("click", () => {
       this.callbacks.onClose(this.id);
@@ -362,15 +687,44 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
-    required<HTMLButtonElement>(
-      this.element,
-      ".legend-overflow",
-    ).addEventListener("click", () => {
-      const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-      this.setLegendOverflowOpen(menu.hidden);
-    });
+    required(this.element, ".panel-ghost-toggle").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onToggleGhostMode(this.id);
+      },
+    );
     this.element.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") this.closeLegendOverflow();
+      if (event.key === "Escape") {
+        if (this.emphasizePaths !== null) this.clearHover();
+        else this.callbacks.onClearFocus(this.id);
+        this.closeRoster();
+        this.closeBindingPopover();
+      } else if (
+        event.target === this.element &&
+        event.key === "Tab" &&
+        this.cursorT !== null
+      ) {
+        event.preventDefault();
+        this.walkHover(event.shiftKey ? -1 : 1);
+      } else if (
+        event.target === this.element &&
+        event.key === "Enter" &&
+        this.emphasizePaths?.size === 1
+      ) {
+        const path = [...this.emphasizePaths][0];
+        const series = this.lastState?.series.find(
+          (entry) => entry.path === path,
+        );
+        if (series !== undefined) {
+          event.preventDefault();
+          this.callbacks.onFocusToggle(this.id, {
+            kind: "series",
+            ref: series.ref,
+            source_key: null,
+            channel: series.ref.channel,
+          });
+        }
+      }
     });
     for (const button of this.element.querySelectorAll<HTMLButtonElement>(
       ".mode-pill",
@@ -387,11 +741,7 @@ export class PanelView {
       this.callbacks.onSetColorSignal(this.id, null);
     });
     cChip.addEventListener("dragover", (event) => {
-      if (
-        !hasDragType(event, SIGNAL_DRAG_TYPE) &&
-        !hasDragType(event, BUNDLE_DRAG_TYPE)
-      )
-        return;
+      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
       event.preventDefault();
       event.stopPropagation();
       cChip.classList.add("drop-target");
@@ -402,22 +752,12 @@ export class PanelView {
     });
     cChip.addEventListener("drop", (event) => {
       cChip.classList.remove("drop-target");
-      const bundle = dragData(event, BUNDLE_DRAG_TYPE);
-      if (bundle !== null) {
-        event.preventDefault();
-        event.stopPropagation();
-        const payload = parseBundlePayload(bundle);
-        const first =
-          payload === null ? undefined : [...payload.member_paths].sort()[0];
-        if (first === undefined) return;
-        this.callbacks.onSetColorSignal(this.id, first);
-        return;
-      }
       const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path === null) return;
       event.preventDefault();
       event.stopPropagation();
-      this.callbacks.onSetColorSignal(this.id, path);
+      const first = parseSignalPayload(path)[0];
+      if (first !== undefined) this.callbacks.onSetColorSignal(this.id, first);
     });
     const header = required<HTMLElement>(this.element, ".panel-header");
     required<HTMLElement>(this.element, ".panel-title").addEventListener(
@@ -431,15 +771,16 @@ export class PanelView {
       event.dataTransfer?.setData(PANEL_DRAG_TYPE, this.id);
     });
     this.element.addEventListener("dragover", (event) => {
-      if (
-        !hasDragType(event, SIGNAL_DRAG_TYPE) &&
-        !hasDragType(event, BUNDLE_DRAG_TYPE)
-      )
-        return;
+      const signalDrag = hasDragType(event, SIGNAL_DRAG_TYPE);
+      const setDrag = hasDragType(event, SET_DRAG_TYPE);
+      if (!signalDrag && !setDrag) return;
       event.preventDefault();
       this.element.classList.add("drop-target");
-      this.setDropStripVisible(true);
-      this.element.classList.toggle("drop-x", this.overStrip(event));
+      this.setDropStripVisible(signalDrag);
+      this.element.classList.toggle(
+        "drop-x",
+        signalDrag && this.overStrip(event),
+      );
     });
     this.element.addEventListener("dragleave", () => {
       this.element.classList.remove("drop-target", "drop-x");
@@ -449,27 +790,22 @@ export class PanelView {
       const asX = this.overStrip(event);
       this.element.classList.remove("drop-target", "drop-x");
       this.setDropStripVisible(false);
-      const bundle = dragData(event, BUNDLE_DRAG_TYPE);
-      if (bundle !== null) {
-        const payload = parseBundlePayload(bundle);
-        if (payload !== null) {
-          event.preventDefault();
-          event.stopPropagation();
-          const first = bundleXSignal(payload.member_paths, asX);
-          if (first !== undefined) {
-            this.callbacks.onSetXSignal(this.id, first);
-          } else {
-            this.callbacks.onDropBundle(this.id, payload.member_paths);
-          }
-        }
+      const setPayload = dragData(event, SET_DRAG_TYPE);
+      if (setPayload !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        const setId = parseSetPayload(setPayload);
+        if (setId !== null) this.callbacks.onDropSet(this.id, setId);
         return;
       }
       const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path === null) return;
       event.preventDefault();
       event.stopPropagation();
-      if (asX) this.callbacks.onSetXSignal(this.id, path);
-      else this.callbacks.onDropSignal(this.id, path);
+      const paths = parseSignalPayload(path);
+      if (paths.length === 0) return;
+      if (asX) this.callbacks.onSetXSignal(this.id, paths[0] as string);
+      else this.callbacks.onDropSignals(this.id, paths);
     });
     this.overlay.addEventListener("pointermove", (event) => {
       if (this.interactions.isDragging()) return;
@@ -480,6 +816,16 @@ export class PanelView {
         layout !== null && inside
           ? this.cursorAt(layout, event.offsetX, event.offsetY, XY_HOVER_RADIUS)
           : null;
+      if (layout !== null && inside) {
+        this.updateHover(
+          event.offsetX,
+          event.offsetY,
+          event.clientX,
+          event.clientY,
+        );
+      } else {
+        this.clearHover();
+      }
       this.callbacks.onCursor(
         this.id,
         cursor,
@@ -488,6 +834,7 @@ export class PanelView {
     });
     this.overlay.addEventListener("pointerleave", () => {
       if (!this.interactions.isDragging()) {
+        this.clearHover();
         this.callbacks.onCursor(this.id, null, null);
       }
     });
@@ -497,47 +844,53 @@ export class PanelView {
   }
 
   update(state: PanelState, maximized: boolean): void {
-    this.lastState = state;
+    const rendered = renderState(state, this.callbacks);
+    this.lastInputState = state;
+    this.lastState = rendered;
     this.element.classList.toggle("maximized", maximized);
-    this.element.setAttribute("aria-label", `${state.title} panel`);
-    required(this.element, ".panel-title").textContent = state.title;
+    this.element.setAttribute("aria-label", `${rendered.title} panel`);
+    required(this.element, ".panel-title").textContent = rendered.title;
     for (const button of this.element.querySelectorAll<HTMLButtonElement>(
       ".mode-pill",
     )) {
-      button.classList.toggle("active", button.dataset.mode === state.mode);
+      button.classList.toggle("active", button.dataset.mode === rendered.mode);
     }
     const xChip = required<HTMLButtonElement>(this.element, ".x-chip");
-    xChip.hidden = !(state.mode === "xy" && state.x_signal !== null);
-    if (!xChip.hidden && state.x_signal !== null) {
+    xChip.hidden = !(rendered.mode === "xy" && rendered.x_signal !== null);
+    if (!xChip.hidden && rendered.x_signal !== null) {
       xChip.replaceChildren(
         chipPrefix("x:"),
         document.createTextNode(
-          xChipLabel(state.x_signal, state.series, this.callbacks),
+          xChipLabel(rendered.x_signal, rendered.series, this.callbacks),
         ),
       );
-      xChip.title = `X axis: ${state.x_signal} — click to remove`;
+      xChip.title = `X axis: ${rendered.x_signal} — click to remove`;
     }
     const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
-    cChip.hidden = state.mode !== "xy";
+    cChip.hidden = rendered.mode !== "xy";
     if (!cChip.hidden) {
       cChip.replaceChildren(
         chipPrefix("c:"),
         document.createTextNode(
-          state.color_by_time
+          rendered.color_by_time
             ? "time"
-            : state.color_signal === null
+            : rendered.color_signal === null
               ? "none"
-              : xChipLabel(state.color_signal, state.series, this.callbacks),
+              : xChipLabel(
+                  rendered.color_signal,
+                  rendered.series,
+                  this.callbacks,
+                ),
         ),
       );
-      cChip.title = state.color_by_time
+      cChip.title = rendered.color_by_time
         ? "Colour channel: time — click to clear"
-        : state.color_signal === null
+        : rendered.color_signal === null
           ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
-          : `Colour channel: ${state.color_signal} — click to clear`;
+          : `Colour channel: ${rendered.color_signal} — click to clear`;
     }
     const note = required<HTMLElement>(this.element, ".panel-mode-note");
-    const windowNote = policyFor(state.mode).windowNote;
+    const windowNote = policyFor(rendered.mode).windowNote;
     note.hidden = windowNote === null;
     if (windowNote !== null) note.textContent = windowNote;
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
@@ -545,29 +898,31 @@ export class PanelView {
     required<HTMLButtonElement>(
       this.element,
       ".panel-stats-toggle",
-    ).setAttribute("aria-pressed", String(state.show_stats));
+    ).setAttribute("aria-pressed", String(rendered.show_stats));
     const axisToggle = required<HTMLButtonElement>(
       this.element,
       ".panel-axis-toggle",
     );
-    axisToggle.textContent = `axes: ${state.axis_style}`;
-    axisToggle.title = `Switch to ${state.axis_style === "gutter" ? "inline" : "gutter"} axes`;
-    this.updateLegend(state);
-    const annotations = this.resolvedAnnotations(state);
-    this.renderAnnotationList(state, annotations);
+    axisToggle.textContent = `axes: ${rendered.axis_style}`;
+    axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
+    this.updateBindings(rendered);
+    this.updateGhostToggle(rendered);
+    this.updateLegend(rendered);
+    const annotations = this.resolvedAnnotations(rendered);
+    this.renderAnnotationList(rendered, annotations);
     this.renderStats();
     this.drawOverlay(annotations);
     if (
       this.inspectorPath !== null &&
-      !state.series.some((series) => series.path === this.inspectorPath)
+      !rendered.series.some((series) => series.path === this.inspectorPath)
     ) {
       this.closeInspector();
     }
     const empty = required<HTMLElement>(this.element, ".panel-empty");
-    if (state.series.length === 0) {
+    if (rendered.series.length === 0) {
       empty.hidden = false;
       empty.textContent = "Empty panel — drag a signal here.";
-    } else if (state.mode === "xy" && state.x_signal === null) {
+    } else if (rendered.mode === "xy" && rendered.x_signal === null) {
       empty.hidden = false;
       empty.textContent = "Drop a signal on the strip below to set the X axis.";
     } else {
@@ -583,20 +938,25 @@ export class PanelView {
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
   ): number {
-    this.lastState = state;
+    const rendered = renderState(state, this.callbacks);
+    this.lastInputState = state;
+    this.lastState = rendered;
     this.lastTiles = tiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
     this.preparedPlot = null;
+    this.hitAdapter = null;
     this.domainSeries = [];
     this.hasColorbar = false;
-    const elapsed = this.renderForMode(state, tiles, samples, window);
+    const elapsed = this.renderForMode(rendered, tiles, samples, window);
+    this.hitAdapter =
+      (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
     this.renderStats();
-    const annotations = this.resolvedAnnotations(state);
-    this.renderAnnotationList(state, annotations);
+    const annotations = this.resolvedAnnotations(rendered);
+    this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (missing.length > 0) {
       this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
@@ -605,7 +965,7 @@ export class PanelView {
   }
 
   private renderForMode(
-    state: PanelState,
+    state: RenderPanelState,
     tiles: TileResponse | null,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
@@ -628,10 +988,7 @@ export class PanelView {
         const series = bySeries.get(tile.signal_path);
         return {
           path: tile.signal_path,
-          colorIndex: resolveSeriesStyle(
-            series?.color_slot ?? 1,
-            series?.dash ?? "solid",
-          ).colorIndex,
+          colorIndex: colorIndexForHue(series?.hue ?? 1),
           bins: tile.bins,
         };
       }),
@@ -648,32 +1005,21 @@ export class PanelView {
     const options: RenderOptions = {
       xLabel: state.x_label ?? "time (s)",
       yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
-      colorSlots: shown.map(
-        (tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1,
-      ),
-      dashes: shown.map(
-        (tile) => bySeries.get(tile.signal_path)?.dash ?? "solid",
-      ),
       yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
-      widths: shown.map((tile) => bySeries.get(tile.signal_path)?.width ?? 1.4),
-      dimmed: shown.map((tile) => {
-        const localPath = this.callbacks.localPathFor(tile.signal_path);
-        const highlighted =
-          localPath === null
-            ? undefined
-            : state.highlighted_sources.find(
-                (entry) => entry.local_path === localPath,
-              );
-        return (
-          highlighted !== undefined && highlighted.path !== tile.signal_path
-        );
+      styles: shown.map((tile) => {
+        const series = bySeries.get(tile.signal_path);
+        return {
+          hue: series?.hue ?? null,
+          dash: series?.dash ?? "solid",
+          width: series?.width ?? 1.4,
+          alpha: series?.opacity ?? 1,
+        };
       }),
-      ...(this.emphasizePath !== null &&
-      shown.some((tile) => tile.signal_path === this.emphasizePath)
+      ...(this.emphasizePaths !== null
         ? {
-            emphasisIndex: shown.findIndex(
-              (tile) => tile.signal_path === this.emphasizePath,
+            emphasisIndices: shown.flatMap((tile, index) =>
+              this.emphasizePaths?.has(tile.signal_path) ? [index] : [],
             ),
           }
         : {}),
@@ -682,7 +1028,7 @@ export class PanelView {
   }
 
   private renderXy(
-    state: PanelState,
+    state: RenderPanelState,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
@@ -706,12 +1052,13 @@ export class PanelView {
         this.callbacks,
       );
       if (resolved === undefined) continue;
-      const style = resolveSeriesStyle(series.color_slot, series.dash);
       this.xyTraces.push({
         path: series.path,
-        colorIndex: style.colorIndex,
-        dash: style.dash,
+        colorIndex: colorIndexForHue(series.hue),
+        hue: series.hue,
+        dash: series.dash,
         width: series.width,
+        opacity: series.opacity,
         trace: pairSamples(resolved, ySeries),
       });
     }
@@ -795,9 +1142,10 @@ export class PanelView {
       // Whole trajectory dimmed underneath, the windowed part lit on top.
       paths.push({
         points: flattenTrace(entry.trace, null),
-        colorIndex: entry.colorIndex,
+        hue: entry.hue,
         dash: "solid",
         width: 1.2,
+        alpha: entry.opacity,
         dimmed: true,
       });
     }
@@ -805,9 +1153,10 @@ export class PanelView {
       const colorValues = colorColumns[index];
       paths.push({
         points: flattenTrace(entry.trace, window),
-        colorIndex: entry.colorIndex,
+        hue: entry.hue,
         dash: entry.dash,
         width: entry.width + 0.4,
+        alpha: entry.opacity,
         markers: true,
         ...(hasColor && colorValues !== null && colorValues !== undefined
           ? {
@@ -860,7 +1209,7 @@ export class PanelView {
   }
 
   private renderSpectra(
-    state: PanelState,
+    state: RenderPanelState,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
@@ -879,18 +1228,20 @@ export class PanelView {
       result.frequency.forEach((frequency, index) => {
         points.push(frequency, result.amplitudeDb[index] ?? -120);
       });
-      const style = resolveSeriesStyle(series.color_slot, series.dash);
       this.domainSeries.push({
         path: series.path,
-        colorIndex: style.colorIndex,
+        colorIndex: colorIndexForHue(series.hue),
+        hue: series.hue,
+        opacity: series.opacity,
         x: result.frequency,
         y: result.amplitudeDb,
       });
       paths.push({
         points,
-        colorIndex: style.colorIndex,
-        dash: style.dash,
+        hue: series.hue,
+        dash: series.dash,
         width: series.width,
+        alpha: series.opacity,
       });
     }
     this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
@@ -916,7 +1267,7 @@ export class PanelView {
   }
 
   private renderHistogram(
-    state: PanelState,
+    state: RenderPanelState,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
@@ -956,23 +1307,20 @@ export class PanelView {
       });
       points.push(edges[edges.length - 1] ?? 0, 0);
       const series = visible[index];
-      const style = resolveSeriesStyle(
-        series?.color_slot ?? 1,
-        series?.dash ?? "solid",
-      );
       if (series !== undefined) {
         histogramSeries.push({
           path: series.path,
-          colorIndex: style.colorIndex,
+          colorIndex: colorIndexForHue(series.hue),
           counts,
           sourceValues: columns[index] ?? [],
         });
       }
       return {
         points,
-        colorIndex: style.colorIndex,
-        dash: style.dash,
+        hue: series?.hue ?? null,
+        dash: series?.dash ?? "solid",
         width: series?.width ?? 1.4,
+        alpha: series?.opacity ?? 1,
       };
     });
     this.preparedPlot = prepareHistogramPlot({
@@ -994,7 +1342,7 @@ export class PanelView {
   }
 
   private resolvePlotRanges(
-    state: PanelState,
+    state: RenderPanelState,
     plot: PreparedPlot,
     window: { t0: number; t1: number },
     seriesKey = "",
@@ -1085,11 +1433,140 @@ export class PanelView {
     return this.element.getBoundingClientRect();
   }
 
-  plotClick(offsetX: number, offsetY: number): void {
-    // 2A's asymmetry: the remove radius is smaller than the pin radius so a
-    // double-click cancels its own accidental pin before fitting.
-    if (this.removeAt(offsetX, offsetY, 9)) return;
-    this.pinAt(offsetX, offsetY, 14);
+  plotClick(
+    offsetX: number,
+    offsetY: number,
+    modifiers: { alt: boolean; shift: boolean } = {
+      alt: false,
+      shift: false,
+    },
+  ): void {
+    if (!modifiers.alt && !modifiers.shift) {
+      if (this.removeAt(offsetX, offsetY, 9)) return;
+      if (this.pinAt(offsetX, offsetY, 14)) return;
+      return;
+    }
+    const hit = this.seriesHit(offsetX, offsetY, 6);
+    if (hit !== null) {
+      const series = this.lastState?.series.find(
+        (entry) => entry.path === hit.path,
+      );
+      if (series !== undefined) {
+        if (modifiers.alt) this.callbacks.onMuteSeries(this.id, series.ref);
+        else if (modifiers.shift) {
+          this.callbacks.onFocusToggle(this.id, {
+            kind: "series",
+            ref: series.ref,
+            source_key: null,
+            channel: series.ref.channel,
+          });
+        }
+        return;
+      }
+    }
+  }
+
+  private seriesHit(
+    offsetX: number,
+    offsetY: number,
+    threshold: number,
+  ): { path: string; distance: number } | null {
+    const layout = this.renderer.lastLayout();
+    return layout === null || this.hitAdapter === null
+      ? null
+      : this.hitAdapter.seriesAt(layout, offsetX, offsetY, threshold);
+  }
+
+  private updateHover(
+    offsetX: number,
+    offsetY: number,
+    clientX: number,
+    clientY: number,
+  ): void {
+    const hit = this.seriesHit(offsetX, offsetY, 6);
+    if (hit === null) {
+      this.clearHover();
+      return;
+    }
+    this.hoverPoint = { x: offsetX, y: offsetY };
+    this.setEmphasis(hit.path);
+    this.showHoverTag(hit.path, clientX, clientY);
+  }
+
+  private showHoverTag(path: string, clientX: number, clientY: number): void {
+    const series = this.lastState?.series.find((entry) => entry.path === path);
+    if (series === undefined) return;
+    const panelRect = this.element.getBoundingClientRect();
+    const tag = this.hoverTag ?? document.createElement("div");
+    this.hoverTag = tag;
+    tag.className = "plot-hover-tag";
+    tag.textContent = `${series.path} — ⇧click to focus`;
+    tag.hidden = false;
+    this.element.append(tag);
+    const tagRect = tag.getBoundingClientRect();
+    tag.style.left = `${String(
+      clamp(
+        clientX - panelRect.left + 10,
+        4,
+        Math.max(4, panelRect.width - tagRect.width - 4),
+      ),
+    )}px`;
+    tag.style.top = `${String(
+      clamp(
+        clientY - panelRect.top + 10,
+        4,
+        Math.max(4, panelRect.height - tagRect.height - 4),
+      ),
+    )}px`;
+  }
+
+  private clearHover(): void {
+    this.hoverPoint = null;
+    this.setEmphasis(null);
+    if (this.hoverTag !== null) {
+      this.hoverTag.hidden = true;
+      this.hoverTag.remove();
+      this.hoverTag = null;
+    }
+  }
+
+  private walkHover(direction: -1 | 1): void {
+    const state = this.lastState;
+    if (state === null) return;
+    const values = new Map(
+      (this.lastTiles?.series ?? []).map((tile) => [
+        tile.signal_path,
+        this.cursorT === null ? null : valueAtTime(tile.bins, this.cursorT),
+      ]),
+    );
+    const series = state.series
+      .filter((entry) => entry.visible)
+      .map((entry, index) => ({
+        entry,
+        index,
+        value: values.get(entry.path),
+      }))
+      .sort((left, right) => {
+        if (left.value === null || left.value === undefined) return 1;
+        if (right.value === null || right.value === undefined) return -1;
+        return left.value - right.value || left.index - right.index;
+      });
+    if (series.length === 0) return;
+    const current = [...(this.emphasizePaths ?? [])][0];
+    const index = series.findIndex((item) => item.entry.path === current);
+    const next =
+      series[(index === -1 ? (direction === 1 ? -1 : 0) : index) + direction];
+    const wrapped = next ?? series[direction === 1 ? 0 : series.length - 1];
+    if (wrapped === undefined) return;
+    this.setEmphasis(wrapped.entry.path);
+    if (this.hoverPoint !== null) {
+      const canvasRect = this.canvas.getBoundingClientRect();
+      this.showHoverTag(
+        wrapped.entry.path,
+        canvasRect.left + this.hoverPoint.x,
+        canvasRect.top + this.hoverPoint.y,
+      );
+    }
   }
 
   /** Removes the annotation under the pixel; true when one was removed. */
@@ -1115,9 +1592,9 @@ export class PanelView {
   }
 
   /** Pins the nearest plotted vertex under the pixel, when one is in range. */
-  private pinAt(offsetX: number, offsetY: number, radius: number): void {
+  private pinAt(offsetX: number, offsetY: number, radius: number): boolean {
     const layout = this.renderer.lastLayout();
-    if (layout === null) return;
+    if (layout === null) return false;
     const hit = this.preparedPlot?.annotationAt(
       layout,
       { x: offsetX, y: offsetY },
@@ -1125,7 +1602,9 @@ export class PanelView {
     );
     if (hit !== null && hit !== undefined) {
       this.callbacks.onPinAnnotation(this.id, hit);
+      return true;
     }
+    return false;
   }
 
   private cursorAt(
@@ -1143,7 +1622,7 @@ export class PanelView {
     );
   }
 
-  private resolvedAnnotations(state: PanelState): ResolvedAnnotations {
+  private resolvedAnnotations(state: RenderPanelState): ResolvedAnnotations {
     const prepared = this.preparedPlot;
     if (prepared === null) return { resolved: [], delta: null };
     const resolved = state.annotations
@@ -1168,7 +1647,9 @@ export class PanelView {
       state?.mode === "xy" && cursorT !== null && this.cursorMode !== "none"
         ? this.xyTraces.flatMap((entry) => {
             const point = markerAt(entry.trace, cursorT);
-            return point === null ? [] : [point];
+            return point === null
+              ? []
+              : [{ ...point, ghost: entry.hue === null }];
           })
         : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
@@ -1194,12 +1675,13 @@ export class PanelView {
   private cursorPointsAt(
     mode: PanelMode | undefined,
     cursorT: number,
-    bySeries: ReadonlyMap<string, PanelState["series"][number]>,
+    bySeries: ReadonlyMap<string, RenderSeries>,
   ): CursorPoint[] {
     if (mode === "fft") {
       return this.domainSeries.map((series) => ({
         value: lerpSample(series.x, series.y, cursorT),
-        colorIndex: series.colorIndex,
+        colorIndex: series.hue === null ? null : series.colorIndex,
+        alpha: series.opacity,
       }));
     }
     if (mode === "histogram") {
@@ -1213,10 +1695,15 @@ export class PanelView {
         },
         0,
       );
-      return (cursor?.markers ?? []).map((point) => ({
-        value: point.y,
-        colorIndex: point.colorIndex,
-      }));
+      const visible = [...bySeries.values()].filter((series) => series.visible);
+      return (cursor?.markers ?? []).map((point, index) => {
+        const series = visible[index];
+        return {
+          value: point.y,
+          colorIndex: series?.hue === null ? null : point.colorIndex,
+          alpha: series?.opacity ?? 1,
+        };
+      });
     }
     return (this.lastTiles?.series ?? []).flatMap((tile) => {
       const series = bySeries.get(tile.signal_path);
@@ -1226,8 +1713,8 @@ export class PanelView {
       return [
         {
           value,
-          colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
-            .colorIndex,
+          colorIndex: series.hue === null ? null : colorIndexForHue(series.hue),
+          alpha: series.opacity,
         },
       ];
     });
@@ -1277,7 +1764,7 @@ export class PanelView {
   }
 
   private renderAnnotationList(
-    state: PanelState,
+    state: RenderPanelState,
     resolution: ResolvedAnnotations,
   ): void {
     const list = required<HTMLElement>(this.element, ".panel-annotations");
@@ -1466,112 +1953,568 @@ export class PanelView {
     input.select();
   }
 
-  private updateLegend(state: PanelState): void {
-    this.legendChips = state.series.map((series) => this.legendChip(series));
-    this.layoutLegend();
-  }
-
-  private layoutLegend(): void {
+  private updateLegend(state: RenderPanelState): void {
     const legend = required(this.element, ".panel-legend");
-    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-    const overflow = required<HTMLButtonElement>(
-      this.element,
-      ".legend-overflow",
+    legend.replaceChildren();
+    const counts = dimensionCounts(state.series as readonly ResolvedSeries[]);
+    legend.append(
+      this.legendCountToken("source", counts.sources, state),
+      ...this.focusChipElements(state),
+      this.legendCountToken("channel", counts.channels, state),
+      ...(state.ghost_mode === "ghost" ? [this.ghostToken(state)] : []),
+      this.colorRuleToken(state),
     );
-    const menuWasOpen = !menu.hidden;
-    const chips = this.legendChips;
-    legend.replaceChildren(...chips);
-    overflow.hidden = true;
+    const lineStyle = state.overrides.some(
+      (override) => override.dash !== null || override.width !== null,
+    )
+      ? "line style ◆ overridden"
+      : "line style flat";
+    required<HTMLElement>(this.element, ".panel-gesture-hint").textContent =
+      `· ${lineStyle} · hover explore · ⇧click focus · ⌥ mute · esc clear`;
+  }
 
-    let visibleCount = chips.length;
-    if (legend.scrollWidth > legend.clientWidth) {
-      overflow.hidden = false;
-      overflow.textContent = `+${String(chips.length)}`;
-      const gap = Number.parseFloat(getComputedStyle(legend).columnGap) || 0;
-      let used = 0;
-      visibleCount = 0;
-      for (const chip of chips) {
-        const next = used + (visibleCount === 0 ? 0 : gap) + chip.offsetWidth;
-        if (next > legend.clientWidth) break;
-        used = next;
-        visibleCount += 1;
-      }
+  private ghostToken(state: RenderPanelState): HTMLButtonElement {
+    const token = document.createElement("button");
+    token.className = "legend-ghost-token";
+    token.type = "button";
+    const ghosts = state.series.filter((series) => series.display === "ghost");
+    token.textContent = `${String(ghosts.length)} ghosts ▾`;
+    token.title = "Browse ghost series";
+    token.setAttribute("aria-haspopup", "dialog");
+    token.addEventListener("click", (event) => {
+      this.openRoster(
+        "source",
+        state,
+        event.currentTarget as HTMLElement,
+        false,
+        true,
+      );
+    });
+    return token;
+  }
+
+  private colorRuleToken(state: RenderPanelState): HTMLButtonElement {
+    const token = document.createElement("button");
+    token.className = "color-rule-token";
+    token.type = "button";
+    token.textContent = `color ← ${state.color_by}`;
+    token.title = "Choose a color rule and review overrides";
+    token.addEventListener("click", (event) => {
+      this.openRulesPopover(state, event.currentTarget as HTMLElement);
+    });
+    return token;
+  }
+
+  private updateBindings(state: RenderPanelState): void {
+    const container = required(this.element, ".panel-bindings");
+    container.replaceChildren();
+    for (const entry of bindingChipEntries(
+      this.callbacks.catalog(),
+      state,
+      this.callbacks.namedSets(),
+    )) {
+      const chip = document.createElement("button");
+      chip.className = "binding-chip";
+      chip.type = "button";
+      chip.textContent = entry.label;
+      chip.title = "Show binding members";
+      chip.addEventListener("click", (event) => {
+        this.openBindingPopover(entry, event.currentTarget as HTMLElement);
+      });
+      container.append(chip);
     }
-
-    const overflowCount = chips.length - visibleCount;
-    legend.replaceChildren(...chips.slice(0, visibleCount));
-    menu.replaceChildren(...chips.slice(visibleCount));
-
-    overflow.hidden = overflowCount === 0;
-    overflow.textContent = `+${String(overflowCount)}`;
-    overflow.setAttribute(
-      "aria-label",
-      `${String(overflowCount)} additional series`,
-    );
-    menu.hidden = overflowCount === 0 || !menuWasOpen;
-    this.syncLegendOverflowButton();
   }
 
-  private legendChip(series: PanelState["series"][number]): HTMLElement {
-    const chip = document.createElement("span");
-    chip.className = `legend-chip ${series.visible ? "" : "muted"}`;
-    chip.classList.toggle(
-      "highlighted",
-      this.lastState?.highlighted_sources.some(
-        (entry) => entry.path === series.path,
-      ) ?? false,
+  private updateGhostToggle(state: RenderPanelState): void {
+    const toggle = required<HTMLButtonElement>(
+      this.element,
+      ".panel-ghost-toggle",
     );
-    const body = document.createElement("button");
-    body.className = "legend-chip-body";
-    body.title = `${series.path} — click to toggle visibility`;
-    const line = document.createElement("span");
-    const style = resolveSeriesStyle(series.color_slot, series.dash);
-    line.className = `legend-line dash-${style.dash}`;
-    line.setAttribute("aria-hidden", "true");
-    line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
-    const name = document.createElement("span");
-    name.className = "legend-name";
-    name.textContent = signalLabel(series.path);
-    body.append(line, name);
-    body.addEventListener("click", () => {
-      this.callbacks.onToggleSeries(this.id, series.path);
-    });
-    body.addEventListener("mouseenter", () => {
-      this.setEmphasis(series.path);
-    });
-    body.addEventListener("mouseleave", () => {
-      this.setEmphasis(null);
-    });
-    const caret = document.createElement("button");
-    caret.className = "legend-chip-caret";
-    caret.textContent = "▾";
-    caret.title = `${series.path} — series inspector`;
-    caret.setAttribute("aria-haspopup", "true");
-    caret.addEventListener("click", (event) => {
-      this.openInspector(series.path, event.clientX, event.clientY);
-    });
-    chip.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      this.openInspector(series.path, event.clientX, event.clientY);
-    });
-    chip.append(body, caret);
-    return chip;
+    const ghost = state.ghost_mode === "ghost";
+    toggle.textContent = ghost ? "ghost" : "all";
+    toggle.title = ghost
+      ? "Show all series"
+      : "Show focused and rule-matched series only";
+    toggle.setAttribute("aria-pressed", String(ghost));
   }
 
-  private setEmphasis(path: string | null): void {
-    if (this.emphasizePath === path) return;
-    this.emphasizePath = path;
+  private legendCountToken(
+    dimension: LegendDimension,
+    count: number,
+    state: RenderPanelState,
+  ): HTMLButtonElement {
+    const token = document.createElement("button");
+    token.className = "legend-count-token";
+    token.textContent = legendTokenLabel(
+      this.callbacks.catalog(),
+      state,
+      dimension,
+      count,
+    );
+    token.title = `Browse ${dimension} roster`;
+    token.setAttribute("aria-haspopup", "dialog");
+    token.addEventListener("click", (event) => {
+      this.openRoster(dimension, state, event.currentTarget as HTMLElement);
+    });
+    return token;
+  }
+
+  private focusChipElements(state: RenderPanelState): HTMLElement[] {
+    const result = focusChips(this.callbacks.catalog(), state);
+    const chips = result.chips.map((focus) => {
+      const chip = document.createElement("span");
+      chip.className = "matrix-focus-chip";
+      const matching = state.series.filter(
+        (series) => focusMatches(focus.entry, series.ref) && series.visible,
+      );
+      const keys = new Map<string, number | null>();
+      for (const series of matching) {
+        if (!keys.has(series.ref.channel))
+          keys.set(series.ref.channel, series.hue);
+      }
+      if (keys.size === 0) keys.set("focus", focus.hue);
+      const markers = [...keys.values()].map((hue) => {
+        const marker = document.createElement("span");
+        marker.className = "matrix-focus-key";
+        marker.style.color =
+          hue === null
+            ? "var(--fg-4)"
+            : `var(--series-${String(colorIndexForHue(hue) + 1)})`;
+        marker.textContent = "—";
+        return marker;
+      });
+      const name = document.createElement("span");
+      name.textContent = `${focus.overridden ? "◆ " : ""}${focus.label}`;
+      const remove = document.createElement("button");
+      remove.className = "matrix-focus-remove";
+      remove.type = "button";
+      remove.textContent = "✕";
+      remove.title = `Remove focus: ${focus.label}`;
+      remove.addEventListener("click", () => {
+        this.callbacks.onFocusToggle(this.id, focus.entry);
+      });
+      chip.append(...markers, name, remove);
+      return chip;
+    });
+    if (result.overflow > 0) {
+      const more = document.createElement("button");
+      more.className = "matrix-focus-overflow";
+      more.textContent = `+${String(result.overflow)}`;
+      more.title = "Browse additional focused entries";
+      more.addEventListener("click", (event) => {
+        this.openRoster(
+          "source",
+          state,
+          event.currentTarget as HTMLElement,
+          true,
+        );
+      });
+      chips.push(more);
+    }
+    return chips;
+  }
+
+  private setEmphasis(paths: readonly string[] | string | null): void {
+    const next =
+      paths === null
+        ? null
+        : new Set(typeof paths === "string" ? [paths] : paths);
+    if (setsEqual(this.emphasizePaths, next)) return;
+    this.emphasizePaths = next;
     if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderData(
+      this.renderForMode(
         this.lastState,
         this.lastTiles,
         this.lastSamples,
         this.lastWindow,
       );
+      this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
   }
 
-  private openInspector(path: string, clientX: number, clientY: number): void {
+  private openRoster(
+    dimension: LegendDimension,
+    state: RenderPanelState,
+    anchor: HTMLElement,
+    focusedOnly = false,
+    ghostOnly = false,
+  ): void {
+    this.closeRoster();
+    const roster = document.createElement("div");
+    roster.className = "matrix-roster";
+    if (ghostOnly) roster.dataset.filter = "ghost";
+    roster.setAttribute("role", "dialog");
+    roster.setAttribute("aria-label", `${dimension} roster`);
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "matrix-roster-search";
+    search.placeholder = dimension === "source" ? "* @ source" : "channel @ *";
+    search.setAttribute("aria-label", `Filter ${dimension} roster`);
+    const rows = document.createElement("div");
+    rows.className = "matrix-roster-rows";
+    const renderRows = (): void => {
+      const all = matrixLegendRows(
+        this.callbacks.catalog(),
+        state,
+        dimension,
+        search.value,
+      ).filter(
+        (row) => (!focusedOnly || row.focused) && (!ghostOnly || row.ghosted),
+      );
+      const slice = virtualSlice(all.length, rows.scrollTop, 224, 24);
+      rows.replaceChildren();
+      rows.style.height = `${String(slice.totalHeight)}px`;
+      rows.style.paddingTop = `${String(slice.topPadding)}px`;
+      for (const row of all.slice(slice.start, slice.end)) {
+        const button = document.createElement("button");
+        button.className = "matrix-roster-row";
+        button.type = "button";
+        button.innerHTML = `<span class="matrix-roster-key"></span><span class="matrix-roster-label"></span><span class="matrix-roster-count"></span>`;
+        const key = required<HTMLElement>(button, ".matrix-roster-key");
+        key.style.color =
+          row.hue === null
+            ? "var(--fg-4)"
+            : `var(--series-${String(colorIndexForHue(row.hue) + 1)})`;
+        key.textContent = row.focused ? "✓" : "—";
+        required(button, ".matrix-roster-label").textContent =
+          `${row.overridden ? "◆ " : ""}${row.label}`;
+        required(button, ".matrix-roster-count").textContent =
+          `×${String(row.count)}`;
+        const matching = state.series.filter((series) =>
+          dimension === "source"
+            ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
+                series.ref.source_key) === row.value
+            : series.ref.channel === row.value,
+        );
+        const paths = matching.map((series) => series.path);
+        button.addEventListener("mouseenter", () => this.setEmphasis(paths));
+        button.addEventListener("mouseleave", () => this.setEmphasis(null));
+        button.addEventListener("click", (event) => {
+          const entry = this.focusEntryForRow(dimension, row, state);
+          if (event.altKey)
+            this.callbacks.onMuteSelector(this.id, row.selector);
+          else this.callbacks.onFocusToggle(this.id, entry);
+        });
+        rows.append(button);
+      }
+    };
+    search.addEventListener("input", renderRows);
+    rows.addEventListener("scroll", renderRows);
+    roster.append(search, rows);
+    this.element.append(roster);
+    const rect = this.element.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    roster.style.left = `${String(
+      clamp(anchorRect.left - rect.left, 4, Math.max(4, rect.width - 220)),
+    )}px`;
+    roster.style.top = `${String(
+      clamp(
+        anchorRect.bottom - rect.top + 4,
+        4,
+        Math.max(4, rect.height - 260),
+      ),
+    )}px`;
+    renderRows();
+    search.focus();
+    const onPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && roster.contains(event.target)) return;
+      this.closeRoster();
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") this.closeRoster();
+    };
+    document.addEventListener("pointerdown", onPointer, { capture: true });
+    document.addEventListener("keydown", onKey);
+    this.rosterCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer, { capture: true });
+      document.removeEventListener("keydown", onKey);
+      roster.remove();
+    };
+  }
+
+  private focusEntryForRow(
+    dimension: LegendDimension,
+    row: MatrixLegendRow,
+    state: RenderPanelState,
+  ): FocusEntry {
+    const series = state.series.find((entry) =>
+      dimension === "source"
+        ? (this.callbacks.catalog().get(entry.ref)?.sourceName ??
+            entry.ref.source_key) === row.value
+        : entry.ref.channel === row.value,
+    );
+    return dimension === "source"
+      ? {
+          kind: "source",
+          ref: null,
+          source_key: series?.ref.source_key ?? row.value,
+          channel: null,
+        }
+      : { kind: "channel", ref: null, source_key: null, channel: row.value };
+  }
+
+  private closeRoster(): void {
+    this.rosterCleanup?.();
+    this.rosterCleanup = null;
+  }
+
+  private openBindingPopover(
+    entry: BindingChipEntry,
+    anchor: HTMLElement,
+  ): void {
+    this.closeBindingPopover();
+    const popover = document.createElement("div");
+    popover.className = "binding-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", `${entry.label} binding members`);
+    const title = document.createElement("div");
+    title.className = "binding-popover-title";
+    title.textContent = entry.label;
+    const rows = document.createElement("div");
+    rows.className = "binding-popover-rows";
+    const removeBinding = document.createElement("button");
+    removeBinding.className = "binding-popover-remove";
+    removeBinding.type = "button";
+    removeBinding.textContent = "remove binding";
+    removeBinding.addEventListener("click", () => {
+      this.callbacks.onRemoveBinding(this.id, entry.bindingIndex);
+      this.closeBindingPopover();
+    });
+    const renderRows = (): void => {
+      const slice = virtualSlice(entry.refs.length, rows.scrollTop, 224, 24);
+      rows.replaceChildren();
+      rows.style.height = `${String(slice.totalHeight)}px`;
+      rows.style.paddingTop = `${String(slice.topPadding)}px`;
+      for (const ref of entry.refs.slice(slice.start, slice.end)) {
+        const row = document.createElement("div");
+        row.className = "binding-popover-row";
+        const path = document.createElement("button");
+        path.className = "binding-popover-member";
+        path.type = "button";
+        path.textContent =
+          this.callbacks.pathForRef(ref) ?? `${ref.source_key}/${ref.channel}`;
+        path.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const rect = path.getBoundingClientRect();
+          this.closeBindingPopover();
+          this.openInspector(path.textContent, rect.left, rect.bottom);
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "✕";
+        remove.title = "Remove series from binding";
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.callbacks.onRemoveSeries(this.id, ref);
+          this.closeBindingPopover();
+        });
+        row.append(path, remove);
+        rows.append(row);
+      }
+    };
+    rows.addEventListener("scroll", renderRows);
+    popover.append(title, rows, removeBinding);
+    this.element.append(popover);
+    const panelRect = this.element.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    popover.style.left = `${String(
+      clamp(
+        anchorRect.left - panelRect.left,
+        4,
+        Math.max(4, panelRect.width - 240),
+      ),
+    )}px`;
+    popover.style.top = `${String(
+      clamp(
+        anchorRect.bottom - panelRect.top + 4,
+        4,
+        Math.max(4, panelRect.height - 280),
+      ),
+    )}px`;
+    renderRows();
+    const onPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && popover.contains(event.target))
+        return;
+      this.closeBindingPopover();
+    };
+    document.addEventListener("pointerdown", onPointer, { capture: true });
+    this.bindingCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer, { capture: true });
+      popover.remove();
+    };
+  }
+
+  private closeBindingPopover(): void {
+    this.bindingCleanup?.();
+    this.bindingCleanup = null;
+  }
+
+  private openRulesPopover(state: RenderPanelState, anchor: HTMLElement): void {
+    this.closeRulesPopover();
+    const popover = document.createElement("div");
+    popover.className = "rules-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", "Color rules");
+    const heading = document.createElement("div");
+    heading.className = "rules-popover-title";
+    const panelNumber = /^panel-(\d+)$/.exec(this.id)?.[1] ?? this.id;
+    heading.textContent = `STYLE RULES — PANEL ${panelNumber}`;
+    const rules = document.createElement("div");
+    rules.className = "rules-rule-list";
+    const colorRow = document.createElement("div");
+    colorRow.className = "rules-rule-row rules-color-rule";
+    const colorDimension = document.createElement("button");
+    colorDimension.type = "button";
+    colorDimension.className = "rules-color-dimension";
+    colorDimension.textContent = `color ← ${state.color_by}`;
+    colorDimension.setAttribute("aria-expanded", "false");
+    const palette = document.createElement("span");
+    palette.className = "rules-palette";
+    for (let index = 1; index <= 8; index += 1) {
+      const swatch = document.createElement("span");
+      swatch.className = "rules-palette-swatch";
+      swatch.style.background = `var(--series-${String(index)})`;
+      swatch.setAttribute("aria-hidden", "true");
+      palette.append(swatch);
+    }
+    const dimensions = document.createElement("div");
+    dimensions.className = "rules-dimension-choice";
+    dimensions.hidden = true;
+    for (const dimension of [
+      "focus",
+      "source",
+      "channel",
+      "set",
+      "attr",
+    ] as const) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rules-dimension";
+      button.dataset.dimension = dimension;
+      button.textContent = dimension;
+      button.classList.toggle("active", state.color_by === dimension);
+      button.addEventListener("click", () => {
+        this.callbacks.onSetColorBy(this.id, dimension);
+        this.closeRulesPopover();
+      });
+      dimensions.append(button);
+    }
+    const channelShortcut = document.createElement("button");
+    channelShortcut.type = "button";
+    channelShortcut.className = "rules-channel-shortcut";
+    channelShortcut.textContent = "color ← channel";
+    channelShortcut.addEventListener("click", () => {
+      this.callbacks.onSetColorBy(this.id, "channel");
+      this.closeRulesPopover();
+    });
+    colorDimension.addEventListener("click", () => {
+      dimensions.hidden = !dimensions.hidden;
+      colorDimension.setAttribute("aria-expanded", String(!dimensions.hidden));
+    });
+    colorRow.append(colorDimension, channelShortcut, palette, dimensions);
+    rules.append(colorRow);
+    for (const text of ["dash ← — flat", "width ← — flat"]) {
+      const row = document.createElement("div");
+      row.className = "rules-rule-row rules-rule-static";
+      row.textContent = text;
+      rules.append(row);
+    }
+    const overridesTitle = document.createElement("div");
+    overridesTitle.className = "rules-overrides-title";
+    const input = this.lastInputState;
+    const overrides =
+      input === null
+        ? []
+        : appliedOverrides(
+            this.callbacks.catalog(),
+            input,
+            this.callbacks.namedSets(),
+          );
+    overridesTitle.textContent = `OVERRIDES · ${String(overrides.length)}`;
+    const rows = document.createElement("div");
+    rows.className = "rules-overrides";
+    const renderOverrides = (): void => {
+      const slice = virtualSlice(overrides.length, rows.scrollTop, 224, 28);
+      rows.replaceChildren();
+      rows.style.height = `${String(slice.totalHeight)}px`;
+      rows.style.paddingTop = `${String(slice.topPadding)}px`;
+      for (const item of overrides.slice(slice.start, slice.end)) {
+        const row = document.createElement("div");
+        row.className = "rules-override-row";
+        const key = document.createElement("span");
+        key.className = "rules-override-key";
+        key.textContent = overrideKey(item.override);
+        const target = document.createElement("span");
+        target.className = "rules-override-target";
+        target.textContent = overrideTarget(item.override, this.callbacks);
+        target.title = target.textContent;
+        const fields = document.createElement("span");
+        fields.className = "rules-override-fields";
+        fields.textContent = overrideFields(item.override);
+        const revert = document.createElement("button");
+        revert.type = "button";
+        revert.textContent = "revert";
+        revert.title = `Revert ${target.textContent}`;
+        revert.addEventListener("click", () => {
+          this.callbacks.onRemoveOverride(this.id, item.index);
+          this.closeRulesPopover();
+        });
+        row.append(key, target, fields, revert);
+        rows.append(row);
+      }
+    };
+    rows.addEventListener("scroll", renderOverrides);
+    const footer = document.createElement("button");
+    footer.type = "button";
+    footer.className = "rules-revert-all";
+    footer.textContent = "revert all";
+    footer.disabled = overrides.length === 0;
+    footer.addEventListener("click", () => {
+      this.callbacks.onClearOverrides(this.id);
+      this.closeRulesPopover();
+    });
+    popover.append(heading, rules, overridesTitle, rows, footer);
+    this.element.append(popover);
+    const panelRect = this.element.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    popover.style.left = `${String(
+      clamp(
+        anchorRect.left - panelRect.left,
+        4,
+        Math.max(4, panelRect.width - 280),
+      ),
+    )}px`;
+    popover.style.top = `${String(
+      clamp(
+        anchorRect.bottom - panelRect.top + 4,
+        4,
+        Math.max(4, panelRect.height - 340),
+      ),
+    )}px`;
+    renderOverrides();
+    const onPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && popover.contains(event.target))
+        return;
+      this.closeRulesPopover();
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") this.closeRulesPopover();
+    };
+    document.addEventListener("pointerdown", onPointer, { capture: true });
+    document.addEventListener("keydown", onKey);
+    this.rulesCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer, { capture: true });
+      document.removeEventListener("keydown", onKey);
+      popover.remove();
+    };
+  }
+
+  private closeRulesPopover(): void {
+    this.rulesCleanup?.();
+    this.rulesCleanup = null;
+  }
+
+  openInspector(path: string, clientX: number, clientY: number): void {
     this.closeInspector();
     const series = this.lastState?.series.find((entry) => entry.path === path);
     if (series === undefined) return;
@@ -1592,10 +2535,10 @@ export class PanelView {
       swatch.setAttribute("aria-label", `Colour slot ${String(slot)}`);
       swatch.classList.toggle(
         "active",
-        resolveSeriesStyle(series.color_slot, "solid").colorIndex + 1 === slot,
+        colorIndexForHue(series.hue) + 1 === slot,
       );
       swatch.addEventListener("click", () => {
-        this.callbacks.onSetSeriesStyle(this.id, path, {
+        this.callbacks.onSetSeriesStyle(this.id, series.ref, {
           color_slot: slot,
           dash: series.dash,
           width: series.width,
@@ -1612,8 +2555,8 @@ export class PanelView {
       button.textContent = dash;
       button.classList.toggle("active", series.dash === dash);
       button.addEventListener("click", () => {
-        this.callbacks.onSetSeriesStyle(this.id, path, {
-          color_slot: series.color_slot,
+        this.callbacks.onSetSeriesStyle(this.id, series.ref, {
+          color_slot: series.hue ?? 1,
           dash,
           width: series.width,
         });
@@ -1629,8 +2572,8 @@ export class PanelView {
     width.value = String(series.width);
     width.setAttribute("aria-label", "Line width");
     width.addEventListener("change", () => {
-      this.callbacks.onSetSeriesStyle(this.id, path, {
-        color_slot: series.color_slot,
+      this.callbacks.onSetSeriesStyle(this.id, series.ref, {
+        color_slot: series.hue ?? 1,
         dash: series.dash,
         width: Number(width.value),
       });
@@ -1653,20 +2596,27 @@ export class PanelView {
       });
       transforms.append(button);
     }
-    const localPath = this.callbacks.localPathFor(path);
-    const highlight =
-      localPath === null ? null : document.createElement("button");
-    if (highlight !== null) {
-      const active =
-        this.lastState?.highlighted_sources.some(
-          (entry) => entry.path === path,
-        ) ?? false;
-      highlight.className = "inspector-action";
-      highlight.textContent = active ? "Clear highlight" : "Highlight";
-      highlight.addEventListener("click", () => {
+    const override =
+      this.lastInputState === null
+        ? undefined
+        : overrideFor(this.lastInputState, series.ref);
+    let overrideAction: HTMLDivElement | null = null;
+    if (override !== undefined) {
+      const selectedOverride = override;
+      overrideAction = document.createElement("div");
+      overrideAction.className = "inspector-override";
+      overrideAction.textContent = `◆ override · ${overrideTarget(selectedOverride, this.callbacks)}`;
+      const revert = document.createElement("button");
+      revert.type = "button";
+      revert.textContent = "revert";
+      const overrideIndex =
+        this.lastInputState?.overrides.indexOf(selectedOverride) ?? -1;
+      revert.addEventListener("click", () => {
+        if (overrideIndex !== -1)
+          this.callbacks.onRemoveOverride(this.id, overrideIndex);
         this.closeInspector();
-        this.callbacks.onToggleHighlight(this.id, path);
       });
+      overrideAction.append(revert);
     }
     const useAsX = document.createElement("button");
     useAsX.className = "inspector-action";
@@ -1680,14 +2630,14 @@ export class PanelView {
     remove.textContent = "remove";
     remove.addEventListener("click", () => {
       this.closeInspector();
-      this.callbacks.onRemoveSeries(this.id, path);
+      this.callbacks.onRemoveSeries(this.id, series.ref);
     });
     popover.append(
       pathRow,
       slots,
       dashes,
       transforms,
-      ...(highlight === null ? [] : [highlight]),
+      ...(overrideAction === null ? [] : [overrideAction]),
       useAsX,
       remove,
     );
@@ -1726,30 +2676,39 @@ export class PanelView {
     this.inspectorPath = null;
     this.element.querySelector(".series-inspector")?.remove();
   }
+}
 
-  private setLegendOverflowOpen(open: boolean): void {
-    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-    if (required<HTMLButtonElement>(this.element, ".legend-overflow").hidden) {
-      return;
-    }
-    menu.hidden = !open;
-    this.syncLegendOverflowButton();
-  }
-
-  private closeLegendOverflow(): void {
-    this.setLegendOverflowOpen(false);
-  }
-
-  private syncLegendOverflowButton(): void {
-    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-    const overflow = required<HTMLButtonElement>(
-      this.element,
-      ".legend-overflow",
+function overrideTarget(
+  override: SeriesOverride,
+  callbacks: Pick<PanelCallbacks, "pathForRef">,
+): string {
+  if (override.target_selector !== null) return override.target_selector;
+  if (override.target_ref !== null) {
+    return (
+      callbacks.pathForRef(override.target_ref) ??
+      `${override.target_ref.source_key}/${override.target_ref.channel}`
     );
-    const open = !menu.hidden;
-    overflow.setAttribute("aria-expanded", String(open));
-    overflow.title = open ? "Hide additional series" : "Show additional series";
   }
+  return "unknown target";
+}
+
+function overrideKey(override: SeriesOverride): string {
+  if (override.color_slot !== null) return "color";
+  if (override.dash !== null) return "dash";
+  if (override.width !== null) return "width";
+  return "style";
+}
+
+function overrideFields(override: SeriesOverride): string {
+  return [
+    override.width === null ? null : `width ${String(override.width)}`,
+    override.dash === null ? null : `dash ${override.dash}`,
+    override.opacity === null ? null : `opacity ${String(override.opacity)}`,
+    override.visible === null ? null : override.visible ? "visible" : "hidden",
+    override.color_slot === null ? null : "highlight",
+  ]
+    .filter((field): field is string => field !== null)
+    .join(" · ");
 }
 
 function yLabel(units: readonly (string | null)[]): string {
@@ -1866,23 +2825,25 @@ function panelMarkup(): string {
           `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
       ).join("")}</span>
       <button class="axis-chip x-chip" hidden></button>
-      <span class="panel-legend"></span>
-      <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
+      <span class="panel-bindings"></span>
+      <button class="panel-ghost-toggle" type="button" aria-pressed="false">all</button>
       <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
       <span class="panel-mode-note" hidden></span>
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">
-          <span class="panel-split-label" aria-hidden="true">split</span>
-          <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right">→</button>
-          <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down (N)">↓</button>
+          <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right — new panel">→</button>
+          <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down — new panel">↓</button>
         </span>
         <button class="panel-action panel-maximize" title="Maximize panel">${MAXIMIZE_GLYPH}</button>
         <button class="panel-action panel-close" title="Close panel">✕</button>
       </span>
     </header>
-    <div class="legend-overflow-menu" role="group" aria-label="Additional plotted series" hidden></div>
+    <div class="panel-legend-strip">
+      <span class="panel-legend"></span>
+      <span class="panel-gesture-hint">color ← source · hover explore · ⇧click focus · ⌥ mute · esc clear</span>
+    </div>
     <div class="plot-wrap">
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>

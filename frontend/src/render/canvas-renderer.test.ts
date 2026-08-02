@@ -5,10 +5,10 @@ import {
   dashPattern,
   formatTicks,
   gutterWidth,
-  resolveSeriesStyle,
   ticks,
   type Palette,
   type RenderOptions,
+  type SeriesStroke,
 } from "./canvas-renderer";
 
 interface DrawCall {
@@ -26,11 +26,26 @@ function recordingContext(charWidth = 6): {
   };
   let fill = "";
   let stroke = "";
+  let alpha = 1;
+  let lineWidth = 1;
   const stub = {
     font: "",
     textAlign: "start",
     textBaseline: "alphabetic",
-    lineWidth: 1,
+    get lineWidth(): number {
+      return lineWidth;
+    },
+    set lineWidth(value: number) {
+      lineWidth = value;
+      push("=lineWidth", value);
+    },
+    get globalAlpha(): number {
+      return alpha;
+    },
+    set globalAlpha(value: number) {
+      alpha = value;
+      push("=globalAlpha", value);
+    },
     get fillStyle(): string {
       return fill;
     },
@@ -136,6 +151,7 @@ const TEST_PALETTE: Palette = {
   border: "#2e3340",
   fg2: "#a9b0bc",
   fg3: "#737985",
+  fg4: "#4d5563",
   grid: "#1a1d24",
   series: [
     "#0072bd",
@@ -186,8 +202,12 @@ function renderOnce(
     {
       xLabel: "time (s)",
       yLabel: "value",
-      colorSlots: series.map((_, index) => index + 1),
-      dashes: series.map(() => "solid"),
+      styles: series.map<SeriesStroke>((_, index) => ({
+        hue: index + 1,
+        dash: "solid",
+        width: 1.4,
+        alpha: 1,
+      })),
       yRange: [-1, 5],
       ...options,
     },
@@ -252,45 +272,18 @@ describe("formatTicks", () => {
 
 describe("gutterWidth", () => {
   it("keeps the default gutter for short labels", () => {
-    expect(gutterWidth(formatTicks([0, 100, 300]), 6)).toBe(52);
+    expect(gutterWidth(formatTicks([0, 100, 300]), 6)).toBe(48);
   });
 
   it("grows so long labels clear the rotated axis title", () => {
     expect(gutterWidth(formatTicks([0, -120_000]), 6)).toBeGreaterThan(52);
   });
-});
 
-describe("resolveSeriesStyle", () => {
-  it("bands the dash class by colour slot", () => {
-    expect(resolveSeriesStyle(1, "solid").dash).toBe("solid");
-    expect(resolveSeriesStyle(7, "solid").dash).toBe("solid");
-    expect(resolveSeriesStyle(8, "solid").dash).toBe("dash");
-    expect(resolveSeriesStyle(14, "solid").dash).toBe("dash");
-    expect(resolveSeriesStyle(15, "solid").dash).toBe("dot");
-  });
-
-  it("folds the colour index onto the MATLAB-style cycle", () => {
-    expect(resolveSeriesStyle(1, "solid").colorIndex).toBe(0);
-    expect(resolveSeriesStyle(8, "solid").colorIndex).toBe(0);
-    expect(resolveSeriesStyle(9, "solid").colorIndex).toBe(1);
-  });
-
-  it("lets an explicit user dash win and handles malformed slots", () => {
-    expect(resolveSeriesStyle(9, "dot").dash).toBe("dot");
-    expect(resolveSeriesStyle(0, "solid").colorIndex).toBeGreaterThanOrEqual(0);
-    expect(resolveSeriesStyle(-3, "solid").colorIndex).toBeGreaterThanOrEqual(
-      0,
-    );
-  });
-
-  it("gives the first 21 slots distinct composite identities", () => {
-    const seen = new Set<string>();
-    for (let slot = 1; slot <= 21; slot += 1) {
-      const style = resolveSeriesStyle(slot, "solid");
-      const key = `${String(style.colorIndex)}:${style.dash}`;
-      expect(seen.has(key)).toBe(false);
-      seen.add(key);
-    }
+  it("tightens four-character labels while retaining five-character clearance", () => {
+    const four = gutterWidth(["1234"], 6);
+    const five = gutterWidth(["12345"], 6);
+    expect(five).toBeGreaterThan(four);
+    expect(five).toBeGreaterThanOrEqual(5 * 6 + 24);
   });
 });
 
@@ -333,9 +326,10 @@ describe("render", () => {
         {
           points: [0, 0, 1, 1, 2, 2],
           colorValues: [0, 0.5, 1],
-          colorIndex: 0,
+          hue: 1,
           dash: "solid",
           width: 1.4,
+          alpha: 1,
         },
       ],
       {
@@ -366,9 +360,10 @@ describe("render", () => {
         {
           points: [0, 0, 1, 1],
           colorValues: [0.5, 0.5],
-          colorIndex: 0,
+          hue: 1,
           dash: "solid",
           width: 1.4,
+          alpha: 1,
         },
       ],
       {
@@ -427,9 +422,10 @@ describe("render", () => {
       [
         {
           points: [0, 0, 1, 1, Number.NaN, Number.NaN, 2, 2],
-          colorIndex: 0,
+          hue: 1,
           dash: "solid",
           width: 1.4,
+          alpha: 1,
         },
       ],
       {
@@ -447,6 +443,45 @@ describe("render", () => {
     expect(renderer.lastLayout()?.xRange).toEqual({ min: 0, max: 2 });
   });
 
+  it("renders ghost paths neutrally even when color values are present", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1, 2, 2],
+          colorValues: [0, 0.5, 1],
+          hue: null,
+          dash: "solid",
+          width: 1,
+          alpha: 0.5,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 2],
+        yRange: [0, 2],
+      },
+    );
+
+    expect(calls).toContainEqual({
+      op: "=strokeStyle",
+      args: [TEST_PALETTE.fg4],
+    });
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
+    expect(calls).not.toContainEqual({
+      op: "=strokeStyle",
+      args: ["#404040"],
+    });
+    expect(calls).not.toContainEqual({
+      op: "=strokeStyle",
+      args: ["#bfbfbf"],
+    });
+  });
+
   it("records the plot layout and supports inline axes", () => {
     const { context } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(640, 360, context));
@@ -458,8 +493,7 @@ describe("render", () => {
       {
         xLabel: "time (s)",
         yLabel: "value",
-        colorSlots: [],
-        dashes: [],
+        styles: [],
         yRange: [1, 5],
         axisStyle: "inline",
       },
@@ -495,7 +529,12 @@ describe("render", () => {
         tile("a", [{ t0: 0, t1: 1, v: 1 }]),
         tile("b", [{ t0: 0, t1: 1, v: 2 }]),
       ],
-      { colorSlots: [1, 3] },
+      {
+        styles: [
+          { hue: 1, dash: "solid", width: 1.4, alpha: 1 },
+          { hue: 3, dash: "solid", width: 1.4, alpha: 1 },
+        ],
+      },
     );
     const strokes = calls
       .filter((call) => call.op === "=strokeStyle")
@@ -504,29 +543,83 @@ describe("render", () => {
     expect(strokes).toContain("#edb120");
   });
 
-  it("dims series from explicit per-series flags", () => {
-    const calls = renderOnce(
-      [
-        tile("a", [{ t0: 0, t1: 1, v: 1 }]),
-        tile("b", [{ t0: 0, t1: 1, v: 2 }]),
-      ],
-      { dimmed: [false, true] },
-    );
+  it("draws a ghost with the fixed neutral stroke", () => {
+    const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
+      styles: [{ hue: null, dash: "solid", width: 1.3, alpha: 0.5 }],
+    });
     expect(
       calls.filter(
         (call) =>
-          call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.fg3,
+          call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.fg4,
       ),
     ).toHaveLength(1);
+    expect(calls).toContainEqual({ op: "=lineWidth", args: [1.3] });
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
+    expect(calls).toContainEqual({ op: "setLineDash", args: [[]] });
   });
 
-  it("dashes the first slot after the MATLAB color cycle", () => {
+  it("applies explicit hue tokens and emphasis alpha math", () => {
+    const calls = renderOnce(
+      [
+        tile("a", [{ t0: 0, t1: 1, v: 1 }]),
+        tile("b", [{ t0: 0, t1: 1, v: 2 }]),
+        tile("c", [{ t0: 0, t1: 1, v: 3 }]),
+      ],
+      {
+        styles: [
+          { hue: 2, dash: "solid", width: 1.2, alpha: 0.6 },
+          { hue: 5, dash: "dot", width: 1.4, alpha: 0.8 },
+          { hue: null, dash: "solid", width: 1, alpha: 0.5 },
+        ],
+        emphasisIndex: 0,
+      },
+    );
+    const strokes = calls
+      .filter((call) => call.op === "=strokeStyle")
+      .map((call) => call.args[0]);
+    expect(strokes).toContain(TEST_PALETTE.series[1]);
+    expect(strokes).toContain(TEST_PALETTE.series[4]);
+    expect(strokes).toContain(TEST_PALETTE.fg4);
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [1] });
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.25] });
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
+    expect(calls).toContainEqual({ op: "=lineWidth", args: [1.6] });
+  });
+
+  it("multiplies a dimmed path's configured alpha", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1],
+          hue: 1,
+          dash: "solid",
+          width: 1.4,
+          alpha: 0.8,
+          dimmed: true,
+        },
+      ],
+      { xLabel: "x", yLabel: "y", xRange: [0, 1], yRange: [0, 1] },
+    );
+
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.4] });
+  });
+
+  it("keeps manual dash independent from hue", () => {
     const calls = renderOnce(
       [
         tile("a", [{ t0: 0, t1: 1, v: 1 }]),
         tile("b", [{ t0: 0, t1: 1, v: 2 }]),
       ],
-      { colorSlots: [1, 8] },
+      {
+        styles: [
+          { hue: 1, dash: "solid", width: 1.4, alpha: 1 },
+          { hue: 1, dash: "dash", width: 1.4, alpha: 1 },
+        ],
+      },
     );
     const patterns = calls
       .filter((call) => call.op === "setLineDash")

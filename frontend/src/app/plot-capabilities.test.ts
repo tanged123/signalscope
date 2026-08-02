@@ -127,6 +127,106 @@ test("XY capabilities share time anchors and report X, Y and C statistics", () =
   ).toBe("Δt 2.0000 s · Δx 4.0000 · Δy 6.0000 · Δc 20.0000");
 });
 
+test("series hit adapters use rendered traces and skip invisible series", () => {
+  const xy = prepareXyPlot({
+    x: { path: "demo/x", values: [0, 5, 10] },
+    series: [
+      {
+        path: "hidden/y",
+        colorIndex: 0,
+        visible: false,
+        trace: { time: [0, 1, 2], x: [0, 5, 10], y: [0, 5, 10] },
+        colorValues: null,
+      },
+      {
+        path: "visible/y",
+        colorIndex: 1,
+        visible: true,
+        trace: { time: [0, 1, 2], x: [0, 5, 10], y: [10, 5, 0] },
+        colorValues: null,
+      },
+    ],
+    color: null,
+    window: { t0: 0, t1: 2 },
+  });
+
+  expect(xy.hitAdapter.seriesAt(layout, 50, 50, 2)).toEqual({
+    path: "visible/y",
+    distance: 0,
+  });
+  expect(xy.hitAdapter.seriesAt(layout, 0, 100, 2)).toBeNull();
+});
+
+test("FFT and histogram hit adapters select rendered traces", () => {
+  const fft = prepareFftPlot({
+    series: [
+      {
+        path: "hidden/spectrum",
+        colorIndex: 0,
+        visible: false,
+        frequency: [0, 5, 10],
+        amplitudeDb: [0, 10, 0],
+      },
+      {
+        path: "visible/spectrum",
+        colorIndex: 1,
+        frequency: [0, 5, 10],
+        amplitudeDb: [10, 0, 10],
+      },
+    ],
+  });
+  expect(fft.hitAdapter.seriesAt(layout, 25, 50, 1)).toEqual({
+    path: "visible/spectrum",
+    distance: 0,
+  });
+  expect(fft.hitAdapter.seriesAt(layout, 50, 50, 1)).toBeNull();
+
+  const histogram = prepareHistogramPlot({
+    edges: [0, 5, 10],
+    series: [
+      {
+        path: "hidden/histogram",
+        colorIndex: 0,
+        visible: false,
+        counts: [2, 8],
+        sourceValues: [],
+      },
+      {
+        path: "visible/histogram",
+        colorIndex: 1,
+        counts: [2, 8],
+        sourceValues: [],
+      },
+    ],
+  });
+  expect(histogram.hitAdapter.seriesAt(layout, 25, 80, 1)).toEqual({
+    path: "visible/histogram",
+    distance: 0,
+  });
+  expect(histogram.hitAdapter.seriesAt(layout, 75, 50, 1)).toBeNull();
+});
+
+test("XY hit adapters report the projected point distance", () => {
+  const xy = prepareXyPlot({
+    x: { path: "demo/x", values: [5] },
+    series: [
+      {
+        path: "demo/y",
+        colorIndex: 0,
+        trace: { time: [0], x: [5], y: [5] },
+        colorValues: null,
+      },
+    ],
+    color: null,
+    window: { t0: 0, t1: 1 },
+  });
+
+  expect(xy.hitAdapter.seriesAt(layout, 53, 54, 6)).toEqual({
+    path: "demo/y",
+    distance: 5,
+  });
+});
+
 test("XY capabilities sample colour on the focused trace's timebase", () => {
   const plot = prepareXyPlot({
     x: { path: "demo/x", values: [1, 3, 6, 8] },

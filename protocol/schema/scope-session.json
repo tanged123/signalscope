@@ -1,5 +1,5 @@
 {
-  "schema_version": 16,
+  "schema_version": 19,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -37,14 +37,74 @@
         "mode": "TimeMode"
       }
     },
-    "SeriesState": {
+    "SeriesRef": {
+      "kind": "object",
+      "fields": { "source_key": "string", "channel": "string" }
+    },
+    "BindingKind": { "kind": "enum", "variants": ["query", "pick", "set"] },
+    "Binding": {
       "kind": "object",
       "fields": {
-        "path": "string",
-        "color_slot": "u8",
-        "dash": "DashStyle",
-        "width": "f32",
-        "visible": "bool"
+        "kind": "BindingKind",
+        "selector": "string?",
+        "refs": "SeriesRef[]",
+        "set_id": "string?"
+      }
+    },
+    "SeriesOverride": {
+      "kind": "object",
+      "fields": {
+        "target_ref": "SeriesRef?",
+        "target_selector": "string?",
+        "color_slot": "u8?",
+        "dash": "DashStyle?",
+        "width": "f32?",
+        "opacity": "f32?",
+        "visible": "bool?"
+      }
+    },
+    "FocusKind": {
+      "kind": "enum",
+      "variants": ["series", "source", "channel"]
+    },
+    "FocusEntry": {
+      "kind": "object",
+      "fields": {
+        "kind": "FocusKind",
+        "ref": "SeriesRef?",
+        "source_key": "string?",
+        "channel": "string?"
+      }
+    },
+    "GhostMode": {
+      "kind": "enum",
+      "variants": ["ghost", "all"],
+      "default": "all"
+    },
+    "StyleDimension": {
+      "kind": "enum",
+      "variants": ["focus", "source", "channel", "set", "attr"],
+      "default": "source"
+    },
+    "SplitDimension": {
+      "kind": "enum",
+      "variants": ["none", "source", "channel"],
+      "default": "none"
+    },
+    "ColorAxis": {
+      "kind": "enum",
+      "variants": ["none", "time", "signal"],
+      "default": "none"
+    },
+    "NamedSetKind": { "kind": "enum", "variants": ["query", "pick"] },
+    "NamedSet": {
+      "kind": "object",
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "kind": "NamedSetKind",
+        "selector": "string?",
+        "refs": "SeriesRef[]"
       }
     },
     "Annotation": {
@@ -58,13 +118,6 @@
         "label": "string"
       }
     },
-    "HighlightedSourceState": {
-      "kind": "object",
-      "fields": {
-        "local_path": "string",
-        "path": "string"
-      }
-    },
     "PanelState": {
       "kind": "object",
       "fields": {
@@ -72,11 +125,15 @@
         "title": "string",
         "mode": "PanelMode",
         "axis_style": "AxisStyle",
-        "x_signal": "string?",
-        "color_signal": "string?",
-        "color_by_time": "bool",
-        "series": "SeriesState[]",
-        "highlighted_sources": "HighlightedSourceState[]",
+        "x_ref": "SeriesRef?",
+        "color_axis": "ColorAxis",
+        "color_ref": "SeriesRef?",
+        "bindings": "Binding[]",
+        "color_by": "StyleDimension",
+        "overrides": "SeriesOverride[]",
+        "focus": "FocusEntry[]",
+        "ghost_mode": "GhostMode",
+        "split_by": "SplitDimension",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
         "x_label": "string?",
@@ -138,46 +195,6 @@
         "reconcile_legacy": "bool"
       }
     },
-    "TimeUnitState": {
-      "kind": "enum",
-      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
-    },
-    "OriginKindState": {
-      "kind": "enum",
-      "variants": [
-        "relative",
-        "absolute_epoch",
-        "event_aligned",
-        "synthetic_index"
-      ]
-    },
-    "TimeDomainState": {
-      "kind": "object",
-      "fields": {
-        "unit": "TimeUnitState",
-        "origin": "OriginKindState",
-        "alignment_origin": "f64"
-      }
-    },
-    "SetMemberState": {
-      "kind": "object",
-      "fields": {
-        "source_key": "string",
-        "missing": "string[]",
-        "scale": "f64",
-        "offset": "f64"
-      }
-    },
-    "SourceSetState": {
-      "kind": "object",
-      "fields": {
-        "key": "string",
-        "label": "string",
-        "generation": "u64",
-        "time_domain": "TimeDomainState",
-        "members": "SetMemberState[]"
-      }
-    },
     "Session": {
       "kind": "object",
       "fields": {
@@ -187,12 +204,10 @@
         "linked_time": "LinkedTime",
         "active_tab_id": "string",
         "tabs": "WorkspaceTab[]",
-        "favorites": "string[]",
-        "favorite_bundles": "string[]",
+        "named_sets": "NamedSet[]",
         "derived": "DerivedSignal[]",
         "derived_bundles": "DerivedBundleState[]",
-        "sources": "SourceRecord[]",
-        "source_sets": "SourceSetState[]"
+        "sources": "SourceRecord[]"
       }
     }
   }

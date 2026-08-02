@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 10,
+  "schema_version": 19,
   "theme": "light",
   "linked_time": {
     "t0": 0.0,
@@ -24,25 +24,44 @@
           "title": "Alpha & Beta",
           "mode": "time",
           "axis_style": "gutter",
-          "x_signal": null,
-          "color_signal": null,
-          "color_by_time": false,
-          "series": [
+          "x_ref": null,
+          "color_axis": "none",
+          "color_ref": null,
+          "bindings": [
             {
-              "path": "roundtrip/alpha",
-              "color_slot": 0,
-              "dash": "solid",
-              "width": 1.5,
-              "visible": true
-            },
+              "kind": "pick",
+              "selector": null,
+              "refs": [
+                { "source_key": "roundtrip", "channel": "alpha" },
+                { "source_key": "roundtrip", "channel": "beta" }
+              ],
+              "set_id": null
+            }
+          ],
+          "color_by": "source",
+          "overrides": [
             {
-              "path": "roundtrip/beta",
+              "target_ref": { "source_key": "roundtrip", "channel": "alpha" },
+              "target_selector": null,
               "color_slot": 1,
               "dash": "solid",
               "width": 1.5,
+              "opacity": null,
+              "visible": true
+            },
+            {
+              "target_ref": { "source_key": "roundtrip", "channel": "beta" },
+              "target_selector": null,
+              "color_slot": 2,
+              "dash": "solid",
+              "width": 1.5,
+              "opacity": null,
               "visible": true
             }
           ],
+          "focus": [],
+          "ghost_mode": "all",
+          "split_by": "none",
           "y_range": null,
           "x_range": null,
           "x_label": "time (s)",
@@ -75,7 +94,17 @@
       ]
     }
   ],
-  "favorites": [],
+  "named_sets": [],
   "derived": [],
-  "source_paths": []
+  "derived_bundles": [],
+  "sources": [
+    {
+      "key": "roundtrip",
+      "path": "/data/roundtrip.csv",
+      "prefix": "roundtrip",
+      "provider_id": null,
+      "decode_provenance": null,
+      "reconcile_legacy": false
+    }
+  ]
 }

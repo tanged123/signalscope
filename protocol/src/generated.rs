@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -54,76 +54,6 @@ mod u64_vec_string {
 pub struct TimeWindow {
     pub t0: f64,
     pub t1: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SetMemberSummary {
-    pub source_key: String,
-    pub missing: Vec<String>,
-    pub scale: f64,
-    pub offset: f64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SetTimeUnit {
-    Seconds,
-    Milliseconds,
-    Microseconds,
-    Nanoseconds,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SetOriginKind {
-    Relative,
-    AbsoluteEpoch,
-    EventAligned,
-    SyntheticIndex,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SetTimeDomainSummary {
-    pub unit: SetTimeUnit,
-    pub origin: SetOriginKind,
-    pub alignment_origin: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SetSummary {
-    #[serde(with = "u64_string")]
-    pub set_id: u64,
-    pub set_key: String,
-    pub label: String,
-    #[serde(with = "u64_string")]
-    pub generation: u64,
-    pub member_count: u32,
-    pub members: Vec<SetMemberSummary>,
-    pub time_domain: SetTimeDomainSummary,
-    pub local_paths: Vec<String>,
-    pub aligned: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct CreateSetRequest {
-    pub label: String,
-    pub member_keys: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct UpdateSetMembersRequest {
-    #[serde(with = "u64_string")]
-    pub set_id: u64,
-    pub member_keys: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SetTimeAlignmentRequest {
-    #[serde(with = "u64_string")]
-    pub set_id: u64,
-    pub source_key: String,
-    pub scale: f64,
-    pub offset: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -343,6 +273,8 @@ pub struct SignalSummary {
     pub point_count: u64,
     pub t_min: f64,
     pub t_max: f64,
+    #[serde(default)]
+    pub last_value: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -456,7 +388,6 @@ pub struct ExportEstimateRequest {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ExportSelection {
     pub source_keys: Vec<String>,
-    pub set_keys: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

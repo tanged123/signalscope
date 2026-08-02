@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Session } from "../generated/session";
+import type { Session, SourceRecord } from "../generated/session";
 import { emptySession } from "./workspace";
 import {
   HistoryStack,
@@ -104,7 +104,7 @@ describe("HistoryStack", () => {
 });
 
 describe("history session projection", () => {
-  const source = {
+  const source: SourceRecord = {
     key: "00000000-0000-0000-0000-000000000001",
     path: "/data/run.csv",
     prefix: "run",
@@ -128,6 +128,21 @@ describe("history session projection", () => {
     expect(snapshot.tabs[0]?.focused_panel_id).toBeNull();
   });
 
+  it("keeps named sets in undo snapshots", () => {
+    const session = emptySession();
+    session.named_sets = [
+      {
+        id: "set-1",
+        name: "Saved",
+        kind: "pick",
+        selector: null,
+        refs: [{ source_key: "run-1", channel: "temp" }],
+      },
+    ];
+
+    expect(historySnapshot(session).named_sets).toEqual(session.named_sets);
+  });
+
   it("preserves live transient state when applying history", () => {
     const historical = emptySession();
     const current = structuredClone(historical);
@@ -140,11 +155,30 @@ describe("history session projection", () => {
     currentTab.focused_panel_id = currentTab.panels[0]?.id ?? null;
     current.linked_time.cursorT = 8;
     current.sources = [source];
+    historical.named_sets = [
+      {
+        id: "historical",
+        name: "Historical",
+        kind: "query",
+        selector: "temp",
+        refs: [],
+      },
+    ];
+    current.named_sets = [
+      {
+        id: "current",
+        name: "Current",
+        kind: "pick",
+        selector: null,
+        refs: [],
+      },
+    ];
 
     const restored = restoreTransientSessionState(historical, current);
 
     expect(restored.linked_time.cursorT).toBe(8);
     expect(restored.sources).toEqual([source]);
+    expect(restored.named_sets).toEqual(historical.named_sets);
     expect(restored.tabs[0]?.focused_panel_id).toBe(
       currentTab.focused_panel_id,
     );

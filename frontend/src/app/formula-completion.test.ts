@@ -74,7 +74,7 @@ describe("formulaCompletions", () => {
     expect(matches).toHaveLength(50);
   });
 
-  it("offers bundle local paths with their run counts", () => {
+  it("offers shared channels as collection references", () => {
     const matches = formulaCompletions(
       {
         source: "signal",
@@ -85,9 +85,10 @@ describe("formulaCompletions", () => {
       [],
       [{ localPath: "alt", runCount: 3 }],
     );
+
     expect(matches[0]).toMatchObject({
       label: "alt",
-      detail: "3 runs",
+      detail: "3 sources",
       replacement: "'alt'",
     });
   });

@@ -29,14 +29,14 @@ test("shared presentation plane renders the demo workspace", async ({
   await expect(page.locator(".panel-split-right")).toBeVisible();
   await expect(page.locator(".panel-split-down")).toBeVisible();
   await expect(page.getByLabel("Panel 1 panel")).toBeVisible();
-  await expect(page.locator(".legend-chip")).toHaveCount(2);
-  for (const name of await page.locator(".legend-name").allTextContents()) {
+  await expect(page.locator(".binding-chip")).toHaveCount(2);
+  for (const name of await page.locator(".binding-chip").allTextContents()) {
     expect(name.trim()).not.toBe("");
   }
   await expect(page.locator(".plot-canvas").first()).toBeVisible();
   await expect(page.locator(".render-ms")).not.toHaveText("— ms");
-  await expect(page.locator(".session-identity")).toContainText(
-    "baked demo source",
+  await expect(page.locator(".session-identity")).toHaveText(
+    /— [1-9]\d* sources · [1-9]\d* signals/,
   );
   await expect(page.locator(".open-files")).toHaveCount(0);
   await expect(page.locator(".cursor-mode")).toBeEmpty();
@@ -69,6 +69,12 @@ test("application menu mirrors commands and marks planned work", async ({
   const menu = page.locator(".app-menu");
   await expect(menu).toBeVisible();
   await expect(button).toHaveAttribute("aria-expanded", "true");
+  await expect(
+    menu.locator(".app-menu-item", { hasText: /^Open…O$/ }),
+  ).toHaveCount(1);
+  await expect(
+    menu.locator(".app-menu-item", { hasText: "Open folder" }),
+  ).toHaveCount(0);
   const unavailable = menu.locator(".app-menu-item", {
     hasText: "Open Workspace",
   });
@@ -256,6 +262,49 @@ test("export dialog exposes range, fidelity, and reduction consequences", async 
   );
 });
 
+test("export source choices scroll without moving actions off screen", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const moduleUrl = "/src/ui/export-dialog.ts";
+    const { ExportDialog } = (await import(moduleUrl)) as {
+      ExportDialog: ExportDialogConstructor;
+    };
+    new ExportDialog(document.body, {
+      estimateHtml: () => Promise.resolve(null),
+      exportSets: () =>
+        Array.from({ length: 120 }, (_, index) => ({
+          key: `source-${String(index)}`,
+          label: `run_${String(index).padStart(3, "0")}`,
+        })),
+      pngBytes: () => Promise.resolve(null),
+      pngPanelCount: () => 0,
+      csvEstimate: () => Promise.resolve(null),
+      runExport: () => Promise.resolve(),
+    }).open("html");
+  });
+
+  const dialog = page.getByRole("dialog", { name: "Export" });
+  const sourceOptions = dialog.locator(".export-set-options");
+  await expect(sourceOptions.locator("label")).toHaveCount(120);
+  const geometry = await sourceOptions.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+  await expect(dialog.locator(".export-actions")).toBeVisible();
+  const box = await dialog.boundingBox();
+  const viewport = page.viewportSize();
+  if (box === null || viewport === null)
+    throw new Error("dialog geometry missing");
+  expect(box.y).toBeGreaterThanOrEqual(16);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 16);
+  await expect(
+    dialog.locator(".export-control-title", { hasText: "SOURCES" }),
+  ).toBeVisible();
+});
+
 test("PNG export defaults to the focused panel and can select all panels", async ({
   page,
 }) => {
@@ -294,9 +343,9 @@ test("the palette disables commands the current build cannot run", async ({
 }) => {
   await page.goto("/");
   await page.keyboard.press("ControlOrMeta+Shift+p");
-  await page.locator(".palette-input").fill("Open CSV");
+  await page.locator(".palette-input").fill("Open…");
   // The browser plane has no ingest host, so the command lists but cannot run.
-  const row = page.locator(".palette-row", { hasText: "Open CSV" });
+  const row = page.locator(".palette-row", { hasText: "Open…" });
   await expect(row).toBeDisabled();
   await expect(row).toHaveAttribute("title", "unavailable in this context");
 });

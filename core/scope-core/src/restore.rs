@@ -10,7 +10,8 @@ use thiserror::Error;
 use crate::{
     expr::{self, ExprError},
     naming,
-    session::Session,
+    series_ref::{path_from_ref, ref_from_path},
+    session::{NamedSetKind, SeriesRef, Session},
     sources::SourceRecord,
     store::SourceKey,
 };
@@ -131,19 +132,35 @@ pub fn reconcile(
 ) -> Result<ReconcileOutcome, ReconcileError> {
     let mut next = session.clone();
     let mut rewritten = 0;
-    for path in &mut next.favorites {
-        rewrite(path, aliases, &mut rewritten);
+    for set in &mut next.named_sets {
+        if matches!(set.kind, NamedSetKind::Pick) {
+            for reference in &mut set.refs {
+                rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
+            }
+        }
     }
     for tab in &mut next.tabs {
         for panel in &mut tab.panels {
-            for series in &mut panel.series {
-                rewrite(&mut series.path, aliases, &mut rewritten);
+            for binding in &mut panel.bindings {
+                for reference in &mut binding.refs {
+                    rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
+                }
             }
-            if let Some(path) = &mut panel.x_signal {
-                rewrite(path, aliases, &mut rewritten);
+            for override_ in &mut panel.overrides {
+                if let Some(reference) = &mut override_.target_ref {
+                    rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
+                }
             }
-            if let Some(path) = &mut panel.color_signal {
-                rewrite(path, aliases, &mut rewritten);
+            for focus in &mut panel.focus {
+                if let Some(reference) = &mut focus.r#ref {
+                    rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
+                }
+            }
+            if let Some(reference) = &mut panel.x_ref {
+                rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
+            }
+            if let Some(reference) = &mut panel.color_ref {
+                rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
             }
             for annotation in &mut panel.annotations {
                 rewrite(&mut annotation.series_path, aliases, &mut rewritten);
@@ -190,39 +207,107 @@ fn rewrite(path: &mut String, aliases: &BTreeMap<String, String>, count: &mut u6
     }
 }
 
+fn rewrite_ref(
+    sources: &[crate::session::SourceRecord],
+    reference: &mut SeriesRef,
+    aliases: &BTreeMap<String, String>,
+    count: &mut u64,
+) {
+    let Some(path) = path_from_ref(sources, reference) else {
+        return;
+    };
+    let Some(replacement) = aliases.get(&path) else {
+        return;
+    };
+    let Some(rewritten) = ref_from_path(sources, replacement) else {
+        return;
+    };
+    *reference = rewritten;
+    *count += 1;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::session::{
-        Annotation, AnnotationDomain, AxisStyle, DashStyle, DerivedSignal, PanelMode, PanelState,
-        SeriesState, Session,
+        Annotation, AnnotationDomain, AxisStyle, Binding, BindingKind, ColorAxis, DerivedSignal,
+        FocusEntry, FocusKind, GhostMode, NamedSet, NamedSetKind, PanelMode, PanelState,
+        SeriesOverride, SeriesRef, Session, SplitDimension, StyleDimension,
     };
 
+    #[allow(clippy::too_many_lines)]
     fn session_with(path: &str, expression: &str) -> Session {
         let mut session = Session {
-            favorites: vec![path.into()],
             derived: vec![DerivedSignal {
                 path: "derived/speed".into(),
                 expr: expression.into(),
             }],
+            named_sets: vec![NamedSet {
+                id: "set-1".into(),
+                name: path.into(),
+                kind: NamedSetKind::Pick,
+                selector: None,
+                refs: vec![SeriesRef {
+                    source_key: key(1).0.to_string(),
+                    channel: path.into(),
+                }],
+            }],
+            sources: vec![
+                crate::session::SourceRecord {
+                    key: key(1).0.to_string(),
+                    path: "/data/run_a.csv".into(),
+                    prefix: "run_a".into(),
+                    provider_id: Some("mcap".into()),
+                    decode_provenance: None,
+                    reconcile_legacy: true,
+                },
+                crate::session::SourceRecord {
+                    key: key(2).0.to_string(),
+                    path: "/data/run_b.csv".into(),
+                    prefix: "run_b".into(),
+                    provider_id: Some("mcap".into()),
+                    decode_provenance: None,
+                    reconcile_legacy: false,
+                },
+            ],
             ..Session::default()
+        };
+        let reference = SeriesRef {
+            source_key: key(1).0.to_string(),
+            channel: path.into(),
         };
         session.tabs[0].panels.push(PanelState {
             id: "panel-a".into(),
             title: "A".into(),
             mode: PanelMode::Time,
             axis_style: AxisStyle::Gutter,
-            x_signal: Some(path.into()),
-            color_signal: Some(path.into()),
-            color_by_time: false,
-            series: vec![SeriesState {
-                path: path.into(),
-                color_slot: 1,
-                dash: DashStyle::Solid,
-                width: 1.0,
-                visible: true,
+            x_ref: Some(reference.clone()),
+            color_axis: ColorAxis::Signal,
+            color_ref: Some(reference.clone()),
+            bindings: vec![Binding {
+                kind: BindingKind::Pick,
+                selector: None,
+                refs: vec![reference.clone()],
+                set_id: None,
             }],
-            highlighted_sources: Vec::new(),
+            color_by: StyleDimension::Source,
+            overrides: vec![SeriesOverride {
+                target_ref: Some(reference.clone()),
+                target_selector: None,
+                color_slot: Some(1),
+                dash: None,
+                width: None,
+                opacity: None,
+                visible: Some(true),
+            }],
+            focus: vec![FocusEntry {
+                kind: FocusKind::Series,
+                r#ref: Some(reference),
+                source_key: None,
+                channel: None,
+            }],
+            ghost_mode: GhostMode::All,
+            split_by: SplitDimension::None,
             y_range: None,
             x_range: None,
             x_label: None,
@@ -245,17 +330,96 @@ mod tests {
     #[test]
     fn mcap_bare_paths_are_rewritten_everywhere() {
         let mut session = session_with("vehicle/imu/ax", "'vehicle/imu/ax' * 2");
-        let aliases = BTreeMap::from([("vehicle/imu/ax".into(), "run_a/vehicle/imu/ax".into())]);
+        let aliases = BTreeMap::from([
+            ("run_a/vehicle/imu/ax".into(), "run_b/vehicle/imu/ax".into()),
+            ("vehicle/imu/ax".into(), "run_a/vehicle/imu/ax".into()),
+        ]);
 
         let outcome = reconcile(&mut session, &aliases, &BTreeSet::new()).unwrap();
-        assert_eq!(outcome.rewritten, 5);
+        assert_eq!(outcome.rewritten, 7);
         let panel = &session.tabs[0].panels[0];
-        assert_eq!(panel.series[0].path, "run_a/vehicle/imu/ax");
-        assert_eq!(panel.x_signal.as_deref(), Some("run_a/vehicle/imu/ax"));
-        assert_eq!(panel.color_signal.as_deref(), Some("run_a/vehicle/imu/ax"));
+        assert_eq!(panel.bindings[0].refs[0].source_key, key(2).0.to_string());
+        assert_eq!(
+            panel.x_ref.as_ref().unwrap().source_key,
+            key(2).0.to_string()
+        );
+        assert_eq!(
+            panel.color_ref.as_ref().unwrap().source_key,
+            key(2).0.to_string()
+        );
+        assert_eq!(
+            panel.overrides[0].target_ref.as_ref().unwrap().source_key,
+            key(2).0.to_string()
+        );
+        assert_eq!(
+            panel.focus[0].r#ref.as_ref().unwrap().source_key,
+            key(2).0.to_string()
+        );
         assert_eq!(panel.annotations[0].series_path, "run_a/vehicle/imu/ax");
-        assert_eq!(session.favorites, ["run_a/vehicle/imu/ax"]);
+        assert_eq!(
+            session.named_sets[0].refs[0].source_key,
+            key(2).0.to_string()
+        );
         assert_eq!(session.derived[0].expr, "'run_a/vehicle/imu/ax' * 2");
+    }
+
+    #[test]
+    fn empty_prefix_refs_round_trip_as_bare_channels() {
+        let source_key = key(1).0.to_string();
+        let mut session = Session {
+            sources: vec![crate::session::SourceRecord {
+                key: source_key.clone(),
+                path: "/data/run.csv".into(),
+                prefix: String::new(),
+                provider_id: None,
+                decode_provenance: None,
+                reconcile_legacy: false,
+            }],
+            named_sets: vec![NamedSet {
+                id: "set-1".into(),
+                name: "Set".into(),
+                kind: NamedSetKind::Pick,
+                selector: None,
+                refs: vec![SeriesRef {
+                    source_key: source_key.clone(),
+                    channel: "temp".into(),
+                }],
+            }],
+            ..Session::default()
+        };
+
+        reconcile(
+            &mut session,
+            &BTreeMap::from([("temp".into(), "pressure".into())]),
+            &BTreeSet::new(),
+        )
+        .expect("reconciles");
+
+        assert_eq!(session.named_sets[0].refs[0].source_key, source_key);
+        assert_eq!(session.named_sets[0].refs[0].channel, "pressure");
+    }
+
+    #[test]
+    fn source_focus_keys_are_not_rewritten_as_signal_paths() {
+        let mut session = session_with("temp", "'temp'");
+        session.tabs[0].panels[0].focus = vec![FocusEntry {
+            kind: FocusKind::Source,
+            r#ref: None,
+            source_key: Some("run_a".into()),
+            channel: None,
+        }];
+
+        reconcile(
+            &mut session,
+            &BTreeMap::from([("run_a".into(), "run_b".into())]),
+            &BTreeSet::new(),
+        )
+        .expect("reconciles");
+
+        assert_eq!(
+            session.tabs[0].panels[0].focus[0].source_key.as_deref(),
+            Some("run_a")
+        );
     }
 
     #[test]
@@ -321,14 +485,8 @@ mod tests {
     #[test]
     fn legacy_marker_clears_only_after_its_source_has_aliases() {
         let mut session = session_with("imu/ax", "'imu/ax'");
-        session.sources.push(crate::session::SourceRecord {
-            key: key(1).0.to_string(),
-            path: "/data/run.csv".into(),
-            prefix: "run".into(),
-            provider_id: Some("mcap".into()),
-            decode_provenance: None,
-            reconcile_legacy: true,
-        });
+        session.sources[0].prefix = "run".into();
+        session.sources[0].path = "/data/run.csv".into();
         let aliases = BTreeMap::from([("imu/ax".into(), "run/imu/ax".into())]);
         reconcile(&mut session, &aliases, &BTreeSet::new()).unwrap();
         assert!(!session.sources[0].reconcile_legacy);

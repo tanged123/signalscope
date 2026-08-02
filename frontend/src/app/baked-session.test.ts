@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { parseBakedSession } from "./baked-session";
-import { emptySession } from "./workspace";
+import { emptySession, WorkspaceModel } from "./workspace";
 
 describe("parseBakedSession", () => {
   it("accepts a current-version session", () => {
@@ -35,6 +35,34 @@ describe("parseBakedSession", () => {
     if (tab === undefined) throw new Error("default tab is missing");
     tab.panels = [{} as never];
     expect(() => parseBakedSession(JSON.stringify(invalidPanel))).toThrow(
+      /structure/,
+    );
+  });
+
+  it.each([
+    ["color_slot", 0],
+    ["color_slot", 9],
+    ["width", -1],
+    ["width", 5],
+    ["opacity", -0.1],
+    ["opacity", 1.1],
+  ] as const)("rejects out-of-range override %s=%s", (field, value) => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.overrides = [
+      {
+        target_ref: null,
+        target_selector: "*",
+        color_slot: 1,
+        dash: null,
+        width: 1,
+        opacity: 1,
+        visible: true,
+        [field]: value,
+      },
+    ];
+
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
       /structure/,
     );
   });

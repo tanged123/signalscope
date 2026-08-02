@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::{naming, store::SourceKey};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SourceRecord {
     pub key: SourceKey,
     pub path: PathBuf,
@@ -21,7 +21,7 @@ pub struct SourceRecord {
     pub reconcile_legacy: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Admission {
     Existing(SourceKey),
     New(SourceRecord),

@@ -6,7 +6,10 @@ use std::{
 };
 
 use crate::pyramid::Pyramid;
-use crate::session::{LinkedTime, PanelMode, PanelState, Session};
+use crate::series_ref::path_from_ref;
+use crate::session::{
+    BindingKind, LinkedTime, NamedSetKind, PanelMode, PanelState, SeriesRef, Session,
+};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{
     BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
@@ -78,21 +81,283 @@ fn effective_window(panel: &PanelState, linked: &LinkedTime) -> (f64, f64) {
     }
 }
 
-fn panel_signal_paths(panel: &PanelState) -> Vec<&str> {
-    let mut paths: Vec<&str> = panel
-        .series
-        .iter()
-        .map(|series| series.path.as_str())
-        .collect();
-    if panel.mode == PanelMode::Xy {
-        if let Some(x) = panel.x_signal.as_deref() {
-            paths.insert(0, x);
-        }
-        if let Some(color) = panel.color_signal.as_deref() {
-            paths.push(color);
+fn panel_signal_ids(
+    session: &Session,
+    store: &SignalStore,
+    panel: &PanelState,
+) -> BTreeSet<SignalId> {
+    let mut ids = BTreeSet::new();
+    for binding in &panel.bindings {
+        match binding.kind {
+            BindingKind::Pick => insert_refs(&mut ids, session, store, &binding.refs),
+            BindingKind::Query => {
+                if let Some(selector) = &binding.selector {
+                    if let Some(signals) = matching_signals(store, selector) {
+                        ids.extend(signals.map(|signal| signal.id));
+                    }
+                }
+            }
+            BindingKind::Set => {
+                let Some(set) = session
+                    .named_sets
+                    .iter()
+                    .find(|set| Some(set.id.as_str()) == binding.set_id.as_deref())
+                else {
+                    continue;
+                };
+                match set.kind {
+                    NamedSetKind::Pick => insert_refs(&mut ids, session, store, &set.refs),
+                    NamedSetKind::Query => {
+                        if let Some(selector) = &set.selector {
+                            if let Some(signals) = matching_signals(store, selector) {
+                                ids.extend(signals.map(|signal| signal.id));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-    paths
+    if panel.mode == PanelMode::Xy {
+        if let Some(signal) = panel
+            .x_ref
+            .as_ref()
+            .and_then(|reference| signal_from_ref(session, store, reference))
+        {
+            ids.insert(signal.id);
+        }
+        if let Some(signal) = panel
+            .color_ref
+            .as_ref()
+            .and_then(|reference| signal_from_ref(session, store, reference))
+        {
+            ids.insert(signal.id);
+        }
+    }
+    ids
+}
+
+fn insert_refs(
+    ids: &mut BTreeSet<SignalId>,
+    session: &Session,
+    store: &SignalStore,
+    refs: &[SeriesRef],
+) {
+    ids.extend(
+        refs.iter()
+            .filter_map(|reference| signal_from_ref(session, store, reference))
+            .map(|signal| signal.id),
+    );
+}
+
+fn signal_from_ref<'a>(
+    session: &Session,
+    store: &'a SignalStore,
+    reference: &SeriesRef,
+) -> Option<&'a Signal> {
+    path_from_ref(&session.sources, reference)
+        .and_then(|path| store.signal_by_path(&path))
+        .or_else(|| {
+            let source = store.sources().find(|source| {
+                source.key.0.to_string() == reference.source_key
+                    || source.prefix == reference.source_key
+            })?;
+            store
+                .signals_of(source.id)
+                .find(|signal| signal.local_path == reference.channel)
+        })
+}
+
+fn matching_signals<'a>(
+    store: &'a SignalStore,
+    selector: &'a str,
+) -> Option<impl Iterator<Item = &'a Signal>> {
+    let selector = parse_selector(selector)?;
+    Some(
+        store
+            .signals()
+            .filter(move |signal| selector_matches(signal, &selector)),
+    )
+}
+
+struct ParsedSelector<'a> {
+    channel: ParsedGlob,
+    source: Option<ParsedGlob>,
+    attrs: Vec<(&'a str, &'a str)>,
+}
+
+struct ParsedGlob {
+    branches: Vec<Vec<char>>,
+}
+
+fn parse_selector(selector: &str) -> Option<ParsedSelector<'_>> {
+    let mut tokens = selector.split_whitespace();
+    let channel = parse_glob(tokens.next()?)?;
+    let mut source = None;
+    let mut attrs = Vec::new();
+    while let Some(token) = tokens.next() {
+        if token == "@" || token.starts_with('@') {
+            if source.is_some() {
+                return None;
+            }
+            let pattern = if token == "@" {
+                tokens.next()
+            } else {
+                token.get(1..)
+            }?;
+            if pattern.is_empty() {
+                return None;
+            }
+            source = Some(parse_glob(pattern)?);
+        } else {
+            let (key, value) = token.split_once(':')?;
+            if value.is_empty() || !matches!(key, "unit" | "kind") {
+                return None;
+            }
+            if key == "kind" && !matches!(value, "derived" | "signal") {
+                return None;
+            }
+            attrs.push((key, value));
+        }
+    }
+    Some(ParsedSelector {
+        channel,
+        source,
+        attrs,
+    })
+}
+
+fn parse_glob(pattern: &str) -> Option<ParsedGlob> {
+    let branches = pattern
+        .split('|')
+        .map(|branch| {
+            let branch = branch.chars().collect::<Vec<_>>();
+            let mut index = 0;
+            while index < branch.len() {
+                if branch[index] != '[' {
+                    index += 1;
+                    continue;
+                }
+                let end = branch[index + 1..]
+                    .iter()
+                    .position(|character| *character == ']')
+                    .map(|offset| index + 1 + offset)?;
+                let body = &branch[index + 1..end];
+                let valid = body.len() == 1 && body[0].is_ascii_alphanumeric()
+                    || body.len() == 3
+                        && body[0].is_ascii_alphanumeric()
+                        && body[1] == '-'
+                        && body[2].is_ascii_alphanumeric();
+                if !valid {
+                    return None;
+                }
+                index = end + 1;
+            }
+            Some(branch)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(ParsedGlob { branches })
+}
+
+fn selector_matches(signal: &Signal, selector: &ParsedSelector<'_>) -> bool {
+    let channel = signal
+        .path
+        .strip_prefix("derived/")
+        .unwrap_or(&signal.local_path);
+    if !glob_matches(&selector.channel, channel) {
+        return false;
+    }
+
+    if let Some(pattern) = &selector.source {
+        let source_name = signal
+            .path
+            .split_once('/')
+            .map_or("derived", |(source, _)| source);
+        if !glob_matches(pattern, source_name) {
+            return false;
+        }
+    }
+    selector.attrs.iter().all(|(key, value)| match *key {
+        "unit" => signal.unit.as_deref() == Some(value),
+        "kind" => match *value {
+            "derived" => signal.path.starts_with("derived/"),
+            "signal" => !signal.path.starts_with("derived/"),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+fn glob_matches(pattern: &ParsedGlob, value: &str) -> bool {
+    let value = value.chars().collect::<Vec<_>>();
+    pattern
+        .branches
+        .iter()
+        .any(|branch| glob_branch_matches(branch, &value))
+}
+
+fn glob_branch_matches(pattern: &[char], value: &[char]) -> bool {
+    fn matches_at(
+        pattern: &[char],
+        value: &[char],
+        pattern_at: usize,
+        value_at: usize,
+        memo: &mut [Vec<Option<bool>>],
+    ) -> bool {
+        if let Some(matched) = memo[pattern_at][value_at] {
+            return matched;
+        }
+        let matched = if pattern_at == pattern.len() {
+            value_at == value.len()
+        } else {
+            match pattern[pattern_at] {
+                '*' => {
+                    matches_at(pattern, value, pattern_at + 1, value_at, memo)
+                        || (value_at < value.len()
+                            && matches_at(pattern, value, pattern_at, value_at + 1, memo))
+                }
+                '?' => {
+                    value_at < value.len()
+                        && matches_at(pattern, value, pattern_at + 1, value_at + 1, memo)
+                }
+                '[' => {
+                    let Some(end) = pattern[pattern_at + 1..]
+                        .iter()
+                        .position(|character| *character == ']')
+                        .map(|offset| pattern_at + 1 + offset)
+                    else {
+                        memo[pattern_at][value_at] = Some(false);
+                        return false;
+                    };
+                    let body = &pattern[pattern_at + 1..end];
+                    let valid = body.len() == 1 && body[0].is_ascii_alphanumeric()
+                        || body.len() == 3
+                            && body[0].is_ascii_alphanumeric()
+                            && body[1] == '-'
+                            && body[2].is_ascii_alphanumeric();
+                    if !valid || value_at == value.len() {
+                        false
+                    } else {
+                        let class_matches = if body.len() == 1 {
+                            value[value_at] == body[0]
+                        } else {
+                            (body[0]..=body[2]).contains(&value[value_at])
+                        };
+                        class_matches && matches_at(pattern, value, end + 1, value_at + 1, memo)
+                    }
+                }
+                character => {
+                    value.get(value_at) == Some(&character)
+                        && matches_at(pattern, value, pattern_at + 1, value_at + 1, memo)
+                }
+            }
+        };
+        memo[pattern_at][value_at] = Some(matched);
+        matched
+    }
+
+    let mut memo = vec![vec![None; value.len() + 1]; pattern.len() + 1];
+    matches_at(pattern, value, 0, 0, &mut memo)
 }
 
 fn signal_plan<'a>(
@@ -175,7 +440,6 @@ pub fn plan<'a>(
             .sources()
             .map(|source| source.key.0.to_string())
             .collect(),
-        set_keys: Vec::new(),
     };
     plan_selected(session, store, pyramids, &selection, range, fidelity)
 }
@@ -198,11 +462,7 @@ pub fn plan_selected<'a>(
     for tab in &session.tabs {
         for panel in &tab.panels {
             if panel.mode != PanelMode::Time {
-                for path in panel_signal_paths(panel) {
-                    if let Some(signal) = store.signal_by_path(path) {
-                        needs_raw.insert(signal.id);
-                    }
-                }
+                needs_raw.extend(panel_signal_ids(session, store, panel));
             }
         }
     }
@@ -242,11 +502,7 @@ pub fn plan_selected<'a>(
                 Some((start, end)) => (start.min(t0), end.max(t1)),
                 None => (t0, t1),
             });
-            for path in panel_signal_paths(panel) {
-                if let Some(signal) = store.signal_by_path(path) {
-                    wanted.insert(signal.id);
-                }
-            }
+            wanted.extend(panel_signal_ids(session, store, panel));
         }
     }
     let (t0, t1) = window.unwrap_or((session.linked_time.t0, session.linked_time.t1));
@@ -285,7 +541,11 @@ fn source_key(store: &SignalStore, signal: &Signal) -> Result<SourceKey, Snapsho
         .ok_or(SnapshotError::MissingSource(signal.id))
 }
 
-fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
+fn signal_summary(
+    signal: &Signal,
+    source_key: SourceKey,
+    last_value: Option<f64>,
+) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
@@ -297,6 +557,7 @@ fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
         point_count: signal.len() as u64,
         t_min,
         t_max,
+        last_value,
     }
 }
 
@@ -317,7 +578,11 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
             .filter_map(|level| entry.pyramid.level_window(level.index, entry.window))
             .collect();
         signals.push(BakedSignal {
-            summary: signal_summary(entry.signal, entry.source_key),
+            summary: signal_summary(
+                entry.signal,
+                entry.source_key,
+                entry.pyramid.last_finite_value(),
+            ),
             levels,
         });
     }
@@ -394,7 +659,10 @@ mod tests {
 
     use super::*;
     use crate::pyramid::Pyramid;
-    use crate::session::{AxisStyle, DashStyle, PanelMode, PanelState, SeriesState, Session};
+    use crate::session::{
+        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelMode, PanelState, SeriesRef,
+        Session,
+    };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
 
@@ -417,27 +685,32 @@ mod tests {
         (store, pyramids)
     }
 
-    fn series(path: &str) -> SeriesState {
-        SeriesState {
-            path: path.to_owned(),
-            color_slot: 0,
-            dash: DashStyle::Solid,
-            width: 1.5,
-            visible: true,
-        }
-    }
-
-    fn panel(mode: PanelMode, paths: &[&str]) -> PanelState {
+    fn panel(id: &str, mode: PanelMode, paths: &[&str]) -> PanelState {
         PanelState {
-            id: "panel-1".to_owned(),
+            id: id.to_owned(),
             title: "Panel".to_owned(),
             mode,
             axis_style: AxisStyle::Gutter,
-            x_signal: None,
-            color_signal: None,
-            color_by_time: false,
-            series: paths.iter().map(|path| series(path)).collect(),
-            highlighted_sources: Vec::new(),
+            x_ref: None,
+            color_axis: crate::session::ColorAxis::None,
+            color_ref: None,
+            bindings: vec![Binding {
+                kind: BindingKind::Pick,
+                selector: None,
+                refs: paths
+                    .iter()
+                    .map(|path| SeriesRef {
+                        source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                        channel: (*path).to_owned(),
+                    })
+                    .collect(),
+                set_id: None,
+            }],
+            color_by: crate::session::StyleDimension::Source,
+            overrides: Vec::new(),
+            focus: Vec::new(),
+            ghost_mode: crate::session::GhostMode::All,
+            split_by: crate::session::SplitDimension::None,
             y_range: None,
             x_range: None,
             x_label: None,
@@ -451,6 +724,14 @@ mod tests {
 
     fn session_with(panels: Vec<PanelState>) -> Session {
         let mut session = Session::default();
+        session.sources.push(crate::session::SourceRecord {
+            key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            path: "/data/test.csv".into(),
+            prefix: String::new(),
+            provider_id: None,
+            decode_provenance: None,
+            reconcile_legacy: false,
+        });
         session.tabs[0].panels = panels;
         session
     }
@@ -489,7 +770,11 @@ mod tests {
         let expected = SnapshotManifest {
             session_json: serde_json::to_string(&session).expect("session"),
             signals: vec![BakedSignal {
-                summary: signal_summary(signal, source_key(&store, signal).expect("source")),
+                summary: signal_summary(
+                    signal,
+                    source_key(&store, signal).expect("source"),
+                    pyramid.last_finite_value(),
+                ),
                 levels: (0..pyramid.level_count())
                     .map(|level| pyramid.level(level).expect("level"))
                     .collect(),
@@ -520,7 +805,7 @@ mod tests {
     #[test]
     fn visible_scope_excludes_signals_on_no_panel() {
         let (store, pyramids) = store_with(&[("a", 10), ("b", 10)]);
-        let session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        let session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
         let export = plan(
             &session,
             &store,
@@ -534,9 +819,139 @@ mod tests {
     }
 
     #[test]
+    fn visible_scope_resolves_query_and_saved_set_bindings() {
+        let (store, pyramids) = store_with(&[("alpha", 10), ("beta", 10), ("ignored", 10)]);
+        let mut panel = panel("panel-1", PanelMode::Time, &[]);
+        panel.bindings = vec![
+            Binding {
+                kind: BindingKind::Query,
+                selector: Some("alpha".into()),
+                refs: Vec::new(),
+                set_id: None,
+            },
+            Binding {
+                kind: BindingKind::Set,
+                selector: None,
+                refs: Vec::new(),
+                set_id: Some("saved".into()),
+            },
+        ];
+        let mut session = session_with(vec![panel]);
+        session.named_sets.push(NamedSet {
+            id: "saved".into(),
+            name: "Saved".into(),
+            kind: NamedSetKind::Pick,
+            selector: None,
+            refs: vec![SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "beta".into(),
+            }],
+        });
+
+        let export = plan(
+            &session,
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Standard,
+        )
+        .expect("plan");
+        let paths = export
+            .signals
+            .iter()
+            .map(|entry| entry.signal.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn visible_scope_query_matcher_handles_globs_kinds_and_empty_results() {
+        let (store, pyramids) = store_with(&[("alpha", 10), ("beta", 10), ("derived/score", 10)]);
+        let cases: &[(&str, &[&str])] = &[
+            ("alpha*", &["alpha"]),
+            ("alpha|beta", &["alpha", "beta"]),
+            ("alpha[", &[]),
+            ("* kind:derived", &["derived/score"]),
+            ("missing*", &[]),
+        ];
+
+        for (selector, expected) in cases {
+            let mut query_panel = panel("panel-query", PanelMode::Time, &[]);
+            query_panel.bindings = vec![Binding {
+                kind: BindingKind::Query,
+                selector: Some((*selector).into()),
+                refs: Vec::new(),
+                set_id: None,
+            }];
+            let session = session_with(vec![query_panel]);
+
+            let export = plan(
+                &session,
+                &store,
+                &pyramids,
+                ExportRange::Visible,
+                ExportFidelity::Standard,
+            )
+            .expect("plan");
+            let paths = export
+                .signals
+                .iter()
+                .map(|entry| entry.signal.path.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(paths, *expected, "selector: {selector}");
+        }
+    }
+
+    #[test]
+    fn sample_mode_resolves_query_sets_before_raw_planning() {
+        let (store, pyramids) =
+            store_with(&[("alpha", 100_000), ("beta", 100_000), ("ignored", 100_000)]);
+        let mut panel = panel("panel-1", PanelMode::Histogram, &[]);
+        panel.bindings = vec![
+            Binding {
+                kind: BindingKind::Query,
+                selector: Some("alpha".into()),
+                refs: Vec::new(),
+                set_id: None,
+            },
+            Binding {
+                kind: BindingKind::Set,
+                selector: None,
+                refs: Vec::new(),
+                set_id: Some("saved-query".into()),
+            },
+        ];
+        let mut session = session_with(vec![panel]);
+        session.named_sets.push(NamedSet {
+            id: "saved-query".into(),
+            name: "Saved query".into(),
+            kind: NamedSetKind::Query,
+            selector: Some("beta".into()),
+            refs: Vec::new(),
+        });
+
+        let export = plan(
+            &session,
+            &store,
+            &pyramids,
+            ExportRange::All,
+            ExportFidelity::Preview,
+        )
+        .expect("plan");
+        let levels = export
+            .signals
+            .iter()
+            .map(|entry| (entry.signal.path.as_str(), entry.finest_level()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(levels["alpha"], 0);
+        assert_eq!(levels["beta"], 0);
+        assert!(levels["ignored"] > 0);
+    }
+
+    #[test]
     fn visible_scope_decimates_dense_time_signals() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
         session.linked_time.t1 = 99_999.0;
         let export = plan(
             &session,
@@ -569,7 +984,7 @@ mod tests {
     #[test]
     fn honesty_rule_bakes_raw_when_sparse_at_every_fidelity() {
         let (store, pyramids) = store_with(&[("a", 500)]);
-        let session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        let session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
         for fidelity in [
             ExportFidelity::Preview,
             ExportFidelity::Standard,
@@ -587,7 +1002,7 @@ mod tests {
     fn sample_mode_panels_force_level_zero_at_preview() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
         for mode in [PanelMode::Xy, PanelMode::Fft] {
-            let session = session_with(vec![panel(mode, &["a"])]);
+            let session = session_with(vec![panel("panel-1", mode, &["a"])]);
             let export = plan(
                 &session,
                 &store,
@@ -605,7 +1020,7 @@ mod tests {
     #[test]
     fn fidelity_ceiling_is_monotone() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        let session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
         let bins: Vec<usize> = [
             ExportFidelity::Preview,
             ExportFidelity::Standard,
@@ -629,11 +1044,20 @@ mod tests {
     #[test]
     fn xy_panels_pull_x_and_color_signals() {
         let (store, pyramids) = store_with(&[("x", 10), ("y", 10), ("c", 10), ("ignored", 10)]);
-        let mut xy = panel(PanelMode::Xy, &["y"]);
-        xy.x_signal = Some("x".to_owned());
-        xy.color_signal = Some("c".to_owned());
-        let mut time = panel(PanelMode::Time, &["ignored"]);
-        time.x_signal = Some("x".to_owned());
+        let mut xy = panel("panel-xy", PanelMode::Xy, &["y"]);
+        xy.x_ref = Some(SeriesRef {
+            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            channel: "x".into(),
+        });
+        xy.color_ref = Some(SeriesRef {
+            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            channel: "c".into(),
+        });
+        let mut time = panel("panel-time", PanelMode::Time, &["ignored"]);
+        time.x_ref = Some(SeriesRef {
+            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            channel: "x".into(),
+        });
         let session = session_with(vec![xy, time]);
         let export = plan(
             &session,
@@ -657,8 +1081,8 @@ mod tests {
         let mut session = Session::default();
         session.linked_time.t0 = 0.0;
         session.linked_time.t1 = 10.0;
-        let linked = panel(PanelMode::Time, &["a"]);
-        let mut unlinked = panel(PanelMode::Time, &["b"]);
+        let linked = panel("panel-linked", PanelMode::Time, &["a"]);
+        let mut unlinked = panel("panel-unlinked", PanelMode::Time, &["b"]);
         unlinked.time_window = Some([20.0, 30.0]);
         session.linked_time.linked = false;
         session.tabs[0].panels = vec![linked, unlinked];
@@ -715,7 +1139,7 @@ mod tests {
     #[test]
     fn baked_levels_are_positional_from_the_finest_planned_level() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
         session.linked_time.t1 = 99_999.0;
         let export = plan(
             &session,
@@ -743,7 +1167,7 @@ mod tests {
     #[test]
     fn clipping_retains_one_neighbor_bin_each_side() {
         let (store, pyramids) = store_with(&[("a", 1_000)]);
-        let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
         session.linked_time.t0 = 100.0;
         session.linked_time.t1 = 200.0;
         let export = plan(
@@ -847,7 +1271,7 @@ mod tests {
     #[test]
     fn estimate_shrinks_with_visible_scope() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let mut session = session_with(vec![panel(PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
         session.linked_time.t0 = 40_000.0;
         session.linked_time.t1 = 40_100.0;
         let visible = plan(
@@ -919,7 +1343,6 @@ mod tests {
         let selected = store.sources().next().unwrap().key.0.to_string();
         let selection = ExportSelection {
             source_keys: vec![selected],
-            set_keys: Vec::new(),
         };
         let plan = plan_selected(
             &Session::default(),

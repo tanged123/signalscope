@@ -167,7 +167,7 @@ export function formulaCompletions(
             return {
               kind: "signal" as const,
               label: localPath,
-              detail: String(runCount) + " runs",
+              detail: `${String(runCount)} sources`,
               replacement,
               caretOffset: replacement.length,
             };

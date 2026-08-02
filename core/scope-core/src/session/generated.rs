@@ -2,28 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 16;
-
-mod u64_string {
-    use serde::{Deserialize, Deserializer, Serializer, de::Error};
-
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    pub fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&value.to_string())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        String::deserialize(deserializer)?
-            .parse()
-            .map_err(D::Error::custom)
-    }
-}
+pub const SESSION_SCHEMA_VERSION: u32 = 19;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -95,12 +74,119 @@ pub struct LinkedTime {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SeriesState {
-    pub path: String,
-    pub color_slot: u8,
-    pub dash: DashStyle,
-    pub width: f32,
-    pub visible: bool,
+pub struct SeriesRef {
+    pub source_key: String,
+    pub channel: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BindingKind {
+    Query,
+    Pick,
+    Set,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Binding {
+    pub kind: BindingKind,
+    #[serde(default)]
+    pub selector: Option<String>,
+    pub refs: Vec<SeriesRef>,
+    #[serde(default)]
+    pub set_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SeriesOverride {
+    #[serde(default)]
+    pub target_ref: Option<SeriesRef>,
+    #[serde(default)]
+    pub target_selector: Option<String>,
+    #[serde(default)]
+    pub color_slot: Option<u8>,
+    #[serde(default)]
+    pub dash: Option<DashStyle>,
+    #[serde(default)]
+    pub width: Option<f32>,
+    #[serde(default)]
+    pub opacity: Option<f32>,
+    #[serde(default)]
+    pub visible: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FocusKind {
+    Series,
+    Source,
+    Channel,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct FocusEntry {
+    pub kind: FocusKind,
+    #[serde(default)]
+    #[serde(rename = "ref")]
+    pub r#ref: Option<SeriesRef>,
+    #[serde(default)]
+    pub source_key: Option<String>,
+    #[serde(default)]
+    pub channel: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GhostMode {
+    Ghost,
+    #[default]
+    All,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StyleDimension {
+    Focus,
+    #[default]
+    Source,
+    Channel,
+    Set,
+    Attr,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitDimension {
+    #[default]
+    None,
+    Source,
+    Channel,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorAxis {
+    #[default]
+    None,
+    Time,
+    Signal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NamedSetKind {
+    Query,
+    Pick,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct NamedSet {
+    pub id: String,
+    pub name: String,
+    pub kind: NamedSetKind,
+    #[serde(default)]
+    pub selector: Option<String>,
+    pub refs: Vec<SeriesRef>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -114,24 +200,22 @@ pub struct Annotation {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct HighlightedSourceState {
-    pub local_path: String,
-    pub path: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct PanelState {
     pub id: String,
     pub title: String,
     pub mode: PanelMode,
     pub axis_style: AxisStyle,
     #[serde(default)]
-    pub x_signal: Option<String>,
+    pub x_ref: Option<SeriesRef>,
+    pub color_axis: ColorAxis,
     #[serde(default)]
-    pub color_signal: Option<String>,
-    pub color_by_time: bool,
-    pub series: Vec<SeriesState>,
-    pub highlighted_sources: Vec<HighlightedSourceState>,
+    pub color_ref: Option<SeriesRef>,
+    pub bindings: Vec<Binding>,
+    pub color_by: StyleDimension,
+    pub overrides: Vec<SeriesOverride>,
+    pub focus: Vec<FocusEntry>,
+    pub ghost_mode: GhostMode,
+    pub split_by: SplitDimension,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
     #[serde(default)]
@@ -197,49 +281,6 @@ pub struct SourceRecord {
     pub reconcile_legacy: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TimeUnitState {
-    Seconds,
-    Milliseconds,
-    Microseconds,
-    Nanoseconds,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OriginKindState {
-    Relative,
-    AbsoluteEpoch,
-    EventAligned,
-    SyntheticIndex,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct TimeDomainState {
-    pub unit: TimeUnitState,
-    pub origin: OriginKindState,
-    pub alignment_origin: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SetMemberState {
-    pub source_key: String,
-    pub missing: Vec<String>,
-    pub scale: f64,
-    pub offset: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SourceSetState {
-    pub key: String,
-    pub label: String,
-    #[serde(with = "u64_string")]
-    pub generation: u64,
-    pub time_domain: TimeDomainState,
-    pub members: Vec<SetMemberState>,
-}
-
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Session {
     pub app: String,
@@ -248,10 +289,8 @@ pub struct Session {
     pub linked_time: LinkedTime,
     pub active_tab_id: String,
     pub tabs: Vec<WorkspaceTab>,
-    pub favorites: Vec<String>,
-    pub favorite_bundles: Vec<String>,
+    pub named_sets: Vec<NamedSet>,
     pub derived: Vec<DerivedSignal>,
     pub derived_bundles: Vec<DerivedBundleState>,
     pub sources: Vec<SourceRecord>,
-    pub source_sets: Vec<SourceSetState>,
 }

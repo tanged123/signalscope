@@ -31,12 +31,10 @@ impl Default for Session {
                 panels: Vec::new(),
                 layout: Vec::new(),
             }],
-            favorites: Vec::new(),
-            favorite_bundles: Vec::new(),
+            named_sets: Vec::new(),
             derived: Vec::new(),
             derived_bundles: Vec::new(),
             sources: Vec::new(),
-            source_sets: Vec::new(),
         }
     }
 }
@@ -110,6 +108,7 @@ pub fn load_from_path(path: &Path) -> Result<Session, SessionError> {
 /// `protocol/schema/scope-session.json`, regenerate, then add an arm here
 /// that rewrites a vN `value` into vN+1 shape and recurses. Additive optional
 /// fields need no rung; only new required fields do.
+#[allow(clippy::too_many_lines)]
 fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, SessionError> {
     match version {
         1 => {
@@ -197,6 +196,21 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(16);
             migrate(16, value)
         }
+        16 => {
+            migrate_v16_bindings(&mut value);
+            value["schema_version"] = serde_json::json!(17);
+            migrate(17, value)
+        }
+        17 => {
+            migrate_v17_channel_refs(&mut value);
+            value["schema_version"] = serde_json::json!(18);
+            migrate(18, value)
+        }
+        18 => {
+            migrate_v18_remove_alignment(&mut value);
+            value["schema_version"] = serde_json::json!(19);
+            migrate(19, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -279,6 +293,239 @@ fn migrate_v10_sources(value: &mut serde_json::Value) {
         object.remove("source_paths");
         object.insert("sources".into(), serde_json::Value::Array(records));
     }
+}
+
+/// Longest-prefix match of a flat path against source prefixes; derived
+/// paths map to the reserved derived source key.
+fn path_to_ref(path: &str, prefixes: &[(String, String)]) -> Option<serde_json::Value> {
+    crate::series_ref::ref_from_prefixes(path, prefixes)
+        .and_then(|reference| serde_json::to_value(reference).ok())
+}
+
+#[allow(clippy::too_many_lines)]
+fn migrate_v16_bindings(value: &mut serde_json::Value) {
+    let prefixes: Vec<(String, String)> = value
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| {
+                    Some((
+                        source.get("prefix")?.as_str()?.to_owned(),
+                        source.get("key")?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for_each_panel(value, |panel| {
+        let series = panel
+            .remove("series")
+            .unwrap_or_else(|| serde_json::json!([]));
+        let mut refs = Vec::new();
+        let mut overrides = Vec::new();
+        for entry in series.as_array().into_iter().flatten() {
+            let Some(path) = entry.get("path").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let Some(target) = path_to_ref(path, &prefixes) else {
+                continue;
+            };
+            refs.push(target.clone());
+            overrides.push(serde_json::json!({
+                "target_ref": target,
+                "target_selector": null,
+                "color_slot": entry.get("color_slot").cloned().unwrap_or_else(|| serde_json::json!(1)),
+                "dash": entry.get("dash").cloned().unwrap_or_else(|| serde_json::json!("solid")),
+                "width": entry.get("width").cloned().unwrap_or_else(|| serde_json::json!(1.4)),
+                "opacity": null,
+                "visible": entry.get("visible").cloned().unwrap_or(serde_json::json!(true)),
+            }));
+        }
+        panel.insert(
+            "bindings".into(),
+            serde_json::json!([{
+                "kind": "pick",
+                "selector": null,
+                "refs": refs,
+                "set_id": null
+            }]),
+        );
+        panel.insert("overrides".into(), serde_json::Value::Array(overrides));
+
+        let highlighted = panel
+            .remove("highlighted_sources")
+            .unwrap_or_else(|| serde_json::json!([]));
+        let focus: Vec<serde_json::Value> = highlighted
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("path").and_then(serde_json::Value::as_str))
+            .filter_map(|path| path_to_ref(path, &prefixes))
+            .map(|target| {
+                serde_json::json!({
+                    "kind": "series",
+                    "ref": target,
+                    "source_key": null,
+                    "channel": null
+                })
+            })
+            .collect();
+        panel.insert("focus".into(), serde_json::Value::Array(focus));
+
+        let x_ref = panel
+            .remove("x_signal")
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .and_then(|path| path_to_ref(&path, &prefixes))
+            .unwrap_or(serde_json::Value::Null);
+        panel.insert("x_ref".into(), x_ref);
+
+        let by_time = panel
+            .remove("color_by_time")
+            .and_then(|value| value.as_bool())
+            == Some(true);
+        let color_ref = panel
+            .remove("color_signal")
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .and_then(|path| path_to_ref(&path, &prefixes))
+            .unwrap_or(serde_json::Value::Null);
+        let axis = if by_time {
+            "time"
+        } else if color_ref.is_null() {
+            "none"
+        } else {
+            "signal"
+        };
+        panel.insert("color_axis".into(), serde_json::json!(axis));
+        panel.insert("color_ref".into(), color_ref);
+        panel.insert("color_by".into(), serde_json::json!("source"));
+        panel.insert("ghost_mode".into(), serde_json::json!("all"));
+        panel.insert("split_by".into(), serde_json::json!("none"));
+    });
+
+    let object = value.as_object_mut().expect("session object");
+    let mut named_sets = Vec::new();
+    for path in take_string_array(object, "favorites") {
+        if let Some(target) = path_to_ref(&path, &prefixes) {
+            named_sets.push(serde_json::json!({
+                "id": format!("set-fav-{}", named_sets.len() + 1),
+                "name": path,
+                "kind": "pick",
+                "selector": null,
+                "refs": [target]
+            }));
+        }
+    }
+    for local in take_string_array(object, "favorite_bundles") {
+        named_sets.push(serde_json::json!({
+            "id": format!("set-fav-{}", named_sets.len() + 1),
+            "name": local,
+            "kind": "query",
+            "selector": local,
+            "refs": []
+        }));
+    }
+    object.insert("named_sets".into(), serde_json::Value::Array(named_sets));
+    object.insert("channel_map".into(), serde_json::json!([]));
+
+    object.remove("source_sets");
+}
+
+fn migrate_v18_remove_alignment(value: &mut serde_json::Value) {
+    for source in value
+        .get_mut("sources")
+        .and_then(serde_json::Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(source) = source.as_object_mut() {
+            source.remove("time_domain");
+            source.remove("scale");
+            source.remove("offset");
+        }
+    }
+}
+
+fn rewrite_v17_channel_refs(
+    value: &mut serde_json::Value,
+    aliases: &std::collections::HashMap<(String, String), String>,
+) {
+    match value {
+        serde_json::Value::Array(entries) => {
+            for entry in entries {
+                rewrite_v17_channel_refs(entry, aliases);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            let source_key = object
+                .get("source_key")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let channel = object
+                .get("channel")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            if let (Some(source_key), Some(channel)) = (source_key, channel) {
+                if let Some(name) = aliases.get(&(source_key, channel)) {
+                    object.insert("channel".into(), serde_json::json!(name));
+                }
+            }
+            for entry in object.values_mut() {
+                rewrite_v17_channel_refs(entry, aliases);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn migrate_v17_channel_refs(value: &mut serde_json::Value) {
+    let aliases: std::collections::HashMap<(String, String), String> = value
+        .get("channel_map")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| {
+            let canonical = entry
+                .get("canonical")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            entry
+                .get("aliases")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(move |alias| {
+                    Some((
+                        (
+                            alias.get("source_key")?.as_str()?.to_owned(),
+                            canonical.clone(),
+                        ),
+                        alias.get("name")?.as_str()?.to_owned(),
+                    ))
+                })
+        })
+        .collect();
+
+    if let Some(object) = value.as_object_mut() {
+        object.remove("channel_map");
+    }
+    rewrite_v17_channel_refs(value, &aliases);
+}
+
+fn take_string_array(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Vec<String> {
+    object
+        .remove(key)
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| entry.as_str().map(str::to_owned))
+        .collect()
 }
 
 fn migrate_v13_ensembles(value: &mut serde_json::Value) {
@@ -494,6 +741,217 @@ mod tests {
         }
     }
 
+    fn v16_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "app": "signalscope", "schema_version": 16, "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true, "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "time", "axis_style": "gutter",
+                    "x_signal": "run/temp", "color_signal": null, "color_by_time": true,
+                    "series": [
+                        {"path": "run/pressure", "color_slot": 2, "dash": "dash", "width": 2.0, "visible": false},
+                        {"path": "derived/err", "color_slot": 1, "dash": "solid", "width": 1.4, "visible": true},
+                        {"path": "orphan/x", "color_slot": 3, "dash": "solid", "width": 1.4, "visible": true}
+                    ],
+                    "highlighted_sources": [{"local_path": "pressure", "path": "run/pressure"}],
+                    "y_range": null, "x_range": null, "x_label": null, "y_label": null, "c_label": null,
+                    "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }],
+            "favorites": ["run/temp"], "favorite_bundles": ["imu/accel/x"],
+            "derived": [], "derived_bundles": [],
+            "sources": [{"key": "11111111-1111-1111-1111-111111111111", "path": "/data/run.csv",
+                         "prefix": "run", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false}],
+            "source_sets": [{
+                "key": "22222222-2222-2222-2222-222222222222", "label": "Set 1", "generation": 3,
+                "members": [{"source_key": "11111111-1111-1111-1111-111111111111",
+                             "missing": [], "scale": 0.001, "offset": 0.5}]
+            }]
+        })
+    }
+
+    #[test]
+    fn v16_series_become_a_pick_binding_with_overrides() {
+        let session = from_json(&v16_fixture().to_string()).unwrap();
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.bindings.len(), 1);
+        let binding = &panel.bindings[0];
+        assert!(matches!(binding.kind, BindingKind::Pick));
+        assert_eq!(binding.refs.len(), 2);
+        assert_eq!(
+            binding.refs[0].source_key,
+            "11111111-1111-1111-1111-111111111111"
+        );
+        assert_eq!(binding.refs[0].channel, "pressure");
+        assert_eq!(binding.refs[1].source_key, "derived");
+        assert_eq!(binding.refs[1].channel, "err");
+        let first = &panel.overrides[0];
+        assert_eq!(first.target_ref.as_ref().unwrap().channel, "pressure");
+        assert_eq!(first.color_slot, Some(2));
+        assert_eq!(first.dash, Some(DashStyle::Dash));
+        assert_eq!(first.visible, Some(false));
+    }
+
+    #[test]
+    fn v16_axes_highlights_and_favorites_migrate() {
+        let session = from_json(&v16_fixture().to_string()).unwrap();
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.x_ref.as_ref().unwrap().channel, "temp");
+        assert!(matches!(panel.color_axis, ColorAxis::Time));
+        assert!(panel.color_ref.is_none());
+        assert_eq!(panel.focus.len(), 1);
+        assert!(matches!(panel.focus[0].kind, FocusKind::Series));
+        assert_eq!(panel.focus[0].r#ref.as_ref().unwrap().channel, "pressure");
+        assert_eq!(session.named_sets.len(), 2);
+        assert!(matches!(session.named_sets[0].kind, NamedSetKind::Pick));
+        assert_eq!(session.named_sets[0].name, "run/temp");
+        assert!(matches!(session.named_sets[1].kind, NamedSetKind::Query));
+        assert_eq!(
+            session.named_sets[1].selector.as_deref(),
+            Some("imu/accel/x")
+        );
+    }
+
+    #[test]
+    fn v16_bare_paths_migrate_for_an_empty_source_prefix() {
+        let mut value = v16_fixture();
+        value["sources"][0]["prefix"] = serde_json::json!("");
+        value["tabs"][0]["panels"][0]["x_signal"] = serde_json::json!("temp");
+        value["tabs"][0]["panels"][0]["series"] = serde_json::json!([{
+            "path": "pressure", "color_slot": 2, "dash": "dash", "width": 2.0, "visible": true
+        }]);
+
+        let session = from_json(&value.to_string()).expect("v16 migrates");
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.x_ref.as_ref().unwrap().channel, "temp");
+        assert_eq!(panel.bindings[0].refs[0].channel, "pressure");
+    }
+
+    #[test]
+    fn migrates_v17_channel_refs() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(17);
+        value["channel_map"] = serde_json::json!([{
+            "canonical": "temp",
+            "aliases": [
+                {"source_key": "run-01", "name": "temperature"},
+                {"source_key": "run-02", "name": "T_amb"}
+            ]
+        }]);
+        value["named_sets"] = serde_json::json!([{
+            "id": "set-1",
+            "name": "Temperatures",
+            "kind": "pick",
+            "selector": "temp",
+            "refs": [
+                {"source_key": "run-01", "channel": "temp"},
+                {"source_key": "run-03", "channel": "pressure"}
+            ]
+        }]);
+        value["tabs"][0]["panels"] = serde_json::json!([{
+            "id": "panel-1",
+            "title": "Temperatures",
+            "mode": "xy",
+            "axis_style": "gutter",
+            "x_ref": {"source_key": "run-01", "channel": "temp"},
+            "color_axis": "signal",
+            "color_ref": {"source_key": "run-02", "channel": "temp"},
+            "bindings": [{
+                "kind": "pick",
+                "selector": "temp",
+                "refs": [{"source_key": "run-02", "channel": "temp"}],
+                "set_id": null
+            }],
+            "color_by": "source",
+            "overrides": [{
+                "target_ref": {"source_key": "run-01", "channel": "temp"},
+                "target_selector": "temp",
+                "color_slot": 1,
+                "dash": "solid",
+                "width": 1.4,
+                "opacity": null,
+                "visible": true
+            }],
+            "focus": [{
+                "kind": "series",
+                "ref": {"source_key": "run-02", "channel": "temp"},
+                "source_key": null,
+                "channel": null
+            }],
+            "ghost_mode": "all",
+            "split_by": "none",
+            "y_range": null,
+            "x_range": null,
+            "x_label": null,
+            "y_label": null,
+            "c_label": null,
+            "time_window": null,
+            "annotations": [],
+            "show_stats": false
+        }]);
+
+        let session = from_json(&value.to_string()).expect("v17 migrates");
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(session.schema_version, 19);
+        assert_eq!(session.named_sets[0].refs[0].channel, "temperature");
+        assert_eq!(session.named_sets[0].refs[1].channel, "pressure");
+        assert_eq!(session.named_sets[0].selector.as_deref(), Some("temp"));
+        assert_eq!(panel.x_ref.as_ref().unwrap().channel, "temperature");
+        assert_eq!(panel.color_ref.as_ref().unwrap().channel, "T_amb");
+        assert_eq!(panel.bindings[0].refs[0].channel, "T_amb");
+        assert_eq!(panel.bindings[0].selector.as_deref(), Some("temp"));
+        assert_eq!(
+            panel.overrides[0].target_ref.as_ref().unwrap().channel,
+            "temperature"
+        );
+        assert_eq!(panel.overrides[0].target_selector.as_deref(), Some("temp"));
+        assert_eq!(panel.focus[0].r#ref.as_ref().unwrap().channel, "T_amb");
+        assert!(
+            serde_json::to_value(session)
+                .expect("serializes")
+                .get("channel_map")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn migrates_v18_without_alignment() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(18);
+        let mut time_domain = serde_json::json!({
+            "unit": "seconds",
+            "origin": "relative"
+        });
+        time_domain["alignment_".to_owned() + "origin"] = serde_json::json!(0.0);
+        value["sources"] = serde_json::json!([{
+            "key": "run-01",
+            "path": "/data/run-01.csv",
+            "prefix": "run_01",
+            "provider_id": null,
+            "decode_provenance": null,
+            "reconcile_legacy": false,
+            "time_domain": time_domain,
+            "scale": 1.0,
+            "offset": 0.0
+        }]);
+
+        let session = from_json(&value.to_string()).expect("migrates");
+
+        assert_eq!(session.schema_version, 19);
+        let serialized = serde_json::to_value(session).expect("serializes");
+        let source = &serialized["sources"][0];
+        assert!(source.get("time_domain").is_none());
+        assert!(source.get("scale").is_none());
+        assert!(source.get("offset").is_none());
+        assert_eq!(source["key"], "run-01");
+        assert_eq!(source["prefix"], "run_01");
+    }
+
     #[test]
     fn session_conformance_fixture_matches_rust() {
         let session = Session {
@@ -502,8 +960,25 @@ mod tests {
                 expr: "hypot('imu/vx', 'imu/vy')".into(),
             }],
             sources: vec![source("/data/run.csv")],
-            favorites: vec!["imu/vx".into()],
-            favorite_bundles: vec!["imu/accel/x".into()],
+            named_sets: vec![
+                NamedSet {
+                    id: "set-1".into(),
+                    name: "imu/vx".into(),
+                    kind: NamedSetKind::Pick,
+                    selector: None,
+                    refs: vec![SeriesRef {
+                        source_key: source("/data/run.csv").key,
+                        channel: "vx".into(),
+                    }],
+                },
+                NamedSet {
+                    id: "set-2".into(),
+                    name: "imu/accel/x".into(),
+                    kind: NamedSetKind::Query,
+                    selector: Some("imu/accel/x".into()),
+                    refs: Vec::new(),
+                },
+            ],
             ..Session::default()
         };
         let current = format!(
@@ -574,17 +1049,34 @@ mod tests {
                     title: "Body velocity".into(),
                     mode: PanelMode::Time,
                     axis_style: AxisStyle::Gutter,
-                    x_signal: None,
-                    color_signal: None,
-                    color_by_time: false,
-                    series: vec![SeriesState {
-                        path: "rocket/velocity_body/x".into(),
-                        color_slot: 1,
-                        dash: DashStyle::Solid,
-                        width: 1.5,
-                        visible: true,
+                    x_ref: None,
+                    color_axis: ColorAxis::None,
+                    color_ref: None,
+                    bindings: vec![Binding {
+                        kind: BindingKind::Pick,
+                        selector: None,
+                        refs: vec![SeriesRef {
+                            source_key: "rocket".into(),
+                            channel: "velocity_body/x".into(),
+                        }],
+                        set_id: None,
                     }],
-                    highlighted_sources: Vec::new(),
+                    color_by: StyleDimension::Source,
+                    overrides: vec![SeriesOverride {
+                        target_ref: Some(SeriesRef {
+                            source_key: "rocket".into(),
+                            channel: "velocity_body/x".into(),
+                        }),
+                        target_selector: None,
+                        color_slot: Some(1),
+                        dash: Some(DashStyle::Solid),
+                        width: Some(1.5),
+                        opacity: None,
+                        visible: Some(true),
+                    }],
+                    focus: Vec::new(),
+                    ghost_mode: GhostMode::All,
+                    split_by: SplitDimension::None,
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -637,7 +1129,6 @@ mod tests {
             ],
             "source_sets": [{
                 "key": "set-1", "label": "Runs", "generation": "1",
-                "time_domain": {"unit": "seconds", "origin": "relative", "alignment_origin": 0.0},
                 "members": [
                     {"source_key": "k1", "missing": [], "scale": 1.0, "offset": 0.0},
                     {"source_key": "k2", "missing": [], "scale": 1.0, "offset": 0.0},
@@ -647,14 +1138,21 @@ mod tests {
         });
         let session = from_json(&json.to_string()).expect("v13 migrates");
         let panel = &session.tabs[0].panels[0];
-        let paths: Vec<&str> = panel
-            .series
-            .iter()
-            .map(|series| series.path.as_str())
-            .collect();
-        assert_eq!(paths, vec!["run_01/alt", "run_02/alt"]);
-        assert_eq!(panel.series[1].color_slot, 2);
-        assert!(panel.highlighted_sources.is_empty());
+        assert_eq!(
+            panel.bindings[0].refs,
+            vec![
+                SeriesRef {
+                    source_key: "k1".into(),
+                    channel: "alt".into(),
+                },
+                SeriesRef {
+                    source_key: "k2".into(),
+                    channel: "alt".into(),
+                }
+            ]
+        );
+        assert_eq!(panel.overrides[1].color_slot, Some(2));
+        assert!(panel.focus.is_empty());
     }
 
     #[test]
@@ -675,8 +1173,8 @@ mod tests {
                 }]}]
         });
         let session = from_json(&json.to_string()).expect("v13 migrates");
-        assert_eq!(session.tabs[0].panels[0].series.len(), 1);
-        assert!(session.tabs[0].panels[0].highlighted_sources.is_empty());
+        assert!(session.tabs[0].panels[0].bindings[0].refs.is_empty());
+        assert!(session.tabs[0].panels[0].focus.is_empty());
     }
 
     #[test]
@@ -715,42 +1213,6 @@ mod tests {
     }
 
     #[test]
-    fn v11_sessions_gain_an_empty_set_list_and_round_trip_membership() {
-        let mut value = serde_json::to_value(Session::default()).unwrap();
-        value["schema_version"] = serde_json::json!(11);
-        value.as_object_mut().unwrap().remove("source_sets");
-        let json = serde_json::to_string(&value).unwrap();
-        let session = from_json(&json).expect("v11 migrates");
-        assert!(session.source_sets.is_empty());
-
-        let with_sets = Session {
-            source_sets: vec![SourceSetState {
-                key: uuid::Uuid::nil().to_string(),
-                label: "Runs".into(),
-                generation: 4,
-                time_domain: TimeDomainState {
-                    unit: TimeUnitState::Seconds,
-                    origin: OriginKindState::Relative,
-                    alignment_origin: 0.0,
-                },
-                members: vec![SetMemberState {
-                    source_key: uuid::Uuid::nil().to_string(),
-                    missing: vec!["imu/ay".into()],
-                    scale: 1.0,
-                    offset: 0.0,
-                }],
-            }],
-            ..session
-        };
-        let restored = from_json(&serde_json::to_string(&with_sets).unwrap()).unwrap();
-        assert_eq!(restored.source_sets, with_sets.source_sets);
-        assert_eq!(
-            restored.source_sets[0].members[0].missing,
-            vec!["imu/ay".to_owned()]
-        );
-    }
-
-    #[test]
     fn v14_sessions_gain_empty_bundle_favorites() {
         let mut value = serde_json::to_value(Session::default()).expect("serializes");
         value["schema_version"] = serde_json::json!(14);
@@ -759,7 +1221,7 @@ mod tests {
             .expect("session object")
             .remove("favorite_bundles");
         let session = from_json(&value.to_string()).expect("v14 migrates");
-        assert!(session.favorite_bundles.is_empty());
+        assert!(session.named_sets.is_empty());
     }
 
     #[test]
@@ -841,7 +1303,7 @@ mod tests {
         assert_eq!(session.tabs[0].layout.len(), 1);
         assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
         assert!((session.tabs[0].layout[0].panels[0].width - 1.0).abs() < f64::EPSILON);
-        assert!(session.favorites.is_empty());
+        assert!(session.named_sets.is_empty());
     }
 
     #[test]
@@ -862,7 +1324,7 @@ mod tests {
         assert_eq!(session.tabs[0].focused_panel_id.as_deref(), Some("panel-a"));
         assert_eq!(session.tabs[0].panels[0].id, "panel-a");
         assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
-        assert_eq!(session.favorites, ["rocket/velocity"]);
+        assert!(session.named_sets.is_empty());
     }
 
     #[test]
@@ -1031,8 +1493,8 @@ mod tests {
         .to_string();
         let session = from_json(&json).expect("v8 session migrates");
         let panel = &session.tabs[0].panels[0];
-        assert!(panel.color_by_time);
-        assert_eq!(panel.color_signal, None);
+        assert!(matches!(panel.color_axis, ColorAxis::Time));
+        assert_eq!(panel.color_ref, None);
         assert_eq!(session.tabs[0].maximized_panel_id, None);
     }
 

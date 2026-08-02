@@ -16,7 +16,12 @@ import {
   historySnapshot,
   restoreTransientSessionState,
 } from "../app/history";
-import { runBatchIngest, waitForBatch } from "../app/ingest";
+import {
+  pickIngestPaths,
+  runBatchIngest,
+  type SourceOpenKind,
+  waitForBatch,
+} from "../app/ingest";
 import {
   applyPreferences,
   clampPlotFontSize,
@@ -31,7 +36,10 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
-import { virtualSlice } from "../app/tree-model";
+import { Catalog } from "../app/catalog";
+import { resolvePanel } from "../app/resolution";
+import { SelectionModel } from "../app/selection";
+import { evaluateSelector } from "../app/selector";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
 import {
@@ -47,7 +55,6 @@ import {
   type ExportSelection,
   type SampleResponse,
   type SampleSeries,
-  type SetSummary,
   type SignalSummary,
   type SourceSummary,
   type TileResponse,
@@ -56,6 +63,7 @@ import type {
   CursorMode,
   PanelMode,
   PanelState,
+  SeriesRef,
   Session,
 } from "../generated/session";
 import type { Preferences } from "../generated/preferences";
@@ -71,10 +79,11 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
-import { FolderScanDialog } from "./folder-scan-dialog";
 import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
-import { SignalTreeView } from "./signal-tree";
+import { SignalOutlineView } from "./signal-outline";
+import { SourceOpenDialog } from "./source-open-dialog";
+import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
@@ -86,7 +95,55 @@ const AUTOSAVE_DEBOUNCE_MS = 800;
 const SAMPLE_CAP = 8192;
 const DERIVED_PREFIX = "derived/";
 
-export function validateDerivedBundleName(path: string): void {
+export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
+  if (count <= 0) return "none";
+  return count <= 4 ? "focus" : "ghost";
+}
+
+export function statusAggregate(
+  sourceCount: number,
+  signalCount: number,
+  pointCount: number,
+): string {
+  return `${sourceCount.toLocaleString()} sources · ${signalCount.toLocaleString()} signals · ${pointCount.toLocaleString()} pts`;
+}
+
+export function bundleCompletionEntries(
+  signals: readonly SignalSummary[],
+): { localPath: string; runCount: number }[] {
+  const sourcesByChannel = new Map<string, Set<string>>();
+  for (const signal of signals) {
+    const sources = sourcesByChannel.get(signal.local_path) ?? new Set();
+    sources.add(signal.source_key);
+    sourcesByChannel.set(signal.local_path, sources);
+  }
+  return [...sourcesByChannel]
+    .filter(([, sources]) => sources.size >= 2)
+    .map(([localPath, sources]) => ({
+      localPath,
+      runCount: sources.size,
+    }))
+    .sort((left, right) => left.localPath.localeCompare(right.localPath));
+}
+
+export function exportSourceOptions(
+  signals: readonly SignalSummary[],
+): { key: string; label: string }[] {
+  const sources = new Map<string, string>();
+  for (const signal of signals) {
+    if (sources.has(signal.source_key)) continue;
+    const suffix = `/${signal.local_path}`;
+    const label = signal.path.endsWith(suffix)
+      ? signal.path.slice(0, -suffix.length)
+      : signal.path;
+    sources.set(signal.source_key, label);
+  }
+  return [...sources]
+    .map(([key, label]) => ({ key, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function validateDerivedBundleName(path: string): void {
   const name = path.startsWith(DERIVED_PREFIX)
     ? path.slice(DERIVED_PREFIX.length)
     : path;
@@ -95,49 +152,25 @@ export function validateDerivedBundleName(path: string): void {
   }
 }
 
-export function bundleCompletionEntries(
-  signals: readonly SignalSummary[],
-  sets: readonly SetSummary[],
-): { localPath: string; runCount: number }[] {
-  const members = new Map<string, Set<string>>();
-  for (const set of sets) {
-    const sourceKeys = new Set(set.members.map((member) => member.source_key));
-    const setMembers = new Map<string, Set<string>>();
-    for (const signal of signals) {
-      if (!sourceKeys.has(signal.source_key)) continue;
-      const paths = setMembers.get(signal.local_path) ?? new Set<string>();
-      paths.add(signal.path);
-      setMembers.set(signal.local_path, paths);
-    }
-    for (const [localPath, paths] of setMembers) {
-      if (paths.size < 2) continue;
-      const allMembers = members.get(localPath) ?? new Set<string>();
-      for (const path of paths) allMembers.add(path);
-      members.set(localPath, allMembers);
-    }
-  }
-  return [...members]
-    .filter(([, paths]) => paths.size >= 2)
-    .map(([localPath, paths]) => ({ localPath, runCount: paths.size }))
-    .sort((left, right) => left.localPath.localeCompare(right.localPath));
-}
-
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
+  private readonly selection = new SelectionModel();
+  private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
-  private sets: SetSummary[] = [];
+  private catalog = Catalog.empty();
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
-  private tree: SignalTreeView | null = null;
+  private outline: SignalOutlineView | null = null;
+  private setsList: SetsListView | null = null;
+  private pendingSetRefs: SeriesRef[] | null = null;
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
-  private folderScanDialog: FolderScanDialog | null = null;
-  private sourcesExpanded = false;
+  private sourceOpenDialog: SourceOpenDialog | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -219,38 +252,101 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
-        onDropSignal: (id, path) => {
-          this.plotSignal(path, id);
+        onDropSignals: (id, paths) => {
+          this.plotSignals(paths, id);
         },
-        onDropBundle: (id, memberPaths) => {
-          this.plotBundle(memberPaths, id);
+        onDropSet: (id, setId) => {
+          this.bindSetToPanel(setId, id);
         },
-        onToggleHighlight: (id, path) => {
-          const localPath = this.isDerivedPath(path)
-            ? undefined
-            : this.signalsByPath.get(path)?.local_path;
-          if (localPath === undefined) return;
-          this.workspace.toggleHighlight(id, path, localPath);
+        onFocusToggle: (id, entry) => {
+          this.workspace.toggleFocus(id, entry);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onClearFocus: (id) => {
+          this.workspace.clearFocus(id);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onMuteSelector: (id, selector) => {
+          this.workspace.addSelectorOverride(id, selector, { visible: false });
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onMuteSeries: (id, ref) => {
+          this.workspace.toggleSeriesVisible(id, ref);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onRemoveBinding: (id, index) => {
+          this.workspace.removeBinding(id, index);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        onToggleGhostMode: (id) => {
+          this.workspace.toggleGhostMode(id);
+          const panel = this.workspace.panel(id);
+          if (panel?.ghost_mode === "ghost") {
+            this.focusFirstSeries(
+              id,
+              resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
+                (series) => series.ref,
+              ),
+            );
+          }
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetColorBy: (id, dimension) => {
+          this.workspace.setColorBy(id, dimension);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onRemoveOverride: (id, index) => {
+          this.workspace.removeOverride(id, index);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onClearOverrides: (id) => {
+          this.workspace.clearOverrides(id);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         localPathFor: (path) =>
           this.isDerivedPath(path)
-            ? null
+            ? path.slice(DERIVED_PREFIX.length)
             : (this.signalsByPath.get(path)?.local_path ?? null),
         sourceKeyFor: (path) =>
           this.isDerivedPath(path)
-            ? null
+            ? "derived"
             : (this.signalsByPath.get(path)?.source_key ?? null),
+        pathForRef: (ref) => this.catalog.get(ref)?.path ?? null,
+        catalog: () => this.catalog,
+        namedSets: () => this.workspace.namedSets(),
+        resolveSeries: (state) =>
+          resolvePanel(this.catalog, state, this.workspace.namedSets()),
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
-          this.workspace.setXSignal(id, path);
+          const ref = this.catalog.refFromPath(path);
+          if (ref === undefined) return;
+          this.workspace.setXRef(id, ref);
           this.workspace.focusPanel(id);
           this.afterLayoutChange();
         },
         onSetColorSignal: (id, path) => {
-          this.workspace.setColorSignal(id, path);
+          this.workspace.setColorRef(
+            id,
+            path === null ? null : (this.catalog.refFromPath(path) ?? null),
+          );
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
@@ -258,8 +354,8 @@ export class AppShell {
         onClearXSignal: (id) => {
           this.clearXSignal(id);
         },
-        onToggleSeries: (id, path) => {
-          this.workspace.toggleSeriesVisible(id, path);
+        onToggleSeries: (id, ref) => {
+          this.workspace.toggleSeriesVisible(id, ref);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -338,14 +434,14 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onSetSeriesStyle: (id, path, style) => {
-          this.workspace.setSeriesStyle(id, path, style);
+        onSetSeriesStyle: (id, ref, style) => {
+          this.workspace.setSeriesOverride(id, ref, style);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onRemoveSeries: (id, path) => {
-          this.workspace.removeSeries(id, path);
+        onRemoveSeries: (id, ref) => {
+          this.workspace.removeSeriesRef(id, ref, this.catalog.get(ref)?.path);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
@@ -361,9 +457,15 @@ export class AppShell {
           const panel = this.workspace.addPanelRow();
           this.plotSignal(path, panel.id);
         },
-        onDropBundleNewPanel: (memberPaths) => {
+        onDropSignalsNewPanel: (memberPaths) => {
           const panel = this.workspace.addPanelRow();
-          this.plotBundle(memberPaths, panel.id);
+          this.plotSignals(memberPaths, panel.id);
+        },
+        onDropSetNewPanel: (setId) => {
+          if (!this.workspace.namedSets().some((set) => set.id === setId))
+            return;
+          const panel = this.workspace.addPanelRow();
+          this.bindSetToPanel(setId, panel.id);
         },
         onMovePanel: (id, rowIndex, cellIndex) => {
           this.workspace.movePanel(id, rowIndex, cellIndex);
@@ -379,26 +481,21 @@ export class AppShell {
         },
       },
     );
-    this.tree = new SignalTreeView(
-      required(this.root, ".tree-scroll"),
-      required(this.root, ".tree-favorites"),
+    this.setsList = new SetsListView(required(this.root, ".tree-sets"), {
+      onSetBind: (setId) => this.bindSetToPanel(setId),
+      onSignalDrop: (refs) => this.openSetNameRow(refs),
+      onSetRemove: (setId) => {
+        this.workspace.removeNamedSet(setId);
+        this.setsList?.setNamedSets(this.workspace.namedSets());
+        this.afterLayoutChange();
+      },
+    });
+    this.outline = new SignalOutlineView(
+      required(this.root, ".outline-scroll"),
+      this.selection,
       {
-        onPlotSignal: (path) => {
-          this.plotSignal(path);
-        },
-        onPlotBundle: (_localPath, memberPaths) => {
-          this.plotBundle(memberPaths);
-        },
-        onToggleFavorite: (path) => {
-          this.workspace.toggleFavorite(path);
-          this.commitHistory();
-          this.tree?.setFavorites(this.workspace.favorites());
-        },
-        onToggleFavoriteBundle: (localPath) => {
-          this.workspace.toggleFavoriteBundle(localPath);
-          this.commitHistory();
-          this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
-        },
+        onSelectionChange: () => {},
+        onAddToPanel: (refs) => this.addRefsToPanel(refs),
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
         },
@@ -407,8 +504,12 @@ export class AppShell {
         },
       },
     );
-    this.palette = new CommandPalette(this.root, (mode) =>
-      this.paletteEntries(mode),
+    this.selection.onChange(() => {
+      this.syncSelectionActions();
+    });
+    this.syncSelectionActions();
+    this.palette = new CommandPalette(this.root, (mode, query, limit) =>
+      this.paletteEntries(mode, query, limit),
     );
     this.formulaBar = new FormulaBar(required(this.root, ".formula-bar"), {
       onCreate: (path, expression) => this.createDerived(path, expression),
@@ -430,7 +531,8 @@ export class AppShell {
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
       const panel = this.workspace.addPanelRow();
       for (const summary of this.signals.slice(0, 2)) {
-        this.workspace.addSeries(panel.id, summary.path);
+        const ref = this.catalog.refFromPath(summary.path);
+        if (ref !== undefined) this.workspace.addSeriesRef(panel.id, ref);
       }
       this.fitWindowToPlotted();
     }
@@ -481,6 +583,15 @@ export class AppShell {
     };
     this.commands.register(undoCommand);
     this.commands.register(redoCommand);
+    this.commands.register({
+      id: "save-selection-as-set",
+      title: "Save selected signals as set",
+      keys: "f",
+      section: "workspace",
+      group: "sets",
+      enabled: () => this.selection.size() > 0,
+      run: () => this.saveSelectedAsSet(),
+    });
     setEditingReservedCombos(
       [
         undoCommand.keys,
@@ -489,24 +600,14 @@ export class AppShell {
       ].filter((keys): keys is string => keys !== undefined),
     );
     this.commands.register({
-      id: "open-files",
-      title: "Open CSV or MCAP…",
+      id: "open-sources",
+      title: "Open…",
       keys: "o",
       section: "file",
       group: "open",
       enabled: () => this.plane.ingest !== null,
       run: () => {
-        void this.openFiles();
-      },
-    });
-    this.commands.register({
-      id: "open-folder",
-      title: "Open folder…",
-      section: "file",
-      group: "open",
-      enabled: () => this.plane.ingest !== null,
-      run: () => {
-        void this.openFolder();
+        this.openSources();
       },
     });
     this.commands.register({
@@ -659,7 +760,7 @@ export class AppShell {
       "panel-clear-color-signal",
       "Panel: clear color signal (c:)",
       (id) => {
-        this.workspace.setColorSignal(id, null);
+        this.workspace.setColorRef(id, null);
       },
     );
     this.registerFocusedPanelCommand(
@@ -853,7 +954,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.14.3");
+        this.showModeHelp("SignalScope 0.15.9");
       },
     });
     this.commands.register({
@@ -1052,8 +1153,13 @@ export class AppShell {
     ];
   }
 
-  private paletteEntries(mode: PaletteMode): PaletteEntry[] {
+  private paletteEntries(
+    mode: PaletteMode,
+    query = "",
+    limit = Number.POSITIVE_INFINITY,
+  ): PaletteEntry[] {
     if (mode === "settings") return this.settingsEntries();
+    if (mode === "signals") return this.signalPaletteEntries(query, limit);
     // Planned and momentarily unavailable commands both stay listed so the
     // palette matches the menu, but each says why it will not run.
     const ranked = [...this.commands.listAll()].sort(
@@ -1067,32 +1173,6 @@ export class AppShell {
         this.commands.run(command.id);
       },
     }));
-    const signals = this.signals.map((summary) => ({
-      title: `plot ${summary.path}`,
-      hint: "signal",
-      run: () => {
-        this.plotSignal(summary.path);
-      },
-    }));
-    const tabs = this.workspace.tabs().map((tab) => ({
-      title: `switch to ${tab.title}`,
-      hint: "workspace",
-      run: () => {
-        this.workspace.selectTab(tab.id);
-        this.afterLayoutChange();
-      },
-    }));
-    const panels = this.workspace.panels().map((panel) => ({
-      title: `focus ${panel.title}`,
-      hint: "panel",
-      run: () => {
-        this.workspace.focusPanel(panel.id);
-        if (this.workspace.maximizedPanelId() !== null) {
-          this.workspace.maximizePanel(panel.id);
-        }
-        this.afterLayoutChange();
-      },
-    }));
     const focused = this.workspace.focusedPanelId();
     const xSignals =
       focused === null
@@ -1102,7 +1182,8 @@ export class AppShell {
             hint: "then pick from tree",
             run: () => {
               this.workspace.setMode(focused, "xy");
-              this.workspace.setXSignal(focused, summary.path);
+              const ref = this.catalog.refFromPath(summary.path);
+              if (ref !== undefined) this.workspace.setXRef(focused, ref);
               this.afterLayoutChange();
             },
           }));
@@ -1122,14 +1203,76 @@ export class AppShell {
               title: `Panel: set color signal (c:)… ${summary.path}`,
               hint: "signal",
               run: () => {
-                this.workspace.setColorSignal(focused, summary.path);
+                const ref = this.catalog.refFromPath(summary.path);
+                if (ref !== undefined) this.workspace.setColorRef(focused, ref);
                 this.afterLayoutChange();
               },
             })),
           ];
-    return mode === "signals"
-      ? [...signals, ...tabs, ...panels]
-      : [...commands, ...xSignals, ...colorSignals];
+    return [...commands, ...xSignals, ...colorSignals];
+  }
+
+  private signalPaletteEntries(query: string, limit: number): PaletteEntry[] {
+    const input = query.trim();
+    const match = input === "" ? null : evaluateSelector(this.catalog, input);
+    const selectorMode =
+      match !== null && (match.signalCount > 0 || /[*?|[@:]/.test(input));
+    const paths = selectorMode
+      ? match.series.map((series) => series.path)
+      : this.signals
+          .filter(
+            (summary) =>
+              input === "" ||
+              summary.path.toLowerCase().includes(input.toLowerCase()),
+          )
+          .map((summary) => summary.path);
+    const aggregate: PaletteEntry[] =
+      selectorMode && match.signalCount > 1
+        ? [
+            {
+              title: `Add ${String(match.signalCount)} signals · ${String(match.sourceCount)} sources to focused panel`,
+              hint: "selector",
+              run: () => {
+                this.bindQueryToPanel(input);
+              },
+            },
+          ]
+        : [];
+    const signalEntries = paths.slice(0, limit).map((path) => ({
+      title: `plot ${path}`,
+      hint: "signal",
+      run: () => {
+        this.plotSignal(path);
+      },
+    }));
+    const titleMatches = (title: string): boolean =>
+      input === "" || title.toLowerCase().includes(input.toLowerCase());
+    const tabs = this.workspace
+      .tabs()
+      .filter((tab) => titleMatches(`switch to ${tab.title}`))
+      .map((tab) => ({
+        title: `switch to ${tab.title}`,
+        hint: "workspace",
+        run: () => {
+          this.workspace.selectTab(tab.id);
+          this.afterLayoutChange();
+        },
+      }));
+    const panels = this.workspace
+      .panels()
+      .filter((panel) => titleMatches(`focus ${panel.title}`))
+      .map((panel) => ({
+        title: `focus ${panel.title}`,
+        hint: "panel",
+        run: () => {
+          this.workspace.focusPanel(panel.id);
+          if (this.workspace.maximizedPanelId() !== null) {
+            this.workspace.maximizePanel(panel.id);
+          }
+          this.afterLayoutChange();
+        },
+      }));
+    return [...aggregate, ...signalEntries, ...tabs, ...panels].slice(0, limit);
   }
 
   private bindControls(): void {
@@ -1150,15 +1293,83 @@ export class AppShell {
     required(this.root, ".formula-toggle").addEventListener("click", () => {
       this.commands.run("toggle-formula");
     });
+    required<HTMLButtonElement>(
+      this.root,
+      ".sets-save-selection",
+    ).addEventListener("click", () => {
+      this.commands.run("save-selection-as-set");
+    });
     required(this.root, ".cursor-toggle").addEventListener("click", () => {
       this.commands.run("cycle-cursor-mode");
     });
-    required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
-      "input",
-      (event) => {
-        this.tree?.setFilter((event.target as HTMLInputElement).value);
+    const search = required<HTMLInputElement>(this.root, ".signal-search");
+    search.addEventListener("input", () => {
+      this.outline?.setFilter(search.value);
+      this.renderSearchStatus();
+    });
+    search.addEventListener("keydown", (event) => {
+      const input = search.value.trim();
+      if (event.key === "Enter") {
+        const match =
+          input === "" ? null : evaluateSelector(this.catalog, input);
+        if (match === null || match.signalCount === 0) return;
+        event.preventDefault();
+        this.bindQueryToPanel(input);
+      } else if (
+        event.key.toLowerCase() === "s" &&
+        (event.metaKey || event.ctrlKey)
+      ) {
+        const match =
+          input === "" ? null : evaluateSelector(this.catalog, input);
+        if (match === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.openSetNameRow();
+      }
+    });
+    const setName = required<HTMLInputElement>(this.root, ".set-name-input");
+    const commitSet = (): void => {
+      const selector = search.value.trim();
+      const name = setName.value.trim();
+      if (name === "") return;
+      if (this.pendingSetRefs === null && selector === "") return;
+      const refs = this.pendingSetRefs;
+      this.workspace.addNamedSet({
+        id: this.workspace.nextSetId(),
+        name,
+        kind: refs === null ? "query" : "pick",
+        selector: refs === null ? selector : null,
+        refs: refs ?? [],
+      });
+      this.pendingSetRefs = null;
+      this.setsList?.setNamedSets(this.workspace.namedSets());
+      this.hideSetNameRow();
+      this.commitHistory();
+      this.afterLayoutChange();
+      search.focus();
+    };
+    setName.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitSet();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.hideSetNameRow();
+        search.focus();
+      }
+    });
+    required<HTMLButtonElement>(this.root, ".set-name-save").addEventListener(
+      "click",
+      commitSet,
+    );
+    required<HTMLButtonElement>(this.root, ".set-name-cancel").addEventListener(
+      "click",
+      () => {
+        this.hideSetNameRow();
+        search.focus();
       },
     );
+    this.renderSearchStatus();
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
       if (this.exportDialog?.isOpen() === true) return;
@@ -1169,8 +1380,19 @@ export class AppShell {
         (target instanceof HTMLElement && target.isContentEditable);
       if (
         editing &&
-        ((!event.metaKey && !event.ctrlKey) || reservedWhileEditing(event))
+        ((!event.metaKey && !event.ctrlKey) ||
+          reservedWhileEditing(event) ||
+          event.key.toLowerCase() === "a")
       ) {
+        return;
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "a" &&
+        this.dockContains(event.target)
+      ) {
+        event.preventDefault();
+        this.selectAllDockRows();
         return;
       }
       if (this.commands.handleKey(event)) event.preventDefault();
@@ -1182,49 +1404,236 @@ export class AppShell {
     if (target === null) {
       target = this.workspace.addPanelRow().id;
     }
-    if (this.workspace.addSeries(target, path)) {
+    const ref = this.catalog.refFromPath(path);
+    if (ref !== undefined && this.workspace.addSeriesRef(target, ref)) {
+      this.afterSeriesAdded(target, [ref]);
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
     }
   }
 
-  private plotBundle(memberPaths: readonly string[], panelId?: string): void {
+  private bindQueryToPanel(selector: string): void {
     let target = this.workspace.focusedPanelId();
-    if (panelId !== undefined) target = panelId;
     if (target === null) target = this.workspace.addPanelRow().id;
-    if (this.workspace.addSeriesBatch(target, memberPaths)) {
+    if (!this.workspace.addQueryBinding(target, selector)) return;
+    this.afterSeriesAdded(target, this.refsForSelector(selector));
+    this.workspace.focusPanel(target);
+    this.fitWindowToPlotted();
+    this.afterLayoutChange();
+  }
+
+  private bindSetToPanel(setId: string, panelId?: string): void {
+    const set = this.workspace.namedSets().find((entry) => entry.id === setId);
+    if (set === undefined) return;
+    let target = panelId ?? this.workspace.focusedPanelId();
+    if (target === null) {
+      target = this.workspace.addPanelRow().id;
+    }
+    if (!this.workspace.addSetBinding(target, setId)) return;
+    this.afterSeriesAdded(
+      target,
+      set.kind === "pick" ? set.refs : this.refsForSelector(set.selector ?? ""),
+    );
+    this.workspace.focusPanel(target);
+    this.fitWindowToPlotted();
+    this.afterLayoutChange();
+  }
+
+  private renderSearchStatus(): void {
+    const input = required<HTMLInputElement>(this.root, ".signal-search");
+    const count = required<HTMLElement>(this.root, ".search-count");
+    const filterRow = required<HTMLElement>(this.root, ".search-filter-row");
+    const value = input.value.trim();
+    count.replaceChildren();
+    filterRow.classList.remove("has-selector");
+    if (value === "") return;
+    const match = evaluateSelector(this.catalog, value);
+    const selectorMode =
+      match !== null && (match.signalCount > 0 || /[*?|[@:]/.test(value));
+    filterRow.classList.toggle("has-selector", selectorMode);
+    if (selectorMode) {
+      count.append(
+        document.createTextNode(
+          `${String(match.signalCount)} signals · ${String(match.sourceCount)} ${match.sourceCount === 1 ? "source" : "sources"} `,
+        ),
+      );
+      const hint = document.createElement("span");
+      hint.textContent = "⏎ add · ⌘S set";
+      count.append(hint);
+      return;
+    }
+    const query = value.toLowerCase();
+    const matches = this.catalog
+      .allSeries()
+      .filter(
+        (series) =>
+          series.channel.toLowerCase().includes(query) ||
+          series.path.toLowerCase().includes(query),
+      );
+    count.append(document.createTextNode(`${String(matches.length)} matches `));
+    const hint = document.createElement("span");
+    hint.textContent = "⏎ add · ⌘S set";
+    count.append(hint);
+  }
+
+  private openSetNameRow(refs: readonly SeriesRef[] | null = null): void {
+    const row = required<HTMLElement>(this.root, ".set-name-row");
+    const input = required<HTMLInputElement>(this.root, ".set-name-input");
+    this.pendingSetRefs = refs === null ? null : [...refs];
+    row.hidden = false;
+    input.value = "";
+    input.focus();
+  }
+
+  private hideSetNameRow(): void {
+    this.pendingSetRefs = null;
+    required<HTMLElement>(this.root, ".set-name-row").hidden = true;
+  }
+
+  private plotSignals(memberPaths: readonly string[], panelId?: string): void {
+    let target = panelId ?? this.workspace.focusedPanelId();
+    if (target === null) target = this.workspace.addPanelRow().id;
+    const refs = memberPaths
+      .map((path) => this.catalog.refFromPath(path))
+      .filter((ref): ref is NonNullable<typeof ref> => ref !== undefined);
+    if (this.workspace.addSeriesRefs(target, refs)) {
+      this.afterSeriesAdded(target, refs);
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
     }
   }
 
-  private async openFiles(): Promise<void> {
-    const port = this.plane.ingest;
-    if (port === null) return;
-    try {
-      const paths = await port.pickSources();
-      if (paths.length > 0) await this.ingestPaths(paths);
-    } catch (error: unknown) {
-      this.reportError(error);
+  private refsForSelector(selector: string): SeriesRef[] {
+    return (evaluateSelector(this.catalog, selector)?.series ?? []).flatMap(
+      (series) => {
+        const ref = this.catalog.refFromPath(series.path);
+        return ref === undefined ? [] : [ref];
+      },
+    );
+  }
+
+  private afterSeriesAdded(
+    panelId: string,
+    addedRefs: readonly SeriesRef[],
+  ): void {
+    const unique = new Map(
+      addedRefs.map((ref) => [this.catalog.refKey(ref), ref]),
+    );
+    const mode = arrivalModeFor(unique.size);
+    if (mode === "none") return;
+    if (mode === "ghost") {
+      this.workspace.setGhostMode(panelId, "ghost");
+      this.focusFirstSeries(panelId, [...unique.values()]);
+      return;
+    }
+    const focused = this.workspace.focusEntries(panelId);
+    for (const ref of unique.values()) {
+      if (
+        focused.some(
+          (entry) =>
+            entry.kind === "series" &&
+            entry.ref?.source_key === ref.source_key &&
+            entry.ref.channel === ref.channel,
+        )
+      ) {
+        continue;
+      }
+      this.workspace.toggleFocus(panelId, {
+        kind: "series",
+        ref,
+        source_key: null,
+        channel: ref.channel,
+      });
     }
   }
 
-  private async openFolder(): Promise<void> {
+  private focusFirstSeries(panelId: string, refs: readonly SeriesRef[]): void {
+    if (this.workspace.focusEntries(panelId).length > 0) return;
+    const first = refs[0];
+    if (first === undefined) return;
+    this.workspace.toggleFocus(panelId, {
+      kind: "series",
+      ref: first,
+      source_key: null,
+      channel: first.channel,
+    });
+  }
+
+  private selectedRefs(): SeriesRef[] {
+    const byKey = new Map(
+      this.catalog.allSeries().map((series) => [
+        this.catalog.refKey({
+          source_key: series.sourceKey,
+          channel: series.channel,
+        }),
+        { source_key: series.sourceKey, channel: series.channel },
+      ]),
+    );
+    return this.selection
+      .keys()
+      .map((key) => byKey.get(key))
+      .filter((ref): ref is SeriesRef => ref !== undefined);
+  }
+
+  private saveSelectedAsSet(): void {
+    this.openSetNameRow(this.selectedRefs());
+  }
+
+  private syncSelectionActions(): void {
+    required<HTMLButtonElement>(this.root, ".sets-save-selection").disabled =
+      this.selection.size() === 0;
+  }
+
+  private syncSelectionWorkspace(): void {
+    const workspaceId = this.workspace.activeTabId();
+    if (this.selectionWorkspaceId === null) {
+      this.selectionWorkspaceId = workspaceId;
+      return;
+    }
+    if (this.selectionWorkspaceId === workspaceId) return;
+    this.selectionWorkspaceId = workspaceId;
+    this.selection.clear();
+  }
+
+  private reconcileSelection(): void {
+    const allowed = new Set(
+      this.catalog.allSeries().map((series) =>
+        this.catalog.refKey({
+          source_key: series.sourceKey,
+          channel: series.channel,
+        }),
+      ),
+    );
+    this.selection.retain(allowed);
+  }
+
+  private addRefsToPanel(refs: readonly SeriesRef[]): void {
+    if (refs.length === 0) return;
+    const panelId =
+      this.workspace.focusedPanelId() ?? this.workspace.addPanelRow().id;
+    if (!this.workspace.addSeriesRefs(panelId, refs)) return;
+    this.afterSeriesAdded(panelId, refs);
+    this.workspace.focusPanel(panelId);
+    this.fitWindowToPlotted();
+    this.afterLayoutChange();
+  }
+
+  private openSources(): void {
+    if (this.plane.ingest === null) return;
+    this.sourceOpenDialog ??= new SourceOpenDialog(this.root);
+    this.sourceOpenDialog.open((kind) => {
+      void this.pickAndIngest(kind);
+    });
+  }
+
+  private async pickAndIngest(kind: SourceOpenKind): Promise<void> {
     const port = this.plane.ingest;
     if (port === null) return;
     try {
-      const folder = await port.pickSourceFolder();
-      if (folder === null) return;
-      this.folderScanDialog ??= new FolderScanDialog(this.root);
-      this.folderScanDialog.open(
-        folder,
-        (recursive) => port.scanSources(folder, recursive),
-        (paths) => {
-          if (paths.length > 0) void this.ingestPaths(paths);
-        },
-      );
+      const paths = await pickIngestPaths(port, kind);
+      if (paths.length > 0) await this.ingestPaths(paths);
     } catch (error: unknown) {
       this.reportError(error);
     }
@@ -1282,7 +1691,9 @@ export class AppShell {
   private fitWindowToPlotted(): void {
     const extent = this.timeExtent(
       [...this.workspace.panels()].flatMap((panel) =>
-        panel.series.map((series) => series.path),
+        resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
+          (series) => series.path,
+        ),
       ),
     );
     if (extent === null) return;
@@ -1340,8 +1751,6 @@ export class AppShell {
         "active",
         this.workspace.linkedTime().linked,
       );
-      this.tree?.setFavorites(this.workspace.favorites());
-      this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     } finally {
       this.restoringHistory = false;
     }
@@ -1372,6 +1781,7 @@ export class AppShell {
   }
 
   private afterLayoutChange(): void {
+    this.syncSelectionWorkspace();
     this.commitHistory();
     this.workspaceTabs?.sync(
       this.workspace.tabs(),
@@ -1493,10 +1903,7 @@ export class AppShell {
           return null;
         }
       },
-      exportSets: () =>
-        this.workspace
-          .snapshot()
-          .source_sets.map((set) => ({ key: set.key, label: set.label })),
+      exportSets: () => exportSourceOptions(this.signals),
       pngBytes: async () => {
         const generation = this.exportGeneration;
         try {
@@ -1599,11 +2006,12 @@ export class AppShell {
     if (path !== null) this.showModeHelp(`exported ${path}`);
   }
 
-  private exportSelection(setKeys?: readonly string[]): ExportSelection {
+  private exportSelection(sourceKeys?: readonly string[]): ExportSelection {
     const session = this.workspace.snapshot();
     return {
-      source_keys: session.sources.map((source) => source.key),
-      set_keys: [...(setKeys ?? session.source_sets.map((set) => set.key))],
+      source_keys: [
+        ...(sourceKeys ?? session.sources.map((source) => source.key)),
+      ],
     };
   }
 
@@ -1721,6 +2129,7 @@ export class AppShell {
       }
       const loaded = await port.reset();
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.selection.clear();
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
       this.tilesByPanel.clear();
@@ -1794,6 +2203,7 @@ export class AppShell {
         }
       }
       this.workspace.replace(JSON.parse(sessionJson) as Session);
+      this.selection.clear();
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = loaded.path;
       this.dirty = false;
@@ -1854,27 +2264,22 @@ export class AppShell {
       await this.reloadSignals();
       const focused = this.workspace.focusedPanelId();
       if (focused !== null) {
-        this.workspace.addSeriesBatch(
-          focused,
-          response.created.map((summary) => summary.path),
-        );
+        const refs = response.created
+          .map((summary) => this.catalog.refFromPath(summary.path))
+          .filter((ref): ref is SeriesRef => ref !== undefined);
+        if (this.workspace.addSeriesRefs(focused, refs)) {
+          this.afterSeriesAdded(focused, refs);
+        }
       }
       if (response.skipped.length > 0) {
         const missing = response.skipped
           .map(
             (entry) =>
-              entry.prefix +
-              " missing " +
-              entry.missing
-                .map((missingPath) => "'" + missingPath + "'")
-                .join(", "),
+              `${entry.prefix} missing ${entry.missing.map((item) => `'${item}'`).join(", ")}`,
           )
           .join("; ");
         this.showModeHelp(
-          "created for " +
-            String(response.created.length) +
-            " runs; " +
-            missing,
+          `created for ${String(response.created.length)} sources; ${missing}`,
         );
       }
       this.afterLayoutChange();
@@ -1884,16 +2289,22 @@ export class AppShell {
     this.workspace.addDerived(summary.path, expr);
     await this.reloadSignals();
     const focused = this.workspace.focusedPanelId();
-    if (focused !== null) this.workspace.addSeries(focused, summary.path);
+    const ref = this.catalog.refFromPath(summary.path);
+    if (focused !== null && ref !== undefined) {
+      this.workspace.addSeriesRef(focused, ref);
+      this.afterSeriesAdded(focused, [ref]);
+    }
     this.afterLayoutChange();
   }
 
   private async removeDerived(path: string): Promise<void> {
     const port = this.plane.derived;
     if (port === null) return;
+    const ref = this.catalog.refFromPath(path);
+    if (ref === undefined) return;
     try {
       await port.remove(path);
-      this.workspace.removeSignal(path);
+      this.workspace.removeSignalRef(ref, path);
       await this.reloadSignals();
       this.afterLayoutChange();
     } catch (error: unknown) {
@@ -1905,11 +2316,15 @@ export class AppShell {
     const port = this.plane.derived;
     if (port === null) return;
     try {
+      const refs = this.signals
+        .filter((summary) => summary.local_path === localPath)
+        .flatMap((summary) => {
+          const ref = this.catalog.refFromPath(summary.path);
+          return ref === undefined ? [] : [{ ref, path: summary.path }];
+        });
       await port.removeBundle(localPath);
-      for (const signal of this.signals.filter(
-        (summary) => summary.local_path === localPath,
-      )) {
-        this.workspace.removeSignal(signal.path);
+      for (const entry of refs) {
+        this.workspace.removeSignalRef(entry.ref, entry.path);
       }
       this.workspace.removeDerivedBundle(localPath);
       await this.reloadSignals();
@@ -1922,19 +2337,14 @@ export class AppShell {
   private hasBundleReference(expression: string): boolean {
     const fullPaths = new Set(this.signals.map((signal) => signal.path));
     const bundlePaths = new Set(
-      bundleCompletionEntries(this.signals, this.sets).map(
-        (bundle) => bundle.localPath,
-      ),
+      bundleCompletionEntries(this.signals).map((bundle) => bundle.localPath),
     );
     for (const match of expression.matchAll(
       /'((?:''|[^'])*)'|"((?:""|[^"])*)"/g,
     )) {
-      const quote = match[1] !== undefined ? "''" : '""';
-      const replacement = quote === "''" ? "'" : '"';
-      const reference = (match[1] ?? match[2] ?? "").replaceAll(
-        quote,
-        replacement,
-      );
+      const doubled = match[1] === undefined ? '""' : "''";
+      const quote = match[1] === undefined ? '"' : "'";
+      const reference = (match[1] ?? match[2] ?? "").replaceAll(doubled, quote);
       if (!fullPaths.has(reference) && bundlePaths.has(reference)) return true;
     }
     return false;
@@ -1963,55 +2373,21 @@ export class AppShell {
   }
 
   private async reloadSignals(): Promise<void> {
-    [this.signals, this.sets] = await Promise.all([
-      this.plane.listSignals(),
-      this.plane.listSets(),
-    ]);
-    this.workspace.setSourceSets(
-      this.sets.map((set) => ({
-        key: set.set_key,
-        label: set.label,
-        generation: set.generation,
-        time_domain: set.time_domain,
-        members: set.members,
-      })),
-    );
+    this.signals = await this.plane.listSignals();
+    this.catalog = Catalog.build(this.signals);
+    this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
-    this.tree?.setSignals(this.signals.map((summary) => summary.path));
-    const prefixesBySource = new Map<string, string>();
-    for (const signal of this.signals) {
-      if (!prefixesBySource.has(signal.source_key)) {
-        prefixesBySource.set(
-          signal.source_key,
-          signal.path.endsWith(`/${signal.local_path}`)
-            ? signal.path.slice(0, -signal.local_path.length - 1)
-            : signal.path,
-        );
-      }
-    }
-    this.tree?.setSets(
-      this.sets
-        .map((set) => ({
-          key: set.set_key,
-          label: set.label,
-          prefixes: [
-            ...new Set(
-              set.members
-                .map((member) => prefixesBySource.get(member.source_key))
-                .filter((prefix): prefix is string => prefix !== undefined),
-            ),
-          ],
-        }))
-        .filter((set) => set.prefixes.length > 0),
+    this.outline?.setCatalog(this.catalog);
+    this.outline?.setFilter(
+      required<HTMLInputElement>(this.root, ".signal-search").value,
     );
+    this.setsList?.setCatalog(this.catalog);
+    this.setsList?.setNamedSets(this.workspace.namedSets());
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
-    this.formulaBar?.setBundles(
-      bundleCompletionEntries(this.signals, this.sets),
-    );
-    this.tree?.setFavorites(this.workspace.favorites());
-    this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
+    this.formulaBar?.setBundles(bundleCompletionEntries(this.signals));
+    this.renderSearchStatus();
     this.updateStatus();
   }
 
@@ -2088,46 +2464,34 @@ export class AppShell {
     ids: string[];
     missing: string[];
   } {
-    const paths = panel.series.map((series) => series.path);
+    const resolved = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    );
+    const paths = resolved.map((series) => series.path);
     if (panel.mode === "xy") {
-      if (panel.x_signal !== null) {
-        paths.unshift(panel.x_signal);
-        const xLocal = this.isDerivedPath(panel.x_signal)
-          ? undefined
-          : this.signalsByPath.get(panel.x_signal)?.local_path;
-        if (xLocal !== undefined) {
-          for (const series of panel.series) {
-            const sourceKey = this.isDerivedPath(series.path)
-              ? undefined
-              : this.signalsByPath.get(series.path)?.source_key;
-            if (sourceKey === undefined) continue;
-            const resolved = this.signals.find(
-              (candidate) =>
-                candidate.source_key === sourceKey &&
-                candidate.local_path === xLocal,
-            );
-            if (resolved !== undefined) paths.push(resolved.path);
-          }
+      const x = panel.x_ref === null ? null : this.catalog.get(panel.x_ref);
+      if (x !== null && x !== undefined) {
+        paths.unshift(x.path);
+        for (const series of resolved) {
+          const paired = this.catalog.get({
+            source_key: series.ref.source_key,
+            channel: x.channel,
+          });
+          if (paired !== undefined) paths.push(paired.path);
         }
       }
-      if (panel.color_signal !== null) {
-        paths.push(panel.color_signal);
-        const cLocal = this.isDerivedPath(panel.color_signal)
-          ? undefined
-          : this.signalsByPath.get(panel.color_signal)?.local_path;
-        if (cLocal !== undefined) {
-          for (const series of panel.series) {
-            const sourceKey = this.isDerivedPath(series.path)
-              ? undefined
-              : this.signalsByPath.get(series.path)?.source_key;
-            if (sourceKey === undefined) continue;
-            const resolved = this.signals.find(
-              (candidate) =>
-                candidate.source_key === sourceKey &&
-                candidate.local_path === cLocal,
-            );
-            if (resolved !== undefined) paths.push(resolved.path);
-          }
+      const color =
+        panel.color_ref === null ? null : this.catalog.get(panel.color_ref);
+      if (color !== null && color !== undefined) {
+        paths.push(color.path);
+        for (const series of resolved) {
+          const paired = this.catalog.get({
+            source_key: series.ref.source_key,
+            channel: color.channel,
+          });
+          if (paired !== undefined) paths.push(paired.path);
         }
       }
     }
@@ -2218,8 +2582,15 @@ export class AppShell {
    */
   private sampleWindow(panel: PanelState): { t0: number; t1: number } {
     if (panel.mode !== "xy") return this.effectiveWindow(panel);
-    const paths = panel.series.map((series) => series.path);
-    if (panel.x_signal !== null) paths.push(panel.x_signal);
+    const paths = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    ).map((series) => series.path);
+    if (panel.x_ref !== null) {
+      const x = this.catalog.get(panel.x_ref);
+      if (x !== undefined) paths.push(x.path);
+    }
     return this.timeExtent(paths) ?? this.effectiveWindow(panel);
   }
 
@@ -2246,7 +2617,11 @@ export class AppShell {
     }
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
-    const extent = this.timeExtent(panel.series.map((series) => series.path));
+    const extent = this.timeExtent(
+      resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
+        (series) => series.path,
+      ),
+    );
     if (extent === null) {
       this.commitHistory();
       this.renderTiles();
@@ -2260,12 +2635,25 @@ export class AppShell {
   /** Removes the assigned X signal while leaving an empty XY axis slot. */
   private clearXSignal(panelId: string): void {
     const panel = this.workspace.panel(panelId);
-    const path = panel?.x_signal;
-    if (panel === undefined || path === null || path === undefined) return;
-    this.workspace.setXSignal(panelId, null);
-    this.workspace.removeSeries(panelId, path);
-    if (panel.color_signal === path) {
-      this.workspace.setColorSignal(panelId, null);
+    const ref = panel?.x_ref;
+    const path =
+      ref === null || ref === undefined ? null : this.catalog.get(ref)?.path;
+    if (
+      panel === undefined ||
+      ref === null ||
+      ref === undefined ||
+      path === undefined ||
+      path === null
+    )
+      return;
+    this.workspace.setXRef(panelId, null);
+    this.workspace.removeSeriesRef(panelId, ref, path);
+    if (
+      panel.color_ref !== null &&
+      panel.color_ref.source_key === ref.source_key &&
+      panel.color_ref.channel === ref.channel
+    ) {
+      this.workspace.setColorRef(panelId, null);
     }
     this.workspace.clearPanelXRange(panelId);
     this.afterLayoutChange();
@@ -2343,13 +2731,24 @@ export class AppShell {
       tip.hidden = true;
       return;
     }
-    const rows = cursor.rows.map((row) =>
+    const resolved = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    );
+    const ghostChannels = new Map(
+      resolved
+        .filter((series) => series.display === "ghost")
+        .map((series) => [series.path, series.ref.channel]),
+    );
+    const rows = groupCursorRows(cursor.rows, ghostChannels).map((row) =>
       tooltipRow(
-        `var(--series-${String(row.colorIndex + 1)})`,
+        row.colorIndex === null
+          ? "var(--fg-4)"
+          : `var(--series-${String(row.colorIndex + 1)})`,
         row.label,
-        row.unit === null
-          ? formatValue(row.value)
-          : `${formatValue(row.value)} ${row.unit}`,
+        row.value,
+        row.ghost,
       ),
     );
     if (rows.length === 0) {
@@ -2419,7 +2818,7 @@ export class AppShell {
           }
         }
       }
-      this.tree?.setLiveValues(values);
+      this.outline?.setLiveValues(values);
     });
   }
 
@@ -2428,14 +2827,10 @@ export class AppShell {
       (total, signal) => total + Number(signal.point_count),
       0,
     );
-    required(this.root, ".signal-count").textContent =
-      `${this.signals.length.toLocaleString()} signals`;
-    required(this.root, ".point-count").textContent =
-      `${pointCount.toLocaleString()} pts`;
-    void this.updateSources();
+    void this.updateSources(pointCount);
   }
 
-  private async updateSources(): Promise<void> {
+  private async updateSources(pointCount: number): Promise<void> {
     const sources = await this.plane.listSources();
     for (const source of sources) {
       if (
@@ -2454,18 +2849,26 @@ export class AppShell {
         reconcile_legacy: false,
       });
     }
-    const firstName = sources[0] === undefined ? "" : basename(sources[0].path);
-    required(this.root, ".source-name").textContent = firstName;
+    const sessionName =
+      this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
+    this.root
+      .querySelector<HTMLElement>(".source-name")
+      ?.replaceChildren(document.createTextNode(sessionName));
+    this.root
+      .querySelector<HTMLElement>(".status-aggregate")
+      ?.replaceChildren(
+        document.createTextNode(
+          statusAggregate(sources.length, this.signals.length, pointCount),
+        ),
+      );
     required(this.root, ".session-identity").textContent =
-      firstName === ""
-        ? ""
-        : `${firstName} — ${this.signals.length.toLocaleString()} signals`;
-    const rows = required<HTMLElement>(this.root, ".source-rows");
-    const toggleSources = (): void => {
-      this.sourcesExpanded = !this.sourcesExpanded;
-      renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
-    };
-    renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
+      `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
+    const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
+    if (dockFooter !== null) {
+      renderDockFooter(dockFooter, sources, this.signals.length, () => {
+        this.openSources();
+      });
+    }
   }
 
   private toggleLinked(): void {
@@ -2503,6 +2906,17 @@ export class AppShell {
   private toggleSignalTree(): void {
     const workbench = required(this.root, ".workbench");
     this.setSignalTreeOpen(workbench.classList.contains("tree-collapsed"));
+  }
+
+  private selectAllDockRows(): void {
+    this.selection.setAll(this.outline?.filteredKeys() ?? []);
+  }
+
+  private dockContains(target: EventTarget | null): boolean {
+    return (
+      target instanceof Node &&
+      required<HTMLElement>(this.root, ".signal-tree").contains(target)
+    );
   }
 
   private setSignalTreeOpen(open: boolean): void {
@@ -2665,72 +3079,47 @@ export function renderBatchProgress(
   progress.replaceChildren(...children);
 }
 
-export function renderSourceRows(
+export function renderDockFooter(
   container: HTMLElement,
   sources: readonly SourceSummary[],
-  expanded: boolean,
-  onToggle: () => void,
+  signalCount: number,
+  onAddSource: () => void,
 ): void {
-  const previousScrollTop =
-    container.querySelector<HTMLElement>(".source-scroll")?.scrollTop ?? 0;
   const totalPoints = sources.reduce(
     (total, source) => total + Number(source.point_count),
     0,
   );
-  if (sources.length <= 8) {
-    container.replaceChildren(...sources.map(sourceRow));
-    return;
-  }
-  const summary = document.createElement("button");
-  summary.type = "button";
-  summary.className = "source-summary";
-  summary.ariaExpanded = String(expanded);
-  summary.textContent = `${String(sources.length)} sources · ${totalPoints.toLocaleString()} pts ${expanded ? "▾" : "▸"}`;
-  summary.addEventListener("click", onToggle);
-  const children: HTMLElement[] = [summary];
-  if (expanded) {
-    const scroll = document.createElement("div");
-    scroll.className = "source-scroll";
-    const rowHeight = 22;
-    const slice = virtualSlice(
-      sources.length,
-      previousScrollTop,
-      scroll.clientHeight > 0 ? scroll.clientHeight : 176,
-      rowHeight,
-    );
-    const spacer = document.createElement("div");
-    spacer.className = "source-spacer";
-    spacer.style.height = `${String(slice.totalHeight)}px`;
-    const windowElement = document.createElement("div");
-    windowElement.className = "source-window";
-    windowElement.style.transform = `translateY(${String(slice.topPadding)}px)`;
-    windowElement.append(
-      ...sources.slice(slice.start, slice.end).map(sourceRow),
-    );
-    spacer.append(windowElement);
-    scroll.append(spacer);
-    scroll.addEventListener("scroll", () => {
-      renderSourceRows(container, sources, true, onToggle);
-      const next = container.querySelector<HTMLElement>(".source-scroll");
-      if (next !== null) next.scrollTop = scroll.scrollTop;
-    });
-    children.push(scroll);
-  }
-  container.replaceChildren(...children);
+  const aggregate = document.createElement("div");
+  aggregate.className = "dock-aggregate";
+  const count = document.createElement("span");
+  count.textContent = `${String(sources.length)} sources · ${String(signalCount)} signals`;
+  const points = document.createElement("span");
+  points.className = "dock-points";
+  points.textContent = `${totalPoints.toLocaleString()} pts`;
+  aggregate.append(count, points);
+
+  const load = document.createElement("div");
+  load.className = "dock-load-row";
+  const add = document.createElement("button");
+  add.className = "dock-add-source";
+  add.type = "button";
+  add.textContent = "+ source";
+  add.addEventListener("click", onAddSource);
+  const formats = document.createElement("span");
+  formats.className = "dock-formats";
+  formats.textContent =
+    sources.length === 0 ? "CSV · MCAP" : loadedSourceFormats(sources);
+  load.append(add, formats);
+  container.replaceChildren(aggregate, load);
 }
 
-function sourceRow(source: SourceSummary): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "source-row";
-  const name = document.createElement("span");
-  name.className = "signal-path";
-  name.textContent = basename(source.path);
-  name.title = source.path;
-  const points = document.createElement("span");
-  points.className = "source-points";
-  points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
-  row.append(name, points);
-  return row;
+function loadedSourceFormats(sources: readonly SourceSummary[]): string {
+  const formats = new Set<string>();
+  for (const source of sources) {
+    const match = /\.([^./]+)$/.exec(source.path);
+    if (match?.[1] !== undefined) formats.add(match[1].toUpperCase());
+  }
+  return [...formats].sort().join(" · ") || "—";
 }
 
 /** Explains why a listed command cannot run, or nothing when it can. */
@@ -2743,7 +3132,7 @@ function unavailableReason(command: Command): { unavailable?: string } {
     : { unavailable: "unavailable in this context" };
 }
 
-function shellMarkup(): string {
+export function shellMarkup(): string {
   return `<main class="workbench formula-collapsed">
     <div class="title-bar">
       <button class="menu-button" aria-label="Application menu" aria-haspopup="menu" aria-expanded="false">≡</button>
@@ -2762,15 +3151,40 @@ function shellMarkup(): string {
 
     <aside class="signal-tree" id="signal-tree" aria-label="Signals">
       <div class="search-wrap">
-        <label>/ <input class="signal-search" placeholder="filter signals…" spellcheck="false" /></label>
+        <div class="search-filter-row">
+          <span class="search-filter-prefix">/</span>
+          <input class="signal-search" aria-label="Search signals" placeholder="Search signals…" spellcheck="false" />
+        </div>
+        <div class="search-count"></div>
       </div>
-      <div class="tree-heading">★ FAVORITES</div>
-      <div class="tree-favorites"></div>
-      <div class="tree-heading">SIGNALS</div>
-      <div class="tree-scroll"></div>
+      <div class="tree-heading sets-heading">
+        <span>SETS</span>
+        <button
+          class="sets-save-selection"
+          type="button"
+          title="Save selected signals as set"
+          disabled
+        >
+          ★+
+        </button>
+      </div>
+      <div class="set-name-row tree-row tree-set-draft" hidden>
+        <span class="tree-set-draft-mark">★</span>
+        <input class="set-name-input" placeholder="set name" spellcheck="false" aria-label="Set name" />
+        <button class="set-name-save" type="button" title="Save set" aria-label="Save set">✓</button>
+        <button class="set-name-cancel" type="button" title="Cancel" aria-label="Cancel">✕</button>
+      </div>
+      <div class="tree-sets"></div>
+      <div class="tree-heading signals-heading">SIGNALS</div>
+      <div class="outline-scroll"></div>
       <div class="source-footer">
         <div class="ingest-progress" hidden></div>
-        <div class="source-rows"></div>
+        <div class="dock-footer">
+          <div class="dock-load-row">
+            <button class="dock-add-source" type="button">+ source</button>
+            <span class="dock-formats">CSV · MCAP</span>
+          </div>
+        </div>
       </div>
     </aside>
 
@@ -2791,10 +3205,8 @@ function shellMarkup(): string {
       </span>
       <span class="status-separator"></span>
       <span class="source-truth">
-        <span class="source-name"></span>
-        <span class="signal-count">0 signals</span>
-        <span class="point-count">0 pts</span>
-        <span class="render-stat">render <span class="render-ms">— ms</span></span>
+        <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
+        <span class="render-stat"> · render <span class="render-ms">— ms</span></span>
       </span>
       <span class="status-spacer"></span>
       <span class="gesture-hint"></span>
@@ -2819,9 +3231,75 @@ function tooltipHeader(text: string): HTMLElement {
   return header;
 }
 
-function tooltipRow(color: string, name: string, value: string): HTMLElement {
+export interface GroupedCursorRow {
+  label: string;
+  value: string;
+  colorIndex: number | null;
+  ghost: boolean;
+}
+
+export function groupCursorRows(
+  rows: readonly PlotCursor["rows"][number][],
+  ghostChannels: ReadonlyMap<string, string>,
+): GroupedCursorRow[] {
+  const grouped = new Map<
+    string,
+    { count: number; min: number; max: number; unit: string | null }
+  >();
+  const result: GroupedCursorRow[] = [];
+  for (const row of rows) {
+    const channel = ghostChannels.get(row.path);
+    if (channel === undefined) {
+      result.push({
+        label: row.label,
+        value:
+          row.unit === null
+            ? formatValue(row.value)
+            : `${formatValue(row.value)} ${row.unit}`,
+        colorIndex: row.colorIndex,
+        ghost: false,
+      });
+      continue;
+    }
+    const current = grouped.get(channel);
+    if (current === undefined) {
+      grouped.set(channel, {
+        count: 1,
+        min: row.value,
+        max: row.value,
+        unit: row.unit,
+      });
+      result.push({ label: channel, value: "", colorIndex: null, ghost: true });
+    } else {
+      current.count += 1;
+      current.min = Math.min(current.min, row.value);
+      current.max = Math.max(current.max, row.value);
+    }
+  }
+  for (const row of result) {
+    if (!row.ghost) continue;
+    const channel = row.label;
+    const group = grouped.get(channel);
+    if (group === undefined) continue;
+    const range =
+      group.min === group.max
+        ? formatValue(group.min)
+        : `${formatValue(group.min)} → ${formatValue(group.max)}`;
+    row.label = `${channel} · ${String(group.count)} signals`;
+    row.value = group.unit === null ? range : `${range} ${group.unit}`;
+  }
+  return result;
+}
+
+function tooltipRow(
+  color: string,
+  name: string,
+  value: string,
+  ghost = false,
+): HTMLElement {
   const row = document.createElement("div");
   row.className = "plot-tip-row";
+  row.classList.toggle("ghost", ghost);
   const swatch = document.createElement("span");
   swatch.className = "plot-tip-swatch";
   swatch.style.background = color;

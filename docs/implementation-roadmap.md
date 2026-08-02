@@ -18,11 +18,16 @@ amendment): quoted names are signal references, functions are bare MATLAB
 names, and the transforms are `gradient`/`cumtrapz`/`movmean`. Derived signals
 materialize into the store under one synthetic source with an in-memory
 pyramid, so every tile, sample, and panel-mode consumer is unchanged. Sessions
-reached schema v12 with ordered derived definitions, durable source records,
-and source-set membership,
+reached schema v19 with ordered derived definitions, durable source records,
+source-local channel-by-source panel bindings, and named sets,
 and gained autosave with resume-on-launch plus named workspace files
 ([ADR 0022](adr/0022-durable-session-persistence.md)). The `localStorage` theme
 key is gone; the session is the only durable store.
+
+Protocol v14 and session v19 remove source alignment metadata that was never
+applied to tile or sample queries; v18 sessions migrate by dropping those
+fields while preserving source identity and provenance
+([ADR 0031](adr/0031-remove-source-alignment.md)).
 
 Multi-source ingest now uses batch jobs with per-file outcomes,
 memory-weighted admission, streaming CSV decode, and off-lock pyramid
@@ -32,9 +37,12 @@ sessions reconcile provider-specific references after restore while autosave
 is paused
 ([ADR 0027](adr/0027-durable-source-identity-and-restore-reconciliation.md)).
 
-Source sets group partial runs by local schema and require explicit alignment
-for absolute or event time. Bundles plot ordinary per-source member series and
-support one highlighted source per local signal path.
+Signals-at-scale P1 is landed: panels resolve channel-by-source series from a
+catalog, source identity is stored per source, and the tree exposes channels
+with read-only named sets instead of source sets, bundle rows, or favorites.
+Shared channel collections still use the derived-bundle evaluator: dropping or
+typing a shared channel in the formula bar materializes one ordinary derived
+member per eligible source.
 
 Out-of-core storage now compacts pyramid bins, synthesizes levels 0–2, shares
 sidecar time sections, and pages columns and fine levels through a leased LRU.
@@ -43,6 +51,10 @@ Derived columns spill under resident pressure.
 ## Phase 4 — export and fidelity
 
 Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. The release-generated README GIF and hosted live demo now ship from the export path per the [automated demo artifacts plan](superpowers/plans/2026-07-30-automated-demo-artifacts.md).
+
+The HTML export picker lists each source once, independent of its signal
+count. Its source list and dialog body remain bounded and scroll internally so
+large campaigns cannot push export controls outside the viewport.
 
 ## Phase 5 — performance and hardening
 
@@ -56,6 +68,33 @@ the split signal/command palettes now mirror one registry. File persistence,
 HTML/PNG/CSV export, and layout-preset entries remain visible planned stubs;
 their backing behavior continues in Phases 3–4 rather than being implied by
 inert chrome.
+
+Signals-at-scale P2 is landed: the selector grammar, named-set UX, and palette
+unification now cover dock filters, bindings, saved sets, and signal search.
+
+Signals-at-scale P3 is landed: panel style resolution now maps color rules and
+selector overrides into explicit focus, rule, and ghost strokes. Matrix legend
+rosters, grouped binding chips, focus/ghost controls, plot hit navigation, and
+grouped cursor readouts keep large multi-source panels bounded while preserving
+keyboard access and session round-trips.
+
+Signals-at-scale P4 is landed: the signals dock now provides a virtualized,
+sortable selector-filtered table with series/channel granularity, shared
+tree/table multi-selection, and bulk add, style, hide, save-set, and derive
+actions without requesting sample data.
+
+Signals-at-scale P5 is landed: channel identity now has a workspace-scoped,
+non-destructive map with near-match suggestions, merge/keep-separate actions,
+original-name recovery, unit-conflict flags, and a bounded channel-map view;
+time panels can facet by source or channel with linked-y small multiples and a
+16-cell overflow guard. Tooltip row expansion and facet annotations remain
+follow-ups because annotations stay attached to the unsplit plot in this
+phase.
+
+The channel map and facet splitting were subsequently removed. Channel
+identity is source-local, named sets cover reusable grouping, and schema v18
+migrates explicit mapped references before deleting the map
+([ADR 0030](adr/0030-source-local-channel-identity.md)).
 
 Phase 1 visualization foundations closed with a validated categorical palette
 that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),

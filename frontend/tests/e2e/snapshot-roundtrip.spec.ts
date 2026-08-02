@@ -40,9 +40,9 @@ test.describe("exported snapshot round trip", () => {
       const panel = page.locator(".panel");
       await expect(panel).toHaveCount(1);
       await expect(panel.locator(".panel-title")).toHaveText("Alpha & Beta");
-      await expect(panel.locator(".legend-name")).toHaveText([
-        "roundtrip/alpha",
-        "roundtrip/beta",
+      await expect(panel.locator(".binding-chip")).toHaveText([
+        "alpha ×1",
+        "beta ×1",
       ]);
       await expect(panel.locator(".annotation-row")).toContainText("peak");
       await expect(page.locator(".window-readout")).toHaveText(
