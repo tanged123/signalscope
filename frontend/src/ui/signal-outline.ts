@@ -28,6 +28,7 @@ export interface SignalOutlineCallbacks {
   onSelectionChange(): void;
   onAddToPanel(refs: readonly SeriesRef[]): void;
   onRemoveDerived(path: string): void;
+  onAlignSource?(sourceKey: string, anchor: HTMLElement): void;
   onMergeChannels?(
     aliases: readonly ChannelAlias[],
     clientX: number,
@@ -43,10 +44,12 @@ export class SignalOutlineView {
   private sort: OutlineSort | null = null;
   private readonly collapsed = new Set<string>();
   private readonly optInColumns = new Set<OutlineColumn>();
+  private readonly nonIdentitySources = new Set<string>();
   private visibleColumns: OutlineColumn[] = [...BASE_COLUMNS];
   private rows: OutlineRow[] = [];
   private activeIndex = 0;
   private liveValues: ReadonlyMap<string, string> = new Map();
+  private outlineWidth = 0;
   private popover: HTMLElement | null = null;
   private readonly rowHeight: number;
   private readonly unsubscribe: () => void;
@@ -127,6 +130,12 @@ export class SignalOutlineView {
     this.render();
   }
 
+  setNonIdentitySources(keys: ReadonlySet<string>): void {
+    this.nonIdentitySources.clear();
+    for (const key of keys) this.nonIdentitySources.add(key);
+    this.render();
+  }
+
   filteredKeys(): readonly string[] {
     return filterCatalogSeries(this.catalog, this.filter).map((series) =>
       this.catalog.refKey({
@@ -143,13 +152,14 @@ export class SignalOutlineView {
 
   /** Used by tests and by ResizeObserver to apply the pane's width budget. */
   applyWidth(width: number): void {
-    const minWidths: Record<OutlineColumn, number> = {
-      channel: 96,
-      source: 84,
-      unit: 44,
-      value: 64,
+    const fixedWidths: Record<OutlineColumn, number> = {
+      channel: 40,
+      source: 40,
+      unit: 32,
+      value: 60,
       pts: 56,
     };
+    this.outlineWidth = width;
     const primary: OutlineColumn =
       this.groupBy === "source" ? "source" : "channel";
     const secondary: OutlineColumn =
@@ -164,18 +174,23 @@ export class SignalOutlineView {
       (column, index, columns) => columns.indexOf(column) === index,
     ) as OutlineColumn[];
     const dropped = new Set<OutlineColumn>();
-    let total =
-      22 + requested.reduce((sum, column) => sum + minWidths[column], 0);
-    for (const column of [
-      ...this.optInColumns,
-      "value",
-      "unit",
-      secondary,
-    ] as const) {
-      if (total <= width || column === primary || !requested.includes(column))
+    const availableWidth = Number.isFinite(width)
+      ? Math.max(0, width - (this.optInColumns.size > 0 ? 12 : 0))
+      : Number.POSITIVE_INFINITY;
+    let total = 18 + 88;
+    for (const column of requested) {
+      if (column !== primary) total += fixedWidths[column];
+    }
+    for (const column of ["pts", "value", "unit", secondary] as const) {
+      if (
+        total <= availableWidth ||
+        column === primary ||
+        !requested.includes(column) ||
+        dropped.has(column)
+      )
         continue;
       dropped.add(column);
-      total -= minWidths[column];
+      total -= fixedWidths[column];
     }
     this.visibleColumns = [...BASE_COLUMNS, ...this.optInColumns].filter(
       (column, index, columns) =>
@@ -184,8 +199,9 @@ export class SignalOutlineView {
     this.listElement.dataset.cols = this.visibleColumns.join(",");
     this.listElement.style.setProperty(
       "--outline-columns",
-      `22px ${this.displayColumns()
-        .map((column) => `${String(minWidths[column])}px`)
+      `18px minmax(88px, 1fr) ${this.displayColumns()
+        .slice(1)
+        .map((column) => this.columnTrack(column, fixedWidths[column]))
         .join(" ")}`,
     );
     this.render();
@@ -258,6 +274,7 @@ export class SignalOutlineView {
     for (const column of this.displayColumns()) {
       const cell = document.createElement("div");
       cell.className = "signal-outline-header-cell";
+      cell.dataset.column = column;
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.column = column;
@@ -277,10 +294,7 @@ export class SignalOutlineView {
   ): string {
     if (column === first) return column.toUpperCase();
     if (column === second) {
-      if (
-        this.listElement.clientWidth > 0 &&
-        this.listElement.clientWidth < 320
-      ) {
+      if (this.currentWidth() > 0 && this.currentWidth() < 320) {
         return second === "source" ? "SRCS" : "CHS";
       }
       return second.toUpperCase();
@@ -302,6 +316,7 @@ export class SignalOutlineView {
     element: HTMLElement,
     row: OutlineGroupRow,
   ): HTMLElement {
+    element.classList.add("outline-group-row");
     element.dataset.key = row.key;
     element.setAttribute(
       "aria-selected",
@@ -329,7 +344,7 @@ export class SignalOutlineView {
       this.setDragPayload(event, row.childKeys),
     );
 
-    const first = this.outlineCell();
+    const checkCell = this.checkCell();
     const caret = document.createElement("button");
     caret.type = "button";
     caret.className = "outline-caret";
@@ -358,7 +373,9 @@ export class SignalOutlineView {
     const label = document.createElement("span");
     label.className = "signal-outline-label signal-path";
     label.textContent = row.label;
-    first.append(caret, check, label);
+    checkCell.appendChild(check);
+    const first = this.outlineCell();
+    first.append(caret, label);
     if (row.names.length > 1) {
       const names = document.createElement("button");
       names.type = "button";
@@ -376,9 +393,33 @@ export class SignalOutlineView {
       first.appendChild(aliases);
     }
     if (row.unitConflict) first.appendChild(this.unitConflictMarker());
-    element.appendChild(first);
+    if (row.groupBy === "source") {
+      const sourceKey = row.refs[0]?.source_key;
+      if (sourceKey !== undefined) {
+        if (this.nonIdentitySources.has(sourceKey))
+          first.appendChild(this.sourceAlignmentMarker());
+        const align = document.createElement("button");
+        align.type = "button";
+        align.className = "source-align";
+        align.textContent = "align ▾";
+        align.setAttribute("aria-label", `Align ${row.label}`);
+        align.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.callbacks.onAlignSource?.(sourceKey, align);
+        });
+        first.appendChild(align);
+      }
+    }
+    element.append(checkCell, first);
     for (const column of this.displayColumns().slice(1)) {
-      element.append(this.dataCell(this.groupValue(row, column)));
+      element.append(
+        this.dataCell(
+          this.groupValue(row, column),
+          column,
+          column !== row.groupBy &&
+            (column === "channel" || column === "source"),
+        ),
+      );
     }
     return element;
   }
@@ -387,6 +428,7 @@ export class SignalOutlineView {
     element: HTMLElement,
     row: OutlineSeriesRow,
   ): HTMLElement {
+    element.classList.add("outline-series-row");
     element.dataset.key = row.key;
     element.dataset.path = row.path;
     element.dataset.signalPath = row.path;
@@ -416,7 +458,7 @@ export class SignalOutlineView {
     element.addEventListener("dragstart", (event) =>
       this.setDragPayload(event, [row.key]),
     );
-    const first = this.outlineCell();
+    const checkCell = this.checkCell();
     const check = document.createElement("span");
     check.className = "outline-select";
     check.textContent = selected ? "▣" : "▢";
@@ -428,13 +470,17 @@ export class SignalOutlineView {
       row.depth === 1
         ? `· ${this.otherDimension(row)}`
         : this.firstDimension(row);
-    first.append(check, label);
+    checkCell.appendChild(check);
+    const first = this.outlineCell();
     if (row.path.startsWith("derived/")) {
       const mark = document.createElement("span");
-      mark.className = "tree-derived-mark";
+      mark.className = "outline-caret tree-derived-mark";
       mark.textContent = "ƒx";
       mark.title = "Derived signal";
       first.appendChild(mark);
+    }
+    first.append(label);
+    if (row.path.startsWith("derived/")) {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "outline-derived-remove";
@@ -446,9 +492,16 @@ export class SignalOutlineView {
       });
       first.appendChild(remove);
     }
-    element.appendChild(first);
+    element.append(checkCell, first);
     for (const column of this.displayColumns().slice(1)) {
-      element.append(this.dataCell(this.seriesValue(row, column)));
+      const cell = this.dataCell(
+        this.seriesValue(row, column),
+        column,
+        column === "value" || column === "pts",
+      );
+      if (column === "value" && (selected || this.liveValues.has(row.path)))
+        cell.classList.add("outline-live-value");
+      element.append(cell);
     }
     return element;
   }
@@ -459,11 +512,37 @@ export class SignalOutlineView {
     return cell;
   }
 
-  private dataCell(value: string): HTMLElement {
+  private checkCell(): HTMLElement {
+    const cell = document.createElement("div");
+    cell.className = "signal-outline-cell outline-check-cell";
+    return cell;
+  }
+
+  private dataCell(
+    value: string,
+    column: OutlineColumn,
+    numeric = false,
+  ): HTMLElement {
     const cell = document.createElement("span");
     cell.className = "signal-outline-cell";
+    cell.dataset.column = column;
+    if (numeric) cell.classList.add("outline-numeric-cell");
     cell.textContent = value;
     return cell;
+  }
+
+  private columnTrack(column: OutlineColumn, minimum: number): string {
+    if (this.outlineWidth >= 480) {
+      const maximum: Record<OutlineColumn, number> = {
+        channel: 90,
+        source: 90,
+        unit: 50,
+        value: 70,
+        pts: 60,
+      };
+      return `minmax(${String(minimum)}px, ${String(maximum[column])}px)`;
+    }
+    return `${String(minimum)}px`;
   }
 
   private firstDimension(row: OutlineSeriesRow): string {
@@ -491,7 +570,11 @@ export class SignalOutlineView {
 
   private groupValue(row: OutlineGroupRow, column: OutlineColumn): string {
     if (column === row.groupBy) return row.label;
-    if (column === "channel" || column === "source") return row.aggregate;
+    if (column === "channel" || column === "source") {
+      return this.currentWidth() > 0 && this.currentWidth() < 320
+        ? (row.aggregate.split(" ", 1)[0] ?? row.aggregate)
+        : row.aggregate;
+    }
     if (column === "unit") return row.unit ?? "—";
     if (column === "pts") return String(row.pts);
     return "—";
@@ -511,6 +594,18 @@ export class SignalOutlineView {
     marker.textContent = "unit?";
     marker.title = "Source units disagree";
     return marker;
+  }
+
+  private sourceAlignmentMarker(): HTMLElement {
+    const marker = document.createElement("span");
+    marker.className = "source-alignment-marker";
+    marker.textContent = "≠";
+    marker.title = "Source time alignment differs from identity";
+    return marker;
+  }
+
+  private currentWidth(): number {
+    return this.outlineWidth || this.listElement.clientWidth;
   }
 
   private emptyElement(): HTMLElement {
@@ -615,15 +710,13 @@ export class SignalOutlineView {
       : keys;
     const entries = selected
       .map((key) =>
-        this.catalog
-          .allSeries()
-          .find(
-            (series) =>
-              this.catalog.refKey({
-                source_key: series.sourceKey,
-                channel: series.channel,
-              }) === key,
-          ),
+        this.catalog.allSeries().find(
+          (series) =>
+            this.catalog.refKey({
+              source_key: series.sourceKey,
+              channel: series.channel,
+            }) === key,
+        ),
       )
       .filter(
         (series): series is NonNullable<typeof series> => series !== undefined,

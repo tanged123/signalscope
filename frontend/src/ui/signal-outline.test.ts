@@ -28,6 +28,10 @@ function viewFor(
   callbacks: Partial<ConstructorParameters<typeof SignalOutlineView>[2]> = {},
 ) {
   const list = document.createElement("div");
+  Object.defineProperty(list, "clientWidth", {
+    configurable: true,
+    value: 400,
+  });
   Object.defineProperty(list, "clientHeight", {
     configurable: true,
     value: 400,
@@ -168,9 +172,90 @@ describe("SignalOutlineView", () => {
     view.setOptInColumns(["pts"]);
     view.applyWidth(600);
     expect(list.dataset.cols).toBe("channel,source,unit,value,pts");
-    view.applyWidth(300);
+    view.applyWidth(280);
+    expect(list.dataset.cols).toContain("value");
+    view.applyWidth(230);
     expect(list.dataset.cols).toBe("channel,source,unit");
-    view.applyWidth(220);
-    expect(list.dataset.cols).toBe("channel,source");
+    view.applyWidth(300);
+    expect(list.dataset.cols).toBe("channel,source,unit,value");
+  });
+
+  it("keeps every rendered row aligned with the header grid", () => {
+    const catalog = Catalog.build([
+      signal("run-01", "temp"),
+      signal("run-01", "speed"),
+      signal("run-02", "temp"),
+    ]);
+    const { list, view } = viewFor(catalog);
+    view.setGroupBy("source");
+    const headerCells = list.querySelector(".signal-outline-header")?.children
+      .length;
+    expect(headerCells).toBeGreaterThan(0);
+    for (const row of list.querySelectorAll<HTMLElement>(
+      ".signal-outline-row",
+    )) {
+      expect(row.children.length).toBe(headerCells);
+    }
+    const group = list.querySelector<HTMLElement>('[data-row-kind="group"]');
+    expect(group?.querySelector(".signal-outline-label")?.textContent).toBe(
+      "run-01",
+    );
+    expect(group?.querySelector(".outline-check-cell")).toBe(
+      group?.firstElementChild,
+    );
+    expect(group?.querySelector(".outline-caret")?.parentElement).toBe(
+      group?.children[1],
+    );
+  });
+
+  it("uses the locked flexible outline template and aggregate abbreviations", () => {
+    const catalog = Catalog.build(
+      Array.from({ length: 9 }, (_, index) =>
+        signal(`run-${String(index)}`, "temp"),
+      ),
+    );
+    const { list, view } = viewFor(catalog);
+    view.setGroupBy("channel");
+    view.applyWidth(280);
+    expect(list.dataset.cols).toContain("value");
+    expect(list.style.getPropertyValue("--outline-columns")).toBe(
+      "18px minmax(88px, 1fr) 40px 32px 60px",
+    );
+    expect(
+      list.querySelector<HTMLElement>(
+        '[data-row-kind="group"] [data-column="source"]',
+      )?.textContent,
+    ).toBe("9");
+    view.applyWidth(400);
+    expect(
+      list.querySelector<HTMLElement>(
+        '[data-row-kind="group"] [data-column="source"]',
+      )?.textContent,
+    ).toBe("9 srcs");
+  });
+
+  it("puts source alignment on source groups only", () => {
+    const onAlignSource = vi.fn();
+    const catalog = Catalog.build([
+      signal("run-01", "temp"),
+      signal("run-01", "speed"),
+      signal("run-02", "temp"),
+    ]);
+    const { list, view } = viewFor(catalog, { onAlignSource });
+    view.setNonIdentitySources(new Set(["run-01"]));
+    view.setGroupBy("source");
+    const sourceGroup = list.querySelector<HTMLElement>(
+      '[data-row-kind="group"]',
+    );
+    const align =
+      sourceGroup?.querySelector<HTMLButtonElement>(".source-align");
+    align?.click();
+    expect(onAlignSource).toHaveBeenCalledWith("run-01", align);
+    expect(
+      sourceGroup?.querySelector(".source-alignment-marker")?.textContent,
+    ).toBe("≠");
+    view.setGroupBy("channel");
+    expect(list.querySelector(".source-align")).toBeNull();
+    expect(list.querySelector(".source-alignment-marker")).toBeNull();
   });
 });

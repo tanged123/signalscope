@@ -10,16 +10,13 @@ test("the outline filters, sorts, groups, selects, and saves a frozen set", asyn
   await expect(page.locator(".signal-group-select")).toHaveValue("channel");
   await expect(page.locator(".signal-view-toggle")).toHaveCount(0);
   await expect(outline.locator('[data-row-kind="series"]')).toHaveCount(2);
-  await expect(outline.locator('[data-column="source"]')).toHaveAttribute(
-    "aria-sort",
-    "none",
+  const sourceHeader = outline.locator(
+    '.signal-outline-header button[data-column="source"]',
   );
+  await expect(sourceHeader).toHaveAttribute("aria-sort", "none");
 
-  await outline.locator('[data-column="source"]').click();
-  await expect(outline.locator('[data-column="source"]')).toHaveAttribute(
-    "aria-sort",
-    "ascending",
-  );
+  await sourceHeader.click();
+  await expect(sourceHeader).toHaveAttribute("aria-sort", "ascending");
   await page.locator(".signal-search").fill("velocity_body/*");
   await outline.focus();
   await page.keyboard.press("ControlOrMeta+a");
