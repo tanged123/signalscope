@@ -312,6 +312,7 @@ fn path_to_ref(path: &str, prefixes: &[(String, String)]) -> Option<serde_json::
         })
 }
 
+#[allow(clippy::too_many_lines)]
 fn migrate_v16_bindings(value: &mut serde_json::Value) {
     let prefixes: Vec<(String, String)> = value
         .get("sources")
@@ -350,7 +351,7 @@ fn migrate_v16_bindings(value: &mut serde_json::Value) {
                 "dash": entry.get("dash").cloned().unwrap_or_else(|| serde_json::json!("solid")),
                 "width": entry.get("width").cloned().unwrap_or_else(|| serde_json::json!(1.4)),
                 "opacity": null,
-                "visible": entry.get("visible").cloned().unwrap_or_else(|| serde_json::json!(true)),
+                "visible": entry.get("visible").cloned().unwrap_or(serde_json::json!(true)),
             }));
         }
         panel.insert(

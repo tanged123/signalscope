@@ -274,6 +274,7 @@ mod tests {
         TimeDomainState, TimeUnitState,
     };
 
+    #[allow(clippy::too_many_lines)]
     fn session_with(path: &str, expression: &str) -> Session {
         let mut session = Session {
             derived: vec![DerivedSignal {

@@ -145,7 +145,7 @@ impl SourceRegistry {
         if let Some(record) = self.by_key.get_mut(&key) {
             record.time_domain = domain;
             record.transform =
-                alignment::default_transform(domain).unwrap_or_else(|| identity_transform());
+                alignment::default_transform(domain).unwrap_or_else(identity_transform);
         }
     }
 
@@ -251,7 +251,7 @@ mod tests {
             panic!("first admission is new");
         };
         assert_eq!(record.time_domain, alignment::TimeDomain::default());
-        assert_eq!(record.transform.scale, 1.0);
+        assert!((record.transform.scale - 1.0).abs() < f64::EPSILON);
         registry.set_time_domain(
             record.key,
             alignment::TimeDomain {
@@ -259,6 +259,6 @@ mod tests {
                 ..alignment::TimeDomain::default()
             },
         );
-        assert_eq!(registry.record(record.key).unwrap().transform.scale, 1e-3);
+        assert!((registry.record(record.key).unwrap().transform.scale - 1e-3).abs() < f64::EPSILON);
     }
 }
