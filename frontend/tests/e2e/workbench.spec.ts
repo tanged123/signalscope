@@ -670,6 +670,28 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await expect(second.locator(".binding-chip")).toHaveCount(0);
 });
 
+test("legend strip and source alignment controls stay bounded", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const panel = page.locator(".panel").first();
+  const strip = panel.locator(".panel-legend-strip");
+  await expect(strip).toBeVisible();
+  await expect(strip.locator(".legend-count-token")).toHaveCount(2);
+  await expect(strip).toContainText("⇧click focus");
+  await expect(panel.locator(".panel-header .legend-count-token")).toHaveCount(
+    0,
+  );
+
+  const align = page.locator(".source-align").first();
+  await align.click();
+  const popover = page.locator(".source-alignment-popover");
+  await expect(popover).toBeVisible();
+  await expect(popover.locator("select, input")).toHaveCount(3);
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+});
+
 test("seam drag resizes panel rows", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("n");

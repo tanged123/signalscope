@@ -949,7 +949,8 @@ export class PanelView {
     this.domainSeries = [];
     this.hasColorbar = false;
     const elapsed = this.renderForMode(rendered, tiles, samples, window);
-    this.hitAdapter = this.preparedPlot?.hitAdapter ?? null;
+    this.hitAdapter =
+      (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );

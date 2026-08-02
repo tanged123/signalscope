@@ -35,8 +35,8 @@ test("shared presentation plane renders the demo workspace", async ({
   }
   await expect(page.locator(".plot-canvas").first()).toBeVisible();
   await expect(page.locator(".render-ms")).not.toHaveText("— ms");
-  await expect(page.locator(".session-identity")).toContainText(
-    "baked demo source",
+  await expect(page.locator(".session-identity")).toHaveText(
+    /— \d+ sources · \d+ signals/,
   );
   await expect(page.locator(".open-files")).toHaveCount(0);
   await expect(page.locator(".cursor-mode")).toBeEmpty();

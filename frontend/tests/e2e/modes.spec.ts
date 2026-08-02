@@ -199,6 +199,51 @@ test.describe("panel modes", () => {
     await expect(list.locator(".annotation-row")).toHaveCount(2);
   });
 
+  test("shift-click focuses consistently across all plot modes", async ({
+    page,
+  }) => {
+    const panel = page.locator(".panel").first();
+    const overlay = panel.locator(".overlay-canvas");
+    for (const [mode, dataMode] of [
+      ["T", "time"],
+      ["XY", "xy"],
+      ["FFT", "fft"],
+      ["H", "histogram"],
+    ] as const) {
+      await panel.locator(`.mode-pill[data-mode="${dataMode}"]`).click();
+      await expect(panel.locator(".panel-empty")).toBeHidden();
+      const [point] = await trajectoryPoints(panel, 1, mode === "H");
+      expect(point).toBeDefined();
+      if (point === undefined) throw new Error(`no ${mode} plot point`);
+      await overlay.click({ position: point, modifiers: ["Shift"] });
+      await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+      await panel.focus();
+      await page.keyboard.press("Escape");
+      await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(panel.locator(".panel-focus-chip")).toBeHidden();
+    }
+  });
+
+  test("plain click still pins an annotation after a series is focused", async ({
+    page,
+  }) => {
+    const panel = page.locator(".panel").first();
+    const overlay = panel.locator(".overlay-canvas");
+    const [point] = await trajectoryPoints(panel, 1);
+    expect(point).toBeDefined();
+    if (point === undefined) throw new Error("no time plot point");
+    await overlay.click({ position: point, modifiers: ["Shift"] });
+    await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+    await overlay.hover({ position: point });
+    await expect(panel.locator(".plot-hover-tag")).toContainText(
+      "⇧click to focus",
+    );
+    await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+    await overlay.click({ position: point });
+    await expect(panel.locator(".annotation-row")).toHaveCount(1);
+  });
+
   test("the colour channel is assignable and clearable", async ({ page }) => {
     const panel = page.locator(".panel").first();
     await panel.locator(".mode-pill", { hasText: "XY" }).click();

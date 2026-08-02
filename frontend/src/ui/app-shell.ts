@@ -3601,8 +3601,9 @@ function openSourceAlignment(
   apply.addEventListener("click", commit);
   for (const control of [unit, scale, offset]) {
     control.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
+      const keyboard = event as KeyboardEvent;
+      if (keyboard.key === "Enter") {
+        keyboard.preventDefault();
         commit();
       }
     });
