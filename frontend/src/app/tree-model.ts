@@ -1,4 +1,4 @@
-import type { Catalog } from "./catalog";
+import type { Catalog, CatalogSeries } from "./catalog";
 import { evaluateSelector } from "./selector";
 
 export interface TreeLeaf {
@@ -20,11 +20,10 @@ export interface TreeChannel {
 
 export type TreeRow = TreeLeaf | TreeChannel;
 
-export function buildTreeRows(
+export function filterCatalogSeries(
   catalog: Catalog,
-  collapsed: ReadonlySet<string>,
   filter: string,
-): TreeRow[] {
+): CatalogSeries[] {
   const input = filter.trim();
   const query = input.toLowerCase();
   const evaluation = input === "" ? null : evaluateSelector(catalog, input);
@@ -40,24 +39,48 @@ export function buildTreeRows(
           ),
         )
       : null;
+  return catalog.allSeries().filter(
+    (series) =>
+      query === "" ||
+      (selectorRefs !== null
+        ? selectorRefs.has(
+            catalog.refKey({
+              source_key: series.sourceKey,
+              channel: series.channel,
+            }),
+          )
+        : series.channel.toLowerCase().includes(query) ||
+          series.path.toLowerCase().includes(query)),
+  );
+}
+
+export function buildTreeRows(
+  catalog: Catalog,
+  collapsed: ReadonlySet<string>,
+  filter: string,
+): TreeRow[] {
+  const query = filter.trim();
+  const filtered = new Set(
+    filterCatalogSeries(catalog, filter).map((series) =>
+      catalog.refKey({
+        source_key: series.sourceKey,
+        channel: series.channel,
+      }),
+    ),
+  );
   const rows: TreeRow[] = [];
   for (const channel of catalog.channels()) {
     const members = catalog
       .allSeries()
       .filter((series) => series.channel === channel.name)
       .sort((left, right) => left.path.localeCompare(right.path));
-    const matching = members.filter(
-      (series) =>
-        query === "" ||
-        (selectorRefs !== null
-          ? selectorRefs.has(
-              catalog.refKey({
-                source_key: series.sourceKey,
-                channel: series.channel,
-              }),
-            )
-          : channel.name.toLowerCase().includes(query) ||
-            series.path.toLowerCase().includes(query)),
+    const matching = members.filter((series) =>
+      filtered.has(
+        catalog.refKey({
+          source_key: series.sourceKey,
+          channel: series.channel,
+        }),
+      ),
     );
     if (matching.length === 0) continue;
     if (members.length === 1) {
