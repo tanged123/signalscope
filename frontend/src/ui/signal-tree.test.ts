@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SignalSummary } from "../generated/protocol";
 import { Catalog } from "../app/catalog";
+import { SelectionModel } from "../app/selection";
 import { SignalTreeView } from "./signal-tree";
 import { SET_DRAG_TYPE } from "./panel";
 
@@ -115,5 +116,47 @@ describe("SignalTreeView set actions", () => {
       SET_DRAG_TYPE,
       JSON.stringify({ set_id: "set-query" }),
     );
+  });
+});
+
+describe("SignalTreeView selection", () => {
+  it("uses modifier clicks for shared range selection and channel members", () => {
+    const list = document.createElement("div");
+    const sets = document.createElement("div");
+    const selection = new SelectionModel();
+    const tree = new SignalTreeView(
+      list,
+      sets,
+      { onPlotSignal: vi.fn(), onRemoveDerived: vi.fn() },
+      selection,
+    );
+    tree.setCatalog(
+      Catalog.build([
+        signal("run-01", "temp"),
+        signal("run-02", "temp"),
+        signal("run-03", "temp"),
+      ]),
+    );
+
+    const first = list.querySelector<HTMLElement>(
+      '[data-signal-path="run-01/temp"]',
+    );
+    first?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, metaKey: true }),
+    );
+    const last = list.querySelector<HTMLElement>(
+      '[data-signal-path="run-03/temp"]',
+    );
+    last?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, shiftKey: true }),
+    );
+    expect(selection.size()).toBe(3);
+
+    list
+      .querySelector<HTMLElement>(".tree-channel")
+      ?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, ctrlKey: true }),
+      );
+    expect(selection.size()).toBe(0);
   });
 });

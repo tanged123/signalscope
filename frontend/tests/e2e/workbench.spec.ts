@@ -175,6 +175,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         point_count: "2",
         t_min: 0,
         t_max: 1,
+        last_value: null,
       };
     });
     const catalog = Catalog.build(summaries);

@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import { WorkspaceModel } from "../app/workspace";
+import { SelectionModel } from "../app/selection";
 import type { BatchStatus } from "../generated/protocol";
 import type { PanelMode } from "../generated/session";
 import {
@@ -56,6 +57,56 @@ interface ShellProbe {
   workspace: WorkspaceModel;
   transitionPanelMode(panelId: string, mode: PanelMode): void;
 }
+
+interface DockProbe {
+  root: HTMLElement;
+  dockMode: "tree" | "table";
+  selection: SelectionModel;
+  tree: { filteredKeys(): readonly string[] };
+  table: { filteredKeys(): readonly string[] };
+  setDockView(mode: "tree" | "table"): void;
+  selectAllDockRows(): void;
+}
+
+describe("signals dock modes", () => {
+  it("swaps tree and table while keeping the shared selection", () => {
+    const root = document.createElement("div");
+    root.innerHTML = `
+      <div class="tree-scroll"></div>
+      <div class="table-scroll"></div>
+      <button data-dock-view="tree"></button>
+      <button data-dock-view="table"></button>
+    `;
+    const shell = Object.create(AppShell.prototype) as DockProbe;
+    shell.root = root;
+    shell.dockMode = "tree";
+    shell.selection = new SelectionModel();
+    shell.tree = { filteredKeys: () => ["tree"] };
+    shell.table = { filteredKeys: () => ["table"] };
+    shell.selection.toggle("shared");
+
+    shell.setDockView("table");
+
+    expect(root.querySelector<HTMLElement>(".tree-scroll")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>(".table-scroll")?.hidden).toBe(
+      false,
+    );
+    expect(shell.selection.keys()).toEqual(["shared"]);
+  });
+
+  it("selects all rows from the active dock only", () => {
+    const shell = Object.create(AppShell.prototype) as DockProbe;
+    shell.root = document.createElement("div");
+    shell.dockMode = "table";
+    shell.selection = new SelectionModel();
+    shell.tree = { filteredKeys: () => ["tree"] };
+    shell.table = { filteredKeys: () => ["table-1", "table-2"] };
+
+    shell.selectAllDockRows();
+
+    expect(shell.selection.keys()).toEqual(["table-1", "table-2"]);
+  });
+});
 
 describe("panel mode transitions", () => {
   it("preserves an XY x signal without adding it to time-mode series", () => {

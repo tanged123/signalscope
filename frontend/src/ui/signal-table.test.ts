@@ -115,9 +115,11 @@ describe("SignalTableView", () => {
       SIGNAL_DRAG_TYPE,
       expect.stringContaining('"channel":"temp"'),
     );
-    expect(
-      JSON.parse(selectedTransfer.setData.mock.calls[0]?.[1] ?? "{}").refs,
-    ).toHaveLength(2);
+    const selectedRaw = selectedTransfer.setData.mock.calls[0]?.[1] as unknown;
+    const selectedPayload = JSON.parse(
+      typeof selectedRaw === "string" ? selectedRaw : "{}",
+    ) as { refs: unknown[] };
+    expect(selectedPayload.refs).toHaveLength(2);
 
     selection.clear();
     const singleTransfer = { setData: vi.fn() };
@@ -126,8 +128,10 @@ describe("SignalTableView", () => {
       value: singleTransfer,
     });
     rows()[2]?.dispatchEvent(singleDrag);
-    expect(
-      JSON.parse(singleTransfer.setData.mock.calls[0]?.[1] ?? "{}").refs,
-    ).toHaveLength(1);
+    const singleRaw = singleTransfer.setData.mock.calls[0]?.[1] as unknown;
+    const singlePayload = JSON.parse(
+      typeof singleRaw === "string" ? singleRaw : "{}",
+    ) as { refs: unknown[] };
+    expect(singlePayload.refs).toHaveLength(1);
   });
 });

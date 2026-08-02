@@ -1,5 +1,6 @@
 import type { NamedSet } from "../generated/session";
 import { Catalog } from "../app/catalog";
+import { SelectionModel } from "../app/selection";
 import { buildTreeRows, virtualSlice, type TreeRow } from "../app/tree-model";
 import { evaluateSelector } from "../app/selector";
 import { SET_DRAG_TYPE, SIGNAL_DRAG_TYPE } from "./panel";
@@ -22,12 +23,16 @@ export class SignalTreeView {
   private rows: TreeRow[] = [];
   private readonly rowHeight: number;
   private liveValues: ReadonlyMap<string, string> = new Map();
+  private readonly selection: SelectionModel;
+  private readonly unsubscribe: () => void;
 
   constructor(
     private readonly listElement: HTMLElement,
     private readonly setsElement: HTMLElement,
     private readonly callbacks: SignalTreeCallbacks,
+    selection = new SelectionModel(),
   ) {
+    this.selection = selection;
     const tokenHeight = Number.parseFloat(
       getComputedStyle(listElement).getPropertyValue("--tree-row-height"),
     );
@@ -36,12 +41,17 @@ export class SignalTreeView {
         ? tokenHeight
         : FALLBACK_ROW_HEIGHT;
     listElement.addEventListener("scroll", () => this.renderRows());
+    this.unsubscribe = selection.onChange(() => this.renderRows());
   }
 
   setCatalog(catalog: Catalog): void {
     this.catalog = catalog;
     this.refresh();
     this.renderSets();
+  }
+
+  destroy(): void {
+    this.unsubscribe();
   }
 
   setSignals(paths: readonly string[]): void {
@@ -73,6 +83,18 @@ export class SignalTreeView {
   setFilter(filter: string): void {
     this.filter = filter;
     this.refresh();
+  }
+
+  filteredKeys(): readonly string[] {
+    const keys = new Set<string>();
+    for (const row of this.rows) {
+      const paths = row.kind === "channel" ? row.members : [row.path];
+      for (const path of paths) {
+        const ref = this.catalog.refFromPath(path);
+        if (ref !== undefined) keys.add(this.catalog.refKey(ref));
+      }
+    }
+    return [...keys];
   }
 
   setLiveValues(values: ReadonlyMap<string, string>): void {
@@ -121,6 +143,10 @@ export class SignalTreeView {
       element.className = "tree-row tree-channel";
       element.style.paddingLeft = `${String(8 + row.depth * 12)}px`;
       element.dataset.channel = row.path;
+      this.setSelectionState(element, row.members);
+      element.addEventListener("click", (event) => {
+        this.handleSelectionClick(event, row.members);
+      });
       const toggle = document.createElement("button");
       toggle.className = "tree-channel-caret";
       toggle.textContent = row.expanded ? "▾" : "▸";
@@ -128,7 +154,8 @@ export class SignalTreeView {
         "aria-label",
         `${row.expanded ? "Collapse" : "Expand"} ${row.label}`,
       );
-      toggle.addEventListener("click", () => {
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
         if (this.collapsed.has(row.path)) this.collapsed.delete(row.path);
         else this.collapsed.add(row.path);
         this.refresh();
@@ -161,6 +188,10 @@ export class SignalTreeView {
     row.tabIndex = 0;
     row.setAttribute("role", "button");
     row.setAttribute("aria-label", `Plot ${path}`);
+    this.setSelectionState(row, [path]);
+    row.addEventListener("click", (event) => {
+      this.handleSelectionClick(event, [path]);
+    });
     row.addEventListener("dragstart", (event) => {
       event.dataTransfer?.setData(SIGNAL_DRAG_TYPE, this.dragPayload([path]));
     });
@@ -264,14 +295,71 @@ export class SignalTreeView {
   }
 
   private dragPayload(paths: readonly string[]): string {
+    const refs = paths
+      .map((path) => this.catalog.refFromPath(path))
+      .filter(
+        (ref): ref is { source_key: string; channel: string } =>
+          ref !== undefined,
+      );
+    const selected = refs.some((ref) =>
+      this.selection.has(this.catalog.refKey(ref)),
+    )
+      ? this.catalog
+          .allSeries()
+          .filter((series) =>
+            this.selection.has(
+              this.catalog.refKey({
+                source_key: series.sourceKey,
+                channel: series.channel,
+              }),
+            ),
+          )
+          .map((series) => ({
+            ref: {
+              source_key: series.sourceKey,
+              channel: series.channel,
+            },
+            path: series.path,
+          }))
+      : refs.map((ref, index) => ({ ref, path: paths[index] ?? "" }));
     return JSON.stringify({
-      refs: paths
-        .map((path) => this.catalog.refFromPath(path))
-        .filter(
-          (ref): ref is { source_key: string; channel: string } =>
-            ref !== undefined,
-        ),
-      paths,
+      refs: selected.map(({ ref }) => ref),
+      paths: selected.map(({ path }) => path),
     });
+  }
+
+  private setSelectionState(
+    element: HTMLElement,
+    paths: readonly string[],
+  ): void {
+    const selected = paths.some((path) => {
+      const ref = this.catalog.refFromPath(path);
+      return ref !== undefined && this.selection.has(this.catalog.refKey(ref));
+    });
+    element.setAttribute("aria-selected", String(selected));
+    if (selected) element.classList.add("selected");
+  }
+
+  private handleSelectionClick(
+    event: MouseEvent,
+    paths: readonly string[],
+  ): void {
+    if (!event.metaKey && !event.ctrlKey && !event.shiftKey) return;
+    const refs = paths
+      .map((path) => this.catalog.refFromPath(path))
+      .filter((ref): ref is NonNullable<typeof ref> => ref !== undefined);
+    if (event.shiftKey) {
+      const target = refs.at(-1);
+      if (target !== undefined)
+        this.selection.selectRange(
+          this.filteredKeys(),
+          this.catalog.refKey(target),
+        );
+      return;
+    }
+    for (const ref of refs) {
+      const key = this.catalog.refKey(ref);
+      this.selection.toggle(key);
+    }
   }
 }

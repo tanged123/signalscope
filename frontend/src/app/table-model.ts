@@ -30,7 +30,7 @@ export function buildTableRows(
   const rows =
     granularity === "series"
       ? filtered.map((series) => seriesRow(catalog, series))
-      : channelRows(catalog, filtered);
+      : channelRows(filtered);
   if (sort === null) return rows;
 
   return rows
@@ -56,10 +56,7 @@ function seriesRow(catalog: Catalog, series: CatalogSeries): TableRow {
   };
 }
 
-function channelRows(
-  catalog: Catalog,
-  series: readonly CatalogSeries[],
-): TableRow[] {
+function channelRows(series: readonly CatalogSeries[]): TableRow[] {
   const grouped = new Map<string, CatalogSeries[]>();
   for (const entry of series) {
     const members = grouped.get(entry.channel) ?? [];

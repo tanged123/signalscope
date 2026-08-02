@@ -406,6 +406,32 @@ button {
   letter-spacing: 0.08em;
 }
 
+.signals-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.signal-view-toggle {
+  display: flex;
+  gap: 1px;
+  letter-spacing: 0;
+}
+
+.signal-view-toggle button {
+  padding: 2px 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--fg-4);
+  font: 0.6154rem var(--font-mono);
+  text-transform: uppercase;
+}
+
+.signal-view-toggle button.active,
+.signal-view-toggle button:hover {
+  color: var(--fg-1);
+}
+
 .signal-path {
   overflow: hidden;
   flex: 1;
@@ -1821,6 +1847,11 @@ button {
 
 .tree-row:hover {
   background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.tree-row.selected {
+  background: var(--amber-3);
   color: var(--fg-1);
 }
 

@@ -1,6 +1,6 @@
 import type { SeriesRef } from "../generated/session";
-import { Catalog } from "../app/catalog";
-import { SelectionModel } from "../app/selection";
+import type { Catalog } from "../app/catalog";
+import type { SelectionModel } from "../app/selection";
 import {
   buildTableRows,
   type TableColumn,
@@ -25,7 +25,7 @@ export interface SignalTableCallbacks {
 }
 
 export class SignalTableView {
-  private catalog = this.emptyCatalog();
+  private catalog!: Catalog;
   private filter = "";
   private granularity: TableGranularity = "series";
   private sort: TableSort | null = null;
@@ -325,9 +325,5 @@ export class SignalTableView {
         ? "No signals loaded."
         : "No matching signals.";
     return empty;
-  }
-
-  private emptyCatalog(): Catalog {
-    return Catalog.empty();
   }
 }

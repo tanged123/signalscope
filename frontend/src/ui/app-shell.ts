@@ -33,6 +33,7 @@ import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
 import { Catalog } from "../app/catalog";
 import { resolvePanel } from "../app/resolution";
+import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
 import { virtualSlice } from "../app/tree-model";
 import { WorkspaceModel } from "../app/workspace";
@@ -78,6 +79,7 @@ import { FolderScanDialog } from "./folder-scan-dialog";
 import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
+import { SignalTableView } from "./signal-table";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
@@ -99,12 +101,15 @@ export class AppShell {
   private readonly commands = new CommandRegistry();
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
+  private readonly selection = new SelectionModel();
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
   private tree: SignalTreeView | null = null;
+  private table: SignalTableView | null = null;
+  private dockMode: "tree" | "table" = "tree";
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
@@ -427,6 +432,12 @@ export class AppShell {
           void this.removeDerived(path);
         },
       },
+      this.selection,
+    );
+    this.table = new SignalTableView(
+      required(this.root, ".table-scroll"),
+      this.selection,
+      { onSelectionChange: () => {} },
     );
     this.palette = new CommandPalette(this.root, (mode, query) =>
       this.paletteEntries(mode, query),
@@ -766,6 +777,14 @@ export class AppShell {
       run: () => {
         this.toggleSignalTree();
       },
+    });
+    this.commands.register({
+      id: "toggle-dock-view",
+      title: "Toggle signals dock view",
+      keys: "mod+shift+t",
+      section: "view",
+      group: "docks",
+      run: () => this.toggleDockView(),
     });
     this.commands.register({
       id: "toggle-linked",
@@ -1213,6 +1232,7 @@ export class AppShell {
     const search = required<HTMLInputElement>(this.root, ".signal-search");
     search.addEventListener("input", () => {
       this.tree?.setFilter(search.value);
+      this.table?.setFilter(search.value);
       this.renderSearchStatus();
     });
     search.addEventListener("keydown", (event) => {
@@ -1270,6 +1290,15 @@ export class AppShell {
         search.focus();
       },
     );
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>(
+      "[data-dock-view]",
+    )) {
+      button.addEventListener("click", () => {
+        const mode = button.dataset.dockView;
+        if (mode === "tree" || mode === "table") this.setDockView(mode);
+      });
+    }
+    this.setDockView(this.dockMode);
     this.renderSearchStatus();
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
@@ -1281,8 +1310,19 @@ export class AppShell {
         (target instanceof HTMLElement && target.isContentEditable);
       if (
         editing &&
-        ((!event.metaKey && !event.ctrlKey) || reservedWhileEditing(event))
+        ((!event.metaKey && !event.ctrlKey) ||
+          reservedWhileEditing(event) ||
+          event.key.toLowerCase() === "a")
       ) {
+        return;
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "a" &&
+        this.dockContains(event.target)
+      ) {
+        event.preventDefault();
+        this.selectAllDockRows();
         return;
       }
       if (this.commands.handleKey(event)) event.preventDefault();
@@ -2137,6 +2177,10 @@ export class AppShell {
     );
     this.tree?.setCatalog(this.catalog);
     this.tree?.setNamedSets(this.workspace.namedSets());
+    this.table?.setCatalog(this.catalog);
+    this.table?.setFilter(
+      required<HTMLInputElement>(this.root, ".signal-search").value,
+    );
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.renderSearchStatus();
     this.updateStatus();
@@ -2699,6 +2743,40 @@ export class AppShell {
     this.setSignalTreeOpen(workbench.classList.contains("tree-collapsed"));
   }
 
+  private toggleDockView(): void {
+    this.setDockView(this.dockMode === "tree" ? "table" : "tree");
+  }
+
+  private setDockView(mode: "tree" | "table"): void {
+    this.dockMode = mode;
+    const tree = required<HTMLElement>(this.root, ".tree-scroll");
+    const table = required<HTMLElement>(this.root, ".table-scroll");
+    tree.hidden = mode !== "tree";
+    table.hidden = mode !== "table";
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>(
+      "[data-dock-view]",
+    )) {
+      const active = button.dataset.dockView === mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }
+
+  private selectAllDockRows(): void {
+    this.selection.setAll(
+      this.dockMode === "table"
+        ? (this.table?.filteredKeys() ?? [])
+        : (this.tree?.filteredKeys() ?? []),
+    );
+  }
+
+  private dockContains(target: EventTarget | null): boolean {
+    return (
+      target instanceof Node &&
+      required<HTMLElement>(this.root, ".signal-tree").contains(target)
+    );
+  }
+
   private setSignalTreeOpen(open: boolean): void {
     const workbench = required<HTMLElement>(this.root, ".workbench");
     const button = required<HTMLButtonElement>(this.root, ".tree-toggle");
@@ -3028,8 +3106,15 @@ function shellMarkup(): string {
       </div>
       <div class="tree-heading">SETS</div>
       <div class="tree-sets"></div>
-      <div class="tree-heading">SIGNALS</div>
+      <div class="tree-heading signals-heading">
+        <span>SIGNALS</span>
+        <span class="signal-view-toggle" role="group" aria-label="Signals view">
+          <button type="button" data-dock-view="tree" class="active" aria-pressed="true">tree</button>
+          <button type="button" data-dock-view="table" aria-pressed="false">table</button>
+        </span>
+      </div>
       <div class="tree-scroll"></div>
+      <div class="table-scroll" hidden></div>
       <div class="source-footer">
         <div class="ingest-progress" hidden></div>
         <div class="source-rows"></div>
