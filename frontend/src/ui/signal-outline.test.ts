@@ -2,13 +2,13 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { SignalSummary } from "../generated/protocol";
 import { Catalog } from "../app/catalog";
 import { SelectionModel } from "../app/selection";
+import type { SignalSummary } from "../generated/protocol";
 import { SIGNAL_DRAG_TYPE } from "./panel";
 import { SignalOutlineView } from "./signal-outline";
 
-function signal(source: string, channel: string, value = 1): SignalSummary {
+function signal(source: string, channel: string, value = 42): SignalSummary {
   return {
     signal_id: `${source}-${channel}`,
     source_id: source,
@@ -55,46 +55,83 @@ function viewFor(
 }
 
 describe("SignalOutlineView", () => {
-  it("renders virtualized rows and group selection", () => {
-    const catalog = Catalog.build(
-      Array.from({ length: 1_000 }, (_, index) =>
-        signal(`run-${String(index)}`, "temp", index),
+  it("virtualizes flat channels and selects collapsed channel groups", () => {
+    const flat = viewFor(
+      Catalog.build(
+        Array.from({ length: 1_000 }, (_, index) =>
+          signal("run-01", `channel-${String(index)}`),
+        ),
       ),
     );
-    const { list, bulk, selection, view } = viewFor(catalog);
-    view.setGroupBy("none");
     expect(
-      list.querySelectorAll(".signal-outline-row").length,
+      flat.list.querySelectorAll(".signal-outline-row").length,
     ).toBeLessThanOrEqual(36);
-    expect(bulk.parentElement).toBe(list);
+    expect(flat.bulk.parentElement).toBe(flat.list);
 
-    view.setGroupBy("channel");
-    const group = list.querySelector<HTMLElement>('[data-row-kind="group"]');
-    expect(group?.querySelector(".outline-caret")?.textContent).toBe("▾");
+    const grouped = viewFor(
+      Catalog.build(
+        Array.from({ length: 1_000 }, (_, index) =>
+          signal(`run-${String(index)}`, "temp"),
+        ),
+      ),
+    );
+    const group = grouped.list.querySelector<HTMLElement>(
+      '[data-row-kind="group"]',
+    );
+    expect(group?.querySelector(".outline-caret")?.textContent).toBe("▸");
+    expect(
+      grouped.list.querySelectorAll('[data-row-kind="series"]'),
+    ).toHaveLength(0);
     group?.querySelector<HTMLButtonElement>(".outline-select")?.click();
-    expect(selection.size()).toBe(1_000);
-    expect(bulk.hidden).toBe(false);
+    expect(grouped.selection.size()).toBe(1_000);
+    expect(grouped.bulk.hidden).toBe(false);
   });
 
-  it("handles series selection, keyboard add, values, and derived removal", () => {
-    const onRemoveDerived = vi.fn();
-    const catalog = Catalog.build([
-      signal("run-01", "temp", 1),
-      signal("derived", "err", 2),
-    ]);
-    const { list, selection, view, onAddToPanel } = viewFor(catalog, {
-      onRemoveDerived,
-    });
-    view.setGroupBy("none");
+  it("renders fixed columns and keeps VALUE blank without a cursor", () => {
+    const { list, view } = viewFor(
+      Catalog.build([signal("run-01", "temp", 42)]),
+    );
+    expect(list.dataset.cols).toBe("channel,value");
+    expect(list.querySelector('[data-column="unit"]')).toBeNull();
+    expect(list.querySelector('[data-column="source"]')).toBeNull();
+    expect(
+      list.querySelector('[data-row-kind="series"] [data-column="value"]')
+        ?.textContent,
+    ).toBe("");
     view.setLiveValues(new Map([["run-01/temp", "9.0000"]]));
+    expect(
+      list.querySelector('[data-row-kind="series"] [data-column="value"]')
+        ?.textContent,
+    ).toBe("9.0000");
+    view.setLiveValues(new Map());
+    expect(
+      list.querySelector('[data-row-kind="series"] [data-column="value"]')
+        ?.textContent,
+    ).toBe("");
+  });
+
+  it("preserves series selection, add, drag, and derived removal", () => {
+    const onRemoveDerived = vi.fn();
+    const { list, selection, onAddToPanel } = viewFor(
+      Catalog.build([signal("run-01", "temp"), signal("derived", "err")]),
+      { onRemoveDerived },
+    );
     const series = list.querySelector<HTMLElement>('[data-path="run-01/temp"]');
     series?.click();
-    expect(selection.size()).toBe(1);
+    expect(selection.keys()).toEqual(["run-01\u0000temp"]);
     series?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     expect(onAddToPanel).toHaveBeenCalledWith([
       { source_key: "run-01", channel: "temp" },
     ]);
-    expect(series?.textContent).toContain("9.0000");
+    const dataTransfer = { setData: vi.fn() };
+    const drag = new Event("dragstart", { bubbles: true });
+    Object.defineProperty(drag, "dataTransfer", { value: dataTransfer });
+    series?.dispatchEvent(drag);
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      SIGNAL_DRAG_TYPE,
+      expect.stringContaining('"source_key":"run-01"'),
+    );
+
     const derived = list.querySelector<HTMLElement>(
       '[data-path="derived/err"]',
     );
@@ -104,7 +141,6 @@ describe("SignalOutlineView", () => {
       ?.click();
     expect(onRemoveDerived).toHaveBeenCalledWith("derived/err");
 
-    list.focus();
     list.dispatchEvent(
       new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true }),
     );
@@ -115,147 +151,36 @@ describe("SignalOutlineView", () => {
     expect(selection.size()).toBe(0);
   });
 
-  it("keeps selection through regrouping and serializes drag payloads", () => {
-    const catalog = Catalog.build([
-      signal("run-01", "temp"),
-      signal("run-02", "speed"),
-    ]);
-    const { list, selection, view } = viewFor(catalog);
-    view.setGroupBy("none");
-    const row = list.querySelector<HTMLElement>('[data-path="run-01/temp"]');
-    row?.click();
-    view.setGroupBy("source");
-    expect(selection.keys()).toEqual(["run-01\u0000temp"]);
-    const dataTransfer = { setData: vi.fn() };
-    const drag = new Event("dragstart", { bubbles: true });
-    Object.defineProperty(drag, "dataTransfer", { value: dataTransfer });
-    list
-      .querySelector<HTMLElement>('[data-path="run-01/temp"]')
-      ?.dispatchEvent(drag);
-    expect(dataTransfer.setData).toHaveBeenCalledWith(
-      SIGNAL_DRAG_TYPE,
-      expect.stringContaining('"source_key":"run-01"'),
+  it("keeps group and series rows on the fixed header grid", () => {
+    const { list } = viewFor(
+      Catalog.build([signal("run-01", "temp"), signal("run-02", "temp")]),
     );
-  });
-
-  it("opens an unmerge popover from a merged channel chip", () => {
-    const catalog = Catalog.build(
-      [signal("run-01", "temp"), signal("run-02", "Temp_C")],
-      [
-        {
-          canonical: "temp",
-          aliases: [
-            { source_key: "run-01", name: "temp" },
-            { source_key: "run-02", name: "Temp_C" },
-          ],
-        },
-      ],
-    );
-    const onUnmerge = vi.fn();
-    const { list, view } = viewFor(catalog, { onUnmerge });
-    const chip = list.querySelector<HTMLButtonElement>(".channel-names-badge");
-    chip?.click();
-    expect(
-      list.querySelector(".outline-unmerge-popover")?.textContent,
-    ).toContain("temp");
-    list.querySelector<HTMLButtonElement>('[data-action="unmerge"]')?.click();
-    expect(onUnmerge).toHaveBeenCalledWith("temp");
-    list.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
-    expect(list.querySelector(".outline-unmerge-popover")).toBeNull();
-    view.destroy();
-  });
-
-  it("drops opt-in and low-priority columns as the pane narrows", () => {
-    const { list, view } = viewFor(Catalog.build([signal("run-01", "temp")]));
-    view.setOptInColumns(["pts"]);
-    view.applyWidth(600);
-    expect(list.dataset.cols).toBe("channel,source,unit,value,pts");
-    view.applyWidth(280);
-    expect(list.dataset.cols).toContain("value");
-    view.applyWidth(230);
-    expect(list.dataset.cols).toBe("channel,source,unit");
-    view.applyWidth(300);
-    expect(list.dataset.cols).toBe("channel,source,unit,value");
-  });
-
-  it("keeps every rendered row aligned with the header grid", () => {
-    const catalog = Catalog.build([
-      signal("run-01", "temp"),
-      signal("run-01", "speed"),
-      signal("run-02", "temp"),
-    ]);
-    const { list, view } = viewFor(catalog);
-    view.setGroupBy("source");
-    const headerCells = list.querySelector(".signal-outline-header")?.children
-      .length;
-    expect(headerCells).toBeGreaterThan(0);
-    for (const row of list.querySelectorAll<HTMLElement>(
-      ".signal-outline-row",
-    )) {
-      expect(row.children.length).toBe(headerCells);
-    }
+    const header = list.querySelector(".signal-outline-header");
     const group = list.querySelector<HTMLElement>('[data-row-kind="group"]');
+    expect(header?.children).toHaveLength(3);
+    expect(group?.children).toHaveLength(3);
     expect(group?.querySelector(".signal-outline-label")?.textContent).toBe(
-      "run-01",
+      "temp — 2 srcs",
     );
-    expect(group?.querySelector(".outline-check-cell")).toBe(
-      group?.firstElementChild,
-    );
-    expect(group?.querySelector(".outline-caret")?.parentElement).toBe(
-      group?.children[1],
-    );
+    expect(group?.querySelector('[data-column="value"]')?.textContent).toBe("");
   });
 
-  it("uses the locked flexible outline template and aggregate abbreviations", () => {
-    const catalog = Catalog.build(
-      Array.from({ length: 9 }, (_, index) =>
-        signal(`run-${String(index)}`, "temp"),
-      ),
-    );
-    const { list, view } = viewFor(catalog);
-    view.setGroupBy("channel");
-    view.applyWidth(280);
-    expect(list.dataset.cols).toContain("value");
-    expect(list.style.getPropertyValue("--outline-columns")).toBe(
-      "18px minmax(88px, 1fr) 40px 32px 60px",
-    );
-    expect(
-      list.querySelector<HTMLElement>(
-        '[data-row-kind="group"] [data-column="source"]',
-      )?.textContent,
-    ).toBe("9");
-    view.applyWidth(400);
-    expect(
-      list.querySelector<HTMLElement>(
-        '[data-row-kind="group"] [data-column="source"]',
-      )?.textContent,
-    ).toBe("9 srcs");
-  });
-
-  it("puts source alignment on source groups only", () => {
+  it("exposes source alignment after expanding a channel", () => {
     const onAlignSource = vi.fn();
-    const catalog = Catalog.build([
-      signal("run-01", "temp"),
-      signal("run-01", "speed"),
-      signal("run-02", "temp"),
-    ]);
-    const { list, view } = viewFor(catalog, { onAlignSource });
-    view.setNonIdentitySources(new Set(["run-01"]));
-    view.setGroupBy("source");
-    const sourceGroup = list.querySelector<HTMLElement>(
-      '[data-row-kind="group"]',
+    const { list, view } = viewFor(
+      Catalog.build([signal("run-01", "temp"), signal("run-02", "temp")]),
+      { onAlignSource },
     );
-    const align =
-      sourceGroup?.querySelector<HTMLButtonElement>(".source-align");
+    list.querySelector<HTMLButtonElement>(".outline-caret")?.click();
+    const source = list.querySelector<HTMLElement>('[data-path="run-01/temp"]');
+    const align = source?.querySelector<HTMLButtonElement>(".source-align");
     align?.click();
     expect(onAlignSource).toHaveBeenCalledWith("run-01", align);
+
+    view.setNonIdentitySources(new Set(["run-01"]));
     expect(
-      sourceGroup?.querySelector(".source-alignment-marker")?.textContent,
+      list.querySelector('[data-path="run-01/temp"] .source-alignment-marker')
+        ?.textContent,
     ).toBe("≠");
-    view.setGroupBy("channel");
-    expect(list.querySelector(".source-align")).toBeNull();
-    expect(list.querySelector(".source-alignment-marker")).toBeNull();
   });
 });
