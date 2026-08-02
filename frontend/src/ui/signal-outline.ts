@@ -141,14 +141,16 @@ export class SignalOutlineView {
     const selectCell = document.createElement("div");
     selectCell.className = "signal-outline-header-cell outline-check-cell";
     const select = document.createElement("button");
+    const filteredKeys = this.filteredKeys();
+    const selected =
+      filteredKeys.length > 0 &&
+      filteredKeys.every((key) => this.selection.has(key));
     select.type = "button";
     select.className = "outline-select";
-    select.textContent = "▢";
-    select.title = "Select all filtered signals";
-    select.setAttribute("aria-label", "Select all filtered signals");
-    select.addEventListener("click", () =>
-      this.selection.setAll(this.filteredKeys()),
-    );
+    select.textContent = selected ? "▣" : "▢";
+    select.title = `${selected ? "Clear" : "Select"} all filtered signals`;
+    select.setAttribute("aria-label", select.title);
+    select.addEventListener("click", () => this.toggleKeys(filteredKeys));
     selectCell.appendChild(select);
 
     const channel = document.createElement("div");

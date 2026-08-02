@@ -99,6 +99,32 @@ describe("SignalOutlineView", () => {
     ).toBe("▢");
   });
 
+  it("selects and clears all filtered signals from the header", () => {
+    const { list, selection } = viewFor(
+      Catalog.build([signal("run-01", "temp"), signal("run-02", "pressure")]),
+    );
+
+    list
+      .querySelector<HTMLButtonElement>(
+        ".signal-outline-header .outline-select",
+      )
+      ?.click();
+    expect(selection.size()).toBe(2);
+    expect(
+      list.querySelector(".signal-outline-header .outline-select")?.textContent,
+    ).toBe("▣");
+
+    list
+      .querySelector<HTMLButtonElement>(
+        ".signal-outline-header .outline-select",
+      )
+      ?.click();
+    expect(selection.size()).toBe(0);
+    expect(
+      list.querySelector(".signal-outline-header .outline-select")?.textContent,
+    ).toBe("▢");
+  });
+
   it("renders fixed columns and keeps VALUE blank without a cursor", () => {
     const { list, view } = viewFor(
       Catalog.build([signal("run-01", "temp", 42)]),
