@@ -1687,6 +1687,116 @@ button {
   padding: 0 6px 8px;
 }
 
+.signal-table-scroll {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 6px 8px;
+  font: 0.6923rem var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-table-header,
+.signal-table-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 90px 50px 60px 70px;
+  align-items: center;
+}
+
+.signal-table-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  min-height: var(--tree-row-height);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-4);
+  letter-spacing: 0.04em;
+}
+
+.signal-table-header-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.signal-table-header-cell > button {
+  min-width: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signal-table-header-cell > button:hover,
+.signal-table-header-cell > button.active {
+  color: var(--fg-1);
+}
+
+.signal-table-granularity {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.signal-table-granularity > button {
+  padding-inline: 2px;
+  font-size: 0.6154rem;
+}
+
+.signal-table-check {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-4);
+  font: inherit;
+}
+
+.signal-table-row {
+  min-height: var(--tree-row-height);
+  border-radius: 2px;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+.signal-table-row > span {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signal-table-row > span:nth-child(5),
+.signal-table-row > span:nth-child(6) {
+  text-align: right;
+}
+
+.signal-table-row:hover {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.signal-table-row.selected {
+  background: var(--amber-3);
+  color: var(--fg-1);
+}
+
+.signal-table-spacer,
+.signal-table-window {
+  position: relative;
+}
+
+.signal-table-window {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
 .tree-spacer {
   position: relative;
 }
