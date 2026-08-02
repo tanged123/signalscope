@@ -151,21 +151,48 @@ the annotation pin/remove gesture, resolving the collision between the two
 (a line click near a rendered vertex is otherwise ambiguous). Hint text
 reads `hover explore · ⇧click focus · ⌥ mute · esc clear`.
 
-**Table mode (§6).** Dock header tree/table toggle. Virtualized flat table
-over the catalog — metadata only (channel, source, unit, pts, last value from
-`SignalSummary`), never sample fetches. The selector box filters it live;
-⇧click ranges; ⌘A selects all filtered. Bulk bar: add to panel · style… (one
-override/rule, never N entries) · hide · save as set · derive ƒx. Selection is
-workspace state shared between tree and table.
+**Tree-table (§6 — amended 2026-08-02; supersedes the tree/table/map
+split).** One tree-table, not two modes. The dock is a single virtualized
+outline table: columns always present, rows optionally grouped.
+`group ← channel` reproduces the old tree (group rows expand to source
+rows); `group ← none` is the flat sortable table; `group ← source` is
+free. One component, one selection model, one implementation — tree vs
+table was a false dichotomy, and the standalone channel-map view is
+deleted with it (§5). Group rows aggregate their children (src count, pt
+sum) and select all of them from the row checkbox; bulk actions operate
+on the selection. The selector box filters live, so ⌘A = "select all
+matching the query" — query → select → act is the bulk workflow. Sorting
+a column while grouped sorts within groups; with `group ← none` it is the
+classic flat table. No tabs, no modes: the only controls are `group ▾`
+(channel · source · none) and a `⊞ ▾` column picker. Group-row checkbox =
+select children; group-row click = expand. Selection is workspace state
+(ephemeral, never serialized) and survives regrouping. One column model
+at every width: canonical `CHANNEL · SOURCE · UNIT · VALUE`, priority in
+that order; `PTS` and other metadata are opt-in via `⊞ ▾`. As the pane
+narrows, columns drop right-to-left by priority — never squeeze, never a
+second layout. The 280 px dock (§10) and the wide view are the same
+component at two widths; docking it wide IS table mode. `style…` on a
+selection writes a rule override (§3), never N per-series entries. Perf
+rule unchanged: the dock never touches sample data — counts, units, and
+last value come from source metadata; 10k rows scroll at 60 fps.
+Deletes: the tree/table/map toggle, `SignalTreeView`/`SignalTableView`,
+`buildTreeRows`/`buildTableRows`, the SERIES/CHANNELS granularity toggle,
+and the channel-map dialog.
 
 **Channel map (§5).** Workspace-scoped `Session.channel_map` aliases
 source-local names onto one canonical channel, non-destructively, applied at
 catalog build so selectors, rules, legends, and the tree all speak canonical
 names. Near-match suggestions on source load use name heuristics
 (case/underscore/unit-suffix) and are suggest-only — never auto-merge. Merge
-gesture: tree multi-select → "Merge as channel…"; map view from the dock
-header and ⌘⇧P. Original names stay visible on demand; unit mismatch flags
-the channel (conversion is a ƒx concern).
+gesture: multi-select → "Merge as channel…" (context menu), plus the dock's
+near-match footer row. Original names stay visible on demand; unit mismatch
+flags the channel (conversion is a ƒx concern).
+
+_Amended 2026-08-02 (P8):_ the standalone map view and its ⌘⇧P shortcut are
+deleted. A merged channel's `N names` chip opens a popover listing the
+original per-source names with an `unmerge` action — inspection and reversal
+live on the row, not in a dialog. The near-match footer row becomes the only
+suggestion surface.
 
 **Facet split (§7).** `split_by` fans the panel into small multiples sharing
 the time axis (y-link toggle), one cell per dimension value, capped at 16
@@ -214,6 +241,12 @@ fetches from the dock.
 **P5 — channel map + facets** (`minor`). Map in catalog build, near-match
 suggestions, merge gesture, map view, ⌘⇧P; facet split with cell cap, rule
 inheritance, shared cursor.
+
+**P8 — tree-table consolidation** (`minor`; after the P6/P7 remediations).
+The dock's tree mode, table mode, and channel-map view collapse into the
+single outline table of §6 (amended): `group ▾` + `⊞ ▾` replace the
+three-way toggle, the bulk bar becomes the outline's footer, and the map
+dialog's unmerge moves onto the merged-channel row.
 
 ## Acceptance (from AUDIT v3 §8)
 
