@@ -474,7 +474,7 @@ export class AppShell {
           this.openChannelMergeMenu(aliases, clientX, clientY);
         },
       },
-      required(this.root, ".bulk-bar"),
+      required<HTMLElement>(this.root, ".bulk-bar"),
     );
     this.bulkBar = new BulkBar(
       required(this.root, ".bulk-bar"),
@@ -3249,7 +3249,7 @@ export class AppShell {
     const bulk = this.root.querySelector<HTMLElement>(".bulk-bar");
     tree.hidden = mode !== "tree";
     table.hidden = mode !== "table";
-    this.table?.setFooterInTable?.(mode === "table");
+    this.table?.setFooterInTable(mode === "table");
     if (
       mode === "tree" &&
       bulk !== null &&
@@ -3545,7 +3545,7 @@ export function renderDockFooter(
 function loadedSourceFormats(sources: readonly SourceSummary[]): string {
   const formats = new Set<string>();
   for (const source of sources) {
-    const match = /\.([^.\/]+)$/.exec(source.path);
+    const match = /\.([^./]+)$/.exec(source.path);
     if (match?.[1] !== undefined) formats.add(match[1].toUpperCase());
   }
   return [...formats].sort().join(" · ") || "—";

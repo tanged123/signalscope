@@ -259,6 +259,8 @@ describe("PanelView facets", () => {
       ),
     );
     const panelCallbacks = callbacks(catalog);
+    const onFocusToggle = vi.fn();
+    panelCallbacks.onFocusToggle = onFocusToggle;
     const view = new PanelView("panel", panelCallbacks);
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -275,9 +277,8 @@ describe("PanelView facets", () => {
     expect(render).toHaveBeenCalledTimes(8);
     expect(
       render.mock.contexts.every((instance) => {
-        const canvas = (
-          instance as unknown as { surface: { canvas: HTMLCanvasElement } }
-        ).surface.canvas;
+        const canvas = (instance as { surface: { canvas: HTMLCanvasElement } })
+          .surface.canvas;
         return canvas.isConnected && canvas.width > 1 && canvas.height > 1;
       }),
     ).toBe(true);
@@ -333,7 +334,7 @@ describe("PanelView facets", () => {
         clientY: 37,
       }),
     );
-    expect(panelCallbacks.onFocusToggle).toHaveBeenCalledWith(
+    expect(onFocusToggle).toHaveBeenCalledWith(
       "panel",
       expect.objectContaining({
         ref: { source_key: "run-00", channel: "temp" },

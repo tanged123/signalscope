@@ -107,7 +107,10 @@ interface DockProbe {
   dockMode: "tree" | "table";
   selection: SelectionModel;
   tree: { filteredKeys(): readonly string[] };
-  table: { filteredKeys(): readonly string[] };
+  table: {
+    filteredKeys(): readonly string[];
+    setFooterInTable(mode: boolean): void;
+  };
   setDockView(mode: "tree" | "table"): void;
   selectAllDockRows(): void;
 }
@@ -126,7 +129,10 @@ describe("signals dock modes", () => {
     shell.dockMode = "tree";
     shell.selection = new SelectionModel();
     shell.tree = { filteredKeys: () => ["tree"] };
-    shell.table = { filteredKeys: () => ["table"] };
+    shell.table = {
+      filteredKeys: () => ["table"],
+      setFooterInTable: vi.fn(),
+    };
     shell.selection.toggle("shared");
 
     shell.setDockView("table");
@@ -144,7 +150,10 @@ describe("signals dock modes", () => {
     shell.dockMode = "table";
     shell.selection = new SelectionModel();
     shell.tree = { filteredKeys: () => ["tree"] };
-    shell.table = { filteredKeys: () => ["table-1", "table-2"] };
+    shell.table = {
+      filteredKeys: () => ["table-1", "table-2"],
+      setFooterInTable: vi.fn(),
+    };
 
     shell.selectAllDockRows();
 
