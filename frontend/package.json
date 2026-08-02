@@ -1,6 +1,6 @@
 {
   "name": "@signalscope/frontend",
-  "version": "1.0.1",
+  "version": "0.15.5",
   "private": true,
   "type": "module",
   "scripts": {
