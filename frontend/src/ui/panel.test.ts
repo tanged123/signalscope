@@ -4,7 +4,7 @@ import type {
   SampleSeries,
   SignalSummary,
 } from "../generated/protocol";
-import type { PanelState } from "../generated/session";
+import type { FocusEntry, PanelState } from "../generated/session";
 import type { PathRenderOptions, PlotPath } from "../render/canvas-renderer";
 import { Catalog } from "../app/catalog";
 
@@ -13,6 +13,8 @@ import {
   MAX_SERIES_PER_PANEL,
   MAXIMIZE_GLYPH,
   PanelView,
+  focusChips,
+  matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
   type RenderPanelState,
@@ -40,9 +42,8 @@ function response(...series: SampleSeries[]): SampleResponse {
 }
 
 function sourceKeyFor(path: string): string | null {
-  if (path.startsWith("run_01/")) return "k1";
-  if (path.startsWith("run_02/")) return "k2";
-  return null;
+  const match = /^run_0*(\d+)\//.exec(path);
+  return match === null ? null : `k${match[1]}`;
 }
 
 function localPathFor(path: string): string | null {
@@ -83,6 +84,7 @@ function xyState(xSignal: string, series: RenderSeries[]): RenderPanelState {
     x_signal: xSignal,
     color_signal: null,
     color_by_time: false,
+    focus: [],
     series,
     y_range: null,
     x_range: null,
@@ -422,5 +424,88 @@ describe("panel series", () => {
     expect(
       xChipLabel("run_01/temp", [visible("run_01/alt")], xyCallbacks),
     ).toBe("run_01/temp");
+  });
+
+  it("builds bounded matrix roster rows with selector filtering", () => {
+    const catalog = Catalog.build(
+      ["run_01", "run_02", "run_03"].flatMap((source) =>
+        ["temp", "speed"].map((channel) => ({
+          signal_id: `${source}-${channel}`,
+          source_id: `k${source.slice(-2).replace(/^0/, "")}`,
+          source_key: `k${source.slice(-2).replace(/^0/, "")}`,
+          local_path: channel,
+          path: `${source}/${channel}`,
+          unit: channel === "temp" ? "K" : "m/s",
+          point_count: "2",
+          t_min: 0,
+          t_max: 1,
+        })),
+      ),
+    );
+    const state = xyState("run_01/temp", [
+      visible("run_01/temp"),
+      visible("run_01/speed"),
+      visible("run_02/temp"),
+      visible("run_03/temp"),
+    ]);
+    state.focus = [
+      {
+        kind: "source",
+        ref: null,
+        source_key: "k2",
+        channel: null,
+      },
+    ];
+    expect(matrixLegendRows(catalog, state, "source")).toEqual([
+      expect.objectContaining({
+        value: "run_01",
+        count: 2,
+        selector: "* @ run_01",
+      }),
+      expect.objectContaining({
+        value: "run_02",
+        count: 1,
+        focused: true,
+      }),
+      expect.objectContaining({ value: "run_03", count: 1 }),
+    ]);
+    expect(
+      matrixLegendRows(catalog, state, "channel", "temp @ *").map(
+        (row) => row.value,
+      ),
+    ).toEqual(["temp"]);
+  });
+
+  it("keeps only the first eight focus chips and reports overflow", () => {
+    const catalog = Catalog.build(
+      Array.from({ length: 10 }, (_, index) => ({
+        signal_id: `run_0${String(index + 1)}-temp`,
+        source_id: `k${String(index + 1)}`,
+        source_key: `k${String(index + 1)}`,
+        local_path: "temp",
+        path: `run_0${String(index + 1)}/temp`,
+        unit: null,
+        point_count: "2",
+        t_min: 0,
+        t_max: 1,
+      })),
+    );
+    const state = xyState(
+      "run_01/temp",
+      Array.from({ length: 10 }, (_, index) =>
+        visible(`run_0${String(index + 1)}/temp`),
+      ),
+    );
+    state.focus = state.series.map(
+      (series): FocusEntry => ({
+        kind: "series",
+        ref: series.ref,
+        source_key: null,
+        channel: null,
+      }),
+    );
+    const result = focusChips(catalog, state);
+    expect(result.chips).toHaveLength(8);
+    expect(result.overflow).toBe(2);
   });
 });

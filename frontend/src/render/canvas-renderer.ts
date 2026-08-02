@@ -37,6 +37,7 @@ export interface RenderOptions {
   axisStyle?: AxisStyle;
   styles?: readonly SeriesStroke[];
   emphasisIndex?: number;
+  emphasisIndices?: readonly number[];
 }
 
 export interface SeriesStroke {
@@ -214,14 +215,19 @@ export class CanvasRenderer {
         alpha: 1,
       };
       const ghost = stroke.hue === null;
-      const emphasized = options.emphasisIndex === index;
+      const emphasized =
+        options.emphasisIndex === index ||
+        (options.emphasisIndices?.includes(index) ?? false);
+      const hasEmphasis =
+        options.emphasisIndex !== undefined ||
+        (options.emphasisIndices?.length ?? 0) > 0;
       const color =
         stroke.hue === null
           ? colors.fg4
           : (colors.series[hueIndex(stroke.hue)] ?? colors.fg2);
       const alpha = emphasized
         ? Math.min(1, stroke.alpha + 0.4)
-        : options.emphasisIndex !== undefined && !ghost
+        : hasEmphasis && !ghost
           ? 0.25
           : stroke.alpha;
       this.drawSeries(

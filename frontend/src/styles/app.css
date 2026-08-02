@@ -297,7 +297,6 @@ button {
 .signal-path,
 .signal-value,
 .source-points,
-.legend-chip,
 .formula-input {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -577,13 +576,12 @@ button {
   align-items: center;
   gap: 2px;
   overflow: hidden;
+  white-space: nowrap;
 }
 
-.panel-legend .legend-chip {
-  max-width: 220px;
-}
-
-.legend-chip {
+.legend-count-token,
+.matrix-focus-chip,
+.matrix-focus-overflow {
   display: inline-flex;
   min-width: 0;
   flex: none;
@@ -593,30 +591,106 @@ button {
   font-size: 0.7692rem;
 }
 
-.legend-chip:hover {
+.legend-count-token,
+.matrix-focus-overflow {
+  padding: 2px 5px;
+  font: 0.7692rem var(--font-mono);
+}
+
+.legend-count-token:hover,
+.matrix-focus-overflow:hover,
+.matrix-focus-chip:hover {
   background: var(--surface-3);
+  color: var(--fg-1);
 }
 
-.legend-chip-body {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
+.matrix-focus-chip {
   gap: 4px;
-  padding: 1px 2px 1px 5px;
-  color: inherit;
-  font: inherit;
+  padding: 2px 3px 2px 5px;
 }
 
-.legend-chip-caret {
-  padding: 1px 4px 1px 0;
+.matrix-focus-key {
+  width: 10px;
+  font-weight: 600;
+}
+
+.matrix-focus-remove {
+  padding: 0 2px;
   color: var(--fg-4);
   font: inherit;
 }
 
+.matrix-focus-remove:hover {
+  color: var(--fg-1);
+}
+
+.matrix-roster {
+  position: absolute;
+  z-index: 4;
+  width: min(260px, calc(100% - 8px));
+  max-height: 280px;
+  padding: 5px;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  box-shadow: var(--elev-2);
+}
+
+.matrix-roster-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-void);
+  color: var(--fg-1);
+  font: 0.7692rem var(--font-mono);
+}
+
+.matrix-roster-rows {
+  max-height: 224px;
+  overflow-y: auto;
+}
+
+.matrix-roster-row {
+  display: grid;
+  width: 100%;
+  min-height: 24px;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  color: var(--fg-2);
+  text-align: left;
+  font: 0.7692rem var(--font-mono);
+}
+
+.matrix-roster-row:hover,
+.matrix-roster-row:focus-visible {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.matrix-roster-key {
+  text-align: center;
+}
+
+.matrix-roster-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.matrix-roster-count {
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+
 .legend-line {
+  display: inline-flex;
   width: 12px;
   height: 2px;
-  flex: none;
   background-color: currentcolor;
 }
 
@@ -636,56 +710,6 @@ button {
     currentcolor 0 2px,
     transparent 2px 5px
   );
-}
-
-.legend-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.legend-overflow {
-  min-width: 30px;
-  flex: none;
-  padding: 2px 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  color: var(--fg-2);
-  font: 0.7692rem var(--font-mono);
-}
-
-.legend-overflow:hover,
-.legend-overflow[aria-expanded="true"] {
-  background: var(--surface-3);
-  color: var(--fg-1);
-}
-
-.legend-overflow-menu {
-  position: absolute;
-  z-index: 4;
-  top: 27px;
-  right: 7px;
-  display: flex;
-  width: min(360px, calc(100% - 14px));
-  max-height: min(280px, calc(100% - 40px));
-  flex-direction: column;
-  gap: 1px;
-  padding: 4px;
-  overflow-y: auto;
-  background: var(--surface-1);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-}
-
-.legend-overflow-menu[hidden] {
-  display: none;
-}
-
-.legend-overflow-menu .legend-chip {
-  width: 100%;
-  max-width: none;
-  flex: none;
-  text-align: left;
 }
 
 .panel-actions {
@@ -1484,19 +1508,6 @@ button {
   padding: 4px 8px;
   color: var(--fg-4);
   font-size: 0.8077rem;
-}
-
-.legend-chip.muted .legend-name {
-  opacity: 0.5;
-  text-decoration: line-through;
-}
-
-.legend-chip.muted .legend-line {
-  opacity: 0.35;
-}
-
-.legend-chip.highlighted .legend-line {
-  box-shadow: 0 0 0 1px var(--fg-1);
 }
 
 .ingest-progress {

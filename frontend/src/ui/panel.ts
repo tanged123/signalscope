@@ -1,4 +1,8 @@
 import { formatCombo } from "../app/commands";
+import type { Catalog } from "../app/catalog";
+import { dimensionCounts, type ResolvedSeries } from "../app/resolution";
+import { virtualSlice } from "../app/tree-model";
+import { evaluateSelector } from "../app/selector";
 import type {
   SampleResponse,
   SampleSeries,
@@ -7,6 +11,7 @@ import type {
 import type {
   AxisStyle,
   DashStyle,
+  FocusEntry,
   PanelMode,
   PanelState,
   SeriesRef,
@@ -96,10 +101,14 @@ export interface PanelCallbacks {
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignals(id: string, paths: string[]): void;
   onDropSet(id: string, setId: string): void;
+  onFocusToggle(id: string, entry: FocusEntry): void;
+  onMuteSelector(id: string, selector: string): void;
+  onMuteSeries(id: string, ref: SeriesRef): void;
   onToggleHighlight(id: string, path: string): void;
   localPathFor(path: string): string | null;
   sourceKeyFor(path: string): string | null;
   pathForRef(ref: { source_key: string; channel: string }): string | null;
+  catalog(): Catalog;
   resolveSeries(state: PanelState): readonly ResolvedSeries[];
   onSetXSignal(id: string, path: string): void;
   onSetColorSignal(id: string, path: string | null): void;
@@ -163,13 +172,141 @@ export interface RenderSeries {
 
 export type RenderPanelState = Omit<
   PanelState,
-  "x_ref" | "color_ref" | "bindings" | "overrides" | "focus"
+  "x_ref" | "color_ref" | "bindings" | "overrides"
 > & {
   x_signal: string | null;
   color_signal: string | null;
   color_by_time: boolean;
   series: RenderSeries[];
 };
+
+export type LegendDimension = "source" | "channel";
+
+export interface MatrixLegendRow {
+  value: string;
+  label: string;
+  count: number;
+  selector: string;
+  focused: boolean;
+  overridden: boolean;
+  hue: number | null;
+}
+
+export interface FocusChip {
+  entry: FocusEntry;
+  label: string;
+  hue: number | null;
+  overridden: boolean;
+}
+
+export function matrixLegendRows(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "series" | "focus" | "color_by">,
+  dimension: LegendDimension,
+  query = "",
+): MatrixLegendRow[] {
+  const evaluation =
+    query.trim() === "" ? null : evaluateSelector(catalog, query);
+  const matching =
+    evaluation === null
+      ? null
+      : new Set(
+          evaluation.series.map((series) =>
+            catalog.refKey({
+              source_key: series.sourceKey,
+              channel: series.channel,
+            }),
+          ),
+        );
+  const rows = new Map<string, MatrixLegendRow>();
+  for (const series of state.series) {
+    const catalogSeries = catalog.get(series.ref);
+    if (matching !== null && !matching.has(catalog.refKey(series.ref))) {
+      continue;
+    }
+    const value =
+      dimension === "source"
+        ? (catalogSeries?.sourceName ?? series.ref.source_key)
+        : series.ref.channel;
+    const existing = rows.get(value);
+    const focus = state.focus.some((entry) => focusMatches(entry, series.ref));
+    if (existing === undefined) {
+      rows.set(value, {
+        value,
+        label: value,
+        count: 1,
+        selector: dimension === "source" ? `* @ ${value}` : `${value} @ *`,
+        focused: focus,
+        overridden: series.overridden,
+        hue: state.color_by === dimension ? series.hue : null,
+      });
+    } else {
+      existing.count += 1;
+      existing.focused ||= focus;
+      existing.overridden ||= series.overridden;
+      if (existing.hue === null && state.color_by === dimension) {
+        existing.hue = series.hue;
+      }
+    }
+  }
+  return [...rows.values()];
+}
+
+export function focusChips(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "series" | "focus">,
+  limit = 8,
+): { chips: FocusChip[]; overflow: number } {
+  const chips = state.focus.map((entry) => {
+    const matching = state.series.filter((series) =>
+      focusMatches(entry, series.ref),
+    );
+    const first = matching[0];
+    const label =
+      entry.kind === "series"
+        ? (first?.path ?? entry.ref?.channel ?? "series")
+        : entry.kind === "source"
+          ? (catalog.get(
+              first?.ref ?? { source_key: entry.source_key ?? "", channel: "" },
+            )?.sourceName ??
+            entry.source_key ??
+            "source")
+          : (entry.channel ?? "channel");
+    return {
+      entry,
+      label,
+      hue: first?.hue ?? null,
+      overridden: matching.some((series) => series.overridden),
+    };
+  });
+  return {
+    chips: chips.slice(0, limit),
+    overflow: Math.max(0, chips.length - limit),
+  };
+}
+
+function setsEqual(
+  left: ReadonlySet<string> | null,
+  right: ReadonlySet<string> | null,
+): boolean {
+  if (left === right) return true;
+  if (left === null || right === null || left.size !== right.size) return false;
+  for (const value of left) if (!right.has(value)) return false;
+  return true;
+}
+
+function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
+  if (entry.kind === "series") {
+    return (
+      entry.ref !== null &&
+      entry.ref.source_key === ref.source_key &&
+      entry.ref.channel === ref.channel
+    );
+  }
+  return entry.kind === "source"
+    ? entry.source_key === ref.source_key
+    : entry.channel === ref.channel;
+}
 
 function renderState(
   state: PanelState,
@@ -286,7 +423,6 @@ export class PanelView {
   private readonly overlayRenderer: OverlayRenderer;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
-  private legendChips: HTMLElement[] = [];
   private lastState: RenderPanelState | null = null;
   private lastInputState: PanelState | null = null;
   private lastTiles: TileResponse | null = null;
@@ -310,9 +446,10 @@ export class PanelView {
   private cursorT: number | null = null;
   private cursorMode: CursorMode = "none";
   private box: InteractionBox | null = null;
-  private emphasizePath: string | null = null;
+  private emphasizePaths: ReadonlySet<string> | null = null;
   private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
+  private rosterCleanup: (() => void) | null = null;
   private hasColorbar = false;
 
   constructor(
@@ -367,9 +504,6 @@ export class PanelView {
       },
     });
     new ResizeObserver(() => {
-      this.layoutLegend();
-    }).observe(required(this.element, ".panel-header"));
-    new ResizeObserver(() => {
       this.callbacks.onResized(this.id);
     }).observe(this.canvas);
   }
@@ -378,12 +512,8 @@ export class PanelView {
     this.element.addEventListener("pointerdown", (event) => {
       this.callbacks.onFocus(this.id);
       const target = event.target;
-      if (
-        target instanceof Node &&
-        !required(this.element, ".legend-overflow-menu").contains(target) &&
-        !required(this.element, ".legend-overflow").contains(target)
-      ) {
-        this.closeLegendOverflow();
+      if (target instanceof Node && !this.element.contains(target)) {
+        this.closeRoster();
       }
     });
     required(this.element, ".panel-close").addEventListener("click", () => {
@@ -416,15 +546,8 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
-    required<HTMLButtonElement>(
-      this.element,
-      ".legend-overflow",
-    ).addEventListener("click", () => {
-      const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-      this.setLegendOverflowOpen(menu.hidden);
-    });
     this.element.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") this.closeLegendOverflow();
+      if (event.key === "Escape") this.closeRoster();
     });
     for (const button of this.element.querySelectorAll<HTMLButtonElement>(
       ".mode-pill",
@@ -700,11 +823,10 @@ export class PanelView {
           alpha: series?.opacity ?? 1,
         };
       }),
-      ...(this.emphasizePath !== null &&
-      shown.some((tile) => tile.signal_path === this.emphasizePath)
+      ...(this.emphasizePaths !== null
         ? {
-            emphasisIndex: shown.findIndex(
-              (tile) => tile.signal_path === this.emphasizePath,
+            emphasisIndices: shown.flatMap((tile, index) =>
+              this.emphasizePaths?.has(tile.signal_path) ? [index] : [],
             ),
           }
         : {}),
@@ -1491,101 +1613,82 @@ export class PanelView {
   }
 
   private updateLegend(state: RenderPanelState): void {
-    this.legendChips = state.series.map((series) => this.legendChip(series));
-    this.layoutLegend();
-  }
-
-  private layoutLegend(): void {
     const legend = required(this.element, ".panel-legend");
-    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-    const overflow = required<HTMLButtonElement>(
-      this.element,
-      ".legend-overflow",
+    legend.replaceChildren();
+    const counts = dimensionCounts(state.series as readonly ResolvedSeries[]);
+    legend.append(
+      this.legendCountToken("source", counts.sources, state),
+      ...this.focusChipElements(state),
+      this.legendCountToken("channel", counts.channels, state),
     );
-    const menuWasOpen = !menu.hidden;
-    const chips = this.legendChips;
-    legend.replaceChildren(...chips);
-    overflow.hidden = true;
+  }
 
-    let visibleCount = chips.length;
-    if (legend.scrollWidth > legend.clientWidth) {
-      overflow.hidden = false;
-      overflow.textContent = `+${String(chips.length)}`;
-      const gap = Number.parseFloat(getComputedStyle(legend).columnGap) || 0;
-      let used = 0;
-      visibleCount = 0;
-      for (const chip of chips) {
-        const next = used + (visibleCount === 0 ? 0 : gap) + chip.offsetWidth;
-        if (next > legend.clientWidth) break;
-        used = next;
-        visibleCount += 1;
-      }
+  private legendCountToken(
+    dimension: LegendDimension,
+    count: number,
+    state: RenderPanelState,
+  ): HTMLButtonElement {
+    const token = document.createElement("button");
+    token.className = "legend-count-token";
+    token.textContent = `${dimension === "source" ? "SRC" : "CH"} ${String(count)} ▾`;
+    token.title = `Browse ${dimension} roster`;
+    token.setAttribute("aria-haspopup", "dialog");
+    token.addEventListener("click", (event) => {
+      this.openRoster(dimension, state, event.currentTarget as HTMLElement);
+    });
+    return token;
+  }
+
+  private focusChipElements(state: RenderPanelState): HTMLElement[] {
+    const result = focusChips(this.callbacks.catalog(), state);
+    const chips = result.chips.map((focus) => {
+      const chip = document.createElement("span");
+      chip.className = "matrix-focus-chip";
+      const marker = document.createElement("span");
+      marker.className = "matrix-focus-key";
+      marker.style.color =
+        focus.hue === null
+          ? "var(--fg-4)"
+          : `var(--series-${String(colorIndexForHue(focus.hue) + 1)})`;
+      marker.textContent = "—";
+      const name = document.createElement("span");
+      name.textContent = `${focus.overridden ? "◆ " : ""}${focus.label}`;
+      const remove = document.createElement("button");
+      remove.className = "matrix-focus-remove";
+      remove.type = "button";
+      remove.textContent = "✕";
+      remove.title = `Remove focus: ${focus.label}`;
+      remove.addEventListener("click", () => {
+        this.callbacks.onFocusToggle(this.id, focus.entry);
+      });
+      chip.append(marker, name, remove);
+      return chip;
+    });
+    if (result.overflow > 0) {
+      const more = document.createElement("button");
+      more.className = "matrix-focus-overflow";
+      more.textContent = `+${String(result.overflow)}`;
+      more.title = "Browse additional focused entries";
+      more.addEventListener("click", (event) => {
+        this.openRoster(
+          "source",
+          state,
+          event.currentTarget as HTMLElement,
+          true,
+        );
+      });
+      chips.push(more);
     }
-
-    const overflowCount = chips.length - visibleCount;
-    legend.replaceChildren(...chips.slice(0, visibleCount));
-    menu.replaceChildren(...chips.slice(visibleCount));
-
-    overflow.hidden = overflowCount === 0;
-    overflow.textContent = `+${String(overflowCount)}`;
-    overflow.setAttribute(
-      "aria-label",
-      `${String(overflowCount)} additional series`,
-    );
-    menu.hidden = overflowCount === 0 || !menuWasOpen;
-    this.syncLegendOverflowButton();
+    return chips;
   }
 
-  private legendChip(series: RenderSeries): HTMLElement {
-    const chip = document.createElement("span");
-    chip.className = `legend-chip ${series.visible ? "" : "muted"}`;
-    chip.classList.toggle("highlighted", series.focused);
-    const body = document.createElement("button");
-    body.className = "legend-chip-body";
-    body.title = `${series.path} — click to toggle visibility`;
-    const line = document.createElement("span");
-    const style = {
-      colorIndex: colorIndexForHue(series.hue),
-      dash: series.dash,
-    };
-    line.className = `legend-line dash-${style.dash}`;
-    line.setAttribute("aria-hidden", "true");
-    line.style.color =
-      series.hue === null
-        ? "var(--fg-4)"
-        : `var(--series-${String(style.colorIndex + 1)})`;
-    const name = document.createElement("span");
-    name.className = "legend-name";
-    name.textContent = signalLabel(series.path);
-    body.append(line, name);
-    body.addEventListener("click", () => {
-      this.callbacks.onToggleSeries(this.id, series.ref);
-    });
-    body.addEventListener("mouseenter", () => {
-      this.setEmphasis(series.path);
-    });
-    body.addEventListener("mouseleave", () => {
-      this.setEmphasis(null);
-    });
-    const caret = document.createElement("button");
-    caret.className = "legend-chip-caret";
-    caret.textContent = "▾";
-    caret.title = `${series.path} — series inspector`;
-    caret.setAttribute("aria-haspopup", "true");
-    caret.addEventListener("click", (event) => {
-      this.openInspector(series.path, event.clientX, event.clientY);
-    });
-    chip.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      this.openInspector(series.path, event.clientX, event.clientY);
-    });
-    chip.append(body, caret);
-    return chip;
-  }
-
-  private setEmphasis(path: string | null): void {
-    if (this.emphasizePath === path) return;
-    this.emphasizePath = path;
+  private setEmphasis(paths: readonly string[] | string | null): void {
+    const next =
+      paths === null
+        ? null
+        : new Set(typeof paths === "string" ? [paths] : paths);
+    if (setsEqual(this.emphasizePaths, next)) return;
+    this.emphasizePaths = next;
     if (this.lastInputState !== null && this.lastWindow !== null) {
       this.renderData(
         this.lastInputState,
@@ -1594,6 +1697,128 @@ export class PanelView {
         this.lastWindow,
       );
     }
+  }
+
+  private openRoster(
+    dimension: LegendDimension,
+    state: RenderPanelState,
+    anchor: HTMLElement,
+    focusedOnly = false,
+  ): void {
+    this.closeRoster();
+    const roster = document.createElement("div");
+    roster.className = "matrix-roster";
+    roster.setAttribute("role", "dialog");
+    roster.setAttribute("aria-label", `${dimension} roster`);
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "matrix-roster-search";
+    search.placeholder = dimension === "source" ? "* @ source" : "channel @ *";
+    search.setAttribute("aria-label", `Filter ${dimension} roster`);
+    const rows = document.createElement("div");
+    rows.className = "matrix-roster-rows";
+    const renderRows = (): void => {
+      const all = matrixLegendRows(
+        this.callbacks.catalog(),
+        state,
+        dimension,
+        search.value,
+      ).filter((row) => !focusedOnly || row.focused);
+      const slice = virtualSlice(all.length, rows.scrollTop, 224, 24);
+      rows.replaceChildren();
+      rows.style.height = `${String(slice.totalHeight)}px`;
+      rows.style.paddingTop = `${String(slice.topPadding)}px`;
+      for (const row of all.slice(slice.start, slice.end)) {
+        const button = document.createElement("button");
+        button.className = "matrix-roster-row";
+        button.type = "button";
+        button.innerHTML = `<span class="matrix-roster-key"></span><span class="matrix-roster-label"></span><span class="matrix-roster-count"></span>`;
+        const key = required(button, ".matrix-roster-key");
+        key.style.color =
+          row.hue === null
+            ? "var(--fg-4)"
+            : `var(--series-${String(colorIndexForHue(row.hue) + 1)})`;
+        key.textContent = row.focused ? "✓" : "—";
+        required(button, ".matrix-roster-label").textContent =
+          `${row.overridden ? "◆ " : ""}${row.label}`;
+        required(button, ".matrix-roster-count").textContent =
+          `×${String(row.count)}`;
+        const matching = state.series.filter((series) =>
+          dimension === "source"
+            ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
+                series.ref.source_key) === row.value
+            : series.ref.channel === row.value,
+        );
+        const paths = matching.map((series) => series.path);
+        button.addEventListener("mouseenter", () => this.setEmphasis(paths));
+        button.addEventListener("mouseleave", () => this.setEmphasis(null));
+        button.addEventListener("click", (event) => {
+          const entry = this.focusEntryForRow(dimension, row, state);
+          if (event.altKey)
+            this.callbacks.onMuteSelector(this.id, row.selector);
+          else this.callbacks.onFocusToggle(this.id, entry);
+        });
+        rows.append(button);
+      }
+    };
+    search.addEventListener("input", renderRows);
+    rows.addEventListener("scroll", renderRows);
+    roster.append(search, rows);
+    this.element.append(roster);
+    const rect = this.element.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    roster.style.left = `${String(
+      clamp(anchorRect.left - rect.left, 4, Math.max(4, rect.width - 220)),
+    )}px`;
+    roster.style.top = `${String(
+      clamp(
+        anchorRect.bottom - rect.top + 4,
+        4,
+        Math.max(4, rect.height - 260),
+      ),
+    )}px`;
+    renderRows();
+    search.focus();
+    const onPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && roster.contains(event.target)) return;
+      this.closeRoster();
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") this.closeRoster();
+    };
+    document.addEventListener("pointerdown", onPointer, { capture: true });
+    document.addEventListener("keydown", onKey);
+    this.rosterCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer, { capture: true });
+      document.removeEventListener("keydown", onKey);
+      roster.remove();
+    };
+  }
+
+  private focusEntryForRow(
+    dimension: LegendDimension,
+    row: MatrixLegendRow,
+    state: RenderPanelState,
+  ): FocusEntry {
+    const series = state.series.find((entry) =>
+      dimension === "source"
+        ? (this.callbacks.catalog().get(entry.ref)?.sourceName ??
+            entry.ref.source_key) === row.value
+        : entry.ref.channel === row.value,
+    );
+    return dimension === "source"
+      ? {
+          kind: "source",
+          ref: null,
+          source_key: series?.ref.source_key ?? row.value,
+          channel: null,
+        }
+      : { kind: "channel", ref: null, source_key: null, channel: row.value };
+  }
+
+  private closeRoster(): void {
+    this.rosterCleanup?.();
+    this.rosterCleanup = null;
   }
 
   private openInspector(path: string, clientX: number, clientY: number): void {
@@ -1748,30 +1973,6 @@ export class PanelView {
     this.inspectorPath = null;
     this.element.querySelector(".series-inspector")?.remove();
   }
-
-  private setLegendOverflowOpen(open: boolean): void {
-    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-    if (required<HTMLButtonElement>(this.element, ".legend-overflow").hidden) {
-      return;
-    }
-    menu.hidden = !open;
-    this.syncLegendOverflowButton();
-  }
-
-  private closeLegendOverflow(): void {
-    this.setLegendOverflowOpen(false);
-  }
-
-  private syncLegendOverflowButton(): void {
-    const menu = required<HTMLElement>(this.element, ".legend-overflow-menu");
-    const overflow = required<HTMLButtonElement>(
-      this.element,
-      ".legend-overflow",
-    );
-    const open = !menu.hidden;
-    overflow.setAttribute("aria-expanded", String(open));
-    overflow.title = open ? "Hide additional series" : "Show additional series";
-  }
 }
 
 function yLabel(units: readonly (string | null)[]): string {
@@ -1889,7 +2090,6 @@ function panelMarkup(): string {
       ).join("")}</span>
       <button class="axis-chip x-chip" hidden></button>
       <span class="panel-legend"></span>
-      <button class="legend-overflow" aria-haspopup="true" aria-expanded="false" hidden></button>
       <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
       <span class="panel-mode-note" hidden></span>
@@ -1904,7 +2104,6 @@ function panelMarkup(): string {
         <button class="panel-action panel-close" title="Close panel">✕</button>
       </span>
     </header>
-    <div class="legend-overflow-menu" role="group" aria-label="Additional plotted series" hidden></div>
     <div class="plot-wrap">
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>

@@ -191,6 +191,24 @@ export class AppShell {
         onDropSet: (id, setId) => {
           this.bindSetToPanel(setId, id);
         },
+        onFocusToggle: (id, entry) => {
+          this.workspace.toggleFocus(id, entry);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onMuteSelector: (id, selector) => {
+          this.workspace.addSelectorOverride(id, selector, { visible: false });
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onMuteSeries: (id, ref) => {
+          this.workspace.toggleSeriesVisible(id, ref);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
         onToggleHighlight: (id, path) => {
           const ref = this.catalog.refFromPath(path);
           if (ref === undefined) return;
@@ -213,6 +231,7 @@ export class AppShell {
             ? "derived"
             : (this.signalsByPath.get(path)?.source_key ?? null),
         pathForRef: (ref) => this.catalog.get(ref)?.path ?? null,
+        catalog: () => this.catalog,
         resolveSeries: (state) =>
           resolvePanel(this.catalog, state, this.workspace.namedSets()),
         onSetXSignal: (id, path) => {
