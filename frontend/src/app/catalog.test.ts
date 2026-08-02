@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SignalSummary } from "../generated/protocol";
+import type { ChannelMapEntry } from "../generated/session";
 import { Catalog, DERIVED_SOURCE_KEY } from "./catalog";
 
 function summary(
@@ -78,5 +79,61 @@ describe("Catalog", () => {
     expect(
       catalog.channels().find((channel) => channel.name === "err")?.unit,
     ).toBeNull();
+  });
+
+  it("canonicalizes mapped channels while retaining source-local names", () => {
+    const map: ChannelMapEntry[] = [
+      {
+        canonical: "temp",
+        aliases: [
+          { source_key: "s7", name: "temperature" },
+          { source_key: "bench", name: "T_amb" },
+          { source_key: "run-01", name: "temp" },
+        ],
+      },
+    ];
+    const mapped = Catalog.build(
+      [
+        summary("s7", "run_07/temperature", "temperature", "K"),
+        summary("bench", "bench/T_amb", "T_amb", "°C"),
+        summary("run-01", "run_01/temp", "temp", "K"),
+      ],
+      map,
+    );
+
+    expect(mapped.channels()).toEqual([
+      {
+        name: "temp",
+        sourceKeys: ["s7", "bench", "run-01"],
+        unit: "K",
+        unitConflict: true,
+        names: ["temperature", "T_amb", "temp"],
+      },
+    ]);
+    expect(mapped.allSeries().map((series) => series.sourceChannel)).toEqual([
+      "temperature",
+      "T_amb",
+      "temp",
+    ]);
+    expect(
+      mapped.get({ source_key: "s7", channel: "temperature" })?.channel,
+    ).toBe("temp");
+    expect(mapped.refFromPath("run_07/temperature")).toEqual({
+      source_key: "s7",
+      channel: "temp",
+    });
+  });
+
+  it.each([
+    ["K", "K", false],
+    ["K", null, false],
+    ["K", "°C", true],
+  ])("flags distinct non-null units (%s, %s)", (left, right, conflict) => {
+    const mapped = Catalog.build([
+      summary("s1", "run_01/temp", "temp", left),
+      summary("s2", "run_02/temp", "temp", right),
+    ]);
+
+    expect(mapped.channels()[0]?.unitConflict).toBe(conflict);
   });
 });
