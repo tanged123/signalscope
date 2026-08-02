@@ -33,6 +33,23 @@
 
 ---
 
+### Task 0: Facet split renders blank + interactions dead (functional — do this first; cherry-pickable ahead of the rest)
+
+**Files:**
+
+- Modify: `frontend/src/ui/panel.ts` (`renderFacetTime` ~1093–1140, `clearFacetGrid`), `frontend/src/ui/panel.test.ts`, `frontend/src/styles/app.css` (`.facet-grid` template)
+
+**Root causes (verified):** (1) each facet cell's canvas is rendered **before** it is appended to the DOM; `surface.ts:20` sizes from `canvas.clientWidth/clientHeight`, which are 0 detached → every cell paints a 1×1 px backing store. (2) `renderFacetTime` hides the panel `overlay`, killing all pointer interactions (hover, ⇧click, cursor tooltip) in facet view. (3) `.facet-grid` hardcodes `repeat(4, 1fr)` tracks regardless of cell count.
+
+- [ ] **Step 1: Failing tests:** with 8 cells and non-empty tiles, each `.facet-cell-canvas` has a backing store larger than 1×1 after render (jsdom: assert the render call received a non-degenerate layout, or stub `clientWidth` post-attach — follow how existing canvas tests fake dimensions); hover over a cell emits emphasis/name-tag for that cell's series; ⇧click in a cell fires `onFocusToggle`; grid uses `ceil(sqrt(n))` columns (assert inline style/CSS var, e.g. 8 cells → 3 columns wide... use `cols = ceil(sqrt(n))`, `rows = ceil(n / cols)`).
+- [ ] **Step 2: Fix render order:** build all cell elements, append them to `facetGrid` (which is already visible), **then** run each cell's `renderer.render` — reading `clientWidth` after attachment forces layout synchronously, so no rAF deferral is needed. Keep the existing per-cell `CanvasRenderer`.
+- [ ] **Step 3: Restore interactions:** keep the overlay hidden (it belongs to the single-plot surface) but delegate `pointermove`/`click`/`pointerleave` on `facetGrid`: resolve the target cell, translate coordinates into the cell's renderer layout, and reuse the Task-1-of-P6 hit adapter path against that cell's series and prepared plot. The shared-t cursor line (`renderFacetCursor`) is unchanged; the tooltip reads from the hovered cell only (P5 locked decision 12 stands).
+- [ ] **Step 4: Adaptive tracks** per Step 1's formula (set `grid-template-columns/rows` inline or via CSS custom properties from the cell count; the 16-cap + overflow cell is unchanged).
+- [ ] **Step 5: Disambiguate the two splits (the naming collision):** the facet control keeps `split ▸`; the layout-split control loses the word `split` — glyph-only `→` and `↓` buttons with tooltips `Split panel right — new panel` / `Split panel down — new panel` and unchanged aria-labels. Facet cells are views of one binding (spec §7), layout splits create real panels; the labels must stop claiming otherwise.
+- [ ] **Step 6:** `./scripts/test.sh unit panel` — PASS; then a manual/e2e smoke: split by source on an 8-source workspace shows 8 populated mini plots. **Commit** `fix(ui): facet cells render after attach, per-cell interactions, adaptive grid, split naming`.
+
+---
+
 ### Task 1: Dock — filter block, tree anatomy, footer
 
 **Files:**
