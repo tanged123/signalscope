@@ -368,7 +368,7 @@ function emptyState(hasSignals: boolean): HTMLElement {
     hint.textContent = `New panel (N) · drag a signal here · ${commands}`;
   } else {
     headline.textContent = "No data loaded.";
-    hint.textContent = `Open CSV / MCAP (O) · ${commands}`;
+    hint.textContent = `Open… (O) · ${commands}`;
   }
   empty.append(headline, hint);
   return empty;

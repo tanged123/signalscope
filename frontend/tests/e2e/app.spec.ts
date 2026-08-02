@@ -69,6 +69,12 @@ test("application menu mirrors commands and marks planned work", async ({
   const menu = page.locator(".app-menu");
   await expect(menu).toBeVisible();
   await expect(button).toHaveAttribute("aria-expanded", "true");
+  await expect(
+    menu.locator(".app-menu-item", { hasText: /^Open…O$/ }),
+  ).toHaveCount(1);
+  await expect(
+    menu.locator(".app-menu-item", { hasText: "Open folder" }),
+  ).toHaveCount(0);
   const unavailable = menu.locator(".app-menu-item", {
     hasText: "Open Workspace",
   });
@@ -337,9 +343,9 @@ test("the palette disables commands the current build cannot run", async ({
 }) => {
   await page.goto("/");
   await page.keyboard.press("ControlOrMeta+Shift+p");
-  await page.locator(".palette-input").fill("Open CSV");
+  await page.locator(".palette-input").fill("Open…");
   // The browser plane has no ingest host, so the command lists but cannot run.
-  const row = page.locator(".palette-row", { hasText: "Open CSV" });
+  const row = page.locator(".palette-row", { hasText: "Open…" });
   await expect(row).toBeDisabled();
   await expect(row).toHaveAttribute("title", "unavailable in this context");
 });

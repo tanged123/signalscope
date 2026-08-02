@@ -3,6 +3,18 @@ import type { IngestPort } from "./data-plane";
 
 const POLL_INTERVAL_MS = 150;
 
+export type SourceOpenKind = "files" | "folder";
+
+export async function pickIngestPaths(
+  port: IngestPort,
+  kind: SourceOpenKind,
+): Promise<string[]> {
+  if (kind === "files") return port.pickSources();
+  const folder = await port.pickSourceFolder();
+  if (folder === null) return [];
+  return (await port.scanSources(folder, true)).files;
+}
+
 export async function runBatchIngest(
   port: IngestPort,
   paths: string[],

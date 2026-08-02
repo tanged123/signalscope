@@ -2144,7 +2144,7 @@ button {
   color: var(--status-error);
 }
 
-.folder-scan-overlay {
+.source-open-overlay {
   position: fixed;
   z-index: 30;
   display: grid;
@@ -2153,9 +2153,9 @@ button {
   place-items: center;
 }
 
-.folder-scan-dialog {
+.source-open-dialog {
   display: grid;
-  width: min(380px, 90vw);
+  width: min(280px, 90vw);
   gap: 8px;
   padding: 16px;
   border: 1px solid var(--border-strong);
@@ -2163,57 +2163,35 @@ button {
   background: var(--surface-1);
 }
 
-.folder-scan-title {
-  overflow: hidden;
+.source-open-title {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
   color: var(--fg-1);
   font: 0.9231rem var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.folder-scan-details,
-.folder-scan-formats,
-.folder-scan-recursive {
-  color: var(--fg-2);
-  font-size: 0.8462rem;
-}
-
-.folder-scan-formats {
-  color: var(--fg-3);
-  font: 0.7692rem var(--font-mono);
-}
-
-.folder-scan-recursive {
-  display: flex;
-  align-items: center;
+.source-open-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 
-.folder-scan-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-faint);
-}
-
-.folder-scan-actions button {
+.source-open-dialog button {
   padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 2px;
   color: var(--fg-2);
 }
 
-.folder-scan-actions button:hover:not(:disabled) {
+.source-open-dialog button:hover,
+.source-open-dialog button:focus-visible {
   background: var(--surface-3);
   color: var(--fg-1);
 }
 
-.folder-scan-actions button:disabled {
-  color: var(--fg-4);
-  cursor: not-allowed;
+.source-open-dialog .source-open-cancel {
+  justify-self: end;
+  border-color: transparent;
 }
 
 .palette-overlay {

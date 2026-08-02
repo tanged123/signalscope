@@ -18,7 +18,7 @@ panel grids over the same loaded sources and linked time window.
 
 ## Interactive demo
 
-[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=0.15.8)](https://tanged123.github.io/signalscope/demo.html)
+[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=0.15.9)](https://tanged123.github.io/signalscope/demo.html)
 
 **[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)**
 to zoom, inspect values, and explore the exported workspace in your browser.
@@ -44,7 +44,7 @@ Run the native shell:
 ./scripts/run.sh native
 ```
 
-Press `O` or click **Open CSV / MCAP**, then select
+Press `O` or click **Open…**, choose **Files**, then select
 [`examples/demo_flight.csv`](examples/demo_flight.csv) to explore the ingest
 and plotting workflow. The demo contains 16 signals spanning smooth and signed
 telemetry, paired XY position, angular values, steps and setpoints, boolean and

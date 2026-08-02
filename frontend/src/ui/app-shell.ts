@@ -16,7 +16,12 @@ import {
   historySnapshot,
   restoreTransientSessionState,
 } from "../app/history";
-import { runBatchIngest, waitForBatch } from "../app/ingest";
+import {
+  pickIngestPaths,
+  runBatchIngest,
+  type SourceOpenKind,
+  waitForBatch,
+} from "../app/ingest";
 import {
   applyPreferences,
   clampPlotFontSize,
@@ -74,10 +79,10 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
-import { FolderScanDialog } from "./folder-scan-dialog";
 import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalOutlineView } from "./signal-outline";
+import { SourceOpenDialog } from "./source-open-dialog";
 import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
@@ -165,7 +170,7 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
-  private folderScanDialog: FolderScanDialog | null = null;
+  private sourceOpenDialog: SourceOpenDialog | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -595,24 +600,14 @@ export class AppShell {
       ].filter((keys): keys is string => keys !== undefined),
     );
     this.commands.register({
-      id: "open-files",
-      title: "Open CSV or MCAP…",
+      id: "open-sources",
+      title: "Open…",
       keys: "o",
       section: "file",
       group: "open",
       enabled: () => this.plane.ingest !== null,
       run: () => {
-        void this.openFiles();
-      },
-    });
-    this.commands.register({
-      id: "open-folder",
-      title: "Open folder…",
-      section: "file",
-      group: "open",
-      enabled: () => this.plane.ingest !== null,
-      run: () => {
-        void this.openFolder();
+        this.openSources();
       },
     });
     this.commands.register({
@@ -959,7 +954,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.15.8");
+        this.showModeHelp("SignalScope 0.15.9");
       },
     });
     this.commands.register({
@@ -1625,31 +1620,20 @@ export class AppShell {
     this.afterLayoutChange();
   }
 
-  private async openFiles(): Promise<void> {
-    const port = this.plane.ingest;
-    if (port === null) return;
-    try {
-      const paths = await port.pickSources();
-      if (paths.length > 0) await this.ingestPaths(paths);
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
+  private openSources(): void {
+    if (this.plane.ingest === null) return;
+    this.sourceOpenDialog ??= new SourceOpenDialog(this.root);
+    this.sourceOpenDialog.open((kind) => {
+      void this.pickAndIngest(kind);
+    });
   }
 
-  private async openFolder(): Promise<void> {
+  private async pickAndIngest(kind: SourceOpenKind): Promise<void> {
     const port = this.plane.ingest;
     if (port === null) return;
     try {
-      const folder = await port.pickSourceFolder();
-      if (folder === null) return;
-      this.folderScanDialog ??= new FolderScanDialog(this.root);
-      this.folderScanDialog.open(
-        folder,
-        (recursive) => port.scanSources(folder, recursive),
-        (paths) => {
-          if (paths.length > 0) void this.ingestPaths(paths);
-        },
-      );
+      const paths = await pickIngestPaths(port, kind);
+      if (paths.length > 0) await this.ingestPaths(paths);
     } catch (error: unknown) {
       this.reportError(error);
     }
@@ -2882,7 +2866,7 @@ export class AppShell {
     const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
     if (dockFooter !== null) {
       renderDockFooter(dockFooter, sources, this.signals.length, () => {
-        void this.openFiles();
+        this.openSources();
       });
     }
   }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BatchStatus } from "../generated/protocol";
 import type { IngestPort } from "./data-plane";
-import { runBatchIngest, waitForBatch } from "./ingest";
+import { pickIngestPaths, runBatchIngest, waitForBatch } from "./ingest";
 
 interface FakePort extends IngestPort {
   released: string[];
@@ -115,5 +115,37 @@ describe("runBatchIngest", () => {
     ]);
     await waitForBatch(port, "1", () => undefined, 0);
     expect(port.released).toEqual([]);
+  });
+});
+
+describe("pickIngestPaths", () => {
+  it("returns selected files directly", async () => {
+    const port = fakePort([]);
+    port.pickSources = () => Promise.resolve(["/data/a.csv", "/data/b.mcap"]);
+
+    await expect(pickIngestPaths(port, "files")).resolves.toEqual([
+      "/data/a.csv",
+      "/data/b.mcap",
+    ]);
+  });
+
+  it("recursively resolves a selected folder to supported files", async () => {
+    const port = fakePort([]);
+    const scans: [string, boolean][] = [];
+    port.pickSourceFolder = () => Promise.resolve("/data/runs");
+    port.scanSources = (path, recursive) => {
+      scans.push([path, recursive]);
+      return Promise.resolve({
+        files: ["/data/runs/a.csv", "/data/runs/sub/b.csv"],
+        total_bytes: "2",
+        format_counts: [],
+      });
+    };
+
+    await expect(pickIngestPaths(port, "folder")).resolves.toEqual([
+      "/data/runs/a.csv",
+      "/data/runs/sub/b.csv",
+    ]);
+    expect(scans).toEqual([["/data/runs", true]]);
   });
 });
