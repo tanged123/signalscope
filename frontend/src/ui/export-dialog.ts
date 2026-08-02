@@ -91,7 +91,7 @@ export class ExportDialog {
           </div>
         </div>
         <div class="export-set-selection" hidden>
-          <span class="export-control-title">SETS</span>
+          <span class="export-control-title">SOURCES</span>
           <div class="export-set-options"></div>
         </div>
         <span class="export-control-title">RANGE</span>

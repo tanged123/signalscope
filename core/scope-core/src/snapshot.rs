@@ -6,7 +6,9 @@ use std::{
 };
 
 use crate::pyramid::Pyramid;
-use crate::session::{LinkedTime, PanelMode, PanelState, SeriesRef, Session};
+use crate::session::{
+    BindingKind, LinkedTime, NamedSetKind, PanelMode, PanelState, SeriesRef, Session,
+};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{
     BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
@@ -78,30 +80,228 @@ fn effective_window(panel: &PanelState, linked: &LinkedTime) -> (f64, f64) {
     }
 }
 
-fn panel_signal_paths(session: &Session, panel: &PanelState) -> Vec<String> {
-    let mut paths = panel
-        .bindings
-        .iter()
-        .flat_map(|binding| binding.refs.iter())
-        .filter_map(|reference| path_from_ref(session, reference))
-        .collect::<Vec<_>>();
-    if panel.mode == PanelMode::Xy {
-        if let Some(x) = panel
-            .x_ref
-            .as_ref()
-            .and_then(|reference| path_from_ref(session, reference))
-        {
-            paths.insert(0, x);
-        }
-        if let Some(color) = panel
-            .color_ref
-            .as_ref()
-            .and_then(|reference| path_from_ref(session, reference))
-        {
-            paths.push(color);
+fn panel_signal_ids(
+    session: &Session,
+    store: &SignalStore,
+    panel: &PanelState,
+) -> BTreeSet<SignalId> {
+    let mut ids = BTreeSet::new();
+    for binding in &panel.bindings {
+        match binding.kind {
+            BindingKind::Pick => insert_refs(&mut ids, session, store, &binding.refs),
+            BindingKind::Query => {
+                if let Some(selector) = &binding.selector {
+                    ids.extend(matching_signals(store, selector).map(|signal| signal.id));
+                }
+            }
+            BindingKind::Set => {
+                let Some(set) = session
+                    .named_sets
+                    .iter()
+                    .find(|set| Some(set.id.as_str()) == binding.set_id.as_deref())
+                else {
+                    continue;
+                };
+                match set.kind {
+                    NamedSetKind::Pick => insert_refs(&mut ids, session, store, &set.refs),
+                    NamedSetKind::Query => {
+                        if let Some(selector) = &set.selector {
+                            ids.extend(matching_signals(store, selector).map(|signal| signal.id));
+                        }
+                    }
+                }
+            }
         }
     }
-    paths
+    if panel.mode == PanelMode::Xy {
+        if let Some(signal) = panel
+            .x_ref
+            .as_ref()
+            .and_then(|reference| signal_from_ref(session, store, reference))
+        {
+            ids.insert(signal.id);
+        }
+        if let Some(signal) = panel
+            .color_ref
+            .as_ref()
+            .and_then(|reference| signal_from_ref(session, store, reference))
+        {
+            ids.insert(signal.id);
+        }
+    }
+    ids
+}
+
+fn insert_refs(
+    ids: &mut BTreeSet<SignalId>,
+    session: &Session,
+    store: &SignalStore,
+    refs: &[SeriesRef],
+) {
+    ids.extend(
+        refs.iter()
+            .filter_map(|reference| signal_from_ref(session, store, reference))
+            .map(|signal| signal.id),
+    );
+}
+
+fn signal_from_ref<'a>(
+    session: &Session,
+    store: &'a SignalStore,
+    reference: &SeriesRef,
+) -> Option<&'a Signal> {
+    path_from_ref(session, reference)
+        .and_then(|path| store.signal_by_path(&path))
+        .or_else(|| {
+            let source = store.sources().find(|source| {
+                source.key.0.to_string() == reference.source_key
+                    || source.prefix == reference.source_key
+            })?;
+            store
+                .signals_of(source.id)
+                .find(|signal| signal.local_path == reference.channel)
+        })
+}
+
+fn matching_signals<'a>(
+    store: &'a SignalStore,
+    selector: &'a str,
+) -> impl Iterator<Item = &'a Signal> {
+    store
+        .signals()
+        .filter(move |signal| selector_matches(signal, selector))
+}
+
+fn selector_matches(signal: &Signal, selector: &str) -> bool {
+    let mut tokens = selector.split_whitespace();
+    let Some(channel_glob) = tokens.next() else {
+        return false;
+    };
+    let channel = signal
+        .path
+        .strip_prefix("derived/")
+        .unwrap_or(&signal.local_path);
+    if !glob_matches(channel_glob, channel) {
+        return false;
+    }
+
+    let mut source_glob = None;
+    let mut attrs = Vec::new();
+    while let Some(token) = tokens.next() {
+        if token == "@" || token.starts_with('@') {
+            if source_glob.is_some() {
+                return false;
+            }
+            let source = if token == "@" {
+                tokens.next()
+            } else {
+                token.get(1..)
+            };
+            let Some(source) = source.filter(|source| !source.is_empty()) else {
+                return false;
+            };
+            source_glob = Some(source);
+        } else {
+            let Some((key, value)) = token.split_once(':') else {
+                return false;
+            };
+            if value.is_empty() || !matches!(key, "unit" | "kind") {
+                return false;
+            }
+            attrs.push((key, value));
+        }
+    }
+
+    if let Some(pattern) = source_glob {
+        let source_name = signal
+            .path
+            .split_once('/')
+            .map_or("derived", |(source, _)| source);
+        if !glob_matches(pattern, source_name) {
+            return false;
+        }
+    }
+    attrs.into_iter().all(|(key, value)| match key {
+        "unit" => signal.unit.as_deref() == Some(value),
+        "kind" => match value {
+            "derived" => signal.path.starts_with("derived/"),
+            "signal" => !signal.path.starts_with("derived/"),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+fn glob_matches(pattern: &str, value: &str) -> bool {
+    let value = value.chars().collect::<Vec<_>>();
+    pattern.split('|').any(|branch| {
+        let branch = branch.chars().collect::<Vec<_>>();
+        glob_branch_matches(&branch, &value)
+    })
+}
+
+fn glob_branch_matches(pattern: &[char], value: &[char]) -> bool {
+    fn matches_at(
+        pattern: &[char],
+        value: &[char],
+        pattern_at: usize,
+        value_at: usize,
+        memo: &mut [Vec<Option<bool>>],
+    ) -> bool {
+        if let Some(matched) = memo[pattern_at][value_at] {
+            return matched;
+        }
+        let matched = if pattern_at == pattern.len() {
+            value_at == value.len()
+        } else {
+            match pattern[pattern_at] {
+                '*' => {
+                    matches_at(pattern, value, pattern_at + 1, value_at, memo)
+                        || (value_at < value.len()
+                            && matches_at(pattern, value, pattern_at, value_at + 1, memo))
+                }
+                '?' => {
+                    value_at < value.len()
+                        && matches_at(pattern, value, pattern_at + 1, value_at + 1, memo)
+                }
+                '[' => {
+                    let Some(end) = pattern[pattern_at + 1..]
+                        .iter()
+                        .position(|character| *character == ']')
+                        .map(|offset| pattern_at + 1 + offset)
+                    else {
+                        memo[pattern_at][value_at] = Some(false);
+                        return false;
+                    };
+                    let body = &pattern[pattern_at + 1..end];
+                    let valid = body.len() == 1 && body[0].is_ascii_alphanumeric()
+                        || body.len() == 3
+                            && body[0].is_ascii_alphanumeric()
+                            && body[1] == '-'
+                            && body[2].is_ascii_alphanumeric();
+                    if !valid || value_at == value.len() {
+                        false
+                    } else {
+                        let class_matches = if body.len() == 1 {
+                            value[value_at] == body[0]
+                        } else {
+                            (body[0]..=body[2]).contains(&value[value_at])
+                        };
+                        class_matches && matches_at(pattern, value, end + 1, value_at + 1, memo)
+                    }
+                }
+                character => {
+                    value.get(value_at) == Some(&character)
+                        && matches_at(pattern, value, pattern_at + 1, value_at + 1, memo)
+                }
+            }
+        };
+        memo[pattern_at][value_at] = Some(matched);
+        matched
+    }
+
+    let mut memo = vec![vec![None; value.len() + 1]; pattern.len() + 1];
+    matches_at(pattern, value, 0, 0, &mut memo)
 }
 
 fn path_from_ref(session: &Session, reference: &SeriesRef) -> Option<String> {
@@ -223,11 +423,7 @@ pub fn plan_selected<'a>(
     for tab in &session.tabs {
         for panel in &tab.panels {
             if panel.mode != PanelMode::Time {
-                for path in panel_signal_paths(session, panel) {
-                    if let Some(signal) = store.signal_by_path(&path) {
-                        needs_raw.insert(signal.id);
-                    }
-                }
+                needs_raw.extend(panel_signal_ids(session, store, panel));
             }
         }
     }
@@ -267,11 +463,7 @@ pub fn plan_selected<'a>(
                 Some((start, end)) => (start.min(t0), end.max(t1)),
                 None => (t0, t1),
             });
-            for path in panel_signal_paths(session, panel) {
-                if let Some(signal) = store.signal_by_path(&path) {
-                    wanted.insert(signal.id);
-                }
-            }
+            wanted.extend(panel_signal_ids(session, store, panel));
         }
     }
     let (t0, t1) = window.unwrap_or((session.linked_time.t0, session.linked_time.t1));
@@ -429,7 +621,8 @@ mod tests {
     use super::*;
     use crate::pyramid::Pyramid;
     use crate::session::{
-        AxisStyle, Binding, BindingKind, PanelMode, PanelState, SeriesRef, Session,
+        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelMode, PanelState, SeriesRef,
+        Session,
     };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
@@ -584,6 +777,98 @@ mod tests {
         .expect("plan");
         assert_eq!(export.signals.len(), 1);
         assert_eq!(export.signals[0].signal.path, "a");
+    }
+
+    #[test]
+    fn visible_scope_resolves_query_and_saved_set_bindings() {
+        let (store, pyramids) = store_with(&[("alpha", 10), ("beta", 10), ("ignored", 10)]);
+        let mut panel = panel(PanelMode::Time, &[]);
+        panel.bindings = vec![
+            Binding {
+                kind: BindingKind::Query,
+                selector: Some("alpha".into()),
+                refs: Vec::new(),
+                set_id: None,
+            },
+            Binding {
+                kind: BindingKind::Set,
+                selector: None,
+                refs: Vec::new(),
+                set_id: Some("saved".into()),
+            },
+        ];
+        let mut session = session_with(vec![panel]);
+        session.named_sets.push(NamedSet {
+            id: "saved".into(),
+            name: "Saved".into(),
+            kind: NamedSetKind::Pick,
+            selector: None,
+            refs: vec![SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "beta".into(),
+            }],
+        });
+
+        let export = plan(
+            &session,
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Standard,
+        )
+        .expect("plan");
+        let paths = export
+            .signals
+            .iter()
+            .map(|entry| entry.signal.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn sample_mode_resolves_query_sets_before_raw_planning() {
+        let (store, pyramids) =
+            store_with(&[("alpha", 100_000), ("beta", 100_000), ("ignored", 100_000)]);
+        let mut panel = panel(PanelMode::Histogram, &[]);
+        panel.bindings = vec![
+            Binding {
+                kind: BindingKind::Query,
+                selector: Some("alpha".into()),
+                refs: Vec::new(),
+                set_id: None,
+            },
+            Binding {
+                kind: BindingKind::Set,
+                selector: None,
+                refs: Vec::new(),
+                set_id: Some("saved-query".into()),
+            },
+        ];
+        let mut session = session_with(vec![panel]);
+        session.named_sets.push(NamedSet {
+            id: "saved-query".into(),
+            name: "Saved query".into(),
+            kind: NamedSetKind::Query,
+            selector: Some("beta".into()),
+            refs: Vec::new(),
+        });
+
+        let export = plan(
+            &session,
+            &store,
+            &pyramids,
+            ExportRange::All,
+            ExportFidelity::Preview,
+        )
+        .expect("plan");
+        let levels = export
+            .signals
+            .iter()
+            .map(|entry| (entry.signal.path.as_str(), entry.finest_level()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(levels["alpha"], 0);
+        assert_eq!(levels["beta"], 0);
+        assert!(levels["ignored"] > 0);
     }
 
     #[test]

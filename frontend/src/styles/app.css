@@ -2300,7 +2300,10 @@ button {
 .export-dialog {
   display: grid;
   width: min(420px, 90vw);
+  max-height: calc(100dvh - 32px);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   gap: 8px;
+  overflow: hidden;
   padding: 16px;
   border: 1px solid var(--border-strong);
   border-radius: 2px;
@@ -2344,9 +2347,12 @@ button {
 
 .export-controls {
   display: grid;
+  min-height: 0;
   gap: 7px;
+  overflow-y: auto;
   padding-top: 8px;
   border-top: 1px solid var(--border-faint);
+  scrollbar-gutter: stable;
 }
 
 .export-png-scope,
@@ -2361,11 +2367,20 @@ button {
 }
 
 .export-set-options {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  max-height: 180px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px 12px;
+  overflow-y: auto;
   color: var(--fg-2);
   font: 0.7692rem var(--font-mono);
+  scrollbar-gutter: stable;
+}
+
+.export-set-options label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .export-control-title {

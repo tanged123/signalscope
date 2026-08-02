@@ -13,6 +13,7 @@ import {
   AppShell,
   arrivalModeFor,
   bundleCompletionEntries,
+  exportSourceOptions,
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
@@ -162,6 +163,20 @@ function bulkSummary(source: string, channel: string): SignalSummary {
     last_value: 1,
   };
 }
+
+it("collapses export choices to one label per source", () => {
+  expect(
+    exportSourceOptions([
+      bulkSummary("run-02", "command"),
+      bulkSummary("run-01", "command"),
+      bulkSummary("run-02", "response"),
+      bulkSummary("run-01", "temperature"),
+    ]),
+  ).toEqual([
+    { key: "run-01", label: "run-01" },
+    { key: "run-02", label: "run-02" },
+  ]);
+});
 
 describe("derived channel collections", () => {
   it("offers channels shared by multiple sources as bundle references", () => {

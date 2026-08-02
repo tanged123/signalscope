@@ -52,6 +52,10 @@ Derived columns spill under resident pressure.
 
 Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. The release-generated README GIF and hosted live demo now ship from the export path per the [automated demo artifacts plan](superpowers/plans/2026-07-30-automated-demo-artifacts.md).
 
+The HTML export picker lists each source once, independent of its signal
+count. Its source list and dialog body remain bounded and scroll internally so
+large campaigns cannot push export controls outside the viewport.
+
 ## Phase 5 — performance and hardening
 
 Benchmark cold multi-GB first plot, cache build and reuse, tile latency, 100M-point pan/zoom, NaN gaps, corrupt inputs, accessibility invariants, release bundles, and artifact-size regression thresholds.

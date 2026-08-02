@@ -256,6 +256,49 @@ test("export dialog exposes range, fidelity, and reduction consequences", async 
   );
 });
 
+test("export source choices scroll without moving actions off screen", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const moduleUrl = "/src/ui/export-dialog.ts";
+    const { ExportDialog } = (await import(moduleUrl)) as {
+      ExportDialog: ExportDialogConstructor;
+    };
+    new ExportDialog(document.body, {
+      estimateHtml: () => Promise.resolve(null),
+      exportSets: () =>
+        Array.from({ length: 120 }, (_, index) => ({
+          key: `source-${String(index)}`,
+          label: `run_${String(index).padStart(3, "0")}`,
+        })),
+      pngBytes: () => Promise.resolve(null),
+      pngPanelCount: () => 0,
+      csvEstimate: () => Promise.resolve(null),
+      runExport: () => Promise.resolve(),
+    }).open("html");
+  });
+
+  const dialog = page.getByRole("dialog", { name: "Export" });
+  const sourceOptions = dialog.locator(".export-set-options");
+  await expect(sourceOptions.locator("label")).toHaveCount(120);
+  const geometry = await sourceOptions.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+  await expect(dialog.locator(".export-actions")).toBeVisible();
+  const box = await dialog.boundingBox();
+  const viewport = page.viewportSize();
+  if (box === null || viewport === null)
+    throw new Error("dialog geometry missing");
+  expect(box.y).toBeGreaterThanOrEqual(16);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 16);
+  await expect(
+    dialog.locator(".export-control-title", { hasText: "SOURCES" }),
+  ).toBeVisible();
+});
+
 test("PNG export defaults to the focused panel and can select all panels", async ({
   page,
 }) => {

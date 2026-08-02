@@ -121,6 +121,23 @@ export function bundleCompletionEntries(
     .sort((left, right) => left.localPath.localeCompare(right.localPath));
 }
 
+export function exportSourceOptions(
+  signals: readonly SignalSummary[],
+): { key: string; label: string }[] {
+  const sources = new Map<string, string>();
+  for (const signal of signals) {
+    if (sources.has(signal.source_key)) continue;
+    const suffix = `/${signal.local_path}`;
+    const label = signal.path.endsWith(suffix)
+      ? signal.path.slice(0, -suffix.length)
+      : signal.path;
+    sources.set(signal.source_key, label);
+  }
+  return [...sources]
+    .map(([key, label]) => ({ key, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
 export function validateDerivedBundleName(path: string): void {
   const name = path.startsWith(DERIVED_PREFIX)
     ? path.slice(DERIVED_PREFIX.length)
@@ -940,7 +957,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.15.0");
+        this.showModeHelp("SignalScope 0.15.2");
       },
     });
     this.commands.register({
@@ -1896,11 +1913,7 @@ export class AppShell {
           return null;
         }
       },
-      exportSets: () =>
-        this.signals.map((source) => ({
-          key: source.source_key,
-          label: source.path,
-        })),
+      exportSets: () => exportSourceOptions(this.signals),
       pngBytes: async () => {
         const generation = this.exportGeneration;
         try {
