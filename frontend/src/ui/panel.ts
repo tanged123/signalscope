@@ -2696,9 +2696,29 @@ export class PanelView {
     popover.setAttribute("aria-label", "Color rules");
     const heading = document.createElement("div");
     heading.className = "rules-popover-title";
-    heading.textContent = "color rule";
+    const panelNumber = /^panel-(\d+)$/.exec(this.id)?.[1] ?? this.id;
+    heading.textContent = `STYLE RULES — PANEL ${panelNumber}`;
+    const rules = document.createElement("div");
+    rules.className = "rules-rule-list";
+    const colorRow = document.createElement("div");
+    colorRow.className = "rules-rule-row rules-color-rule";
+    const colorDimension = document.createElement("button");
+    colorDimension.type = "button";
+    colorDimension.className = "rules-color-dimension";
+    colorDimension.textContent = `color ← ${state.color_by}`;
+    colorDimension.setAttribute("aria-expanded", "false");
+    const palette = document.createElement("span");
+    palette.className = "rules-palette";
+    for (let index = 1; index <= 8; index += 1) {
+      const swatch = document.createElement("span");
+      swatch.className = "rules-palette-swatch";
+      swatch.style.background = `var(--series-${String(index)})`;
+      swatch.setAttribute("aria-hidden", "true");
+      palette.append(swatch);
+    }
     const dimensions = document.createElement("div");
-    dimensions.className = "rules-dimensions";
+    dimensions.className = "rules-dimension-choice";
+    dimensions.hidden = true;
     for (const dimension of [
       "focus",
       "source",
@@ -2709,13 +2729,26 @@ export class PanelView {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "rules-dimension";
-      button.textContent = `color ← ${dimension}`;
+      button.dataset.dimension = dimension;
+      button.textContent = dimension;
       button.classList.toggle("active", state.color_by === dimension);
       button.addEventListener("click", () => {
         this.callbacks.onSetColorBy(this.id, dimension);
         this.closeRulesPopover();
       });
       dimensions.append(button);
+    }
+    colorDimension.addEventListener("click", () => {
+      dimensions.hidden = !dimensions.hidden;
+      colorDimension.setAttribute("aria-expanded", String(!dimensions.hidden));
+    });
+    colorRow.append(colorDimension, palette, dimensions);
+    rules.append(colorRow);
+    for (const text of ["dash ← — flat", "width ← — flat"]) {
+      const row = document.createElement("div");
+      row.className = "rules-rule-row rules-rule-static";
+      row.textContent = text;
+      rules.append(row);
     }
     const overridesTitle = document.createElement("div");
     overridesTitle.className = "rules-overrides-title";
@@ -2733,6 +2766,9 @@ export class PanelView {
       for (const item of overrides.slice(slice.start, slice.end)) {
         const row = document.createElement("div");
         row.className = "rules-override-row";
+        const key = document.createElement("span");
+        key.className = "rules-override-key";
+        key.textContent = overrideKey(item.override);
         const target = document.createElement("span");
         target.className = "rules-override-target";
         target.textContent = overrideTarget(item.override, this.callbacks);
@@ -2748,7 +2784,7 @@ export class PanelView {
           this.callbacks.onRemoveOverride(this.id, item.index);
           this.closeRulesPopover();
         });
-        row.append(target, fields, revert);
+        row.append(key, target, fields, revert);
         rows.append(row);
       }
     };
@@ -2762,7 +2798,7 @@ export class PanelView {
       this.callbacks.onClearOverrides(this.id);
       this.closeRulesPopover();
     });
-    popover.append(heading, dimensions, overridesTitle, rows, footer);
+    popover.append(heading, rules, overridesTitle, rows, footer);
     this.element.append(popover);
     const panelRect = this.element.getBoundingClientRect();
     const anchorRect = anchor.getBoundingClientRect();
@@ -3046,13 +3082,20 @@ function overrideTarget(
   return "unknown target";
 }
 
+function overrideKey(override: SeriesOverride): string {
+  if (override.color_slot !== null) return "color";
+  if (override.dash !== null) return "dash";
+  if (override.width !== null) return "width";
+  return "style";
+}
+
 function overrideFields(override: SeriesOverride): string {
   return [
-    override.color_slot === null ? null : "color",
-    override.dash === null ? null : "dash",
-    override.width === null ? null : "width",
-    override.opacity === null ? null : "opacity",
-    override.visible === null ? null : "visible",
+    override.width === null ? null : `width ${String(override.width)}`,
+    override.dash === null ? null : `dash ${override.dash}`,
+    override.opacity === null ? null : `opacity ${String(override.opacity)}`,
+    override.visible === null ? null : override.visible ? "visible" : "hidden",
+    override.color_slot === null ? null : "highlight",
   ]
     .filter((field): field is string => field !== null)
     .join(" · ");

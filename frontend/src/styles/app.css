@@ -1069,6 +1069,67 @@ button {
   color: var(--fg-3);
 }
 
+.rules-rule-list {
+  display: grid;
+  gap: 1px;
+}
+
+.rules-rule-row {
+  min-height: 22px;
+  padding: 3px 4px;
+  color: var(--fg-2);
+  font: 0.7692rem var(--font-mono);
+}
+
+.rules-color-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.rules-color-dimension {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--fg-1);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+}
+
+.rules-color-dimension:hover,
+.rules-color-dimension:focus-visible {
+  color: var(--amber-7);
+}
+
+.rules-palette {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.rules-palette-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+}
+
+.rules-dimension-choice {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.rules-dimension-choice[hidden] {
+  display: none;
+}
+
+.rules-rule-static {
+  color: var(--fg-4);
+}
+
 .rules-dimensions {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1097,12 +1158,16 @@ button {
 .rules-override-row {
   display: grid;
   min-height: 28px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 5px;
   padding: 2px 4px;
   color: var(--fg-2);
   font: 0.7692rem var(--font-mono);
+}
+
+.rules-override-key {
+  color: var(--fg-3);
 }
 
 .rules-override-target {
@@ -1122,6 +1187,10 @@ button {
   padding: 1px 3px;
   color: var(--fg-3);
   font: inherit;
+}
+
+.rules-override-row button {
+  color: var(--amber-7);
 }
 
 .rules-override-row button:hover,
