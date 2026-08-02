@@ -1,30 +1,47 @@
-import type { DashStyle } from "../generated/session";
 import type {
+  DashStyle,
   FocusEntry,
   NamedSet,
   PanelState,
   SeriesOverride,
   SeriesRef,
+  StyleDimension,
 } from "../generated/session";
 import type { Catalog, CatalogSeries } from "./catalog";
-import { evaluateSelector } from "./selector";
+import { parseSelector, seriesMatches, type Selector } from "./selector";
+
+export type SeriesDisplay = "focus" | "rule" | "ghost";
 
 export interface ResolvedSeries {
   ref: SeriesRef;
   path: string;
-  colorSlot: number;
+  display: SeriesDisplay;
+  hue: number | null;
   dash: DashStyle;
   width: number;
   opacity: number;
   visible: boolean;
   focused: boolean;
+  overridden: boolean;
+}
+
+interface ResolvedRef {
+  ref: SeriesRef;
+  series: CatalogSeries;
+  bindingIndex: number;
+}
+
+interface PreparedOverride {
+  index: number;
+  override: SeriesOverride;
+  selector: Selector | null;
 }
 
 export function overrideFor(
-  panel: PanelState,
+  panel: PanelState | undefined,
   ref: SeriesRef,
 ): SeriesOverride | undefined {
-  return panel.overrides.find(
+  return panel?.overrides.find(
     (override) =>
       override.target_ref !== null && sameRef(override.target_ref, ref),
   );
@@ -35,53 +52,121 @@ export function resolvePanel(
   panel: PanelState,
   namedSets: readonly NamedSet[],
 ): ResolvedSeries[] {
-  const refs: SeriesRef[] = [];
-  const seen = new Set<string>();
-  const add = (ref: SeriesRef): void => {
-    const key = catalog.refKey(ref);
-    if (seen.has(key) || catalog.get(ref) === undefined) return;
-    seen.add(key);
-    refs.push({ ...ref });
-  };
-  for (const binding of panel.bindings) {
-    if (binding.kind === "pick") {
-      binding.refs.forEach(add);
-    } else if (binding.kind === "set") {
-      const set = namedSets.find((entry) => entry.id === binding.set_id);
-      if (set?.kind === "pick") set.refs.forEach(add);
-      else if (set?.kind === "query" && set.selector !== null) {
-        addSelector(catalog, set.selector, add);
-      }
-    } else if (binding.selector !== null) {
-      addSelector(catalog, binding.selector, add);
+  const refs = resolveRefs(catalog, panel, namedSets);
+  const focused = refs.map(({ ref }) => matchesAnyFocus(panel.focus, ref));
+  const display = focused.map((isFocused) =>
+    isFocused
+      ? ("focus" as const)
+      : panel.ghost_mode === "ghost"
+        ? ("ghost" as const)
+        : ("rule" as const),
+  );
+  const hues = assignHues(catalog, panel, refs, focused);
+  const overrides = prepareOverrides(panel.overrides);
+
+  return refs.map(({ ref, series }, index) => {
+    let hue = hues[index] ?? 1;
+    let dash: DashStyle = "solid";
+    let width = 1.4;
+    let opacity = 1;
+    let visible = true;
+    let overridden = false;
+
+    for (const prepared of overrides) {
+      if (!matchesOverride(prepared, series, ref)) continue;
+      overridden = true;
+      const override = prepared.override;
+      if (override.color_slot !== null) hue = hueForSlot(override.color_slot);
+      if (override.dash !== null) dash = override.dash;
+      if (override.width !== null) width = override.width;
+      if (override.opacity !== null) opacity = override.opacity;
+      if (override.visible !== null) visible = override.visible;
     }
-  }
-  const claimed = new Set<number>();
-  for (const override of panel.overrides) {
-    if (override.color_slot !== null) claimed.add(override.color_slot);
-  }
-  return refs.map((ref) => {
-    const override = overrideFor(panel, ref);
-    let colorSlot = override?.color_slot ?? null;
-    if (colorSlot === null) {
-      colorSlot = 1;
-      while (claimed.has(colorSlot)) colorSlot += 1;
-      claimed.add(colorSlot);
+
+    if (display[index] === "ghost") {
+      hue = null;
+      dash = "solid";
+      width = 1;
+      opacity = 0.5;
     }
-    const series = catalog.get(ref) as CatalogSeries;
+
     return {
       ref,
       path: series.path,
-      colorSlot,
-      dash: override?.dash ?? "solid",
-      width: override?.width ?? 1.4,
-      opacity: override?.opacity ?? 1,
-      visible: override?.visible ?? true,
-      focused:
-        panel.focus.length === 0 ||
-        panel.focus.some((entry) => matchesFocus(entry, ref)),
+      display: display[index] ?? "rule",
+      hue,
+      dash,
+      width,
+      opacity,
+      visible,
+      focused: focused[index] ?? false,
+      overridden,
     };
   });
+}
+
+export interface DimensionCounts {
+  sources: number;
+  channels: number;
+}
+
+export function dimensionCounts(
+  resolved: readonly ResolvedSeries[],
+): DimensionCounts {
+  return {
+    sources: new Set(resolved.map((series) => series.ref.source_key)).size,
+    channels: new Set(resolved.map((series) => series.ref.channel)).size,
+  };
+}
+
+export function appliedOverrides(
+  catalog: Catalog,
+  panel: PanelState,
+): { index: number; override: SeriesOverride; matchCount: number }[] {
+  const refs = resolveRefs(catalog, panel, []).map(({ ref, series }) => ({
+    ref,
+    series,
+  }));
+  const prepared = prepareOverrides(panel.overrides);
+  return prepared.map(({ index, override }) => ({
+    index,
+    override,
+    matchCount: refs.filter(({ ref, series }) => {
+      const candidate = prepared.find((entry) => entry.index === index);
+      return candidate !== undefined && matchesOverride(candidate, series, ref);
+    }).length,
+  }));
+}
+
+function resolveRefs(
+  catalog: Catalog,
+  panel: PanelState,
+  namedSets: readonly NamedSet[],
+): ResolvedRef[] {
+  const resolved: ResolvedRef[] = [];
+  const seen = new Set<string>();
+  const add = (ref: SeriesRef, bindingIndex: number): void => {
+    const key = catalog.refKey(ref);
+    const series = catalog.get(ref);
+    if (seen.has(key) || series === undefined) return;
+    seen.add(key);
+    resolved.push({ ref: { ...ref }, series, bindingIndex });
+  };
+  panel.bindings.forEach((binding, bindingIndex) => {
+    if (binding.kind === "pick") {
+      binding.refs.forEach((ref) => add(ref, bindingIndex));
+    } else if (binding.kind === "set") {
+      const set = namedSets.find((entry) => entry.id === binding.set_id);
+      if (set?.kind === "pick") {
+        set.refs.forEach((ref) => add(ref, bindingIndex));
+      } else if (set?.kind === "query" && set.selector !== null) {
+        addSelector(catalog, set.selector, (ref) => add(ref, bindingIndex));
+      }
+    } else if (binding.selector !== null) {
+      addSelector(catalog, binding.selector, (ref) => add(ref, bindingIndex));
+    }
+  });
+  return resolved;
 }
 
 function addSelector(
@@ -89,15 +174,113 @@ function addSelector(
   input: string,
   add: (ref: SeriesRef) => void,
 ): void {
-  const match = evaluateSelector(catalog, input);
-  if (match === null) return;
-  for (const series of match.series) {
-    add({ source_key: series.sourceKey, channel: series.channel });
+  const parsed = parseSelector(input);
+  if (!parsed.ok) return;
+  for (const series of catalog.allSeries()) {
+    if (seriesMatches(parsed.selector, series)) {
+      add({ source_key: series.sourceKey, channel: series.channel });
+    }
   }
+}
+
+function assignHues(
+  catalog: Catalog,
+  panel: PanelState,
+  refs: readonly ResolvedRef[],
+  focused: readonly boolean[],
+): number[] {
+  const values = new Map<string, number>();
+  const hues: number[] = [];
+  refs.forEach(({ ref, series, bindingIndex }, index) => {
+    const value = dimensionValue(
+      panel,
+      ref,
+      series,
+      bindingIndex,
+      focused[index] ?? false,
+    );
+    let hue = values.get(value);
+    if (hue === undefined) {
+      hue = (values.size % 7) + 1;
+      values.set(value, hue);
+    }
+    hues.push(hue);
+  });
+  return hues;
+}
+
+function dimensionValue(
+  panel: PanelState,
+  ref: SeriesRef,
+  series: CatalogSeries,
+  bindingIndex: number,
+  isFocused: boolean,
+): string {
+  if (panel.color_by === "channel") return `channel:${series.channel}`;
+  if (panel.color_by === "set") return `set:${String(bindingIndex)}`;
+  if (panel.color_by === "attr") {
+    return `attr:${series.summary.unit ?? "—"}`;
+  }
+  if (panel.color_by === "focus") {
+    const focusIndex = panel.focus.findIndex((entry) =>
+      matchesFocus(entry, ref),
+    );
+    if (isFocused && focusIndex !== -1) return `focus:${String(focusIndex)}`;
+  }
+  return `source:${series.sourceKey}`;
+}
+
+function prepareOverrides(
+  overrides: readonly SeriesOverride[],
+): PreparedOverride[] {
+  return overrides.flatMap((override, index) => {
+    if (override.target_selector === null) {
+      return [
+        {
+          index,
+          override,
+          selector: null,
+        },
+      ];
+    }
+    const parsed = parseSelector(override.target_selector);
+    return [
+      {
+        index,
+        override,
+        selector: parsed.ok ? parsed.selector : null,
+      },
+    ];
+  });
+}
+
+function matchesOverride(
+  prepared: PreparedOverride,
+  series: CatalogSeries,
+  ref: SeriesRef,
+): boolean {
+  const targetRef = prepared.override.target_ref;
+  const refMatches = targetRef !== null && sameRef(targetRef, ref);
+  const selectorMatches =
+    prepared.override.target_selector !== null &&
+    prepared.selector !== null &&
+    seriesMatches(prepared.selector, series);
+  return refMatches || selectorMatches;
+}
+
+function hueForSlot(slot: number): number {
+  return ((Math.max(1, Math.trunc(slot)) - 1) % 7) + 1;
 }
 
 function sameRef(left: SeriesRef, right: SeriesRef): boolean {
   return left.source_key === right.source_key && left.channel === right.channel;
+}
+
+function matchesAnyFocus(
+  entries: readonly FocusEntry[],
+  ref: SeriesRef,
+): boolean {
+  return entries.some((entry) => matchesFocus(entry, ref));
 }
 
 function matchesFocus(entry: FocusEntry, ref: SeriesRef): boolean {

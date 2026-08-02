@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import type { SignalSummary } from "../generated/protocol";
-import type { PanelState } from "../generated/session";
+import type {
+  FocusEntry,
+  PanelState,
+  SeriesOverride,
+} from "../generated/session";
 import { Catalog } from "./catalog";
-import { overrideFor, resolvePanel } from "./resolution";
+import {
+  appliedOverrides,
+  dimensionCounts,
+  overrideFor,
+  resolvePanel,
+} from "./resolution";
 
 function signal(sourceKey: string, channel: string): SignalSummary {
   return {
@@ -161,18 +170,250 @@ describe("resolvePanel", () => {
     expect(resolvePanel(catalog, state, [])).toEqual([
       expect.objectContaining({
         path: "a/temp",
-        colorSlot: 1,
+        hue: 1,
         focused: false,
+        overridden: false,
       }),
       expect.objectContaining({
         path: "b/temp",
-        colorSlot: 2,
+        hue: 2,
         dash: "dash",
         width: 2,
         opacity: 0.5,
         visible: false,
         focused: true,
+        overridden: true,
       }),
+    ]);
+  });
+
+  it("assigns hue slots by source, channel, and first-appearance order", () => {
+    const sources = Array.from(
+      { length: 8 },
+      (_, index) => `run_0${index + 1}`,
+    );
+    const wideCatalog = Catalog.build([
+      ...sources.flatMap((source) => [
+        signal(source, "temp"),
+        signal(source, "speed"),
+      ]),
+    ]);
+    const state = panel();
+    state.bindings = [
+      {
+        kind: "query",
+        selector: "*",
+        refs: [],
+        set_id: null,
+      },
+    ];
+
+    state.color_by = "source";
+    expect(
+      resolvePanel(wideCatalog, state, []).map((entry) => entry.hue),
+    ).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 1, 1]);
+
+    state.color_by = "channel";
+    expect(
+      resolvePanel(wideCatalog, state, [])
+        .slice(0, 6)
+        .map((entry) => entry.hue),
+    ).toEqual([1, 2, 1, 2, 1, 2]);
+  });
+
+  it("assigns focus hues in focus-stack order", () => {
+    const state = panel();
+    state.color_by = "focus";
+    state.bindings = [
+      {
+        kind: "pick",
+        selector: null,
+        refs: [
+          { source_key: "b", channel: "temp" },
+          { source_key: "a", channel: "speed" },
+        ],
+        set_id: null,
+      },
+    ];
+    state.focus = [
+      {
+        kind: "series",
+        ref: { source_key: "a", channel: "speed" },
+        source_key: null,
+        channel: null,
+      },
+      {
+        kind: "series",
+        ref: { source_key: "b", channel: "temp" },
+        source_key: null,
+        channel: null,
+      },
+    ];
+    expect(resolvePanel(catalog, state, []).map((entry) => entry.hue)).toEqual([
+      1, 2,
+    ]);
+  });
+
+  it.each([
+    ["all", [], ["rule", "rule"]],
+    ["ghost", [], ["ghost", "ghost"]],
+    ["all", ["b"], ["rule", "focus"]],
+    ["ghost", ["b"], ["ghost", "focus"]],
+  ] as const)("resolves %s display state", (ghostMode, sources, expected) => {
+    const state = panel();
+    state.ghost_mode = ghostMode;
+    state.bindings = [
+      {
+        kind: "pick",
+        selector: null,
+        refs: [
+          { source_key: "a", channel: "temp" },
+          { source_key: "b", channel: "temp" },
+        ],
+        set_id: null,
+      },
+    ];
+    state.focus = sources.map(
+      (source): FocusEntry => ({
+        kind: "source",
+        ref: null,
+        source_key: source,
+        channel: null,
+      }),
+    );
+    expect(
+      resolvePanel(catalog, state, []).map((entry) => entry.display),
+    ).toEqual(expected);
+  });
+
+  it("applies selector overrides across a panel and lets later fields win", () => {
+    const ruleCatalog = Catalog.build([
+      signal("a", "temp"),
+      signal("b", "temp"),
+      signal("a", "speed"),
+      signal("run_01", "temp"),
+      signal("run_01", "temperature"),
+    ]);
+    const state = panel();
+    state.bindings = [
+      {
+        kind: "query",
+        selector: "*",
+        refs: [],
+        set_id: null,
+      },
+    ];
+    state.overrides = [
+      {
+        target_ref: null,
+        target_selector: "temp* @ run_01",
+        color_slot: 3,
+        dash: null,
+        width: null,
+        opacity: 0.2,
+        visible: null,
+      },
+      {
+        target_ref: { source_key: "run_01", channel: "temp" },
+        target_selector: null,
+        color_slot: 5,
+        dash: "dot",
+        width: 2,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    const result = resolvePanel(ruleCatalog, state, []);
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        path: "a/temp",
+        overridden: false,
+        hue: 1,
+      }),
+    );
+    expect(result.find((entry) => entry.path === "run_01/temp")).toEqual(
+      expect.objectContaining({
+        hue: 5,
+        dash: "dot",
+        width: 2,
+        opacity: 0.2,
+        overridden: true,
+      }),
+    );
+  });
+
+  it("flattens ghost styles but preserves visibility overrides", () => {
+    const state = panel();
+    state.ghost_mode = "ghost";
+    state.bindings = [
+      {
+        kind: "pick",
+        selector: null,
+        refs: [{ source_key: "a", channel: "temp" }],
+        set_id: null,
+      },
+    ];
+    state.overrides = [
+      {
+        target_ref: { source_key: "a", channel: "temp" },
+        target_selector: null,
+        color_slot: 7,
+        dash: "dash",
+        width: 3,
+        opacity: 0.1,
+        visible: false,
+      },
+    ];
+    expect(resolvePanel(catalog, state, [])[0]).toEqual(
+      expect.objectContaining({
+        hue: null,
+        dash: "solid",
+        width: 1,
+        opacity: 0.5,
+        visible: false,
+        overridden: true,
+      }),
+    );
+  });
+
+  it("counts dimensions and reports applied override match counts", () => {
+    const state = panel();
+    state.bindings = [
+      {
+        kind: "query",
+        selector: "*",
+        refs: [],
+        set_id: null,
+      },
+    ];
+    const overrides: SeriesOverride[] = [
+      {
+        target_ref: null,
+        target_selector: "temp",
+        color_slot: 2,
+        dash: null,
+        width: null,
+        opacity: null,
+        visible: null,
+      },
+      {
+        target_ref: { source_key: "a", channel: "speed" },
+        target_selector: null,
+        color_slot: null,
+        dash: "dot",
+        width: null,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    state.overrides = overrides;
+    expect(dimensionCounts(resolvePanel(catalog, state, []))).toEqual({
+      sources: 2,
+      channels: 2,
+    });
+    expect(appliedOverrides(catalog, state)).toEqual([
+      { index: 0, override: overrides[0], matchCount: 2 },
+      { index: 1, override: overrides[1], matchCount: 1 },
     ]);
   });
 });
