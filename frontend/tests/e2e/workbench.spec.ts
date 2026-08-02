@@ -691,7 +691,10 @@ test("legend strip and source alignment controls stay bounded", async ({
     0,
   );
 
-  const align = page.locator(".source-align").first();
+  await page.locator(".signal-group-select").selectOption("source");
+  const align = page
+    .locator('.signal-outline-row[data-row-kind="group"] .source-align')
+    .first();
   await align.click();
   const popover = page.locator(".source-alignment-popover");
   await expect(popover).toBeVisible();

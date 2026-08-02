@@ -329,7 +329,6 @@ describe("workspace identity", () => {
     shell.root.innerHTML = `
       <span class="source-name"></span>
       <span class="session-identity"></span>
-      <div class="source-rows"></div>
     `;
     shell.workspace = new WorkspaceModel();
     shell.workspacePath = null;

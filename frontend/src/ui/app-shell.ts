@@ -37,11 +37,7 @@ import { suggestMerges } from "../app/channel-map";
 import { resolvePanel } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
-import {
-  virtualSlice,
-  type GroupBy,
-  type OutlineColumn,
-} from "../app/outline-model";
+import { type GroupBy, type OutlineColumn } from "../app/outline-model";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
 import {
@@ -134,7 +130,7 @@ export class AppShell {
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
   private folderScanDialog: FolderScanDialog | null = null;
-  private sourcesExpanded = false;
+  private sourceSummaries: SourceSummary[] = [];
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -446,6 +442,28 @@ export class AppShell {
         onAddToPanel: (refs) => this.addRefsToPanel(refs),
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
+        },
+        onAlignSource: (sourceKey, anchor) => {
+          const source = this.sourceSummaries.find(
+            (entry) => entry.source_key === sourceKey,
+          );
+          const row = anchor.closest<HTMLElement>(".signal-outline-row");
+          if (source !== undefined && row !== null) {
+            openSourceAlignment(
+              this.root,
+              row,
+              anchor,
+              source,
+              (nextSource, domain, scale, offset) => {
+                void this.applySourceAlignment(
+                  nextSource,
+                  domain,
+                  scale,
+                  offset,
+                );
+              },
+            );
+          }
         },
         onMergeChannels: (aliases, clientX, clientY) => {
           this.openChannelMergeMenu(aliases, clientX, clientY);
@@ -929,7 +947,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 1.5.0");
+        this.showModeHelp("SignalScope 1.5.1");
       },
     });
     this.commands.register({
@@ -3034,6 +3052,7 @@ export class AppShell {
 
   private async updateSources(): Promise<void> {
     const sources = await this.plane.listSources();
+    this.sourceSummaries = [...sources];
     for (const source of sources) {
       if (
         this.workspace
@@ -3072,34 +3091,19 @@ export class AppShell {
       );
     required(this.root, ".session-identity").textContent =
       `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
+    this.outline?.setNonIdentitySources(
+      new Set(
+        sources
+          .filter((source) => !sourceAlignmentIsIdentity(source))
+          .map((source) => source.source_key),
+      ),
+    );
     const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
     if (dockFooter !== null) {
       renderDockFooter(dockFooter, sources, this.signals.length, () => {
         void this.openFiles();
       });
     }
-    const rows = required<HTMLElement>(this.root, ".source-rows");
-    const toggleSources = (): void => {
-      this.sourcesExpanded = !this.sourcesExpanded;
-      renderSourceRows(
-        rows,
-        sources,
-        this.sourcesExpanded,
-        toggleSources,
-        (source, domain, scale, offset) => {
-          void this.applySourceAlignment(source, domain, scale, offset);
-        },
-      );
-    };
-    renderSourceRows(
-      rows,
-      sources,
-      this.sourcesExpanded,
-      toggleSources,
-      (source, domain, scale, offset) => {
-        void this.applySourceAlignment(source, domain, scale, offset);
-      },
-    );
   }
 
   private async applySourceAlignment(
@@ -3385,71 +3389,6 @@ export function renderBatchProgress(
   progress.replaceChildren(...children);
 }
 
-export function renderSourceRows(
-  container: HTMLElement,
-  sources: readonly SourceSummary[],
-  expanded: boolean,
-  onToggle: () => void,
-  onAlignment?: (
-    source: SourceSummary,
-    domain: SourceSummary["time_domain"],
-    scale: number,
-    offset: number,
-  ) => void,
-): void {
-  sourceAlignmentCleanup.get(container)?.();
-  const previousScrollTop =
-    container.querySelector<HTMLElement>(".source-scroll")?.scrollTop ?? 0;
-  const totalPoints = sources.reduce(
-    (total, source) => total + Number(source.point_count),
-    0,
-  );
-  if (sources.length <= 8) {
-    container.replaceChildren(
-      ...sources.map((source) => sourceRow(container, source, onAlignment)),
-    );
-    return;
-  }
-  const summary = document.createElement("button");
-  summary.type = "button";
-  summary.className = "source-summary";
-  summary.ariaExpanded = String(expanded);
-  summary.textContent = `${String(sources.length)} sources · ${totalPoints.toLocaleString()} pts ${expanded ? "▾" : "▸"}`;
-  summary.addEventListener("click", onToggle);
-  const children: HTMLElement[] = [summary];
-  if (expanded) {
-    const scroll = document.createElement("div");
-    scroll.className = "source-scroll";
-    const rowHeight = 22;
-    const slice = virtualSlice(
-      sources.length,
-      previousScrollTop,
-      scroll.clientHeight > 0 ? scroll.clientHeight : 176,
-      rowHeight,
-    );
-    const spacer = document.createElement("div");
-    spacer.className = "source-spacer";
-    spacer.style.height = `${String(slice.totalHeight)}px`;
-    const windowElement = document.createElement("div");
-    windowElement.className = "source-window";
-    windowElement.style.transform = `translateY(${String(slice.topPadding)}px)`;
-    windowElement.append(
-      ...sources
-        .slice(slice.start, slice.end)
-        .map((source) => sourceRow(container, source, onAlignment)),
-    );
-    spacer.append(windowElement);
-    scroll.append(spacer);
-    scroll.addEventListener("scroll", () => {
-      renderSourceRows(container, sources, true, onToggle, onAlignment);
-      const next = container.querySelector<HTMLElement>(".source-scroll");
-      if (next !== null) next.scrollTop = scroll.scrollTop;
-    });
-    children.push(scroll);
-  }
-  container.replaceChildren(...children);
-}
-
 export function renderDockFooter(
   container: HTMLElement,
   sources: readonly SourceSummary[],
@@ -3495,50 +3434,6 @@ function loadedSourceFormats(sources: readonly SourceSummary[]): string {
 
 const sourceAlignmentCleanup = new WeakMap<HTMLElement, () => void>();
 
-function sourceRow(
-  container: HTMLElement,
-  source: SourceSummary,
-  onAlignment?: (
-    source: SourceSummary,
-    domain: SourceSummary["time_domain"],
-    scale: number,
-    offset: number,
-  ) => void,
-): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "source-row";
-  const name = document.createElement("span");
-  name.className = "signal-path";
-  name.textContent = basename(source.path);
-  name.title = source.path;
-  const points = document.createElement("span");
-  points.className = "source-points";
-  points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
-  row.append(name, points);
-  if (!sourceAlignmentIsIdentity(source)) {
-    const marker = document.createElement("span");
-    marker.className = "source-alignment-marker";
-    marker.textContent = "≠";
-    marker.title = "Source time alignment differs from identity";
-    row.append(marker);
-  }
-  const align = document.createElement("button");
-  align.type = "button";
-  align.className = "source-align";
-  align.textContent = "align ▾";
-  align.addEventListener("click", () => {
-    openSourceAlignment(
-      container,
-      row,
-      align,
-      source,
-      onAlignment ?? (() => undefined),
-    );
-  });
-  row.append(align);
-  return row;
-}
-
 function sourceAlignmentIsIdentity(source: SourceSummary): boolean {
   return (
     source.time_domain.unit === "seconds" &&
@@ -3549,10 +3444,10 @@ function sourceAlignmentIsIdentity(source: SourceSummary): boolean {
   );
 }
 
-function openSourceAlignment(
+export function openSourceAlignment(
   container: HTMLElement,
   row: HTMLElement,
-  anchor: HTMLButtonElement,
+  anchor: HTMLElement,
   source: SourceSummary,
   onAlignment: (
     source: SourceSummary,
@@ -3716,7 +3611,6 @@ export function shellMarkup(): string {
       <div class="source-footer">
         <div class="ingest-progress" hidden></div>
         <div class="channel-suggestions" hidden></div>
-        <div class="source-rows"></div>
         <div class="dock-footer">
           <div class="dock-load-row">
             <button class="dock-add-source" type="button">+ source</button>
