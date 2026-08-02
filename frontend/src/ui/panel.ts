@@ -506,6 +506,33 @@ export function parseSignalPayload(data: string): string[] {
   return data === "" ? [] : [data];
 }
 
+export function parseSignalRefsPayload(data: string): SeriesRef[] {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (typeof payload !== "object" || payload === null) return [];
+    const refs = (payload as { refs?: unknown }).refs;
+    if (!Array.isArray(refs)) return [];
+    if (
+      refs.every((ref: unknown) => {
+        if (typeof ref !== "object" || ref === null) return false;
+        const candidate = ref as {
+          source_key?: unknown;
+          channel?: unknown;
+        };
+        return (
+          typeof candidate.source_key === "string" &&
+          typeof candidate.channel === "string"
+        );
+      })
+    ) {
+      return refs as SeriesRef[];
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
 export function parseSetPayload(data: string): string | null {
   try {
     const payload: unknown = JSON.parse(data);

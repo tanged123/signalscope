@@ -111,6 +111,7 @@ export class AppShell {
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
+  private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
   private signalsByPath = new Map<string, SignalSummary>();
@@ -422,6 +423,7 @@ export class AppShell {
     );
     this.setsList = new SetsListView(required(this.root, ".tree-sets"), {
       onSetBind: (setId) => this.bindSetToPanel(setId),
+      onSignalDrop: (refs) => this.openSetNameRow(refs),
       onSetRemove: (setId) => {
         this.workspace.removeNamedSet(setId);
         this.setsList?.setNamedSets(this.workspace.namedSets());
@@ -473,7 +475,11 @@ export class AppShell {
         onDerive: () => this.deriveSelected(),
       },
     );
-    this.selection.onChange(() => this.updateBulkBar());
+    this.selection.onChange(() => {
+      this.updateBulkBar();
+      this.syncSelectionActions();
+    });
+    this.syncSelectionActions();
     this.palette = new CommandPalette(this.root, (mode, query) =>
       this.paletteEntries(mode, query),
     );
@@ -549,6 +555,13 @@ export class AppShell {
     };
     this.commands.register(undoCommand);
     this.commands.register(redoCommand);
+    this.commands.register({
+      id: "save-selection-as-set",
+      title: "Save selected signals as set",
+      keys: "f",
+      enabled: () => this.selection.size() > 0,
+      run: () => this.saveSelectedAsSet(),
+    });
     setEditingReservedCombos(
       [
         undoCommand.keys,
@@ -921,7 +934,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 2.0.0");
+        this.showModeHelp("SignalScope 3.0.0");
       },
     });
     this.commands.register({
@@ -1253,6 +1266,12 @@ export class AppShell {
     required(this.root, ".formula-toggle").addEventListener("click", () => {
       this.commands.run("toggle-formula");
     });
+    required<HTMLButtonElement>(
+      this.root,
+      ".sets-save-selection",
+    ).addEventListener("click", () => {
+      this.commands.run("save-selection-as-set");
+    });
     required(this.root, ".cursor-toggle").addEventListener("click", () => {
       this.commands.run("cycle-cursor-mode");
     });
@@ -1519,6 +1538,38 @@ export class AppShell {
       .keys()
       .map((key) => byKey.get(key))
       .filter((ref): ref is SeriesRef => ref !== undefined);
+  }
+
+  private saveSelectedAsSet(): void {
+    this.openSetNameRow(this.selectedRefs());
+  }
+
+  private syncSelectionActions(): void {
+    required<HTMLButtonElement>(this.root, ".sets-save-selection").disabled =
+      this.selection.size() === 0;
+  }
+
+  private syncSelectionWorkspace(): void {
+    const workspaceId = this.workspace.activeTabId();
+    if (this.selectionWorkspaceId === null) {
+      this.selectionWorkspaceId = workspaceId;
+      return;
+    }
+    if (this.selectionWorkspaceId === workspaceId) return;
+    this.selectionWorkspaceId = workspaceId;
+    this.selection.clear();
+  }
+
+  private reconcileSelection(): void {
+    const allowed = new Set(
+      this.catalog.allSeries().map((series) =>
+        this.catalog.refKey({
+          source_key: series.sourceKey,
+          channel: series.channel,
+        }),
+      ),
+    );
+    this.selection.retain(allowed);
   }
 
   private updateBulkBar(): void {
@@ -1849,6 +1900,7 @@ export class AppShell {
   }
 
   private afterLayoutChange(): void {
+    this.syncSelectionWorkspace();
     this.commitHistory();
     this.workspaceTabs?.sync(
       this.workspace.tabs(),
@@ -2200,6 +2252,7 @@ export class AppShell {
       }
       const loaded = await port.reset();
       this.workspace.replace(JSON.parse(loaded.session_json) as Session);
+      this.selection.clear();
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
       this.tilesByPanel.clear();
@@ -2273,6 +2326,7 @@ export class AppShell {
         }
       }
       this.workspace.replace(JSON.parse(sessionJson) as Session);
+      this.selection.clear();
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = loaded.path;
       this.dirty = false;
@@ -2378,6 +2432,7 @@ export class AppShell {
   private async reloadSignals(): Promise<void> {
     this.signals = await this.plane.listSignals();
     this.catalog = Catalog.build(this.signals);
+    this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
@@ -3336,7 +3391,17 @@ export function shellMarkup(): string {
           <button class="set-name-cancel" type="button">cancel</button>
         </div>
       </div>
-      <div class="tree-heading">SETS</div>
+      <div class="tree-heading sets-heading">
+        <span>SETS</span>
+        <button
+          class="sets-save-selection"
+          type="button"
+          title="Save selected signals as set"
+          disabled
+        >
+          ★+
+        </button>
+      </div>
       <div class="tree-sets"></div>
       <div class="tree-heading signals-heading">SIGNALS</div>
       <div class="outline-scroll"></div>

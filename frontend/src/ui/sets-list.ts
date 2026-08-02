@@ -1,11 +1,19 @@
 import type { NamedSet } from "../generated/session";
+import type { SeriesRef } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import { evaluateSelector } from "../app/selector";
-import { SET_DRAG_TYPE } from "./panel";
+import {
+  dragData,
+  hasDragType,
+  parseSignalRefsPayload,
+  SET_DRAG_TYPE,
+  SIGNAL_DRAG_TYPE,
+} from "./panel";
 
 export interface SetsListCallbacks {
   onSetBind(setId: string): void;
   onSetRemove(setId: string): void;
+  onSignalDrop(refs: readonly SeriesRef[]): void;
 }
 
 export class SetsListView {
@@ -15,7 +23,25 @@ export class SetsListView {
   constructor(
     private readonly element: HTMLElement,
     private readonly callbacks: SetsListCallbacks,
-  ) {}
+  ) {
+    this.element.addEventListener("dragover", (event) => {
+      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      event.preventDefault();
+      this.element.classList.add("drop-target");
+    });
+    this.element.addEventListener("dragleave", () => {
+      this.element.classList.remove("drop-target");
+    });
+    this.element.addEventListener("drop", (event) => {
+      this.element.classList.remove("drop-target");
+      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      event.preventDefault();
+      const payload = dragData(event, SIGNAL_DRAG_TYPE);
+      if (payload === null) return;
+      const refs = parseSignalRefsPayload(payload);
+      if (refs.length > 0) this.callbacks.onSignalDrop(refs);
+    });
+  }
 
   setCatalog(catalog: Catalog): void {
     this.catalog = catalog;

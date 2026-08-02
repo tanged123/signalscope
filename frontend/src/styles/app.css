@@ -423,6 +423,32 @@ button {
   justify-content: space-between;
 }
 
+.sets-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sets-save-selection {
+  padding: 0 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-3);
+  font: inherit;
+  line-height: 1;
+}
+
+.sets-save-selection:hover:not(:disabled),
+.sets-save-selection:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--fg-1);
+}
+
+.sets-save-selection:disabled {
+  color: var(--fg-4);
+  cursor: default;
+}
+
 .signal-path {
   overflow: hidden;
   flex: 1;

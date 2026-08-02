@@ -23,6 +23,7 @@ import {
   matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
+  parseSignalRefsPayload,
   type RenderPanelState,
   type RenderSeries,
   xChipLabel,
@@ -348,6 +349,21 @@ describe("panel series", () => {
     ).toEqual(["a/alt", "b/alt"]);
     expect(parseSignalPayload("not json")).toEqual(["not json"]);
     expect(parseSignalPayload(JSON.stringify({ paths: [1] }))).toEqual([]);
+  });
+
+  it("parses signal drag refs", () => {
+    expect(
+      parseSignalRefsPayload(
+        JSON.stringify({
+          refs: [{ source_key: "run-01", channel: "temp" }],
+          paths: ["run-01/temp"],
+        }),
+      ),
+    ).toEqual([{ source_key: "run-01", channel: "temp" }]);
+    expect(parseSignalRefsPayload("not json")).toEqual([]);
+    expect(
+      parseSignalRefsPayload(JSON.stringify({ refs: [{ source_key: 1 }] })),
+    ).toEqual([]);
   });
 
   it("parses named set drag payloads", () => {

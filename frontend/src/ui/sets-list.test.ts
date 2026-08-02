@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SignalSummary } from "../generated/protocol";
 import { Catalog } from "../app/catalog";
-import { SET_DRAG_TYPE } from "./panel";
+import { SET_DRAG_TYPE, SIGNAL_DRAG_TYPE } from "./panel";
 import { SetsListView } from "./sets-list";
 
 function signal(source: string, channel: string): SignalSummary {
@@ -27,7 +27,12 @@ describe("SetsListView", () => {
     const element = document.createElement("div");
     const onSetBind = vi.fn();
     const onSetRemove = vi.fn();
-    const view = new SetsListView(element, { onSetBind, onSetRemove });
+    const onSignalDrop = vi.fn();
+    const view = new SetsListView(element, {
+      onSetBind,
+      onSetRemove,
+      onSignalDrop,
+    });
     view.setCatalog(
       Catalog.build([signal("run-01", "temp"), signal("run-02", "temp")]),
     );
@@ -78,8 +83,47 @@ describe("SetsListView", () => {
     const view = new SetsListView(element, {
       onSetBind: vi.fn(),
       onSetRemove: vi.fn(),
+      onSignalDrop: vi.fn(),
     });
     view.setNamedSets([]);
     expect(element.textContent).toBe("Saved sets appear here");
+  });
+
+  it("accepts signal drops for manual set creation", () => {
+    const element = document.createElement("div");
+    const onSignalDrop = vi.fn();
+    new SetsListView(element, {
+      onSetBind: vi.fn(),
+      onSetRemove: vi.fn(),
+      onSignalDrop,
+    });
+
+    const payload = JSON.stringify({
+      refs: [{ source_key: "run-01", channel: "temp" }],
+      paths: ["run-01/temp"],
+    });
+    const dataTransfer = {
+      types: [SIGNAL_DRAG_TYPE],
+      getData: vi.fn(() => payload),
+    };
+    const dragover = new Event("dragover", { cancelable: true });
+    Object.defineProperty(dragover, "dataTransfer", { value: dataTransfer });
+    element.dispatchEvent(dragover);
+
+    expect(element.classList.contains("drop-target")).toBe(true);
+    expect(dragover.defaultPrevented).toBe(true);
+
+    const dragleave = new Event("dragleave");
+    Object.defineProperty(dragleave, "dataTransfer", { value: dataTransfer });
+    element.dispatchEvent(dragleave);
+    expect(element.classList.contains("drop-target")).toBe(false);
+
+    const drop = new Event("drop", { cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", { value: dataTransfer });
+    element.dispatchEvent(drop);
+
+    expect(onSignalDrop).toHaveBeenCalledWith([
+      { source_key: "run-01", channel: "temp" },
+    ]);
   });
 });

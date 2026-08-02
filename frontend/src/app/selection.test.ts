@@ -58,4 +58,29 @@ describe("SelectionModel", () => {
 
     expect(listener).toHaveBeenCalledTimes(3);
   });
+
+  it("retains only keys still present in the catalog", () => {
+    const selection = new SelectionModel();
+    const listener = vi.fn();
+    selection.setAll(["live", "deleted"]);
+    selection.onChange(listener);
+
+    selection.retain(new Set(["live", "other"]));
+
+    expect(selection.keys()).toEqual(["live"]);
+    expect(listener).toHaveBeenCalledOnce();
+    selection.selectRange(["live", "other"], "other");
+    expect(selection.keys()).toEqual(["other"]);
+  });
+
+  it("does not notify when every selected key remains valid", () => {
+    const selection = new SelectionModel();
+    const listener = vi.fn();
+    selection.setAll(["live"]);
+    selection.onChange(listener);
+
+    selection.retain(new Set(["live", "other"]));
+
+    expect(listener).not.toHaveBeenCalled();
+  });
 });

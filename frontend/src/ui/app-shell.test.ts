@@ -8,7 +8,7 @@ import { Catalog } from "../app/catalog";
 import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
-import type { PanelMode } from "../generated/session";
+import type { PanelMode, SeriesRef } from "../generated/session";
 import {
   AppShell,
   arrivalModeFor,
@@ -128,113 +128,77 @@ function bulkSummary(source: string, channel: string): SignalSummary {
   };
 }
 
-interface BulkProbe {
+interface SelectionProbe {
   workspace: WorkspaceModel;
   catalog: Catalog;
   selection: SelectionModel;
   root: HTMLElement;
-  bulkBar: {
-    setDeriveEnabled(enabled: boolean, title: string): void;
-  };
-  afterLayoutChange(): void;
-  applyBulkStyle(style: {
-    color_slot: number;
-    dash: "solid" | "dash" | "dot";
-    width: number;
-  }): void;
-  applyBulkVisibility(visible: boolean): void;
-  updateBulkBar(): void;
+  selectionWorkspaceId: string | null;
+  saveSelectedAsSet(): void;
+  syncSelectionActions(): void;
+  syncSelectionWorkspace(): void;
+  reconcileSelection(): void;
 }
 
-describe("bulk dock actions", () => {
-  it("fans a selector style override across every resolving panel once", () => {
-    const catalog = Catalog.build([
-      bulkSummary("run-01", "temp"),
-      bulkSummary("run-02", "temp"),
-    ]);
-    const workspace = new WorkspaceModel();
-    const first = workspace.addPanelRow();
-    const second = workspace.addPanelRow();
-    const refs = [
-      { source_key: "run-01", channel: "temp" },
-      { source_key: "run-02", channel: "temp" },
-    ];
-    workspace.addSeriesRefs(first.id, refs);
-    workspace.addSeriesRefs(second.id, refs);
-    const shell = Object.create(AppShell.prototype) as BulkProbe;
-    shell.workspace = workspace;
-    shell.catalog = catalog;
-    shell.selection = new SelectionModel();
-    shell.root = document.createElement("div");
-    shell.root.innerHTML = '<input class="signal-search" value="temp" />';
-    shell.bulkBar = { setDeriveEnabled: vi.fn() };
-    shell.afterLayoutChange = vi.fn();
-    shell.selection.setAll(refs.map((ref) => catalog.refKey(ref)));
-
-    shell.applyBulkStyle({ color_slot: 2, dash: "solid", width: 2 });
-
-    expect(workspace.panel(first.id)?.overrides).toEqual([
-      expect.objectContaining({ target_selector: "temp", target_ref: null }),
-    ]);
-    expect(workspace.panel(second.id)?.overrides).toEqual([
-      expect.objectContaining({ target_selector: "temp", target_ref: null }),
-    ]);
+describe("selection actions", () => {
+  it("renders the SETS save-selection button", () => {
+    const markup = shellMarkup();
+    expect(markup).toContain('class="sets-save-selection"');
   });
 
-  it("uses a target-ref override for a hand-picked hide", () => {
-    const catalog = Catalog.build([bulkSummary("run-01", "temp")]);
-    const workspace = new WorkspaceModel();
-    const panel = workspace.addPanelRow();
-    const ref = { source_key: "run-01", channel: "temp" };
-    workspace.addSeriesRef(panel.id, ref);
-    const shell = Object.create(AppShell.prototype) as BulkProbe;
-    shell.workspace = workspace;
+  it("enables manual-set creation only when signals are selected", () => {
+    const ref: SeriesRef = { source_key: "run-01", channel: "temp" };
+    const catalog = Catalog.build([bulkSummary(ref.source_key, ref.channel)]);
+    const shell = Object.create(AppShell.prototype) as SelectionProbe;
     shell.catalog = catalog;
     shell.selection = new SelectionModel();
     shell.root = document.createElement("div");
-    shell.root.innerHTML = '<input class="signal-search" value="" />';
-    shell.bulkBar = { setDeriveEnabled: vi.fn() };
-    shell.afterLayoutChange = vi.fn();
+    shell.root.innerHTML = shellMarkup();
+    const saveButton = shell.root.querySelector<HTMLButtonElement>(
+      ".sets-save-selection",
+    );
+    const setNameRow = shell.root.querySelector<HTMLElement>(".set-name-row");
+    if (saveButton === null || setNameRow === null)
+      throw new Error("missing UI");
+
+    shell.selection.clear();
+    shell.syncSelectionActions();
+    expect(saveButton.disabled).toBe(true);
     shell.selection.toggle(catalog.refKey(ref));
-
-    shell.applyBulkVisibility(false);
-
-    expect(workspace.panel(panel.id)?.overrides).toEqual([
-      expect.objectContaining({
-        target_ref: ref,
-        target_selector: null,
-        visible: false,
-      }),
-    ]);
+    shell.syncSelectionActions();
+    expect(saveButton.disabled).toBe(false);
+    shell.saveSelectedAsSet();
+    expect(setNameRow.hidden).toBe(false);
   });
 
-  it("enables derive for one channel and disables it across channels", () => {
-    const catalog = Catalog.build([
-      bulkSummary("run-01", "temp"),
-      bulkSummary("run-02", "temp"),
-      bulkSummary("run-01", "speed"),
-    ]);
-    const shell = Object.create(AppShell.prototype) as BulkProbe;
+  it("clears selection when the active workspace changes", () => {
+    const workspace = new WorkspaceModel();
+    const shell = Object.create(AppShell.prototype) as SelectionProbe;
+    shell.workspace = workspace;
+    shell.selection = new SelectionModel();
+    shell.selectionWorkspaceId = workspace.activeTabId();
+    shell.selection.toggle("selected");
+
+    workspace.addTab();
+    shell.syncSelectionWorkspace();
+
+    expect(shell.selection.keys()).toEqual([]);
+  });
+
+  it("reconciles selection against the current catalog", () => {
+    const ref = { source_key: "run-01", channel: "temp" };
+    const catalog = Catalog.build([bulkSummary(ref.source_key, ref.channel)]);
+    const shell = Object.create(AppShell.prototype) as SelectionProbe;
     shell.catalog = catalog;
     shell.selection = new SelectionModel();
-    const setDeriveEnabled = vi.fn();
-    shell.bulkBar = { setDeriveEnabled };
-
     shell.selection.setAll([
-      catalog.refKey({ source_key: "run-01", channel: "temp" }),
+      catalog.refKey(ref),
       catalog.refKey({ source_key: "run-02", channel: "temp" }),
     ]);
-    shell.updateBulkBar();
-    expect(setDeriveEnabled).toHaveBeenLastCalledWith(true, expect.any(String));
-    shell.selection.setAll([
-      catalog.refKey({ source_key: "run-01", channel: "temp" }),
-      catalog.refKey({ source_key: "run-01", channel: "speed" }),
-    ]);
-    shell.updateBulkBar();
-    expect(setDeriveEnabled).toHaveBeenLastCalledWith(
-      false,
-      "Derive requires one channel",
-    );
+
+    shell.reconcileSelection();
+
+    expect(shell.selection.keys()).toEqual([catalog.refKey(ref)]);
   });
 });
 
@@ -297,6 +261,7 @@ describe("workspace identity", () => {
   it("advertises the selector grammar in the filter placeholder", () => {
     const markup = shellMarkup();
     expect(markup).toContain('placeholder="glob @ source · unit:K"');
+    expect(markup).toContain('class="sets-save-selection"');
     expect(markup).not.toContain('class="signal-group-select"');
     expect(markup).not.toContain('class="outline-columns-button"');
     expect(markup).not.toContain('class="channel-suggestions"');

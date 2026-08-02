@@ -37,7 +37,7 @@ export class SelectionModel {
       this.anchor === null ? -1 : orderedVisible.indexOf(this.anchor);
     const toIndex = orderedVisible.indexOf(toKey);
     if (anchorIndex < 0 || toIndex < 0) {
-      this.toggle(toKey);
+      this.replace([toKey]);
       return;
     }
 
@@ -48,6 +48,15 @@ export class SelectionModel {
 
   setAll(keys: readonly string[]): void {
     this.replace(keys);
+  }
+
+  retain(allowed: ReadonlySet<string>): void {
+    const next = this.keys().filter((key) => allowed.has(key));
+    if (next.length === this.selected.size) return;
+    this.selected.clear();
+    for (const key of next) this.selected.add(key);
+    if (this.anchor !== null && !allowed.has(this.anchor)) this.anchor = null;
+    this.notify();
   }
 
   clear(): void {
