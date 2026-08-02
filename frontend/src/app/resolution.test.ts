@@ -257,7 +257,7 @@ describe("resolvePanel", () => {
 
   it.each([
     ["all", [], ["rule", "rule"]],
-    ["ghost", [], ["ghost", "ghost"]],
+    ["ghost", [], ["focus", "ghost"]],
     ["all", ["b"], ["rule", "focus"]],
     ["ghost", ["b"], ["ghost", "focus"]],
   ] as const)("resolves %s display state", (ghostMode, sources, expected) => {
@@ -285,6 +285,34 @@ describe("resolvePanel", () => {
     expect(
       resolvePanel(catalog, state, []).map((entry) => entry.display),
     ).toEqual(expected);
+  });
+
+  it("focuses every channel from the first source by default in ghost mode", () => {
+    const state = panel();
+    state.ghost_mode = "ghost";
+    state.bindings = [
+      {
+        kind: "pick",
+        selector: null,
+        refs: [
+          { source_key: "a", channel: "temp" },
+          { source_key: "a", channel: "speed" },
+          { source_key: "b", channel: "temp" },
+        ],
+        set_id: null,
+      },
+    ];
+
+    expect(
+      resolvePanel(catalog, state, []).map(({ display, focused }) => ({
+        display,
+        focused,
+      })),
+    ).toEqual([
+      { display: "focus", focused: true },
+      { display: "focus", focused: true },
+      { display: "ghost", focused: false },
+    ]);
   });
 
   it("applies selector overrides across a panel and lets later fields win", () => {
@@ -346,6 +374,14 @@ describe("resolvePanel", () => {
   it("flattens ghost styles but preserves visibility overrides", () => {
     const state = panel();
     state.ghost_mode = "ghost";
+    state.focus = [
+      {
+        kind: "source",
+        ref: null,
+        source_key: "b",
+        channel: null,
+      },
+    ];
     state.bindings = [
       {
         kind: "pick",

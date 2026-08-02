@@ -57,6 +57,8 @@ async function installDerivedPlane(page: Page): Promise<void> {
       sources: [],
     });
     const internals = {
+      // Keep the mock's Promise contract aligned with Tauri's invoke API.
+      // eslint-disable-next-line @typescript-eslint/require-await
       invoke: async (command: string, args?: Record<string, unknown>) => {
         const request = args?.["request"] as
           | { payload?: Record<string, unknown> }

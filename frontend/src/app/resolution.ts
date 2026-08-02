@@ -52,7 +52,18 @@ export function resolvePanel(
   namedSets: readonly NamedSet[],
 ): ResolvedSeries[] {
   const refs = resolveRefs(catalog, panel, namedSets);
-  const focused = refs.map(({ ref }) => matchesAnyFocus(panel.focus, ref));
+  const focus: readonly FocusEntry[] =
+    panel.focus.length === 0 && panel.ghost_mode === "ghost" && refs[0]
+      ? [
+          {
+            kind: "source",
+            ref: null,
+            source_key: refs[0].ref.source_key,
+            channel: null,
+          },
+        ]
+      : panel.focus;
+  const focused = refs.map(({ ref }) => matchesAnyFocus(focus, ref));
   const display = focused.map((isFocused) =>
     isFocused
       ? ("focus" as const)
@@ -60,7 +71,7 @@ export function resolvePanel(
         ? ("ghost" as const)
         : ("rule" as const),
   );
-  const hues = assignHues(panel, refs, focused);
+  const hues = assignHues({ ...panel, focus: [...focus] }, refs, focused);
   const overrides = prepareOverrides(panel.overrides);
 
   return refs.map(({ ref, series }, index) => {

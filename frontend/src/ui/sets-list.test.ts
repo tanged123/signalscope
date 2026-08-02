@@ -60,6 +60,19 @@ describe("SetsListView", () => {
     expect(element.textContent).toContain("live");
     expect(element.textContent).toContain("▣ 1");
 
+    const queryCaret =
+      element.querySelector<HTMLButtonElement>(".tree-set-caret");
+    queryCaret?.click();
+    expect(onSetBind).not.toHaveBeenCalled();
+    expect(element.querySelector<HTMLElement>(".tree-set")?.ariaExpanded).toBe(
+      "true",
+    );
+    expect(
+      [...element.querySelectorAll(".tree-set-member")].map(
+        (member) => member.textContent,
+      ),
+    ).toEqual(["run-01/temp", "run-02/temp"]);
+
     element.querySelector<HTMLElement>(".tree-set")?.click();
     expect(onSetBind).toHaveBeenCalledWith("query");
     const manual = element.querySelectorAll<HTMLElement>(".tree-set")[1];
@@ -68,7 +81,7 @@ describe("SetsListView", () => {
     );
     expect(onSetRemove).toHaveBeenCalledWith("pick");
 
-    const dataTransfer = { setData: vi.fn() };
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "none" };
     const drag = new Event("dragstart");
     Object.defineProperty(drag, "dataTransfer", { value: dataTransfer });
     element.querySelector<HTMLElement>(".tree-set")?.dispatchEvent(drag);
@@ -76,6 +89,7 @@ describe("SetsListView", () => {
       SET_DRAG_TYPE,
       JSON.stringify({ set_id: "query" }),
     );
+    expect(dataTransfer.effectAllowed).toBe("copy");
   });
 
   it("renders the empty state", () => {

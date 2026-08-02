@@ -20,6 +20,7 @@ export interface OverlayPalette {
   fg1: string;
   fg2: string;
   fg3: string;
+  fg4: string;
   surface0: string;
   surface2: string;
   fontPlot: string;
@@ -56,12 +57,14 @@ export interface OverlayState {
 export type CursorMode = SessionCursorMode;
 export interface CursorPoint {
   value: number;
-  colorIndex: number;
+  colorIndex: number | null;
+  alpha: number;
 }
 
 export interface XyMarker {
   x: number;
   y: number;
+  ghost?: boolean;
 }
 
 export class OverlayRenderer {
@@ -124,11 +127,12 @@ export class OverlayRenderer {
     context.lineWidth = 1.6;
     context.setLineDash([]);
     context.fillStyle = palette.surface0;
-    context.strokeStyle = palette.amber;
     for (const marker of markers) {
       const x = projectX(layout, marker.x);
       const y = projectY(layout, marker.y);
       if (!insidePlot(layout, x, y)) continue;
+      context.globalAlpha = marker.ghost === true ? 0.5 : 1;
+      context.strokeStyle = marker.ghost === true ? palette.fg4 : palette.amber;
       context.beginPath();
       context.arc(x, y, 4, 0, Math.PI * 2);
       context.fill();
@@ -171,9 +175,13 @@ export class OverlayRenderer {
         if (y < layout.plot.y || y > layout.plot.y + layout.plot.height) {
           continue;
         }
+        context.globalAlpha = point.alpha;
         context.beginPath();
         context.fillStyle = palette.surface0;
-        context.strokeStyle = palette.series[point.colorIndex] ?? palette.fg2;
+        context.strokeStyle =
+          point.colorIndex === null
+            ? palette.fg4
+            : (palette.series[point.colorIndex] ?? palette.fg2);
         context.arc(x, y, 3, 0, Math.PI * 2);
         context.fill();
         context.stroke();
@@ -331,6 +339,7 @@ export class OverlayRenderer {
       fg1: token("--fg-1"),
       fg2: token("--fg-2"),
       fg3: token("--fg-3"),
+      fg4: token("--fg-4"),
       surface0: token("--surface-0"),
       surface2: token("--surface-2"),
       fontPlot:

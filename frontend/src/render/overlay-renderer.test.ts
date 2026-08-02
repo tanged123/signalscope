@@ -12,6 +12,7 @@ const palette: OverlayPalette = {
   fg1: "#fff",
   fg2: "#aaa",
   fg3: "#777",
+  fg4: "#555",
   surface0: "#000",
   surface2: "#111",
   fontPlot: "monospace",
@@ -73,7 +74,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
   renderer.draw(layout, {
     cursorT: 30,
     cursorMode: "track",
-    cursorPoints: [{ value: 25, colorIndex: 0 }],
+    cursorPoints: [{ value: 25, colorIndex: 0, alpha: 1 }],
     xyMarkers: [],
     box: null,
     annotations: [],
@@ -81,6 +82,19 @@ test("draws the cursor and rubber band with interaction amber", () => {
   });
   expect(calls).toContain("strokeStyle:#407fd0");
   expect(calls).toContain("arc");
+
+  calls.length = 0;
+  renderer.draw(layout, {
+    cursorT: 30,
+    cursorMode: "track",
+    cursorPoints: [{ value: 25, colorIndex: null, alpha: 0.5 }],
+    xyMarkers: [],
+    box: null,
+    annotations: [],
+    delta: null,
+  });
+  expect(calls).toContain(`strokeStyle:${palette.fg4}`);
+  expect(calls).toContain("globalAlpha:0.5");
 });
 
 test("draws XY cursor markers as hollow amber rings", () => {

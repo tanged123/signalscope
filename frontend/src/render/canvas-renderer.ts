@@ -50,9 +50,10 @@ export interface SeriesStroke {
 export interface PlotPath {
   /** Flat vertex pairs `[x0, y0, x1, y1, …]`; a NaN vertex lifts the pen. */
   points: readonly number[];
-  colorIndex: number;
+  hue: number | null;
   dash: DashStyle;
   width: number;
+  alpha: number;
   /** Drawn in `--fg-4` at low alpha: present but outside the window. */
   dimmed?: boolean;
   /** Filled sample dots, for sparse traces. */
@@ -346,7 +347,12 @@ export class CanvasRenderer {
     context.beginPath();
     context.rect(plot.x, plot.y, plot.width, plot.height);
     context.clip();
-    if (path.colorValues !== undefined && path.dimmed !== true) {
+    context.globalAlpha = path.dimmed === true ? 0.5 : path.alpha;
+    if (
+      path.colorValues !== undefined &&
+      path.dimmed !== true &&
+      path.hue !== null
+    ) {
       this.drawColorMappedPath(context, project, path, colors);
       context.restore();
       return;
@@ -354,9 +360,10 @@ export class CanvasRenderer {
     context.strokeStyle =
       path.dimmed === true
         ? colors.fg3
-        : (colors.series[path.colorIndex] ?? colors.fg2);
+        : path.hue === null
+          ? colors.fg4
+          : (colors.series[hueIndex(path.hue)] ?? colors.fg2);
     context.lineWidth = path.dimmed === true ? 1.2 : path.width;
-    context.globalAlpha = path.dimmed === true ? 0.5 : 1;
     context.setLineDash(dashPattern(path.dash));
     context.beginPath();
     let penDown = false;

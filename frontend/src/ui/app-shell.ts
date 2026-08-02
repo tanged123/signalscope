@@ -895,7 +895,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 3.0.0");
+        this.showModeHelp("SignalScope 3.1.0");
       },
     });
     this.commands.register({
@@ -2620,6 +2620,7 @@ export class AppShell {
           : `var(--series-${String(row.colorIndex + 1)})`,
         row.label,
         row.value,
+        row.ghost,
       ),
     );
     if (rows.length === 0) {
@@ -3036,7 +3037,7 @@ export function shellMarkup(): string {
       <div class="search-wrap">
         <div class="search-filter-row">
           <span class="search-filter-prefix">/</span>
-          <input class="signal-search" placeholder="glob @ source · unit:K" spellcheck="false" />
+          <input class="signal-search" placeholder="Search signals…" spellcheck="false" />
         </div>
         <div class="search-count"></div>
         <div class="set-name-row" hidden>
@@ -3117,6 +3118,7 @@ export interface GroupedCursorRow {
   label: string;
   value: string;
   colorIndex: number | null;
+  ghost: boolean;
 }
 
 export function groupCursorRows(
@@ -3138,6 +3140,7 @@ export function groupCursorRows(
             ? formatValue(row.value)
             : `${formatValue(row.value)} ${row.unit}`,
         colorIndex: row.colorIndex,
+        ghost: false,
       });
       continue;
     }
@@ -3149,7 +3152,7 @@ export function groupCursorRows(
         max: row.value,
         unit: row.unit,
       });
-      result.push({ label: channel, value: "", colorIndex: null });
+      result.push({ label: channel, value: "", colorIndex: null, ghost: true });
     } else {
       current.count += 1;
       current.min = Math.min(current.min, row.value);
@@ -3165,15 +3168,21 @@ export function groupCursorRows(
       group.min === group.max
         ? formatValue(group.min)
         : `${formatValue(group.min)} → ${formatValue(group.max)}`;
-    row.label = `${channel} · ${String(group.count)} ghosts`;
+    row.label = `${channel} · ${String(group.count)} signals`;
     row.value = group.unit === null ? range : `${range} ${group.unit}`;
   }
   return result;
 }
 
-function tooltipRow(color: string, name: string, value: string): HTMLElement {
+function tooltipRow(
+  color: string,
+  name: string,
+  value: string,
+  ghost = false,
+): HTMLElement {
   const row = document.createElement("div");
   row.className = "plot-tip-row";
+  row.classList.toggle("ghost", ghost);
   const swatch = document.createElement("span");
   swatch.className = "plot-tip-swatch";
   swatch.style.background = color;

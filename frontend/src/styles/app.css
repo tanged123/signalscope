@@ -1346,6 +1346,10 @@ button {
   gap: 6px;
 }
 
+.plot-tip-row.ghost {
+  opacity: 0.55;
+}
+
 .plot-tip-swatch {
   width: 9px;
   height: 2px;
@@ -2022,7 +2026,30 @@ button {
 
 .tree-set {
   padding: 0 4px;
+  cursor: grab;
+}
+
+.tree-set:active {
+  cursor: grabbing;
+}
+
+.tree-set-caret {
+  width: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  font: 9px var(--font-mono);
   cursor: pointer;
+}
+
+.tree-set-member {
+  padding-left: 20px;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-set-name,

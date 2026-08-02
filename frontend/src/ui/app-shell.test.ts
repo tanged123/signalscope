@@ -54,7 +54,8 @@ it("groups ghost cursor rows by channel while keeping focused rows itemized", ()
     new Map(rows.slice(0, 16).map((row) => [row.path, "temp"])),
   );
   expect(grouped).toHaveLength(3);
-  expect(grouped[0]?.label).toBe("temp · 16 ghosts");
+  expect(grouped[0]?.label).toBe("temp · 16 signals");
+  expect(grouped[0]?.ghost).toBe(true);
   expect(grouped[1]?.label).toBe("run_17/temp");
   expect(grouped[2]?.label).toBe("run_18/alt");
 });
@@ -256,9 +257,9 @@ describe("workspace identity", () => {
     );
   });
 
-  it("advertises the selector grammar in the filter placeholder", () => {
+  it("uses a plain-language filter placeholder", () => {
     const markup = shellMarkup();
-    expect(markup).toContain('placeholder="glob @ source · unit:K"');
+    expect(markup).toContain('placeholder="Search signals…"');
     expect(markup).toContain('class="sets-save-selection"');
     expect(markup).not.toContain('class="signal-group-select"');
     expect(markup).not.toContain('class="outline-columns-button"');

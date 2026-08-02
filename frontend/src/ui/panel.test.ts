@@ -391,8 +391,10 @@ describe("panel series", () => {
       {
         path: "run_01/alt",
         colorIndex: 0,
+        hue: 1,
         dash: "solid",
         width: 1.4,
+        opacity: 1,
         trace: { time: [0, 1], x: [10, 20], y: [1, 2] },
       },
     ]);
@@ -412,8 +414,10 @@ describe("panel series", () => {
       {
         path: "derived/score",
         colorIndex: 0,
+        hue: 1,
         dash: "solid",
         width: 1.4,
+        opacity: 1,
         trace: { time: [0, 1], x: [10, 20], y: [1, 2] },
       },
     ]);

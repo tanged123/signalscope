@@ -665,6 +665,11 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   const setRow = page.locator(".tree-set", { hasText: "thermal" });
   await expect(setRow).toContainText("2");
   await expect(setRow).toContainText("live");
+  await setRow.locator(".tree-set-caret").click();
+  await expect(page.locator(".tree-set-member")).toHaveCount(2);
+  await expect(page.locator(".tree-set-member").first()).toContainText(
+    "rocket/velocity_body/",
+  );
 
   await first.locator(".panel-header").click();
   await page.keyboard.press("n");

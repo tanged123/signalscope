@@ -326,9 +326,10 @@ describe("render", () => {
         {
           points: [0, 0, 1, 1, 2, 2],
           colorValues: [0, 0.5, 1],
-          colorIndex: 0,
+          hue: 1,
           dash: "solid",
           width: 1.4,
+          alpha: 1,
         },
       ],
       {
@@ -359,9 +360,10 @@ describe("render", () => {
         {
           points: [0, 0, 1, 1],
           colorValues: [0.5, 0.5],
-          colorIndex: 0,
+          hue: 1,
           dash: "solid",
           width: 1.4,
+          alpha: 1,
         },
       ],
       {
@@ -420,9 +422,10 @@ describe("render", () => {
       [
         {
           points: [0, 0, 1, 1, Number.NaN, Number.NaN, 2, 2],
-          colorIndex: 0,
+          hue: 1,
           dash: "solid",
           width: 1.4,
+          alpha: 1,
         },
       ],
       {
@@ -438,6 +441,45 @@ describe("render", () => {
       1,
     );
     expect(renderer.lastLayout()?.xRange).toEqual({ min: 0, max: 2 });
+  });
+
+  it("renders ghost paths neutrally even when color values are present", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1, 2, 2],
+          colorValues: [0, 0.5, 1],
+          hue: null,
+          dash: "solid",
+          width: 1,
+          alpha: 0.5,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 2],
+        yRange: [0, 2],
+      },
+    );
+
+    expect(calls).toContainEqual({
+      op: "=strokeStyle",
+      args: [TEST_PALETTE.fg4],
+    });
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
+    expect(calls).not.toContainEqual({
+      op: "=strokeStyle",
+      args: ["#404040"],
+    });
+    expect(calls).not.toContainEqual({
+      op: "=strokeStyle",
+      args: ["#bfbfbf"],
+    });
   });
 
   it("records the plot layout and supports inline axes", () => {

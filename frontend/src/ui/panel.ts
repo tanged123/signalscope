@@ -569,13 +569,17 @@ export class PanelView {
   private xyTraces: {
     path: string;
     colorIndex: number;
+    hue: number | null;
     dash: DashStyle;
     width: number;
+    opacity: number;
     trace: XyTrace;
   }[] = [];
   private domainSeries: {
     path: string;
     colorIndex: number;
+    hue: number | null;
+    opacity: number;
     x: number[];
     y: number[];
   }[] = [];
@@ -1054,8 +1058,10 @@ export class PanelView {
       this.xyTraces.push({
         path: series.path,
         colorIndex: colorIndexForHue(series.hue),
+        hue: series.hue,
         dash: series.dash,
         width: series.width,
+        opacity: series.opacity,
         trace: pairSamples(resolved, ySeries),
       });
     }
@@ -1139,9 +1145,10 @@ export class PanelView {
       // Whole trajectory dimmed underneath, the windowed part lit on top.
       paths.push({
         points: flattenTrace(entry.trace, null),
-        colorIndex: entry.colorIndex,
+        hue: entry.hue,
         dash: "solid",
         width: 1.2,
+        alpha: entry.opacity,
         dimmed: true,
       });
     }
@@ -1149,9 +1156,10 @@ export class PanelView {
       const colorValues = colorColumns[index];
       paths.push({
         points: flattenTrace(entry.trace, window),
-        colorIndex: entry.colorIndex,
+        hue: entry.hue,
         dash: entry.dash,
         width: entry.width + 0.4,
+        alpha: entry.opacity,
         markers: true,
         ...(hasColor && colorValues !== null && colorValues !== undefined
           ? {
@@ -1226,14 +1234,17 @@ export class PanelView {
       this.domainSeries.push({
         path: series.path,
         colorIndex: colorIndexForHue(series.hue),
+        hue: series.hue,
+        opacity: series.opacity,
         x: result.frequency,
         y: result.amplitudeDb,
       });
       paths.push({
         points,
-        colorIndex: colorIndexForHue(series.hue),
+        hue: series.hue,
         dash: series.dash,
         width: series.width,
+        alpha: series.opacity,
       });
     }
     this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
@@ -1309,9 +1320,10 @@ export class PanelView {
       }
       return {
         points,
-        colorIndex: colorIndexForHue(series?.hue ?? 1),
+        hue: series?.hue ?? null,
         dash: series?.dash ?? "solid",
         width: series?.width ?? 1.4,
+        alpha: series?.opacity ?? 1,
       };
     });
     this.preparedPlot = prepareHistogramPlot({
@@ -1638,7 +1650,9 @@ export class PanelView {
       state?.mode === "xy" && cursorT !== null && this.cursorMode !== "none"
         ? this.xyTraces.flatMap((entry) => {
             const point = markerAt(entry.trace, cursorT);
-            return point === null ? [] : [point];
+            return point === null
+              ? []
+              : [{ ...point, ghost: entry.hue === null }];
           })
         : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
@@ -1669,7 +1683,8 @@ export class PanelView {
     if (mode === "fft") {
       return this.domainSeries.map((series) => ({
         value: lerpSample(series.x, series.y, cursorT),
-        colorIndex: series.colorIndex,
+        colorIndex: series.hue === null ? null : series.colorIndex,
+        alpha: series.opacity,
       }));
     }
     if (mode === "histogram") {
@@ -1683,10 +1698,15 @@ export class PanelView {
         },
         0,
       );
-      return (cursor?.markers ?? []).map((point) => ({
-        value: point.y,
-        colorIndex: point.colorIndex,
-      }));
+      const visible = [...bySeries.values()].filter((series) => series.visible);
+      return (cursor?.markers ?? []).map((point, index) => {
+        const series = visible[index];
+        return {
+          value: point.y,
+          colorIndex: series?.hue === null ? null : point.colorIndex,
+          alpha: series?.opacity ?? 1,
+        };
+      });
     }
     return (this.lastTiles?.series ?? []).flatMap((tile) => {
       const series = bySeries.get(tile.signal_path);
@@ -1696,7 +1716,8 @@ export class PanelView {
       return [
         {
           value,
-          colorIndex: colorIndexForHue(series.hue),
+          colorIndex: series.hue === null ? null : colorIndexForHue(series.hue),
+          alpha: series.opacity,
         },
       ];
     });
