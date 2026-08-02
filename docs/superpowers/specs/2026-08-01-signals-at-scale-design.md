@@ -275,3 +275,19 @@ new interaction surface (sets drag-bind, focus/ghost gestures, roster
 popovers, table bulk actions, merge flow). The session-conformance fixture
 changes once, in P1. Cross-layer P1 runs `./scripts/ci.sh all`; later phases
 run the affected suites plus the frontend gate.
+
+## Amendment (2026-08-02, channel-first outline)
+
+The channel-first outline design supersedes the configurable tree-table,
+channel-map, and facet-split decisions above. SIGNALS now has one fixed view:
+multi-source channels are collapsed groups, single-source channels are flat,
+and the only columns are CHANNEL and VALUE. VALUE is blank unless an active
+plot cursor supplies a live value. UNIT, regrouping, sorting, and the column
+picker are removed from the dock.
+
+Channel identity is source-local. Named sets provide reusable grouping, and
+source alignment remains on source series rows. Session schema v18 rewrites
+mapped explicit references to their source-local names before removing
+`channel_map`. See
+`docs/superpowers/specs/2026-08-02-channel-first-signal-outline-design.md` and
+[ADR 0030](../../adr/0030-source-local-channel-identity.md).

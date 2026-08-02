@@ -1,22 +1,25 @@
 import { expect, test } from "./fixtures";
 
-test("the outline filters, sorts, groups, selects, and saves a frozen set", async ({
+test("the fixed channel outline filters, selects, and saves a frozen set", async ({
   page,
 }) => {
   await page.goto("/");
 
   const outline = page.locator(".outline-scroll");
   await expect(outline).toBeVisible();
-  await expect(page.locator(".signal-group-select")).toHaveValue("channel");
-  await expect(page.locator(".signal-view-toggle")).toHaveCount(0);
+  await expect(outline).toHaveAttribute("data-cols", "channel,value");
+  await expect(
+    outline.locator('.signal-outline-header [data-column="channel"]'),
+  ).toHaveText("CHANNEL");
+  await expect(
+    outline.locator('.signal-outline-header [data-column="value"]'),
+  ).toHaveText("VALUE");
+  await expect(outline.locator('[data-column="unit"]')).toHaveCount(0);
+  await expect(outline.locator('[data-column="source"]')).toHaveCount(0);
+  await expect(page.locator(".signal-group-select")).toHaveCount(0);
+  await expect(page.locator(".outline-columns-button")).toHaveCount(0);
   await expect(outline.locator('[data-row-kind="series"]')).toHaveCount(2);
-  const sourceHeader = outline.locator(
-    '.signal-outline-header button[data-column="source"]',
-  );
-  await expect(sourceHeader).toHaveAttribute("aria-sort", "none");
 
-  await sourceHeader.click();
-  await expect(sourceHeader).toHaveAttribute("aria-sort", "ascending");
   await page.locator(".signal-search").fill("velocity_body/*");
   await outline.focus();
   await page.keyboard.press("ControlOrMeta+a");
@@ -26,25 +29,36 @@ test("the outline filters, sorts, groups, selects, and saves a frozen set", asyn
   await page.locator(".set-name-input").fill("all velocity");
   await page.locator(".set-name-input").press("Enter");
   await expect(page.locator(".tree-set")).toContainText("▣ 2");
-
-  await page.locator(".signal-group-select").selectOption("source");
-  await expect(page.locator(".signal-group-select")).toHaveValue("source");
   await expect(page.locator(".bulk-bar")).toContainText("2 selected");
 });
 
-test("the outline column picker exposes PTS and closes with Escape", async ({
+test("VALUE stays blank until the cursor is active over a plot", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.locator(".outline-columns-button").click();
-  await expect(page.locator(".outline-columns-popover")).toBeVisible();
-  await expect(
-    page.locator(".outline-columns-popover input[type=checkbox]"),
-  ).toBeVisible();
-  await page.locator(".outline-columns-popover input[type=checkbox]").check();
-  await expect(
-    page.locator(".outline-columns-popover input[type=checkbox]"),
-  ).toBeChecked();
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".outline-columns-popover")).toBeHidden();
+  const values = page.locator(
+    '.outline-scroll [data-row-kind="series"] [data-column="value"]',
+  );
+  await expect(values).toHaveCount(2);
+  await expect(values.first()).toHaveText("");
+  await expect(values.last()).toHaveText("");
+
+  await page.keyboard.press("c");
+  await page
+    .locator(".panel")
+    .first()
+    .locator(".overlay-canvas")
+    .hover({ position: { x: 300, y: 120 } });
+  await expect
+    .poll(async () =>
+      values.evaluateAll((cells) =>
+        cells.some((cell) => cell.textContent.trim() !== ""),
+      ),
+    )
+    .toBe(true);
+
+  await page.keyboard.press("c");
+  await page.keyboard.press("c");
+  await expect(values.first()).toHaveText("");
+  await expect(values.last()).toHaveText("");
 });

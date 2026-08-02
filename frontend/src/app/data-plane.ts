@@ -39,6 +39,7 @@ import {
   type TileRequest,
   type TileResponse,
 } from "../generated/protocol";
+import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { open, seal, type Envelope } from "./envelope";
 import { queryPyramid } from "./pyramid-query";
 import { binsToSamples, sampleWindow } from "./samples";
@@ -615,7 +616,7 @@ function createDemoManifest(): BakedManifest {
   return seal({
     session_json: JSON.stringify({
       app: "signalscope",
-      schema_version: 17,
+      schema_version: SESSION_SCHEMA_VERSION,
       theme: "dark",
       linked_time: {
         t0: 0,

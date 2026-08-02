@@ -507,6 +507,38 @@ fn migrate_v16_bindings(value: &mut serde_json::Value) {
     }
 }
 
+fn rewrite_v17_channel_refs(
+    value: &mut serde_json::Value,
+    aliases: &std::collections::HashMap<(String, String), String>,
+) {
+    match value {
+        serde_json::Value::Array(entries) => {
+            for entry in entries {
+                rewrite_v17_channel_refs(entry, aliases);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            let source_key = object
+                .get("source_key")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let channel = object
+                .get("channel")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            if let (Some(source_key), Some(channel)) = (source_key, channel) {
+                if let Some(name) = aliases.get(&(source_key, channel)) {
+                    object.insert("channel".into(), serde_json::json!(name));
+                }
+            }
+            for entry in object.values_mut() {
+                rewrite_v17_channel_refs(entry, aliases);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn migrate_v17_channel_refs(value: &mut serde_json::Value) {
     let aliases: std::collections::HashMap<(String, String), String> = value
         .get("channel_map")
@@ -536,42 +568,10 @@ fn migrate_v17_channel_refs(value: &mut serde_json::Value) {
         })
         .collect();
 
-    fn rewrite_refs(
-        value: &mut serde_json::Value,
-        aliases: &std::collections::HashMap<(String, String), String>,
-    ) {
-        match value {
-            serde_json::Value::Array(entries) => {
-                for entry in entries {
-                    rewrite_refs(entry, aliases);
-                }
-            }
-            serde_json::Value::Object(object) => {
-                let source_key = object
-                    .get("source_key")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned);
-                let channel = object
-                    .get("channel")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned);
-                if let (Some(source_key), Some(channel)) = (source_key, channel) {
-                    if let Some(name) = aliases.get(&(source_key, channel)) {
-                        object.insert("channel".into(), serde_json::json!(name));
-                    }
-                }
-                for entry in object.values_mut() {
-                    rewrite_refs(entry, aliases);
-                }
-            }
-            _ => {}
-        }
-    }
-
     if let Some(object) = value.as_object_mut() {
         object.remove("channel_map");
     }
-    rewrite_refs(value, &aliases);
+    rewrite_v17_channel_refs(value, &aliases);
 }
 
 fn take_string_array(

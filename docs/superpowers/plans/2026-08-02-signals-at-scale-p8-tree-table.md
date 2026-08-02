@@ -422,3 +422,17 @@ setNonIdentitySources(keys: ReadonlySet<string>): void; // drives the ≠ marker
 - Decision coverage: one component/no modes → T3+T5; group semantics + one-click child select → T1/T3; ⌘A-on-query bulk workflow → T3/T6; sort-within-groups → T1; group ▾ + ⊞▾ only controls → T4; one column model + priority drop → T4; selection survives regrouping → T3 (locked 10); style… = one rule → already true (bulk bar unchanged), asserted in T6; perf/no-sample-data → T1 perf test + T6 smoke; map deletion + unmerge-on-row → T3 (popover) + T5 (deletion).
 - Supersede-don't-parallel: the deletion checklist (T5 Step 4) is the phase gate, mirroring P1's bundle grep.
 - Type consistency: `OutlineRow`/`GroupBy`/`OutlineColumn` (T1) are consumed by name in T3/T4; `SignalOutlineCallbacks.onAddToPanel` replaces both `onPlotSignal(s)` and `onPlotRow`; `onUnmerge(canonical: string)` matches the existing workspace mutation signature wired at app-shell ~501–541; drag payload `{refs, paths}` unchanged so panel drop code is untouched.
+
+---
+
+## Amendment (2026-08-02, channel-first cleanup)
+
+This plan is retained as implementation history. Its configurable grouping,
+sorting, metadata columns, column picker, aliases, unmerge affordance, and
+catalog last-value behavior are superseded by
+`2026-08-02-channel-first-signal-outline.md`.
+
+The resulting outline has fixed CHANNEL and cursor-only VALUE columns, groups
+only by source-local channel, and places alignment on source series rows.
+Channel mapping is removed through session schema v18; facet splitting remains
+removed.
