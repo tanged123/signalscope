@@ -4,8 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Catalog } from "../app/catalog";
 import { resolvePanel } from "../app/resolution";
-import type { SignalSummary } from "../generated/protocol";
+import type { SignalSummary, TileResponse } from "../generated/protocol";
 import type { PanelState } from "../generated/session";
+import { CanvasRenderer } from "../render/canvas-renderer";
 import { PanelView, type PanelCallbacks } from "./panel";
 
 function signal(source: string, channel: string): SignalSummary {
@@ -20,6 +21,33 @@ function signal(source: string, channel: string): SignalSummary {
     t_min: 0,
     t_max: 1,
     last_value: null,
+  };
+}
+
+function tiles(paths: readonly string[]): TileResponse {
+  return {
+    request_id: "facet",
+    series: paths.map((path) => ({
+      signal_id: path,
+      signal_path: path,
+      unit: null,
+      level: 0,
+      bins: [
+        {
+          t0: 0,
+          t1: 1,
+          first: 1,
+          last: 1,
+          min: 1,
+          max: 1,
+          sum: 1,
+          sum_sq: 1,
+          finite_count: "1",
+          sample_count: "1",
+          has_gap: false,
+        },
+      ],
+    })),
   };
 }
 
@@ -181,6 +209,7 @@ describe("PanelView facets", () => {
     );
     const view = new PanelView("panel", callbacks(catalog));
     const host = document.createElement("div");
+    document.body.appendChild(host);
     host.appendChild(view.element);
     const panel = state();
     view.renderData(panel, null, null, { t0: 0, t1: 1 });
@@ -204,6 +233,109 @@ describe("PanelView facets", () => {
     expect(
       view.element.querySelector<HTMLCanvasElement>(".plot-canvas")?.hidden,
     ).toBe(false);
+  });
+
+  it("attaches facet canvases before rendering and routes cell gestures", () => {
+    mockCanvas();
+    globalThis.ResizeObserver = class {
+      observe(): void {}
+      disconnect(): void {}
+      unobserve(): void {}
+    } as unknown as typeof ResizeObserver;
+    vi.spyOn(HTMLCanvasElement.prototype, "clientWidth", "get").mockReturnValue(
+      200,
+    );
+    vi.spyOn(
+      HTMLCanvasElement.prototype,
+      "clientHeight",
+      "get",
+    ).mockReturnValue(100);
+    const catalog = Catalog.build(
+      Array.from({ length: 8 }, (_, index) =>
+        signal(`run-${String(index).padStart(2, "0")}`, "temp"),
+      ),
+    );
+    const panelCallbacks = callbacks(catalog);
+    const view = new PanelView("panel", panelCallbacks);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    host.appendChild(view.element);
+    const panel = state();
+    const paths = Array.from(
+      { length: 8 },
+      (_, index) => `run-${String(index).padStart(2, "0")}/temp`,
+    );
+    const render = vi.spyOn(CanvasRenderer.prototype, "render");
+
+    view.renderData(panel, tiles(paths), null, { t0: 0, t1: 1 });
+
+    expect(render).toHaveBeenCalledTimes(8);
+    expect(
+      render.mock.contexts.every((instance) => {
+        const canvas = (
+          instance as unknown as { surface: { canvas: HTMLCanvasElement } }
+        ).surface.canvas;
+        return canvas.isConnected && canvas.width > 1 && canvas.height > 1;
+      }),
+    ).toBe(true);
+    const grid = view.element.querySelector<HTMLElement>(".facet-grid");
+    expect(grid?.style.gridTemplateColumns).toBe("repeat(3, minmax(0, 1fr))");
+
+    const canvas = grid?.querySelector<HTMLCanvasElement>(".facet-cell-canvas");
+    if (canvas === null || canvas === undefined)
+      throw new Error("facet missing");
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+      }),
+    });
+    canvas.dispatchEvent(
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 120,
+        clientY: 37,
+      }),
+    );
+    expect(
+      view.element.querySelector(".plot-hover-tag")?.textContent,
+    ).toContain("run-00/temp");
+
+    const focusedCanvas =
+      grid?.querySelector<HTMLCanvasElement>(".facet-cell-canvas");
+    if (focusedCanvas === null || focusedCanvas === undefined) {
+      throw new Error("facet missing after hover");
+    }
+    Object.defineProperty(focusedCanvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+      }),
+    });
+    focusedCanvas.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        shiftKey: true,
+        clientX: 120,
+        clientY: 37,
+      }),
+    );
+    expect(panelCallbacks.onFocusToggle).toHaveBeenCalledWith(
+      "panel",
+      expect.objectContaining({
+        ref: { source_key: "run-00", channel: "temp" },
+      }),
+    );
   });
 
   it("disables split for non-time modes", () => {

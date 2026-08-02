@@ -194,6 +194,17 @@ export type RenderPanelState = Omit<PanelState, "x_ref" | "color_ref"> & {
   series: RenderSeries[];
 };
 
+interface FacetPlot {
+  cell: HTMLElement;
+  canvas: HTMLCanvasElement;
+  renderer: CanvasRenderer;
+  plot: PreparedPlot;
+  shown: readonly {
+    series: RenderSeries;
+    tile: TileResponse["series"][number];
+  }[];
+}
+
 export type LegendDimension = "source" | "channel";
 
 export interface MatrixLegendRow {
@@ -559,6 +570,7 @@ export class PanelView {
   private splitCleanup: (() => void) | null = null;
   private hasColorbar = false;
   private facetYLinked = true;
+  private facetPlots = new Map<HTMLElement, FacetPlot>();
 
   constructor(
     private readonly id: string,
@@ -823,6 +835,16 @@ export class PanelView {
     this.overlay.addEventListener("contextmenu", (event) => {
       event.preventDefault();
     });
+    this.facetGrid.addEventListener("pointermove", (event) => {
+      this.facetPointerMove(event);
+    });
+    this.facetGrid.addEventListener("pointerleave", () => {
+      this.clearHover();
+      this.callbacks.onCursor(this.id, null, null);
+    });
+    this.facetGrid.addEventListener("click", (event) => {
+      this.facetClick(event);
+    });
   }
 
   update(state: PanelState, maximized: boolean): void {
@@ -948,6 +970,7 @@ export class PanelView {
     this.hitAdapter = null;
     this.domainSeries = [];
     this.hasColorbar = false;
+    this.facetPlots.clear();
     const elapsed = this.renderForMode(rendered, tiles, samples, window);
     this.hitAdapter =
       (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
@@ -1090,7 +1113,16 @@ export class PanelView {
             ] as const)
           : null;
     let elapsed = 0;
-    for (const { cell, shown, plot } of prepared) {
+    this.facetGrid.style.gridTemplateColumns = `repeat(${String(
+      Math.ceil(Math.sqrt(Math.max(1, layout.cells.length))),
+    )}, minmax(0, 1fr))`;
+    this.facetGrid.style.gridTemplateRows = `repeat(${String(
+      Math.ceil(
+        (layout.cells.length + (layout.overflow > 0 ? 1 : 0)) /
+          Math.ceil(Math.sqrt(Math.max(1, layout.cells.length))),
+      ),
+    )}, minmax(0, 1fr))`;
+    const facetElements = prepared.map(({ cell, shown, plot }) => {
       const cellElement = document.createElement("div");
       cellElement.className = "facet-cell";
       cellElement.dataset.facetKey = cell.key;
@@ -1101,6 +1133,18 @@ export class PanelView {
       canvas.className = "facet-cell-canvas";
       canvas.setAttribute("aria-label", `${cell.label} time-series plot`);
       const renderer = new CanvasRenderer(canvas);
+      cellElement.append(label, canvas);
+      this.facetGrid.appendChild(cellElement);
+      this.facetPlots.set(cellElement, {
+        cell: cellElement,
+        canvas,
+        renderer,
+        plot,
+        shown,
+      });
+      return { cellElement, shown, plot, renderer, canvas };
+    });
+    for (const { shown, plot, renderer } of facetElements) {
       const automatic = plot.autoRanges();
       const y = linkedY ?? automatic.y ?? [0, 1];
       const x = automatic.x ?? [window.t0, window.t1];
@@ -1122,11 +1166,16 @@ export class PanelView {
               width: series.width,
               alpha: series.opacity,
             })),
+            ...(this.emphasizePaths === null
+              ? {}
+              : {
+                  emphasisIndices: shown.flatMap(({ series }, index) =>
+                    this.emphasizePaths?.has(series.path) ? [index] : [],
+                  ),
+                }),
           },
         );
       }
-      cellElement.append(label, canvas);
-      this.facetGrid.appendChild(cellElement);
     }
     if (layout.overflow > 0) {
       const overflow = document.createElement("div");
@@ -1139,10 +1188,98 @@ export class PanelView {
   }
 
   private clearFacetGrid(): void {
+    this.facetPlots.clear();
     this.facetGrid.hidden = true;
     this.facetGrid.replaceChildren();
+    this.facetGrid.style.gridTemplateColumns = "";
+    this.facetGrid.style.gridTemplateRows = "";
     this.canvas.hidden = false;
     this.overlay.hidden = false;
+  }
+
+  private facetPoint(
+    event: PointerEvent | MouseEvent,
+  ): { facet: FacetPlot; x: number; y: number } | null {
+    const target = event.target;
+    if (!(target instanceof Element)) return null;
+    const cell = target.closest<HTMLElement>(".facet-cell");
+    if (cell === null) return null;
+    const facet = this.facetPlots.get(cell);
+    if (facet === undefined) return null;
+    const rect = facet.canvas.getBoundingClientRect();
+    const x = rect.width > 0 ? event.clientX - rect.left : event.offsetX;
+    const y = rect.height > 0 ? event.clientY - rect.top : event.offsetY;
+    return { facet, x, y };
+  }
+
+  private facetPointerMove(event: PointerEvent): void {
+    const point = this.facetPoint(event);
+    if (point === null) return;
+    const layout = point.facet.renderer.lastLayout();
+    if (layout === null || !insidePlot(layout, point.x, point.y)) {
+      this.clearHover();
+      this.callbacks.onCursor(this.id, null, null);
+      return;
+    }
+    const hit = point.facet.plot.hitAdapter.seriesAt(
+      layout,
+      point.x,
+      point.y,
+      6,
+    );
+    if (hit === null) {
+      this.clearHover();
+      this.callbacks.onCursor(this.id, null, null);
+      return;
+    }
+    this.setEmphasis(hit.path);
+    this.showHoverTag(hit.path, event.clientX, event.clientY);
+    this.callbacks.onCursor(
+      this.id,
+      point.facet.plot.cursorAt(
+        layout,
+        { x: point.x, y: point.y },
+        XY_HOVER_RADIUS,
+      ),
+      { x: event.clientX, y: event.clientY },
+    );
+  }
+
+  private facetClick(event: MouseEvent): void {
+    const point = this.facetPoint(event);
+    if (point === null) return;
+    const layout = point.facet.renderer.lastLayout();
+    if (layout === null) return;
+    const hit = point.facet.plot.hitAdapter.seriesAt(
+      layout,
+      point.x,
+      point.y,
+      6,
+    );
+    if (hit === null) return;
+    const series = point.facet.shown.find(
+      (entry) => entry.series.path === hit.path,
+    )?.series;
+    if (series === undefined) return;
+    if (event.shiftKey || event.altKey) {
+      if (event.altKey) this.callbacks.onMuteSeries(this.id, series.ref);
+      else {
+        this.callbacks.onFocusToggle(this.id, {
+          kind: "series",
+          ref: series.ref,
+          source_key: null,
+          channel: series.ref.channel,
+        });
+      }
+      return;
+    }
+    const annotation = point.facet.plot.annotationAt(
+      layout,
+      { x: point.x, y: point.y },
+      14,
+    );
+    if (annotation !== null)
+      this.callbacks.onPinAnnotation(this.id, annotation);
   }
 
   private renderFacetCursor(window: { t0: number; t1: number }): void {
@@ -2973,9 +3110,8 @@ function panelMarkup(): string {
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">
-          <span class="panel-split-label" aria-hidden="true">split</span>
-          <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right">→</button>
-          <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down (N)">↓</button>
+          <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right — new panel">→</button>
+          <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down — new panel">↓</button>
         </span>
         <button class="panel-action panel-maximize" title="Maximize panel">${MAXIMIZE_GLYPH}</button>
         <button class="panel-action panel-close" title="Close panel">✕</button>
