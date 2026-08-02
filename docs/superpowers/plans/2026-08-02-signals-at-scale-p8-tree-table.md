@@ -247,6 +247,112 @@ export class SignalOutlineView {
 
 ---
 
+## Remediation addendum — 2026-08-02 post-implementation review (Tasks 7–8)
+
+Edward's visual review of the landed P8 (`f5d99df`) against §10 found the
+outline unusable as rendered. Root causes, verified in code:
+
+1. **Grid off-by-one (the main bug).** The header renders `1 + N` tracks
+   (check cell + one cell per column), but data rows render only `N` cells:
+   `groupElement`/`seriesElement` put caret + checkbox + label together in
+   ONE "outline cell", which lands in the 22 px check track. The label is
+   crushed to zero width (group rows show no name at all) and every data
+   cell shifts one column left — the `3 chs` aggregate renders under
+   SOURCE, unit `—` under CHS. Rows and header must share one template with
+   the checkbox in its own first-track cell for BOTH row kinds.
+2. **Width budget can never show §10's four columns at 280 px.** Locked
+   decision 3's minimums sum to 22+96+84+44+64 = 310 px, so VALUE is always
+   dropped at the default dock width — §10 shows CHANNEL·SRCS·UNIT·VALUE
+   all present at 280. The budget was wrong in this plan, not in luna's
+   implementation. Locked decision 3 is superseded by locked decision 11
+   below. Fixed-px tracks also waste pane width; the outline column must
+   flex.
+3. **Control/row styling far from the mock:** the `group ←` select and
+   `⊞ ▾` button render as large chrome instead of the mock's 10 px micro
+   token; aggregate text (`3 chs`) duplicates the abbreviated header
+   (`CHS`); numeric cells are not right-aligned tabular.
+
+Process lesson (again): the jsdom tests asserted structure but nothing
+about track alignment — the §10 screenshot comparison is part of DONE.
+
+## Locked decisions — remediation (supersede where noted)
+
+11. **Column template (supersedes locked 3's px budget).** Tracks:
+    check 18 px · outline `minmax(88px, 1fr)` · second column 40 px ·
+    UNIT 32 px · VALUE 60 px · PTS 56 px (opt-in). Canonical four fit any
+    pane ≥ 238 px — never dropped at the 280 px dock. Drop order below
+    that / with opt-ins that don't fit: PTS, then VALUE, then UNIT, then
+    the second column; outline column and check never drop. The outline
+    column is the only flexible track.
+12. **Row anatomy = header anatomy.** Every row renders `1 + N` cells on
+    the shared template: cell 1 = checkbox (`▣`/`▢`; button on group rows,
+    marker on series rows); cell 2 = caret (group rows only) + label
+    (+ `N names` badge, alias sub-line, `ƒx`, ✕); cells 3+ = data columns.
+    §10 order confirmed: `▣ · ▸ temp 3 names · 9 · K · —`.
+13. **Aggregate cell copy:** bare count (`9`) when the second-column
+    header is abbreviated (pane < 320 px), `9 srcs`/`9 chs` when wide.
+    Right-aligned tabular numerals for the second column, PTS, and VALUE;
+    UNIT `--fg-3`; selected rows keep the P7 amber row tint.
+14. **Heading controls restyle:** `group ← channel ▾` is a 10 px
+    letter-spaced mono micro-token (`--fg-3`, no box until hover —
+    `appearance: none` on the select, hairline border only on
+    focus-visible), options lowercase; `⊞ ▾` matches. Same height as the
+    SETS/SIGNALS headings — the controls must not inflate the heading row.
+15. **Sources section (answers "what is this for"):** the per-source rows
+    (`run_01.csv · 3,003 pts · align ▾`) were the P6 alignment rail. The
+    outline now owns the source dimension, so the listing is duplicate UI
+    and is **deleted**. What survives, unchanged, in the dock footer area:
+    ingest progress, the near-match suggestion row, the aggregate
+    (`N sources · M signals · X pts`), `+ source`, and the loaded-format
+    readout. Alignment moves onto the outline's source group rows
+    (`group ← source`): an `align ▾` button opening the existing
+    `source-alignment-popover` (same `onAlignment` plumbing) and a `≠`
+    marker when the transform is non-identity. Reaching it costs one
+    grouping switch — acceptable for an occasional operation; do NOT add a
+    context-menu system for this.
+
+---
+
+### Task 7: Grid alignment, column budget, mock-fidelity pass
+
+**Files:**
+
+- Modify: `frontend/src/ui/signal-outline.ts` (+`signal-outline.test.ts`), `frontend/src/styles/app.css` (outline + heading-control styles)
+
+- [ ] **Step 1: Failing tests:**
+  - Every rendered row has exactly `header.children.length` cells (structure parity — this is the off-by-one regression test); the group row's label cell textContent equals `row.label` (non-empty for a source group).
+  - `applyWidth(280)` keeps all four canonical columns (`data-cols` includes `value`); `applyWidth(230)` drops `value` only; `applyWidth(300)` with PTS opted in drops `pts` first.
+  - `--outline-columns` uses `minmax(88px, 1fr)` for the outline track and the locked fixed widths for the rest.
+  - Aggregate cell reads `9` at `applyWidth(280)` and `9 srcs` at `applyWidth(400)` (locked 13, same threshold as the header abbreviation).
+  - Series-row checkbox marker and group-row checkbox button both sit in cell 1 (`.outline-check-cell`); caret sits in cell 2.
+- [ ] **Step 2: Implement** locked 11–12: build the template from visible columns; move the checkbox out of the outline cell into a dedicated first cell for both row kinds; caret + label (+ badges) in cell 2; drop logic re-ordered per locked 11.
+- [ ] **Step 3: Styling pass** per locked 13–14: right-aligned tabular numeric cells, UNIT `--fg-3`, amber selected tint (port the P7 `signal-table` selected/hover rules to the outline classes if they died with `signal-table.ts`), compact heading token, lowercase select options.
+- [ ] **Step 4:** `./scripts/test.sh unit signal-outline` — PASS. Screenshot the 280 px dock against §10 and a wide dock against §6; attach to the handoff. **Commit** `fix(ui): outline rows share the header grid; column budget fits the 280px dock`.
+
+---
+
+### Task 8: Delete the per-source rows; alignment onto source group rows
+
+**Files:**
+
+- Modify: `frontend/src/ui/app-shell.ts` (`renderSourceRows` ~3388–3450, `sourceRow` ~3501, alignment popover ~3557–3640, dock markup `.source-rows` ~3719), `frontend/src/ui/signal-outline.ts` (+test), `frontend/src/ui/app-shell-sources.test.ts` or equivalent, `frontend/src/styles/app.css`
+
+**Interfaces — produces:**
+
+```ts
+// SignalOutlineCallbacks gains:
+onAlignSource?(sourceKey: string, anchor: HTMLElement): void;
+// SignalOutlineView gains:
+setNonIdentitySources(keys: ReadonlySet<string>): void; // drives the ≠ marker
+```
+
+- [ ] **Step 1: Failing tests:** the dock renders no `.source-row` elements and no `align ▾` outside the outline; ingest progress, `.channel-suggestions`, aggregate footer, `+ source`, and the format readout still render; with `group ← source`, a source group row shows `align ▾` firing `onAlignSource(source_key, buttonElement)` and shows `≠` iff its key is in `setNonIdentitySources`; series rows and channel group rows show neither.
+- [ ] **Step 2: Implement.** Delete the per-source row rendering from `renderSourceRows` (keep everything else it renders); export/reuse the existing alignment popover builder so app-shell's `onAlignSource` opens it anchored to the outline button with the same unit/scale/offset controls and `onAlignment` commit path; app-shell feeds `setNonIdentitySources` from the source records it already holds. Group-row `align ▾` gets the source key from `row.refs[0].source_key`.
+- [ ] **Step 3: Grep gate:** `grep -rn "source-row\b\|sourceRow(" frontend/src frontend/tests` → hits only in the alignment popover module and its tests.
+- [ ] **Step 4:** Update e2e specs that touched `.source-row`/`align ▾` (alignment round-trip now: switch grouping to source → `align ▾` → popover → apply). `./scripts/ci.sh frontend` — PASS. `./scripts/version.sh bump patch && ./scripts/version.sh check`. **Commit** `fix(ui): per-source rows deleted; alignment lives on outline source groups`.
+
+---
+
 ## Self-review notes (already applied)
 
 - Decision coverage: one component/no modes → T3+T5; group semantics + one-click child select → T1/T3; ⌘A-on-query bulk workflow → T3/T6; sort-within-groups → T1; group ▾ + ⊞▾ only controls → T4; one column model + priority drop → T4; selection survives regrouping → T3 (locked 10); style… = one rule → already true (bulk bar unchanged), asserted in T6; perf/no-sample-data → T1 perf test + T6 smoke; map deletion + unmerge-on-row → T3 (popover) + T5 (deletion).

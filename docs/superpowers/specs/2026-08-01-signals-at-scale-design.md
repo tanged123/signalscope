@@ -177,7 +177,8 @@ rule unchanged: the dock never touches sample data — counts, units, and
 last value come from source metadata; 10k rows scroll at 60 fps.
 Deletes: the tree/table/map toggle, `SignalTreeView`/`SignalTableView`,
 `buildTreeRows`/`buildTableRows`, the SERIES/CHANNELS granularity toggle,
-and the channel-map dialog.
+the channel-map dialog, and (P8 remediation) the dock's per-source rows
+list — the footer load rail stays.
 
 **Channel map (§5).** Workspace-scoped `Session.channel_map` aliases
 source-local names onto one canonical channel, non-destructively, applied at
@@ -216,6 +217,13 @@ Added 2026-08-02:
 - **Per-source alignment edits are on-demand**, behind an affordance on the
   source row — never permanent per-source controls. A row of inputs per
   source is the same unbounded-element violation as a chip per series.
+  _Amended (P8 remediation):_ "the source row" is the outline's source
+  group row (`group ← source`): it carries the `align ▾` affordance and a
+  `≠` marker when the transform is non-identity. The dock's separate
+  per-source rows list is deleted — with the tree-table owning the source
+  dimension, a second source listing is duplicate UI. The dock keeps only
+  the load rail: ingest progress, near-match row, aggregate footer,
+  `+ source`, and the loaded-format readout.
 
 ## Rollout
 
