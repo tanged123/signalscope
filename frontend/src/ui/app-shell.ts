@@ -3094,12 +3094,11 @@ export class AppShell {
         offset: source.offset,
       });
     }
-    const firstName = sources[0] === undefined ? "" : basename(sources[0].path);
-    required(this.root, ".source-name").textContent = firstName;
+    const sessionName =
+      this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
+    required(this.root, ".source-name").textContent = sessionName;
     required(this.root, ".session-identity").textContent =
-      firstName === ""
-        ? ""
-        : `${firstName} — ${this.signals.length.toLocaleString()} signals`;
+      `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
     const rows = required<HTMLElement>(this.root, ".source-rows");
     const toggleSources = (): void => {
       this.sourcesExpanded = !this.sourcesExpanded;
@@ -3624,7 +3623,7 @@ function unavailableReason(command: Command): { unavailable?: string } {
     : { unavailable: "unavailable in this context" };
 }
 
-function shellMarkup(): string {
+export function shellMarkup(): string {
   return `<main class="workbench formula-collapsed">
     <div class="title-bar">
       <button class="menu-button" aria-label="Application menu" aria-haspopup="menu" aria-expanded="false">≡</button>
@@ -3643,7 +3642,7 @@ function shellMarkup(): string {
 
     <aside class="signal-tree" id="signal-tree" aria-label="Signals">
       <div class="search-wrap">
-        <label>/ <input class="signal-search" placeholder="filter signals…" spellcheck="false" /></label>
+        <label>/ <input class="signal-search" placeholder="glob @ source · unit:K" spellcheck="false" /></label>
         <div class="search-count"></div>
         <div class="set-name-row" hidden>
           <input class="set-name-input" placeholder="set name" spellcheck="false" aria-label="Set name" />

@@ -7,12 +7,14 @@ import { SelectionModel } from "../app/selection";
 import { Catalog } from "../app/catalog";
 import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
+import type { SourceSummary } from "../generated/protocol";
 import type { PanelMode } from "../generated/session";
 import {
   AppShell,
   arrivalModeFor,
   groupCursorRows,
   renderBatchProgress,
+  shellMarkup,
 } from "./app-shell";
 
 it("arrival mode focuses small additions and ghosts large additions", () => {
@@ -307,6 +309,68 @@ describe("bulk dock actions", () => {
       true,
       "Merge selected channels",
     );
+  });
+});
+
+interface SourcesProbe {
+  root: HTMLElement;
+  plane: { listSources(): Promise<readonly SourceSummary[]> };
+  workspace: WorkspaceModel;
+  signals: SignalSummary[];
+  workspacePath: string | null;
+  updateSources(): Promise<void>;
+}
+
+function sourceSummary(sourceKey: string): SourceSummary {
+  return {
+    source_id: sourceKey,
+    source_key: sourceKey,
+    prefix: sourceKey,
+    path: `/data/${sourceKey}.csv`,
+    point_count: "10",
+    time_domain: {
+      unit: "seconds",
+      origin: "relative",
+      alignment_origin: 0,
+    },
+    scale: 1,
+    offset: 0,
+  };
+}
+
+describe("workspace identity", () => {
+  it("aggregates source and signal counts in the title identity", async () => {
+    const shell = Object.create(AppShell.prototype) as SourcesProbe;
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = `
+      <span class="source-name"></span>
+      <span class="session-identity"></span>
+      <div class="source-rows"></div>
+    `;
+    shell.workspace = new WorkspaceModel();
+    shell.workspacePath = null;
+    shell.signals = [
+      bulkSummary("run-01", "temp"),
+      bulkSummary("run-02", "temp"),
+    ];
+    shell.plane = {
+      listSources: vi
+        .fn()
+        .mockResolvedValue([sourceSummary("run-01"), sourceSummary("run-02")]),
+    };
+
+    await shell.updateSources();
+
+    expect(shell.root.querySelector(".source-name")?.textContent).toBe(
+      "Untitled",
+    );
+    expect(shell.root.querySelector(".session-identity")?.textContent).toBe(
+      "— 2 sources · 2 signals",
+    );
+  });
+
+  it("advertises the selector grammar in the filter placeholder", () => {
+    expect(shellMarkup()).toContain('placeholder="glob @ source · unit:K"');
   });
 });
 
