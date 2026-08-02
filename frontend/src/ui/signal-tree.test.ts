@@ -47,9 +47,7 @@ describe("SignalTreeView sets and channels", () => {
       },
     ]);
 
-    expect(list.querySelector(".tree-channel")?.textContent).toContain(
-      "temp — 2 srcs",
-    );
+    expect(list.querySelector(".tree-channel")?.textContent).toContain("temp");
     expect(sets.textContent).toContain("temperature");
     expect(sets.textContent).toContain("live");
     sets
@@ -204,5 +202,42 @@ describe("SignalTreeView channel actions", () => {
       12,
       34,
     );
+  });
+
+  it("shows a count column, merged aliases, and derived markers", () => {
+    const list = document.createElement("div");
+    const sets = document.createElement("div");
+    const tree = new SignalTreeView(list, sets, {
+      onPlotSignal: vi.fn(),
+      onRemoveDerived: vi.fn(),
+    });
+    tree.setCatalog(
+      Catalog.build(
+        [
+          signal("run-01", "temp"),
+          signal("run-02", "temperature"),
+          signal("derived", "error"),
+        ],
+        [
+          {
+            canonical: "temp",
+            aliases: [
+              { source_key: "run-01", name: "temp" },
+              { source_key: "run-02", name: "temperature" },
+            ],
+          },
+        ],
+      ),
+    );
+
+    const channel = list.querySelector<HTMLElement>(".tree-channel");
+    expect(channel?.querySelector(".tree-count")?.textContent).toBe("2");
+    expect(channel?.querySelector(".channel-names-badge")?.textContent).toBe(
+      "2 names",
+    );
+    expect(channel?.querySelector(".channel-alias-line")?.textContent).toBe(
+      "run-01: temp · run-02: temperature",
+    );
+    expect(list.querySelector(".tree-derived-mark")?.textContent).toBe("ƒx");
   });
 });

@@ -14,9 +14,11 @@ export interface TreeChannel {
   label: string;
   depth: number;
   sourceKeys: readonly string[];
+  sourceCount: number;
   expanded: boolean;
   members: readonly string[];
   names: readonly string[];
+  aliases: readonly string[];
   unitConflict: boolean;
 }
 
@@ -102,12 +104,16 @@ export function buildTreeRows(
     rows.push({
       kind: "channel",
       path,
-      label: `${channel.name} — ${String(members.length)} srcs`,
+      label: channel.name,
       depth: 0,
       sourceKeys: channel.sourceKeys,
+      sourceCount: members.length,
       expanded,
       members: matching.map((series) => series.path),
       names: channel.names,
+      aliases: members.map(
+        (series) => `${series.sourceName}: ${series.sourceChannel}`,
+      ),
       unitConflict: channel.unitConflict,
     });
     if (expanded) {

@@ -177,19 +177,36 @@ export class SignalTreeView {
       const name = document.createElement("span");
       name.className = "signal-path";
       name.textContent = row.label;
+      const header = document.createElement("span");
+      header.className = "tree-channel-header";
+      header.append(name);
       if (row.names.length > 1) {
         const names = document.createElement("span");
         names.className = "channel-names-badge";
         names.textContent = `${String(row.names.length)} names`;
-        names.title = row.names.join(", ");
-        element.appendChild(names);
+        names.title = row.aliases.join(", ");
+        header.append(names);
       }
       if (row.unitConflict) {
         const unit = document.createElement("span");
         unit.className = "unit-conflict-marker";
         unit.textContent = "unit?";
         unit.title = "Source units disagree";
-        element.appendChild(unit);
+        header.append(unit);
+      }
+      const count = document.createElement("span");
+      count.className = "tree-count";
+      count.textContent = String(row.sourceCount);
+      count.title = `${String(row.sourceCount)} sources`;
+      header.append(count);
+      const body = document.createElement("span");
+      body.className = "tree-channel-body";
+      body.append(header);
+      if (row.names.length > 1) {
+        const aliases = document.createElement("span");
+        aliases.className = "channel-alias-line";
+        aliases.textContent = row.aliases.join(" · ");
+        body.append(aliases);
       }
       element.draggable = true;
       element.addEventListener("dragstart", (event) => {
@@ -201,7 +218,7 @@ export class SignalTreeView {
       element.addEventListener("dblclick", () => {
         this.callbacks.onPlotSignals?.(row.members);
       });
-      element.append(toggle, name);
+      element.append(toggle, body);
       return element;
     }
     return this.leafElement(row.path, row.label, row.depth);
@@ -247,6 +264,13 @@ export class SignalTreeView {
     const value = document.createElement("span");
     value.className = "signal-value";
     value.textContent = this.liveValues.get(path) ?? "—";
+    if (path.startsWith("derived/")) {
+      const mark = document.createElement("span");
+      mark.className = "tree-derived-mark";
+      mark.textContent = "ƒx";
+      mark.title = "Derived signal";
+      row.append(mark);
+    }
     row.append(name, value);
     if (path.startsWith("derived/")) {
       const remove = document.createElement("button");

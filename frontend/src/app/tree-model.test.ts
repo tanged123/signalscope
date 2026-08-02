@@ -40,12 +40,14 @@ describe("buildTreeRows", () => {
       {
         kind: "channel",
         path: "channel:temp",
-        label: "temp — 2 srcs",
+        label: "temp",
         depth: 0,
         sourceKeys: ["run-01", "run-02"],
+        sourceCount: 2,
         expanded: false,
         members: ["run-01/temp", "run-02/temp"],
         names: ["temp"],
+        aliases: ["run-01: temp", "run-02: temp"],
         unitConflict: false,
       },
     ]);
@@ -59,9 +61,28 @@ describe("buildTreeRows", () => {
     expect(leaf?.kind).toBe("leaf");
     expect(channel?.kind).toBe("channel");
     expect(expanded.map((row) => row.path)).toContain("run-01/temp");
-    expect(expanded.find((row) => row.kind === "channel")?.label).toBe(
-      "temp — 2 srcs",
+    expect(expanded.find((row) => row.kind === "channel")?.label).toBe("temp");
+  });
+
+  it("exposes merged alias names and a separate source count", () => {
+    const merged = Catalog.build(
+      [signal("run-01", "temp"), signal("run-02", "temperature")],
+      [
+        {
+          canonical: "temp",
+          aliases: [
+            { source_key: "run-01", name: "temp" },
+            { source_key: "run-02", name: "temperature" },
+          ],
+        },
+      ],
     );
+    expect(buildTreeRows(merged, new Set(), "")[0]).toMatchObject({
+      kind: "channel",
+      label: "temp",
+      sourceCount: 2,
+      aliases: ["run-01: temp", "run-02: temperature"],
+    });
   });
 
   it("filters by channel or member path", () => {

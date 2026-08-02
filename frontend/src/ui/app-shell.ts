@@ -1334,6 +1334,12 @@ export class AppShell {
       this.table?.setFilter(search.value);
       this.renderSearchStatus();
     });
+    required<HTMLButtonElement>(this.root, ".dock-add-source").addEventListener(
+      "click",
+      () => {
+        void this.openFiles();
+      },
+    );
     search.addEventListener("keydown", (event) => {
       const input = search.value.trim();
       const match = input === "" ? null : evaluateSelector(this.catalog, input);
@@ -1487,12 +1493,15 @@ export class AppShell {
   private renderSearchStatus(): void {
     const input = required<HTMLInputElement>(this.root, ".signal-search");
     const count = required<HTMLElement>(this.root, ".search-count");
+    const filterRow = required<HTMLElement>(this.root, ".search-filter-row");
     const value = input.value.trim();
     count.replaceChildren();
+    filterRow.classList.remove("has-selector");
     if (value === "") return;
     const match = evaluateSelector(this.catalog, value);
     const selectorMode =
       match !== null && (match.signalCount > 0 || /[*?|[@:]/.test(value));
+    filterRow.classList.toggle("has-selector", selectorMode);
     if (selectorMode) {
       count.append(
         document.createTextNode(
@@ -1512,7 +1521,10 @@ export class AppShell {
           series.channel.toLowerCase().includes(query) ||
           series.path.toLowerCase().includes(query),
       );
-    count.textContent = `${String(matches.length)} matches`;
+    count.append(document.createTextNode(`${String(matches.length)} matches `));
+    const hint = document.createElement("span");
+    hint.textContent = "⏎ add · ⌘S set";
+    count.append(hint);
   }
 
   private openSetNameRow(refs: readonly SeriesRef[] | null = null): void {
@@ -1736,6 +1748,7 @@ export class AppShell {
         .join(" · ")} → ${suggestion.canonical}`;
       const merge = document.createElement("button");
       merge.type = "button";
+      merge.className = "channel-suggestion-merge";
       merge.textContent = "merge";
       merge.addEventListener("click", () => {
         this.workspace.mergeChannels(
@@ -1767,7 +1780,10 @@ export class AppShell {
           this.afterLayoutChange();
         });
       });
-      row.append(label, merge, separate);
+      const count = document.createElement("span");
+      count.className = "channel-suggestion-count";
+      count.textContent = String(suggestion.names.length);
+      row.append(label, count, merge, separate);
       host.appendChild(row);
     }
   }
@@ -3099,6 +3115,12 @@ export class AppShell {
     required(this.root, ".source-name").textContent = sessionName;
     required(this.root, ".session-identity").textContent =
       `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
+    const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
+    if (dockFooter !== null) {
+      renderDockFooter(dockFooter, sources, this.signals.length, () => {
+        void this.openFiles();
+      });
+    }
     const rows = required<HTMLElement>(this.root, ".source-rows");
     const toggleSources = (): void => {
       this.sourcesExpanded = !this.sourcesExpanded;
@@ -3445,6 +3467,49 @@ export function renderSourceRows(
   container.replaceChildren(...children);
 }
 
+export function renderDockFooter(
+  container: HTMLElement,
+  sources: readonly SourceSummary[],
+  signalCount: number,
+  onAddSource: () => void,
+): void {
+  const totalPoints = sources.reduce(
+    (total, source) => total + Number(source.point_count),
+    0,
+  );
+  const aggregate = document.createElement("div");
+  aggregate.className = "dock-aggregate";
+  const count = document.createElement("span");
+  count.textContent = `${String(sources.length)} sources · ${String(signalCount)} signals`;
+  const points = document.createElement("span");
+  points.className = "dock-points";
+  points.textContent = `${totalPoints.toLocaleString()} pts`;
+  aggregate.append(count, points);
+
+  const load = document.createElement("div");
+  load.className = "dock-load-row";
+  const add = document.createElement("button");
+  add.className = "dock-add-source";
+  add.type = "button";
+  add.textContent = "+ source";
+  add.addEventListener("click", onAddSource);
+  const formats = document.createElement("span");
+  formats.className = "dock-formats";
+  formats.textContent =
+    sources.length === 0 ? "CSV · MCAP" : loadedSourceFormats(sources);
+  load.append(add, formats);
+  container.replaceChildren(aggregate, load);
+}
+
+function loadedSourceFormats(sources: readonly SourceSummary[]): string {
+  const formats = new Set<string>();
+  for (const source of sources) {
+    const match = /\.([^.\/]+)$/.exec(source.path);
+    if (match?.[1] !== undefined) formats.add(match[1].toUpperCase());
+  }
+  return [...formats].sort().join(" · ") || "—";
+}
+
 const sourceAlignmentCleanup = new WeakMap<HTMLElement, () => void>();
 
 function sourceRow(
@@ -3643,7 +3708,10 @@ export function shellMarkup(): string {
 
     <aside class="signal-tree" id="signal-tree" aria-label="Signals">
       <div class="search-wrap">
-        <label>/ <input class="signal-search" placeholder="glob @ source · unit:K" spellcheck="false" /></label>
+        <div class="search-filter-row">
+          <span class="search-filter-prefix">/</span>
+          <input class="signal-search" placeholder="glob @ source · unit:K" spellcheck="false" />
+        </div>
         <div class="search-count"></div>
         <div class="set-name-row" hidden>
           <input class="set-name-input" placeholder="set name" spellcheck="false" aria-label="Set name" />
@@ -3668,6 +3736,7 @@ export function shellMarkup(): string {
         <div class="ingest-progress" hidden></div>
         <div class="channel-suggestions" hidden></div>
         <div class="source-rows"></div>
+        <div class="dock-footer"></div>
       </div>
     </aside>
 

@@ -344,16 +344,27 @@ button {
   border-bottom: 1px solid var(--border-faint);
 }
 
-.search-wrap label {
+.search-filter-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  height: 26px;
   padding: 5px 8px;
   border: 1px solid var(--border-strong);
   border-radius: 2px;
   background: var(--surface-void);
   color: var(--fg-3);
   font-family: var(--font-mono);
+}
+
+.search-filter-row:focus-within,
+.search-filter-row.has-selector {
+  border-color: var(--amber-5);
+}
+
+.search-filter-prefix {
+  color: var(--fg-2);
+  font: 0.8462rem var(--font-mono);
 }
 
 .signal-search {
@@ -451,6 +462,48 @@ button {
   font-size: 0.7692rem;
 }
 
+.dock-footer {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-faint);
+  font: 0.6923rem var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dock-aggregate,
+.dock-load-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dock-aggregate {
+  color: var(--fg-2);
+}
+
+.dock-points,
+.dock-formats {
+  margin-left: auto;
+}
+
+.dock-points,
+.dock-formats {
+  color: var(--fg-3);
+}
+
+.dock-add-source {
+  padding: 0;
+  color: var(--amber-7);
+  font: inherit;
+}
+
+.dock-add-source:hover,
+.dock-add-source:focus-visible {
+  color: var(--amber-9);
+}
+
 .channel-suggestions {
   display: grid;
   gap: 4px;
@@ -469,7 +522,7 @@ button {
 
 .channel-suggestion {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 4px;
   align-items: center;
 }
@@ -478,6 +531,15 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.channel-suggestion-count {
+  color: var(--cmd-yellow);
+  font-variant-numeric: tabular-nums;
+}
+
+.channel-suggestion-merge {
+  color: var(--amber-7) !important;
 }
 
 .channel-suggestion button,
@@ -2055,11 +2117,54 @@ button {
   color: var(--fg-1);
 }
 
+.tree-channel {
+  align-items: flex-start;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.tree-channel-body {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  line-height: 10px;
+}
+
+.tree-channel-header {
+  display: flex;
+  min-width: 0;
+  height: 11px;
+  align-items: center;
+  gap: 5px;
+}
+
+.tree-count {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-3);
+  font: 0.6923rem var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.channel-alias-line {
+  display: block;
+  overflow: hidden;
+  padding-left: 12px;
+  color: var(--fg-3);
+  font: 0.6154rem var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .channel-names-badge,
 .unit-conflict-marker {
   flex: none;
   color: var(--fg-3);
   font: 0.6923rem var(--font-mono);
+}
+
+.channel-names-badge {
+  color: var(--amber-7);
 }
 
 .unit-conflict-marker {

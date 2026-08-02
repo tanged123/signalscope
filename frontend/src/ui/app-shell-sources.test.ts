@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SourceSummary } from "../generated/protocol";
-import { renderSourceRows } from "./app-shell";
+import { renderDockFooter, renderSourceRows, shellMarkup } from "./app-shell";
 
 function source(index: number): SourceSummary {
   return {
@@ -110,4 +110,46 @@ describe("renderSourceRows", () => {
       "≠",
     );
   });
+});
+
+describe("renderDockFooter", () => {
+  it("shows aggregate counts, loaded formats, and a load action", () => {
+    const element = document.createElement("div");
+    const onAddSource = vi.fn();
+    renderDockFooter(
+      element,
+      [source(1), { ...source(2), path: "/data/run_2.mcap" }],
+      17,
+      onAddSource,
+    );
+
+    expect(element.querySelector(".dock-aggregate")?.textContent).toContain(
+      "2 sources · 17 signals",
+    );
+    expect(element.querySelector(".dock-points")?.textContent).toBe(
+      "2,000 pts",
+    );
+    expect(element.querySelector(".dock-formats")?.textContent).toBe(
+      "CSV · MCAP",
+    );
+    element.querySelector<HTMLButtonElement>(".dock-add-source")?.click();
+    expect(onAddSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the supported-format hint only for an empty workspace", () => {
+    const element = document.createElement("div");
+    renderDockFooter(element, [], 0, vi.fn());
+    expect(element.querySelector(".dock-formats")?.textContent).toBe(
+      "CSV · MCAP",
+    );
+    expect(element.querySelector(".dock-add-source")?.textContent).toBe(
+      "+ source",
+    );
+  });
+});
+
+it("keeps the filter prefix outside the input", () => {
+  const markup = shellMarkup();
+  expect(markup).toContain('class="search-filter-row"');
+  expect(markup).toContain('<span class="search-filter-prefix">/</span>');
 });
