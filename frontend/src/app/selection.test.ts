@@ -95,4 +95,16 @@ describe("SelectionModel", () => {
 
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("clears a stale deselected anchor during catalog reconciliation", () => {
+    const selection = new SelectionModel();
+    selection.toggle("live");
+    selection.toggle("deleted");
+    selection.toggle("deleted");
+
+    selection.retain(new Set(["live", "other"]));
+
+    expect(selection).toHaveProperty("anchor", null);
+    expect(selection.keys()).toEqual(["live"]);
+  });
 });

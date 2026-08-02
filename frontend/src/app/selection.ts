@@ -53,10 +53,10 @@ export class SelectionModel {
 
   retain(allowed: ReadonlySet<string>): void {
     const next = this.keys().filter((key) => allowed.has(key));
+    if (this.anchor !== null && !allowed.has(this.anchor)) this.anchor = null;
     if (next.length === this.selected.size) return;
     this.selected.clear();
     for (const key of next) this.selected.add(key);
-    if (this.anchor !== null && !allowed.has(this.anchor)) this.anchor = null;
     this.notify();
   }
 
