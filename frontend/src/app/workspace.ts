@@ -4,6 +4,7 @@ import type {
   DashStyle,
   DerivedBundleState,
   DerivedSignal,
+  GhostMode,
   LayoutRow,
   LinkedTime,
   PanelMode,
@@ -11,6 +12,7 @@ import type {
   Session,
   SeriesOverride,
   SeriesRef,
+  StyleDimension,
   FocusEntry,
   TimeDomainState,
   NamedSet,
@@ -401,8 +403,10 @@ export class WorkspaceModel {
   }
 
   toggleSeriesVisible(panelId: string, ref: SeriesRef): void {
-    const override = this.overrideFor(this.panel(panelId), ref);
-    if (override !== undefined) override.visible = !(override.visible ?? true);
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    const override = this.ensureSeriesOverride(panel, ref);
+    override.visible = !(override.visible ?? true);
   }
 
   addSeriesRef(panelId: string, ref: SeriesRef): boolean {
@@ -413,22 +417,6 @@ export class WorkspaceModel {
       this.createPickBinding(panel);
     if (binding.refs.some((entry) => sameRef(entry, ref))) return false;
     binding.refs.push({ ...ref });
-    const used = new Set(
-      panel.overrides.flatMap((entry) =>
-        entry.color_slot === null ? [] : [entry.color_slot],
-      ),
-    );
-    let colorSlot = 1;
-    while (used.has(colorSlot)) colorSlot += 1;
-    panel.overrides.push({
-      target_ref: { ...ref },
-      target_selector: null,
-      color_slot: colorSlot,
-      dash: "solid",
-      width: 1.4,
-      opacity: null,
-      visible: true,
-    });
     return true;
   }
 
@@ -479,24 +467,63 @@ export class WorkspaceModel {
   ): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    const override =
-      this.overrideFor(panel, ref) ??
-      (() => {
-        const created: SeriesOverride = {
-          target_ref: { ...ref },
-          target_selector: null,
-          color_slot: null,
-          dash: null,
-          width: null,
-          opacity: null,
-          visible: null,
-        };
-        panel.overrides.push(created);
-        return created;
-      })();
+    const override = this.ensureSeriesOverride(panel, ref);
     override.color_slot = style.color_slot;
     override.dash = style.dash;
     override.width = style.width;
+  }
+
+  setColorBy(panelId: string, dimension: StyleDimension): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.color_by = dimension;
+  }
+
+  setGhostMode(panelId: string, mode: GhostMode): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.ghost_mode = mode;
+  }
+
+  toggleGhostMode(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) {
+      panel.ghost_mode = panel.ghost_mode === "ghost" ? "all" : "ghost";
+    }
+  }
+
+  addSelectorOverride(
+    panelId: string,
+    selector: string,
+    style: Partial<
+      Pick<
+        SeriesOverride,
+        "color_slot" | "dash" | "width" | "opacity" | "visible"
+      >
+    >,
+  ): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.overrides.push({
+      target_ref: null,
+      target_selector: selector,
+      color_slot: style.color_slot ?? null,
+      dash: style.dash ?? null,
+      width: style.width ?? null,
+      opacity: style.opacity ?? null,
+      visible: style.visible ?? null,
+    });
+  }
+
+  removeOverride(panelId: string, index: number): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || index < 0 || index >= panel.overrides.length) {
+      return;
+    }
+    panel.overrides.splice(index, 1);
+  }
+
+  clearOverrides(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.overrides = [];
   }
 
   toggleFocus(panelId: string, entry: FocusEntry): void {
@@ -505,6 +532,15 @@ export class WorkspaceModel {
     const index = panel.focus.findIndex((current) => sameFocus(current, entry));
     if (index === -1) panel.focus.push(structuredClone(entry));
     else panel.focus.splice(index, 1);
+  }
+
+  clearFocus(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel !== undefined) panel.focus = [];
+  }
+
+  focusEntries(panelId: string): readonly FocusEntry[] {
+    return this.panel(panelId)?.focus ?? [];
   }
 
   setXRef(panelId: string, ref: SeriesRef | null): void {
@@ -631,6 +667,25 @@ export class WorkspaceModel {
     return panel?.overrides.find(
       (entry) => entry.target_ref !== null && sameRef(entry.target_ref, ref),
     );
+  }
+
+  private ensureSeriesOverride(
+    panel: PanelState,
+    ref: SeriesRef,
+  ): SeriesOverride {
+    const existing = this.overrideFor(panel, ref);
+    if (existing !== undefined) return existing;
+    const created: SeriesOverride = {
+      target_ref: { ...ref },
+      target_selector: null,
+      color_slot: null,
+      dash: null,
+      width: null,
+      opacity: null,
+      visible: null,
+    };
+    panel.overrides.push(created);
+    return created;
   }
 
   setPanelYRange(panelId: string, range: [number, number]): void {

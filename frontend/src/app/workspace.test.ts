@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { WorkspaceModel, emptySession } from "./workspace";
-import type { PanelState, SourceRecord } from "../generated/session";
+import type {
+  PanelState,
+  SourceRecord,
+  StyleDimension,
+} from "../generated/session";
 
 interface TestSeries {
   path: string;
@@ -436,16 +440,13 @@ describe("WorkspaceModel", () => {
     expect(widths(model, 0)).toEqual([1]);
   });
 
-  it("assigns the lowest unused color slot per panel", () => {
+  it("adds series refs without allocating manual overrides", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
     expect(model.addSeriesRef(panel.id, refForPath("a/one"))).toBe(true);
     expect(model.addSeriesRef(panel.id, refForPath("a/two"))).toBe(true);
     expect(model.addSeriesRef(panel.id, refForPath("a/one"))).toBe(false);
-    const slots = legacySeries(model.panel(panel.id)).map(
-      (series) => series.color_slot,
-    );
-    expect(slots).toEqual([1, 2]);
+    expect(model.panel(panel.id)?.overrides).toEqual([]);
   });
 
   it("addSeriesRefs adds all new refs in one call and skips duplicates", () => {
@@ -464,7 +465,7 @@ describe("WorkspaceModel", () => {
       "run_02/alt",
       "run_03/alt",
     ]);
-    expect(new Set(series.map((entry) => entry.color_slot)).size).toBe(3);
+    expect(model.panel(panel.id)?.overrides).toEqual([]);
     expect(model.addSeriesRefs(panel.id, [refForPath("run_02/alt")])).toBe(
       false,
     );
@@ -481,20 +482,13 @@ describe("WorkspaceModel", () => {
     };
     model.toggleFocus(panel.id, entry);
     expect(model.panel(panel.id)?.focus).toEqual([entry]);
+    expect(model.focusEntries(panel.id)).toEqual([entry]);
+    model.clearFocus(panel.id);
+    expect(model.focusEntries(panel.id)).toEqual([]);
+    model.toggleFocus(panel.id, entry);
+    expect(model.focusEntries(panel.id)).toEqual([entry]);
     model.toggleFocus(panel.id, entry);
     expect(model.panel(panel.id)?.focus).toEqual([]);
-  });
-
-  it("allocates slots past 8 instead of wrapping onto slot 1", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    for (let index = 0; index < 10; index += 1) {
-      model.addSeriesRef(panel.id, refForPath(`rocket/sig_${String(index)}`));
-    }
-    const slots = legacySeries(model.panels()[0]).map(
-      (series) => series.color_slot,
-    );
-    expect(slots).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
   it("colour-by-time replaces the colour signal", () => {
@@ -522,6 +516,76 @@ describe("WorkspaceModel", () => {
     model.addSeriesRef(panel.id, refForPath("a/one"));
     model.toggleSeriesVisible(panel.id, { source_key: "a", channel: "one" });
     expect(legacySeries(model.panel(panel.id))[0]?.visible).toBe(false);
+  });
+
+  it("stores color rules, ghost mode, and selector overrides", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const dimensions: StyleDimension[] = [
+      "focus",
+      "source",
+      "channel",
+      "set",
+      "attr",
+    ];
+    for (const dimension of dimensions) model.setColorBy(panel.id, dimension);
+    expect(model.panel(panel.id)?.color_by).toBe("attr");
+
+    model.setGhostMode(panel.id, "ghost");
+    expect(model.panel(panel.id)?.ghost_mode).toBe("ghost");
+    model.toggleGhostMode(panel.id);
+    expect(model.panel(panel.id)?.ghost_mode).toBe("all");
+
+    model.addSelectorOverride(panel.id, "temp* @ run_01", {
+      color_slot: 3,
+      opacity: 0.5,
+      visible: false,
+    });
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      {
+        target_ref: null,
+        target_selector: "temp* @ run_01",
+        color_slot: 3,
+        dash: null,
+        width: null,
+        opacity: 0.5,
+        visible: false,
+      },
+    ]);
+  });
+
+  it("merges target-ref styles and manages the override stack", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("a/one");
+    model.setSeriesOverride(panel.id, ref, {
+      color_slot: 5,
+      dash: "dot",
+      width: 2.5,
+    });
+    model.setSeriesOverride(panel.id, ref, {
+      color_slot: 2,
+      dash: "solid",
+      width: 3,
+    });
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      {
+        target_ref: ref,
+        target_selector: null,
+        color_slot: 2,
+        dash: "solid",
+        width: 3,
+        opacity: null,
+        visible: null,
+      },
+    ]);
+
+    model.addSelectorOverride(panel.id, "one", { width: 4 });
+    model.removeOverride(panel.id, 1);
+    expect(model.panel(panel.id)?.overrides).toHaveLength(1);
+    model.addSelectorOverride(panel.id, "one", { width: 4 });
+    model.clearOverrides(panel.id);
+    expect(model.panel(panel.id)?.overrides).toEqual([]);
   });
 
   it("promotes a plotted series to the XY x axis", () => {
