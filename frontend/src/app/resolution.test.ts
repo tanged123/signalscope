@@ -190,7 +190,7 @@ describe("resolvePanel", () => {
   it("assigns hue slots by source, channel, and first-appearance order", () => {
     const sources = Array.from(
       { length: 8 },
-      (_, index) => `run_0${index + 1}`,
+      (_, index) => `run_0${String(index + 1)}`,
     );
     const wideCatalog = Catalog.build([
       ...sources.flatMap((source) => [

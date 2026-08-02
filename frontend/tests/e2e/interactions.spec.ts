@@ -35,8 +35,7 @@ test.describe("desktop plot interactions", () => {
     await page.mouse.wheel(0, -240);
     await expect(readout).not.toHaveText(beforeWindow ?? "");
 
-    await panel.locator(".panel-header").click();
-    await page.keyboard.press("s");
+    await panel.locator(".panel-stats-toggle").click();
     await expect(panel.locator(".panel-stats")).toBeVisible();
     await expect(panel.locator(".panel-stats")).toContainText("μ");
     const metricMargins = await panel
@@ -110,7 +109,7 @@ test.describe("desktop plot interactions", () => {
     await expect(readout).toHaveText(fitted ?? "");
   });
 
-  test("title editing, inline axes and legend inspector are keyboard reachable", async ({
+  test("title editing, inline axes and rules are keyboard reachable", async ({
     page,
   }) => {
     const panel = page.locator(".panel").first();
@@ -126,13 +125,11 @@ test.describe("desktop plot interactions", () => {
       "axes: inline",
     );
 
-    await panel.locator(".legend-chip-caret").first().click();
-    const inspector = panel.locator(".series-inspector");
-    await expect(inspector).toBeVisible();
-    await expect(inspector.locator(".inspector-slot")).toHaveCount(7);
-    await page.keyboard.press("s");
-    await expect(inspector).toBeVisible();
-    await inspector.locator(".inspector-dash", { hasText: "dot" }).click();
-    await expect(inspector).toBeHidden();
+    await panel.locator(".color-rule-token").click();
+    const rules = panel.locator(".rules-popover");
+    await expect(rules).toBeVisible();
+    await expect(rules.locator(".rules-dimension")).toHaveCount(5);
+    await rules.getByRole("button", { name: "color ← channel" }).click();
+    await expect(rules).toBeHidden();
   });
 });

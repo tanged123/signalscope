@@ -613,6 +613,14 @@ export class WorkspaceModel {
     return true;
   }
 
+  removeBinding(panelId: string, index: number): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || index < 0 || index >= panel.bindings.length) {
+      return;
+    }
+    panel.bindings.splice(index, 1);
+  }
+
   nextSetId(): string {
     let maximum = 0;
     for (const set of this.session.named_sets) {

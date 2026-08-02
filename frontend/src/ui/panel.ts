@@ -1,6 +1,11 @@
 import { formatCombo } from "../app/commands";
 import type { Catalog } from "../app/catalog";
-import { dimensionCounts, type ResolvedSeries } from "../app/resolution";
+import {
+  appliedOverrides,
+  dimensionCounts,
+  overrideFor,
+  type ResolvedSeries,
+} from "../app/resolution";
 import { virtualSlice } from "../app/tree-model";
 import { evaluateSelector } from "../app/selector";
 import type {
@@ -10,13 +15,16 @@ import type {
 } from "../generated/protocol";
 import type {
   AxisStyle,
+  Binding,
   DashStyle,
   FocusEntry,
+  NamedSet,
   PanelMode,
   PanelState,
   SeriesRef,
+  SeriesOverride,
+  StyleDimension,
 } from "../generated/session";
-import type { ResolvedSeries } from "../app/resolution";
 import {
   clamp,
   formatValue,
@@ -28,6 +36,7 @@ import {
   type Range,
 } from "../app/plot-math";
 import { histogram } from "../app/histogram";
+import { nearestLine } from "../app/plot-hit";
 import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
@@ -43,6 +52,7 @@ import {
 } from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
 import { lerpSample, pairSamples, type XyTrace } from "../app/xy";
+import { nearestXyPoint } from "../app/xy-hit";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
@@ -102,13 +112,16 @@ export interface PanelCallbacks {
   onDropSignals(id: string, paths: string[]): void;
   onDropSet(id: string, setId: string): void;
   onFocusToggle(id: string, entry: FocusEntry): void;
+  onClearFocus(id: string): void;
   onMuteSelector(id: string, selector: string): void;
   onMuteSeries(id: string, ref: SeriesRef): void;
-  onToggleHighlight(id: string, path: string): void;
+  onRemoveBinding(id: string, index: number): void;
+  onToggleGhostMode(id: string): void;
   localPathFor(path: string): string | null;
   sourceKeyFor(path: string): string | null;
   pathForRef(ref: { source_key: string; channel: string }): string | null;
   catalog(): Catalog;
+  namedSets(): readonly NamedSet[];
   resolveSeries(state: PanelState): readonly ResolvedSeries[];
   onSetXSignal(id: string, path: string): void;
   onSetColorSignal(id: string, path: string | null): void;
@@ -136,6 +149,9 @@ export interface PanelCallbacks {
     axis: "x" | "y" | "c",
     label: string | null,
   ): void;
+  onSetColorBy(id: string, dimension: StyleDimension): void;
+  onRemoveOverride(id: string, index: number): void;
+  onClearOverrides(id: string): void;
   onSetSeriesStyle(
     id: string,
     ref: SeriesRef,
@@ -170,10 +186,7 @@ export interface RenderSeries {
   overridden: boolean;
 }
 
-export type RenderPanelState = Omit<
-  PanelState,
-  "x_ref" | "color_ref" | "bindings" | "overrides"
-> & {
+export type RenderPanelState = Omit<PanelState, "x_ref" | "color_ref"> & {
   x_signal: string | null;
   color_signal: string | null;
   color_by_time: boolean;
@@ -197,6 +210,14 @@ export interface FocusChip {
   label: string;
   hue: number | null;
   overridden: boolean;
+}
+
+export interface BindingChipEntry {
+  label: string;
+  bindingIndex: number;
+  kind: Binding["kind"];
+  refs: SeriesRef[];
+  selector: string | null;
 }
 
 export function matrixLegendRows(
@@ -283,6 +304,84 @@ export function focusChips(
     chips: chips.slice(0, limit),
     overflow: Math.max(0, chips.length - limit),
   };
+}
+
+export function bindingChipEntries(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "bindings">,
+  namedSets: readonly NamedSet[],
+): BindingChipEntry[] {
+  const entries: BindingChipEntry[] = [];
+  for (const [bindingIndex, binding] of state.bindings.entries()) {
+    if (binding.kind === "pick") {
+      const groups = new Map<string, SeriesRef[]>();
+      for (const ref of binding.refs) {
+        const group = groups.get(ref.channel) ?? [];
+        group.push(ref);
+        groups.set(ref.channel, group);
+      }
+      for (const [channel, refs] of groups) {
+        entries.push({
+          label: `${channel} ×${String(refs.length)}`,
+          bindingIndex,
+          kind: binding.kind,
+          refs,
+          selector: null,
+        });
+      }
+      continue;
+    }
+
+    const selector =
+      binding.kind === "query"
+        ? binding.selector
+        : (namedSets.find((set) => set.id === binding.set_id)?.selector ??
+          null);
+    const set =
+      binding.kind === "set"
+        ? namedSets.find((entry) => entry.id === binding.set_id)
+        : null;
+    const refs =
+      binding.kind === "set" && set?.kind === "pick"
+        ? set.refs
+        : selector === null
+          ? []
+          : (evaluateSelector(catalog, selector)?.series ?? []).map(
+              (series) =>
+                catalog.refFromPath(series.path) ?? {
+                  source_key: series.sourceKey,
+                  channel: series.channel,
+                },
+            );
+    const label =
+      binding.kind === "set"
+        ? `★ ${set?.name ?? binding.set_id ?? "missing set"} · ${String(refs.length)}`
+        : `${binding.selector ?? "invalid selector"} · ${String(refs.length)}`;
+    entries.push({
+      label,
+      bindingIndex,
+      kind: binding.kind,
+      refs,
+      selector,
+    });
+  }
+  return entries;
+}
+
+export function focusHeaderLabel(
+  state: Pick<RenderPanelState, "series" | "focus">,
+): { label: string; position: string } | null {
+  const entry = state.focus[0];
+  if (entry === undefined) return null;
+  const matching = state.series.filter((series) =>
+    focusMatches(entry, series.ref),
+  );
+  const label =
+    matching[0]?.path ??
+    (entry.kind === "source"
+      ? (entry.source_key ?? "source")
+      : (entry.channel ?? "channel"));
+  return { label, position: `1/${String(state.focus.length)}` };
 }
 
 function setsEqual(
@@ -447,9 +546,13 @@ export class PanelView {
   private cursorMode: CursorMode = "none";
   private box: InteractionBox | null = null;
   private emphasizePaths: ReadonlySet<string> | null = null;
+  private hoverPoint: { x: number; y: number } | null = null;
+  private hoverTag: HTMLElement | null = null;
   private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
   private rosterCleanup: (() => void) | null = null;
+  private bindingCleanup: (() => void) | null = null;
+  private rulesCleanup: (() => void) | null = null;
   private hasColorbar = false;
 
   constructor(
@@ -459,6 +562,7 @@ export class PanelView {
     this.element = document.createElement("article");
     this.element.className = "panel";
     this.element.dataset.panelId = id;
+    this.element.tabIndex = 0;
     this.element.innerHTML = panelMarkup();
     this.canvas = required<HTMLCanvasElement>(this.element, ".plot-canvas");
     this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
@@ -476,8 +580,8 @@ export class PanelView {
       fitView: () => {
         this.callbacks.onFitView(this.id);
       },
-      plotClick: (x, y) => {
-        this.plotClick(x, y);
+      plotClick: (x, y, modifiers) => {
+        this.plotClick(x, y, modifiers);
       },
       setGesture: (hint) => {
         this.callbacks.onGesture(this.id, hint);
@@ -512,8 +616,15 @@ export class PanelView {
     this.element.addEventListener("pointerdown", (event) => {
       this.callbacks.onFocus(this.id);
       const target = event.target;
-      if (target instanceof Node && !this.element.contains(target)) {
+      if (
+        target instanceof Node &&
+        !this.element.contains(target) &&
+        !this.element.querySelector(".matrix-roster")?.contains(target) &&
+        !this.element.querySelector(".binding-popover")?.contains(target)
+      ) {
         this.closeRoster();
+        this.closeBindingPopover();
+        this.closeRulesPopover();
       }
     });
     required(this.element, ".panel-close").addEventListener("click", () => {
@@ -546,8 +657,36 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
+    required(this.element, ".panel-ghost-toggle").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onToggleGhostMode(this.id);
+      },
+    );
     this.element.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") this.closeRoster();
+      if (event.key === "Escape") {
+        if (this.emphasizePaths !== null) this.clearHover();
+        else this.callbacks.onClearFocus(this.id);
+        this.closeRoster();
+        this.closeBindingPopover();
+      } else if (event.key === "Tab" && this.cursorT !== null) {
+        event.preventDefault();
+        this.walkHover(event.shiftKey ? -1 : 1);
+      } else if (event.key === "Enter" && this.emphasizePaths?.size === 1) {
+        const path = [...this.emphasizePaths][0];
+        const series = this.lastState?.series.find(
+          (entry) => entry.path === path,
+        );
+        if (series !== undefined) {
+          event.preventDefault();
+          this.callbacks.onFocusToggle(this.id, {
+            kind: "series",
+            ref: series.ref,
+            source_key: null,
+            channel: series.ref.channel,
+          });
+        }
+      }
     });
     for (const button of this.element.querySelectorAll<HTMLButtonElement>(
       ".mode-pill",
@@ -639,6 +778,16 @@ export class PanelView {
         layout !== null && inside
           ? this.cursorAt(layout, event.offsetX, event.offsetY, XY_HOVER_RADIUS)
           : null;
+      if (layout !== null && inside) {
+        this.updateHover(
+          event.offsetX,
+          event.offsetY,
+          event.clientX,
+          event.clientY,
+        );
+      } else {
+        this.clearHover();
+      }
       this.callbacks.onCursor(
         this.id,
         cursor,
@@ -647,6 +796,7 @@ export class PanelView {
     });
     this.overlay.addEventListener("pointerleave", () => {
       if (!this.interactions.isDragging()) {
+        this.clearHover();
         this.callbacks.onCursor(this.id, null, null);
       }
     });
@@ -717,6 +867,9 @@ export class PanelView {
     );
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
+    this.updateBindings(rendered);
+    this.updateFocusHeader(rendered);
+    this.updateGhostToggle(rendered);
     this.updateLegend(rendered);
     const annotations = this.resolvedAnnotations(rendered);
     this.renderAnnotationList(rendered, annotations);
@@ -1232,11 +1385,168 @@ export class PanelView {
     return this.element.getBoundingClientRect();
   }
 
-  plotClick(offsetX: number, offsetY: number): void {
-    // 2A's asymmetry: the remove radius is smaller than the pin radius so a
-    // double-click cancels its own accidental pin before fitting.
+  plotClick(
+    offsetX: number,
+    offsetY: number,
+    modifiers: { alt: boolean } = { alt: false },
+  ): void {
+    // Preserve the existing annotation gesture at a rendered vertex. A line
+    // click away from a vertex is the focus gesture for the series underneath.
     if (this.removeAt(offsetX, offsetY, 9)) return;
-    this.pinAt(offsetX, offsetY, 14);
+    if (this.pinAt(offsetX, offsetY, 14)) return;
+    const hit = this.seriesHit(offsetX, offsetY, 6);
+    if (hit !== null) {
+      const series = this.lastState?.series.find(
+        (entry) => entry.path === hit.path,
+      );
+      if (series !== undefined) {
+        if (modifiers.alt) this.callbacks.onMuteSeries(this.id, series.ref);
+        else {
+          this.callbacks.onFocusToggle(this.id, {
+            kind: "series",
+            ref: series.ref,
+            source_key: null,
+            channel: series.ref.channel,
+          });
+        }
+        return;
+      }
+    }
+  }
+
+  private seriesHit(
+    offsetX: number,
+    offsetY: number,
+    threshold: number,
+  ): { path: string; distance: number } | null {
+    const layout = this.renderer.lastLayout();
+    const state = this.lastState;
+    if (layout === null || state === null) return null;
+    if (state.mode === "time") {
+      const byPath = new Map(
+        state.series.map((series) => [series.path, series]),
+      );
+      const hit = nearestLine(
+        (this.lastTiles?.series ?? [])
+          .filter((tile) => byPath.get(tile.signal_path)?.visible === true)
+          .map((tile) => ({ path: tile.signal_path, bins: tile.bins })),
+        layout,
+        offsetX,
+        offsetY,
+        threshold,
+      );
+      return hit === null ? null : { path: hit.path, distance: hit.distance };
+    }
+    if (state.mode === "xy") {
+      const hit = nearestXyPoint(
+        this.xyTraces,
+        layout,
+        offsetX,
+        offsetY,
+        threshold,
+      );
+      return hit === null ? null : { path: hit.path, distance: 0 };
+    }
+    const hit = this.preparedPlot?.annotationAt(
+      layout,
+      { x: offsetX, y: offsetY },
+      threshold,
+    );
+    return hit === null || hit === undefined
+      ? null
+      : { path: hit.path, distance: 0 };
+  }
+
+  private updateHover(
+    offsetX: number,
+    offsetY: number,
+    clientX: number,
+    clientY: number,
+  ): void {
+    const hit = this.seriesHit(offsetX, offsetY, 6);
+    if (hit === null) {
+      this.clearHover();
+      return;
+    }
+    this.hoverPoint = { x: offsetX, y: offsetY };
+    this.setEmphasis(hit.path);
+    this.showHoverTag(hit.path, clientX, clientY);
+  }
+
+  private showHoverTag(path: string, clientX: number, clientY: number): void {
+    const series = this.lastState?.series.find((entry) => entry.path === path);
+    if (series === undefined) return;
+    const panelRect = this.element.getBoundingClientRect();
+    const tag = this.hoverTag ?? document.createElement("div");
+    this.hoverTag = tag;
+    tag.className = "plot-hover-tag";
+    tag.textContent = `${series.path} — click to focus`;
+    tag.hidden = false;
+    this.element.append(tag);
+    const tagRect = tag.getBoundingClientRect();
+    tag.style.left = `${String(
+      clamp(
+        clientX - panelRect.left + 10,
+        4,
+        Math.max(4, panelRect.width - tagRect.width - 4),
+      ),
+    )}px`;
+    tag.style.top = `${String(
+      clamp(
+        clientY - panelRect.top + 10,
+        4,
+        Math.max(4, panelRect.height - tagRect.height - 4),
+      ),
+    )}px`;
+  }
+
+  private clearHover(): void {
+    this.hoverPoint = null;
+    this.setEmphasis(null);
+    if (this.hoverTag !== null) {
+      this.hoverTag.hidden = true;
+      this.hoverTag.remove();
+      this.hoverTag = null;
+    }
+  }
+
+  private walkHover(direction: -1 | 1): void {
+    const state = this.lastState;
+    if (state === null) return;
+    const values = new Map(
+      (this.lastTiles?.series ?? []).map((tile) => [
+        tile.signal_path,
+        this.cursorT === null ? null : valueAtTime(tile.bins, this.cursorT),
+      ]),
+    );
+    const series = state.series
+      .filter((entry) => entry.visible)
+      .map((entry, index) => ({
+        entry,
+        index,
+        value: values.get(entry.path),
+      }))
+      .sort((left, right) => {
+        if (left.value === null || left.value === undefined) return 1;
+        if (right.value === null || right.value === undefined) return -1;
+        return left.value - right.value || left.index - right.index;
+      });
+    if (series.length === 0) return;
+    const current = [...(this.emphasizePaths ?? [])][0];
+    const index = series.findIndex((item) => item.entry.path === current);
+    const next =
+      series[(index === -1 ? (direction === 1 ? -1 : 0) : index) + direction];
+    const wrapped = next ?? series[direction === 1 ? 0 : series.length - 1];
+    if (wrapped === undefined) return;
+    this.setEmphasis(wrapped.entry.path);
+    if (this.hoverPoint !== null) {
+      const canvasRect = this.canvas.getBoundingClientRect();
+      this.showHoverTag(
+        wrapped.entry.path,
+        canvasRect.left + this.hoverPoint.x,
+        canvasRect.top + this.hoverPoint.y,
+      );
+    }
   }
 
   /** Removes the annotation under the pixel; true when one was removed. */
@@ -1262,9 +1572,9 @@ export class PanelView {
   }
 
   /** Pins the nearest plotted vertex under the pixel, when one is in range. */
-  private pinAt(offsetX: number, offsetY: number, radius: number): void {
+  private pinAt(offsetX: number, offsetY: number, radius: number): boolean {
     const layout = this.renderer.lastLayout();
-    if (layout === null) return;
+    if (layout === null) return false;
     const hit = this.preparedPlot?.annotationAt(
       layout,
       { x: offsetX, y: offsetY },
@@ -1272,7 +1582,9 @@ export class PanelView {
     );
     if (hit !== null && hit !== undefined) {
       this.callbacks.onPinAnnotation(this.id, hit);
+      return true;
     }
+    return false;
   }
 
   private cursorAt(
@@ -1620,7 +1932,75 @@ export class PanelView {
       this.legendCountToken("source", counts.sources, state),
       ...this.focusChipElements(state),
       this.legendCountToken("channel", counts.channels, state),
+      this.colorRuleToken(state),
     );
+  }
+
+  private colorRuleToken(state: RenderPanelState): HTMLButtonElement {
+    const token = document.createElement("button");
+    token.className = "color-rule-token";
+    token.type = "button";
+    token.textContent = `color ← ${state.color_by}`;
+    token.title = "Choose a color rule and review overrides";
+    token.addEventListener("click", (event) => {
+      this.openRulesPopover(state, event.currentTarget as HTMLElement);
+    });
+    return token;
+  }
+
+  private updateBindings(state: RenderPanelState): void {
+    const container = required(this.element, ".panel-bindings");
+    container.replaceChildren();
+    for (const entry of bindingChipEntries(
+      this.callbacks.catalog(),
+      state,
+      this.callbacks.namedSets(),
+    )) {
+      const chip = document.createElement("button");
+      chip.className = "binding-chip";
+      chip.type = "button";
+      chip.textContent = entry.label;
+      chip.title = "Show binding members";
+      chip.addEventListener("click", (event) => {
+        this.openBindingPopover(entry, event.currentTarget as HTMLElement);
+      });
+      container.append(chip);
+    }
+  }
+
+  private updateFocusHeader(state: RenderPanelState): void {
+    const chip = required<HTMLElement>(this.element, ".panel-focus-chip");
+    chip.replaceChildren();
+    const header = focusHeaderLabel(state);
+    chip.hidden = header === null;
+    if (header === null) return;
+    const label = document.createElement("span");
+    label.textContent = `focus ${header.label} · ${header.position}`;
+    const remove = document.createElement("button");
+    remove.className = "panel-focus-remove";
+    remove.type = "button";
+    remove.textContent = "✕";
+    remove.title = "Clear focused entry";
+    const entry = state.focus[0];
+    if (entry !== undefined) {
+      remove.addEventListener("click", () => {
+        this.callbacks.onFocusToggle(this.id, entry);
+      });
+    }
+    chip.append(label, remove);
+  }
+
+  private updateGhostToggle(state: RenderPanelState): void {
+    const toggle = required<HTMLButtonElement>(
+      this.element,
+      ".panel-ghost-toggle",
+    );
+    const ghost = state.ghost_mode === "ghost";
+    toggle.textContent = ghost ? "ghost" : "all";
+    toggle.title = ghost
+      ? "Show all series"
+      : "Show focused and rule-matched series only";
+    toggle.setAttribute("aria-pressed", String(ghost));
   }
 
   private legendCountToken(
@@ -1733,7 +2113,7 @@ export class PanelView {
         button.className = "matrix-roster-row";
         button.type = "button";
         button.innerHTML = `<span class="matrix-roster-key"></span><span class="matrix-roster-label"></span><span class="matrix-roster-count"></span>`;
-        const key = required(button, ".matrix-roster-key");
+        const key = required<HTMLElement>(button, ".matrix-roster-key");
         key.style.color =
           row.hue === null
             ? "var(--fg-4)"
@@ -1821,7 +2201,213 @@ export class PanelView {
     this.rosterCleanup = null;
   }
 
-  private openInspector(path: string, clientX: number, clientY: number): void {
+  private openBindingPopover(
+    entry: BindingChipEntry,
+    anchor: HTMLElement,
+  ): void {
+    this.closeBindingPopover();
+    const popover = document.createElement("div");
+    popover.className = "binding-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", `${entry.label} binding members`);
+    const title = document.createElement("div");
+    title.className = "binding-popover-title";
+    title.textContent = entry.label;
+    const rows = document.createElement("div");
+    rows.className = "binding-popover-rows";
+    const removeBinding = document.createElement("button");
+    removeBinding.className = "binding-popover-remove";
+    removeBinding.type = "button";
+    removeBinding.textContent = "remove binding";
+    removeBinding.addEventListener("click", () => {
+      this.callbacks.onRemoveBinding(this.id, entry.bindingIndex);
+      this.closeBindingPopover();
+    });
+    const renderRows = (): void => {
+      const slice = virtualSlice(entry.refs.length, rows.scrollTop, 224, 24);
+      rows.replaceChildren();
+      rows.style.height = `${String(slice.totalHeight)}px`;
+      rows.style.paddingTop = `${String(slice.topPadding)}px`;
+      for (const ref of entry.refs.slice(slice.start, slice.end)) {
+        const row = document.createElement("div");
+        row.className = "binding-popover-row";
+        const path = document.createElement("button");
+        path.className = "binding-popover-member";
+        path.type = "button";
+        path.textContent =
+          this.callbacks.pathForRef(ref) ?? `${ref.source_key}/${ref.channel}`;
+        path.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const rect = path.getBoundingClientRect();
+          this.closeBindingPopover();
+          this.openInspector(path.textContent ?? "", rect.left, rect.bottom);
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "✕";
+        remove.title = "Remove series from binding";
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.callbacks.onRemoveSeries(this.id, ref);
+          this.closeBindingPopover();
+        });
+        row.append(path, remove);
+        rows.append(row);
+      }
+    };
+    rows.addEventListener("scroll", renderRows);
+    popover.append(title, rows, removeBinding);
+    this.element.append(popover);
+    const panelRect = this.element.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    popover.style.left = `${String(
+      clamp(
+        anchorRect.left - panelRect.left,
+        4,
+        Math.max(4, panelRect.width - 240),
+      ),
+    )}px`;
+    popover.style.top = `${String(
+      clamp(
+        anchorRect.bottom - panelRect.top + 4,
+        4,
+        Math.max(4, panelRect.height - 280),
+      ),
+    )}px`;
+    renderRows();
+    const onPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && popover.contains(event.target))
+        return;
+      this.closeBindingPopover();
+    };
+    document.addEventListener("pointerdown", onPointer, { capture: true });
+    this.bindingCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer, { capture: true });
+      popover.remove();
+    };
+  }
+
+  private closeBindingPopover(): void {
+    this.bindingCleanup?.();
+    this.bindingCleanup = null;
+  }
+
+  private openRulesPopover(state: RenderPanelState, anchor: HTMLElement): void {
+    this.closeRulesPopover();
+    const popover = document.createElement("div");
+    popover.className = "rules-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", "Color rules");
+    const heading = document.createElement("div");
+    heading.className = "rules-popover-title";
+    heading.textContent = "color rule";
+    const dimensions = document.createElement("div");
+    dimensions.className = "rules-dimensions";
+    for (const dimension of [
+      "focus",
+      "source",
+      "channel",
+      "set",
+      "attr",
+    ] as const) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rules-dimension";
+      button.textContent = `color ← ${dimension}`;
+      button.classList.toggle("active", state.color_by === dimension);
+      button.addEventListener("click", () => {
+        this.callbacks.onSetColorBy(this.id, dimension);
+        this.closeRulesPopover();
+      });
+      dimensions.append(button);
+    }
+    const overridesTitle = document.createElement("div");
+    overridesTitle.className = "rules-overrides-title";
+    const input = this.lastInputState;
+    const overrides =
+      input === null ? [] : appliedOverrides(this.callbacks.catalog(), input);
+    overridesTitle.textContent = `OVERRIDES · ${String(overrides.length)}`;
+    const rows = document.createElement("div");
+    rows.className = "rules-overrides";
+    const renderOverrides = (): void => {
+      const slice = virtualSlice(overrides.length, rows.scrollTop, 224, 28);
+      rows.replaceChildren();
+      rows.style.height = `${String(slice.totalHeight)}px`;
+      rows.style.paddingTop = `${String(slice.topPadding)}px`;
+      for (const item of overrides.slice(slice.start, slice.end)) {
+        const row = document.createElement("div");
+        row.className = "rules-override-row";
+        const target = document.createElement("span");
+        target.className = "rules-override-target";
+        target.textContent = overrideTarget(item.override, this.callbacks);
+        target.title = target.textContent;
+        const fields = document.createElement("span");
+        fields.className = "rules-override-fields";
+        fields.textContent = overrideFields(item.override);
+        const revert = document.createElement("button");
+        revert.type = "button";
+        revert.textContent = "revert";
+        revert.title = `Revert ${target.textContent}`;
+        revert.addEventListener("click", () => {
+          this.callbacks.onRemoveOverride(this.id, item.index);
+          this.closeRulesPopover();
+        });
+        row.append(target, fields, revert);
+        rows.append(row);
+      }
+    };
+    rows.addEventListener("scroll", renderOverrides);
+    const footer = document.createElement("button");
+    footer.type = "button";
+    footer.className = "rules-revert-all";
+    footer.textContent = "revert all";
+    footer.disabled = overrides.length === 0;
+    footer.addEventListener("click", () => {
+      this.callbacks.onClearOverrides(this.id);
+      this.closeRulesPopover();
+    });
+    popover.append(heading, dimensions, overridesTitle, rows, footer);
+    this.element.append(popover);
+    const panelRect = this.element.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    popover.style.left = `${String(
+      clamp(
+        anchorRect.left - panelRect.left,
+        4,
+        Math.max(4, panelRect.width - 280),
+      ),
+    )}px`;
+    popover.style.top = `${String(
+      clamp(
+        anchorRect.bottom - panelRect.top + 4,
+        4,
+        Math.max(4, panelRect.height - 340),
+      ),
+    )}px`;
+    renderOverrides();
+    const onPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && popover.contains(event.target))
+        return;
+      this.closeRulesPopover();
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") this.closeRulesPopover();
+    };
+    document.addEventListener("pointerdown", onPointer, { capture: true });
+    document.addEventListener("keydown", onKey);
+    this.rulesCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer, { capture: true });
+      document.removeEventListener("keydown", onKey);
+      popover.remove();
+    };
+  }
+
+  private closeRulesPopover(): void {
+    this.rulesCleanup?.();
+    this.rulesCleanup = null;
+  }
+
+  openInspector(path: string, clientX: number, clientY: number): void {
     this.closeInspector();
     const series = this.lastState?.series.find((entry) => entry.path === path);
     if (series === undefined) return;
@@ -1903,17 +2489,28 @@ export class PanelView {
       });
       transforms.append(button);
     }
-    const localPath = this.callbacks.localPathFor(path);
-    const highlight =
-      localPath === null ? null : document.createElement("button");
-    if (highlight !== null) {
-      const active = series.focused;
-      highlight.className = "inspector-action";
-      highlight.textContent = active ? "Clear highlight" : "Highlight";
-      highlight.addEventListener("click", () => {
+    const override =
+      this.lastInputState === null
+        ? undefined
+        : overrideFor(this.lastInputState, series.ref);
+    const overrideAction =
+      override === undefined ? null : document.createElement("div");
+    if (overrideAction !== null) {
+      const selectedOverride = override;
+      if (selectedOverride === undefined) return;
+      overrideAction.className = "inspector-override";
+      overrideAction.textContent = `◆ override · ${overrideTarget(selectedOverride, this.callbacks)}`;
+      const revert = document.createElement("button");
+      revert.type = "button";
+      revert.textContent = "revert";
+      const overrideIndex =
+        this.lastInputState?.overrides.indexOf(selectedOverride) ?? -1;
+      revert.addEventListener("click", () => {
+        if (overrideIndex !== -1)
+          this.callbacks.onRemoveOverride(this.id, overrideIndex);
         this.closeInspector();
-        this.callbacks.onToggleHighlight(this.id, path);
       });
+      overrideAction.append(revert);
     }
     const useAsX = document.createElement("button");
     useAsX.className = "inspector-action";
@@ -1934,7 +2531,7 @@ export class PanelView {
       slots,
       dashes,
       transforms,
-      ...(highlight === null ? [] : [highlight]),
+      ...(overrideAction === null ? [] : [overrideAction]),
       useAsX,
       remove,
     );
@@ -1973,6 +2570,32 @@ export class PanelView {
     this.inspectorPath = null;
     this.element.querySelector(".series-inspector")?.remove();
   }
+}
+
+function overrideTarget(
+  override: SeriesOverride,
+  callbacks: Pick<PanelCallbacks, "pathForRef">,
+): string {
+  if (override.target_selector !== null) return override.target_selector;
+  if (override.target_ref !== null) {
+    return (
+      callbacks.pathForRef(override.target_ref) ??
+      `${override.target_ref.source_key}/${override.target_ref.channel}`
+    );
+  }
+  return "unknown target";
+}
+
+function overrideFields(override: SeriesOverride): string {
+  return [
+    override.color_slot === null ? null : "color",
+    override.dash === null ? null : "dash",
+    override.width === null ? null : "width",
+    override.opacity === null ? null : "opacity",
+    override.visible === null ? null : "visible",
+  ]
+    .filter((field): field is string => field !== null)
+    .join(" · ");
 }
 
 function yLabel(units: readonly (string | null)[]): string {
@@ -2089,6 +2712,9 @@ function panelMarkup(): string {
           `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
       ).join("")}</span>
       <button class="axis-chip x-chip" hidden></button>
+      <span class="panel-bindings"></span>
+      <span class="panel-focus-chip" hidden></span>
+      <button class="panel-ghost-toggle" type="button" aria-pressed="false">all</button>
       <span class="panel-legend"></span>
       <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>

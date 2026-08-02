@@ -60,6 +60,12 @@ inert chrome.
 Signals-at-scale P2 is landed: the selector grammar, named-set UX, and palette
 unification now cover dock filters, bindings, saved sets, and signal search.
 
+Signals-at-scale P3 is landed: panel style resolution now maps color rules and
+selector overrides into explicit focus, rule, and ghost strokes. Matrix legend
+rosters, grouped binding chips, focus/ghost controls, plot hit navigation, and
+grouped cursor readouts keep large multi-source panels bounded while preserving
+keyboard access and session round-trips.
+
 Phase 1 visualization foundations closed with a validated categorical palette
 that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
 a headless renderer harness and coherent tick pipeline, unbounded series

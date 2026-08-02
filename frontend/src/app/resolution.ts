@@ -5,7 +5,6 @@ import type {
   PanelState,
   SeriesOverride,
   SeriesRef,
-  StyleDimension,
 } from "../generated/session";
 import type { Catalog, CatalogSeries } from "./catalog";
 import { parseSelector, seriesMatches, type Selector } from "./selector";
@@ -61,11 +60,11 @@ export function resolvePanel(
         ? ("ghost" as const)
         : ("rule" as const),
   );
-  const hues = assignHues(catalog, panel, refs, focused);
+  const hues = assignHues(panel, refs, focused);
   const overrides = prepareOverrides(panel.overrides);
 
   return refs.map(({ ref, series }, index) => {
-    let hue = hues[index] ?? 1;
+    let hue: number | null = hues[index] ?? 1;
     let dash: DashStyle = "solid";
     let width = 1.4;
     let opacity = 1;
@@ -184,7 +183,6 @@ function addSelector(
 }
 
 function assignHues(
-  catalog: Catalog,
   panel: PanelState,
   refs: readonly ResolvedRef[],
   focused: readonly boolean[],

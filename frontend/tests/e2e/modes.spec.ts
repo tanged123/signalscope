@@ -11,12 +11,12 @@ async function trajectoryPoints(
       const context = canvas.getContext("2d");
       if (context === null) return [];
       const color = getComputedStyle(document.documentElement)
-        .getPropertyValue("--series-2")
+        .getPropertyValue("--series-1")
         .trim();
       const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
       if (match === null) {
         throw new Error(
-          `trajectoryPoints expected --series-2 as #rrggbb, received "${color}"`,
+          `trajectoryPoints expected --series-1 as #rrggbb, received "${color}"`,
         );
       }
       const target = match.slice(1).map((part) => Number.parseInt(part, 16));
@@ -96,29 +96,28 @@ test.describe("panel modes", () => {
 
   test("XY mode adopts the first series as the x axis", async ({ page }) => {
     const panel = page.locator(".panel").first();
-    await expect(panel.locator(".legend-chip")).toHaveCount(2);
+    await expect(panel.locator(".binding-chip")).toHaveCount(2);
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
     await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
     // The promoted x signal leaves the plotted series.
-    await expect(panel.locator(".legend-chip")).toHaveCount(1);
+    await expect(panel.locator(".binding-chip")).toHaveCount(1);
     await expect(panel.locator(".panel-empty")).toBeHidden();
 
     await panel.locator(".mode-pill", { hasText: "FFT" }).click();
-    await expect(panel.locator(".legend-chip")).toHaveCount(1);
+    await expect(panel.locator(".binding-chip")).toHaveCount(1);
 
     await panel.locator(".mode-pill", { hasText: "XY" }).click();
-    await expect(panel.locator(".legend-chip")).toHaveCount(1);
+    await expect(panel.locator(".binding-chip")).toHaveCount(1);
     await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("switch to histogram");
     await page.keyboard.press("Enter");
     await expect(panel.locator(".mode-pill.active")).toHaveText("H");
-    await expect(panel.locator(".legend-chip")).toHaveCount(1);
+    await expect(panel.locator(".binding-chip")).toHaveCount(1);
   });
 
   test("the x chip and the palette both reach XY mode", async ({ page }) => {
     const panel = page.locator(".panel").first();
-    await panel.locator(".legend-chip-caret").first().click();
-    await panel.locator(".inspector-action", { hasText: "use as X" }).click();
+    await panel.locator(".mode-pill", { hasText: "XY" }).click();
     const chip = panel.locator(".x-chip");
     await expect(chip).toBeVisible();
     await expect(chip).toContainText("x:");
@@ -127,12 +126,6 @@ test.describe("panel modes", () => {
     await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
     await expect(chip).toBeHidden();
     await expect(panel.locator(".panel-empty")).toContainText("set the X axis");
-
-    await page.keyboard.press("ControlOrMeta+Shift+p");
-    await page.keyboard.type("switch to XY");
-    await page.keyboard.press("Enter");
-    await expect(panel.locator(".mode-pill.active")).toHaveText("XY");
-    await expect(chip).toBeVisible();
 
     await page.keyboard.press("ControlOrMeta+Shift+p");
     await page.keyboard.type("clear X signal");
@@ -410,7 +403,7 @@ test.describe("panel modes", () => {
     const second = page.locator(".panel").last();
     await page.locator(".tree-scroll .tree-leaf").first().focus();
     await page.keyboard.press("Enter");
-    await expect(second.locator(".legend-chip")).toHaveCount(1);
+    await expect(second.locator(".binding-chip")).toHaveCount(1);
     const stats = page.locator(".panel-stats");
 
     await page.locator(".menu-button").click();

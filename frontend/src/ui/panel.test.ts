@@ -13,6 +13,8 @@ import {
   MAX_SERIES_PER_PANEL,
   MAXIMIZE_GLYPH,
   PanelView,
+  bindingChipEntries,
+  focusHeaderLabel,
   focusChips,
   matrixLegendRows,
   parseSetPayload,
@@ -43,7 +45,7 @@ function response(...series: SampleSeries[]): SampleResponse {
 
 function sourceKeyFor(path: string): string | null {
   const match = /^run_0*(\d+)\//.exec(path);
-  return match === null ? null : `k${match[1]}`;
+  return match === null ? null : `k${String(match[1])}`;
 }
 
 function localPathFor(path: string): string | null {
@@ -84,6 +86,8 @@ function xyState(xSignal: string, series: RenderSeries[]): RenderPanelState {
     x_signal: xSignal,
     color_signal: null,
     color_by_time: false,
+    bindings: [],
+    overrides: [],
     focus: [],
     series,
     y_range: null,
@@ -507,5 +511,79 @@ describe("panel series", () => {
     const result = focusChips(catalog, state);
     expect(result.chips).toHaveLength(8);
     expect(result.overflow).toBe(2);
+  });
+
+  it("groups pick bindings and counts live query and set members", () => {
+    const catalog = Catalog.build(
+      ["run_01", "run_02", "run_03"].flatMap((source) =>
+        ["temp", "speed"].map((channel) => ({
+          signal_id: `${source}-${channel}`,
+          source_id: `k${source.slice(-1)}`,
+          source_key: `k${source.slice(-1)}`,
+          local_path: channel,
+          path: `${source}/${channel}`,
+          unit: null,
+          point_count: "2",
+          t_min: 0,
+          t_max: 1,
+        })),
+      ),
+    );
+    const state = xyState("run_01/temp", [visible("run_01/temp")]);
+    state.bindings = [
+      {
+        kind: "pick",
+        selector: null,
+        refs: [
+          { source_key: "k1", channel: "temp" },
+          { source_key: "k2", channel: "temp" },
+          { source_key: "k3", channel: "speed" },
+        ],
+        set_id: null,
+      },
+      { kind: "query", selector: "temp", refs: [], set_id: null },
+      { kind: "set", selector: null, refs: [], set_id: "live" },
+    ];
+    expect(
+      bindingChipEntries(catalog, state, [
+        {
+          id: "live",
+          name: "Live temps",
+          kind: "query",
+          selector: "temp",
+          refs: [],
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({ label: "temp ×2", bindingIndex: 0 }),
+      expect.objectContaining({ label: "speed ×1", bindingIndex: 0 }),
+      expect.objectContaining({ label: "temp · 3", bindingIndex: 1 }),
+      expect.objectContaining({ label: "★ Live temps · 3", bindingIndex: 2 }),
+    ]);
+  });
+
+  it("reports the first focused series and its stack position", () => {
+    const state = xyState("run_01/temp", [
+      visible("run_01/temp"),
+      visible("run_02/temp"),
+    ]);
+    state.focus = [
+      {
+        kind: "series",
+        ref: state.series[1]?.ref ?? null,
+        source_key: null,
+        channel: null,
+      },
+      {
+        kind: "series",
+        ref: state.series[0]?.ref ?? null,
+        source_key: null,
+        channel: null,
+      },
+    ];
+    expect(focusHeaderLabel(state)).toEqual({
+      label: "run_02/temp",
+      position: "1/2",
+    });
   });
 });

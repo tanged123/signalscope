@@ -5,7 +5,52 @@ import { describe, expect, it } from "vitest";
 import { WorkspaceModel } from "../app/workspace";
 import type { BatchStatus } from "../generated/protocol";
 import type { PanelMode } from "../generated/session";
-import { AppShell, renderBatchProgress } from "./app-shell";
+import {
+  AppShell,
+  arrivalModeFor,
+  groupCursorRows,
+  renderBatchProgress,
+} from "./app-shell";
+
+it("arrival mode focuses small additions and ghosts large additions", () => {
+  expect(arrivalModeFor(0)).toBe("none");
+  expect(arrivalModeFor(4)).toBe("focus");
+  expect(arrivalModeFor(5)).toBe("ghost");
+});
+
+it("groups ghost cursor rows by channel while keeping focused rows itemized", () => {
+  const rows = [
+    ...Array.from({ length: 16 }, (_, index) => ({
+      path: `run_${String(index + 1)}/temp`,
+      label: `run_${String(index + 1)}/temp`,
+      value: index + 1,
+      unit: "C",
+      colorIndex: 0,
+    })),
+    {
+      path: "run_17/temp",
+      label: "run_17/temp",
+      value: 17,
+      unit: "C",
+      colorIndex: 1,
+    },
+    {
+      path: "run_18/alt",
+      label: "run_18/alt",
+      value: 18,
+      unit: "m",
+      colorIndex: 2,
+    },
+  ];
+  const grouped = groupCursorRows(
+    rows,
+    new Map(rows.slice(0, 16).map((row) => [row.path, "temp"])),
+  );
+  expect(grouped).toHaveLength(3);
+  expect(grouped[0]?.label).toBe("temp · 16 ghosts");
+  expect(grouped[1]?.label).toBe("run_17/temp");
+  expect(grouped[2]?.label).toBe("run_18/alt");
+});
 
 interface ShellProbe {
   workspace: WorkspaceModel;

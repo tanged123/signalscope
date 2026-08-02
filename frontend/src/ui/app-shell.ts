@@ -58,6 +58,7 @@ import type {
   CursorMode,
   PanelMode,
   PanelState,
+  SeriesRef,
   Session,
 } from "../generated/session";
 import type { Preferences } from "../generated/preferences";
@@ -87,6 +88,11 @@ const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
 const DERIVED_PREFIX = "derived/";
+
+export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
+  if (count <= 0) return "none";
+  return count <= 4 ? "focus" : "ghost";
+}
 
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
@@ -197,6 +203,12 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
+        onClearFocus: (id) => {
+          this.workspace.clearFocus(id);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
         onMuteSelector: (id, selector) => {
           this.workspace.addSelectorOverride(id, selector, { visible: false });
           this.commitHistory();
@@ -209,15 +221,32 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onToggleHighlight: (id, path) => {
-          const ref = this.catalog.refFromPath(path);
-          if (ref === undefined) return;
-          this.workspace.toggleFocus(id, {
-            kind: "series",
-            ref,
-            source_key: null,
-            channel: ref.channel,
-          });
+        onRemoveBinding: (id, index) => {
+          this.workspace.removeBinding(id, index);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        onToggleGhostMode: (id) => {
+          this.workspace.toggleGhostMode(id);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetColorBy: (id, dimension) => {
+          this.workspace.setColorBy(id, dimension);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onRemoveOverride: (id, index) => {
+          this.workspace.removeOverride(id, index);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onClearOverrides: (id) => {
+          this.workspace.clearOverrides(id);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -232,6 +261,7 @@ export class AppShell {
             : (this.signalsByPath.get(path)?.source_key ?? null),
         pathForRef: (ref) => this.catalog.get(ref)?.path ?? null,
         catalog: () => this.catalog,
+        namedSets: () => this.workspace.namedSets(),
         resolveSeries: (state) =>
           resolvePanel(this.catalog, state, this.workspace.namedSets()),
         onSetXSignal: (id, path) => {
@@ -1266,6 +1296,7 @@ export class AppShell {
     }
     const ref = this.catalog.refFromPath(path);
     if (ref !== undefined && this.workspace.addSeriesRef(target, ref)) {
+      this.afterSeriesAdded(target, [ref]);
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
@@ -1276,18 +1307,24 @@ export class AppShell {
     let target = this.workspace.focusedPanelId();
     if (target === null) target = this.workspace.addPanelRow().id;
     if (!this.workspace.addQueryBinding(target, selector)) return;
+    this.afterSeriesAdded(target, this.refsForSelector(selector));
     this.workspace.focusPanel(target);
     this.fitWindowToPlotted();
     this.afterLayoutChange();
   }
 
   private bindSetToPanel(setId: string, panelId?: string): void {
-    if (!this.workspace.namedSets().some((set) => set.id === setId)) return;
+    const set = this.workspace.namedSets().find((entry) => entry.id === setId);
+    if (set === undefined) return;
     let target = panelId ?? this.workspace.focusedPanelId();
     if (target === null) {
       target = this.workspace.addPanelRow().id;
     }
     if (!this.workspace.addSetBinding(target, setId)) return;
+    this.afterSeriesAdded(
+      target,
+      set.kind === "pick" ? set.refs : this.refsForSelector(set.selector ?? ""),
+    );
     this.workspace.focusPanel(target);
     this.fitWindowToPlotted();
     this.afterLayoutChange();
@@ -1344,9 +1381,53 @@ export class AppShell {
       .map((path) => this.catalog.refFromPath(path))
       .filter((ref): ref is NonNullable<typeof ref> => ref !== undefined);
     if (this.workspace.addSeriesRefs(target, refs)) {
+      this.afterSeriesAdded(target, refs);
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
+    }
+  }
+
+  private refsForSelector(selector: string): SeriesRef[] {
+    return (evaluateSelector(this.catalog, selector)?.series ?? []).flatMap(
+      (series) => {
+        const ref = this.catalog.refFromPath(series.path);
+        return ref === undefined ? [] : [ref];
+      },
+    );
+  }
+
+  private afterSeriesAdded(
+    panelId: string,
+    addedRefs: readonly SeriesRef[],
+  ): void {
+    const unique = new Map(
+      addedRefs.map((ref) => [this.catalog.refKey(ref), ref]),
+    );
+    const mode = arrivalModeFor(unique.size);
+    if (mode === "none") return;
+    if (mode === "ghost") {
+      this.workspace.setGhostMode(panelId, "ghost");
+      return;
+    }
+    const focused = this.workspace.focusEntries(panelId);
+    for (const ref of unique.values()) {
+      if (
+        focused.some(
+          (entry) =>
+            entry.kind === "series" &&
+            entry.ref?.source_key === ref.source_key &&
+            entry.ref.channel === ref.channel,
+        )
+      ) {
+        continue;
+      }
+      this.workspace.toggleFocus(panelId, {
+        kind: "series",
+        ref,
+        source_key: null,
+        channel: ref.channel,
+      });
     }
   }
 
@@ -2004,8 +2085,10 @@ export class AppShell {
     await this.reloadSignals();
     const focused = this.workspace.focusedPanelId();
     const ref = this.catalog.refFromPath(summary.path);
-    if (focused !== null && ref !== undefined)
+    if (focused !== null && ref !== undefined) {
       this.workspace.addSeriesRef(focused, ref);
+      this.afterSeriesAdded(focused, [ref]);
+    }
     this.afterLayoutChange();
   }
 
@@ -2399,13 +2482,23 @@ export class AppShell {
       tip.hidden = true;
       return;
     }
-    const rows = cursor.rows.map((row) =>
+    const resolved = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    );
+    const ghostChannels = new Map(
+      resolved
+        .filter((series) => series.display === "ghost")
+        .map((series) => [series.path, series.ref.channel]),
+    );
+    const rows = groupCursorRows(cursor.rows, ghostChannels).map((row) =>
       tooltipRow(
-        `var(--series-${String(row.colorIndex + 1)})`,
+        row.colorIndex === null
+          ? "var(--fg-4)"
+          : `var(--series-${String(row.colorIndex + 1)})`,
         row.label,
-        row.unit === null
-          ? formatValue(row.value)
-          : `${formatValue(row.value)} ${row.unit}`,
+        row.value,
       ),
     );
     if (rows.length === 0) {
@@ -2986,6 +3079,64 @@ function tooltipHeader(text: string): HTMLElement {
   header.className = "plot-tip-header";
   header.textContent = text;
   return header;
+}
+
+export interface GroupedCursorRow {
+  label: string;
+  value: string;
+  colorIndex: number | null;
+}
+
+export function groupCursorRows(
+  rows: readonly PlotCursor["rows"][number][],
+  ghostChannels: ReadonlyMap<string, string>,
+): GroupedCursorRow[] {
+  const grouped = new Map<
+    string,
+    { count: number; min: number; max: number; unit: string | null }
+  >();
+  const result: GroupedCursorRow[] = [];
+  for (const row of rows) {
+    const channel = ghostChannels.get(row.path);
+    if (channel === undefined) {
+      result.push({
+        label: row.label,
+        value:
+          row.unit === null
+            ? formatValue(row.value)
+            : `${formatValue(row.value)} ${row.unit}`,
+        colorIndex: row.colorIndex,
+      });
+      continue;
+    }
+    const current = grouped.get(channel);
+    if (current === undefined) {
+      grouped.set(channel, {
+        count: 1,
+        min: row.value,
+        max: row.value,
+        unit: row.unit,
+      });
+      result.push({ label: channel, value: "", colorIndex: null });
+    } else {
+      current.count += 1;
+      current.min = Math.min(current.min, row.value);
+      current.max = Math.max(current.max, row.value);
+    }
+  }
+  for (const row of result) {
+    if (row.colorIndex !== null) continue;
+    const channel = row.label;
+    const group = grouped.get(channel);
+    if (group === undefined) continue;
+    const range =
+      group.min === group.max
+        ? formatValue(group.min)
+        : `${formatValue(group.min)} → ${formatValue(group.max)}`;
+    row.label = `${channel} · ${String(group.count)} ghosts`;
+    row.value = group.unit === null ? range : `${range} ${group.unit}`;
+  }
+  return result;
 }
 
 function tooltipRow(color: string, name: string, value: string): HTMLElement {

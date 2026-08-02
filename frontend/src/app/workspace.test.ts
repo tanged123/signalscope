@@ -838,6 +838,17 @@ describe("WorkspaceModel", () => {
     ]);
   });
 
+  it("removes a binding by its serialized index", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addQueryBinding(panel.id, "temp");
+    model.addSetBinding(panel.id, "set-1");
+    model.removeBinding(panel.id, 0);
+    expect(model.panel(panel.id)?.bindings).toEqual([
+      { kind: "set", selector: null, refs: [], set_id: "set-1" },
+    ]);
+  });
+
   it("allocates the next set id across current and migrated ids", () => {
     const empty = new WorkspaceModel();
     expect(empty.nextSetId()).toBe("set-1");
