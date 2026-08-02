@@ -133,6 +133,13 @@ export class FormulaBar {
     this.renderHelpExample();
   }
 
+  focusWithExpression(expression: string): void {
+    this.input.value = expression;
+    this.input.focus();
+    this.input.setSelectionRange(expression.length, expression.length);
+    this.refreshCompletions(false);
+  }
+
   private onKeyDown(event: KeyboardEvent): void {
     if (event.ctrlKey && event.code === "Space") {
       event.preventDefault();

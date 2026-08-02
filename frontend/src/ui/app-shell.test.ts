@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { WorkspaceModel } from "../app/workspace";
 import { SelectionModel } from "../app/selection";
+import { Catalog } from "../app/catalog";
+import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { PanelMode } from "../generated/session";
 import {
@@ -105,6 +107,129 @@ describe("signals dock modes", () => {
     shell.selectAllDockRows();
 
     expect(shell.selection.keys()).toEqual(["table-1", "table-2"]);
+  });
+});
+
+function bulkSummary(source: string, channel: string): SignalSummary {
+  return {
+    signal_id: `${source}-${channel}`,
+    source_id: source,
+    source_key: source,
+    local_path: channel,
+    path: `${source}/${channel}`,
+    unit: "K",
+    point_count: "10",
+    t_min: 0,
+    t_max: 1,
+    last_value: 1,
+  };
+}
+
+interface BulkProbe {
+  workspace: WorkspaceModel;
+  catalog: Catalog;
+  selection: SelectionModel;
+  root: HTMLElement;
+  bulkBar: { setDeriveEnabled(enabled: boolean, title: string): void };
+  afterLayoutChange(): void;
+  applyBulkStyle(style: {
+    color_slot: number;
+    dash: "solid" | "dash" | "dot";
+    width: number;
+  }): void;
+  applyBulkVisibility(visible: boolean): void;
+  updateBulkBar(): void;
+}
+
+describe("bulk dock actions", () => {
+  it("fans a selector style override across every resolving panel once", () => {
+    const catalog = Catalog.build([
+      bulkSummary("run-01", "temp"),
+      bulkSummary("run-02", "temp"),
+    ]);
+    const workspace = new WorkspaceModel();
+    const first = workspace.addPanelRow();
+    const second = workspace.addPanelRow();
+    const refs = [
+      { source_key: "run-01", channel: "temp" },
+      { source_key: "run-02", channel: "temp" },
+    ];
+    workspace.addSeriesRefs(first.id, refs);
+    workspace.addSeriesRefs(second.id, refs);
+    const shell = Object.create(AppShell.prototype) as BulkProbe;
+    shell.workspace = workspace;
+    shell.catalog = catalog;
+    shell.selection = new SelectionModel();
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<input class="signal-search" value="temp" />';
+    shell.bulkBar = { setDeriveEnabled: vi.fn() };
+    shell.afterLayoutChange = vi.fn();
+    shell.selection.setAll(refs.map((ref) => catalog.refKey(ref)));
+
+    shell.applyBulkStyle({ color_slot: 2, dash: "solid", width: 2 });
+
+    expect(workspace.panel(first.id)?.overrides).toEqual([
+      expect.objectContaining({ target_selector: "temp", target_ref: null }),
+    ]);
+    expect(workspace.panel(second.id)?.overrides).toEqual([
+      expect.objectContaining({ target_selector: "temp", target_ref: null }),
+    ]);
+  });
+
+  it("uses a target-ref override for a hand-picked hide", () => {
+    const catalog = Catalog.build([bulkSummary("run-01", "temp")]);
+    const workspace = new WorkspaceModel();
+    const panel = workspace.addPanelRow();
+    const ref = { source_key: "run-01", channel: "temp" };
+    workspace.addSeriesRef(panel.id, ref);
+    const shell = Object.create(AppShell.prototype) as BulkProbe;
+    shell.workspace = workspace;
+    shell.catalog = catalog;
+    shell.selection = new SelectionModel();
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<input class="signal-search" value="" />';
+    shell.bulkBar = { setDeriveEnabled: vi.fn() };
+    shell.afterLayoutChange = vi.fn();
+    shell.selection.toggle(catalog.refKey(ref));
+
+    shell.applyBulkVisibility(false);
+
+    expect(workspace.panel(panel.id)?.overrides).toEqual([
+      expect.objectContaining({
+        target_ref: ref,
+        target_selector: null,
+        visible: false,
+      }),
+    ]);
+  });
+
+  it("enables derive for one channel and disables it across channels", () => {
+    const catalog = Catalog.build([
+      bulkSummary("run-01", "temp"),
+      bulkSummary("run-02", "temp"),
+      bulkSummary("run-01", "speed"),
+    ]);
+    const shell = Object.create(AppShell.prototype) as BulkProbe;
+    shell.catalog = catalog;
+    shell.selection = new SelectionModel();
+    const setDeriveEnabled = vi.fn();
+    shell.bulkBar = { setDeriveEnabled };
+
+    shell.selection.setAll([
+      catalog.refKey({ source_key: "run-01", channel: "temp" }),
+      catalog.refKey({ source_key: "run-02", channel: "temp" }),
+    ]);
+    shell.updateBulkBar();
+    expect(setDeriveEnabled).toHaveBeenLastCalledWith(true, expect.any(String));
+    shell.selection.setAll([
+      catalog.refKey({ source_key: "run-01", channel: "temp" }),
+      catalog.refKey({ source_key: "run-01", channel: "speed" }),
+    ]);
+    shell.updateBulkBar();
+    expect(setDeriveEnabled).toHaveBeenLastCalledWith(
+      false,
+      "Derive requires one channel",
+    );
   });
 });
 

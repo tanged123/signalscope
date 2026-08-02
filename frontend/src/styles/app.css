@@ -1919,6 +1919,46 @@ button {
   font-size: 0.8077rem;
 }
 
+.bulk-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--fg-2);
+  font: 0.6923rem var(--font-mono);
+}
+
+.bulk-bar[hidden] {
+  display: none;
+}
+
+.bulk-bar button {
+  padding: 2px 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: inherit;
+}
+
+.bulk-bar button:hover:not(:disabled) {
+  color: var(--fg-1);
+}
+
+.bulk-bar button:disabled {
+  color: var(--fg-4);
+  cursor: not-allowed;
+}
+
+.bulk-bar-hint {
+  margin-left: auto;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+
 .ingest-progress {
   display: flex;
   flex-wrap: wrap;

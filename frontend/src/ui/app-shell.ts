@@ -8,6 +8,7 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
+import { quoteSignalPath } from "../app/formula";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
@@ -80,6 +81,7 @@ import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { SignalTableView } from "./signal-table";
+import { BulkBar } from "./bulk-bar";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
@@ -109,7 +111,9 @@ export class AppShell {
   private workspaceTabs: WorkspaceTabsView | null = null;
   private tree: SignalTreeView | null = null;
   private table: SignalTableView | null = null;
+  private bulkBar: BulkBar | null = null;
   private dockMode: "tree" | "table" = "tree";
+  private pendingSetRefs: SeriesRef[] | null = null;
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
@@ -439,6 +443,18 @@ export class AppShell {
       this.selection,
       { onSelectionChange: () => {} },
     );
+    this.bulkBar = new BulkBar(
+      required(this.root, ".bulk-bar"),
+      this.selection,
+      {
+        onAddToPanel: () => this.addSelectedToPanel(),
+        onStyle: () => this.styleSelected(),
+        onHide: () => this.hideSelected(),
+        onSaveSet: () => this.openSetNameRow(this.selectedRefs()),
+        onDerive: () => this.deriveSelected(),
+      },
+    );
+    this.selection.onChange(() => this.updateBulkBar());
     this.palette = new CommandPalette(this.root, (mode, query) =>
       this.paletteEntries(mode, query),
     );
@@ -1255,14 +1271,17 @@ export class AppShell {
     const commitSet = (): void => {
       const selector = search.value.trim();
       const name = setName.value.trim();
-      if (selector === "" || name === "") return;
+      if (name === "" || (this.pendingSetRefs === null && selector === ""))
+        return;
+      const refs = this.pendingSetRefs;
       this.workspace.addNamedSet({
         id: this.workspace.nextSetId(),
         name,
-        kind: "query",
-        selector,
-        refs: [],
+        kind: refs === null ? "query" : "pick",
+        selector: refs === null ? selector : null,
+        refs: refs ?? [],
       });
+      this.pendingSetRefs = null;
       this.tree?.setNamedSets(this.workspace.namedSets());
       this.hideSetNameRow();
       this.commitHistory();
@@ -1401,15 +1420,17 @@ export class AppShell {
     count.textContent = `${String(matches.length)} matches`;
   }
 
-  private openSetNameRow(): void {
+  private openSetNameRow(refs: readonly SeriesRef[] | null = null): void {
     const row = required<HTMLElement>(this.root, ".set-name-row");
     const input = required<HTMLInputElement>(this.root, ".set-name-input");
+    this.pendingSetRefs = refs === null ? null : [...refs];
     row.hidden = false;
     input.value = "";
     input.focus();
   }
 
   private hideSetNameRow(): void {
+    this.pendingSetRefs = null;
     required<HTMLElement>(this.root, ".set-name-row").hidden = true;
   }
 
@@ -1469,6 +1490,175 @@ export class AppShell {
         channel: ref.channel,
       });
     }
+  }
+
+  private selectedRefs(): SeriesRef[] {
+    const byKey = new Map(
+      this.catalog.allSeries().map((series) => [
+        this.catalog.refKey({
+          source_key: series.sourceKey,
+          channel: series.channel,
+        }),
+        { source_key: series.sourceKey, channel: series.channel },
+      ]),
+    );
+    return this.selection
+      .keys()
+      .map((key) => byKey.get(key))
+      .filter((ref): ref is SeriesRef => ref !== undefined);
+  }
+
+  private updateBulkBar(): void {
+    const refs = this.selectedRefs();
+    const channels = new Set(refs.map((ref) => ref.channel));
+    const enabled = refs.length === 1 || channels.size === 1;
+    this.bulkBar?.setDeriveEnabled(
+      enabled,
+      enabled
+        ? "Derive from the selected signal(s)"
+        : "Derive requires one channel",
+    );
+  }
+
+  private addSelectedToPanel(): void {
+    const refs = this.selectedRefs();
+    if (refs.length === 0) return;
+    const panelId =
+      this.workspace.focusedPanelId() ?? this.workspace.addPanelRow().id;
+    if (!this.workspace.addSeriesRefs(panelId, refs)) return;
+    this.afterSeriesAdded(panelId, refs);
+    this.workspace.focusPanel(panelId);
+    this.fitWindowToPlotted();
+    this.afterLayoutChange();
+  }
+
+  private styleSelected(): void {
+    this.applyBulkStyle({ color_slot: 1, dash: "solid", width: 1.4 });
+  }
+
+  private hideSelected(): void {
+    this.applyBulkVisibility(false);
+  }
+
+  private applyBulkStyle(style: {
+    color_slot: number;
+    dash: "solid" | "dash" | "dot";
+    width: number;
+  }): void {
+    this.forEachSelectedPanel((panel, refs, selector) => {
+      if (selector !== null) {
+        this.workspace.addSelectorOverride(panel.id, selector, style);
+        return;
+      }
+      const resolved = resolvePanel(
+        this.catalog,
+        panel,
+        this.workspace.namedSets(),
+      );
+      for (const ref of refs) {
+        if (
+          resolved.some(
+            (series) =>
+              this.catalog.refKey(series.ref) === this.catalog.refKey(ref),
+          )
+        ) {
+          this.workspace.setSeriesOverride(panel.id, ref, style);
+        }
+      }
+    });
+    this.afterLayoutChange();
+  }
+
+  private applyBulkVisibility(visible: boolean): void {
+    this.forEachSelectedPanel((panel, refs, selector) => {
+      if (selector !== null) {
+        this.workspace.addSelectorOverride(panel.id, selector, { visible });
+        return;
+      }
+      const resolved = resolvePanel(
+        this.catalog,
+        panel,
+        this.workspace.namedSets(),
+      );
+      for (const ref of refs) {
+        if (
+          resolved.some(
+            (series) =>
+              this.catalog.refKey(series.ref) === this.catalog.refKey(ref),
+          )
+        ) {
+          this.workspace.setSeriesVisible(panel.id, ref, visible);
+        }
+      }
+    });
+    this.afterLayoutChange();
+  }
+
+  private forEachSelectedPanel(
+    callback: (
+      panel: PanelState,
+      refs: readonly SeriesRef[],
+      selector: string | null,
+    ) => void,
+  ): void {
+    const refs = this.selectedRefs();
+    if (refs.length === 0) return;
+    const selectedKeys = new Set(refs.map((ref) => this.catalog.refKey(ref)));
+    const selector = this.selectorForSelected(selectedKeys);
+    for (const panel of this.workspace.panels()) {
+      const resolved = resolvePanel(
+        this.catalog,
+        panel,
+        this.workspace.namedSets(),
+      );
+      if (
+        resolved.some((series) =>
+          selectedKeys.has(this.catalog.refKey(series.ref)),
+        )
+      ) {
+        callback(panel, refs, selector);
+      }
+    }
+  }
+
+  private selectorForSelected(
+    selectedKeys: ReadonlySet<string>,
+  ): string | null {
+    const selector = required<HTMLInputElement>(
+      this.root,
+      ".signal-search",
+    ).value.trim();
+    if (selector === "") return null;
+    const evaluation = evaluateSelector(this.catalog, selector);
+    const selectorSyntax = /[*?|[@:]/.test(selector);
+    if (
+      evaluation === null ||
+      (evaluation.signalCount === 0 && !selectorSyntax)
+    ) {
+      return null;
+    }
+    const matchKeys = new Set(
+      evaluation.series.map((series) =>
+        this.catalog.refKey({
+          source_key: series.sourceKey,
+          channel: series.channel,
+        }),
+      ),
+    );
+    return matchKeys.size === selectedKeys.size &&
+      [...matchKeys].every((key) => selectedKeys.has(key))
+      ? selector
+      : null;
+  }
+
+  private deriveSelected(): void {
+    const refs = this.selectedRefs();
+    const channels = new Set(refs.map((ref) => ref.channel));
+    if (refs.length === 0 || (refs.length > 1 && channels.size !== 1)) return;
+    this.setFormulaOpen(true);
+    this.formulaBar?.focusWithExpression(
+      quoteSignalPath(refs[0]?.channel ?? ""),
+    );
   }
 
   private async openFiles(): Promise<void> {
@@ -3115,6 +3305,7 @@ function shellMarkup(): string {
       </div>
       <div class="tree-scroll"></div>
       <div class="table-scroll" hidden></div>
+      <div class="bulk-bar" hidden></div>
       <div class="source-footer">
         <div class="ingest-progress" hidden></div>
         <div class="source-rows"></div>

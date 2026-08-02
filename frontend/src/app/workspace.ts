@@ -473,6 +473,13 @@ export class WorkspaceModel {
     override.width = style.width;
   }
 
+  setSeriesVisible(panelId: string, ref: SeriesRef, visible: boolean): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    const override = this.ensureSeriesOverride(panel, ref);
+    override.visible = visible;
+  }
+
   setColorBy(panelId: string, dimension: StyleDimension): void {
     const panel = this.panel(panelId);
     if (panel !== undefined) panel.color_by = dimension;
