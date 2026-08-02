@@ -649,6 +649,32 @@ describe("WorkspaceModel", () => {
     ).toEqual(["position/east"]);
   });
 
+  it("keeps state when setting the current x ref and preserves promoted metadata", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const east = refForPath("position/east");
+    model.addSeriesRef(panel.id, east);
+    model.setSeriesOverride(panel.id, east, {
+      color_slot: 1,
+      dash: "solid",
+      width: 3,
+    });
+    model.toggleFocus(panel.id, {
+      kind: "series",
+      ref: east,
+      source_key: null,
+      channel: east.channel,
+    });
+    model.setXRef(panel.id, east);
+    model.setPanelXRange(panel.id, [1, 2]);
+
+    model.setXRef(panel.id, east);
+
+    expect(model.panel(panel.id)?.x_range).toEqual([1, 2]);
+    expect(model.panel(panel.id)?.overrides).toHaveLength(1);
+    expect(model.panel(panel.id)?.focus).toHaveLength(1);
+  });
+
   it("stores and clears a panel y range", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

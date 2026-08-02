@@ -165,7 +165,8 @@ test("the fixed channel outline filters, selects, and saves a frozen set", async
   await expect(page.locator(".outline-columns-button")).toHaveCount(0);
   await expect(outline.locator('[data-row-kind="series"]')).toHaveCount(2);
 
-  await page.locator(".signal-search").fill("velocity_body/*");
+  await page.locator(".signal-search").fill("velocity_body/x");
+  await expect(outline.locator('[data-row-kind="series"]')).toHaveCount(1);
   await outline.focus();
   await page.keyboard.press("ControlOrMeta+a");
   await expect(page.locator(".sets-save-selection")).toBeEnabled();
@@ -175,7 +176,7 @@ test("the fixed channel outline filters, selects, and saves a frozen set", async
   await page.locator(".set-name-input").press("Enter");
   await expect(
     page.locator(".tree-set", { hasText: "all velocity" }),
-  ).toContainText("▣ 2");
+  ).toContainText("▣ 1");
   await expect(page.locator(".sets-save-selection")).toBeEnabled();
   await expect(page.locator(".bulk-bar")).toHaveCount(0);
 });

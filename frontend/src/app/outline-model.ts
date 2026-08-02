@@ -40,28 +40,18 @@ export function filterCatalogSeries(
   const selectorSyntax = /[*?|[@:]/.test(input);
   const selectorRefs =
     evaluation !== null && (evaluation.signalCount > 0 || selectorSyntax)
-      ? new Set(
-          evaluation.series.map((series) =>
-            catalog.refKey({
-              source_key: series.sourceKey,
-              channel: series.channel,
-            }),
-          ),
-        )
+      ? new Set(evaluation.series)
       : null;
-  return catalog.allSeries().filter(
-    (series) =>
-      query === "" ||
-      (selectorRefs !== null
-        ? selectorRefs.has(
-            catalog.refKey({
-              source_key: series.sourceKey,
-              channel: series.channel,
-            }),
-          )
-        : series.channel.toLowerCase().includes(query) ||
-          series.path.toLowerCase().includes(query)),
-  );
+  return catalog
+    .allSeries()
+    .filter(
+      (series) =>
+        query === "" ||
+        (selectorRefs !== null
+          ? selectorRefs.has(series)
+          : series.channel.toLowerCase().includes(query) ||
+            series.path.toLowerCase().includes(query)),
+    );
 }
 
 export interface VirtualSlice {
@@ -79,10 +69,13 @@ export function virtualSlice(
   overscan = 8,
 ): VirtualSlice {
   const totalHeight = count * rowHeight;
-  const first = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const last = Math.min(
     count,
     Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan,
+  );
+  const first = Math.min(
+    last,
+    Math.max(0, Math.floor(scrollTop / rowHeight) - overscan),
   );
   return {
     start: first,
@@ -104,7 +97,9 @@ export function buildOutlineRows(
   }
 
   const rows: OutlineRow[] = [];
-  for (const [channel, members] of groups) {
+  for (const [channel, members] of [...groups].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
     if (members.length === 1) {
       rows.push(seriesRow(catalog, members[0] as CatalogSeries, 0));
       continue;

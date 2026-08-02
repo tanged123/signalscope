@@ -503,8 +503,8 @@ export class AppShell {
       this.syncSelectionActions();
     });
     this.syncSelectionActions();
-    this.palette = new CommandPalette(this.root, (mode, query) =>
-      this.paletteEntries(mode, query),
+    this.palette = new CommandPalette(this.root, (mode, query, limit) =>
+      this.paletteEntries(mode, query, limit),
     );
     this.formulaBar = new FormulaBar(required(this.root, ".formula-bar"), {
       onCreate: (path, expression) => this.createDerived(path, expression),
@@ -582,6 +582,8 @@ export class AppShell {
       id: "save-selection-as-set",
       title: "Save selected signals as set",
       keys: "f",
+      section: "workspace",
+      group: "sets",
       enabled: () => this.selection.size() > 0,
       run: () => this.saveSelectedAsSet(),
     });
@@ -957,7 +959,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.15.3");
+        this.showModeHelp("SignalScope 1.0.0");
       },
     });
     this.commands.register({
@@ -1156,8 +1158,13 @@ export class AppShell {
     ];
   }
 
-  private paletteEntries(mode: PaletteMode, query = ""): PaletteEntry[] {
+  private paletteEntries(
+    mode: PaletteMode,
+    query = "",
+    limit = Number.POSITIVE_INFINITY,
+  ): PaletteEntry[] {
     if (mode === "settings") return this.settingsEntries();
+    if (mode === "signals") return this.signalPaletteEntries(query, limit);
     // Planned and momentarily unavailable commands both stay listed so the
     // palette matches the menu, but each says why it will not run.
     const ranked = [...this.commands.listAll()].sort(
@@ -1169,32 +1176,6 @@ export class AppShell {
       ...unavailableReason(command),
       run: () => {
         this.commands.run(command.id);
-      },
-    }));
-    const allSignals = this.signals.map((summary) => ({
-      title: `plot ${summary.path}`,
-      hint: "signal",
-      run: () => {
-        this.plotSignal(summary.path);
-      },
-    }));
-    const tabs = this.workspace.tabs().map((tab) => ({
-      title: `switch to ${tab.title}`,
-      hint: "workspace",
-      run: () => {
-        this.workspace.selectTab(tab.id);
-        this.afterLayoutChange();
-      },
-    }));
-    const panels = this.workspace.panels().map((panel) => ({
-      title: `focus ${panel.title}`,
-      hint: "panel",
-      run: () => {
-        this.workspace.focusPanel(panel.id);
-        if (this.workspace.maximizedPanelId() !== null) {
-          this.workspace.maximizePanel(panel.id);
-        }
-        this.afterLayoutChange();
       },
     }));
     const focused = this.workspace.focusedPanelId();
@@ -1233,23 +1214,24 @@ export class AppShell {
               },
             })),
           ];
-    if (mode !== "signals") return [...commands, ...xSignals, ...colorSignals];
+    return [...commands, ...xSignals, ...colorSignals];
+  }
 
+  private signalPaletteEntries(query: string, limit: number): PaletteEntry[] {
     const input = query.trim();
-    if (input === "") return [...allSignals, ...tabs, ...panels];
-    const match = evaluateSelector(this.catalog, input);
+    const match = input === "" ? null : evaluateSelector(this.catalog, input);
     const selectorMode =
       match !== null && (match.signalCount > 0 || /[*?|[@:]/.test(input));
-    const selectedPaths =
-      match === null
-        ? new Set<string>()
-        : new Set(match.series.map((series) => series.path));
-    const signals = selectorMode
-      ? allSignals.filter((entry) => selectedPaths.has(entry.title.slice(5)))
-      : allSignals.filter((entry) =>
-          entry.title.toLowerCase().includes(input.toLowerCase()),
-        );
-    const aggregate =
+    const paths = selectorMode
+      ? match.series.map((series) => series.path)
+      : this.signals
+          .filter(
+            (summary) =>
+              input === "" ||
+              summary.path.toLowerCase().includes(input.toLowerCase()),
+          )
+          .map((summary) => summary.path);
+    const aggregate: PaletteEntry[] =
       selectorMode && match.signalCount > 1
         ? [
             {
@@ -1261,14 +1243,41 @@ export class AppShell {
             },
           ]
         : [];
+    const signalEntries = paths.slice(0, limit).map((path) => ({
+      title: `plot ${path}`,
+      hint: "signal",
+      run: () => {
+        this.plotSignal(path);
+      },
+    }));
     const titleMatches = (title: string): boolean =>
-      title.toLowerCase().includes(input.toLowerCase());
-    return [
-      ...aggregate,
-      ...signals,
-      ...tabs.filter((entry) => titleMatches(entry.title)),
-      ...panels.filter((entry) => titleMatches(entry.title)),
-    ];
+      input === "" || title.toLowerCase().includes(input.toLowerCase());
+    const tabs = this.workspace
+      .tabs()
+      .filter((tab) => titleMatches(`switch to ${tab.title}`))
+      .map((tab) => ({
+        title: `switch to ${tab.title}`,
+        hint: "workspace",
+        run: () => {
+          this.workspace.selectTab(tab.id);
+          this.afterLayoutChange();
+        },
+      }));
+    const panels = this.workspace
+      .panels()
+      .filter((panel) => titleMatches(`focus ${panel.title}`))
+      .map((panel) => ({
+        title: `focus ${panel.title}`,
+        hint: "panel",
+        run: () => {
+          this.workspace.focusPanel(panel.id);
+          if (this.workspace.maximizedPanelId() !== null) {
+            this.workspace.maximizePanel(panel.id);
+          }
+          this.afterLayoutChange();
+        },
+      }));
+    return [...aggregate, ...signalEntries, ...tabs, ...panels].slice(0, limit);
   }
 
   private bindControls(): void {
@@ -1303,23 +1312,21 @@ export class AppShell {
       this.outline?.setFilter(search.value);
       this.renderSearchStatus();
     });
-    required<HTMLButtonElement>(this.root, ".dock-add-source").addEventListener(
-      "click",
-      () => {
-        void this.openFiles();
-      },
-    );
     search.addEventListener("keydown", (event) => {
       const input = search.value.trim();
-      const match = input === "" ? null : evaluateSelector(this.catalog, input);
-      if (event.key === "Enter" && match !== null && match.signalCount > 0) {
+      if (event.key === "Enter") {
+        const match =
+          input === "" ? null : evaluateSelector(this.catalog, input);
+        if (match === null || match.signalCount === 0) return;
         event.preventDefault();
         this.bindQueryToPanel(input);
       } else if (
         event.key.toLowerCase() === "s" &&
-        (event.metaKey || event.ctrlKey) &&
-        match !== null
+        (event.metaKey || event.ctrlKey)
       ) {
+        const match =
+          input === "" ? null : evaluateSelector(this.catalog, input);
+        if (match === null) return;
         event.preventDefault();
         event.stopPropagation();
         this.openSetNameRow();
@@ -1453,7 +1460,7 @@ export class AppShell {
     if (selectorMode) {
       count.append(
         document.createTextNode(
-          `${String(match.signalCount)} signals · ${String(match.sourceCount)} sources `,
+          `${String(match.signalCount)} signals · ${String(match.sourceCount)} ${match.sourceCount === 1 ? "source" : "sources"} `,
         ),
       );
       const hint = document.createElement("span");
@@ -1490,8 +1497,7 @@ export class AppShell {
   }
 
   private plotSignals(memberPaths: readonly string[], panelId?: string): void {
-    let target = this.workspace.focusedPanelId();
-    if (panelId !== undefined) target = panelId;
+    let target = panelId ?? this.workspace.focusedPanelId();
     if (target === null) target = this.workspace.addPanelRow().id;
     const refs = memberPaths
       .map((path) => this.catalog.refFromPath(path))
@@ -2837,18 +2843,10 @@ export class AppShell {
       (total, signal) => total + Number(signal.point_count),
       0,
     );
-    const aggregate = this.root.querySelector<HTMLElement>(".status-aggregate");
-    if (aggregate !== null) {
-      aggregate.textContent = statusAggregate(
-        this.workspace.sources().length,
-        this.signals.length,
-        pointCount,
-      );
-    }
-    void this.updateSources();
+    void this.updateSources(pointCount);
   }
 
-  private async updateSources(): Promise<void> {
+  private async updateSources(pointCount: number): Promise<void> {
     const sources = await this.plane.listSources();
     for (const source of sources) {
       if (
@@ -2872,10 +2870,6 @@ export class AppShell {
     this.root
       .querySelector<HTMLElement>(".source-name")
       ?.replaceChildren(document.createTextNode(sessionName));
-    const pointCount = this.signals.reduce(
-      (total, signal) => total + Number(signal.point_count),
-      0,
-    );
     this.root
       .querySelector<HTMLElement>(".status-aggregate")
       ?.replaceChildren(
@@ -3175,7 +3169,7 @@ export function shellMarkup(): string {
       <div class="search-wrap">
         <div class="search-filter-row">
           <span class="search-filter-prefix">/</span>
-          <input class="signal-search" placeholder="Search signals…" spellcheck="false" />
+          <input class="signal-search" aria-label="Search signals" placeholder="Search signals…" spellcheck="false" />
         </div>
         <div class="search-count"></div>
       </div>
@@ -3299,7 +3293,7 @@ export function groupCursorRows(
     }
   }
   for (const row of result) {
-    if (row.colorIndex !== null) continue;
+    if (!row.ghost) continue;
     const channel = row.label;
     const group = grouped.get(channel);
     if (group === undefined) continue;

@@ -25,6 +25,7 @@ function signal(source: string, channel: string): SignalSummary {
 describe("SetsListView", () => {
   it("renders live and frozen sets with bind, delete, and drag actions", () => {
     const element = document.createElement("div");
+    document.body.append(element);
     const onSetBind = vi.fn();
     const onSetRemove = vi.fn();
     const onSignalDrop = vi.fn();
@@ -56,7 +57,7 @@ describe("SetsListView", () => {
     expect(element.querySelector(".tree-set")?.textContent).toContain(
       "★ thermal",
     );
-    expect(element.textContent).toContain("2");
+    expect(element.querySelector(".tree-set-detail")?.textContent).toBe("· 2");
     expect(element.textContent).toContain("live");
     expect(element.textContent).toContain("▣ 1");
 
@@ -64,9 +65,10 @@ describe("SetsListView", () => {
       element.querySelector<HTMLButtonElement>(".tree-set-caret");
     queryCaret?.click();
     expect(onSetBind).not.toHaveBeenCalled();
-    expect(element.querySelector<HTMLElement>(".tree-set")?.ariaExpanded).toBe(
-      "true",
-    );
+    const expandedCaret =
+      element.querySelector<HTMLButtonElement>(".tree-set-caret");
+    expect(expandedCaret?.ariaExpanded).toBe("true");
+    expect(document.activeElement).toBe(expandedCaret);
     expect(
       [...element.querySelectorAll(".tree-set-member")].map(
         (member) => member.textContent,
@@ -89,6 +91,7 @@ describe("SetsListView", () => {
       SET_DRAG_TYPE,
       JSON.stringify({ set_id: "query" }),
     );
+    element.remove();
     expect(dataTransfer.effectAllowed).toBe("copy");
   });
 

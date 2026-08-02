@@ -222,4 +222,46 @@ describe("SignalOutlineView", () => {
     expect(list.querySelectorAll(".source-alignment-marker")).toHaveLength(0);
     expect(list.querySelector(".outline-bulk-footer")).toBeNull();
   });
+
+  it("scrolls and focuses the active virtual row during keyboard navigation", () => {
+    const { list } = viewFor(
+      Catalog.build(
+        Array.from({ length: 100 }, (_, index) =>
+          signal("run-01", `channel-${String(index).padStart(3, "0")}`),
+        ),
+      ),
+    );
+    Object.defineProperty(list, "clientHeight", {
+      configurable: true,
+      value: 44,
+    });
+    document.body.append(list);
+    list.focus();
+
+    list.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "End", bubbles: true }),
+    );
+
+    const active = list.querySelector<HTMLElement>(
+      '[data-path="run-01/channel-099"]',
+    );
+    expect(active).not.toBeNull();
+    expect(document.activeElement).toBe(active);
+    expect(list.scrollTop).toBeGreaterThan(0);
+    list.remove();
+  });
+
+  it("removes owned listeners when destroyed", () => {
+    const { list, view } = viewFor(Catalog.build([signal("run-01", "temp")]));
+    const render = vi.fn();
+    Object.assign(view, { render });
+    view.destroy();
+
+    list.dispatchEvent(new Event("scroll"));
+    list.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "End", bubbles: true }),
+    );
+
+    expect(render).not.toHaveBeenCalled();
+  });
 });

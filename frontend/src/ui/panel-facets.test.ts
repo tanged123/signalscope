@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Catalog } from "../app/catalog";
 import { resolvePanel } from "../app/resolution";
@@ -116,6 +116,15 @@ function mockCanvas(): void {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
 }
 
+beforeEach(() => {
+  mockCanvas();
+  globalThis.ResizeObserver = class {
+    observe(): void {}
+    disconnect(): void {}
+    unobserve(): void {}
+  } as unknown as typeof ResizeObserver;
+});
+
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
   vi.restoreAllMocks();
@@ -123,12 +132,6 @@ afterEach(() => {
 
 describe("PanelView panel chrome", () => {
   it("renders the legend and focus strip below a header without roster tokens", () => {
-    mockCanvas();
-    globalThis.ResizeObserver = class {
-      observe(): void {}
-      disconnect(): void {}
-      unobserve(): void {}
-    } as unknown as typeof ResizeObserver;
     const catalog = Catalog.build([
       signal("run-01", "temp"),
       signal("run-02", "temp"),
@@ -168,12 +171,6 @@ describe("PanelView panel chrome", () => {
   });
 
   it("ignores legacy facet state and keeps one plot surface", () => {
-    mockCanvas();
-    globalThis.ResizeObserver = class {
-      observe(): void {}
-      disconnect(): void {}
-      unobserve(): void {}
-    } as unknown as typeof ResizeObserver;
     const catalog = Catalog.build([signal("run-01", "temp")]);
     const view = new PanelView("panel", callbacks(catalog));
     const panel = state();
@@ -185,5 +182,38 @@ describe("PanelView panel chrome", () => {
     expect(
       view.element.querySelector<HTMLCanvasElement>(".plot-canvas")?.hidden,
     ).toBe(false);
+  });
+
+  it("does not intercept Tab or Enter from descendant controls", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const panelCallbacks = callbacks(catalog);
+    const onFocusToggle = vi.fn();
+    panelCallbacks.onFocusToggle = onFocusToggle;
+    const view = new PanelView("panel", panelCallbacks);
+    view.update(state(), false);
+    Object.assign(view, {
+      cursorT: 0,
+      emphasizePaths: new Set(["run-01/temp"]),
+    });
+    const button =
+      view.element.querySelector<HTMLButtonElement>(".panel-close");
+    if (button === null) throw new Error("missing panel button");
+    const tab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    const enter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+
+    button.dispatchEvent(tab);
+    button.dispatchEvent(enter);
+
+    expect(tab.defaultPrevented).toBe(false);
+    expect(enter.defaultPrevented).toBe(false);
+    expect(onFocusToggle).not.toHaveBeenCalled();
   });
 });

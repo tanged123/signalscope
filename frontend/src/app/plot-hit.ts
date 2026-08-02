@@ -74,7 +74,7 @@ export function nearestLine(
   return best;
 }
 
-function segmentHit(
+export function segmentHit(
   first: { x: number; y: number },
   second: { x: number; y: number },
   px: number,

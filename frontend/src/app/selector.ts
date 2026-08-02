@@ -27,7 +27,10 @@ export interface SelectorMatch {
   sourceCount: number;
 }
 
+const MAX_GLOB_LENGTH = 256;
+
 export function compileGlob(pattern: string): RegExp | null {
+  if (pattern.length > MAX_GLOB_LENGTH) return null;
   let source = "";
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index];
@@ -94,7 +97,11 @@ export function parseSelector(input: string): SelectorParse {
     if (key !== "unit" && key !== "kind") {
       return { ok: false, error: `unknown attribute: ${key}` };
     }
-    attrs.push({ key, value: token.slice(separator + 1) });
+    const value = token.slice(separator + 1);
+    if (key === "kind" && value !== "derived" && value !== "signal") {
+      return { ok: false, error: `unknown kind: ${value}` };
+    }
+    attrs.push({ key, value });
   }
 
   return {
@@ -114,15 +121,7 @@ export function seriesMatches(
     if (attr.key === "unit" && series.summary.unit !== attr.value) return false;
     if (attr.key === "kind") {
       const derived = series.sourceKey === DERIVED_SOURCE_KEY;
-      if (
-        attr.value === "derived"
-          ? !derived
-          : attr.value === "signal"
-            ? derived
-            : true
-      ) {
-        return false;
-      }
+      if ((attr.value === "derived") !== derived) return false;
     }
   }
   return true;

@@ -505,10 +505,6 @@ button {
 .dock-points,
 .dock-formats {
   margin-left: auto;
-}
-
-.dock-points,
-.dock-formats {
   color: var(--fg-3);
 }
 
@@ -762,8 +758,11 @@ button {
 }
 
 .legend-count-token:hover,
+.legend-count-token:focus-visible,
 .matrix-focus-overflow:hover,
-.matrix-focus-chip:hover {
+.matrix-focus-overflow:focus-visible,
+.matrix-focus-chip:hover,
+.matrix-focus-chip:focus-visible {
   background: var(--surface-3);
   color: var(--fg-1);
 }
@@ -784,21 +783,28 @@ button {
   font: inherit;
 }
 
-.matrix-focus-remove:hover {
+.matrix-focus-remove:hover,
+.matrix-focus-remove:focus-visible {
   color: var(--fg-1);
 }
 
-.matrix-roster {
+.matrix-roster,
+.binding-popover,
+.rules-popover {
   position: absolute;
   z-index: 4;
-  width: min(260px, calc(100% - 8px));
-  max-height: 280px;
-  padding: 5px;
   overflow: hidden;
   background: var(--surface-1);
   border: 1px solid var(--border-strong);
   border-radius: 2px;
   box-shadow: var(--elev-2);
+}
+
+.matrix-roster,
+.binding-popover {
+  width: min(260px, calc(100% - 8px));
+  max-height: 280px;
+  padding: 5px;
 }
 
 .matrix-roster-search {
@@ -851,19 +857,6 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-.binding-popover {
-  position: absolute;
-  z-index: 4;
-  width: min(260px, calc(100% - 8px));
-  max-height: 280px;
-  padding: 5px;
-  overflow: hidden;
-  background: var(--surface-1);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  box-shadow: var(--elev-2);
-}
-
 .binding-popover-title {
   padding: 2px 4px 5px;
   color: var(--fg-1);
@@ -897,7 +890,7 @@ button {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--fg-2) !important;
+  color: var(--fg-2);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -917,16 +910,9 @@ button {
 }
 
 .rules-popover {
-  position: absolute;
-  z-index: 4;
   width: min(300px, calc(100% - 8px));
   max-height: 340px;
   padding: 6px;
-  overflow: hidden;
-  background: var(--surface-1);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  box-shadow: var(--elev-2);
 }
 
 .rules-popover-title,
@@ -1857,9 +1843,6 @@ button {
   flex: 1;
   overflow-y: auto;
   padding: 0 6px 8px;
-}
-
-.outline-scroll {
   font: 11px var(--font-mono);
   font-variant-numeric: tabular-nums;
 }

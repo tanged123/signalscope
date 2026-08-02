@@ -347,7 +347,7 @@ export class CanvasRenderer {
     context.beginPath();
     context.rect(plot.x, plot.y, plot.width, plot.height);
     context.clip();
-    context.globalAlpha = path.dimmed === true ? 0.5 : path.alpha;
+    context.globalAlpha = path.dimmed === true ? path.alpha * 0.5 : path.alpha;
     if (
       path.colorValues !== undefined &&
       path.dimmed !== true &&

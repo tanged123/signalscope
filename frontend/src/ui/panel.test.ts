@@ -761,6 +761,7 @@ describe("panel series", () => {
       callbacks: Pick<
         PanelCallbacks,
         | "catalog"
+        | "namedSets"
         | "pathForRef"
         | "onSetColorBy"
         | "onRemoveOverride"
@@ -773,6 +774,7 @@ describe("panel series", () => {
     view.id = "panel-1";
     view.callbacks = {
       catalog: () => catalog,
+      namedSets: () => [],
       pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
       onSetColorBy,
       onRemoveOverride,

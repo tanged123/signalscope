@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::pyramid::Pyramid;
+use crate::series_ref::path_from_ref;
 use crate::session::{
     BindingKind, LinkedTime, NamedSetKind, PanelMode, PanelState, SeriesRef, Session,
 };
@@ -150,7 +151,7 @@ fn signal_from_ref<'a>(
     store: &'a SignalStore,
     reference: &SeriesRef,
 ) -> Option<&'a Signal> {
-    path_from_ref(session, reference)
+    path_from_ref(&session.sources, reference)
         .and_then(|path| store.signal_by_path(&path))
         .or_else(|| {
             let source = store.sources().find(|source| {
@@ -302,23 +303,6 @@ fn glob_branch_matches(pattern: &[char], value: &[char]) -> bool {
 
     let mut memo = vec![vec![None; value.len() + 1]; pattern.len() + 1];
     matches_at(pattern, value, 0, 0, &mut memo)
-}
-
-fn path_from_ref(session: &Session, reference: &SeriesRef) -> Option<String> {
-    if reference.source_key == "derived" {
-        return Some(format!("derived/{}", reference.channel));
-    }
-    session
-        .sources
-        .iter()
-        .find(|source| source.key == reference.source_key)
-        .map(|source| {
-            if source.prefix.is_empty() {
-                reference.channel.clone()
-            } else {
-                format!("{}/{}", source.prefix, reference.channel)
-            }
-        })
 }
 
 fn signal_plan<'a>(

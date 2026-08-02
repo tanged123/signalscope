@@ -39,6 +39,61 @@ const primitiveRust = {
   u64: "u64",
 };
 
+const RUST_KEYWORDS = new Set([
+  "Self",
+  "abstract",
+  "as",
+  "async",
+  "await",
+  "become",
+  "box",
+  "break",
+  "const",
+  "continue",
+  "crate",
+  "do",
+  "dyn",
+  "else",
+  "enum",
+  "extern",
+  "false",
+  "final",
+  "fn",
+  "for",
+  "gen",
+  "if",
+  "impl",
+  "in",
+  "let",
+  "loop",
+  "macro",
+  "match",
+  "mod",
+  "move",
+  "mut",
+  "override",
+  "priv",
+  "pub",
+  "ref",
+  "return",
+  "self",
+  "static",
+  "struct",
+  "super",
+  "trait",
+  "true",
+  "try",
+  "type",
+  "typeof",
+  "unsafe",
+  "unsized",
+  "use",
+  "virtual",
+  "where",
+  "while",
+  "yield",
+]);
+
 const primitiveTypeScript = {
   bool: "boolean",
   f32: "number",
@@ -257,5 +312,5 @@ function emitObject(rust, typeScript, name, definition) {
 
 function rustIdentifier(field) {
   const identifier = snakeCase(field);
-  return identifier === "ref" ? "r#ref" : identifier;
+  return RUST_KEYWORDS.has(identifier) ? `r#${identifier}` : identifier;
 }

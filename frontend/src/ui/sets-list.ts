@@ -20,6 +20,10 @@ export class SetsListView {
   private catalog = Catalog.empty();
   private readonly expandedSets = new Set<string>();
   private namedSets: readonly NamedSet[] = [];
+  private readonly selectorCache = new Map<
+    string,
+    ReturnType<typeof evaluateSelector>
+  >();
 
   constructor(
     private readonly element: HTMLElement,
@@ -46,6 +50,7 @@ export class SetsListView {
 
   setCatalog(catalog: Catalog): void {
     this.catalog = catalog;
+    this.selectorCache.clear();
     this.render();
   }
 
@@ -71,16 +76,17 @@ export class SetsListView {
       const expanded = this.expandedSets.has(set.id);
       const live =
         set.kind === "query" && set.selector !== null
-          ? evaluateSelector(this.catalog, set.selector)
+          ? this.cachedSelector(set.selector)
           : null;
       const row = document.createElement("div");
       row.className = "tree-row tree-set";
       row.tabIndex = 0;
       row.setAttribute("role", "button");
-      row.ariaExpanded = String(expanded);
       const caret = document.createElement("button");
       caret.className = "tree-set-caret";
+      caret.dataset.setId = set.id;
       caret.type = "button";
+      caret.ariaExpanded = String(expanded);
       caret.textContent = expanded ? "▾" : "▸";
       caret.title = `${expanded ? "Collapse" : "Expand"} ${set.name}`;
       caret.setAttribute("aria-label", caret.title);
@@ -88,7 +94,11 @@ export class SetsListView {
         event.stopPropagation();
         if (expanded) this.expandedSets.delete(set.id);
         else this.expandedSets.add(set.id);
+        const setId = set.id;
         this.render();
+        [...this.element.querySelectorAll<HTMLButtonElement>(".tree-set-caret")]
+          .find((candidate) => candidate.dataset.setId === setId)
+          ?.focus();
       });
       const name = document.createElement("span");
       name.className = "tree-set-name";
@@ -155,5 +165,15 @@ export class SetsListView {
       }
     }
     this.element.replaceChildren(...rows);
+  }
+
+  private cachedSelector(selector: string) {
+    if (!this.selectorCache.has(selector)) {
+      this.selectorCache.set(
+        selector,
+        evaluateSelector(this.catalog, selector),
+      );
+    }
+    return this.selectorCache.get(selector) ?? null;
   }
 }

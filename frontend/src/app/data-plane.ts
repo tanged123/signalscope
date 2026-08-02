@@ -623,7 +623,7 @@ function createDemoManifest(): BakedManifest {
       sources: [],
     }),
     signals: demoSignals.map(({ summary, generate }) => ({
-      summary,
+      summary: { ...summary, last_value: generate(summary.t_max) },
       levels: buildDemoLevels(makeBins(generate)),
     })),
   });

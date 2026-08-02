@@ -212,7 +212,7 @@ describe("resolvePanel", () => {
     state.color_by = "source";
     expect(
       resolvePanel(wideCatalog, state, []).map((entry) => entry.hue),
-    ).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 1, 1]);
+    ).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8]);
 
     state.color_by = "channel";
     expect(
@@ -452,5 +452,34 @@ describe("resolvePanel", () => {
       { index: 0, override: overrides[0], matchCount: 2 },
       { index: 1, override: overrides[1], matchCount: 1 },
     ]);
+  });
+
+  it("counts overrides against named-set members", () => {
+    const state = panel();
+    state.bindings = [
+      { kind: "set", selector: null, refs: [], set_id: "saved" },
+    ];
+    state.overrides = [
+      {
+        target_ref: null,
+        target_selector: "temp",
+        color_slot: null,
+        dash: null,
+        width: null,
+        opacity: null,
+        visible: false,
+      },
+    ];
+    const sets = [
+      {
+        id: "saved",
+        name: "Saved",
+        kind: "pick" as const,
+        selector: null,
+        refs: [{ source_key: "a", channel: "temp" }],
+      },
+    ];
+
+    expect(appliedOverrides(catalog, state, sets)[0]?.matchCount).toBe(1);
   });
 });

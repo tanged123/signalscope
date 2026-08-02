@@ -279,8 +279,14 @@ export class WorkspaceView {
       if (path !== null) {
         event.preventDefault();
         const paths = parseSignalPayload(path);
-        if (paths.length > 1) this.callbacks.onDropSignalsNewPanel?.(paths);
-        else if (paths[0] !== undefined)
+        if (paths.length > 1) {
+          if (this.callbacks.onDropSignalsNewPanel === undefined) {
+            const first = paths[0];
+            if (first !== undefined) this.callbacks.onDropSignalNewPanel(first);
+          } else {
+            this.callbacks.onDropSignalsNewPanel(paths);
+          }
+        } else if (paths[0] !== undefined)
           this.callbacks.onDropSignalNewPanel(paths[0]);
       }
     });

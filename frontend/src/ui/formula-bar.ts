@@ -111,9 +111,8 @@ export class FormulaBar {
         refs.every((ref) => ref.channel === firstChannel)
           ? firstChannel
           : null;
-      const path = sharedChannel ?? paths[0] ?? null;
+      const reference = sharedChannel ?? paths[0] ?? null;
       element.classList.remove("drop-target");
-      const reference = path;
       if (reference === null || reference === "") {
         return;
       }
@@ -151,13 +150,6 @@ export class FormulaBar {
 
   setBundles(bundles: readonly FormulaBundleCompletion[]): void {
     this.bundles = bundles.map((bundle) => ({ ...bundle }));
-  }
-
-  focusWithExpression(expression: string): void {
-    this.input.value = expression;
-    this.input.focus();
-    this.input.setSelectionRange(expression.length, expression.length);
-    this.refreshCompletions(false);
   }
 
   private onKeyDown(event: KeyboardEvent): void {

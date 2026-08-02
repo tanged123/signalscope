@@ -559,10 +559,26 @@ export class WorkspaceModel {
   setXRef(panelId: string, ref: SeriesRef | null): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    if (panel.x_ref !== null && !sameRef(panel.x_ref, ref)) {
+    if ((panel.x_ref === null && ref === null) || sameRef(panel.x_ref, ref)) {
+      return;
+    }
+    if (panel.x_ref !== null) {
       this.addSeriesRef(panelId, panel.x_ref);
     }
-    if (ref !== null) this.removeSeriesRef(panelId, ref);
+    if (ref !== null) {
+      panel.bindings = panel.bindings
+        .map((binding) =>
+          binding.kind === "pick"
+            ? {
+                ...binding,
+                refs: binding.refs.filter((entry) => !sameRef(entry, ref)),
+              }
+            : binding,
+        )
+        .filter(
+          (binding) => binding.kind !== "pick" || binding.refs.length > 0,
+        );
+    }
     panel.x_ref = ref === null ? null : { ...ref };
     panel.x_range = null;
     panel.y_range = null;

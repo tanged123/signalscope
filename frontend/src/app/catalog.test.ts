@@ -66,12 +66,27 @@ describe("Catalog", () => {
   it("round-trips paths and references", () => {
     for (const series of catalog.allSeries()) {
       const ref = catalog.refFromPath(series.path);
-      expect(ref).toBeDefined();
-      expect(catalog.get(ref as never)?.path).toBe(series.path);
+      if (ref === undefined) throw new Error("missing reference");
+      expect(catalog.get(ref)?.path).toBe(series.path);
     }
     const ref = catalog.refFromPath("run_01/temp");
     expect(ref).toEqual({ source_key: "run-01", channel: "temp" });
-    expect(catalog.get(ref as never)?.path).toBe("run_01/temp");
+    if (ref === undefined) throw new Error("missing reference");
+    expect(catalog.get(ref)?.path).toBe("run_01/temp");
+    expect(catalog.get({ source_key: "run_01", channel: "temp" })?.path).toBe(
+      "run_01/temp",
+    );
+  });
+
+  it("labels an unprefixed source with its source key", () => {
+    const unprefixed = Catalog.build([
+      {
+        ...summary("source-key", "temp", "temp"),
+        path: "temp",
+      },
+    ]);
+
+    expect(unprefixed.allSeries()[0]?.sourceName).toBe("source-key");
   });
 
   it("retains null units", () => {

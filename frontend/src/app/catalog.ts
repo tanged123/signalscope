@@ -47,10 +47,14 @@ export class Catalog {
     for (const summary of signals) {
       const derived = summary.path.startsWith("derived/");
       const sourceKey = derived ? DERIVED_SOURCE_KEY : summary.source_key;
-      const channel = derived ? summary.path.slice(8) : summary.local_path;
+      const channel = derived
+        ? summary.path.slice(DERIVED_SOURCE_KEY.length + 1)
+        : summary.local_path;
       const series: CatalogSeries = {
         sourceKey,
-        sourceName: separatorName(summary.path) ?? DERIVED_SOURCE_KEY,
+        sourceName:
+          separatorName(summary.path) ??
+          (derived ? DERIVED_SOURCE_KEY : summary.source_key),
         channel,
         path: summary.path,
         summary,

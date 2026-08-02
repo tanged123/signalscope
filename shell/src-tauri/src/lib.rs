@@ -594,26 +594,28 @@ fn list_signals(
 ) -> Result<Envelope<Vec<SignalSummary>>, String> {
     let mut data = state.lock().map_err(|error| error.to_string())?;
     data.reexpand_derived_bundles();
-    Ok(Envelope::new(
-        data.store
-            .signals()
-            .map(|signal| {
-                let key = data
-                    .store
-                    .sources()
-                    .find(|source| source.id == signal.source_id)
-                    .expect("signal source")
-                    .key;
-                signal_summary(
-                    signal,
-                    key,
-                    data.pyramids
-                        .get(&signal.id)
-                        .and_then(Pyramid::last_finite_value),
-                )
-            })
-            .collect(),
-    ))
+    Ok(Envelope::new(signal_summaries(&data)))
+}
+
+fn signal_summaries(data: &DataState) -> Vec<SignalSummary> {
+    data.store
+        .signals()
+        .map(|signal| {
+            let key = data
+                .store
+                .sources()
+                .find(|source| source.id == signal.source_id)
+                .expect("signal source")
+                .key;
+            signal_summary(
+                signal,
+                key,
+                data.pyramids
+                    .get(&signal.id)
+                    .and_then(Pyramid::last_finite_value),
+            )
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -762,7 +764,11 @@ impl DataState {
             .map(|signal| signal.path.clone())
             .collect();
         let mut locals = BTreeMap::new();
-        for source in self.store.sources() {
+        for source in self
+            .store
+            .sources()
+            .filter(|source| Some(source.id) != self.derived_source)
+        {
             locals.insert(
                 source.key,
                 (
@@ -1862,6 +1868,55 @@ mod tests {
     }
 
     #[test]
+    fn bundle_inputs_exclude_the_derived_source() {
+        let mut data = data_with_bundle_sources();
+        data.create_derived_signal(DerivedRequest {
+            path: "derived/base".into(),
+            expr: "'run_01/temp' * 2".into(),
+        })
+        .expect("creates derived signal");
+        let derived_source = data.derived_source.expect("derived source");
+        let derived_key = data
+            .store
+            .sources()
+            .find(|source| source.id == derived_source)
+            .expect("registered derived source")
+            .key;
+
+        let (_, locals) = data.bundle_inputs();
+
+        assert!(!locals.contains_key(&derived_key));
+        assert_eq!(locals.len(), 3);
+    }
+
+    #[test]
+    fn signal_summaries_report_last_values_only_for_available_pyramids() {
+        let mut data = data_with_bundle_sources();
+        let signal = data
+            .store
+            .signal_by_path("run_01/temp")
+            .expect("signal with pyramid");
+        data.pyramids
+            .insert(signal.id, Pyramid::from_signal(signal));
+
+        let summaries = signal_summaries(&data);
+        assert_eq!(
+            summaries
+                .iter()
+                .find(|summary| summary.path == "run_01/temp")
+                .and_then(|summary| summary.last_value),
+            Some(2.0)
+        );
+        assert_eq!(
+            summaries
+                .iter()
+                .find(|summary| summary.path == "run_02/temp")
+                .and_then(|summary| summary.last_value),
+            None
+        );
+    }
+
+    #[test]
     fn a_derived_signal_spills_when_it_exceeds_the_resident_budget() {
         let (mut data, _) = data_with_signal("input/x");
         data.cache_root = tempfile::tempdir().unwrap().keep();
@@ -1878,6 +1933,7 @@ mod tests {
             .unwrap();
         let signal = data.store.signal(SignalId(summary.signal_id)).unwrap();
 
+        assert_eq!(summary.last_value, Some(4.0));
         assert!(signal.is_paged());
         assert_eq!(&*signal.values(), &[2.0, 4.0]);
     }

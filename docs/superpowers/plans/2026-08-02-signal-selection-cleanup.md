@@ -16,7 +16,7 @@
 - Sources continue using raw stored numeric timestamps; do not add a replacement normalization path.
 - Generated Rust and TypeScript protocol/session files change only through `./scripts/codegen.sh`.
 - Protocol version 14 and session schema version 19 are breaking API changes with explicit docs and migration coverage.
-- The final version bump is major from 2.0.0 to 3.0.0.
+- The final version bump is major from 0.15.3 to 1.0.0.
 - Stage files explicitly and leave unrelated worktree changes untouched.
 
 ---

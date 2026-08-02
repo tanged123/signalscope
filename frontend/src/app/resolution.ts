@@ -121,11 +121,14 @@ export function dimensionCounts(
 export function appliedOverrides(
   catalog: Catalog,
   panel: PanelState,
+  namedSets: readonly NamedSet[] = [],
 ): { index: number; override: SeriesOverride; matchCount: number }[] {
-  const refs = resolveRefs(catalog, panel, []).map(({ ref, series }) => ({
-    ref,
-    series,
-  }));
+  const refs = resolveRefs(catalog, panel, namedSets).map(
+    ({ ref, series }) => ({
+      ref,
+      series,
+    }),
+  );
   const prepared = prepareOverrides(panel.overrides);
   return prepared.map(({ index, override }) => ({
     index,
@@ -199,7 +202,7 @@ function assignHues(
     );
     let hue = values.get(value);
     if (hue === undefined) {
-      hue = (values.size % 7) + 1;
+      hue = (values.size % 8) + 1;
       values.set(value, hue);
     }
     hues.push(hue);
@@ -231,24 +234,16 @@ function dimensionValue(
 function prepareOverrides(
   overrides: readonly SeriesOverride[],
 ): PreparedOverride[] {
-  return overrides.flatMap((override, index) => {
-    if (override.target_selector === null) {
-      return [
-        {
-          index,
-          override,
-          selector: null,
-        },
-      ];
-    }
-    const parsed = parseSelector(override.target_selector);
-    return [
-      {
-        index,
-        override,
-        selector: parsed.ok ? parsed.selector : null,
-      },
-    ];
+  return overrides.map((override, index) => {
+    const parsed =
+      override.target_selector === null
+        ? null
+        : parseSelector(override.target_selector);
+    return {
+      index,
+      override,
+      selector: parsed?.ok === true ? parsed.selector : null,
+    };
   });
 }
 
@@ -267,7 +262,7 @@ function matchesOverride(
 }
 
 function hueForSlot(slot: number): number {
-  return ((Math.max(1, Math.trunc(slot)) - 1) % 7) + 1;
+  return ((Math.max(1, Math.trunc(slot)) - 1) % 8) + 1;
 }
 
 function sameRef(left: SeriesRef, right: SeriesRef): boolean {

@@ -654,19 +654,8 @@ export class PanelView {
   }
 
   private bind(): void {
-    this.element.addEventListener("pointerdown", (event) => {
+    this.element.addEventListener("pointerdown", () => {
       this.callbacks.onFocus(this.id);
-      const target = event.target;
-      if (
-        target instanceof Node &&
-        !this.element.contains(target) &&
-        !this.element.querySelector(".matrix-roster")?.contains(target) &&
-        !this.element.querySelector(".binding-popover")?.contains(target)
-      ) {
-        this.closeRoster();
-        this.closeBindingPopover();
-        this.closeRulesPopover();
-      }
     });
     required(this.element, ".panel-close").addEventListener("click", () => {
       this.callbacks.onClose(this.id);
@@ -710,10 +699,18 @@ export class PanelView {
         else this.callbacks.onClearFocus(this.id);
         this.closeRoster();
         this.closeBindingPopover();
-      } else if (event.key === "Tab" && this.cursorT !== null) {
+      } else if (
+        event.target === this.element &&
+        event.key === "Tab" &&
+        this.cursorT !== null
+      ) {
         event.preventDefault();
         this.walkHover(event.shiftKey ? -1 : 1);
-      } else if (event.key === "Enter" && this.emphasizePaths?.size === 1) {
+      } else if (
+        event.target === this.element &&
+        event.key === "Enter" &&
+        this.emphasizePaths?.size === 1
+      ) {
         const path = [...this.emphasizePaths][0];
         const series = this.lastState?.series.find(
           (entry) => entry.path === path,
@@ -2124,13 +2121,14 @@ export class PanelView {
         : new Set(typeof paths === "string" ? [paths] : paths);
     if (setsEqual(this.emphasizePaths, next)) return;
     this.emphasizePaths = next;
-    if (this.lastInputState !== null && this.lastWindow !== null) {
-      this.renderData(
-        this.lastInputState,
+    if (this.lastState !== null && this.lastWindow !== null) {
+      this.renderForMode(
+        this.lastState,
         this.lastTiles,
         this.lastSamples,
         this.lastWindow,
       );
+      this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
   }
 
@@ -2425,7 +2423,13 @@ export class PanelView {
     overridesTitle.className = "rules-overrides-title";
     const input = this.lastInputState;
     const overrides =
-      input === null ? [] : appliedOverrides(this.callbacks.catalog(), input);
+      input === null
+        ? []
+        : appliedOverrides(
+            this.callbacks.catalog(),
+            input,
+            this.callbacks.namedSets(),
+          );
     overridesTitle.textContent = `OVERRIDES · ${String(overrides.length)}`;
     const rows = document.createElement("div");
     rows.className = "rules-overrides";
@@ -2596,11 +2600,10 @@ export class PanelView {
       this.lastInputState === null
         ? undefined
         : overrideFor(this.lastInputState, series.ref);
-    const overrideAction =
-      override === undefined ? null : document.createElement("div");
-    if (overrideAction !== null) {
+    let overrideAction: HTMLDivElement | null = null;
+    if (override !== undefined) {
       const selectedOverride = override;
-      if (selectedOverride === undefined) return;
+      overrideAction = document.createElement("div");
       overrideAction.className = "inspector-override";
       overrideAction.textContent = `◆ override · ${overrideTarget(selectedOverride, this.callbacks)}`;
       const revert = document.createElement("button");

@@ -4,7 +4,7 @@ import type {
   AnnotationDomain,
   PanelMode,
 } from "../generated/session";
-import { nearestLine, nearestVertex } from "./plot-hit";
+import { nearestLine, nearestVertex, segmentHit } from "./plot-hit";
 import {
   formatValue,
   invertX,
@@ -331,7 +331,15 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
           y,
           threshold,
         );
-        return hit === null ? null : { path: hit.path, distance: 0 };
+        return hit === null
+          ? null
+          : {
+              path: hit.path,
+              distance: Math.hypot(
+                projectX(layout, hit.x) - x,
+                projectY(layout, hit.y) - y,
+              ),
+            };
       },
     },
     autoRanges() {
@@ -752,7 +760,7 @@ function nearestPolyline(
         y: projectY(layout, valueY),
       };
       if (previous !== null) {
-        const hit = segmentDistance(previous, current, px, py);
+        const hit = segmentHit(previous, current, px, py).squared;
         if (hit <= bestSquared) {
           bestSquared = hit;
           best = { path: entry.path, distance: Math.sqrt(hit) };
@@ -762,30 +770,6 @@ function nearestPolyline(
     }
   }
   return best;
-}
-
-function segmentDistance(
-  first: { x: number; y: number },
-  second: { x: number; y: number },
-  px: number,
-  py: number,
-): number {
-  const dx = second.x - first.x;
-  const dy = second.y - first.y;
-  const lengthSquared = dx * dx + dy * dy;
-  const fraction =
-    lengthSquared === 0
-      ? 0
-      : Math.max(
-          0,
-          Math.min(
-            1,
-            ((px - first.x) * dx + (py - first.y) * dy) / lengthSquared,
-          ),
-        );
-  const x = first.x + dx * fraction;
-  const y = first.y + dy * fraction;
-  return (x - px) ** 2 + (y - py) ** 2;
 }
 
 function histogramPoints(

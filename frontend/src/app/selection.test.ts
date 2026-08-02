@@ -59,6 +59,16 @@ describe("SelectionModel", () => {
     expect(listener).toHaveBeenCalledTimes(3);
   });
 
+  it("does not notify when toggling an empty group", () => {
+    const selection = new SelectionModel();
+    const listener = vi.fn();
+    selection.onChange(listener);
+
+    selection.toggleMany([]);
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("retains only keys still present in the catalog", () => {
     const selection = new SelectionModel();
     const listener = vi.fn();

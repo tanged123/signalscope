@@ -25,6 +25,8 @@ describe("CommandPalette", () => {
     });
     const palette = new CommandPalette(root, provider);
     palette.open("signals");
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(provider).toHaveBeenLastCalledWith("signals", "", 13);
     const input = root.querySelector<HTMLInputElement>(".palette-input");
     if (input === null) throw new Error("palette input missing");
     input.value = "temp @ run_*";
@@ -36,7 +38,7 @@ describe("CommandPalette", () => {
       "plot run_01/tempsignal",
       "plot run_02/tempsignal",
     ]);
-    expect(provider).toHaveBeenLastCalledWith("signals", "temp @ run_*");
+    expect(provider).toHaveBeenLastCalledWith("signals", "temp @ run_*", 13);
 
     input.value = "press";
     input.dispatchEvent(new Event("input"));

@@ -10,7 +10,8 @@ use thiserror::Error;
 use crate::{
     expr::{self, ExprError},
     naming,
-    session::{FocusKind, NamedSetKind, SeriesRef, Session},
+    series_ref::{path_from_ref, ref_from_path},
+    session::{NamedSetKind, SeriesRef, Session},
     sources::SourceRecord,
     store::SourceKey,
 };
@@ -154,11 +155,6 @@ pub fn reconcile(
                 if let Some(reference) = &mut focus.r#ref {
                     rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
                 }
-                if matches!(focus.kind, FocusKind::Source) {
-                    if let Some(source_key) = &mut focus.source_key {
-                        rewrite(source_key, aliases, &mut rewritten);
-                    }
-                }
             }
             if let Some(reference) = &mut panel.x_ref {
                 rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
@@ -228,40 +224,6 @@ fn rewrite_ref(
     };
     *reference = rewritten;
     *count += 1;
-}
-
-fn path_from_ref(
-    sources: &[crate::session::SourceRecord],
-    reference: &SeriesRef,
-) -> Option<String> {
-    if reference.source_key == "derived" {
-        return Some(format!("derived/{}", reference.channel));
-    }
-    sources
-        .iter()
-        .find(|source| source.key == reference.source_key)
-        .map(|source| format!("{}/{}", source.prefix, reference.channel))
-}
-
-fn ref_from_path(sources: &[crate::session::SourceRecord], path: &str) -> Option<SeriesRef> {
-    if let Some(channel) = path.strip_prefix("derived/") {
-        return Some(SeriesRef {
-            source_key: "derived".into(),
-            channel: channel.into(),
-        });
-    }
-    sources
-        .iter()
-        .filter(|source| {
-            path.len() > source.prefix.len() + 1
-                && path.starts_with(&source.prefix)
-                && path.as_bytes()[source.prefix.len()] == b'/'
-        })
-        .max_by_key(|source| source.prefix.len())
-        .map(|source| SeriesRef {
-            source_key: source.key.clone(),
-            channel: path[source.prefix.len() + 1..].into(),
-        })
 }
 
 #[cfg(test)]
@@ -399,6 +361,65 @@ mod tests {
             key(2).0.to_string()
         );
         assert_eq!(session.derived[0].expr, "'run_a/vehicle/imu/ax' * 2");
+    }
+
+    #[test]
+    fn empty_prefix_refs_round_trip_as_bare_channels() {
+        let source_key = key(1).0.to_string();
+        let mut session = Session {
+            sources: vec![crate::session::SourceRecord {
+                key: source_key.clone(),
+                path: "/data/run.csv".into(),
+                prefix: String::new(),
+                provider_id: None,
+                decode_provenance: None,
+                reconcile_legacy: false,
+            }],
+            named_sets: vec![NamedSet {
+                id: "set-1".into(),
+                name: "Set".into(),
+                kind: NamedSetKind::Pick,
+                selector: None,
+                refs: vec![SeriesRef {
+                    source_key: source_key.clone(),
+                    channel: "temp".into(),
+                }],
+            }],
+            ..Session::default()
+        };
+
+        reconcile(
+            &mut session,
+            &BTreeMap::from([("temp".into(), "pressure".into())]),
+            &BTreeSet::new(),
+        )
+        .expect("reconciles");
+
+        assert_eq!(session.named_sets[0].refs[0].source_key, source_key);
+        assert_eq!(session.named_sets[0].refs[0].channel, "pressure");
+    }
+
+    #[test]
+    fn source_focus_keys_are_not_rewritten_as_signal_paths() {
+        let mut session = session_with("temp", "'temp'");
+        session.tabs[0].panels[0].focus = vec![FocusEntry {
+            kind: FocusKind::Source,
+            r#ref: None,
+            source_key: Some("run_a".into()),
+            channel: None,
+        }];
+
+        reconcile(
+            &mut session,
+            &BTreeMap::from([("run_a".into(), "run_b".into())]),
+            &BTreeSet::new(),
+        )
+        .expect("reconciles");
+
+        assert_eq!(
+            session.tabs[0].panels[0].focus[0].source_key.as_deref(),
+            Some("run_a")
+        );
     }
 
     #[test]

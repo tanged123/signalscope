@@ -22,7 +22,11 @@ test.describe("desktop plot interactions", () => {
     await expect(page.locator(".cursor-time")).not.toHaveText("t —");
     await expect(page.locator(".plot-tip")).toBeVisible();
     await expect(
-      page.locator(".outline-scroll [data-path]").first(),
+      page
+        .locator(
+          '.outline-scroll [data-row-kind="series"] [data-column="value"]',
+        )
+        .first(),
     ).not.toHaveText("—");
 
     await page.keyboard.press("c");

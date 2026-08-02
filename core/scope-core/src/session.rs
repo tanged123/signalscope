@@ -295,31 +295,11 @@ fn migrate_v10_sources(value: &mut serde_json::Value) {
     }
 }
 
-const DERIVED_SOURCE_KEY: &str = "derived";
-
 /// Longest-prefix match of a flat path against source prefixes; derived
 /// paths map to the reserved derived source key.
 fn path_to_ref(path: &str, prefixes: &[(String, String)]) -> Option<serde_json::Value> {
-    if let Some(rest) = path.strip_prefix("derived/") {
-        return Some(serde_json::json!({
-            "source_key": DERIVED_SOURCE_KEY,
-            "channel": rest,
-        }));
-    }
-    prefixes
-        .iter()
-        .filter(|(prefix, _)| {
-            path.len() > prefix.len() + 1
-                && path.starts_with(prefix.as_str())
-                && path.as_bytes()[prefix.len()] == b'/'
-        })
-        .max_by_key(|(prefix, _)| prefix.len())
-        .map(|(prefix, key)| {
-            serde_json::json!({
-                "source_key": key,
-                "channel": &path[prefix.len() + 1..],
-            })
-        })
+    crate::series_ref::ref_from_prefixes(path, prefixes)
+        .and_then(|reference| serde_json::to_value(reference).ok())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -835,6 +815,21 @@ mod tests {
             session.named_sets[1].selector.as_deref(),
             Some("imu/accel/x")
         );
+    }
+
+    #[test]
+    fn v16_bare_paths_migrate_for_an_empty_source_prefix() {
+        let mut value = v16_fixture();
+        value["sources"][0]["prefix"] = serde_json::json!("");
+        value["tabs"][0]["panels"][0]["x_signal"] = serde_json::json!("temp");
+        value["tabs"][0]["panels"][0]["series"] = serde_json::json!([{
+            "path": "pressure", "color_slot": 2, "dash": "dash", "width": 2.0, "visible": true
+        }]);
+
+        let session = from_json(&value.to_string()).expect("v16 migrates");
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.x_ref.as_ref().unwrap().channel, "temp");
+        assert_eq!(panel.bindings[0].refs[0].channel, "pressure");
     }
 
     #[test]

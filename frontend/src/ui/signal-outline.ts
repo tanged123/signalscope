@@ -30,6 +30,9 @@ export class SignalOutlineView {
   private liveValues: ReadonlyMap<string, string> = new Map();
   private readonly rowHeight: number;
   private readonly unsubscribe: () => void;
+  private readonly onScroll = (): void => this.render();
+  private readonly onKeyDown = (event: KeyboardEvent): void =>
+    this.keydown(event);
 
   constructor(
     private readonly listElement: HTMLElement,
@@ -52,8 +55,8 @@ export class SignalOutlineView {
     );
     listElement.setAttribute("role", "grid");
     listElement.setAttribute("aria-multiselectable", "true");
-    listElement.addEventListener("scroll", () => this.render());
-    listElement.addEventListener("keydown", (event) => this.keydown(event));
+    listElement.addEventListener("scroll", this.onScroll);
+    listElement.addEventListener("keydown", this.onKeyDown);
     this.unsubscribe = selection.onChange(() => {
       this.render();
       this.callbacks.onSelectionChange();
@@ -85,6 +88,8 @@ export class SignalOutlineView {
   }
 
   destroy(): void {
+    this.listElement.removeEventListener("scroll", this.onScroll);
+    this.listElement.removeEventListener("keydown", this.onKeyDown);
     this.unsubscribe();
   }
 
@@ -424,6 +429,20 @@ export class SignalOutlineView {
       if (target !== undefined)
         this.selection.selectRange(this.filteredKeys(), target);
     }
+    const top = next * this.rowHeight;
+    const bottom = top + this.rowHeight;
+    if (top < this.listElement.scrollTop) {
+      this.listElement.scrollTop = top;
+    } else if (
+      bottom >
+      this.listElement.scrollTop + this.listElement.clientHeight
+    ) {
+      this.listElement.scrollTop = bottom - this.listElement.clientHeight;
+    }
+    this.render();
+    [...this.listElement.querySelectorAll<HTMLElement>("[data-key]")]
+      .find((element) => element.dataset.key === row?.key)
+      ?.focus();
   }
 
   private setDragPayload(
@@ -433,16 +452,17 @@ export class SignalOutlineView {
     const selected = keys.some((key) => this.selection.has(key))
       ? this.selection.keys()
       : keys;
+    const byKey = new Map(
+      this.catalog.allSeries().map((series) => [
+        this.catalog.refKey({
+          source_key: series.sourceKey,
+          channel: series.channel,
+        }),
+        series,
+      ]),
+    );
     const entries = selected
-      .map((key) =>
-        this.catalog.allSeries().find(
-          (series) =>
-            this.catalog.refKey({
-              source_key: series.sourceKey,
-              channel: series.channel,
-            }) === key,
-        ),
-      )
+      .map((key) => byKey.get(key))
       .filter(
         (series): series is NonNullable<typeof series> => series !== undefined,
       );

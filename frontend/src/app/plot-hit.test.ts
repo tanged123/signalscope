@@ -49,3 +49,12 @@ test("nearestLine hits the rendered envelope within a pixel tolerance", () => {
   expect(hit?.distance).toBe(1);
   expect(nearestLine([], layout, 50, 50, 6)).toBeNull();
 });
+
+test("nearestLine does not connect bins across a gap", () => {
+  const first = { ...bin(0, 1, 2, 2), has_gap: true };
+  const second = bin(9, 10, 8, 8);
+
+  expect(
+    nearestLine([{ path: "a/b", bins: [first, second] }], layout, 50, 50, 8),
+  ).toBeNull();
+});

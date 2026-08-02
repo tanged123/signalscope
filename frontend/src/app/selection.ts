@@ -23,6 +23,7 @@ export class SelectionModel {
   }
 
   toggleMany(keys: readonly string[]): void {
+    if (keys.length === 0) return;
     const allSelected = keys.every((key) => this.selected.has(key));
     for (const key of keys) {
       if (allSelected) this.selected.delete(key);
@@ -74,9 +75,10 @@ export class SelectionModel {
 
   private replace(keys: readonly string[]): void {
     const next = [...new Set(keys)];
+    const current = this.keys();
     if (
       next.length === this.selected.size &&
-      next.every((key, index) => key === this.keys()[index])
+      next.every((key, index) => key === current[index])
     ) {
       return;
     }

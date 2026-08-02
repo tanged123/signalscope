@@ -125,14 +125,15 @@ interface DockProbe {
 describe("signals outline dock", () => {
   it("keeps one outline surface and the shared selection", () => {
     const root = document.createElement("div");
-    root.innerHTML = `<div class="outline-scroll"></div>`;
+    root.innerHTML = shellMarkup();
     const shell = Object.create(AppShell.prototype) as DockProbe;
     shell.root = root;
     shell.selection = new SelectionModel();
-    shell.outline = { filteredKeys: () => ["outline"] };
-    shell.selection.toggle("shared");
+    shell.outline = { filteredKeys: () => ["shared"] };
 
-    expect(root.querySelector(".outline-scroll")).not.toBeNull();
+    shell.selectAllDockRows();
+
+    expect(root.querySelectorAll(".outline-scroll")).toHaveLength(1);
     expect(root.querySelector(".signal-outline-controls")).toBeNull();
     expect(shell.selection.keys()).toEqual(["shared"]);
   });

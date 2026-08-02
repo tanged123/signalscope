@@ -59,6 +59,19 @@ describe("BakedPlane.querySamples", () => {
     expect(response.series[0]?.stride).toBe(2);
     expect(Number.isNaN(response.series[0]?.values[1])).toBe(true);
   });
+
+  it("reports finite last values for both generated demo signals", async () => {
+    const plane = BakedPlane.fromDocument({
+      querySelector: () => null,
+    } as unknown as Document);
+
+    const signals = await plane.listSignals();
+
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => Number.isFinite(signal.last_value))).toBe(
+      true,
+    );
+  });
 });
 
 describe("batch ingest port", () => {

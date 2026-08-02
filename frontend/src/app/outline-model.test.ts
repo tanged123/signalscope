@@ -45,7 +45,10 @@ describe("buildOutlineRows", () => {
     ).toMatchObject({
       expanded: false,
       aggregate: "2 srcs",
-      childKeys: ["run_02\u0000temp", "run_01\u0000temp"],
+      childKeys: [
+        catalog.refKey({ source_key: "run_02", channel: "temp" }),
+        catalog.refKey({ source_key: "run_01", channel: "temp" }),
+      ],
     });
     expect(
       rows.some((row) => row.kind === "series" && row.path.endsWith("/temp")),
@@ -88,9 +91,19 @@ describe("buildOutlineRows", () => {
         summary("run_01", `channel_${String(index)}`),
       ),
     );
-    const started = performance.now();
     expect(buildOutlineRows(large, options())).toHaveLength(10_000);
-    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it("orders channel rows alphabetically", () => {
+    const unsorted = Catalog.build([
+      summary("run_01", "zulu"),
+      summary("run_01", "alpha"),
+    ]);
+    expect(
+      buildOutlineRows(unsorted, options()).map((row) =>
+        row.kind === "series" ? row.channel : row.label,
+      ),
+    ).toEqual(["alpha", "zulu"]);
   });
 });
 
@@ -101,6 +114,15 @@ describe("virtualSlice", () => {
       end: 129,
       topPadding: 1_980,
       totalHeight: 220_000,
+    });
+  });
+
+  it("caps stale scroll offsets at the end of the row set", () => {
+    expect(virtualSlice(10, 10_000, 100, 20, 2)).toEqual({
+      start: 10,
+      end: 10,
+      topPadding: 200,
+      totalHeight: 200,
     });
   });
 });

@@ -170,7 +170,6 @@ test("FFT and histogram hit adapters select rendered traces", () => {
       {
         path: "visible/spectrum",
         colorIndex: 1,
-        visible: true,
         frequency: [0, 5, 10],
         amplitudeDb: [10, 0, 10],
       },
@@ -195,7 +194,6 @@ test("FFT and histogram hit adapters select rendered traces", () => {
       {
         path: "visible/histogram",
         colorIndex: 1,
-        visible: true,
         counts: [2, 8],
         sourceValues: [],
       },
@@ -206,6 +204,27 @@ test("FFT and histogram hit adapters select rendered traces", () => {
     distance: 0,
   });
   expect(histogram.hitAdapter.seriesAt(layout, 75, 50, 1)).toBeNull();
+});
+
+test("XY hit adapters report the projected point distance", () => {
+  const xy = prepareXyPlot({
+    x: { path: "demo/x", values: [5] },
+    series: [
+      {
+        path: "demo/y",
+        colorIndex: 0,
+        trace: { time: [0], x: [5], y: [5] },
+        colorValues: null,
+      },
+    ],
+    color: null,
+    window: { t0: 0, t1: 1 },
+  });
+
+  expect(xy.hitAdapter.seriesAt(layout, 53, 54, 6)).toEqual({
+    path: "demo/y",
+    distance: 5,
+  });
 });
 
 test("XY capabilities sample colour on the focused trace's timebase", () => {

@@ -16,6 +16,7 @@ pub mod paging;
 pub mod preferences;
 pub mod pyramid;
 pub mod restore;
+pub mod series_ref;
 pub mod session;
 pub mod snapshot;
 pub mod sources;

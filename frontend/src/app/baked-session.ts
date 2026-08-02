@@ -105,7 +105,11 @@ function isOverride(value: unknown): boolean {
     ) &&
     isNullable(
       value.color_slot,
-      (item): item is number => typeof item === "number",
+      (item): item is number =>
+        typeof item === "number" &&
+        Number.isFinite(item) &&
+        item >= 1 &&
+        item <= 8,
     ) &&
     isNullable(
       value.dash,
@@ -114,11 +118,19 @@ function isOverride(value: unknown): boolean {
     ) &&
     isNullable(
       value.width,
-      (item): item is number => typeof item === "number",
+      (item): item is number =>
+        typeof item === "number" &&
+        Number.isFinite(item) &&
+        item >= 0.5 &&
+        item <= 4,
     ) &&
     isNullable(
       value.opacity,
-      (item): item is number => typeof item === "number",
+      (item): item is number =>
+        typeof item === "number" &&
+        Number.isFinite(item) &&
+        item >= 0 &&
+        item <= 1,
     ) &&
     isNullable(
       value.visible,
@@ -154,6 +166,21 @@ function isFocus(value: unknown): boolean {
       value.channel,
       (item): item is string => typeof item === "string",
     )
+  );
+}
+
+function isNamedSet(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    (value.kind === "query" || value.kind === "pick") &&
+    isNullable(
+      value.selector,
+      (candidate): candidate is string => typeof candidate === "string",
+    ) &&
+    Array.isArray(value.refs) &&
+    value.refs.every(isSeriesRef)
   );
 }
 
@@ -235,19 +262,7 @@ function isSession(value: JsonObject): value is JsonObject & Session {
     Array.isArray(value.tabs) &&
     value.tabs.every(isTab) &&
     Array.isArray(value.named_sets) &&
-    value.named_sets.every(
-      (item) =>
-        isRecord(item) &&
-        typeof item.id === "string" &&
-        typeof item.name === "string" &&
-        (item.kind === "query" || item.kind === "pick") &&
-        isNullable(
-          item.selector,
-          (candidate): candidate is string => typeof candidate === "string",
-        ) &&
-        Array.isArray(item.refs) &&
-        item.refs.every(isSeriesRef),
-    ) &&
+    value.named_sets.every(isNamedSet) &&
     Array.isArray(value.derived) &&
     value.derived.every(
       (item) =>

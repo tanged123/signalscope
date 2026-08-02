@@ -303,7 +303,9 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
   await expect(panel.locator(".panel-actions")).toBeVisible();
   await panel.locator(".legend-count-token").first().click();
   await expect(panel.locator(".matrix-roster")).toBeVisible();
-  expect(await panel.locator(".matrix-roster-row").count()).toBeLessThan(40);
+  await expect
+    .poll(() => panel.locator(".matrix-roster-row").count())
+    .toBeLessThan(40);
   await panel.locator(".matrix-roster-row").first().click();
   await expect(panel.locator(".binding-chip")).toHaveCount(1);
   await panel.locator(".binding-chip").click();
@@ -668,7 +670,7 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   const search = page.locator(".signal-search");
   await search.fill("velocity_body/* @ rocket");
   await expect(page.locator(".search-count")).toContainText(
-    "2 signals · 1 sources",
+    "2 signals · 1 source",
   );
   await search.press("Enter");
   const first = page.locator(".panel").first();

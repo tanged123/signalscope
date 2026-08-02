@@ -60,6 +60,11 @@ describe("evaluateSelector", () => {
         (entry) => entry.path,
       ),
     ).toEqual(["derived/err"]);
+    expect(
+      evaluateSelector(catalog, "* kind:signal")?.series.map(
+        (entry) => entry.path,
+      ),
+    ).not.toContain("derived/err");
   });
 
   it("reports signal and source counts", () => {
@@ -124,6 +129,10 @@ describe("compileGlob", () => {
   it("unterminated range is malformed", () => {
     expect(compileGlob("run_[1")).toBeNull();
   });
+
+  it("rejects patterns above the supported length cap", () => {
+    expect(compileGlob("a".repeat(257))).toBeNull();
+  });
 });
 
 describe("parseSelector", () => {
@@ -156,6 +165,7 @@ describe("parseSelector", () => {
       ]);
     }
     expect(parseSelector("temp foo:bar").ok).toBe(false);
+    expect(parseSelector("temp kind:other").ok).toBe(false);
   });
 
   it("rejects empty, incomplete, malformed, and duplicate source terms", () => {

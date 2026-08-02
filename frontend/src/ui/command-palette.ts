@@ -1,6 +1,9 @@
 import { fuzzyScore } from "../app/fuzzy";
 import { required } from "./dom";
 
+const FUZZY_PATH_LIMIT = 12;
+const SIGNAL_LIMIT = 13;
+
 export interface PaletteEntry {
   title: string;
   hint: string;
@@ -29,6 +32,7 @@ export class CommandPalette {
     private readonly provider: (
       mode: PaletteMode,
       query?: string,
+      limit?: number,
     ) => PaletteEntry[],
   ) {
     this.element = document.createElement("div");
@@ -82,7 +86,7 @@ export class CommandPalette {
 
   open(mode: PaletteMode): void {
     this.mode = mode;
-    this.entries = this.provider(mode, "");
+    this.entries = mode === "signals" ? [] : this.provider(mode, "");
     this.element.hidden = false;
     this.input.placeholder =
       mode === "signals"
@@ -106,8 +110,8 @@ export class CommandPalette {
   private filter(): void {
     const query = this.input.value;
     if (this.mode === "signals") {
-      this.entries = this.provider(this.mode, query);
-      this.matches = this.entries.slice(0, 13);
+      this.entries = this.provider(this.mode, query, SIGNAL_LIMIT);
+      this.matches = this.entries;
       this.selected = 0;
       this.renderList();
       return;
@@ -119,7 +123,7 @@ export class CommandPalette {
           item.score !== null,
       )
       .sort((left, right) => right.score - left.score)
-      .slice(0, 12)
+      .slice(0, FUZZY_PATH_LIMIT)
       .map((item) => item.entry);
     this.selected = 0;
     this.renderList();
@@ -169,7 +173,7 @@ export class CommandPalette {
   /** Re-pulls entries so hints show updated values, keeping the selection. */
   private refreshEntries(): void {
     const selected = this.selected;
-    this.entries = this.provider(this.mode, "");
+    if (this.mode !== "signals") this.entries = this.provider(this.mode, "");
     this.filter();
     this.selected = Math.min(selected, Math.max(0, this.matches.length - 1));
     this.renderList();

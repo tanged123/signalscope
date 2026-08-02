@@ -545,7 +545,7 @@ describe("render", () => {
 
   it("draws a ghost with the fixed neutral stroke", () => {
     const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
-      styles: [{ hue: null, dash: "solid", width: 1, alpha: 0.5 }],
+      styles: [{ hue: null, dash: "solid", width: 1.3, alpha: 0.5 }],
     });
     expect(
       calls.filter(
@@ -553,7 +553,7 @@ describe("render", () => {
           call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.fg4,
       ),
     ).toHaveLength(1);
-    expect(calls).toContainEqual({ op: "=lineWidth", args: [1] });
+    expect(calls).toContainEqual({ op: "=lineWidth", args: [1.3] });
     expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
     expect(calls).toContainEqual({ op: "setLineDash", args: [[]] });
   });
@@ -584,6 +584,28 @@ describe("render", () => {
     expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.25] });
     expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
     expect(calls).toContainEqual({ op: "=lineWidth", args: [1.6] });
+  });
+
+  it("multiplies a dimmed path's configured alpha", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1],
+          hue: 1,
+          dash: "solid",
+          width: 1.4,
+          alpha: 0.8,
+          dimmed: true,
+        },
+      ],
+      { xLabel: "x", yLabel: "y", xRange: [0, 1], yRange: [0, 1] },
+    );
+
+    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.4] });
   });
 
   it("keeps manual dash independent from hue", () => {
