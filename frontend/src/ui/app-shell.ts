@@ -241,6 +241,15 @@ export class AppShell {
         },
         onToggleGhostMode: (id) => {
           this.workspace.toggleGhostMode(id);
+          const panel = this.workspace.panel(id);
+          if (panel?.ghost_mode === "ghost") {
+            this.focusFirstSource(
+              id,
+              resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
+                (series) => series.ref,
+              ),
+            );
+          }
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -901,7 +910,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 3.1.1");
+        this.showModeHelp("SignalScope 3.1.2");
       },
     });
     this.commands.register({
@@ -1468,6 +1477,7 @@ export class AppShell {
     if (mode === "none") return;
     if (mode === "ghost") {
       this.workspace.setGhostMode(panelId, "ghost");
+      this.focusFirstSource(panelId, [...unique.values()]);
       return;
     }
     const focused = this.workspace.focusEntries(panelId);
@@ -1489,6 +1499,18 @@ export class AppShell {
         channel: ref.channel,
       });
     }
+  }
+
+  private focusFirstSource(panelId: string, refs: readonly SeriesRef[]): void {
+    if (this.workspace.focusEntries(panelId).length > 0) return;
+    const first = refs[0];
+    if (first === undefined) return;
+    this.workspace.toggleFocus(panelId, {
+      kind: "source",
+      ref: null,
+      source_key: first.source_key,
+      channel: null,
+    });
   }
 
   private selectedRefs(): SeriesRef[] {

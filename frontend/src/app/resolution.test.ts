@@ -257,7 +257,7 @@ describe("resolvePanel", () => {
 
   it.each([
     ["all", [], ["rule", "rule"]],
-    ["ghost", [], ["focus", "ghost"]],
+    ["ghost", [], ["ghost", "ghost"]],
     ["all", ["b"], ["rule", "focus"]],
     ["ghost", ["b"], ["ghost", "focus"]],
   ] as const)("resolves %s display state", (ghostMode, sources, expected) => {
@@ -287,7 +287,7 @@ describe("resolvePanel", () => {
     ).toEqual(expected);
   });
 
-  it("focuses every channel from the first source by default in ghost mode", () => {
+  it("does not synthesize focus for an empty ghost-mode focus stack", () => {
     const state = panel();
     state.ghost_mode = "ghost";
     state.bindings = [
@@ -309,8 +309,8 @@ describe("resolvePanel", () => {
         focused,
       })),
     ).toEqual([
-      { display: "focus", focused: true },
-      { display: "focus", focused: true },
+      { display: "ghost", focused: false },
+      { display: "ghost", focused: false },
       { display: "ghost", focused: false },
     ]);
   });

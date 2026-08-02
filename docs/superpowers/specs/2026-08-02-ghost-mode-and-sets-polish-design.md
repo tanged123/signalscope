@@ -7,10 +7,9 @@ saved sets inspectable and reliably draggable into panels.
 
 ## Behavior
 
-- A ghost-mode panel with no explicit focus derives its default focus from the
-  first resolved source. Every visible series from that source uses normal
-  focused styling; the remaining series use ghost styling. Explicit focus
-  replaces the derived default, and clearing explicit focus restores it.
+- When ghost mode starts with an empty focus stack, the first resolved source
+  is stored as a normal source focus entry. Every visible series from that
+  source uses focused styling and the remaining series use ghost styling.
 - Time, XY, FFT, and histogram plots use the same ghost stroke: `--fg-4`, solid,
   1 px, and 0.5 opacity. XY color mapping does not override ghost styling.
 - Track-cursor points for ghost series use `--fg-4` at reduced opacity. The
@@ -23,15 +22,18 @@ saved sets inspectable and reliably draggable into panels.
   binds the set to the target panel by reference.
 - Set rows use a grab cursor and copy drag effect to expose the existing drag
   interaction.
+- Dropping a set onto the workspace background creates a panel with a live set
+  binding. Set naming uses an inline draft row in the SETS tree.
 - The signal search placeholder is `Search signals…`.
 
 ## Architecture
 
-Default focus is derived in panel resolution rather than written into session
-state. This covers newly created and restored panels without inventing hidden
-persistence mutations. Arbitrary-path rendering receives the same nullable hue
-and opacity already used by time rendering, so every panel mode follows one
-resolved series style.
+Panel resolution reads only the persisted focus stack. Large-series arrival
+and manual ghost activation seed the first source through the normal focus
+model when that stack is empty, so focus chips, rosters, rendering, and session
+state share one source of truth. Arbitrary-path rendering receives the same
+nullable hue and opacity already used by time rendering, so every panel mode
+follows one resolved series style.
 
 Set expansion remains local view state. Members are resolved from the current
 catalog on each render, keeping query sets live and omitting unavailable pick
