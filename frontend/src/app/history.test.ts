@@ -111,13 +111,6 @@ describe("history session projection", () => {
     provider_id: null,
     decode_provenance: null,
     reconcile_legacy: false,
-    time_domain: {
-      unit: "seconds",
-      origin: "relative",
-      alignment_origin: 0,
-    },
-    scale: 1,
-    offset: 0,
   };
 
   it("excludes cursor, focus, and ingested sources", () => {

@@ -1,5 +1,5 @@
 {
-  "schema_version": 18,
+  "schema_version": 19,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -192,31 +192,7 @@
         "prefix": "string",
         "provider_id": "string?",
         "decode_provenance": "string?",
-        "reconcile_legacy": "bool",
-        "time_domain": "TimeDomainState",
-        "scale": "f64",
-        "offset": "f64"
-      }
-    },
-    "TimeUnitState": {
-      "kind": "enum",
-      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
-    },
-    "OriginKindState": {
-      "kind": "enum",
-      "variants": [
-        "relative",
-        "absolute_epoch",
-        "event_aligned",
-        "synthetic_index"
-      ]
-    },
-    "TimeDomainState": {
-      "kind": "object",
-      "fields": {
-        "unit": "TimeUnitState",
-        "origin": "OriginKindState",
-        "alignment_origin": "f64"
+        "reconcile_legacy": "bool"
       }
     },
     "Session": {

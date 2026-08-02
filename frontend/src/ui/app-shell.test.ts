@@ -223,13 +223,6 @@ function sourceSummary(sourceKey: string): SourceSummary {
     prefix: sourceKey,
     path: `/data/${sourceKey}.csv`,
     point_count: "10",
-    time_domain: {
-      unit: "seconds",
-      origin: "relative",
-      alignment_origin: 0,
-    },
-    scale: 1,
-    offset: 0,
   };
 }
 

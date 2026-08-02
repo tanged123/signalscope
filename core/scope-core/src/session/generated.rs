@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 18;
+pub const SESSION_SCHEMA_VERSION: u32 = 19;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -279,34 +279,6 @@ pub struct SourceRecord {
     #[serde(default)]
     pub decode_provenance: Option<String>,
     pub reconcile_legacy: bool,
-    pub time_domain: TimeDomainState,
-    pub scale: f64,
-    pub offset: f64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TimeUnitState {
-    Seconds,
-    Milliseconds,
-    Microseconds,
-    Nanoseconds,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OriginKindState {
-    Relative,
-    AbsoluteEpoch,
-    EventAligned,
-    SyntheticIndex,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct TimeDomainState {
-    pub unit: TimeUnitState,
-    pub origin: OriginKindState,
-    pub alignment_origin: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

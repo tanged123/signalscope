@@ -1,41 +1,11 @@
 {
-  "protocol_version": 13,
+  "protocol_version": 14,
   "types": {
     "TimeWindow": {
       "kind": "object",
       "fields": {
         "t0": "f64",
         "t1": "f64"
-      }
-    },
-    "SourceTimeUnit": {
-      "kind": "enum",
-      "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
-    },
-    "SourceOriginKind": {
-      "kind": "enum",
-      "variants": [
-        "relative",
-        "absolute_epoch",
-        "event_aligned",
-        "synthetic_index"
-      ]
-    },
-    "SourceTimeDomainSummary": {
-      "kind": "object",
-      "fields": {
-        "unit": "SourceTimeUnit",
-        "origin": "SourceOriginKind",
-        "alignment_origin": "f64"
-      }
-    },
-    "SourceAlignmentRequest": {
-      "kind": "object",
-      "fields": {
-        "source_key": "string",
-        "time_domain": "SourceTimeDomainSummary",
-        "scale": "f64",
-        "offset": "f64"
       }
     },
     "IngestBatchRequest": {
@@ -250,10 +220,7 @@
         "source_key": "string",
         "prefix": "string",
         "path": "string",
-        "point_count": "u64",
-        "time_domain": "SourceTimeDomainSummary",
-        "scale": "f64",
-        "offset": "f64"
+        "point_count": "u64"
       }
     },
     "IngestStage": {

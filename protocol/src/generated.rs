@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -54,39 +54,6 @@ mod u64_vec_string {
 pub struct TimeWindow {
     pub t0: f64,
     pub t1: f64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SourceTimeUnit {
-    Seconds,
-    Milliseconds,
-    Microseconds,
-    Nanoseconds,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SourceOriginKind {
-    Relative,
-    AbsoluteEpoch,
-    EventAligned,
-    SyntheticIndex,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SourceTimeDomainSummary {
-    pub unit: SourceTimeUnit,
-    pub origin: SourceOriginKind,
-    pub alignment_origin: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SourceAlignmentRequest {
-    pub source_key: String,
-    pub time_domain: SourceTimeDomainSummary,
-    pub scale: f64,
-    pub offset: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -319,9 +286,6 @@ pub struct SourceSummary {
     pub path: String,
     #[serde(with = "u64_string")]
     pub point_count: u64,
-    pub time_domain: SourceTimeDomainSummary,
-    pub scale: f64,
-    pub offset: f64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]

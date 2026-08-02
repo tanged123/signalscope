@@ -10,7 +10,6 @@ use std::{
 
 use base64::Engine;
 use scope_core::{
-    alignment::{AffineTransform, OriginKind, TimeDomain, TimeUnit},
     cache::{self, CacheRoot},
     columns::Column,
     compute, expr,
@@ -36,8 +35,7 @@ use scope_protocol::{
     RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries,
     SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest,
     ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SignalSummary, SignalTile,
-    SkippedMemberSummary, SourceAlignmentRequest, SourceOriginKind, SourceSummary,
-    SourceTimeDomainSummary, SourceTimeUnit, TileRequest, TileResponse,
+    SkippedMemberSummary, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -123,38 +121,13 @@ fn signal_summary(
     }
 }
 
-fn source_summary(source: &Source, record: Option<&SourceRecord>) -> SourceSummary {
-    let domain = record.map_or_else(TimeDomain::default, |record| record.time_domain);
-    let transform = record.map_or(
-        AffineTransform {
-            scale: 1.0,
-            offset: 0.0,
-        },
-        |record| record.transform,
-    );
+fn source_summary(source: &Source) -> SourceSummary {
     SourceSummary {
         source_id: source.id.0,
         source_key: source.key.0.to_string(),
         prefix: source.prefix.clone(),
         path: source.path.display().to_string(),
         point_count: source.point_count as u64,
-        time_domain: SourceTimeDomainSummary {
-            unit: match domain.unit {
-                TimeUnit::Seconds | TimeUnit::Unsupported => SourceTimeUnit::Seconds,
-                TimeUnit::Milliseconds => SourceTimeUnit::Milliseconds,
-                TimeUnit::Microseconds => SourceTimeUnit::Microseconds,
-                TimeUnit::Nanoseconds => SourceTimeUnit::Nanoseconds,
-            },
-            origin: match domain.origin {
-                OriginKind::Relative => SourceOriginKind::Relative,
-                OriginKind::AbsoluteEpoch => SourceOriginKind::AbsoluteEpoch,
-                OriginKind::EventAligned => SourceOriginKind::EventAligned,
-                OriginKind::SyntheticIndex => SourceOriginKind::SyntheticIndex,
-            },
-            alignment_origin: domain.alignment_origin,
-        },
-        scale: transform.scale,
-        offset: transform.offset,
     }
 }
 
@@ -442,10 +415,6 @@ fn restore_reconcile(
     let mut outcome = restore::reconcile(&mut restored, &built.aliases, &missing)
         .map_err(|error| error.to_string())?;
     outcome.conflicts = built.conflicts;
-    {
-        let mut data = state.lock().map_err(|error| error.to_string())?;
-        restore_alignment(&restored, &mut data)?;
-    }
     Ok(Envelope::new(RestoreReconcileResponse {
         session_json: serde_json::to_string(&restored).map_err(|error| error.to_string())?,
         rewritten: outcome.rewritten,
@@ -465,36 +434,6 @@ fn restore_reconcile(
     }))
 }
 
-fn restore_alignment(session: &session::Session, data: &mut DataState) -> Result<(), String> {
-    for saved in &session.sources {
-        let key = SourceKey(uuid::Uuid::parse_str(&saved.key).map_err(|error| error.to_string())?);
-        let domain = TimeDomain {
-            unit: match saved.time_domain.unit {
-                session::TimeUnitState::Seconds => TimeUnit::Seconds,
-                session::TimeUnitState::Milliseconds => TimeUnit::Milliseconds,
-                session::TimeUnitState::Microseconds => TimeUnit::Microseconds,
-                session::TimeUnitState::Nanoseconds => TimeUnit::Nanoseconds,
-            },
-            origin: match saved.time_domain.origin {
-                session::OriginKindState::Relative => OriginKind::Relative,
-                session::OriginKindState::AbsoluteEpoch => OriginKind::AbsoluteEpoch,
-                session::OriginKindState::EventAligned => OriginKind::EventAligned,
-                session::OriginKindState::SyntheticIndex => OriginKind::SyntheticIndex,
-            },
-            alignment_origin: saved.time_domain.alignment_origin,
-        };
-        data.registry.set_time_domain(key, domain);
-        data.registry.set_transform(
-            key,
-            AffineTransform {
-                scale: saved.scale,
-                offset: saved.offset,
-            },
-        );
-    }
-    Ok(())
-}
-
 fn core_source_record(record: &session::SourceRecord) -> Result<SourceRecord, String> {
     Ok(SourceRecord {
         key: SourceKey(uuid::Uuid::parse_str(&record.key).map_err(|error| error.to_string())?),
@@ -503,11 +442,6 @@ fn core_source_record(record: &session::SourceRecord) -> Result<SourceRecord, St
         provider_id: record.provider_id.clone(),
         decode_provenance: record.decode_provenance.clone(),
         reconcile_legacy: record.reconcile_legacy,
-        time_domain: TimeDomain::default(),
-        transform: AffineTransform {
-            scale: 1.0,
-            offset: 0.0,
-        },
     })
 }
 
@@ -649,10 +583,7 @@ fn list_sources(
 ) -> Result<Envelope<Vec<SourceSummary>>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(Envelope::new(
-        data.store
-            .sources()
-            .map(|source| source_summary(source, data.registry.record(source.key)))
-            .collect(),
+        data.store.sources().map(source_summary).collect(),
     ))
 }
 
@@ -683,43 +614,6 @@ fn list_signals(
             })
             .collect(),
     ))
-}
-
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn set_source_alignment(
-    request: Envelope<SourceAlignmentRequest>,
-    state: State<'_, Arc<Mutex<DataState>>>,
-) -> Result<Envelope<()>, String> {
-    let request = request.open().map_err(|error| error.to_string())?;
-    let key = uuid::Uuid::parse_str(&request.source_key)
-        .map(SourceKey)
-        .map_err(|error| error.to_string())?;
-    let domain = TimeDomain {
-        unit: match request.time_domain.unit {
-            SourceTimeUnit::Seconds => TimeUnit::Seconds,
-            SourceTimeUnit::Milliseconds => TimeUnit::Milliseconds,
-            SourceTimeUnit::Microseconds => TimeUnit::Microseconds,
-            SourceTimeUnit::Nanoseconds => TimeUnit::Nanoseconds,
-        },
-        origin: match request.time_domain.origin {
-            SourceOriginKind::Relative => OriginKind::Relative,
-            SourceOriginKind::AbsoluteEpoch => OriginKind::AbsoluteEpoch,
-            SourceOriginKind::EventAligned => OriginKind::EventAligned,
-            SourceOriginKind::SyntheticIndex => OriginKind::SyntheticIndex,
-        },
-        alignment_origin: request.time_domain.alignment_origin,
-    };
-    let mut data = state.lock().map_err(|error| error.to_string())?;
-    data.registry.set_time_domain(key, domain);
-    data.registry.set_transform(
-        key,
-        AffineTransform {
-            scale: request.scale,
-            offset: request.offset,
-        },
-    );
-    Ok(Envelope::new(()))
 }
 
 #[tauri::command]
@@ -1652,7 +1546,6 @@ pub fn run() {
             restore_reconcile,
             list_sources,
             list_signals,
-            set_source_alignment,
             query_tiles,
             query_samples,
             create_derived,
@@ -1759,11 +1652,6 @@ mod tests {
             provider_id: Some("csv".into()),
             decode_provenance: Some("abc".into()),
             reconcile_legacy: false,
-            time_domain: TimeDomain::default(),
-            transform: AffineTransform {
-                scale: 1.0,
-                offset: 0.0,
-            },
         };
         let time: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0, 3.0]);
         let pyramid = Pyramid::from_samples(&time, &[1.0, 2.0, 3.0, 4.0]);

@@ -18,11 +18,16 @@ amendment): quoted names are signal references, functions are bare MATLAB
 names, and the transforms are `gradient`/`cumtrapz`/`movmean`. Derived signals
 materialize into the store under one synthetic source with an in-memory
 pyramid, so every tile, sample, and panel-mode consumer is unchanged. Sessions
-reached schema v18 with ordered derived definitions, durable source records,
+reached schema v19 with ordered derived definitions, durable source records,
 source-local channel-by-source panel bindings, and named sets,
 and gained autosave with resume-on-launch plus named workspace files
 ([ADR 0022](adr/0022-durable-session-persistence.md)). The `localStorage` theme
 key is gone; the session is the only durable store.
+
+Protocol v14 and session v19 remove source alignment metadata that was never
+applied to tile or sample queries; v18 sessions migrate by dropping those
+fields while preserving source identity and provenance
+([ADR 0031](adr/0031-remove-source-alignment.md)).
 
 Multi-source ingest now uses batch jobs with per-file outcomes,
 memory-weighted admission, streaming CSV decode, and off-lock pyramid
@@ -33,8 +38,8 @@ is paused
 ([ADR 0027](adr/0027-durable-source-identity-and-restore-reconciliation.md)).
 
 Signals-at-scale P1 is landed: panels resolve channel-by-source series from a
-catalog, alignment is stored per source, and the tree exposes channels with
-read-only named sets instead of source sets, bundles, or favorites.
+catalog, source identity is stored per source, and the tree exposes channels
+with read-only named sets instead of source sets, bundles, or favorites.
 
 Out-of-core storage now compacts pyramid bins, synthesizes levels 0–2, shares
 sidecar time sections, and pages columns and fine levels through a leased LRU.

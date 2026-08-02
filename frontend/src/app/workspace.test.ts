@@ -83,9 +83,6 @@ function sourceRecord(overrides: Partial<SourceRecord> = {}): SourceRecord {
     provider_id: null,
     decode_provenance: null,
     reconcile_legacy: false,
-    time_domain: { unit: "seconds", origin: "relative", alignment_origin: 0 },
-    scale: 1,
-    offset: 0,
     ...overrides,
   };
 }

@@ -455,13 +455,6 @@ export class BakedPlane implements DataPlane {
         prefix: this.payload.signals[0]?.summary.path.split("/")[0] ?? "demo",
         path: this.sourceLabel,
         point_count: String(points),
-        time_domain: {
-          unit: "seconds",
-          origin: "relative",
-          alignment_origin: 0,
-        },
-        scale: 1,
-        offset: 0,
       },
     ]);
   }

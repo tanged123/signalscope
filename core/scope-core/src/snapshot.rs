@@ -499,13 +499,6 @@ mod tests {
             provider_id: None,
             decode_provenance: None,
             reconcile_legacy: false,
-            time_domain: crate::session::TimeDomainState {
-                unit: crate::session::TimeUnitState::Seconds,
-                origin: crate::session::OriginKindState::Relative,
-                alignment_origin: 0.0,
-            },
-            scale: 1.0,
-            offset: 0.0,
         });
         session.tabs[0].panels = panels;
         session
@@ -758,13 +751,6 @@ mod tests {
                 provider_id: None,
                 decode_provenance: None,
                 reconcile_legacy: false,
-                time_domain: crate::session::TimeDomainState {
-                    unit: crate::session::TimeUnitState::Seconds,
-                    origin: crate::session::OriginKindState::Relative,
-                    alignment_origin: 0.0,
-                },
-                scale: 1.0,
-                offset: 0.0,
             }],
             ..Session::default()
         };

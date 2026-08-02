@@ -910,11 +910,6 @@ mod tests {
             provider_id: None,
             decode_provenance: None,
             reconcile_legacy: true,
-            time_domain: crate::alignment::TimeDomain::default(),
-            transform: crate::alignment::AffineTransform {
-                scale: 1.0,
-                offset: 0.0,
-            },
         };
         let jobs = BatchJobs::new(BatchOptions::for_tests());
         jobs.replace_sources(vec![record.clone()]).unwrap();

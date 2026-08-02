@@ -269,9 +269,8 @@ mod tests {
     use super::*;
     use crate::session::{
         Annotation, AnnotationDomain, AxisStyle, Binding, BindingKind, ColorAxis, DerivedSignal,
-        FocusEntry, FocusKind, GhostMode, NamedSet, NamedSetKind, OriginKindState, PanelMode,
-        PanelState, SeriesOverride, SeriesRef, Session, SplitDimension, StyleDimension,
-        TimeDomainState, TimeUnitState,
+        FocusEntry, FocusKind, GhostMode, NamedSet, NamedSetKind, PanelMode, PanelState,
+        SeriesOverride, SeriesRef, Session, SplitDimension, StyleDimension,
     };
 
     #[allow(clippy::too_many_lines)]
@@ -299,13 +298,6 @@ mod tests {
                     provider_id: Some("mcap".into()),
                     decode_provenance: None,
                     reconcile_legacy: true,
-                    time_domain: TimeDomainState {
-                        unit: TimeUnitState::Seconds,
-                        origin: OriginKindState::Relative,
-                        alignment_origin: 0.0,
-                    },
-                    scale: 1.0,
-                    offset: 0.0,
                 },
                 crate::session::SourceRecord {
                     key: key(2).0.to_string(),
@@ -314,13 +306,6 @@ mod tests {
                     provider_id: Some("mcap".into()),
                     decode_provenance: None,
                     reconcile_legacy: false,
-                    time_domain: TimeDomainState {
-                        unit: TimeUnitState::Seconds,
-                        origin: OriginKindState::Relative,
-                        alignment_origin: 0.0,
-                    },
-                    scale: 1.0,
-                    offset: 0.0,
                 },
             ],
             ..Session::default()
@@ -463,11 +448,6 @@ mod tests {
             provider_id: None,
             decode_provenance: None,
             reconcile_legacy: true,
-            time_domain: crate::alignment::TimeDomain::default(),
-            transform: crate::alignment::AffineTransform {
-                scale: 1.0,
-                offset: 0.0,
-            },
         };
         let paths = vec!["imu/ax".into()];
         assert_eq!(

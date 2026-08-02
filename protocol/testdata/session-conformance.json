@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 18,
+  "schema_version": 19,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -57,14 +57,7 @@
       "prefix": "run",
       "provider_id": null,
       "decode_provenance": null,
-      "reconcile_legacy": false,
-      "time_domain": {
-        "unit": "seconds",
-        "origin": "relative",
-        "alignment_origin": 0.0
-      },
-      "scale": 1.0,
-      "offset": 0.0
+      "reconcile_legacy": false
     }
   ]
 }

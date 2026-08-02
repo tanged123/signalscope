@@ -205,6 +205,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(18);
             migrate(18, value)
         }
+        18 => {
+            migrate_v18_remove_alignment(&mut value);
+            value["schema_version"] = serde_json::json!(19);
+            migrate(19, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -444,65 +449,20 @@ fn migrate_v16_bindings(value: &mut serde_json::Value) {
     object.insert("named_sets".into(), serde_json::Value::Array(named_sets));
     object.insert("channel_map".into(), serde_json::json!([]));
 
-    let sets = object
-        .remove("source_sets")
-        .unwrap_or_else(|| serde_json::json!([]));
-    let mut alignment = std::collections::BTreeMap::new();
-    for set in sets.as_array().into_iter().flatten() {
-        let domain = set
-            .get("time_domain")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        for member in set
-            .get("members")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if let Some(key) = member.get("source_key").and_then(serde_json::Value::as_str) {
-                alignment.insert(
-                    key.to_owned(),
-                    (
-                        domain.clone(),
-                        member
-                            .get("scale")
-                            .cloned()
-                            .unwrap_or_else(|| serde_json::json!(1.0)),
-                        member
-                            .get("offset")
-                            .cloned()
-                            .unwrap_or_else(|| serde_json::json!(0.0)),
-                    ),
-                );
-            }
-        }
-    }
-    if let Some(sources) = object
+    object.remove("source_sets");
+}
+
+fn migrate_v18_remove_alignment(value: &mut serde_json::Value) {
+    for source in value
         .get_mut("sources")
         .and_then(serde_json::Value::as_array_mut)
+        .into_iter()
+        .flatten()
     {
-        for source in sources {
-            let key = source
-                .get("key")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_owned();
-            let (domain, scale, offset) = alignment.remove(&key).unwrap_or((
-                serde_json::Value::Null,
-                serde_json::json!(1.0),
-                serde_json::json!(0.0),
-            ));
-            source["time_domain"] = if domain.is_null() {
-                serde_json::json!({
-                    "unit": "seconds",
-                    "origin": "relative",
-                    "alignment_origin": 0.0
-                })
-            } else {
-                domain
-            };
-            source["scale"] = scale;
-            source["offset"] = offset;
+        if let Some(source) = source.as_object_mut() {
+            source.remove("time_domain");
+            source.remove("scale");
+            source.remove("offset");
         }
     }
 }
@@ -797,13 +757,6 @@ mod tests {
             provider_id: None,
             decode_provenance: None,
             reconcile_legacy: false,
-            time_domain: TimeDomainState {
-                unit: TimeUnitState::Seconds,
-                origin: OriginKindState::Relative,
-                alignment_origin: 0.0,
-            },
-            scale: 1.0,
-            offset: 0.0,
         }
     }
 
@@ -835,7 +788,6 @@ mod tests {
                          "prefix": "run", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false}],
             "source_sets": [{
                 "key": "22222222-2222-2222-2222-222222222222", "label": "Set 1", "generation": 3,
-                "time_domain": {"unit": "milliseconds", "origin": "relative", "alignment_origin": 0.0},
                 "members": [{"source_key": "11111111-1111-1111-1111-111111111111",
                              "missing": [], "scale": 0.001, "offset": 0.5}]
             }]
@@ -882,18 +834,6 @@ mod tests {
             session.named_sets[1].selector.as_deref(),
             Some("imu/accel/x")
         );
-    }
-
-    #[test]
-    fn v16_set_member_alignment_lands_on_the_source_record() {
-        let session = from_json(&v16_fixture().to_string()).unwrap();
-        let source = &session.sources[0];
-        assert!((source.scale - 0.001).abs() < f64::EPSILON);
-        assert!((source.offset - 0.5).abs() < f64::EPSILON);
-        assert!(matches!(
-            source.time_domain.unit,
-            TimeUnitState::Milliseconds
-        ));
     }
 
     #[test]
@@ -961,7 +901,7 @@ mod tests {
 
         let session = from_json(&value.to_string()).expect("v17 migrates");
         let panel = &session.tabs[0].panels[0];
-        assert_eq!(session.schema_version, 18);
+        assert_eq!(session.schema_version, 19);
         assert_eq!(session.named_sets[0].refs[0].channel, "temperature");
         assert_eq!(session.named_sets[0].refs[1].channel, "pressure");
         assert_eq!(session.named_sets[0].selector.as_deref(), Some("temp"));
@@ -981,6 +921,39 @@ mod tests {
                 .get("channel_map")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn migrates_v18_without_alignment() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(18);
+        let mut time_domain = serde_json::json!({
+            "unit": "seconds",
+            "origin": "relative"
+        });
+        time_domain["alignment_".to_owned() + "origin"] = serde_json::json!(0.0);
+        value["sources"] = serde_json::json!([{
+            "key": "run-01",
+            "path": "/data/run-01.csv",
+            "prefix": "run_01",
+            "provider_id": null,
+            "decode_provenance": null,
+            "reconcile_legacy": false,
+            "time_domain": time_domain,
+            "scale": 1.0,
+            "offset": 0.0
+        }]);
+
+        let session = from_json(&value.to_string()).expect("migrates");
+
+        assert_eq!(session.schema_version, 19);
+        let serialized = serde_json::to_value(session).expect("serializes");
+        let source = &serialized["sources"][0];
+        assert!(source.get("time_domain").is_none());
+        assert!(source.get("scale").is_none());
+        assert!(source.get("offset").is_none());
+        assert_eq!(source["key"], "run-01");
+        assert_eq!(source["prefix"], "run_01");
     }
 
     #[test]
@@ -1160,7 +1133,6 @@ mod tests {
             ],
             "source_sets": [{
                 "key": "set-1", "label": "Runs", "generation": "1",
-                "time_domain": {"unit": "seconds", "origin": "relative", "alignment_origin": 0.0},
                 "members": [
                     {"source_key": "k1", "missing": [], "scale": 1.0, "offset": 0.0},
                     {"source_key": "k2", "missing": [], "scale": 1.0, "offset": 0.0},

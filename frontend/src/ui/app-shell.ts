@@ -2726,9 +2726,6 @@ export class AppShell {
         provider_id: null,
         decode_provenance: null,
         reconcile_legacy: false,
-        time_domain: source.time_domain,
-        scale: source.scale,
-        offset: source.offset,
       });
     }
     const sessionName =

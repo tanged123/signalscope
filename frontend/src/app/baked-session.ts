@@ -39,23 +39,7 @@ function isSource(value: unknown): boolean {
       value.decode_provenance,
       (item): item is string => typeof item === "string",
     ) &&
-    typeof value.reconcile_legacy === "boolean" &&
-    isTimeDomain(value.time_domain) &&
-    typeof value.scale === "number" &&
-    typeof value.offset === "number"
-  );
-}
-
-function isTimeDomain(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    ["seconds", "milliseconds", "microseconds", "nanoseconds"].includes(
-      String(value.unit),
-    ) &&
-    ["relative", "absolute_epoch", "event_aligned", "synthetic_index"].includes(
-      String(value.origin),
-    ) &&
-    typeof value.alignment_origin === "number"
+    typeof value.reconcile_legacy === "boolean"
   );
 }
 
