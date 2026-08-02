@@ -290,7 +290,8 @@ export class SignalOutlineView {
     checkCell.appendChild(check);
 
     const first = this.outlineCell();
-    const derived = row.path.startsWith("derived/");
+    const bundle = row.channel.startsWith("derived/");
+    const derived = bundle || row.path.startsWith("derived/");
     if (derived) {
       const mark = document.createElement("span");
       mark.className = "outline-caret tree-derived-mark";
@@ -312,7 +313,11 @@ export class SignalOutlineView {
       remove.title = `Remove ${row.path}`;
       remove.addEventListener("click", (event) => {
         event.stopPropagation();
-        this.callbacks.onRemoveDerived(row.path);
+        if (bundle) {
+          this.callbacks.onRemoveDerivedBundle(row.channel);
+        } else {
+          this.callbacks.onRemoveDerived(row.path);
+        }
       });
       first.appendChild(remove);
     }

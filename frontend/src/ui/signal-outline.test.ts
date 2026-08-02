@@ -180,6 +180,25 @@ describe("SignalOutlineView", () => {
     expect(onRemoveDerivedBundle).toHaveBeenCalledWith("derived/score");
   });
 
+  it("exposes bundle removal when only one source is eligible", () => {
+    const onRemoveDerived = vi.fn();
+    const onRemoveDerivedBundle = vi.fn();
+    const { list } = viewFor(
+      Catalog.build([signal("run-01", "derived/score")]),
+      { onRemoveDerived, onRemoveDerivedBundle },
+    );
+    const series = list.querySelector<HTMLElement>(
+      '[data-path="run-01/derived/score"]',
+    );
+
+    expect(series?.textContent).toContain("ƒx");
+    series
+      ?.querySelector<HTMLButtonElement>(".outline-derived-remove")
+      ?.click();
+    expect(onRemoveDerivedBundle).toHaveBeenCalledWith("derived/score");
+    expect(onRemoveDerived).not.toHaveBeenCalled();
+  });
+
   it("keeps group and series rows on the fixed header grid", () => {
     const { list } = viewFor(
       Catalog.build([signal("run-01", "temp"), signal("run-02", "temp")]),
