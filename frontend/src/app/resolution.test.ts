@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SignalSummary } from "../generated/protocol";
 import type { PanelState } from "../generated/session";
 import { Catalog } from "./catalog";
-import { resolvePanel } from "./resolution";
+import { overrideFor, resolvePanel } from "./resolution";
 
 function signal(sourceKey: string, channel: string): SignalSummary {
   return {
@@ -126,6 +126,9 @@ describe("resolvePanel", () => {
         channel: null,
       },
     ];
+    expect(overrideFor(state, { source_key: "b", channel: "temp" })).toBe(
+      state.overrides[0],
+    );
     expect(resolvePanel(catalog, state, [])).toEqual([
       expect.objectContaining({
         path: "a/temp",

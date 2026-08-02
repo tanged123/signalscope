@@ -833,8 +833,8 @@ This is the largest rewiring task. Method: `grep -n "P1-TASK8\|\.series\b\|highl
 - [ ] **Step 1: Grep gates** — all must return only migration code (`session.rs` v16 arm), ADR/docs history, and this plan/spec:
 
 ```bash
-grep -rin "bundle" --include="*.ts" --include="*.rs" frontend/src core protocol shell | grep -v derived_bundle
-grep -rin "source_set\|SetSummary\|favorite" --include="*.ts" --include="*.rs" frontend/src core protocol shell
+grep --recursive --ignore-case --line-number "bundle" --include="*.ts" --include="*.rs" frontend/src core protocol shell | grep --invert-match derived_bundle
+grep --recursive --ignore-case --line-number "source_set\|SetSummary\|favorite" --include="*.ts" --include="*.rs" frontend/src core protocol shell
 grep -rn "highlighted_sources\|SeriesState\|prefixesBySource" frontend/src core
 ```
 

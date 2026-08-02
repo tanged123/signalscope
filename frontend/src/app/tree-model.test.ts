@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { SignalSummary } from "../generated/protocol";
 import { Catalog } from "./catalog";
-import { buildTreeRows, virtualSlice } from "./tree-model";
+import {
+  buildTreeRows,
+  virtualSlice,
+  type TreeChannel,
+  type TreeLeaf,
+} from "./tree-model";
 
 function signal(sourceKey: string, channel: string): SignalSummary {
   return {
@@ -42,6 +47,14 @@ describe("buildTreeRows", () => {
       },
     ]);
     const expanded = buildTreeRows(catalog, new Set(), "");
+    const leaf: TreeLeaf | undefined = expanded.find(
+      (row): row is TreeLeaf => row.kind === "leaf",
+    );
+    const channel: TreeChannel | undefined = expanded.find(
+      (row): row is TreeChannel => row.kind === "channel",
+    );
+    expect(leaf?.kind).toBe("leaf");
+    expect(channel?.kind).toBe("channel");
     expect(expanded.map((row) => row.path)).toContain("run-01/temp");
     expect(expanded.find((row) => row.kind === "channel")?.label).toBe(
       "temp — 2 srcs",
