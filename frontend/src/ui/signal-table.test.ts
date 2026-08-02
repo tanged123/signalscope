@@ -29,16 +29,21 @@ function viewFixture(count = 5): {
   selection: SelectionModel;
   view: SignalTableView;
   onSelectionChange: ReturnType<typeof vi.fn>;
+  onPlotRow: ReturnType<typeof vi.fn>;
 } {
   const list = document.createElement("div");
   Object.defineProperty(list, "clientHeight", { value: 400 });
   const selection = new SelectionModel();
   const onSelectionChange = vi.fn();
-  const view = new SignalTableView(list, selection, { onSelectionChange });
+  const onPlotRow = vi.fn();
+  const view = new SignalTableView(list, selection, {
+    onSelectionChange,
+    onPlotRow,
+  });
   view.setCatalog(
     Catalog.build(Array.from({ length: count }, (_, i) => signal(i))),
   );
-  return { list, selection, view, onSelectionChange };
+  return { list, selection, view, onSelectionChange, onPlotRow };
 }
 
 describe("SignalTableView", () => {
@@ -95,6 +100,49 @@ describe("SignalTableView", () => {
     expect(list.querySelector(".signal-table-row")?.textContent).toContain(
       "temp",
     );
+    expect(
+      list
+        .querySelector(".signal-table-header-cell")
+        ?.classList.contains("signal-table-micro-label"),
+    ).toBe(true);
+  });
+
+  it("formats values and adds an active row on double-click or Enter", () => {
+    const { list, onPlotRow } = viewFixture(2);
+    const rows = list.querySelectorAll<HTMLElement>(".signal-table-row");
+    expect(rows[0]?.textContent).toContain("0.0000");
+    expect(rows[0]?.textContent).toContain("▢");
+    rows[0]?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(onPlotRow).toHaveBeenCalledWith([
+      { source_key: "run_000", channel: "temp" },
+    ]);
+    list.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    expect(onPlotRow).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks selected rows across the full row", () => {
+    const { list, selection } = viewFixture(1);
+    selection.toggle("run_000\u0000temp");
+    const row = list.querySelector<HTMLElement>(".signal-table-row");
+    expect(row?.classList.contains("selected")).toBe(true);
+    expect(row?.textContent).toContain("▣");
+  });
+
+  it("mounts the shared bulk bar as the table footer only in table mode", () => {
+    const list = document.createElement("div");
+    Object.defineProperty(list, "clientHeight", { value: 400 });
+    const footer = document.createElement("div");
+    const view = new SignalTableView(
+      list,
+      new SelectionModel(),
+      { onSelectionChange: vi.fn() },
+      footer,
+    );
+    view.setCatalog(Catalog.build([signal(1)]));
+    view.setFooterInTable(true);
+    expect(footer.parentElement).toBe(list);
+    view.setFooterInTable(false);
+    expect(footer.parentElement).toBeNull();
   });
 
   it("drags all selected refs from a selected row and only that row otherwise", () => {

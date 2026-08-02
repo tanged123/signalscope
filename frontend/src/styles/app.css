@@ -2020,6 +2020,13 @@ button {
   overflow: hidden;
 }
 
+.signal-table-micro-label {
+  color: var(--fg-4);
+  font: 10px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .signal-table-header-cell > button {
   min-width: 0;
   padding: 0 4px;
@@ -2074,6 +2081,10 @@ button {
 .signal-table-row > span:nth-child(5),
 .signal-table-row > span:nth-child(6) {
   text-align: right;
+}
+
+.signal-table-row > span:nth-child(4) {
+  color: var(--fg-3);
 }
 
 .signal-table-row:hover {
@@ -2398,6 +2409,37 @@ button {
 .bulk-bar button:disabled {
   color: var(--fg-4);
   cursor: not-allowed;
+}
+
+.bulk-bar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bulk-bar .bulk-bar-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--amber-7);
+}
+
+.bulk-bar .bulk-bar-link:hover:not(:disabled),
+.bulk-bar .bulk-bar-link:focus-visible {
+  color: var(--amber-9);
+}
+
+.bulk-bar-count {
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-table-scroll > .bulk-bar {
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  margin: 0 -6px -8px;
+  border-top-color: var(--border-strong);
 }
 
 .bulk-bar-hint {

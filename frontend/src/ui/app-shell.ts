@@ -461,10 +461,12 @@ export class AppShell {
       this.selection,
       {
         onSelectionChange: () => {},
+        onPlotRow: (refs) => this.addRefsToPanel(refs),
         onMergeChannels: (aliases, clientX, clientY) => {
           this.openChannelMergeMenu(aliases, clientX, clientY);
         },
       },
+      required(this.root, ".bulk-bar"),
     );
     this.bulkBar = new BulkBar(
       required(this.root, ".bulk-bar"),
@@ -1789,7 +1791,10 @@ export class AppShell {
   }
 
   private addSelectedToPanel(): void {
-    const refs = this.selectedRefs();
+    this.addRefsToPanel(this.selectedRefs());
+  }
+
+  private addRefsToPanel(refs: readonly SeriesRef[]): void {
     if (refs.length === 0) return;
     const panelId =
       this.workspace.focusedPanelId() ?? this.workspace.addPanelRow().id;
@@ -3216,8 +3221,19 @@ export class AppShell {
     this.dockMode = mode;
     const tree = required<HTMLElement>(this.root, ".tree-scroll");
     const table = required<HTMLElement>(this.root, ".table-scroll");
+    const bulk = this.root.querySelector<HTMLElement>(".bulk-bar");
     tree.hidden = mode !== "tree";
     table.hidden = mode !== "table";
+    this.table?.setFooterInTable?.(mode === "table");
+    if (
+      mode === "tree" &&
+      bulk !== null &&
+      bulk.parentElement !== this.root.querySelector(".signal-tree")
+    ) {
+      const signalTree = required<HTMLElement>(this.root, ".signal-tree");
+      const sourceFooter = required<HTMLElement>(this.root, ".source-footer");
+      signalTree.insertBefore(bulk, sourceFooter);
+    }
     for (const button of this.root.querySelectorAll<HTMLButtonElement>(
       "[data-dock-view]",
     )) {

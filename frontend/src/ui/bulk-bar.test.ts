@@ -23,6 +23,11 @@ describe("BulkBar", () => {
     selection.setAll(["a", "b"]);
     expect(host.hidden).toBe(false);
     expect(host.textContent).toContain("2 selected");
+    expect(host.querySelector(".bulk-bar-actions")).not.toBeNull();
+    expect(host.querySelector(".bulk-bar-count")).not.toBeNull();
+    expect(host.querySelector(".bulk-bar-hint")?.textContent).toBe(
+      "⇧click range · ⌘A all filtered",
+    );
     expect(host.getAttribute("aria-live")).toBe("polite");
 
     for (const action of ["add", "style", "hide", "save", "derive"]) {

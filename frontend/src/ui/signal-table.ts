@@ -23,6 +23,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
 
 export interface SignalTableCallbacks {
   onSelectionChange(): void;
+  onPlotRow?(refs: readonly SeriesRef[]): void;
   onMergeChannels?(
     aliases: readonly ChannelAlias[],
     clientX: number,
@@ -37,6 +38,9 @@ export class SignalTableView {
   private sort: TableSort | null = null;
   private rows: TableRow[] = [];
   private activeIndex = 0;
+  private readonly footerElement: HTMLElement | null;
+  private footerInTable = false;
+  private catalogReady = false;
   private readonly rowHeight: number;
   private readonly unsubscribe: () => void;
 
@@ -44,7 +48,9 @@ export class SignalTableView {
     private readonly listElement: HTMLElement,
     private readonly selection: SelectionModel,
     private readonly callbacks: SignalTableCallbacks,
+    footerElement: HTMLElement | null = null,
   ) {
+    this.footerElement = footerElement;
     const tokenHeight = Number.parseFloat(
       getComputedStyle(listElement).getPropertyValue("--tree-row-height"),
     );
@@ -66,6 +72,7 @@ export class SignalTableView {
 
   setCatalog(catalog: Catalog): void {
     this.catalog = catalog;
+    this.catalogReady = true;
     this.refresh();
   }
 
@@ -82,6 +89,14 @@ export class SignalTableView {
 
   filteredKeys(): readonly string[] {
     return this.rows.flatMap((row) => this.rowKeys(row));
+  }
+
+  setFooterInTable(inTable: boolean): void {
+    this.footerInTable = inTable;
+    if (!inTable && this.footerElement?.parentElement === this.listElement) {
+      this.footerElement.remove();
+    }
+    if (this.catalogReady) this.render();
   }
 
   destroy(): void {
@@ -109,6 +124,7 @@ export class SignalTableView {
     if (this.rows.length === 0) {
       spacer.appendChild(this.emptyElement());
       this.listElement.replaceChildren(header, spacer);
+      this.appendFooter();
       return;
     }
 
@@ -127,6 +143,13 @@ export class SignalTableView {
     }
     spacer.appendChild(windowElement);
     this.listElement.replaceChildren(header, spacer);
+    this.appendFooter();
+  }
+
+  private appendFooter(): void {
+    if (this.footerInTable && this.footerElement !== null) {
+      this.listElement.append(this.footerElement);
+    }
   }
 
   private headerElement(): HTMLElement {
@@ -135,7 +158,7 @@ export class SignalTableView {
     header.setAttribute("role", "row");
 
     const first = document.createElement("div");
-    first.className = "signal-table-header-cell";
+    first.className = "signal-table-header-cell signal-table-micro-label";
     const select = document.createElement("button");
     select.className = "signal-table-check";
     select.type = "button";
@@ -149,7 +172,8 @@ export class SignalTableView {
     header.appendChild(first);
 
     const channel = document.createElement("div");
-    channel.className = "signal-table-header-cell signal-table-granularity";
+    channel.className =
+      "signal-table-header-cell signal-table-granularity signal-table-micro-label";
     for (const granularity of ["series", "channels"] as const) {
       const button = document.createElement("button");
       button.type = "button";
@@ -174,7 +198,7 @@ export class SignalTableView {
 
     for (const column of TABLE_COLUMNS.slice(1)) {
       const cell = document.createElement("div");
-      cell.className = "signal-table-header-cell";
+      cell.className = "signal-table-header-cell signal-table-micro-label";
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.column = column;
@@ -208,6 +232,9 @@ export class SignalTableView {
       } else {
         this.toggleRow(row);
       }
+    });
+    element.addEventListener("dblclick", () => {
+      this.callbacks.onPlotRow?.(row.refs);
     });
     element.addEventListener("contextmenu", (event) => {
       event.preventDefault();
@@ -246,7 +273,7 @@ export class SignalTableView {
       row.source,
       row.unit ?? "—",
       String(row.pts),
-      row.value === null ? "—" : String(row.value),
+      row.value === null ? "—" : formatTableValue(row.value),
     ].entries()) {
       const cell = document.createElement("span");
       cell.textContent = value;
@@ -280,7 +307,11 @@ export class SignalTableView {
     else if (event.key === "ArrowUp") next = Math.max(previous - 1, 0);
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = this.rows.length - 1;
-    else if (event.key === " ") {
+    else if (event.key === "Enter") {
+      event.preventDefault();
+      this.callbacks.onPlotRow?.(this.rows[previous]?.refs ?? []);
+      return;
+    } else if (event.key === " ") {
       event.preventDefault();
       this.toggleRow(this.rows[previous] as TableRow);
       return;
@@ -364,4 +395,8 @@ export class SignalTableView {
         : "No matching signals.";
     return empty;
   }
+}
+
+export function formatTableValue(value: number | null): string {
+  return value === null ? "—" : value.toFixed(4);
 }

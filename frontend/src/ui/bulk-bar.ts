@@ -52,7 +52,6 @@ export class BulkBar {
     const summary = document.createElement("span");
     summary.className = "bulk-bar-count";
     summary.textContent = `${String(count)} selected`;
-    this.element.appendChild(summary);
     const actions = [
       ["add", "add to panel", () => this.callbacks.onAddToPanel()],
       ["style", "style…", () => this.callbacks.onStyle()],
@@ -65,9 +64,12 @@ export class BulkBar {
           ] as const)
         : []),
     ] as const;
+    const actionRow = document.createElement("span");
+    actionRow.className = "bulk-bar-actions";
     for (const action of actions) {
       const button = document.createElement("button");
       button.type = "button";
+      button.className = "bulk-bar-link";
       button.dataset.action = action[0];
       button.textContent = action[1];
       button.addEventListener("click", action[2]);
@@ -76,8 +78,9 @@ export class BulkBar {
         button.title = this.deriveTitle;
       }
       if (action[0] === "merge") button.title = this.mergeTitle;
-      this.element.appendChild(button);
+      actionRow.appendChild(button);
     }
+    this.element.append(summary, actionRow);
     const hint = document.createElement("span");
     hint.className = "bulk-bar-hint";
     hint.textContent = "⇧click range · ⌘A all filtered";
