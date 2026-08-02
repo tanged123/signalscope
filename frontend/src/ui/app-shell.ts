@@ -138,7 +138,7 @@ export function exportSourceOptions(
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 
-export function validateDerivedBundleName(path: string): void {
+function validateDerivedBundleName(path: string): void {
   const name = path.startsWith(DERIVED_PREFIX)
     ? path.slice(DERIVED_PREFIX.length)
     : path;
@@ -957,7 +957,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.15.2");
+        this.showModeHelp("SignalScope 0.15.3");
       },
     });
     this.commands.register({

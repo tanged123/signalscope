@@ -88,7 +88,7 @@ export interface PlotDelta {
   second: PlotPoint;
 }
 
-export interface SeriesHit {
+interface SeriesHit {
   path: string;
   distance: number;
 }
