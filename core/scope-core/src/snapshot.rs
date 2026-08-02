@@ -310,7 +310,11 @@ fn source_key(store: &SignalStore, signal: &Signal) -> Result<SourceKey, Snapsho
         .ok_or(SnapshotError::MissingSource(signal.id))
 }
 
-fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
+fn signal_summary(
+    signal: &Signal,
+    source_key: SourceKey,
+    last_value: Option<f64>,
+) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
@@ -322,6 +326,7 @@ fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
         point_count: signal.len() as u64,
         t_min,
         t_max,
+        last_value,
     }
 }
 
@@ -342,7 +347,11 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
             .filter_map(|level| entry.pyramid.level_window(level.index, entry.window))
             .collect();
         signals.push(BakedSignal {
-            summary: signal_summary(entry.signal, entry.source_key),
+            summary: signal_summary(
+                entry.signal,
+                entry.source_key,
+                entry.pyramid.last_finite_value(),
+            ),
             levels,
         });
     }
@@ -536,7 +545,11 @@ mod tests {
         let expected = SnapshotManifest {
             session_json: serde_json::to_string(&session).expect("session"),
             signals: vec![BakedSignal {
-                summary: signal_summary(signal, source_key(&store, signal).expect("source")),
+                summary: signal_summary(
+                    signal,
+                    source_key(&store, signal).expect("source"),
+                    pyramid.last_finite_value(),
+                ),
                 levels: (0..pyramid.level_count())
                     .map(|level| pyramid.level(level).expect("level"))
                     .collect(),

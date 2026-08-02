@@ -33,6 +33,7 @@ function catalogFixture(): Catalog {
     point_count: "1",
     t_min: 0,
     t_max: 1,
+    last_value: null,
   }));
   return Catalog.build(summaries);
 }

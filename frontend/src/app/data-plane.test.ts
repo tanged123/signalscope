@@ -31,6 +31,7 @@ describe("BakedPlane.querySamples", () => {
       point_count: "5",
       t_min: 0,
       t_max: 4,
+      last_value: null,
     };
     const plane = new BakedPlane(
       seal({
@@ -75,6 +76,7 @@ describe("batch ingest port", () => {
             point_count: "2",
             t_min: 0,
             t_max: 1,
+            last_value: null,
           },
         ]) as never,
       ),
@@ -184,6 +186,7 @@ describe("derived port", () => {
           point_count: "3",
           t_min: 0,
           t_max: 2,
+          last_value: null,
         }) as never,
       );
     });

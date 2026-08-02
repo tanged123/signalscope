@@ -204,6 +204,7 @@ function summary(path: string): SignalSummary {
     point_count: "2",
     t_min: 0,
     t_max: 1,
+    last_value: null,
   };
 }
 
@@ -443,6 +444,7 @@ describe("panel series", () => {
           point_count: "2",
           t_min: 0,
           t_max: 1,
+          last_value: null,
         })),
       ),
     );
@@ -492,6 +494,7 @@ describe("panel series", () => {
         point_count: "2",
         t_min: 0,
         t_max: 1,
+        last_value: null,
       })),
     );
     const state = xyState(
@@ -526,6 +529,7 @@ describe("panel series", () => {
           point_count: "2",
           t_min: 0,
           t_max: 1,
+          last_value: null,
         })),
       ),
     );

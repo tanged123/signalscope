@@ -18,6 +18,7 @@ function signal(sourceKey: string, channel: string): SignalSummary {
     point_count: "1",
     t_min: 0,
     t_max: 0,
+    last_value: null,
   };
 }
 

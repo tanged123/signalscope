@@ -323,6 +323,15 @@ impl Pyramid {
         level_count(self.sample_count)
     }
 
+    /// Returns the final value recorded by the coarsest resident envelope bin.
+    #[must_use]
+    pub fn last_finite_value(&self) -> Option<f64> {
+        self.level(self.level_count().saturating_sub(1))?
+            .last()?
+            .last
+            .filter(|value| value.is_finite())
+    }
+
     #[must_use]
     pub fn stored_bin_count(&self) -> usize {
         self.merged.iter().map(CachedBinLevel::len).sum()
@@ -608,6 +617,19 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
+
+    #[test]
+    fn last_value_uses_the_coarsest_bin_tail_without_scanning_for_a_fallback() {
+        assert_eq!(
+            Pyramid::from_samples(&[0.0, 1.0, 2.0], &[1.0, 2.0, f64::NAN]).last_finite_value(),
+            Some(2.0)
+        );
+        assert_eq!(
+            Pyramid::from_samples(&[0.0, 1.0, 2.0], &[1.0, f64::NAN, 3.0]).last_finite_value(),
+            Some(3.0)
+        );
+        assert_eq!(Pyramid::from_samples(&[], &[]).last_finite_value(), None);
+    }
 
     #[test]
     #[allow(clippy::float_cmp)]

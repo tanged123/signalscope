@@ -239,7 +239,8 @@
         "unit": "string?",
         "point_count": "u64",
         "t_min": "f64",
-        "t_max": "f64"
+        "t_max": "f64",
+        "last_value": "f64?"
       }
     },
     "SourceSummary": {

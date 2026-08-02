@@ -103,7 +103,11 @@ impl Drop for RestoreSettlement<'_> {
     }
 }
 
-fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
+fn signal_summary(
+    signal: &Signal,
+    source_key: SourceKey,
+    last_value: Option<f64>,
+) -> SignalSummary {
     let (t_min, t_max) = signal.time_bounds();
     SignalSummary {
         signal_id: signal.id.0,
@@ -115,6 +119,7 @@ fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
         point_count: signal.len() as u64,
         t_min,
         t_max,
+        last_value,
     }
 }
 
@@ -668,7 +673,13 @@ fn list_signals(
                     .find(|source| source.id == signal.source_id)
                     .expect("signal source")
                     .key;
-                signal_summary(signal, key)
+                signal_summary(
+                    signal,
+                    key,
+                    data.pyramids
+                        .get(&signal.id)
+                        .and_then(Pyramid::last_finite_value),
+                )
             })
             .collect(),
     ))
@@ -916,9 +927,9 @@ impl DataState {
             .find(|source| source.id == source_id)
             .expect("derived source")
             .key;
-        let summary = signal_summary(signal, source_key);
-        self.pyramids
-            .insert(signal_id, Pyramid::from_signal(signal));
+        let pyramid = Pyramid::from_signal(signal);
+        let summary = signal_summary(signal, source_key, pyramid.last_finite_value());
+        self.pyramids.insert(signal_id, pyramid);
         self.derived_references
             .insert(summary.path.clone(), references);
         if let Some(handle) = spill {

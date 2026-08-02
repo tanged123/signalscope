@@ -306,6 +306,8 @@ pub struct SignalSummary {
     pub point_count: u64,
     pub t_min: f64,
     pub t_max: f64,
+    #[serde(default)]
+    pub last_value: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

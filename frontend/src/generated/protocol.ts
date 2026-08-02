@@ -176,6 +176,7 @@ export interface SignalSummary {
   point_count: string;
   t_min: number;
   t_max: number;
+  last_value: number | null;
 }
 
 export interface SourceSummary {

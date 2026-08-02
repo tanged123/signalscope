@@ -59,6 +59,7 @@ export class SignalTreeView {
         point_count: "0",
         t_min: 0,
         t_max: 0,
+        last_value: null,
       };
     });
     this.setCatalog(Catalog.build(summaries));

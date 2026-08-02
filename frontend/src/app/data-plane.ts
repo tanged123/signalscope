@@ -590,6 +590,7 @@ function createDemoManifest(): BakedManifest {
         point_count: String(pointCount),
         t_min: 0,
         t_max: (pointCount - 1) / 30,
+        last_value: null,
       },
       generate: (time) =>
         145 * Math.sin(time * 0.14) + 58 * Math.sin(time * 0.47) + time * 1.3,
@@ -605,6 +606,7 @@ function createDemoManifest(): BakedManifest {
         point_count: String(pointCount),
         t_min: 0,
         t_max: (pointCount - 1) / 30,
+        last_value: null,
       },
       generate: (time) =>
         54 * Math.cos(time * 0.19) + 26 * Math.sin(time * 0.63),

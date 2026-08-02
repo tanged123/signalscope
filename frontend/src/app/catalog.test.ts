@@ -19,6 +19,7 @@ function summary(
     point_count: "2",
     t_min: 0,
     t_max: 1,
+    last_value: null,
   };
 }
 
