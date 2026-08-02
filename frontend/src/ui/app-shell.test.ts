@@ -90,10 +90,10 @@ interface ArrivalProbe {
   afterSeriesAdded(panelId: string, refs: readonly SeriesRef[]): void;
 }
 
-it("stores the first source as real focus when large additions enter ghost mode", () => {
+it("stores the first series as real focus when large additions enter ghost mode", () => {
   const refs = Array.from({ length: 5 }, (_, index) => ({
     source_key: `run-0${String(index + 1)}`,
-    channel: "temp",
+    channel: "response",
   }));
   const shell = Object.create(AppShell.prototype) as ArrivalProbe;
   shell.workspace = new WorkspaceModel();
@@ -107,10 +107,10 @@ it("stores the first source as real focus when large additions enter ghost mode"
   expect(shell.workspace.panel(panel.id)?.ghost_mode).toBe("ghost");
   expect(shell.workspace.focusEntries(panel.id)).toEqual([
     {
-      kind: "source",
-      ref: null,
-      source_key: "run-01",
-      channel: null,
+      kind: "series",
+      ref: { source_key: "run-01", channel: "response" },
+      source_key: null,
+      channel: "response",
     },
   ]);
 });

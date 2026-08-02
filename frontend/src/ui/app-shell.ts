@@ -287,7 +287,7 @@ export class AppShell {
           this.workspace.toggleGhostMode(id);
           const panel = this.workspace.panel(id);
           if (panel?.ghost_mode === "ghost") {
-            this.focusFirstSource(
+            this.focusFirstSeries(
               id,
               resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
                 (series) => series.ref,
@@ -959,7 +959,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.15.7");
+        this.showModeHelp("SignalScope 0.15.8");
       },
     });
     this.commands.register({
@@ -1530,7 +1530,7 @@ export class AppShell {
     if (mode === "none") return;
     if (mode === "ghost") {
       this.workspace.setGhostMode(panelId, "ghost");
-      this.focusFirstSource(panelId, [...unique.values()]);
+      this.focusFirstSeries(panelId, [...unique.values()]);
       return;
     }
     const focused = this.workspace.focusEntries(panelId);
@@ -1554,15 +1554,15 @@ export class AppShell {
     }
   }
 
-  private focusFirstSource(panelId: string, refs: readonly SeriesRef[]): void {
+  private focusFirstSeries(panelId: string, refs: readonly SeriesRef[]): void {
     if (this.workspace.focusEntries(panelId).length > 0) return;
     const first = refs[0];
     if (first === undefined) return;
     this.workspace.toggleFocus(panelId, {
-      kind: "source",
-      ref: null,
-      source_key: first.source_key,
-      channel: null,
+      kind: "series",
+      ref: first,
+      source_key: null,
+      channel: first.channel,
     });
   }
 
