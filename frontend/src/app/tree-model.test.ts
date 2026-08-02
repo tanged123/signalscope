@@ -75,6 +75,21 @@ describe("buildTreeRows", () => {
       path: "derived/err",
     });
   });
+
+  it("uses selectors first and substring matching as the fallback", () => {
+    expect(
+      buildTreeRows(catalog, new Set(), "temp* @ run-01").map(
+        (row) => row.path,
+      ),
+    ).toEqual(["channel:temp", "run-01/temp"]);
+    expect(
+      buildTreeRows(catalog, new Set(), "temp").map((row) => row.path),
+    ).toEqual(["channel:temp", "run-01/temp", "run-02/temp"]);
+    expect(buildTreeRows(catalog, new Set(), "xyz[")).toEqual([]);
+    expect(
+      buildTreeRows(catalog, new Set(), "emp").map((row) => row.path),
+    ).toEqual(["channel:temp", "run-01/temp", "run-02/temp"]);
+  });
 });
 
 describe("virtualSlice", () => {

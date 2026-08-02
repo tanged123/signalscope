@@ -761,6 +761,63 @@ describe("WorkspaceModel", () => {
     expect(model.namedSets()).toEqual([]);
   });
 
+  it("adds query and set bindings without duplicates", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    expect(model.addQueryBinding(panel.id, "temp*")).toBe(true);
+    expect(model.addQueryBinding(panel.id, "temp*")).toBe(false);
+    expect(model.addSetBinding(panel.id, "set-1")).toBe(true);
+    expect(model.addSetBinding(panel.id, "set-1")).toBe(false);
+    expect(model.panel(panel.id)?.bindings).toEqual([
+      { kind: "query", selector: "temp*", refs: [], set_id: null },
+      { kind: "set", selector: null, refs: [], set_id: "set-1" },
+    ]);
+  });
+
+  it("allocates the next set id across current and migrated ids", () => {
+    const empty = new WorkspaceModel();
+    expect(empty.nextSetId()).toBe("set-1");
+    empty.addNamedSet({
+      id: "set-3",
+      name: "three",
+      kind: "pick",
+      selector: null,
+      refs: [],
+    });
+    empty.addNamedSet({
+      id: "set-fav-7",
+      name: "seven",
+      kind: "pick",
+      selector: null,
+      refs: [],
+    });
+    empty.addNamedSet({
+      id: "other",
+      name: "other",
+      kind: "pick",
+      selector: null,
+      refs: [],
+    });
+    expect(empty.nextSetId()).toBe("set-8");
+  });
+
+  it("removes a named set binding from every tab", () => {
+    const model = new WorkspaceModel();
+    const first = model.addPanelRow();
+    model.addSetBinding(first.id, "set-1");
+    model.addSetBinding(first.id, "set-2");
+    model.addTab();
+    const second = model.addPanelRow();
+    model.addSetBinding(second.id, "set-1");
+    model.removeNamedSet("set-1");
+    expect(
+      model
+        .tabs()
+        .flatMap((tab) => tab.panels)
+        .flatMap((panel) => panel.bindings),
+    ).toEqual([{ kind: "set", selector: null, refs: [], set_id: "set-2" }]);
+  });
+
   it("never reuses an id already present in a loaded session", () => {
     const session = emptySession();
     const tab = session.tabs[0];

@@ -60,6 +60,7 @@ import {
 } from "./plot-interactions";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
+export const SET_DRAG_TYPE = "application/x-signalscope-set";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
 export const MAX_SERIES_PER_PANEL = 64;
 export const MAXIMIZE_GLYPH = "↗";
@@ -90,6 +91,7 @@ export interface PanelCallbacks {
   onMaximize(id: string): void;
   onSelectMode(id: string, mode: PanelMode): void;
   onDropSignals(id: string, paths: string[]): void;
+  onDropSet(id: string, setId: string): void;
   onToggleHighlight(id: string, path: string): void;
   localPathFor(path: string): string | null;
   sourceKeyFor(path: string): string | null;
@@ -247,6 +249,23 @@ export function parseSignalPayload(data: string): string[] {
     // Malformed external drag payloads are ignored.
   }
   return data === "" ? [] : [data];
+}
+
+export function parseSetPayload(data: string): string | null {
+  try {
+    const payload: unknown = JSON.parse(data);
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "set_id" in payload &&
+      typeof payload.set_id === "string"
+    ) {
+      return payload.set_id;
+    }
+  } catch {
+    // Malformed external drag payloads are ignored.
+  }
+  return null;
 }
 
 export class PanelView {
@@ -442,11 +461,16 @@ export class PanelView {
       event.dataTransfer?.setData(PANEL_DRAG_TYPE, this.id);
     });
     this.element.addEventListener("dragover", (event) => {
-      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
+      const signalDrag = hasDragType(event, SIGNAL_DRAG_TYPE);
+      const setDrag = hasDragType(event, SET_DRAG_TYPE);
+      if (!signalDrag && !setDrag) return;
       event.preventDefault();
       this.element.classList.add("drop-target");
-      this.setDropStripVisible(true);
-      this.element.classList.toggle("drop-x", this.overStrip(event));
+      this.setDropStripVisible(signalDrag);
+      this.element.classList.toggle(
+        "drop-x",
+        signalDrag && this.overStrip(event),
+      );
     });
     this.element.addEventListener("dragleave", () => {
       this.element.classList.remove("drop-target", "drop-x");
@@ -456,6 +480,14 @@ export class PanelView {
       const asX = this.overStrip(event);
       this.element.classList.remove("drop-target", "drop-x");
       this.setDropStripVisible(false);
+      const setPayload = dragData(event, SET_DRAG_TYPE);
+      if (setPayload !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        const setId = parseSetPayload(setPayload);
+        if (setId !== null) this.callbacks.onDropSet(this.id, setId);
+        return;
+      }
       const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path === null) return;
       event.preventDefault();

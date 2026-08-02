@@ -94,6 +94,35 @@ describe("resolvePanel", () => {
     ]);
   });
 
+  it("resolves selector queries and invalid selectors to no series", () => {
+    const state = panel();
+    state.bindings = [
+      { kind: "query", selector: "temp @ a", refs: [], set_id: null },
+      { kind: "query", selector: "run_[", refs: [], set_id: null },
+    ];
+    expect(resolvePanel(catalog, state, []).map((entry) => entry.path)).toEqual(
+      ["a/temp"],
+    );
+
+    state.bindings[0] = {
+      kind: "set",
+      selector: null,
+      refs: [],
+      set_id: "query",
+    };
+    expect(
+      resolvePanel(catalog, state, [
+        {
+          id: "query",
+          name: "query",
+          kind: "query",
+          selector: "temp @ b",
+          refs: [],
+        },
+      ]).map((entry) => entry.path),
+    ).toEqual(["b/temp"]);
+  });
+
   it("applies styles, reserved slots, and focus", () => {
     const state = panel();
     state.bindings = [

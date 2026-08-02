@@ -7,6 +7,7 @@ import type {
   SeriesRef,
 } from "../generated/session";
 import type { Catalog, CatalogSeries } from "./catalog";
+import { evaluateSelector } from "./selector";
 
 export interface ResolvedSeries {
   ref: SeriesRef;
@@ -49,10 +50,10 @@ export function resolvePanel(
       const set = namedSets.find((entry) => entry.id === binding.set_id);
       if (set?.kind === "pick") set.refs.forEach(add);
       else if (set?.kind === "query" && set.selector !== null) {
-        addChannel(catalog, set.selector, add);
+        addSelector(catalog, set.selector, add);
       }
     } else if (binding.selector !== null) {
-      addChannel(catalog, binding.selector, add);
+      addSelector(catalog, binding.selector, add);
     }
   }
   const claimed = new Set<number>();
@@ -83,15 +84,15 @@ export function resolvePanel(
   });
 }
 
-function addChannel(
+function addSelector(
   catalog: Catalog,
-  channel: string,
+  input: string,
   add: (ref: SeriesRef) => void,
 ): void {
-  for (const series of catalog.allSeries()) {
-    if (series.channel === channel) {
-      add({ source_key: series.sourceKey, channel: series.channel });
-    }
+  const match = evaluateSelector(catalog, input);
+  if (match === null) return;
+  for (const series of match.series) {
+    add({ source_key: series.sourceKey, channel: series.channel });
   }
 }
 

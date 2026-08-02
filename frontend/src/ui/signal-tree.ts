@@ -1,14 +1,16 @@
 import type { NamedSet } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import { buildTreeRows, virtualSlice, type TreeRow } from "../app/tree-model";
-import { SIGNAL_DRAG_TYPE } from "./panel";
+import { evaluateSelector } from "../app/selector";
+import { SET_DRAG_TYPE, SIGNAL_DRAG_TYPE } from "./panel";
 
 const FALLBACK_ROW_HEIGHT = 22;
 
 export interface SignalTreeCallbacks {
   onPlotSignal(path: string): void;
   onPlotSignals?(paths: readonly string[]): void;
-  onSetSelected?(set: NamedSet): void;
+  onSetBind?(setId: string): void;
+  onSetRemove?(setId: string): void;
   onRemoveDerived(path: string): void;
 }
 
@@ -39,6 +41,7 @@ export class SignalTreeView {
   setCatalog(catalog: Catalog): void {
     this.catalog = catalog;
     this.refresh();
+    this.renderSets();
   }
 
   setSignals(paths: readonly string[]): void {
@@ -201,12 +204,59 @@ export class SignalTreeView {
     }
     this.setsElement.replaceChildren(
       ...this.namedSets.map((set) => {
-        const row = document.createElement("button");
+        const row = document.createElement("div");
         row.className = "tree-row tree-set";
-        row.textContent = `${set.name} · ${set.kind === "query" ? (set.selector ?? "query") : `${String(set.refs.length)} signals`}`;
-        row.addEventListener("click", () =>
-          this.callbacks.onSetSelected?.(set),
-        );
+        row.tabIndex = 0;
+        row.setAttribute("role", "button");
+        const name = document.createElement("span");
+        name.className = "tree-set-name";
+        name.textContent = `★ ${set.name}`;
+        const detail = document.createElement("span");
+        detail.className = "tree-set-detail";
+        const live =
+          set.kind === "query" && set.selector !== null
+            ? evaluateSelector(this.catalog, set.selector)
+            : null;
+        detail.textContent = `· ${String(live?.signalCount ?? set.refs.length)}`;
+        const badge = document.createElement("span");
+        badge.className = "tree-set-badge";
+        if (set.kind === "query") {
+          badge.textContent = "live";
+          badge.title = `${String(live?.signalCount ?? 0)} matching signals`;
+        } else {
+          badge.textContent = `▣ ${String(set.refs.length)}`;
+          badge.title = "Manual pick set";
+        }
+        const remove = document.createElement("button");
+        remove.className = "tree-set-remove";
+        remove.type = "button";
+        remove.textContent = "✕";
+        remove.title = `Delete ${set.name}`;
+        remove.setAttribute("aria-label", `Delete ${set.name}`);
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.callbacks.onSetRemove?.(set.id);
+        });
+        row.addEventListener("click", () => {
+          this.callbacks.onSetBind?.(set.id);
+        });
+        row.addEventListener("keydown", (event) => {
+          if (event.key === "Delete") {
+            event.preventDefault();
+            this.callbacks.onSetRemove?.(set.id);
+          } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            this.callbacks.onSetBind?.(set.id);
+          }
+        });
+        row.draggable = true;
+        row.addEventListener("dragstart", (event) => {
+          event.dataTransfer?.setData(
+            SET_DRAG_TYPE,
+            JSON.stringify({ set_id: set.id }),
+          );
+        });
+        row.append(name, detail, badge, remove);
         return row;
       }),
     );

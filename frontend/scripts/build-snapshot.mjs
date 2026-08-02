@@ -16,7 +16,7 @@ for (const match of [
   const cssPath = resolve(distDirectory, href.replace(/^\//, ""));
   let css = await readFile(cssPath, "utf8");
   css = await inlineCssAssets(css, cssPath);
-  html = html.replace(element, `<style>${css}</style>`);
+  html = html.replace(element, () => `<style>${css}</style>`);
 }
 
 for (const match of [
@@ -30,7 +30,7 @@ for (const match of [
   const script = await readFile(scriptPath, "utf8");
   html = html.replace(
     element,
-    `<script type="module">${escapeClosingScript(script)}</script>`,
+    () => `<script type="module">${escapeClosingScript(script)}</script>`,
   );
 }
 

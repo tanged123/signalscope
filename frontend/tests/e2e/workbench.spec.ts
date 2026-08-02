@@ -165,6 +165,7 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onMaximize: () => {},
       onSelectMode: () => {},
       onDropSignals: () => {},
+      onDropSet: () => {},
       onToggleHighlight: () => {},
       localPathFor: () => null,
       sourceKeyFor: () => null,
@@ -612,6 +613,37 @@ test("tree filters, sets, and drag-to-plot", async ({ page }) => {
   await expect(target.locator(".legend-chip")).toHaveCount(2);
   await expect(target).not.toHaveClass(/focused/);
   await expect(target).not.toHaveClass(/drop-target/);
+});
+
+test("selector filter binds and saves a live set", async ({ page }) => {
+  await page.goto("/");
+  const search = page.locator(".signal-search");
+  await search.fill("velocity_body/* @ rocket");
+  await expect(page.locator(".search-count")).toContainText(
+    "2 signals · 1 sources",
+  );
+  await search.press("Enter");
+  const first = page.locator(".panel").first();
+  await expect(first.locator(".legend-chip")).toHaveCount(2);
+
+  await search.press("ControlOrMeta+s");
+  await page.locator(".set-name-input").fill("thermal");
+  await page.locator(".set-name-input").press("Enter");
+  const setRow = page.locator(".tree-set", { hasText: "thermal" });
+  await expect(setRow).toContainText("2");
+  await expect(setRow).toContainText("live");
+
+  await first.locator(".panel-header").click();
+  await page.keyboard.press("n");
+  const second = page.locator(".panel").last();
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await setRow.dispatchEvent("dragstart", { dataTransfer });
+  await second.dispatchEvent("drop", { dataTransfer });
+  await expect(second.locator(".legend-chip")).toHaveCount(2);
+
+  await setRow.focus();
+  await page.keyboard.press("Delete");
+  await expect(second.locator(".legend-chip")).toHaveCount(0);
 });
 
 test("seam drag resizes panel rows", async ({ page }) => {

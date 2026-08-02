@@ -33,6 +33,7 @@ import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
 import { Catalog } from "../app/catalog";
 import { resolvePanel } from "../app/resolution";
+import { evaluateSelector } from "../app/selector";
 import { virtualSlice } from "../app/tree-model";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
@@ -186,6 +187,9 @@ export class AppShell {
         },
         onDropSignals: (id, paths) => {
           this.plotSignals(paths, id);
+        },
+        onDropSet: (id, setId) => {
+          this.bindSetToPanel(setId, id);
         },
         onToggleHighlight: (id, path) => {
           const ref = this.catalog.refFromPath(path);
@@ -362,25 +366,21 @@ export class AppShell {
         onPlotSignals: (paths) => {
           this.plotSignals(paths);
         },
-        onSetSelected: (set) => {
-          const paths =
-            set.kind === "pick"
-              ? set.refs
-                  .map((ref) => this.catalog.get(ref)?.path)
-                  .filter((path): path is string => path !== undefined)
-              : this.catalog
-                  .allSeries()
-                  .filter((series) => series.channel === set.selector)
-                  .map((series) => series.path);
-          this.plotSignals(paths);
+        onSetBind: (setId) => {
+          this.bindSetToPanel(setId);
+        },
+        onSetRemove: (setId) => {
+          this.workspace.removeNamedSet(setId);
+          this.tree?.setNamedSets(this.workspace.namedSets());
+          this.afterLayoutChange();
         },
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
         },
       },
     );
-    this.palette = new CommandPalette(this.root, (mode) =>
-      this.paletteEntries(mode),
+    this.palette = new CommandPalette(this.root, (mode, query) =>
+      this.paletteEntries(mode, query),
     );
     this.formulaBar = new FormulaBar(required(this.root, ".formula-bar"), {
       onCreate: (path, expression) => this.createDerived(path, expression),
@@ -1025,7 +1025,7 @@ export class AppShell {
     ];
   }
 
-  private paletteEntries(mode: PaletteMode): PaletteEntry[] {
+  private paletteEntries(mode: PaletteMode, query = ""): PaletteEntry[] {
     if (mode === "settings") return this.settingsEntries();
     // Planned and momentarily unavailable commands both stay listed so the
     // palette matches the menu, but each says why it will not run.
@@ -1040,7 +1040,7 @@ export class AppShell {
         this.commands.run(command.id);
       },
     }));
-    const signals = this.signals.map((summary) => ({
+    const allSignals = this.signals.map((summary) => ({
       title: `plot ${summary.path}`,
       hint: "signal",
       run: () => {
@@ -1102,9 +1102,42 @@ export class AppShell {
               },
             })),
           ];
-    return mode === "signals"
-      ? [...signals, ...tabs, ...panels]
-      : [...commands, ...xSignals, ...colorSignals];
+    if (mode !== "signals") return [...commands, ...xSignals, ...colorSignals];
+
+    const input = query.trim();
+    if (input === "") return [...allSignals, ...tabs, ...panels];
+    const match = evaluateSelector(this.catalog, input);
+    const selectorMode =
+      match !== null && (match.signalCount > 0 || /[*?|[@:]/.test(input));
+    const selectedPaths =
+      match === null
+        ? new Set<string>()
+        : new Set(match.series.map((series) => series.path));
+    const signals = selectorMode
+      ? allSignals.filter((entry) => selectedPaths.has(entry.title.slice(5)))
+      : allSignals.filter((entry) =>
+          entry.title.toLowerCase().includes(input.toLowerCase()),
+        );
+    const aggregate =
+      selectorMode && match.signalCount > 1
+        ? [
+            {
+              title: `Add ${String(match.signalCount)} signals · ${String(match.sourceCount)} sources to focused panel`,
+              hint: "selector",
+              run: () => {
+                this.bindQueryToPanel(input);
+              },
+            },
+          ]
+        : [];
+    const titleMatches = (title: string): boolean =>
+      title.toLowerCase().includes(input.toLowerCase());
+    return [
+      ...aggregate,
+      ...signals,
+      ...tabs.filter((entry) => titleMatches(entry.title)),
+      ...panels.filter((entry) => titleMatches(entry.title)),
+    ];
   }
 
   private bindControls(): void {
@@ -1128,12 +1161,67 @@ export class AppShell {
     required(this.root, ".cursor-toggle").addEventListener("click", () => {
       this.commands.run("cycle-cursor-mode");
     });
-    required<HTMLInputElement>(this.root, ".signal-search").addEventListener(
-      "input",
-      (event) => {
-        this.tree?.setFilter((event.target as HTMLInputElement).value);
+    const search = required<HTMLInputElement>(this.root, ".signal-search");
+    search.addEventListener("input", () => {
+      this.tree?.setFilter(search.value);
+      this.renderSearchStatus();
+    });
+    search.addEventListener("keydown", (event) => {
+      const input = search.value.trim();
+      const match = input === "" ? null : evaluateSelector(this.catalog, input);
+      if (event.key === "Enter" && match !== null && match.signalCount > 0) {
+        event.preventDefault();
+        this.bindQueryToPanel(input);
+      } else if (
+        event.key.toLowerCase() === "s" &&
+        (event.metaKey || event.ctrlKey) &&
+        match !== null
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openSetNameRow();
+      }
+    });
+    const setName = required<HTMLInputElement>(this.root, ".set-name-input");
+    const commitSet = (): void => {
+      const selector = search.value.trim();
+      const name = setName.value.trim();
+      if (selector === "" || name === "") return;
+      this.workspace.addNamedSet({
+        id: this.workspace.nextSetId(),
+        name,
+        kind: "query",
+        selector,
+        refs: [],
+      });
+      this.tree?.setNamedSets(this.workspace.namedSets());
+      this.hideSetNameRow();
+      this.commitHistory();
+      this.afterLayoutChange();
+      search.focus();
+    };
+    setName.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitSet();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.hideSetNameRow();
+        search.focus();
+      }
+    });
+    required<HTMLButtonElement>(this.root, ".set-name-save").addEventListener(
+      "click",
+      commitSet,
+    );
+    required<HTMLButtonElement>(this.root, ".set-name-cancel").addEventListener(
+      "click",
+      () => {
+        this.hideSetNameRow();
+        search.focus();
       },
     );
+    this.renderSearchStatus();
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
       if (this.exportDialog?.isOpen() === true) return;
@@ -1163,6 +1251,70 @@ export class AppShell {
       this.fitWindowToPlotted();
       this.afterLayoutChange();
     }
+  }
+
+  private bindQueryToPanel(selector: string): void {
+    let target = this.workspace.focusedPanelId();
+    if (target === null) target = this.workspace.addPanelRow().id;
+    if (!this.workspace.addQueryBinding(target, selector)) return;
+    this.workspace.focusPanel(target);
+    this.fitWindowToPlotted();
+    this.afterLayoutChange();
+  }
+
+  private bindSetToPanel(setId: string, panelId?: string): void {
+    if (!this.workspace.namedSets().some((set) => set.id === setId)) return;
+    let target = panelId ?? this.workspace.focusedPanelId();
+    if (target === null) {
+      target = this.workspace.addPanelRow().id;
+    }
+    if (!this.workspace.addSetBinding(target, setId)) return;
+    this.workspace.focusPanel(target);
+    this.fitWindowToPlotted();
+    this.afterLayoutChange();
+  }
+
+  private renderSearchStatus(): void {
+    const input = required<HTMLInputElement>(this.root, ".signal-search");
+    const count = required<HTMLElement>(this.root, ".search-count");
+    const value = input.value.trim();
+    count.replaceChildren();
+    if (value === "") return;
+    const match = evaluateSelector(this.catalog, value);
+    const selectorMode =
+      match !== null && (match.signalCount > 0 || /[*?|[@:]/.test(value));
+    if (selectorMode) {
+      count.append(
+        document.createTextNode(
+          `${String(match.signalCount)} signals · ${String(match.sourceCount)} sources `,
+        ),
+      );
+      const hint = document.createElement("span");
+      hint.textContent = "⏎ add · ⌘S set";
+      count.append(hint);
+      return;
+    }
+    const query = value.toLowerCase();
+    const matches = this.catalog
+      .allSeries()
+      .filter(
+        (series) =>
+          series.channel.toLowerCase().includes(query) ||
+          series.path.toLowerCase().includes(query),
+      );
+    count.textContent = `${String(matches.length)} matches`;
+  }
+
+  private openSetNameRow(): void {
+    const row = required<HTMLElement>(this.root, ".set-name-row");
+    const input = required<HTMLInputElement>(this.root, ".set-name-input");
+    row.hidden = false;
+    input.value = "";
+    input.focus();
+  }
+
+  private hideSetNameRow(): void {
+    required<HTMLElement>(this.root, ".set-name-row").hidden = true;
   }
 
   private plotSignals(memberPaths: readonly string[], panelId?: string): void {
@@ -1884,6 +2036,7 @@ export class AppShell {
     this.tree?.setCatalog(this.catalog);
     this.tree?.setNamedSets(this.workspace.namedSets());
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
+    this.renderSearchStatus();
     this.updateStatus();
   }
 
@@ -2754,6 +2907,12 @@ function shellMarkup(): string {
     <aside class="signal-tree" id="signal-tree" aria-label="Signals">
       <div class="search-wrap">
         <label>/ <input class="signal-search" placeholder="filter signals…" spellcheck="false" /></label>
+        <div class="search-count"></div>
+        <div class="set-name-row" hidden>
+          <input class="set-name-input" placeholder="set name" spellcheck="false" aria-label="Set name" />
+          <button class="set-name-save" type="button">save</button>
+          <button class="set-name-cancel" type="button">cancel</button>
+        </div>
       </div>
       <div class="tree-heading">SETS</div>
       <div class="tree-sets"></div>

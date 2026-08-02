@@ -5,6 +5,7 @@ export const DERIVED_SOURCE_KEY = "derived";
 
 export interface CatalogSeries {
   sourceKey: string;
+  sourceName: string;
   channel: string;
   path: string;
   summary: SignalSummary;
@@ -46,6 +47,7 @@ export class Catalog {
       const channel = derived ? summary.path.slice(8) : summary.local_path;
       const series: CatalogSeries = {
         sourceKey,
+        sourceName: separatorName(summary.path) ?? DERIVED_SOURCE_KEY,
         channel,
         path: summary.path,
         summary,
@@ -104,4 +106,9 @@ export class Catalog {
   refKey(ref: SeriesRef): string {
     return refKeyOf(ref.source_key, ref.channel);
   }
+}
+
+function separatorName(path: string): string | null {
+  const separator = path.indexOf("/");
+  return separator === -1 ? null : path.slice(0, separator);
 }

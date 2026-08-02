@@ -13,6 +13,7 @@ import {
   MAX_SERIES_PER_PANEL,
   MAXIMIZE_GLYPH,
   PanelView,
+  parseSetPayload,
   parseSignalPayload,
   type RenderPanelState,
   type RenderSeries,
@@ -235,6 +236,12 @@ describe("panel series", () => {
     ).toEqual(["a/alt", "b/alt"]);
     expect(parseSignalPayload("not json")).toEqual(["not json"]);
     expect(parseSignalPayload(JSON.stringify({ paths: [1] }))).toEqual([]);
+  });
+
+  it("parses named set drag payloads", () => {
+    expect(parseSetPayload(JSON.stringify({ set_id: "set-3" }))).toBe("set-3");
+    expect(parseSetPayload(JSON.stringify({ set_id: 3 }))).toBeNull();
+    expect(parseSetPayload("not json")).toBeNull();
   });
 
   it("omits the trace when a source lacks the X local path instead of cross-pairing", () => {

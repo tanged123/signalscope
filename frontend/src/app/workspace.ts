@@ -539,10 +539,64 @@ export class WorkspaceModel {
     else this.session.named_sets[index] = structuredClone(set);
   }
 
+  addQueryBinding(panelId: string, selector: string): boolean {
+    const panel = this.panel(panelId);
+    if (
+      panel === undefined ||
+      panel.bindings.some(
+        (binding) => binding.kind === "query" && binding.selector === selector,
+      )
+    ) {
+      return false;
+    }
+    panel.bindings.push({
+      kind: "query",
+      selector,
+      refs: [],
+      set_id: null,
+    });
+    return true;
+  }
+
+  addSetBinding(panelId: string, setId: string): boolean {
+    const panel = this.panel(panelId);
+    if (
+      panel === undefined ||
+      panel.bindings.some(
+        (binding) => binding.kind === "set" && binding.set_id === setId,
+      )
+    ) {
+      return false;
+    }
+    panel.bindings.push({
+      kind: "set",
+      selector: null,
+      refs: [],
+      set_id: setId,
+    });
+    return true;
+  }
+
+  nextSetId(): string {
+    let maximum = 0;
+    for (const set of this.session.named_sets) {
+      const match = /^set(?:-fav)?-(\d+)$/.exec(set.id);
+      if (match !== null) maximum = Math.max(maximum, Number(match[1]));
+    }
+    return `set-${String(maximum + 1)}`;
+  }
+
   removeNamedSet(id: string): void {
     this.session.named_sets = this.session.named_sets.filter(
       (set) => set.id !== id,
     );
+    for (const tab of this.session.tabs) {
+      for (const panel of tab.panels) {
+        panel.bindings = panel.bindings.filter(
+          (binding) => binding.kind !== "set" || binding.set_id !== id,
+        );
+      }
+    }
   }
 
   setSourceAlignment(

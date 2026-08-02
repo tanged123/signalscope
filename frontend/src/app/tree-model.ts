@@ -1,4 +1,5 @@
 import type { Catalog } from "./catalog";
+import { evaluateSelector } from "./selector";
 
 export interface TreeLeaf {
   kind: "leaf";
@@ -24,7 +25,21 @@ export function buildTreeRows(
   collapsed: ReadonlySet<string>,
   filter: string,
 ): TreeRow[] {
-  const query = filter.trim().toLowerCase();
+  const input = filter.trim();
+  const query = input.toLowerCase();
+  const evaluation = input === "" ? null : evaluateSelector(catalog, input);
+  const selectorSyntax = /[*?|[@:]/.test(input);
+  const selectorRefs =
+    evaluation !== null && (evaluation.signalCount > 0 || selectorSyntax)
+      ? new Set(
+          evaluation.series.map((series) =>
+            catalog.refKey({
+              source_key: series.sourceKey,
+              channel: series.channel,
+            }),
+          ),
+        )
+      : null;
   const rows: TreeRow[] = [];
   for (const channel of catalog.channels()) {
     const members = catalog
@@ -34,8 +49,15 @@ export function buildTreeRows(
     const matching = members.filter(
       (series) =>
         query === "" ||
-        channel.name.toLowerCase().includes(query) ||
-        series.path.toLowerCase().includes(query),
+        (selectorRefs !== null
+          ? selectorRefs.has(
+              catalog.refKey({
+                source_key: series.sourceKey,
+                channel: series.channel,
+              }),
+            )
+          : channel.name.toLowerCase().includes(query) ||
+            series.path.toLowerCase().includes(query)),
     );
     if (matching.length === 0) continue;
     if (members.length === 1) {

@@ -49,6 +49,19 @@ describe("Catalog", () => {
     });
   });
 
+  it("retains display source names", () => {
+    expect(
+      catalog.get({ source_key: "run-01", channel: "temp" }),
+    ).toMatchObject({
+      sourceName: "run_01",
+    });
+    expect(
+      catalog.get({ source_key: DERIVED_SOURCE_KEY, channel: "err" }),
+    ).toMatchObject({
+      sourceName: "derived",
+    });
+  });
+
   it("round-trips paths and references", () => {
     for (const series of catalog.allSeries()) {
       const ref = catalog.refFromPath(series.path);

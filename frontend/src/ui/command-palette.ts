@@ -26,7 +26,10 @@ export class CommandPalette {
 
   constructor(
     root: HTMLElement,
-    private readonly provider: (mode: PaletteMode) => PaletteEntry[],
+    private readonly provider: (
+      mode: PaletteMode,
+      query?: string,
+    ) => PaletteEntry[],
   ) {
     this.element = document.createElement("div");
     this.element.className = "palette-overlay";
@@ -79,7 +82,7 @@ export class CommandPalette {
 
   open(mode: PaletteMode): void {
     this.mode = mode;
-    this.entries = this.provider(mode);
+    this.entries = this.provider(mode, "");
     this.element.hidden = false;
     this.input.placeholder =
       mode === "signals"
@@ -102,6 +105,13 @@ export class CommandPalette {
 
   private filter(): void {
     const query = this.input.value;
+    if (this.mode === "signals") {
+      this.entries = this.provider(this.mode, query);
+      this.matches = this.entries.slice(0, 13);
+      this.selected = 0;
+      this.renderList();
+      return;
+    }
     this.matches = this.entries
       .map((entry) => ({ entry, score: fuzzyScore(query, entry.title) }))
       .filter(
@@ -159,7 +169,7 @@ export class CommandPalette {
   /** Re-pulls entries so hints show updated values, keeping the selection. */
   private refreshEntries(): void {
     const selected = this.selected;
-    this.entries = this.provider(this.mode);
+    this.entries = this.provider(this.mode, "");
     this.filter();
     this.selected = Math.min(selected, Math.max(0, this.matches.length - 1));
     this.renderList();

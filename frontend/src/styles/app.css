@@ -367,6 +367,39 @@ button {
   font: 0.8462rem var(--font-mono);
 }
 
+.search-count {
+  min-height: 1.1em;
+  padding: 4px 2px 0;
+  color: var(--fg-3);
+  font: 0.7692rem var(--font-mono);
+}
+
+.search-count span {
+  color: var(--fg-3);
+}
+
+.set-name-row {
+  display: flex;
+  gap: 4px;
+  padding-top: 5px;
+}
+
+.set-name-input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-void);
+  color: var(--fg-1);
+  font: 0.7692rem var(--font-mono);
+}
+
+.set-name-row button {
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: 0.6923rem var(--font-mono);
+}
+
 .tree-heading {
   padding: 8px 12px 4px;
   color: var(--fg-3);
@@ -1386,6 +1419,44 @@ button {
 
 .tree-row:hover {
   background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.tree-set {
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.tree-set-name,
+.tree-set-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-set-name {
+  flex: 1;
+}
+
+.tree-set-detail {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.tree-set-badge {
+  color: var(--fg-3);
+  font: 0.6923rem var(--font-mono);
+}
+
+.tree-set-remove {
+  padding: 0 3px;
+  border: 0;
+  background: none;
+  color: var(--fg-4);
+  cursor: pointer;
+}
+
+.tree-set-remove:hover {
   color: var(--fg-1);
 }
 
