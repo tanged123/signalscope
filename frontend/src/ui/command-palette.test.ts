@@ -48,6 +48,19 @@ describe("CommandPalette", () => {
     );
   });
 
+  it("caps signal results when the provider ignores the requested limit", () => {
+    const root = document.createElement("div");
+    const palette = new CommandPalette(root, () =>
+      Array.from({ length: 20 }, (_, index) =>
+        entry(`plot signal-${String(index)}`),
+      ),
+    );
+
+    palette.open("signals");
+
+    expect(root.querySelectorAll(".palette-row")).toHaveLength(13);
+  });
+
   it("keeps fuzzy matching for commands", () => {
     const root = document.createElement("div");
     const palette = new CommandPalette(root, () => [

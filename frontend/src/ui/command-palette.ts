@@ -17,6 +17,11 @@ export interface PaletteEntry {
 }
 
 export type PaletteMode = "commands" | "signals" | "settings";
+export type PaletteProvider = (
+  mode: PaletteMode,
+  query: string,
+  limit: number,
+) => PaletteEntry[];
 
 export class CommandPalette {
   private readonly element: HTMLElement;
@@ -29,11 +34,7 @@ export class CommandPalette {
 
   constructor(
     root: HTMLElement,
-    private readonly provider: (
-      mode: PaletteMode,
-      query?: string,
-      limit?: number,
-    ) => PaletteEntry[],
+    private readonly provider: PaletteProvider,
   ) {
     this.element = document.createElement("div");
     this.element.className = "palette-overlay";
@@ -86,7 +87,10 @@ export class CommandPalette {
 
   open(mode: PaletteMode): void {
     this.mode = mode;
-    this.entries = mode === "signals" ? [] : this.provider(mode, "");
+    this.entries =
+      mode === "signals"
+        ? []
+        : this.provider(mode, "", Number.POSITIVE_INFINITY);
     this.element.hidden = false;
     this.input.placeholder =
       mode === "signals"
@@ -111,7 +115,7 @@ export class CommandPalette {
     const query = this.input.value;
     if (this.mode === "signals") {
       this.entries = this.provider(this.mode, query, SIGNAL_LIMIT);
-      this.matches = this.entries;
+      this.matches = this.entries.slice(0, SIGNAL_LIMIT);
       this.selected = 0;
       this.renderList();
       return;
@@ -173,7 +177,9 @@ export class CommandPalette {
   /** Re-pulls entries so hints show updated values, keeping the selection. */
   private refreshEntries(): void {
     const selected = this.selected;
-    if (this.mode !== "signals") this.entries = this.provider(this.mode, "");
+    if (this.mode !== "signals") {
+      this.entries = this.provider(this.mode, "", Number.POSITIVE_INFINITY);
+    }
     this.filter();
     this.selected = Math.min(selected, Math.max(0, this.matches.length - 1));
     this.renderList();
