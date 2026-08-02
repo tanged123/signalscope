@@ -2240,7 +2240,7 @@ export class PanelView {
           event.stopPropagation();
           const rect = path.getBoundingClientRect();
           this.closeBindingPopover();
-          this.openInspector(path.textContent ?? "", rect.left, rect.bottom);
+          this.openInspector(path.textContent, rect.left, rect.bottom);
         });
         const remove = document.createElement("button");
         remove.type = "button";
