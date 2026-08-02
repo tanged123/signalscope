@@ -73,6 +73,18 @@ describe("SelectionModel", () => {
     expect(selection.keys()).toEqual(["other"]);
   });
 
+  it("keeps the new range anchor after stale-selection recovery", () => {
+    const selection = new SelectionModel();
+    selection.toggle("deleted");
+    selection.retain(new Set(["live", "other"]));
+
+    selection.selectRange(["live", "other"], "other");
+    expect(selection.keys()).toEqual(["other"]);
+
+    selection.selectRange(["live", "other"], "live");
+    expect(selection.keys()).toEqual(["live", "other"]);
+  });
+
   it("does not notify when every selected key remains valid", () => {
     const selection = new SelectionModel();
     const listener = vi.fn();

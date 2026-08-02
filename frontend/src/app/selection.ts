@@ -37,6 +37,7 @@ export class SelectionModel {
       this.anchor === null ? -1 : orderedVisible.indexOf(this.anchor);
     const toIndex = orderedVisible.indexOf(toKey);
     if (anchorIndex < 0 || toIndex < 0) {
+      this.anchor = toKey;
       this.replace([toKey]);
       return;
     }
