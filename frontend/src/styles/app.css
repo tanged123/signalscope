@@ -494,6 +494,7 @@ button {
 }
 
 .source-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -502,6 +503,61 @@ button {
 .source-points {
   margin-left: auto;
   color: var(--fg-2);
+}
+
+.source-align,
+.source-alignment-apply {
+  padding: 1px 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: 0.6923rem var(--font-mono);
+}
+
+.source-align:hover,
+.source-align:focus-visible,
+.source-alignment-apply:hover,
+.source-alignment-apply:focus-visible {
+  color: var(--fg-1);
+}
+
+.source-alignment-marker {
+  color: var(--amber-7);
+  font: 0.7692rem var(--font-mono);
+}
+
+.source-alignment-popover {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  top: calc(100% + 3px);
+  display: grid;
+  min-width: 210px;
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  box-shadow: var(--elev-2);
+  font: 0.6923rem var(--font-mono);
+}
+
+.source-alignment-popover label {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  color: var(--fg-3);
+}
+
+.source-alignment-popover select,
+.source-alignment-popover input {
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-void);
+  color: var(--fg-1);
+  font: inherit;
 }
 
 .workspace {

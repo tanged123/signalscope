@@ -3393,6 +3393,7 @@ export function renderSourceRows(
     offset: number,
   ) => void,
 ): void {
+  sourceAlignmentCleanup.get(container)?.();
   const previousScrollTop =
     container.querySelector<HTMLElement>(".source-scroll")?.scrollTop ?? 0;
   const totalPoints = sources.reduce(
@@ -3401,7 +3402,7 @@ export function renderSourceRows(
   );
   if (sources.length <= 8) {
     container.replaceChildren(
-      ...sources.map((source) => sourceRow(source, onAlignment)),
+      ...sources.map((source) => sourceRow(container, source, onAlignment)),
     );
     return;
   }
@@ -3431,7 +3432,7 @@ export function renderSourceRows(
     windowElement.append(
       ...sources
         .slice(slice.start, slice.end)
-        .map((source) => sourceRow(source, onAlignment)),
+        .map((source) => sourceRow(container, source, onAlignment)),
     );
     spacer.append(windowElement);
     scroll.append(spacer);
@@ -3445,7 +3446,10 @@ export function renderSourceRows(
   container.replaceChildren(...children);
 }
 
+const sourceAlignmentCleanup = new WeakMap<HTMLElement, () => void>();
+
 function sourceRow(
+  container: HTMLElement,
   source: SourceSummary,
   onAlignment?: (
     source: SourceSummary,
@@ -3464,51 +3468,150 @@ function sourceRow(
   points.className = "source-points";
   points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
   row.append(name, points);
-  if (onAlignment !== undefined) {
-    const unit = document.createElement("select");
-    unit.className = "source-time-unit";
-    for (const option of [
-      "seconds",
-      "milliseconds",
-      "microseconds",
-      "nanoseconds",
-    ] as const) {
-      const item = document.createElement("option");
-      item.value = option;
-      item.textContent = option;
-      item.selected = option === source.time_domain.unit;
-      unit.append(item);
-    }
-    const scale = document.createElement("input");
-    scale.type = "number";
-    scale.step = "any";
-    scale.value = String(source.scale);
-    scale.ariaLabel = `${source.prefix} time scale`;
-    const offset = document.createElement("input");
-    offset.type = "number";
-    offset.step = "any";
-    offset.value = String(source.offset);
-    offset.ariaLabel = `${source.prefix} time offset`;
-    const apply = (): void => {
-      const nextScale = Number(scale.value);
-      const nextOffset = Number(offset.value);
-      if (!Number.isFinite(nextScale) || !Number.isFinite(nextOffset)) return;
-      onAlignment(
-        source,
-        {
-          ...source.time_domain,
-          unit: unit.value as SourceSummary["time_domain"]["unit"],
-        },
-        nextScale,
-        nextOffset,
-      );
-    };
-    unit.addEventListener("change", apply);
-    scale.addEventListener("change", apply);
-    offset.addEventListener("change", apply);
-    row.append(unit, scale, offset);
+  if (!sourceAlignmentIsIdentity(source)) {
+    const marker = document.createElement("span");
+    marker.className = "source-alignment-marker";
+    marker.textContent = "≠";
+    marker.title = "Source time alignment differs from identity";
+    row.append(marker);
   }
+  const align = document.createElement("button");
+  align.type = "button";
+  align.className = "source-align";
+  align.textContent = "align ▾";
+  align.addEventListener("click", () => {
+    openSourceAlignment(
+      container,
+      row,
+      align,
+      source,
+      onAlignment ?? (() => undefined),
+    );
+  });
+  row.append(align);
   return row;
+}
+
+function sourceAlignmentIsIdentity(source: SourceSummary): boolean {
+  return (
+    source.time_domain.unit === "seconds" &&
+    source.time_domain.origin === "relative" &&
+    source.time_domain.alignment_origin === 0 &&
+    source.scale === 1 &&
+    source.offset === 0
+  );
+}
+
+function openSourceAlignment(
+  container: HTMLElement,
+  row: HTMLElement,
+  anchor: HTMLButtonElement,
+  source: SourceSummary,
+  onAlignment: (
+    source: SourceSummary,
+    domain: SourceSummary["time_domain"],
+    scale: number,
+    offset: number,
+  ) => void,
+): void {
+  sourceAlignmentCleanup.get(container)?.();
+  const popover = document.createElement("div");
+  popover.className = "source-alignment-popover";
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-label", `Align ${source.prefix}`);
+  const unit = document.createElement("select");
+  unit.className = "source-time-unit";
+  unit.ariaLabel = `${source.prefix} time unit`;
+  for (const option of [
+    "seconds",
+    "milliseconds",
+    "microseconds",
+    "nanoseconds",
+  ] as const) {
+    const item = document.createElement("option");
+    item.value = option;
+    item.textContent = option;
+    item.selected = option === source.time_domain.unit;
+    unit.append(item);
+  }
+  const scale = document.createElement("input");
+  scale.className = "source-time-scale";
+  scale.type = "number";
+  scale.step = "any";
+  scale.value = String(source.scale);
+  scale.ariaLabel = `${source.prefix} time scale`;
+  const offset = document.createElement("input");
+  offset.className = "source-time-offset";
+  offset.type = "number";
+  offset.step = "any";
+  offset.value = String(source.offset);
+  offset.ariaLabel = `${source.prefix} time offset`;
+  const apply = document.createElement("button");
+  apply.type = "button";
+  apply.className = "source-alignment-apply";
+  apply.textContent = "apply";
+  const addField = (label: string, control: HTMLElement): void => {
+    const field = document.createElement("label");
+    field.textContent = label;
+    field.append(control);
+    popover.append(field);
+  };
+  addField("unit", unit);
+  addField("scale", scale);
+  addField("offset", offset);
+  popover.append(apply);
+  row.append(popover);
+  const close = (): void => {
+    document.removeEventListener("pointerdown", onPointer, true);
+    document.removeEventListener("keydown", onKey);
+    popover.remove();
+    if (sourceAlignmentCleanup.get(container) === close) {
+      sourceAlignmentCleanup.delete(container);
+    }
+  };
+  const onPointer = (event: PointerEvent): void => {
+    const target = event.target;
+    if (
+      target instanceof Node &&
+      (popover.contains(target) || anchor.contains(target))
+    )
+      return;
+    close();
+  };
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+    }
+  };
+  const commit = (): void => {
+    const nextScale = Number(scale.value);
+    const nextOffset = Number(offset.value);
+    if (!Number.isFinite(nextScale) || !Number.isFinite(nextOffset)) return;
+    onAlignment(
+      source,
+      {
+        ...source.time_domain,
+        unit: unit.value as SourceSummary["time_domain"]["unit"],
+      },
+      nextScale,
+      nextOffset,
+    );
+    close();
+  };
+  apply.addEventListener("click", commit);
+  for (const control of [unit, scale, offset]) {
+    control.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commit();
+      }
+    });
+  }
+  sourceAlignmentCleanup.set(container, close);
+  document.addEventListener("pointerdown", onPointer, true);
+  document.addEventListener("keydown", onKey);
+  unit.focus();
 }
 
 /** Explains why a listed command cannot run, or nothing when it can. */
