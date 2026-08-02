@@ -756,5 +756,5 @@ export function gutterWidth(
   charWidth: number,
 ): number {
   const longest = labels.reduce((max, label) => Math.max(max, label.length), 0);
-  return Math.max(52, Math.ceil(longest * charWidth) + 7 + 4 + 12);
+  return Math.max(48, Math.ceil(longest * charWidth) + 24);
 }

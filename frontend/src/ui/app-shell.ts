@@ -104,6 +104,14 @@ export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
   return count <= 4 ? "focus" : "ghost";
 }
 
+export function statusAggregate(
+  sourceCount: number,
+  signalCount: number,
+  pointCount: number,
+): string {
+  return `${sourceCount.toLocaleString()} sources · ${signalCount.toLocaleString()} signals · ${pointCount.toLocaleString()} pts`;
+}
+
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
@@ -3086,10 +3094,14 @@ export class AppShell {
       (total, signal) => total + Number(signal.point_count),
       0,
     );
-    required(this.root, ".signal-count").textContent =
-      `${this.signals.length.toLocaleString()} signals`;
-    required(this.root, ".point-count").textContent =
-      `${pointCount.toLocaleString()} pts`;
+    const aggregate = this.root.querySelector<HTMLElement>(".status-aggregate");
+    if (aggregate !== null) {
+      aggregate.textContent = statusAggregate(
+        this.workspace.sources().length,
+        this.signals.length,
+        pointCount,
+      );
+    }
     void this.updateSources();
   }
 
@@ -3117,7 +3129,20 @@ export class AppShell {
     }
     const sessionName =
       this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
-    required(this.root, ".source-name").textContent = sessionName;
+    this.root
+      .querySelector<HTMLElement>(".source-name")
+      ?.replaceChildren(document.createTextNode(sessionName));
+    const pointCount = this.signals.reduce(
+      (total, signal) => total + Number(signal.point_count),
+      0,
+    );
+    this.root
+      .querySelector<HTMLElement>(".status-aggregate")
+      ?.replaceChildren(
+        document.createTextNode(
+          statusAggregate(sources.length, this.signals.length, pointCount),
+        ),
+      );
     required(this.root, ".session-identity").textContent =
       `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
     const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
@@ -3773,10 +3798,8 @@ export function shellMarkup(): string {
       </span>
       <span class="status-separator"></span>
       <span class="source-truth">
-        <span class="source-name"></span>
-        <span class="signal-count">0 signals</span>
-        <span class="point-count">0 pts</span>
-        <span class="render-stat">render <span class="render-ms">— ms</span></span>
+        <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
+        <span class="render-stat"> · render <span class="render-ms">— ms</span></span>
       </span>
       <span class="status-spacer"></span>
       <span class="gesture-hint"></span>

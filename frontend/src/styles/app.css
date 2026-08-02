@@ -166,7 +166,8 @@ button {
 }
 
 .workspace-tab.active {
-  background: var(--surface-4);
+  background: var(--surface-0);
+  box-shadow: inset 0 1px 0 var(--border-strong);
   color: var(--fg-1);
 }
 

@@ -193,6 +193,9 @@ describe("PanelView facets", () => {
     expect(
       view.element.querySelector<HTMLElement>(".panel-focus-chip")?.hidden,
     ).toBe(false);
+    expect(
+      view.element.querySelector<HTMLElement>(".panel-annotations")?.hidden,
+    ).toBe(true);
   });
 
   it("renders bounded facet cells and fans the linked cursor line out", () => {

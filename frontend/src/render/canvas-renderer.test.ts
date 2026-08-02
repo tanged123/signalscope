@@ -272,11 +272,18 @@ describe("formatTicks", () => {
 
 describe("gutterWidth", () => {
   it("keeps the default gutter for short labels", () => {
-    expect(gutterWidth(formatTicks([0, 100, 300]), 6)).toBe(52);
+    expect(gutterWidth(formatTicks([0, 100, 300]), 6)).toBe(48);
   });
 
   it("grows so long labels clear the rotated axis title", () => {
     expect(gutterWidth(formatTicks([0, -120_000]), 6)).toBeGreaterThan(52);
+  });
+
+  it("tightens four-character labels while retaining five-character clearance", () => {
+    const four = gutterWidth(["1234"], 6);
+    const five = gutterWidth(["12345"], 6);
+    expect(five).toBeGreaterThan(four);
+    expect(five).toBeGreaterThanOrEqual(5 * 6 + 24);
   });
 });
 

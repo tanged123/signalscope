@@ -3,7 +3,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SourceSummary } from "../generated/protocol";
-import { renderDockFooter, renderSourceRows, shellMarkup } from "./app-shell";
+import {
+  renderDockFooter,
+  renderSourceRows,
+  shellMarkup,
+  statusAggregate,
+} from "./app-shell";
 
 function source(index: number): SourceSummary {
   return {
@@ -23,6 +28,12 @@ function source(index: number): SourceSummary {
 }
 
 describe("renderSourceRows", () => {
+  it("formats the status identity as one aggregate readout", () => {
+    expect(statusAggregate(2, 17, 2_000)).toBe(
+      "2 sources · 17 signals · 2,000 pts",
+    );
+  });
+
   it("keeps small source lists expanded without a toggle", () => {
     const element = document.createElement("div");
     renderSourceRows(

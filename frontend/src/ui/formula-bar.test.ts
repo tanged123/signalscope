@@ -6,6 +6,12 @@ import { SIGNAL_DRAG_TYPE } from "./panel";
 import { FormulaBar, formulaBarMarkup } from "./formula-bar";
 
 describe("FormulaBar signal references", () => {
+  it("advertises the idle derived-signal drop affordance", () => {
+    expect(formulaBarMarkup()).toContain(
+      'placeholder="derived/name = expression · drop signals here"',
+    );
+  });
+
   it("inserts a quoted signal path when dragged", () => {
     const form = document.createElement("form");
     form.innerHTML = formulaBarMarkup().replace(/^<form[^>]*>|<\/form>$/g, "");
