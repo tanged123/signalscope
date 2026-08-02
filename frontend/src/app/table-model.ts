@@ -18,6 +18,7 @@ export interface TableRow {
   unit: string | null;
   pts: number;
   value: number | null;
+  unitConflict: boolean;
 }
 
 export function buildTableRows(
@@ -53,6 +54,7 @@ function seriesRow(catalog: Catalog, series: CatalogSeries): TableRow {
     unit: series.summary.unit,
     pts: Number(series.summary.point_count),
     value: series.summary.last_value,
+    unitConflict: false,
   };
 }
 
@@ -68,7 +70,11 @@ function channelRows(series: readonly CatalogSeries[]): TableRow[] {
       source_key: entry.sourceKey,
       channel: entry.channel,
     }));
-    const units = new Set(members.map((entry) => entry.summary.unit));
+    const units = new Set(
+      members
+        .map((entry) => entry.summary.unit)
+        .filter((unit): unit is string => unit !== null),
+    );
     return {
       key: `channel:${channel}`,
       refs,
@@ -80,6 +86,7 @@ function channelRows(series: readonly CatalogSeries[]): TableRow[] {
         0,
       ),
       value: null,
+      unitConflict: units.size > 1,
     };
   });
 }

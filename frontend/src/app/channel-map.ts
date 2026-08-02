@@ -71,7 +71,7 @@ export function suggestMerges(
   >();
 
   for (const series of catalog.allSeries()) {
-    const channel = series.channel;
+    const channel = series.sourceChannel;
     if (isCovered(map, series.sourceKey, channel)) continue;
     const key = normalizeChannelName(channel);
     const group = groups.get(key) ?? [];

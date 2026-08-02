@@ -429,6 +429,11 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.mode = mode;
   }
 
+  setSplitBy(id: string, splitBy: PanelState["split_by"]): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) panel.split_by = splitBy;
+  }
+
   /** Enters XY mode, adopting the first plotted series as the x axis. */
   promoteSeriesToX(id: string): void {
     const panel = this.panel(id);

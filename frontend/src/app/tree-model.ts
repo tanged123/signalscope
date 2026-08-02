@@ -16,6 +16,8 @@ export interface TreeChannel {
   sourceKeys: readonly string[];
   expanded: boolean;
   members: readonly string[];
+  names: readonly string[];
+  unitConflict: boolean;
 }
 
 export type TreeRow = TreeLeaf | TreeChannel;
@@ -105,6 +107,8 @@ export function buildTreeRows(
       sourceKeys: channel.sourceKeys,
       expanded,
       members: matching.map((series) => series.path),
+      names: channel.names,
+      unitConflict: channel.unitConflict,
     });
     if (expanded) {
       for (const series of matching) {

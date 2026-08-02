@@ -3,6 +3,7 @@ import type { Catalog } from "../app/catalog";
 import {
   appliedOverrides,
   dimensionCounts,
+  facetCells,
   overrideFor,
   type ResolvedSeries,
 } from "../app/resolution";
@@ -109,6 +110,7 @@ export interface PanelCallbacks {
   onSplitDown(id: string): void;
   onMaximize(id: string): void;
   onSelectMode(id: string, mode: PanelMode): void;
+  onSetSplitBy?(id: string, splitBy: PanelState["split_by"]): void;
   onDropSignals(id: string, paths: string[]): void;
   onDropSet(id: string, setId: string): void;
   onFocusToggle(id: string, entry: FocusEntry): void;
@@ -520,6 +522,7 @@ export class PanelView {
   private readonly canvas: HTMLCanvasElement;
   private readonly overlay: HTMLCanvasElement;
   private readonly overlayRenderer: OverlayRenderer;
+  private readonly facetGrid: HTMLElement;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
   private lastState: RenderPanelState | null = null;
@@ -553,7 +556,9 @@ export class PanelView {
   private rosterCleanup: (() => void) | null = null;
   private bindingCleanup: (() => void) | null = null;
   private rulesCleanup: (() => void) | null = null;
+  private splitCleanup: (() => void) | null = null;
   private hasColorbar = false;
+  private facetYLinked = true;
 
   constructor(
     private readonly id: string,
@@ -566,6 +571,7 @@ export class PanelView {
     this.element.innerHTML = panelMarkup();
     this.canvas = required<HTMLCanvasElement>(this.element, ".plot-canvas");
     this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
+    this.facetGrid = required(this.element, ".facet-grid");
     this.renderer = new CanvasRenderer(this.canvas);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
@@ -625,6 +631,7 @@ export class PanelView {
         this.closeRoster();
         this.closeBindingPopover();
         this.closeRulesPopover();
+        this.closeSplitPopover();
       }
     });
     required(this.element, ".panel-close").addEventListener("click", () => {
@@ -655,6 +662,19 @@ export class PanelView {
       "click",
       () => {
         this.callbacks.onToggleAxisStyle(this.id);
+      },
+    );
+    required<HTMLButtonElement>(
+      this.element,
+      ".panel-split-by",
+    ).addEventListener("click", (event) => {
+      this.openSplitPopover(event.currentTarget as HTMLElement);
+    });
+    required<HTMLButtonElement>(this.element, ".facet-y-link").addEventListener(
+      "click",
+      () => {
+        this.facetYLinked = !this.facetYLinked;
+        this.renderDataFromLastInput();
       },
     );
     required(this.element, ".panel-ghost-toggle").addEventListener(
@@ -870,8 +890,25 @@ export class PanelView {
     this.updateBindings(rendered);
     this.updateFocusHeader(rendered);
     this.updateGhostToggle(rendered);
+    const split = required<HTMLButtonElement>(this.element, ".panel-split-by");
+    split.textContent =
+      rendered.split_by === "none" ? "split ▸" : `split ← ${rendered.split_by}`;
+    split.disabled = rendered.mode !== "time";
+    split.title =
+      rendered.mode === "time"
+        ? "Split time panel by source or channel"
+        : "Split applies to time panels";
+    const yLink = required<HTMLButtonElement>(this.element, ".facet-y-link");
+    yLink.hidden = rendered.mode !== "time" || rendered.split_by === "none";
+    yLink.textContent = this.facetYLinked ? "⛓y" : "y";
+    yLink.title = this.facetYLinked
+      ? "Unlink facet Y ranges"
+      : "Link facet Y ranges";
     this.updateLegend(rendered);
-    const annotations = this.resolvedAnnotations(rendered);
+    const annotations =
+      rendered.split_by === "none"
+        ? this.resolvedAnnotations(rendered)
+        : { resolved: [], delta: null };
     this.renderAnnotationList(rendered, annotations);
     this.renderStats();
     this.drawOverlay(annotations);
@@ -915,7 +952,10 @@ export class PanelView {
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
     this.renderStats();
-    const annotations = this.resolvedAnnotations(rendered);
+    const annotations =
+      rendered.split_by === "none"
+        ? this.resolvedAnnotations(rendered)
+        : { resolved: [], delta: null };
     this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (missing.length > 0) {
@@ -930,6 +970,10 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
+    if (state.mode === "time" && state.split_by !== "none") {
+      return this.renderFacetTime(state, tiles, window);
+    }
+    this.clearFacetGrid();
     if (state.mode === "xy") return this.renderXy(state, samples, window);
     if (state.mode === "fft") return this.renderSpectra(state, samples, window);
     if (state.mode === "histogram") {
@@ -985,6 +1029,148 @@ export class PanelView {
         : {}),
     };
     return this.renderer.render(response, ranges.x, options);
+  }
+
+  private renderFacetTime(
+    state: RenderPanelState,
+    tiles: TileResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    this.canvas.hidden = true;
+    this.overlay.hidden = true;
+    this.facetGrid.hidden = false;
+    this.facetGrid.replaceChildren();
+    const input = this.lastInputState;
+    if (input === null) return 0;
+    const layout = facetCells(
+      this.callbacks.catalog(),
+      input,
+      this.callbacks.namedSets(),
+    );
+    const tileByPath = new Map(
+      (tiles?.series ?? []).map((series) => [series.signal_path, series]),
+    );
+    const prepared = layout.cells.map((cell) => {
+      const shown = cell.series
+        .filter((series) => series.visible)
+        .map((series) => ({ series, tile: tileByPath.get(series.path) }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            series: RenderSeries;
+            tile: NonNullable<typeof entry.tile>;
+          } => entry.tile !== undefined,
+        );
+      const plot = prepareTimePlot({
+        series: shown.map(({ series, tile }) => ({
+          path: tile.signal_path,
+          colorIndex: colorIndexForHue(series.hue ?? 1),
+          bins: tile.bins,
+        })),
+        window,
+      });
+      return { cell, shown, plot };
+    });
+    this.preparedPlot = prepared[0]?.plot ?? null;
+    const yRanges = prepared.flatMap(({ plot }) => {
+      const range = plot.autoRanges().y;
+      return range === null ? [] : [range];
+    });
+    const linkedY =
+      this.facetYLinked && state.y_range !== null
+        ? state.y_range
+        : this.facetYLinked && yRanges.length > 0
+          ? ([
+              Math.min(...yRanges.map((range) => range[0])),
+              Math.max(...yRanges.map((range) => range[1])),
+            ] as const)
+          : null;
+    let elapsed = 0;
+    for (const { cell, shown, plot } of prepared) {
+      const cellElement = document.createElement("div");
+      cellElement.className = "facet-cell";
+      cellElement.dataset.facetKey = cell.key;
+      const label = document.createElement("div");
+      label.className = "facet-cell-label";
+      label.textContent = cell.label;
+      const canvas = document.createElement("canvas");
+      canvas.className = "facet-cell-canvas";
+      canvas.setAttribute("aria-label", `${cell.label} time-series plot`);
+      const renderer = new CanvasRenderer(canvas);
+      const automatic = plot.autoRanges();
+      const y = linkedY ?? automatic.y ?? [0, 1];
+      const x = automatic.x ?? [window.t0, window.t1];
+      if (shown.length > 0 && automatic.x !== null && automatic.y !== null) {
+        elapsed += renderer.render(
+          {
+            request_id: tiles?.request_id ?? "facet",
+            series: shown.map(({ tile }) => tile),
+          },
+          { min: x[0], max: x[1] },
+          {
+            xLabel: state.x_label ?? "time (s)",
+            yLabel: state.y_label ?? yLabel(shown.map(({ tile }) => tile.unit)),
+            yRange: y,
+            axisStyle: state.axis_style,
+            styles: shown.map(({ series }) => ({
+              hue: series.hue,
+              dash: series.dash,
+              width: series.width,
+              alpha: series.opacity,
+            })),
+          },
+        );
+      }
+      cellElement.append(label, canvas);
+      this.facetGrid.appendChild(cellElement);
+    }
+    if (layout.overflow > 0) {
+      const overflow = document.createElement("div");
+      overflow.className = "facet-cell facet-overflow";
+      overflow.textContent = `+${String(layout.overflow)} more — tighten the selector`;
+      this.facetGrid.appendChild(overflow);
+    }
+    this.renderFacetCursor(window);
+    return elapsed;
+  }
+
+  private clearFacetGrid(): void {
+    this.facetGrid.hidden = true;
+    this.facetGrid.replaceChildren();
+    this.canvas.hidden = false;
+    this.overlay.hidden = false;
+  }
+
+  private renderFacetCursor(window: { t0: number; t1: number }): void {
+    for (const cell of this.facetGrid.querySelectorAll<HTMLElement>(
+      ".facet-cell",
+    )) {
+      cell.querySelector(".facet-cursor")?.remove();
+      if (
+        this.cursorT === null ||
+        this.cursorMode === "none" ||
+        window.t1 <= window.t0 ||
+        cell.classList.contains("facet-overflow")
+      )
+        continue;
+      const cursor = document.createElement("span");
+      cursor.className = "facet-cursor";
+      cursor.style.left = `${String(
+        ((this.cursorT - window.t0) / (window.t1 - window.t0)) * 100,
+      )}%`;
+      cell.appendChild(cursor);
+    }
+  }
+
+  private renderDataFromLastInput(): void {
+    if (this.lastInputState === null || this.lastWindow === null) return;
+    this.renderData(
+      this.lastInputState,
+      this.lastTiles,
+      this.lastSamples,
+      this.lastWindow,
+    );
   }
 
   private renderXy(
@@ -1351,16 +1537,25 @@ export class PanelView {
     if (this.preparedPlot?.interaction.cursorLink !== "time") return;
     this.cursorT = cursorT;
     this.drawOverlay();
+    if (this.lastState?.split_by !== "none" && this.lastWindow !== null) {
+      this.renderFacetCursor(this.lastWindow);
+    }
   }
 
   setLocalCursor(cursorValue: number | null): void {
     this.cursorT = cursorValue;
     this.drawOverlay();
+    if (this.lastState?.split_by !== "none" && this.lastWindow !== null) {
+      this.renderFacetCursor(this.lastWindow);
+    }
   }
 
   clearCursor(): void {
     this.cursorT = null;
     this.drawOverlay();
+    if (this.lastState?.split_by !== "none" && this.lastWindow !== null) {
+      this.renderFacetCursor(this.lastWindow);
+    }
   }
 
   setCursorMode(cursorMode: CursorMode): void {
@@ -1934,6 +2129,20 @@ export class PanelView {
       this.legendCountToken("channel", counts.channels, state),
       this.colorRuleToken(state),
     );
+    if (state.mode === "time" && state.split_by !== "none") {
+      const layout =
+        this.lastInputState === null
+          ? null
+          : facetCells(
+              this.callbacks.catalog(),
+              this.lastInputState,
+              this.callbacks.namedSets(),
+            );
+      const token = document.createElement("span");
+      token.className = "legend-split-token";
+      token.textContent = `split ← ${state.split_by} · ${String(layout?.cells.length ?? 0)} cells`;
+      legend.appendChild(token);
+    }
   }
 
   private colorRuleToken(state: RenderPanelState): HTMLButtonElement {
@@ -2407,6 +2616,65 @@ export class PanelView {
     this.rulesCleanup = null;
   }
 
+  private openSplitPopover(anchor: HTMLElement): void {
+    const state = this.lastState;
+    if (state === null || state.mode !== "time") return;
+    this.closeSplitPopover();
+    const popover = document.createElement("div");
+    popover.className = "split-by-popover";
+    popover.setAttribute("role", "menu");
+    for (const dimension of ["none", "source", "channel"] as const) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "menuitem");
+      button.textContent = dimension;
+      button.classList.toggle("active", state.split_by === dimension);
+      button.addEventListener("click", () => {
+        this.callbacks.onSetSplitBy?.(this.id, dimension);
+        this.closeSplitPopover();
+      });
+      popover.appendChild(button);
+    }
+    this.element.appendChild(popover);
+    const panelRect = this.element.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    popover.style.left = `${String(
+      clamp(
+        anchorRect.left - panelRect.left,
+        4,
+        Math.max(4, panelRect.width - 160),
+      ),
+    )}px`;
+    popover.style.top = `${String(
+      clamp(
+        anchorRect.bottom - panelRect.top + 4,
+        4,
+        Math.max(4, panelRect.height - 120),
+      ),
+    )}px`;
+    const onPointer = (event: PointerEvent): void => {
+      if (!popover.contains(event.target as Node) && event.target !== anchor) {
+        this.closeSplitPopover();
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") this.closeSplitPopover();
+    };
+    document.addEventListener("pointerdown", onPointer, { capture: true });
+    document.addEventListener("keydown", onKey);
+    this.splitCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer, { capture: true });
+      document.removeEventListener("keydown", onKey);
+      popover.remove();
+    };
+    popover.querySelector<HTMLButtonElement>(".active")?.focus();
+  }
+
+  private closeSplitPopover(): void {
+    this.splitCleanup?.();
+    this.splitCleanup = null;
+  }
+
   openInspector(path: string, clientX: number, clientY: number): void {
     this.closeInspector();
     const series = this.lastState?.series.find((entry) => entry.path === path);
@@ -2418,7 +2686,12 @@ export class PanelView {
     popover.setAttribute("aria-label", `${path} series inspector`);
     const pathRow = document.createElement("div");
     pathRow.className = "inspector-path";
-    pathRow.textContent = path;
+    const catalogSeries = this.callbacks.catalog().get(series.ref);
+    pathRow.textContent =
+      catalogSeries !== undefined &&
+      catalogSeries.sourceChannel !== catalogSeries.channel
+        ? `${path} (${catalogSeries.sourceName}: ${catalogSeries.sourceChannel})`
+        : path;
     const slots = document.createElement("div");
     slots.className = "inspector-slots";
     for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
@@ -2718,6 +2991,8 @@ function panelMarkup(): string {
       <span class="panel-legend"></span>
       <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
+      <button class="panel-action panel-split-by" title="Split time panel by source or channel">split ▸</button>
+      <button class="panel-action facet-y-link" hidden type="button">⛓y</button>
       <span class="panel-mode-note" hidden></span>
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
@@ -2733,6 +3008,7 @@ function panelMarkup(): string {
     <div class="plot-wrap">
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
+      <div class="facet-grid" hidden></div>
       <div class="panel-empty" hidden></div>
       <div class="xy-drop-strip" hidden>
         ⇄ <span>drop here — use as X axis (switches panel to XY)</span>

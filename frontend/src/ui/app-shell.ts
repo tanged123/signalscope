@@ -33,6 +33,7 @@ import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
 import { Catalog } from "../app/catalog";
+import { suggestMerges } from "../app/channel-map";
 import { resolvePanel } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
@@ -60,6 +61,7 @@ import type {
   CursorMode,
   PanelMode,
   PanelState,
+  ChannelAlias,
   SeriesRef,
   Session,
 } from "../generated/session";
@@ -82,6 +84,10 @@ import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalTreeView } from "./signal-tree";
 import { SignalTableView } from "./signal-table";
 import { BulkBar } from "./bulk-bar";
+import {
+  ChannelMapView,
+  type ChannelMapViewCallbacks,
+} from "./channel-map-view";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
@@ -112,8 +118,11 @@ export class AppShell {
   private tree: SignalTreeView | null = null;
   private table: SignalTableView | null = null;
   private bulkBar: BulkBar | null = null;
+  private channelMapView: ChannelMapView | null = null;
   private dockMode: "tree" | "table" = "tree";
   private pendingSetRefs: SeriesRef[] | null = null;
+  private pendingMergeAliases: ChannelAlias[] | null = null;
+  private channelMenuCleanup: (() => void) | null = null;
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
@@ -196,6 +205,12 @@ export class AppShell {
         },
         onSelectMode: (id, mode) => {
           this.transitionPanelMode(id, mode);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        onSetSplitBy: (id, splitBy) => {
+          this.workspace.setSplitBy(id, splitBy);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
@@ -435,13 +450,21 @@ export class AppShell {
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
         },
+        onMergeChannels: (aliases, clientX, clientY) => {
+          this.openChannelMergeMenu(aliases, clientX, clientY);
+        },
       },
       this.selection,
     );
     this.table = new SignalTableView(
       required(this.root, ".table-scroll"),
       this.selection,
-      { onSelectionChange: () => {} },
+      {
+        onSelectionChange: () => {},
+        onMergeChannels: (aliases, clientX, clientY) => {
+          this.openChannelMergeMenu(aliases, clientX, clientY);
+        },
+      },
     );
     this.bulkBar = new BulkBar(
       required(this.root, ".bulk-bar"),
@@ -452,6 +475,7 @@ export class AppShell {
         onHide: () => this.hideSelected(),
         onSaveSet: () => this.openSetNameRow(this.selectedRefs()),
         onDerive: () => this.deriveSelected(),
+        onMerge: () => this.mergeSelected(),
       },
     );
     this.selection.onChange(() => this.updateBulkBar());
@@ -464,6 +488,47 @@ export class AppShell {
         this.setFormulaOpen(false);
       },
     });
+    this.channelMapView = new ChannelMapView(this.root, {
+      onClose: () => {},
+      onUnmerge: (canonical) => {
+        this.workspace.unmergeChannel(canonical);
+        this.selection.clear();
+        void this.reloadSignals().then(() => {
+          this.commitHistory();
+          this.afterLayoutChange();
+          this.openChannelMap();
+        });
+      },
+      onMerge: (suggestion) => {
+        this.workspace.mergeChannels(
+          suggestion.canonical,
+          suggestion.names.map((entry) => ({
+            source_key: entry.sourceKey,
+            name: entry.channel,
+          })),
+        );
+        this.selection.clear();
+        void this.reloadSignals().then(() => {
+          this.commitHistory();
+          this.afterLayoutChange();
+          this.openChannelMap();
+        });
+      },
+      onKeep: (suggestion) => {
+        this.workspace.keepSeparate(
+          suggestion.names.map((entry) => ({
+            source_key: entry.sourceKey,
+            name: entry.channel,
+          })),
+        );
+        this.selection.clear();
+        void this.reloadSignals().then(() => {
+          this.commitHistory();
+          this.afterLayoutChange();
+          this.openChannelMap();
+        });
+      },
+    } satisfies ChannelMapViewCallbacks);
     this.registerCommands();
     this.commands.onRun = (id) => {
       this.usage.record(id);
@@ -803,6 +868,13 @@ export class AppShell {
       run: () => this.toggleDockView(),
     });
     this.commands.register({
+      id: "open-channel-map",
+      title: "Open channel map",
+      section: "view",
+      group: "docks",
+      run: () => this.openChannelMap(),
+    });
+    this.commands.register({
       id: "toggle-linked",
       title: "Toggle linked time",
       keys: "l",
@@ -1109,6 +1181,14 @@ export class AppShell {
     ];
   }
 
+  private openChannelMap(): void {
+    this.channelMapView?.open(
+      this.catalog,
+      this.workspace.channelMap(),
+      suggestMerges(this.catalog, this.workspace.channelMap()).slice(0, 3),
+    );
+  }
+
   private paletteEntries(mode: PaletteMode, query = ""): PaletteEntry[] {
     if (mode === "settings") return this.settingsEntries();
     // Planned and momentarily unavailable commands both stay listed so the
@@ -1235,6 +1315,9 @@ export class AppShell {
     required(this.root, ".tree-toggle").addEventListener("click", () => {
       this.commands.run("toggle-signal-tree");
     });
+    required(this.root, ".channel-map-button").addEventListener("click", () => {
+      this.openChannelMap();
+    });
     this.bindSignalTreeResize();
     required(this.root, ".linked-toggle").addEventListener("click", () => {
       this.commands.run("toggle-linked");
@@ -1271,8 +1354,20 @@ export class AppShell {
     const commitSet = (): void => {
       const selector = search.value.trim();
       const name = setName.value.trim();
-      if (name === "" || (this.pendingSetRefs === null && selector === ""))
+      if (name === "") return;
+      if (this.pendingMergeAliases !== null) {
+        const aliases = this.pendingMergeAliases;
+        this.workspace.mergeChannels(name, aliases);
+        this.hideSetNameRow();
+        this.selection.clear();
+        void this.reloadSignals().then(() => {
+          this.commitHistory();
+          this.afterLayoutChange();
+        });
+        search.focus();
         return;
+      }
+      if (this.pendingSetRefs === null && selector === "") return;
       const refs = this.pendingSetRefs;
       this.workspace.addNamedSet({
         id: this.workspace.nextSetId(),
@@ -1423,6 +1518,7 @@ export class AppShell {
   private openSetNameRow(refs: readonly SeriesRef[] | null = null): void {
     const row = required<HTMLElement>(this.root, ".set-name-row");
     const input = required<HTMLInputElement>(this.root, ".set-name-input");
+    this.pendingMergeAliases = null;
     this.pendingSetRefs = refs === null ? null : [...refs];
     row.hidden = false;
     input.value = "";
@@ -1431,6 +1527,7 @@ export class AppShell {
 
   private hideSetNameRow(): void {
     this.pendingSetRefs = null;
+    this.pendingMergeAliases = null;
     required<HTMLElement>(this.root, ".set-name-row").hidden = true;
   }
 
@@ -1518,6 +1615,161 @@ export class AppShell {
         ? "Derive from the selected signal(s)"
         : "Derive requires one channel",
     );
+    if (this.bulkBar !== null && "setMergeEnabled" in this.bulkBar) {
+      this.bulkBar.setMergeEnabled(
+        refs.length >= 2 && channels.size >= 2,
+        "Merge selected channels",
+      );
+    }
+  }
+
+  private mergeSelected(): void {
+    const aliases = this.aliasesForRefs(this.selectedRefs());
+    if (aliases.length < 2) return;
+    this.openMergeNameRow(aliases);
+  }
+
+  private openMergeNameRow(aliases: readonly ChannelAlias[]): void {
+    const row = required<HTMLElement>(this.root, ".set-name-row");
+    const input = required<HTMLInputElement>(this.root, ".set-name-input");
+    this.pendingSetRefs = null;
+    this.pendingMergeAliases = aliases.map((alias) => ({ ...alias }));
+    row.hidden = false;
+    input.value = mostCommonAliasName(aliases);
+    input.focus();
+    input.select();
+  }
+
+  private aliasesForRefs(refs: readonly SeriesRef[]): ChannelAlias[] {
+    const aliases: ChannelAlias[] = [];
+    const seen = new Set<string>();
+    for (const ref of refs) {
+      const series = this.catalog.get(ref);
+      if (series === undefined) continue;
+      const key = `${series.sourceKey}\u0000${series.sourceChannel}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      aliases.push({
+        source_key: series.sourceKey,
+        name: series.sourceChannel,
+      });
+    }
+    return aliases;
+  }
+
+  private openChannelMergeMenu(
+    aliases: readonly ChannelAlias[],
+    clientX: number,
+    clientY: number,
+  ): void {
+    if (aliases.length < 2) return;
+    this.closeChannelMergeMenu();
+    const menu = document.createElement("div");
+    menu.className = "channel-merge-menu";
+    menu.setAttribute("role", "menu");
+    menu.style.left = `${String(clientX)}px`;
+    menu.style.top = `${String(clientY)}px`;
+    const merge = document.createElement("button");
+    merge.type = "button";
+    merge.textContent = "Merge as channel…";
+    merge.setAttribute("role", "menuitem");
+    merge.addEventListener("click", () => {
+      this.closeChannelMergeMenu();
+      this.openMergeNameRow(aliases);
+    });
+    const separate = document.createElement("button");
+    separate.type = "button";
+    separate.textContent = "Keep separate";
+    separate.setAttribute("role", "menuitem");
+    separate.addEventListener("click", () => {
+      this.closeChannelMergeMenu();
+      this.workspace.keepSeparate(aliases);
+      this.selection.clear();
+      void this.reloadSignals().then(() => {
+        this.commitHistory();
+        this.afterLayoutChange();
+      });
+    });
+    menu.append(merge, separate);
+    this.root.appendChild(menu);
+    const onPointer = (event: PointerEvent): void => {
+      if (!menu.contains(event.target as Node)) this.closeChannelMergeMenu();
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") this.closeChannelMergeMenu();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    this.channelMenuCleanup = () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      menu.remove();
+    };
+    merge.focus();
+  }
+
+  private closeChannelMergeMenu(): void {
+    this.channelMenuCleanup?.();
+    this.channelMenuCleanup = null;
+  }
+
+  private renderChannelSuggestions(): void {
+    const host = this.root.querySelector<HTMLElement>(".channel-suggestions");
+    if (host === null) return;
+    const suggestions = suggestMerges(
+      this.catalog,
+      this.workspace.channelMap(),
+    ).slice(0, 3);
+    host.replaceChildren();
+    host.hidden = suggestions.length === 0;
+    if (suggestions.length === 0) return;
+    const heading = document.createElement("div");
+    heading.className = "channel-suggestions-heading";
+    heading.textContent = "Possible channel merges";
+    host.appendChild(heading);
+    for (const suggestion of suggestions) {
+      const row = document.createElement("div");
+      row.className = "channel-suggestion";
+      const label = document.createElement("span");
+      label.textContent = `${suggestion.names
+        .map((entry) => entry.channel)
+        .join(" · ")} → ${suggestion.canonical}`;
+      const merge = document.createElement("button");
+      merge.type = "button";
+      merge.textContent = "merge";
+      merge.addEventListener("click", () => {
+        this.workspace.mergeChannels(
+          suggestion.canonical,
+          suggestion.names.map((entry) => ({
+            source_key: entry.sourceKey,
+            name: entry.channel,
+          })),
+        );
+        this.selection.clear();
+        void this.reloadSignals().then(() => {
+          this.commitHistory();
+          this.afterLayoutChange();
+        });
+      });
+      const separate = document.createElement("button");
+      separate.type = "button";
+      separate.textContent = "keep separate";
+      separate.addEventListener("click", () => {
+        this.workspace.keepSeparate(
+          suggestion.names.map((entry) => ({
+            source_key: entry.sourceKey,
+            name: entry.channel,
+          })),
+        );
+        this.selection.clear();
+        void this.reloadSignals().then(() => {
+          this.commitHistory();
+          this.afterLayoutChange();
+        });
+      });
+      row.append(label, merge, separate);
+      host.appendChild(row);
+    }
   }
 
   private addSelectedToPanel(): void {
@@ -2372,6 +2624,7 @@ export class AppShell {
       required<HTMLInputElement>(this.root, ".signal-search").value,
     );
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
+    this.renderChannelSuggestions();
     this.renderSearchStatus();
     this.updateStatus();
   }
@@ -2726,14 +2979,15 @@ export class AppShell {
         .filter((series) => series.display === "ghost")
         .map((series) => [series.path, series.ref.channel]),
     );
-    const rows = groupCursorRows(cursor.rows, ghostChannels).map((row) =>
-      tooltipRow(
-        row.colorIndex === null
-          ? "var(--fg-4)"
-          : `var(--series-${String(row.colorIndex + 1)})`,
-        row.label,
-        row.value,
-      ),
+    const rows = groupCursorRows(cursor.rows, ghostChannels, this.catalog).map(
+      (row) =>
+        tooltipRow(
+          row.colorIndex === null
+            ? "var(--fg-4)"
+            : `var(--series-${String(row.colorIndex + 1)})`,
+          row.label,
+          row.value,
+        ),
     );
     if (rows.length === 0) {
       tip.hidden = true;
@@ -3301,6 +3555,7 @@ function shellMarkup(): string {
         <span class="signal-view-toggle" role="group" aria-label="Signals view">
           <button type="button" data-dock-view="tree" class="active" aria-pressed="true">tree</button>
           <button type="button" data-dock-view="table" aria-pressed="false">table</button>
+          <button type="button" class="channel-map-button" aria-label="Open channel map">map</button>
         </span>
       </div>
       <div class="tree-scroll"></div>
@@ -3308,6 +3563,7 @@ function shellMarkup(): string {
       <div class="bulk-bar" hidden></div>
       <div class="source-footer">
         <div class="ingest-progress" hidden></div>
+        <div class="channel-suggestions" hidden></div>
         <div class="source-rows"></div>
       </div>
     </aside>
@@ -3366,6 +3622,7 @@ export interface GroupedCursorRow {
 export function groupCursorRows(
   rows: readonly PlotCursor["rows"][number][],
   ghostChannels: ReadonlyMap<string, string>,
+  catalog?: Catalog,
 ): GroupedCursorRow[] {
   const grouped = new Map<
     string,
@@ -3376,7 +3633,7 @@ export function groupCursorRows(
     const channel = ghostChannels.get(row.path);
     if (channel === undefined) {
       result.push({
-        label: row.label,
+        label: originalCursorLabel(row.label, row.path, catalog),
         value:
           row.unit === null
             ? formatValue(row.value)
@@ -3413,6 +3670,32 @@ export function groupCursorRows(
     row.value = group.unit === null ? range : `${range} ${group.unit}`;
   }
   return result;
+}
+
+function originalCursorLabel(
+  label: string,
+  path: string,
+  catalog: Catalog | undefined,
+): string {
+  if (catalog === undefined) return label;
+  const ref = catalog.refFromPath(path);
+  const series = ref === undefined ? undefined : catalog.get(ref);
+  if (series === undefined || series.sourceChannel === series.channel) {
+    return label;
+  }
+  return `${label} (${series.sourceName}: ${series.sourceChannel})`;
+}
+
+function mostCommonAliasName(aliases: readonly ChannelAlias[]): string {
+  const counts = new Map<string, number>();
+  for (const alias of aliases) {
+    counts.set(alias.name, (counts.get(alias.name) ?? 0) + 1);
+  }
+  return (
+    [...counts.entries()].sort(
+      (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+    )[0]?.[0] ?? ""
+  );
 }
 
 function tooltipRow(color: string, name: string, value: string): HTMLElement {

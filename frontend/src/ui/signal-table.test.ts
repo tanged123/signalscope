@@ -134,4 +134,45 @@ describe("SignalTableView", () => {
     ) as { refs: unknown[] };
     expect(singlePayload.refs).toHaveLength(1);
   });
+
+  it("offers the source alias from a row context menu", () => {
+    const { list, view } = viewFixture(1);
+    const onMergeChannels = vi.fn();
+    view.destroy();
+    const selection = new SelectionModel();
+    const contextView = new SignalTableView(list, selection, {
+      onSelectionChange: vi.fn(),
+      onMergeChannels,
+    });
+    contextView.setCatalog(
+      Catalog.build(
+        [
+          {
+            ...signal(1, "Temp_C"),
+            local_path: "Temp_C",
+          },
+        ],
+        [
+          {
+            canonical: "temp",
+            aliases: [{ source_key: "run_001", name: "Temp_C" }],
+          },
+        ],
+      ),
+    );
+
+    list.querySelector<HTMLElement>(".signal-table-row")?.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 5,
+        clientY: 6,
+      }),
+    );
+
+    expect(onMergeChannels).toHaveBeenCalledWith(
+      [{ source_key: "run_001", name: "Temp_C" }],
+      5,
+      6,
+    );
+  });
 });

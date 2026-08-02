@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SignalSummary } from "../generated/protocol";
+import type { ChannelAlias } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import { SelectionModel } from "../app/selection";
 import { SignalTreeView } from "./signal-tree";
@@ -158,5 +159,50 @@ describe("SignalTreeView selection", () => {
         new MouseEvent("click", { bubbles: true, ctrlKey: true }),
       );
     expect(selection.size()).toBe(0);
+  });
+});
+
+describe("SignalTreeView channel actions", () => {
+  it("offers original aliases from a channel context menu", () => {
+    const list = document.createElement("div");
+    const sets = document.createElement("div");
+    const onMergeChannels = vi.fn();
+    const tree = new SignalTreeView(list, sets, {
+      onPlotSignal: vi.fn(),
+      onRemoveDerived: vi.fn(),
+      onMergeChannels,
+    });
+    tree.setCatalog(
+      Catalog.build(
+        [signal("run-01", "temp"), signal("run-02", "Temp_C")],
+        [
+          {
+            canonical: "temp",
+            aliases: [
+              { source_key: "run-01", name: "temp" },
+              { source_key: "run-02", name: "Temp_C" },
+            ],
+          },
+        ],
+      ),
+    );
+
+    const channel = list.querySelector<HTMLElement>(".tree-channel");
+    channel?.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 12,
+        clientY: 34,
+      }),
+    );
+
+    expect(onMergeChannels).toHaveBeenCalledWith(
+      [
+        { source_key: "run-01", name: "temp" },
+        { source_key: "run-02", name: "Temp_C" },
+      ] satisfies ChannelAlias[],
+      12,
+      34,
+    );
   });
 });

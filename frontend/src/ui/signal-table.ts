@@ -1,4 +1,5 @@
 import type { SeriesRef } from "../generated/session";
+import type { ChannelAlias } from "../generated/session";
 import type { Catalog } from "../app/catalog";
 import type { SelectionModel } from "../app/selection";
 import {
@@ -22,6 +23,11 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
 
 export interface SignalTableCallbacks {
   onSelectionChange(): void;
+  onMergeChannels?(
+    aliases: readonly ChannelAlias[],
+    clientX: number,
+    clientY: number,
+  ): void;
 }
 
 export class SignalTableView {
@@ -203,6 +209,14 @@ export class SignalTableView {
         this.toggleRow(row);
       }
     });
+    element.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      this.callbacks.onMergeChannels?.(
+        this.aliasesForRefs(row.refs),
+        event.clientX,
+        event.clientY,
+      );
+    });
     element.addEventListener("dragstart", (event) => {
       const rowKeys = this.rowKeys(row);
       const keys = rowKeys.some((key) => this.selection.has(key))
@@ -227,15 +241,22 @@ export class SignalTableView {
     checkbox.textContent = selected ? "▣" : "▢";
     checkbox.setAttribute("aria-hidden", "true");
     element.appendChild(checkbox);
-    for (const value of [
+    for (const [index, value] of [
       row.channel,
       row.source,
       row.unit ?? "—",
       String(row.pts),
       row.value === null ? "—" : String(row.value),
-    ]) {
+    ].entries()) {
       const cell = document.createElement("span");
       cell.textContent = value;
+      if (index === 0 && row.unitConflict) {
+        const marker = document.createElement("span");
+        marker.className = "unit-conflict-marker";
+        marker.textContent = " unit?";
+        marker.title = "Source units disagree";
+        cell.appendChild(marker);
+      }
       element.appendChild(cell);
     }
     return element;
@@ -300,6 +321,23 @@ export class SignalTableView {
     return series === undefined
       ? undefined
       : { source_key: series.sourceKey, channel: series.channel };
+  }
+
+  private aliasesForRefs(refs: readonly SeriesRef[]): ChannelAlias[] {
+    const aliases: ChannelAlias[] = [];
+    const seen = new Set<string>();
+    for (const ref of refs) {
+      const series = this.catalog.get(ref);
+      if (series === undefined) continue;
+      const key = `${series.sourceKey}\u0000${series.sourceChannel}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      aliases.push({
+        source_key: series.sourceKey,
+        name: series.sourceChannel,
+      });
+    }
+    return aliases;
   }
 
   private cycleSort(column: TableColumn): void {

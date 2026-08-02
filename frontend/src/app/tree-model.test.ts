@@ -45,6 +45,8 @@ describe("buildTreeRows", () => {
         sourceKeys: ["run-01", "run-02"],
         expanded: false,
         members: ["run-01/temp", "run-02/temp"],
+        names: ["temp"],
+        unitConflict: false,
       },
     ]);
     const expanded = buildTreeRows(catalog, new Set(), "");

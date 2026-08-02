@@ -503,6 +503,15 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.color_axis).toBe("none");
   });
 
+  it("stores the panel split dimension", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setSplitBy(panel.id, "source");
+    expect(model.panel(panel.id)?.split_by).toBe("source");
+    model.setSplitBy(panel.id, "channel");
+    expect(model.panel(panel.id)?.split_by).toBe("channel");
+  });
+
   it("keeps the user dash default solid and writes the spec width", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

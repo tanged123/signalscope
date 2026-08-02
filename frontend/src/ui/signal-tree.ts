@@ -1,4 +1,5 @@
 import type { NamedSet } from "../generated/session";
+import type { ChannelAlias } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import { SelectionModel } from "../app/selection";
 import { buildTreeRows, virtualSlice, type TreeRow } from "../app/tree-model";
@@ -13,6 +14,11 @@ export interface SignalTreeCallbacks {
   onSetBind?(setId: string): void;
   onSetRemove?(setId: string): void;
   onRemoveDerived(path: string): void;
+  onMergeChannels?(
+    aliases: readonly ChannelAlias[],
+    clientX: number,
+    clientY: number,
+  ): void;
 }
 
 export class SignalTreeView {
@@ -147,6 +153,14 @@ export class SignalTreeView {
       element.addEventListener("click", (event) => {
         this.handleSelectionClick(event, row.members);
       });
+      element.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        this.callbacks.onMergeChannels?.(
+          this.aliasesForPaths(row.members),
+          event.clientX,
+          event.clientY,
+        );
+      });
       const toggle = document.createElement("button");
       toggle.className = "tree-channel-caret";
       toggle.textContent = row.expanded ? "▾" : "▸";
@@ -163,6 +177,20 @@ export class SignalTreeView {
       const name = document.createElement("span");
       name.className = "signal-path";
       name.textContent = row.label;
+      if (row.names.length > 1) {
+        const names = document.createElement("span");
+        names.className = "channel-names-badge";
+        names.textContent = `${String(row.names.length)} names`;
+        names.title = row.names.join(", ");
+        element.appendChild(names);
+      }
+      if (row.unitConflict) {
+        const unit = document.createElement("span");
+        unit.className = "unit-conflict-marker";
+        unit.textContent = "unit?";
+        unit.title = "Source units disagree";
+        element.appendChild(unit);
+      }
       element.draggable = true;
       element.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData(
@@ -191,6 +219,14 @@ export class SignalTreeView {
     this.setSelectionState(row, [path]);
     row.addEventListener("click", (event) => {
       this.handleSelectionClick(event, [path]);
+    });
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      this.callbacks.onMergeChannels?.(
+        this.aliasesForPaths([path]),
+        event.clientX,
+        event.clientY,
+      );
     });
     row.addEventListener("dragstart", (event) => {
       event.dataTransfer?.setData(SIGNAL_DRAG_TYPE, this.dragPayload([path]));
@@ -361,5 +397,23 @@ export class SignalTreeView {
       const key = this.catalog.refKey(ref);
       this.selection.toggle(key);
     }
+  }
+
+  private aliasesForPaths(paths: readonly string[]): ChannelAlias[] {
+    const aliases: ChannelAlias[] = [];
+    const seen = new Set<string>();
+    for (const path of paths) {
+      const ref = this.catalog.refFromPath(path);
+      const series = ref === undefined ? undefined : this.catalog.get(ref);
+      if (series === undefined) continue;
+      const key = `${series.sourceKey}\u0000${series.sourceChannel}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      aliases.push({
+        source_key: series.sourceKey,
+        name: series.sourceChannel,
+      });
+    }
+    return aliases;
   }
 }

@@ -60,10 +60,22 @@ describe("buildTableRows", () => {
         channel: "temp",
         source: "2 srcs",
         unit: "K",
+        unitConflict: false,
         pts: 50,
         value: null,
       },
     ]);
+  });
+
+  it("marks channels whose source units disagree", () => {
+    const conflict = Catalog.build([
+      summary("run_01", "temp", 1, 1, "K"),
+      summary("run_02", "temp", 1, 2, "C"),
+    ]);
+
+    expect(
+      buildTableRows(conflict, "", null, "channels")[0]?.unitConflict,
+    ).toBe(true);
   });
 
   it("sorts every column in both directions with nulls last", () => {

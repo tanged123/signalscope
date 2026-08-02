@@ -71,6 +71,14 @@ sortable selector-filtered table with series/channel granularity, shared
 tree/table multi-selection, and bulk add, style, hide, save-set, and derive
 actions without requesting sample data.
 
+Signals-at-scale P5 is landed: channel identity now has a workspace-scoped,
+non-destructive map with near-match suggestions, merge/keep-separate actions,
+original-name recovery, unit-conflict flags, and a bounded channel-map view;
+time panels can facet by source or channel with linked-y small multiples and a
+16-cell overflow guard. Tooltip row expansion and facet annotations remain
+follow-ups because annotations stay attached to the unsplit plot in this
+phase.
+
 Phase 1 visualization foundations closed with a validated categorical palette
 that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
 a headless renderer harness and coherent tick pipeline, unbounded series
