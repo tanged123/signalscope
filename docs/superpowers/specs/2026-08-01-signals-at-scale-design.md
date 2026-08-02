@@ -139,11 +139,17 @@ header chips.
 **Ghost by default (§9).** Per panel: focus stack plus `ghost_mode`. Drops of
 ≤ 4 series auto-focus all of them; above that the bundle arrives fully
 ghosted (fg-4, 1 px, ~50% opacity, no per-series styling, hit-testable) and
-color is granted only through focus. Hover = temporary emphasis + name tag;
-click pins focus; legend key click focuses a slice; Tab/⇧Tab walk ghosts by
-value at cursor t; esc clears; ⌥click mutes; the "all" toggle rule-colors
-everything. Builds on the existing `dimmed[]`/`emphasisIndex` render path.
-Deletes: highlight semantics and inspector highlight actions.
+color is granted only through focus. Hover = temporary emphasis + name tag
+(hover never mutates focus state); ⇧click pins focus; legend key click
+focuses a slice; Tab/⇧Tab walk ghosts by value at cursor t; esc clears;
+⌥click mutes; the "all" toggle rule-colors everything. Builds on the existing
+`dimmed[]`/`emphasisIndex` render path. Deletes: highlight semantics and
+inspector highlight actions.
+
+_Amended 2026-08-02:_ focus is ⇧click, not plain click — plain click stays
+the annotation pin/remove gesture, resolving the collision between the two
+(a line click near a rendered vertex is otherwise ambiguous). Hint text
+reads `hover explore · ⇧click focus · ⌥ mute · esc clear`.
 
 **Table mode (§6).** Dock header tree/table toggle. Virtualized flat table
 over the catalog — metadata only (channel, source, unit, pts, last value from
@@ -173,6 +179,16 @@ Restated from AGENTS.md because phase plans must carry them locally: amber is
 interaction-only; every pointer action has a keyboard path; the renderer stays
 deterministic from tiles, viewport, and tokens; snapshots remain
 self-contained; dock and table never touch sample data.
+
+Added 2026-08-02:
+
+- **Plot interactions are mode-universal.** Hover-explore, ⇧click focus,
+  ⌥click mute, Tab walk, and esc behave identically in time, XY, FFT, and
+  histogram panels (and any future mode). Each mode supplies a series
+  hit-test adapter; interaction handlers never branch on panel mode.
+- **Per-source alignment edits are on-demand**, behind an affordance on the
+  source row — never permanent per-source controls. A row of inputs per
+  source is the same unbounded-element violation as a chip per series.
 
 ## Rollout
 
