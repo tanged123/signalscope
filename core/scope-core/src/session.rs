@@ -108,6 +108,7 @@ pub fn load_from_path(path: &Path) -> Result<Session, SessionError> {
 /// `protocol/schema/scope-session.json`, regenerate, then add an arm here
 /// that rewrites a vN `value` into vN+1 shape and recurses. Additive optional
 /// fields need no rung; only new required fields do.
+#[allow(clippy::too_many_lines)]
 fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, SessionError> {
     match version {
         1 => {

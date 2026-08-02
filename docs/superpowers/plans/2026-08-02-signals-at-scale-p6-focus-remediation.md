@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Vitest, Playwright.
 
-**Spec:** `docs/superpowers/specs/2026-08-01-signals-at-scale-design.md` — re-read it: amended 2026-08-02 (§9 ⇧click focus; cross-cutting: mode-universal interactions, on-demand alignment). Pixel reference: §10 of `docs/Signal Scope UI Design Pass/SignalScope Signals at Scale.dc.html` (1440×880 mock). Assumes P5 as landed at `0ba48b7` (v1.4.0).
+**Spec:** `docs/superpowers/specs/2026-08-01-signals-at-scale-design.md` — re-read it: amended 2026-08-02 (§9 ⇧click focus; cross-cutting: mode-universal interactions, on-demand alignment). Pixel reference: §10 of `docs/Signal Scope UI Design Pass/SignalScope Signals at Scale.dc.html` (1440×880 mock). Assumes P5 as landed in the v1.4.0 baseline.
 
 ## Global Constraints
 

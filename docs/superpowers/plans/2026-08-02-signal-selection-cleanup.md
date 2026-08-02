@@ -616,7 +616,7 @@ Run:
 ./scripts/ci.sh quality
 ```
 
-Expected: all affected gates PASS. If the existing spellcheck false positive for commit hash `0ba48b7` remains in the untouched P6 plan, report that exact pre-existing quality limitation and leave the unrelated file unchanged.
+Expected: all affected gates PASS. If the existing spellcheck false positive remains in the untouched P6 plan, report that exact pre-existing quality limitation and leave the unrelated file unchanged.
 
 - [ ] **Step 6: Bump and verify the major version**
 
