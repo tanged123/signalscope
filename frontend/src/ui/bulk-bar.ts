@@ -6,14 +6,11 @@ export interface BulkBarCallbacks {
   onHide(): void;
   onSaveSet(): void;
   onDerive(): void;
-  onMerge?(): void;
 }
 
 export class BulkBar {
   private deriveEnabled = true;
   private deriveTitle = "Derive from the selected signal(s)";
-  private mergeEnabled = false;
-  private mergeTitle = "Merge selected channels";
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -30,12 +27,6 @@ export class BulkBar {
   setDeriveEnabled(enabled: boolean, title: string): void {
     this.deriveEnabled = enabled;
     this.deriveTitle = title;
-    this.render();
-  }
-
-  setMergeEnabled(enabled: boolean, title: string): void {
-    this.mergeEnabled = enabled;
-    this.mergeTitle = title;
     this.render();
   }
 
@@ -58,11 +49,6 @@ export class BulkBar {
       ["hide", "hide", () => this.callbacks.onHide()],
       ["save", "save as set", () => this.callbacks.onSaveSet()],
       ["derive", "derive ƒx", () => this.callbacks.onDerive()],
-      ...(this.mergeEnabled
-        ? ([
-            ["merge", "merge channels", () => this.callbacks.onMerge?.()],
-          ] as const)
-        : []),
     ] as const;
     const actionRow = document.createElement("span");
     actionRow.className = "bulk-bar-actions";
@@ -77,7 +63,6 @@ export class BulkBar {
         button.disabled = !this.deriveEnabled;
         button.title = this.deriveTitle;
       }
-      if (action[0] === "merge") button.title = this.mergeTitle;
       actionRow.appendChild(button);
     }
     this.element.append(summary, actionRow);

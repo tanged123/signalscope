@@ -2473,12 +2473,7 @@ export class PanelView {
     popover.setAttribute("aria-label", `${path} series inspector`);
     const pathRow = document.createElement("div");
     pathRow.className = "inspector-path";
-    const catalogSeries = this.callbacks.catalog().get(series.ref);
-    pathRow.textContent =
-      catalogSeries !== undefined &&
-      catalogSeries.sourceChannel !== catalogSeries.channel
-        ? `${path} (${catalogSeries.sourceName}: ${catalogSeries.sourceChannel})`
-        : path;
+    pathRow.textContent = path;
     const slots = document.createElement("div");
     slots.className = "inspector-slots";
     for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {

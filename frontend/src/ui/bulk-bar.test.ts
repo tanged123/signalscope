@@ -15,7 +15,6 @@ describe("BulkBar", () => {
       onHide: vi.fn(),
       onSaveSet: vi.fn(),
       onDerive: vi.fn(),
-      onMerge: vi.fn(),
     };
     new BulkBar(host, selection, callbacks);
 
@@ -40,33 +39,10 @@ describe("BulkBar", () => {
     expect(callbacks.onHide).toHaveBeenCalledOnce();
     expect(callbacks.onSaveSet).toHaveBeenCalledOnce();
     expect(callbacks.onDerive).toHaveBeenCalledOnce();
+    expect(host.querySelector('[data-action="merge"]')).toBeNull();
 
     selection.clear();
     expect(host.hidden).toBe(true);
-  });
-
-  it("offers merge when enabled and dispatches the shared action", () => {
-    const host = document.createElement("div");
-    const selection = new SelectionModel();
-    const onMerge = vi.fn();
-    const bar = new BulkBar(host, selection, {
-      onAddToPanel: vi.fn(),
-      onStyle: vi.fn(),
-      onHide: vi.fn(),
-      onSaveSet: vi.fn(),
-      onDerive: vi.fn(),
-      onMerge,
-    });
-    selection.setAll(["a", "b"]);
-
-    expect(host.querySelector('[data-action="merge"]')).toBeNull();
-    bar.setMergeEnabled(true, "Merge selected channels");
-    host.querySelector<HTMLButtonElement>('[data-action="merge"]')?.click();
-
-    expect(onMerge).toHaveBeenCalledOnce();
-    expect(
-      host.querySelector<HTMLButtonElement>('[data-action="merge"]')?.title,
-    ).toBe("Merge selected channels");
   });
 
   it("explains why derive is disabled for multiple channels", () => {

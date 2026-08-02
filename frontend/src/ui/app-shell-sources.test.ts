@@ -38,7 +38,7 @@ describe("source dock rail", () => {
     const markup = shellMarkup();
     expect(markup).not.toContain('class="source-rows"');
     expect(markup).toContain('class="ingest-progress"');
-    expect(markup).toContain('class="channel-suggestions"');
+    expect(markup).not.toContain('class="channel-suggestions"');
   });
 
   it("keeps source alignment in the shared on-demand popover", () => {

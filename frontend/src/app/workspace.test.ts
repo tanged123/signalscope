@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { WorkspaceModel, emptySession } from "./workspace";
 import type {
-  ChannelAlias,
   PanelState,
   Session,
   SourceRecord,
@@ -564,57 +563,6 @@ describe("WorkspaceModel", () => {
         width: null,
         opacity: 0.5,
         visible: false,
-      },
-    ]);
-  });
-
-  it("merges and unmerges channel aliases", () => {
-    const model = new WorkspaceModel();
-    const aliases: ChannelAlias[] = [
-      { source_key: "run-01", name: "temp" },
-      { source_key: "run-02", name: "temperature" },
-    ];
-
-    model.mergeChannels("temp", aliases);
-    expect(model.channelMap()).toEqual([{ canonical: "temp", aliases }]);
-    model.unmergeChannel("temp");
-    expect(model.channelMap()).toEqual([]);
-  });
-
-  it("moves aliases between entries without duplicate ownership", () => {
-    const model = new WorkspaceModel();
-    model.mergeChannels("velocity", [{ source_key: "run-01", name: "speed" }]);
-    model.mergeChannels("speed", [
-      { source_key: "run-01", name: "speed" },
-      { source_key: "run-02", name: "speed" },
-    ]);
-
-    expect(model.channelMap()).toEqual([
-      {
-        canonical: "speed",
-        aliases: [
-          { source_key: "run-01", name: "speed" },
-          { source_key: "run-02", name: "speed" },
-        ],
-      },
-    ]);
-  });
-
-  it("writes identity entries when a suggestion is kept separate", () => {
-    const model = new WorkspaceModel();
-    model.keepSeparate([
-      { source_key: "run-01", name: "temp" },
-      { source_key: "run-02", name: "Temp_C" },
-    ]);
-
-    expect(model.channelMap()).toEqual([
-      {
-        canonical: "temp",
-        aliases: [{ source_key: "run-01", name: "temp" }],
-      },
-      {
-        canonical: "Temp_C",
-        aliases: [{ source_key: "run-02", name: "Temp_C" }],
       },
     ]);
   });

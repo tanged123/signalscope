@@ -135,25 +135,6 @@ describe("history session projection", () => {
     expect(snapshot.tabs[0]?.focused_panel_id).toBeNull();
   });
 
-  it("keeps the channel map in undoable workspace history", () => {
-    const session = emptySession();
-    session.channel_map = [
-      {
-        canonical: "temp",
-        aliases: [{ source_key: "run-01", name: "temperature" }],
-      },
-    ];
-
-    const snapshot = historySnapshot(session);
-    expect(snapshot.channel_map).toEqual(session.channel_map);
-
-    const current = structuredClone(session);
-    current.channel_map = [];
-    expect(restoreTransientSessionState(snapshot, current).channel_map).toEqual(
-      session.channel_map,
-    );
-  });
-
   it("preserves live transient state when applying history", () => {
     const historical = emptySession();
     const current = structuredClone(historical);

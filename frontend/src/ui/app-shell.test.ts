@@ -57,29 +57,7 @@ it("groups ghost cursor rows by channel while keeping focused rows itemized", ()
   expect(grouped[2]?.label).toBe("run_18/alt");
 });
 
-it("labels itemized cursor rows with their original source channel", () => {
-  const catalog = Catalog.build(
-    [
-      {
-        signal_id: "run_07-temp",
-        source_id: "run_07",
-        source_key: "run_07",
-        local_path: "temperature",
-        path: "run_07/temperature",
-        unit: "C",
-        point_count: "1",
-        t_min: 0,
-        t_max: 1,
-        last_value: 1,
-      },
-    ],
-    [
-      {
-        canonical: "temp",
-        aliases: [{ source_key: "run_07", name: "temperature" }],
-      },
-    ],
-  );
+it("labels itemized cursor rows with the source-local channel", () => {
   const [row] = groupCursorRows(
     [
       {
@@ -91,10 +69,9 @@ it("labels itemized cursor rows with their original source channel", () => {
       },
     ],
     new Map(),
-    catalog,
   );
 
-  expect(row?.label).toBe("run_07/temperature (run_07: temperature)");
+  expect(row?.label).toBe("run_07/temperature");
 });
 
 interface ShellProbe {
@@ -158,7 +135,6 @@ interface BulkProbe {
   root: HTMLElement;
   bulkBar: {
     setDeriveEnabled(enabled: boolean, title: string): void;
-    setMergeEnabled?(enabled: boolean, title: string): void;
   };
   afterLayoutChange(): void;
   applyBulkStyle(style: {
@@ -168,17 +144,6 @@ interface BulkProbe {
   }): void;
   applyBulkVisibility(visible: boolean): void;
   updateBulkBar(): void;
-}
-
-interface SuggestionProbe {
-  workspace: WorkspaceModel;
-  catalog: Catalog;
-  selection: SelectionModel;
-  root: HTMLElement;
-  reloadSignals(): Promise<void>;
-  commitHistory(): void;
-  afterLayoutChange(): void;
-  renderChannelSuggestions(): void;
 }
 
 describe("bulk dock actions", () => {
@@ -271,29 +236,6 @@ describe("bulk dock actions", () => {
       "Derive requires one channel",
     );
   });
-
-  it("enables merge only when selection spans channel names", () => {
-    const catalog = Catalog.build([
-      bulkSummary("run-01", "temp"),
-      bulkSummary("run-02", "Temp_C"),
-    ]);
-    const shell = Object.create(AppShell.prototype) as BulkProbe;
-    shell.catalog = catalog;
-    shell.selection = new SelectionModel();
-    const setMergeEnabled = vi.fn();
-    shell.bulkBar = { setDeriveEnabled: vi.fn(), setMergeEnabled };
-
-    shell.selection.setAll([
-      catalog.refKey({ source_key: "run-01", channel: "temp" }),
-      catalog.refKey({ source_key: "run-02", channel: "Temp_C" }),
-    ]);
-    shell.updateBulkBar();
-
-    expect(setMergeEnabled).toHaveBeenLastCalledWith(
-      true,
-      "Merge selected channels",
-    );
-  });
 });
 
 interface SourcesProbe {
@@ -353,50 +295,12 @@ describe("workspace identity", () => {
   });
 
   it("advertises the selector grammar in the filter placeholder", () => {
-    expect(shellMarkup()).toContain('placeholder="glob @ source · unit:K"');
-    expect(shellMarkup()).toContain('class="signal-group-select"');
-    expect(shellMarkup()).toContain('class="outline-columns-button"');
-    expect(shellMarkup()).not.toContain("dock-view");
-  });
-});
-
-describe("channel suggestions", () => {
-  it("renders merge and keep actions from the tree footer", async () => {
-    const shell = Object.create(AppShell.prototype) as SuggestionProbe;
-    shell.root = document.createElement("div");
-    shell.root.innerHTML = '<div class="channel-suggestions"></div>';
-    shell.workspace = new WorkspaceModel();
-    shell.catalog = Catalog.build([
-      bulkSummary("run-01", "temp"),
-      bulkSummary("run-02", "Temp_C"),
-    ]);
-    shell.selection = new SelectionModel();
-    shell.reloadSignals = vi.fn().mockResolvedValue(undefined);
-    shell.commitHistory = vi.fn();
-    shell.afterLayoutChange = vi.fn();
-
-    shell.renderChannelSuggestions();
-    const suggestion = shell.root.querySelector<HTMLElement>(
-      ".channel-suggestion",
-    );
-    expect(suggestion?.textContent).toContain("temp");
-    suggestion?.querySelector<HTMLButtonElement>("button")?.click();
-    await Promise.resolve();
-    expect(shell.workspace.channelMap()).toEqual([
-      {
-        canonical: "temp",
-        aliases: [
-          { source_key: "run-01", name: "temp" },
-          { source_key: "run-02", name: "Temp_C" },
-        ],
-      },
-    ]);
-
-    suggestion?.querySelectorAll<HTMLButtonElement>("button")[1]?.click();
-    await Promise.resolve();
-    expect(
-      shell.workspace.channelMap().every((entry) => entry.aliases.length === 1),
-    ).toBe(true);
+    const markup = shellMarkup();
+    expect(markup).toContain('placeholder="glob @ source · unit:K"');
+    expect(markup).not.toContain('class="signal-group-select"');
+    expect(markup).not.toContain('class="outline-columns-button"');
+    expect(markup).not.toContain('class="channel-suggestions"');
+    expect(markup).not.toContain("dock-view");
   });
 });
 
