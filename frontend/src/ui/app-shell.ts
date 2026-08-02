@@ -217,12 +217,6 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
-        onSetSplitBy: (id, splitBy) => {
-          this.workspace.setSplitBy(id, splitBy);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          void this.refreshTiles();
-        },
         onDropSignals: (id, paths) => {
           this.plotSignals(paths, id);
         },
@@ -992,7 +986,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 1.4.3");
+        this.showModeHelp("SignalScope 1.4.4");
       },
     });
     this.commands.register({

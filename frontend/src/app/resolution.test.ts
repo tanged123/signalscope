@@ -10,7 +10,6 @@ import { Catalog } from "./catalog";
 import {
   appliedOverrides,
   dimensionCounts,
-  facetCells,
   overrideFor,
   resolvePanel,
 } from "./resolution";
@@ -417,84 +416,5 @@ describe("resolvePanel", () => {
       { index: 0, override: overrides[0], matchCount: 2 },
       { index: 1, override: overrides[1], matchCount: 1 },
     ]);
-  });
-});
-
-describe("facetCells", () => {
-  it("groups resolved series by source and channel with bounded overflow", () => {
-    const catalog = Catalog.build([
-      ...["a", "b", "c"].flatMap((source) => [
-        signal(source, "temp"),
-        signal(source, "speed"),
-      ]),
-    ]);
-    const state = panel();
-    state.bindings = [{ kind: "query", selector: "*", refs: [], set_id: null }];
-    state.split_by = "source";
-
-    const bySource = facetCells(catalog, state, []);
-    expect(
-      bySource.cells.map((cell) => [cell.key, cell.series.length]),
-    ).toEqual([
-      ["a", 2],
-      ["b", 2],
-      ["c", 2],
-    ]);
-    expect(bySource.cells.map((cell) => cell.label)).toEqual(["a", "b", "c"]);
-
-    state.split_by = "channel";
-    const byChannel = facetCells(catalog, state, []);
-    expect(byChannel.cells.map((cell) => cell.series.length)).toEqual([3, 3]);
-
-    const wide = Catalog.build(
-      Array.from({ length: 20 }, (_, index) =>
-        signal(`run-${String(index).padStart(2, "0")}`, "temp"),
-      ),
-    );
-    state.split_by = "source";
-    const bounded = facetCells(wide, state, []);
-    expect(bounded.cells).toHaveLength(16);
-    expect(bounded.overflow).toBe(4);
-  });
-
-  it("remaps hues away from the split dimension", () => {
-    const catalog = Catalog.build([
-      signal("a", "temp"),
-      signal("a", "speed"),
-      signal("b", "temp"),
-      signal("b", "speed"),
-    ]);
-    const state = panel();
-    state.bindings = [{ kind: "query", selector: "*", refs: [], set_id: null }];
-    state.split_by = "source";
-    state.color_by = "source";
-    const remapped = facetCells(catalog, state, []);
-    expect(
-      remapped.cells.map((cell) => cell.series.map((entry) => entry.hue)),
-    ).toEqual([
-      [1, 2],
-      [1, 2],
-    ]);
-
-    state.color_by = "channel";
-    const inherited = facetCells(catalog, state, []);
-    expect(
-      inherited.cells.map((cell) => cell.series.map((entry) => entry.hue)),
-    ).toEqual([
-      [1, 2],
-      [1, 2],
-    ]);
-  });
-
-  it("passes an unsplit panel through unchanged", () => {
-    const catalog = Catalog.build([signal("a", "temp")]);
-    const state = panel();
-    state.bindings = [{ kind: "query", selector: "*", refs: [], set_id: null }];
-    const resolved = resolvePanel(catalog, state, []);
-    const layout = facetCells(catalog, state, []);
-    expect(layout).toEqual({
-      cells: [{ key: "all", label: "all", series: resolved }],
-      overflow: 0,
-    });
   });
 });

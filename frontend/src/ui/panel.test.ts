@@ -18,7 +18,6 @@ import {
   MAXIMIZE_GLYPH,
   PanelView,
   bindingChipEntries,
-  focusHeaderLabel,
   focusChips,
   legendTokenLabel,
   matrixLegendRows,
@@ -861,30 +860,5 @@ describe("panel series", () => {
       expect.objectContaining({ label: "temp · 3", bindingIndex: 1 }),
       expect.objectContaining({ label: "★ Live temps · 3", bindingIndex: 2 }),
     ]);
-  });
-
-  it("reports the first focused series and its stack position", () => {
-    const state = xyState("run_01/temp", [
-      visible("run_01/temp"),
-      visible("run_02/temp"),
-    ]);
-    state.focus = [
-      {
-        kind: "series",
-        ref: state.series[1]?.ref ?? null,
-        source_key: null,
-        channel: null,
-      },
-      {
-        kind: "series",
-        ref: state.series[0]?.ref ?? null,
-        source_key: null,
-        channel: null,
-      },
-    ];
-    expect(focusHeaderLabel(state)).toEqual({
-      label: "run_02/temp",
-      position: "1/2",
-    });
   });
 });

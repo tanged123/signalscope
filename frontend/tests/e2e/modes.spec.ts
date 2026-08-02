@@ -216,12 +216,12 @@ test.describe("panel modes", () => {
       expect(point).toBeDefined();
       if (point === undefined) throw new Error(`no ${mode} plot point`);
       await overlay.click({ position: point, modifiers: ["Shift"] });
-      await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+      await expect(panel.locator(".matrix-focus-chip")).toBeVisible();
       await panel.focus();
       await page.keyboard.press("Escape");
-      await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+      await expect(panel.locator(".matrix-focus-chip")).toBeVisible();
       await page.keyboard.press("Escape");
-      await expect(panel.locator(".panel-focus-chip")).toBeHidden();
+      await expect(panel.locator(".matrix-focus-chip")).toBeHidden();
     }
   });
 
@@ -234,12 +234,12 @@ test.describe("panel modes", () => {
     expect(point).toBeDefined();
     if (point === undefined) throw new Error("no time plot point");
     await overlay.click({ position: point, modifiers: ["Shift"] });
-    await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+    await expect(panel.locator(".matrix-focus-chip")).toBeVisible();
     await overlay.hover({ position: point });
     await expect(panel.locator(".plot-hover-tag")).toContainText(
       "⇧click to focus",
     );
-    await expect(panel.locator(".panel-focus-chip")).toBeVisible();
+    await expect(panel.locator(".matrix-focus-chip")).toBeVisible();
     await overlay.click({ position: point });
     await expect(panel.locator(".annotation-row")).toHaveCount(1);
   });

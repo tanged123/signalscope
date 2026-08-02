@@ -5,7 +5,6 @@ import type {
   PanelState,
   SeriesOverride,
   SeriesRef,
-  SplitDimension,
 } from "../generated/session";
 import type { Catalog, CatalogSeries } from "./catalog";
 import { parseSelector, seriesMatches, type Selector } from "./selector";
@@ -23,17 +22,6 @@ export interface ResolvedSeries {
   visible: boolean;
   focused: boolean;
   overridden: boolean;
-}
-
-export interface FacetCell {
-  key: string;
-  label: string;
-  series: ResolvedSeries[];
-}
-
-export interface FacetLayout {
-  cells: FacetCell[];
-  overflow: number;
 }
 
 interface ResolvedRef {
@@ -114,39 +102,6 @@ export function resolvePanel(
       overridden,
     };
   });
-}
-
-export function facetCells(
-  catalog: Catalog,
-  panel: PanelState,
-  namedSets: readonly NamedSet[],
-): FacetLayout {
-  const resolved = resolvePanel(catalog, panel, namedSets);
-  if (panel.split_by === "none") {
-    return {
-      cells: [{ key: "all", label: "all", series: resolved }],
-      overflow: 0,
-    };
-  }
-  const groups = new Map<string, { label: string; series: ResolvedSeries[] }>();
-  for (const entry of resolved) {
-    const series = catalog.get(entry.ref);
-    const key = facetKey(panel.split_by, entry, series);
-    const label = facetLabel(panel.split_by, key, series);
-    const group = groups.get(key) ?? { label, series: [] };
-    group.series.push(entry);
-    groups.set(key, group);
-  }
-  const allGroups = [...groups.entries()];
-  const cells = allGroups.slice(0, 16).map(([key, group]) => ({
-    key,
-    label: group.label,
-    series:
-      panel.color_by === panel.split_by
-        ? recolorFacetSeries(group.series, catalog, panel.split_by)
-        : group.series,
-  }));
-  return { cells, overflow: Math.max(0, allGroups.length - cells.length) };
 }
 
 export interface DimensionCounts {
@@ -271,47 +226,6 @@ function dimensionValue(
     if (isFocused && focusIndex !== -1) return `focus:${String(focusIndex)}`;
   }
   return `source:${series.sourceKey}`;
-}
-
-function facetKey(
-  dimension: Exclude<SplitDimension, "none">,
-  entry: ResolvedSeries,
-  series: CatalogSeries | undefined,
-): string {
-  if (dimension === "source") return series?.sourceKey ?? entry.ref.source_key;
-  return series?.channel ?? entry.ref.channel;
-}
-
-function facetLabel(
-  dimension: Exclude<SplitDimension, "none">,
-  key: string,
-  series: CatalogSeries | undefined,
-): string {
-  if (dimension === "source") return series?.sourceName ?? key;
-  return series?.channel ?? key;
-}
-
-function recolorFacetSeries(
-  series: readonly ResolvedSeries[],
-  catalog: Catalog,
-  splitBy: Exclude<SplitDimension, "none">,
-): ResolvedSeries[] {
-  const other = splitBy === "source" ? "channel" : "source";
-  const hues = new Map<string, number>();
-  return series.map((entry) => {
-    if (entry.hue === null) return entry;
-    const catalogSeries = catalog.get(entry.ref);
-    const key =
-      other === "source"
-        ? `source:${catalogSeries?.sourceKey ?? entry.ref.source_key}`
-        : `channel:${catalogSeries?.channel ?? entry.ref.channel}`;
-    let hue = hues.get(key);
-    if (hue === undefined) {
-      hue = (hues.size % 7) + 1;
-      hues.set(key, hue);
-    }
-    return { ...entry, hue };
-  });
 }
 
 function prepareOverrides(

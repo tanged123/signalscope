@@ -4,6 +4,7 @@ import { WorkspaceModel, emptySession } from "./workspace";
 import type {
   ChannelAlias,
   PanelState,
+  Session,
   SourceRecord,
   StyleDimension,
 } from "../generated/session";
@@ -503,13 +504,16 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.color_axis).toBe("none");
   });
 
-  it("stores the panel split dimension", () => {
+  it("normalizes legacy facet split state when restoring a session", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
-    model.setSplitBy(panel.id, "source");
-    expect(model.panel(panel.id)?.split_by).toBe("source");
-    model.setSplitBy(panel.id, "channel");
-    expect(model.panel(panel.id)?.split_by).toBe("channel");
+    panel.split_by = "source";
+
+    const restored = new WorkspaceModel(
+      structuredClone(model.snapshot()) as Session,
+    );
+
+    expect(restored.panel(panel.id)?.split_by).toBe("none");
   });
 
   it("keeps the user dash default solid and writes the spec width", () => {

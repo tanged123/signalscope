@@ -57,6 +57,12 @@ export function emptySession(): Session {
   };
 }
 
+function clearFacetSplits(session: Session): void {
+  for (const tab of session.tabs) {
+    for (const panel of tab.panels) panel.split_by = "none";
+  }
+}
+
 export class WorkspaceModel {
   private session: Session;
   private nextPanelNumber: number;
@@ -64,6 +70,7 @@ export class WorkspaceModel {
 
   constructor(session: Session = emptySession()) {
     this.session = session;
+    clearFacetSplits(this.session);
     if (session.tabs.length === 0) {
       session.tabs.push(createWorkspaceTab(1));
     }
@@ -82,6 +89,7 @@ export class WorkspaceModel {
   /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
   replace(session: Session): void {
     this.session = session;
+    clearFacetSplits(this.session);
   }
 
   theme(): Session["theme"] {
@@ -427,11 +435,6 @@ export class WorkspaceModel {
   setMode(id: string, mode: PanelMode): void {
     const panel = this.panel(id);
     if (panel !== undefined) panel.mode = mode;
-  }
-
-  setSplitBy(id: string, splitBy: PanelState["split_by"]): void {
-    const panel = this.panel(id);
-    if (panel !== undefined) panel.split_by = splitBy;
   }
 
   /** Enters XY mode, adopting the first plotted series as the x axis. */
