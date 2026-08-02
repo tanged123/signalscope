@@ -510,60 +510,6 @@ button {
   color: var(--amber-9);
 }
 
-.source-alignment-apply {
-  padding: 1px 4px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2);
-  color: var(--fg-2);
-  font: 0.6923rem var(--font-mono);
-}
-
-.source-align:hover,
-.source-align:focus-visible,
-.source-alignment-apply:hover,
-.source-alignment-apply:focus-visible {
-  color: var(--fg-1);
-}
-
-.source-alignment-marker {
-  color: var(--amber-7);
-  font: 0.7692rem var(--font-mono);
-}
-
-.source-alignment-popover {
-  position: absolute;
-  z-index: 5;
-  right: 0;
-  top: calc(100% + 3px);
-  display: grid;
-  min-width: 210px;
-  gap: 4px;
-  padding: 6px;
-  background: var(--surface-1);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  box-shadow: var(--elev-2);
-  font: 0.6923rem var(--font-mono);
-}
-
-.source-alignment-popover label {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 6px;
-  align-items: center;
-  color: var(--fg-3);
-}
-
-.source-alignment-popover select,
-.source-alignment-popover input {
-  min-width: 0;
-  padding: 2px 4px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-void);
-  color: var(--fg-1);
-  font: inherit;
-}
-
 .workspace {
   grid-area: main;
   display: flex;
@@ -2014,8 +1960,7 @@ button {
 
 .outline-select,
 .outline-caret,
-.outline-derived-remove,
-.source-align {
+.outline-derived-remove {
   flex: none;
   padding: 0 2px;
   border: 0;
@@ -2034,24 +1979,9 @@ button {
   text-align: center;
 }
 
-.source-align {
-  border: 1px solid transparent;
-  color: var(--fg-3);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  opacity: 0;
-}
-
-.outline-series-row:hover .source-align,
-.outline-series-row:focus-within .source-align {
-  opacity: 1;
-}
-
 .outline-caret:hover,
 .outline-select:hover,
-.outline-derived-remove:hover,
-.source-align:hover,
-.source-align:focus-visible {
+.outline-derived-remove:hover {
   border-color: var(--border-strong);
   outline: 0;
   color: var(--fg-1);
@@ -2066,14 +1996,6 @@ button {
   position: absolute;
   right: 0;
   left: 0;
-}
-
-.outline-bulk-footer {
-  position: sticky;
-  z-index: 2;
-  bottom: 0;
-  margin: 0 -6px -8px;
-  border-top-color: var(--border-strong);
 }
 
 .tree-row {
@@ -2148,69 +2070,6 @@ button {
   padding: 4px 8px;
   color: var(--fg-4);
   font-size: 0.8077rem;
-}
-
-.bulk-bar {
-  display: flex;
-  flex: none;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  padding: 5px 10px;
-  border-top: 1px solid var(--border-strong);
-  background: var(--surface-2);
-  color: var(--fg-2);
-  font: 11px var(--font-mono);
-}
-
-.bulk-bar[hidden] {
-  display: none;
-}
-
-.bulk-bar button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--fg-2);
-  font: inherit;
-}
-
-.bulk-bar button:hover:not(:disabled) {
-  color: var(--fg-1);
-}
-
-.bulk-bar button:disabled {
-  color: var(--fg-4);
-  cursor: not-allowed;
-}
-
-.bulk-bar-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.bulk-bar .bulk-bar-link {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--amber-7);
-}
-
-.bulk-bar .bulk-bar-link:hover:not(:disabled),
-.bulk-bar .bulk-bar-link:focus-visible {
-  color: var(--amber-9);
-}
-
-.bulk-bar-count {
-  color: var(--fg-1);
-  font-variant-numeric: tabular-nums;
-}
-
-.bulk-bar-hint {
-  margin-left: auto;
-  color: var(--fg-4);
-  white-space: nowrap;
 }
 
 .ingest-progress {

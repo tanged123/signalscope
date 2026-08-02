@@ -32,7 +32,6 @@ import {
   type SaveExportFileRequest,
   type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
-  type SourceAlignmentRequest,
   type SignalSummary,
   type SnapshotManifest,
   type SourceSummary,
@@ -123,7 +122,6 @@ export interface DataPlane {
   readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
-  setSourceAlignment(request: SourceAlignmentRequest): Promise<void>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
@@ -365,14 +363,6 @@ export class TauriPlane implements DataPlane {
     return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
   }
 
-  async setSourceAlignment(request: SourceAlignmentRequest): Promise<void> {
-    open(
-      await this.invoke<Envelope<null>>("set_source_alignment", {
-        request: seal(request),
-      }),
-    );
-  }
-
   async queryTiles(request: TileRequest): Promise<TileResponse> {
     return open(
       await this.invoke<Envelope<TileResponse>>("query_tiles", {
@@ -474,10 +464,6 @@ export class BakedPlane implements DataPlane {
         offset: 0,
       },
     ]);
-  }
-
-  setSourceAlignment(): Promise<void> {
-    return Promise.reject(new Error("snapshots are read-only"));
   }
 
   queryTiles(request: TileRequest): Promise<TileResponse> {

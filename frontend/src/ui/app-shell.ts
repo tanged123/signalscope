@@ -8,7 +8,6 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
-import { quoteSignalPath } from "../app/formula";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
@@ -80,7 +79,6 @@ import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalOutlineView } from "./signal-outline";
 import { SetsListView } from "./sets-list";
-import { BulkBar } from "./bulk-bar";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
@@ -119,13 +117,11 @@ export class AppShell {
   private workspaceTabs: WorkspaceTabsView | null = null;
   private outline: SignalOutlineView | null = null;
   private setsList: SetsListView | null = null;
-  private bulkBar: BulkBar | null = null;
   private pendingSetRefs: SeriesRef[] | null = null;
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
   private folderScanDialog: FolderScanDialog | null = null;
-  private sourceSummaries: SourceSummary[] = [];
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -439,44 +435,9 @@ export class AppShell {
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
         },
-        onAlignSource: (sourceKey, anchor) => {
-          const source = this.sourceSummaries.find(
-            (entry) => entry.source_key === sourceKey,
-          );
-          const row = anchor.closest<HTMLElement>(".signal-outline-row");
-          if (source !== undefined && row !== null) {
-            openSourceAlignment(
-              this.root,
-              row,
-              anchor,
-              source,
-              (nextSource, domain, scale, offset) => {
-                void this.applySourceAlignment(
-                  nextSource,
-                  domain,
-                  scale,
-                  offset,
-                );
-              },
-            );
-          }
-        },
-      },
-      required<HTMLElement>(this.root, ".bulk-bar"),
-    );
-    this.bulkBar = new BulkBar(
-      required(this.root, ".bulk-bar"),
-      this.selection,
-      {
-        onAddToPanel: () => this.addSelectedToPanel(),
-        onStyle: () => this.styleSelected(),
-        onHide: () => this.hideSelected(),
-        onSaveSet: () => this.openSetNameRow(this.selectedRefs()),
-        onDerive: () => this.deriveSelected(),
       },
     );
     this.selection.onChange(() => {
-      this.updateBulkBar();
       this.syncSelectionActions();
     });
     this.syncSelectionActions();
@@ -1572,22 +1533,6 @@ export class AppShell {
     this.selection.retain(allowed);
   }
 
-  private updateBulkBar(): void {
-    const refs = this.selectedRefs();
-    const channels = new Set(refs.map((ref) => ref.channel));
-    const enabled = refs.length === 1 || channels.size === 1;
-    this.bulkBar?.setDeriveEnabled(
-      enabled,
-      enabled
-        ? "Derive from the selected signal(s)"
-        : "Derive requires one channel",
-    );
-  }
-
-  private addSelectedToPanel(): void {
-    this.addRefsToPanel(this.selectedRefs());
-  }
-
   private addRefsToPanel(refs: readonly SeriesRef[]): void {
     if (refs.length === 0) return;
     const panelId =
@@ -1597,135 +1542,6 @@ export class AppShell {
     this.workspace.focusPanel(panelId);
     this.fitWindowToPlotted();
     this.afterLayoutChange();
-  }
-
-  private styleSelected(): void {
-    this.applyBulkStyle({ color_slot: 1, dash: "solid", width: 1.4 });
-  }
-
-  private hideSelected(): void {
-    this.applyBulkVisibility(false);
-  }
-
-  private applyBulkStyle(style: {
-    color_slot: number;
-    dash: "solid" | "dash" | "dot";
-    width: number;
-  }): void {
-    this.forEachSelectedPanel((panel, refs, selector) => {
-      if (selector !== null) {
-        this.workspace.addSelectorOverride(panel.id, selector, style);
-        return;
-      }
-      const resolved = resolvePanel(
-        this.catalog,
-        panel,
-        this.workspace.namedSets(),
-      );
-      for (const ref of refs) {
-        if (
-          resolved.some(
-            (series) =>
-              this.catalog.refKey(series.ref) === this.catalog.refKey(ref),
-          )
-        ) {
-          this.workspace.setSeriesOverride(panel.id, ref, style);
-        }
-      }
-    });
-    this.afterLayoutChange();
-  }
-
-  private applyBulkVisibility(visible: boolean): void {
-    this.forEachSelectedPanel((panel, refs, selector) => {
-      if (selector !== null) {
-        this.workspace.addSelectorOverride(panel.id, selector, { visible });
-        return;
-      }
-      const resolved = resolvePanel(
-        this.catalog,
-        panel,
-        this.workspace.namedSets(),
-      );
-      for (const ref of refs) {
-        if (
-          resolved.some(
-            (series) =>
-              this.catalog.refKey(series.ref) === this.catalog.refKey(ref),
-          )
-        ) {
-          this.workspace.setSeriesVisible(panel.id, ref, visible);
-        }
-      }
-    });
-    this.afterLayoutChange();
-  }
-
-  private forEachSelectedPanel(
-    callback: (
-      panel: PanelState,
-      refs: readonly SeriesRef[],
-      selector: string | null,
-    ) => void,
-  ): void {
-    const refs = this.selectedRefs();
-    if (refs.length === 0) return;
-    const selectedKeys = new Set(refs.map((ref) => this.catalog.refKey(ref)));
-    const selector = this.selectorForSelected(selectedKeys);
-    for (const panel of this.workspace.panels()) {
-      const resolved = resolvePanel(
-        this.catalog,
-        panel,
-        this.workspace.namedSets(),
-      );
-      if (
-        resolved.some((series) =>
-          selectedKeys.has(this.catalog.refKey(series.ref)),
-        )
-      ) {
-        callback(panel, refs, selector);
-      }
-    }
-  }
-
-  private selectorForSelected(
-    selectedKeys: ReadonlySet<string>,
-  ): string | null {
-    const selector = required<HTMLInputElement>(
-      this.root,
-      ".signal-search",
-    ).value.trim();
-    if (selector === "") return null;
-    const evaluation = evaluateSelector(this.catalog, selector);
-    const selectorSyntax = /[*?|[@:]/.test(selector);
-    if (
-      evaluation === null ||
-      (evaluation.signalCount === 0 && !selectorSyntax)
-    ) {
-      return null;
-    }
-    const matchKeys = new Set(
-      evaluation.series.map((series) =>
-        this.catalog.refKey({
-          source_key: series.sourceKey,
-          channel: series.channel,
-        }),
-      ),
-    );
-    return matchKeys.size === selectedKeys.size &&
-      [...matchKeys].every((key) => selectedKeys.has(key))
-      ? selector
-      : null;
-  }
-
-  private deriveSelected(): void {
-    const refs = this.selectedRefs();
-    const channels = new Set(refs.map((ref) => ref.channel));
-    if (refs.length === 0 || (refs.length > 1 && channels.size !== 1)) return;
-    this.setFormulaOpen(true);
-    this.formulaBar?.focusWithExpression(
-      quoteSignalPath(refs[0]?.channel ?? ""),
-    );
   }
 
   private async openFiles(): Promise<void> {
@@ -2895,7 +2711,6 @@ export class AppShell {
 
   private async updateSources(): Promise<void> {
     const sources = await this.plane.listSources();
-    this.sourceSummaries = [...sources];
     for (const source of sources) {
       if (
         this.workspace
@@ -2934,44 +2749,11 @@ export class AppShell {
       );
     required(this.root, ".session-identity").textContent =
       `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
-    this.outline?.setNonIdentitySources(
-      new Set(
-        sources
-          .filter((source) => !sourceAlignmentIsIdentity(source))
-          .map((source) => source.source_key),
-      ),
-    );
     const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
     if (dockFooter !== null) {
       renderDockFooter(dockFooter, sources, this.signals.length, () => {
         void this.openFiles();
       });
-    }
-  }
-
-  private async applySourceAlignment(
-    source: SourceSummary,
-    domain: SourceSummary["time_domain"],
-    scale: number,
-    offset: number,
-  ): Promise<void> {
-    try {
-      await this.plane.setSourceAlignment({
-        source_key: source.source_key,
-        time_domain: domain,
-        scale,
-        offset,
-      });
-      this.workspace.setSourceAlignment(
-        source.source_key,
-        domain,
-        scale,
-        offset,
-      );
-      this.commitHistory();
-      await this.reloadSignals();
-    } catch (error: unknown) {
-      this.reportError(error);
     }
   }
 
@@ -3226,131 +3008,6 @@ function loadedSourceFormats(sources: readonly SourceSummary[]): string {
   return [...formats].sort().join(" · ") || "—";
 }
 
-const sourceAlignmentCleanup = new WeakMap<HTMLElement, () => void>();
-
-function sourceAlignmentIsIdentity(source: SourceSummary): boolean {
-  return (
-    source.time_domain.unit === "seconds" &&
-    source.time_domain.origin === "relative" &&
-    source.time_domain.alignment_origin === 0 &&
-    source.scale === 1 &&
-    source.offset === 0
-  );
-}
-
-export function openSourceAlignment(
-  container: HTMLElement,
-  row: HTMLElement,
-  anchor: HTMLElement,
-  source: SourceSummary,
-  onAlignment: (
-    source: SourceSummary,
-    domain: SourceSummary["time_domain"],
-    scale: number,
-    offset: number,
-  ) => void,
-): void {
-  sourceAlignmentCleanup.get(container)?.();
-  const popover = document.createElement("div");
-  popover.className = "source-alignment-popover";
-  popover.setAttribute("role", "dialog");
-  popover.setAttribute("aria-label", `Align ${source.prefix}`);
-  const unit = document.createElement("select");
-  unit.className = "source-time-unit";
-  unit.ariaLabel = `${source.prefix} time unit`;
-  for (const option of [
-    "seconds",
-    "milliseconds",
-    "microseconds",
-    "nanoseconds",
-  ] as const) {
-    const item = document.createElement("option");
-    item.value = option;
-    item.textContent = option;
-    item.selected = option === source.time_domain.unit;
-    unit.append(item);
-  }
-  const scale = document.createElement("input");
-  scale.className = "source-time-scale";
-  scale.type = "number";
-  scale.step = "any";
-  scale.value = String(source.scale);
-  scale.ariaLabel = `${source.prefix} time scale`;
-  const offset = document.createElement("input");
-  offset.className = "source-time-offset";
-  offset.type = "number";
-  offset.step = "any";
-  offset.value = String(source.offset);
-  offset.ariaLabel = `${source.prefix} time offset`;
-  const apply = document.createElement("button");
-  apply.type = "button";
-  apply.className = "source-alignment-apply";
-  apply.textContent = "apply";
-  const addField = (label: string, control: HTMLElement): void => {
-    const field = document.createElement("label");
-    field.textContent = label;
-    field.append(control);
-    popover.append(field);
-  };
-  addField("unit", unit);
-  addField("scale", scale);
-  addField("offset", offset);
-  popover.append(apply);
-  row.append(popover);
-  const close = (): void => {
-    document.removeEventListener("pointerdown", onPointer, true);
-    document.removeEventListener("keydown", onKey);
-    popover.remove();
-    if (sourceAlignmentCleanup.get(container) === close) {
-      sourceAlignmentCleanup.delete(container);
-    }
-  };
-  const onPointer = (event: PointerEvent): void => {
-    const target = event.target;
-    if (
-      target instanceof Node &&
-      (popover.contains(target) || anchor.contains(target))
-    )
-      return;
-    close();
-  };
-  const onKey = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-    }
-  };
-  const commit = (): void => {
-    const nextScale = Number(scale.value);
-    const nextOffset = Number(offset.value);
-    if (!Number.isFinite(nextScale) || !Number.isFinite(nextOffset)) return;
-    onAlignment(
-      source,
-      {
-        ...source.time_domain,
-        unit: unit.value as SourceSummary["time_domain"]["unit"],
-      },
-      nextScale,
-      nextOffset,
-    );
-    close();
-  };
-  apply.addEventListener("click", commit);
-  for (const control of [unit, scale, offset]) {
-    control.addEventListener("keydown", (event) => {
-      const keyboard = event as KeyboardEvent;
-      if (keyboard.key === "Enter") {
-        keyboard.preventDefault();
-        commit();
-      }
-    });
-  }
-  sourceAlignmentCleanup.set(container, close);
-  document.addEventListener("pointerdown", onPointer, true);
-  document.addEventListener("keydown", onKey);
-  unit.focus();
-}
-
 /** Explains why a listed command cannot run, or nothing when it can. */
 function unavailableReason(command: Command): { unavailable?: string } {
   if (command.status === "planned") {
@@ -3405,7 +3062,6 @@ export function shellMarkup(): string {
       <div class="tree-sets"></div>
       <div class="tree-heading signals-heading">SIGNALS</div>
       <div class="outline-scroll"></div>
-      <div class="bulk-bar" hidden></div>
       <div class="source-footer">
         <div class="ingest-progress" hidden></div>
         <div class="dock-footer">

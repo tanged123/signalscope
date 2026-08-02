@@ -624,7 +624,7 @@ test("outline filters, sets, and drag-to-plot", async ({ page }) => {
     .nth(1);
   await secondLeaf.focus();
   await page.keyboard.press("Space");
-  await expect(page.locator(".bulk-bar")).toContainText("1 selected");
+  await expect(page.locator(".sets-save-selection")).toBeEnabled();
   await expect(spaceTarget.locator(".binding-chip")).toHaveCount(0);
 
   const leaf = page.locator('.outline-scroll [data-row-kind="series"]').first();
@@ -678,9 +678,7 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await expect(second.locator(".binding-chip")).toHaveCount(0);
 });
 
-test("legend strip and source alignment controls stay bounded", async ({
-  page,
-}) => {
+test("legend strip and source rows stay bounded", async ({ page }) => {
   await page.goto("/");
   const panel = page.locator(".panel").first();
   const strip = panel.locator(".panel-legend-strip");
@@ -695,14 +693,8 @@ test("legend strip and source alignment controls stay bounded", async ({
     .locator('.signal-outline-row[data-row-kind="series"]')
     .first();
   await sourceRow.hover();
-  const align = sourceRow.locator(".source-align");
-  await expect(align).toBeVisible();
-  await align.click();
-  const popover = page.locator(".source-alignment-popover");
-  await expect(popover).toBeVisible();
-  await expect(popover.locator("select, input")).toHaveCount(3);
-  await page.keyboard.press("Escape");
-  await expect(popover).toBeHidden();
+  await expect(sourceRow.locator(".source-align")).toHaveCount(0);
+  await expect(page.locator(".source-alignment-popover")).toHaveCount(0);
 });
 
 test("seam drag resizes panel rows", async ({ page }) => {

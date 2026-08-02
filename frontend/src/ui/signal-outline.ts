@@ -18,14 +18,12 @@ export interface SignalOutlineCallbacks {
   onSelectionChange(): void;
   onAddToPanel(refs: readonly SeriesRef[]): void;
   onRemoveDerived(path: string): void;
-  onAlignSource?(sourceKey: string, anchor: HTMLElement): void;
 }
 
 export class SignalOutlineView {
   private catalog: Catalog = CatalogClass.empty();
   private filter = "";
   private readonly expanded = new Set<string>();
-  private readonly nonIdentitySources = new Set<string>();
   private rows: OutlineRow[] = [];
   private activeIndex = 0;
   private liveValues: ReadonlyMap<string, string> = new Map();
@@ -36,7 +34,6 @@ export class SignalOutlineView {
     private readonly listElement: HTMLElement,
     private readonly selection: SelectionModel,
     private readonly callbacks: SignalOutlineCallbacks,
-    private readonly bulkBarElement: HTMLElement,
   ) {
     const tokenHeight = Number.parseFloat(
       getComputedStyle(listElement).getPropertyValue("--tree-row-height"),
@@ -54,7 +51,6 @@ export class SignalOutlineView {
     );
     listElement.setAttribute("role", "grid");
     listElement.setAttribute("aria-multiselectable", "true");
-    this.bulkBarElement.classList.add("outline-bulk-footer");
     listElement.addEventListener("scroll", () => this.render());
     listElement.addEventListener("keydown", (event) => this.keydown(event));
     this.unsubscribe = selection.onChange(() => {
@@ -75,12 +71,6 @@ export class SignalOutlineView {
 
   setLiveValues(values: ReadonlyMap<string, string>): void {
     this.liveValues = values;
-    this.render();
-  }
-
-  setNonIdentitySources(keys: ReadonlySet<string>): void {
-    this.nonIdentitySources.clear();
-    for (const key of keys) this.nonIdentitySources.add(key);
     this.render();
   }
 
@@ -133,7 +123,7 @@ export class SignalOutlineView {
       );
       spacer.appendChild(windowElement);
     }
-    this.listElement.replaceChildren(header, spacer, this.bulkBarElement);
+    this.listElement.replaceChildren(header, spacer);
   }
 
   private headerElement(): HTMLElement {
@@ -302,20 +292,6 @@ export class SignalOutlineView {
         this.callbacks.onRemoveDerived(row.path);
       });
       first.appendChild(remove);
-    } else {
-      if (this.nonIdentitySources.has(row.ref.source_key)) {
-        first.appendChild(this.sourceAlignmentMarker());
-      }
-      const align = document.createElement("button");
-      align.type = "button";
-      align.className = "source-align";
-      align.textContent = "align";
-      align.setAttribute("aria-label", `Align ${row.source}`);
-      align.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this.callbacks.onAlignSource?.(row.ref.source_key, align);
-      });
-      first.appendChild(align);
     }
 
     const value = this.liveValues.get(row.path) ?? "";
@@ -343,14 +319,6 @@ export class SignalOutlineView {
     cell.dataset.column = "value";
     cell.textContent = value;
     return cell;
-  }
-
-  private sourceAlignmentMarker(): HTMLElement {
-    const marker = document.createElement("span");
-    marker.className = "source-alignment-marker";
-    marker.textContent = "≠";
-    marker.title = "Source time alignment differs from identity";
-    return marker;
   }
 
   private emptyElement(): HTMLElement {

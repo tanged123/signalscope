@@ -14,7 +14,9 @@ import {
   arrivalModeFor,
   groupCursorRows,
   renderBatchProgress,
+  renderDockFooter,
   shellMarkup,
+  statusAggregate,
 } from "./app-shell";
 
 it("arrival mode focuses small additions and ghosts large additions", () => {
@@ -89,7 +91,7 @@ interface DockProbe {
 describe("signals outline dock", () => {
   it("keeps one outline surface and the shared selection", () => {
     const root = document.createElement("div");
-    root.innerHTML = `<div class="outline-scroll"></div><div class="bulk-bar"></div>`;
+    root.innerHTML = `<div class="outline-scroll"></div>`;
     const shell = Object.create(AppShell.prototype) as DockProbe;
     shell.root = root;
     shell.selection = new SelectionModel();
@@ -144,6 +146,9 @@ describe("selection actions", () => {
   it("renders the SETS save-selection button", () => {
     const markup = shellMarkup();
     expect(markup).toContain('class="sets-save-selection"');
+    expect(markup).not.toContain("bulk-bar");
+    expect(markup).not.toContain("source-align");
+    expect(markup).not.toContain("source-alignment-popover");
   });
 
   it("enables manual-set creation only when signals are selected", () => {
@@ -266,6 +271,56 @@ describe("workspace identity", () => {
     expect(markup).not.toContain('class="outline-columns-button"');
     expect(markup).not.toContain('class="channel-suggestions"');
     expect(markup).not.toContain("dock-view");
+  });
+});
+
+describe("source dock rail", () => {
+  it("formats the status identity as one aggregate readout", () => {
+    expect(statusAggregate(2, 17, 2_000)).toBe(
+      "2 sources · 17 signals · 2,000 pts",
+    );
+  });
+
+  it("does not render a duplicate per-source listing", () => {
+    const markup = shellMarkup();
+    expect(markup).not.toContain('class="source-rows"');
+    expect(markup).toContain('class="ingest-progress"');
+    expect(markup).not.toContain('class="channel-suggestions"');
+  });
+
+  it("shows aggregate counts, loaded formats, and a load action", () => {
+    const element = document.createElement("div");
+    const onAddSource = vi.fn();
+    renderDockFooter(
+      element,
+      [
+        sourceSummary("run-01"),
+        { ...sourceSummary("run-02"), path: "/data/run-02.mcap" },
+      ],
+      17,
+      onAddSource,
+    );
+
+    expect(element.querySelector(".dock-aggregate")?.textContent).toContain(
+      "2 sources · 17 signals",
+    );
+    expect(element.querySelector(".dock-points")?.textContent).toBe("20 pts");
+    expect(element.querySelector(".dock-formats")?.textContent).toBe(
+      "CSV · MCAP",
+    );
+    element.querySelector<HTMLButtonElement>(".dock-add-source")?.click();
+    expect(onAddSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the supported-format hint only for an empty workspace", () => {
+    const element = document.createElement("div");
+    renderDockFooter(element, [], 0, vi.fn());
+    expect(element.querySelector(".dock-formats")?.textContent).toBe(
+      "CSV · MCAP",
+    );
+    expect(element.querySelector(".dock-add-source")?.textContent).toBe(
+      "+ source",
+    );
   });
 });
 

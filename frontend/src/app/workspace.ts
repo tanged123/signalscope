@@ -14,7 +14,6 @@ import type {
   SeriesRef,
   StyleDimension,
   FocusEntry,
-  TimeDomainState,
   NamedSet,
   SourceRecord,
   WorkspaceTab,
@@ -654,20 +653,6 @@ export class WorkspaceModel {
           (binding) => binding.kind !== "set" || binding.set_id !== id,
         );
       }
-    }
-  }
-
-  setSourceAlignment(
-    key: string,
-    domain: TimeDomainState,
-    scale: number,
-    offset: number,
-  ): void {
-    const source = this.session.sources.find((entry) => entry.key === key);
-    if (source !== undefined) {
-      source.time_domain = structuredClone(domain);
-      source.scale = scale;
-      source.offset = offset;
     }
   }
 

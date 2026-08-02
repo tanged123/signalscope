@@ -23,13 +23,13 @@ test("the fixed channel outline filters, selects, and saves a frozen set", async
   await page.locator(".signal-search").fill("velocity_body/*");
   await outline.focus();
   await page.keyboard.press("ControlOrMeta+a");
-  await expect(page.locator(".bulk-bar")).toContainText("2 selected");
+  await expect(page.locator(".sets-save-selection")).toBeEnabled();
 
   await page.locator('[data-action="save"]').click();
   await page.locator(".set-name-input").fill("all velocity");
   await page.locator(".set-name-input").press("Enter");
   await expect(page.locator(".tree-set")).toContainText("▣ 2");
-  await expect(page.locator(".bulk-bar")).toContainText("2 selected");
+  await expect(page.locator(".sets-save-selection")).toBeEnabled();
 });
 
 test("VALUE stays blank until the cursor is active over a plot", async ({

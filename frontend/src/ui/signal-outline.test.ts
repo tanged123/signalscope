@@ -36,22 +36,16 @@ function viewFor(
     configurable: true,
     value: 400,
   });
-  const bulk = document.createElement("div");
   const selection = new SelectionModel();
   const onAddToPanel = vi.fn();
-  const view = new SignalOutlineView(
-    list,
-    selection,
-    {
-      onSelectionChange: vi.fn(),
-      onAddToPanel,
-      onRemoveDerived: vi.fn(),
-      ...callbacks,
-    },
-    bulk,
-  );
+  const view = new SignalOutlineView(list, selection, {
+    onSelectionChange: vi.fn(),
+    onAddToPanel,
+    onRemoveDerived: vi.fn(),
+    ...callbacks,
+  });
   view.setCatalog(catalog);
-  return { list, bulk, selection, view, onAddToPanel };
+  return { list, selection, view, onAddToPanel };
 }
 
 describe("SignalOutlineView", () => {
@@ -66,8 +60,6 @@ describe("SignalOutlineView", () => {
     expect(
       flat.list.querySelectorAll(".signal-outline-row").length,
     ).toBeLessThanOrEqual(36);
-    expect(flat.bulk.parentElement).toBe(flat.list);
-
     const grouped = viewFor(
       Catalog.build(
         Array.from({ length: 1_000 }, (_, index) =>
@@ -84,7 +76,6 @@ describe("SignalOutlineView", () => {
     ).toHaveLength(0);
     group?.querySelector<HTMLButtonElement>(".outline-select")?.click();
     expect(grouped.selection.size()).toBe(1_000);
-    expect(grouped.bulk.hidden).toBe(false);
   });
 
   it("renders fixed columns and keeps VALUE blank without a cursor", () => {
@@ -165,22 +156,13 @@ describe("SignalOutlineView", () => {
     expect(group?.querySelector('[data-column="value"]')?.textContent).toBe("");
   });
 
-  it("exposes source alignment after expanding a channel", () => {
-    const onAlignSource = vi.fn();
-    const { list, view } = viewFor(
+  it("renders selectable source rows without alignment controls or a footer", () => {
+    const { list } = viewFor(
       Catalog.build([signal("run-01", "temp"), signal("run-02", "temp")]),
-      { onAlignSource },
     );
     list.querySelector<HTMLButtonElement>(".outline-caret")?.click();
-    const source = list.querySelector<HTMLElement>('[data-path="run-01/temp"]');
-    const align = source?.querySelector<HTMLButtonElement>(".source-align");
-    align?.click();
-    expect(onAlignSource).toHaveBeenCalledWith("run-01", align);
-
-    view.setNonIdentitySources(new Set(["run-01"]));
-    expect(
-      list.querySelector('[data-path="run-01/temp"] .source-alignment-marker')
-        ?.textContent,
-    ).toBe("≠");
+    expect(list.querySelectorAll(".source-align")).toHaveLength(0);
+    expect(list.querySelectorAll(".source-alignment-marker")).toHaveLength(0);
+    expect(list.querySelector(".outline-bulk-footer")).toBeNull();
   });
 });
