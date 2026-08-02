@@ -2,42 +2,54 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { BUNDLE_DRAG_TYPE } from "./panel";
+import type { SignalSummary } from "../generated/protocol";
+import { Catalog } from "../app/catalog";
 import { SignalTreeView } from "./signal-tree";
 
-describe("SignalTreeView favorites drop", () => {
-  it("favorites a bundle dragged into the favorites section", () => {
+function signal(sourceKey: string, channel: string): SignalSummary {
+  return {
+    signal_id: `${sourceKey}-${channel}`,
+    source_id: sourceKey,
+    source_key: sourceKey,
+    local_path: channel,
+    path: `${sourceKey}/${channel}`,
+    unit: null,
+    point_count: "1",
+    t_min: 0,
+    t_max: 0,
+  };
+}
+
+describe("SignalTreeView sets and channels", () => {
+  it("renders a shared channel and read-only named sets", () => {
     const list = document.createElement("div");
-    const favorites = document.createElement("div");
-    const onToggleFavoriteBundle = vi.fn();
-    const tree = new SignalTreeView(list, favorites, {
+    const sets = document.createElement("div");
+    const onSetSelected = vi.fn();
+    const tree = new SignalTreeView(list, sets, {
       onPlotSignal: vi.fn(),
-      onToggleFavorite: vi.fn(),
-      onToggleFavoriteBundle,
+      onSetSelected,
       onRemoveDerived: vi.fn(),
     });
-    tree.setSignals(["run_01/alt", "run_02/alt"]);
-    tree.setSets([
-      { key: "set-1", label: "Runs", prefixes: ["run_01", "run_02"] },
+    tree.setCatalog(
+      Catalog.build([signal("run-01", "temp"), signal("run-02", "temp")]),
+    );
+    tree.setNamedSets([
+      {
+        id: "set-1",
+        name: "temperature",
+        kind: "query",
+        selector: "temp",
+        refs: [],
+      },
     ]);
 
-    const payload = JSON.stringify({
-      local_path: "alt",
-      member_paths: ["run_01/alt", "run_02/alt"],
-    });
-    const dataTransfer = {
-      types: [BUNDLE_DRAG_TYPE],
-      getData: (type: string) => (type === BUNDLE_DRAG_TYPE ? payload : ""),
-    };
-    const dragover = new Event("dragover", { bubbles: true, cancelable: true });
-    Object.defineProperty(dragover, "dataTransfer", { value: dataTransfer });
-    favorites.dispatchEvent(dragover);
-    expect(dragover.defaultPrevented).toBe(true);
-
-    const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, "dataTransfer", { value: dataTransfer });
-    favorites.dispatchEvent(drop);
-
-    expect(onToggleFavoriteBundle).toHaveBeenCalledWith("alt");
+    expect(list.querySelector(".tree-channel")?.textContent).toContain(
+      "temp — 2 srcs",
+    );
+    expect(sets.textContent).toContain("temperature");
+    sets.querySelector("button")?.dispatchEvent(new MouseEvent("click"));
+    expect(onSetSelected).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "set-1" }),
+    );
   });
 });

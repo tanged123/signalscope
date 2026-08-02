@@ -215,47 +215,6 @@ mod tests {
     }
 
     #[test]
-    fn monte_carlo_demo_forms_one_partial_set() {
-        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/monte_carlo");
-        let mut files = std::fs::read_dir(directory)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect::<Vec<_>>();
-        files.sort();
-        let cancel = CancelToken::default();
-        let candidates = files
-            .iter()
-            .enumerate()
-            .map(|(index, path)| {
-                let mut progress = |_| {};
-                let mut context = DecodeContext {
-                    progress: &mut progress,
-                    cancel: &cancel,
-                };
-                let decoded = CsvDecoder.decode(path, &mut context).unwrap();
-                (
-                    SourceKey(uuid::Uuid::from_u128(index as u128 + 1)),
-                    decoded
-                        .signals
-                        .into_iter()
-                        .map(|signal| signal.local_path)
-                        .collect(),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        let sets = crate::sets::propose_sets(&candidates);
-
-        assert_eq!(files.len(), 8);
-        assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].members.len(), 8);
-        assert_eq!(
-            sets[0].missing_for(candidates[7].0),
-            &std::collections::BTreeSet::from(["temperature".to_owned()])
-        );
-    }
-
-    #[test]
     fn csv_decode_reports_monotonic_progress_ending_at_one() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "time,value").unwrap();

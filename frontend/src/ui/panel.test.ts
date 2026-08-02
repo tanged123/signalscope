@@ -4,18 +4,18 @@ import type {
   SampleSeries,
   SignalSummary,
 } from "../generated/protocol";
-import type { PanelState, SeriesState } from "../generated/session";
+import type { PanelState } from "../generated/session";
 import type { PathRenderOptions, PlotPath } from "../render/canvas-renderer";
+import { Catalog } from "../app/catalog";
 
 import { AppShell } from "./app-shell";
 import {
-  BUNDLE_DRAG_TYPE,
   MAX_SERIES_PER_PANEL,
   MAXIMIZE_GLYPH,
   PanelView,
-  SIGNAL_DRAG_TYPE,
-  bundleXSignal,
-  parseBundlePayload,
+  parseSignalPayload,
+  type RenderPanelState,
+  type RenderSeries,
   xChipLabel,
 } from "./panel";
 
@@ -51,21 +51,81 @@ function localPathFor(path: string): string | null {
 
 const xyCallbacks = { localPathFor, sourceKeyFor };
 
-function visible(path: string): SeriesState {
-  return { path, color_slot: 1, dash: "solid", width: 1.4, visible: true };
+function visible(path: string): RenderSeries {
+  return {
+    ref: {
+      source_key: sourceKeyFor(path) ?? "",
+      channel: localPathFor(path) ?? path,
+    },
+    path,
+    color_slot: 1,
+    dash: "solid",
+    width: 1.4,
+    visible: true,
+    focused: true,
+  };
 }
 
-function xyState(xSignal: string, series: SeriesState[]): PanelState {
+function xyState(xSignal: string, series: RenderSeries[]): RenderPanelState {
   return {
     id: "panel",
     title: "XY",
     mode: "xy",
     axis_style: "gutter",
+    color_axis: "none",
+    color_by: "source",
+    ghost_mode: "all",
+    split_by: "none",
     x_signal: xSignal,
     color_signal: null,
     color_by_time: false,
     series,
-    highlighted_sources: [],
+    y_range: null,
+    x_range: null,
+    x_label: null,
+    y_label: null,
+    c_label: null,
+    time_window: null,
+    annotations: [],
+    show_stats: false,
+  };
+}
+
+function sessionXyState(
+  xSignal: string,
+  series: RenderSeries[],
+  colorSignal: string | null,
+): PanelState {
+  const ref = (path: string) => {
+    const [prefix, ...channel] = path.split("/");
+    const sourcePrefix = prefix ?? "";
+    return {
+      source_key:
+        sourceKeyFor(`${sourcePrefix}/${channel.join("/")}`) ?? sourcePrefix,
+      channel: channel.join("/"),
+    };
+  };
+  return {
+    id: "panel",
+    title: "XY",
+    mode: "xy",
+    axis_style: "gutter",
+    x_ref: ref(xSignal),
+    color_axis: colorSignal === null ? "none" : "signal",
+    color_ref: colorSignal === null ? null : ref(colorSignal),
+    bindings: [
+      {
+        kind: "pick",
+        selector: null,
+        refs: series.map((entry) => ref(entry.path)),
+        set_id: null,
+      },
+    ],
+    color_by: "source",
+    overrides: [],
+    focus: [],
+    ghost_mode: "all",
+    split_by: "none",
     y_range: null,
     x_range: null,
     x_label: null,
@@ -93,7 +153,7 @@ interface PanelProbe {
     y: { min: number; max: number };
   };
   renderXy(
-    state: PanelState,
+    state: RenderPanelState,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number;
@@ -138,17 +198,25 @@ function summary(path: string): SignalSummary {
 }
 
 interface AppShellProbe {
-  workspace: { derived(): { path: string }[] };
+  workspace: {
+    derived(): { path: string }[];
+    namedSets(): never[];
+  };
   signals: SignalSummary[];
   signalsByPath: Map<string, SignalSummary>;
+  catalog: Catalog;
   panelSignalIds(panel: PanelState): { ids: string[]; missing: string[] };
 }
 
 function appShellProbe(...signals: SignalSummary[]): AppShellProbe {
   const shell = Object.create(AppShell.prototype) as AppShellProbe;
-  shell.workspace = { derived: () => [{ path: "derived/score" }] };
+  shell.workspace = {
+    derived: () => [{ path: "derived/score" }],
+    namedSets: () => [],
+  };
   shell.signals = signals;
   shell.signalsByPath = new Map(signals.map((entry) => [entry.path, entry]));
+  shell.catalog = Catalog.build(signals);
   return shell;
 }
 
@@ -161,25 +229,12 @@ describe("panel series", () => {
     expect(MAX_SERIES_PER_PANEL).toBe(64);
   });
 
-  it("bundle drag type is distinct from the signal drag type", () => {
-    expect(BUNDLE_DRAG_TYPE).not.toBe(SIGNAL_DRAG_TYPE);
-    expect(BUNDLE_DRAG_TYPE.startsWith("application/x-signalscope")).toBe(true);
-  });
-
-  it("parses only string-array bundle member payloads", () => {
+  it("parses signal drag paths", () => {
     expect(
-      parseBundlePayload(
-        JSON.stringify({
-          local_path: "alt",
-          member_paths: ["a/alt", "b/alt"],
-        }),
-      ),
-    ).toEqual({ member_paths: ["a/alt", "b/alt"] });
-    expect(parseBundlePayload("not json")).toBeNull();
-    expect(
-      parseBundlePayload(JSON.stringify({ member_paths: [1] })),
-    ).toBeNull();
-    expect(parseBundlePayload(JSON.stringify({}))).toBeNull();
+      parseSignalPayload(JSON.stringify({ paths: ["a/alt", "b/alt"] })),
+    ).toEqual(["a/alt", "b/alt"]);
+    expect(parseSignalPayload("not json")).toEqual(["not json"]);
+    expect(parseSignalPayload(JSON.stringify({ paths: [1] }))).toEqual([]);
   });
 
   it("omits the trace when a source lacks the X local path instead of cross-pairing", () => {
@@ -327,12 +382,11 @@ describe("panel series", () => {
       summary("run_02/temp"),
       summary("run_02/alt"),
     );
-    const state = xyState("run_01/t", [
-      visible("run_01/alt"),
-      visible("run_02/alt"),
-      visible("derived/score"),
-    ]);
-    state.color_signal = "run_01/temp";
+    const state = sessionXyState(
+      "run_01/t",
+      [visible("run_01/alt"), visible("run_02/alt"), visible("derived/score")],
+      "run_01/temp",
+    );
 
     expect(shell.panelSignalIds(state)).toEqual({
       ids: [
@@ -343,7 +397,7 @@ describe("panel series", () => {
         "id:run_01/temp",
         "id:run_02/temp",
       ],
-      missing: ["derived/score"],
+      missing: [],
     });
   });
 
@@ -358,12 +412,5 @@ describe("panel series", () => {
     expect(
       xChipLabel("run_01/temp", [visible("run_01/alt")], xyCallbacks),
     ).toBe("run_01/temp");
-  });
-
-  it("uses a bundle's sorted-first member as X when dropped on the strip", () => {
-    expect(bundleXSignal(["run_02/alt", "run_01/alt"], true)).toBe(
-      "run_01/alt",
-    );
-    expect(bundleXSignal(["run_02/alt", "run_01/alt"], false)).toBeUndefined();
   });
 });

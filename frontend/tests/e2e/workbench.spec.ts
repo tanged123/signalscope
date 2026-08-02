@@ -164,11 +164,24 @@ test("panel legend keeps controls visible and exposes overflow", async ({
       onSplitDown: () => {},
       onMaximize: () => {},
       onSelectMode: () => {},
-      onDropSignal: () => {},
-      onDropBundle: () => {},
+      onDropSignals: () => {},
       onToggleHighlight: () => {},
       localPathFor: () => null,
       sourceKeyFor: () => null,
+      pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
+      resolveSeries: (state) =>
+        state.bindings
+          .flatMap((binding) => binding.refs)
+          .map((ref, index) => ({
+            ref,
+            path: `${ref.source_key}/${ref.channel}`,
+            colorSlot: index + 1,
+            dash: "solid" as const,
+            width: 1.4,
+            opacity: 1,
+            visible: true,
+            focused: true,
+          })),
       onSetXSignal: () => {},
       onSetColorSignal: () => {},
       onClearXSignal: () => {},
@@ -200,17 +213,25 @@ test("panel legend keeps controls visible and exposes overflow", async ({
         title: "Many series",
         mode: "time",
         axis_style: "gutter",
-        x_signal: null,
-        color_signal: null,
-        color_by_time: false,
-        series: Array.from({ length: 40 }, (_, index) => ({
-          path: `monte_carlo/run_${String(index + 1)}`,
-          color_slot: index + 1,
-          dash: "solid" as const,
-          width: 1.4,
-          visible: true,
-        })),
-        highlighted_sources: [],
+        x_ref: null,
+        color_axis: "none",
+        color_ref: null,
+        bindings: [
+          {
+            kind: "pick" as const,
+            selector: null,
+            refs: Array.from({ length: 40 }, (_, index) => ({
+              source_key: "monte_carlo",
+              channel: `run_${String(index + 1)}`,
+            })),
+            set_id: null,
+          },
+        ],
+        color_by: "source",
+        overrides: [],
+        focus: [],
+        ghost_mode: "all",
+        split_by: "none",
         y_range: null,
         x_range: null,
         x_label: null,
@@ -378,7 +399,7 @@ test("formula component creates and recalls accepted formulas", async ({
   await input.press("Enter");
   await expect(host.locator(".formula-error")).toContainText("unknown signal");
   await expect(host.locator(".formula-error-guidance")).toHaveText(
-    "Signal and bundle references use quoted paths. Drag from the tree to insert.",
+    "Signal references use quoted paths. Drag from the tree to insert.",
   );
   await expect(input).toHaveValue("derived/bad = 'missing/path'");
 
@@ -542,8 +563,11 @@ test("signal tree toggles and collapses through its resize edge", async ({
   expect(Number(await seam.getAttribute("aria-valuenow"))).toBeGreaterThan(220);
 });
 
-test("tree filters, favorites, and drag-to-plot", async ({ page }) => {
+test("tree filters, sets, and drag-to-plot", async ({ page }) => {
   await page.goto("/");
+  await expect(page.locator(".tree-sets")).toContainText(
+    "Saved sets appear here",
+  );
 
   await page.keyboard.press("/");
   await expect(page.locator(".signal-search")).toBeFocused();
@@ -556,21 +580,7 @@ test("tree filters, favorites, and drag-to-plot", async ({ page }) => {
   await expect(firstLeaf).toHaveAttribute("role", "button");
   await expect(firstLeaf).toHaveAccessibleName(/^Plot /);
 
-  await firstLeaf.locator(".tree-star").click();
-  await expect(page.locator(".tree-favorites .tree-leaf")).toHaveCount(1);
-  const favoriteTransfer = await page.evaluateHandle(() => new DataTransfer());
-  await page
-    .locator(".tree-scroll .tree-leaf")
-    .nth(1)
-    .dispatchEvent("dragstart", { dataTransfer: favoriteTransfer });
-  await page.locator(".tree-favorites").dispatchEvent("dragover", {
-    dataTransfer: favoriteTransfer,
-  });
-  await page.locator(".tree-favorites").dispatchEvent("drop", {
-    dataTransfer: favoriteTransfer,
-  });
-  await expect(page.locator(".tree-favorites .tree-leaf")).toHaveCount(2);
-
+  await firstLeaf.focus();
   await page.keyboard.press("n");
   const enterTarget = page.locator(".panel").last();
   await firstLeaf.focus();

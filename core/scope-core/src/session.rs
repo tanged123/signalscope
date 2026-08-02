@@ -31,12 +31,11 @@ impl Default for Session {
                 panels: Vec::new(),
                 layout: Vec::new(),
             }],
-            favorites: Vec::new(),
-            favorite_bundles: Vec::new(),
+            named_sets: Vec::new(),
+            channel_map: Vec::new(),
             derived: Vec::new(),
             derived_bundles: Vec::new(),
             sources: Vec::new(),
-            source_sets: Vec::new(),
         }
     }
 }
@@ -197,6 +196,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(16);
             migrate(16, value)
         }
+        16 => {
+            migrate_v16_bindings(&mut value);
+            value["schema_version"] = serde_json::json!(17);
+            migrate(17, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -279,6 +283,236 @@ fn migrate_v10_sources(value: &mut serde_json::Value) {
         object.remove("source_paths");
         object.insert("sources".into(), serde_json::Value::Array(records));
     }
+}
+
+const DERIVED_SOURCE_KEY: &str = "derived";
+
+/// Longest-prefix match of a flat path against source prefixes; derived
+/// paths map to the reserved derived source key.
+fn path_to_ref(path: &str, prefixes: &[(String, String)]) -> Option<serde_json::Value> {
+    if let Some(rest) = path.strip_prefix("derived/") {
+        return Some(serde_json::json!({
+            "source_key": DERIVED_SOURCE_KEY,
+            "channel": rest,
+        }));
+    }
+    prefixes
+        .iter()
+        .filter(|(prefix, _)| {
+            path.len() > prefix.len() + 1
+                && path.starts_with(prefix.as_str())
+                && path.as_bytes()[prefix.len()] == b'/'
+        })
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map(|(prefix, key)| {
+            serde_json::json!({
+                "source_key": key,
+                "channel": &path[prefix.len() + 1..],
+            })
+        })
+}
+
+fn migrate_v16_bindings(value: &mut serde_json::Value) {
+    let prefixes: Vec<(String, String)> = value
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| {
+                    Some((
+                        source.get("prefix")?.as_str()?.to_owned(),
+                        source.get("key")?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for_each_panel(value, |panel| {
+        let series = panel
+            .remove("series")
+            .unwrap_or_else(|| serde_json::json!([]));
+        let mut refs = Vec::new();
+        let mut overrides = Vec::new();
+        for entry in series.as_array().into_iter().flatten() {
+            let Some(path) = entry.get("path").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let Some(target) = path_to_ref(path, &prefixes) else {
+                continue;
+            };
+            refs.push(target.clone());
+            overrides.push(serde_json::json!({
+                "target_ref": target,
+                "target_selector": null,
+                "color_slot": entry.get("color_slot").cloned().unwrap_or_else(|| serde_json::json!(1)),
+                "dash": entry.get("dash").cloned().unwrap_or_else(|| serde_json::json!("solid")),
+                "width": entry.get("width").cloned().unwrap_or_else(|| serde_json::json!(1.4)),
+                "opacity": null,
+                "visible": entry.get("visible").cloned().unwrap_or_else(|| serde_json::json!(true)),
+            }));
+        }
+        panel.insert(
+            "bindings".into(),
+            serde_json::json!([{
+                "kind": "pick",
+                "selector": null,
+                "refs": refs,
+                "set_id": null
+            }]),
+        );
+        panel.insert("overrides".into(), serde_json::Value::Array(overrides));
+
+        let highlighted = panel
+            .remove("highlighted_sources")
+            .unwrap_or_else(|| serde_json::json!([]));
+        let focus: Vec<serde_json::Value> = highlighted
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("path").and_then(serde_json::Value::as_str))
+            .filter_map(|path| path_to_ref(path, &prefixes))
+            .map(|target| {
+                serde_json::json!({
+                    "kind": "series",
+                    "ref": target,
+                    "source_key": null,
+                    "channel": null
+                })
+            })
+            .collect();
+        panel.insert("focus".into(), serde_json::Value::Array(focus));
+
+        let x_ref = panel
+            .remove("x_signal")
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .and_then(|path| path_to_ref(&path, &prefixes))
+            .unwrap_or(serde_json::Value::Null);
+        panel.insert("x_ref".into(), x_ref);
+
+        let by_time = panel
+            .remove("color_by_time")
+            .and_then(|value| value.as_bool())
+            == Some(true);
+        let color_ref = panel
+            .remove("color_signal")
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .and_then(|path| path_to_ref(&path, &prefixes))
+            .unwrap_or(serde_json::Value::Null);
+        let axis = if by_time {
+            "time"
+        } else if color_ref.is_null() {
+            "none"
+        } else {
+            "signal"
+        };
+        panel.insert("color_axis".into(), serde_json::json!(axis));
+        panel.insert("color_ref".into(), color_ref);
+        panel.insert("color_by".into(), serde_json::json!("source"));
+        panel.insert("ghost_mode".into(), serde_json::json!("all"));
+        panel.insert("split_by".into(), serde_json::json!("none"));
+    });
+
+    let object = value.as_object_mut().expect("session object");
+    let mut named_sets = Vec::new();
+    for path in take_string_array(object, "favorites") {
+        if let Some(target) = path_to_ref(&path, &prefixes) {
+            named_sets.push(serde_json::json!({
+                "id": format!("set-fav-{}", named_sets.len() + 1),
+                "name": path,
+                "kind": "pick",
+                "selector": null,
+                "refs": [target]
+            }));
+        }
+    }
+    for local in take_string_array(object, "favorite_bundles") {
+        named_sets.push(serde_json::json!({
+            "id": format!("set-fav-{}", named_sets.len() + 1),
+            "name": local,
+            "kind": "query",
+            "selector": local,
+            "refs": []
+        }));
+    }
+    object.insert("named_sets".into(), serde_json::Value::Array(named_sets));
+    object.insert("channel_map".into(), serde_json::json!([]));
+
+    let sets = object
+        .remove("source_sets")
+        .unwrap_or_else(|| serde_json::json!([]));
+    let mut alignment = std::collections::BTreeMap::new();
+    for set in sets.as_array().into_iter().flatten() {
+        let domain = set
+            .get("time_domain")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        for member in set
+            .get("members")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(key) = member.get("source_key").and_then(serde_json::Value::as_str) {
+                alignment.insert(
+                    key.to_owned(),
+                    (
+                        domain.clone(),
+                        member
+                            .get("scale")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!(1.0)),
+                        member
+                            .get("offset")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!(0.0)),
+                    ),
+                );
+            }
+        }
+    }
+    if let Some(sources) = object
+        .get_mut("sources")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for source in sources {
+            let key = source
+                .get("key")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let (domain, scale, offset) = alignment.remove(&key).unwrap_or((
+                serde_json::Value::Null,
+                serde_json::json!(1.0),
+                serde_json::json!(0.0),
+            ));
+            source["time_domain"] = if domain.is_null() {
+                serde_json::json!({
+                    "unit": "seconds",
+                    "origin": "relative",
+                    "alignment_origin": 0.0
+                })
+            } else {
+                domain
+            };
+            source["scale"] = scale;
+            source["offset"] = offset;
+        }
+    }
+}
+
+fn take_string_array(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Vec<String> {
+    object
+        .remove(key)
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| entry.as_str().map(str::to_owned))
+        .collect()
 }
 
 fn migrate_v13_ensembles(value: &mut serde_json::Value) {
@@ -491,7 +725,103 @@ mod tests {
             provider_id: None,
             decode_provenance: None,
             reconcile_legacy: false,
+            time_domain: TimeDomainState {
+                unit: TimeUnitState::Seconds,
+                origin: OriginKindState::Relative,
+                alignment_origin: 0.0,
+            },
+            scale: 1.0,
+            offset: 0.0,
         }
+    }
+
+    fn v16_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "app": "signalscope", "schema_version": 16, "theme": "dark",
+            "linked_time": {"t0": 0.0, "t1": 1.0, "linked": true, "paused": false, "cursorT": null, "mode": "fixed"},
+            "active_tab_id": "workspace-1",
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "layout": [{"height": 1.0, "panels": [{"panel_id": "panel-1", "width": 1.0}]}],
+                "panels": [{
+                    "id": "panel-1", "title": "Panel 1", "mode": "time", "axis_style": "gutter",
+                    "x_signal": "run/temp", "color_signal": null, "color_by_time": true,
+                    "series": [
+                        {"path": "run/pressure", "color_slot": 2, "dash": "dash", "width": 2.0, "visible": false},
+                        {"path": "derived/err", "color_slot": 1, "dash": "solid", "width": 1.4, "visible": true},
+                        {"path": "orphan/x", "color_slot": 3, "dash": "solid", "width": 1.4, "visible": true}
+                    ],
+                    "highlighted_sources": [{"local_path": "pressure", "path": "run/pressure"}],
+                    "y_range": null, "x_range": null, "x_label": null, "y_label": null, "c_label": null,
+                    "time_window": null, "annotations": [], "show_stats": false
+                }]
+            }],
+            "favorites": ["run/temp"], "favorite_bundles": ["imu/accel/x"],
+            "derived": [], "derived_bundles": [],
+            "sources": [{"key": "11111111-1111-1111-1111-111111111111", "path": "/data/run.csv",
+                         "prefix": "run", "provider_id": null, "decode_provenance": null, "reconcile_legacy": false}],
+            "source_sets": [{
+                "key": "22222222-2222-2222-2222-222222222222", "label": "Set 1", "generation": 3,
+                "time_domain": {"unit": "milliseconds", "origin": "relative", "alignment_origin": 0.0},
+                "members": [{"source_key": "11111111-1111-1111-1111-111111111111",
+                             "missing": [], "scale": 0.001, "offset": 0.5}]
+            }]
+        })
+    }
+
+    #[test]
+    fn v16_series_become_a_pick_binding_with_overrides() {
+        let session = from_json(&v16_fixture().to_string()).unwrap();
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.bindings.len(), 1);
+        let binding = &panel.bindings[0];
+        assert!(matches!(binding.kind, BindingKind::Pick));
+        assert_eq!(binding.refs.len(), 2);
+        assert_eq!(
+            binding.refs[0].source_key,
+            "11111111-1111-1111-1111-111111111111"
+        );
+        assert_eq!(binding.refs[0].channel, "pressure");
+        assert_eq!(binding.refs[1].source_key, "derived");
+        assert_eq!(binding.refs[1].channel, "err");
+        let first = &panel.overrides[0];
+        assert_eq!(first.target_ref.as_ref().unwrap().channel, "pressure");
+        assert_eq!(first.color_slot, Some(2));
+        assert_eq!(first.dash, Some(DashStyle::Dash));
+        assert_eq!(first.visible, Some(false));
+    }
+
+    #[test]
+    fn v16_axes_highlights_and_favorites_migrate() {
+        let session = from_json(&v16_fixture().to_string()).unwrap();
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(panel.x_ref.as_ref().unwrap().channel, "temp");
+        assert!(matches!(panel.color_axis, ColorAxis::Time));
+        assert!(panel.color_ref.is_none());
+        assert_eq!(panel.focus.len(), 1);
+        assert!(matches!(panel.focus[0].kind, FocusKind::Series));
+        assert_eq!(panel.focus[0].r#ref.as_ref().unwrap().channel, "pressure");
+        assert_eq!(session.named_sets.len(), 2);
+        assert!(matches!(session.named_sets[0].kind, NamedSetKind::Pick));
+        assert_eq!(session.named_sets[0].name, "run/temp");
+        assert!(matches!(session.named_sets[1].kind, NamedSetKind::Query));
+        assert_eq!(
+            session.named_sets[1].selector.as_deref(),
+            Some("imu/accel/x")
+        );
+    }
+
+    #[test]
+    fn v16_set_member_alignment_lands_on_the_source_record() {
+        let session = from_json(&v16_fixture().to_string()).unwrap();
+        let source = &session.sources[0];
+        assert!((source.scale - 0.001).abs() < f64::EPSILON);
+        assert!((source.offset - 0.5).abs() < f64::EPSILON);
+        assert!(matches!(
+            source.time_domain.unit,
+            TimeUnitState::Milliseconds
+        ));
     }
 
     #[test]
@@ -502,8 +832,25 @@ mod tests {
                 expr: "hypot('imu/vx', 'imu/vy')".into(),
             }],
             sources: vec![source("/data/run.csv")],
-            favorites: vec!["imu/vx".into()],
-            favorite_bundles: vec!["imu/accel/x".into()],
+            named_sets: vec![
+                NamedSet {
+                    id: "set-1".into(),
+                    name: "imu/vx".into(),
+                    kind: NamedSetKind::Pick,
+                    selector: None,
+                    refs: vec![SeriesRef {
+                        source_key: source("/data/run.csv").key,
+                        channel: "vx".into(),
+                    }],
+                },
+                NamedSet {
+                    id: "set-2".into(),
+                    name: "imu/accel/x".into(),
+                    kind: NamedSetKind::Query,
+                    selector: Some("imu/accel/x".into()),
+                    refs: Vec::new(),
+                },
+            ],
             ..Session::default()
         };
         let current = format!(
@@ -574,17 +921,34 @@ mod tests {
                     title: "Body velocity".into(),
                     mode: PanelMode::Time,
                     axis_style: AxisStyle::Gutter,
-                    x_signal: None,
-                    color_signal: None,
-                    color_by_time: false,
-                    series: vec![SeriesState {
-                        path: "rocket/velocity_body/x".into(),
-                        color_slot: 1,
-                        dash: DashStyle::Solid,
-                        width: 1.5,
-                        visible: true,
+                    x_ref: None,
+                    color_axis: ColorAxis::None,
+                    color_ref: None,
+                    bindings: vec![Binding {
+                        kind: BindingKind::Pick,
+                        selector: None,
+                        refs: vec![SeriesRef {
+                            source_key: "rocket".into(),
+                            channel: "velocity_body/x".into(),
+                        }],
+                        set_id: None,
                     }],
-                    highlighted_sources: Vec::new(),
+                    color_by: StyleDimension::Source,
+                    overrides: vec![SeriesOverride {
+                        target_ref: Some(SeriesRef {
+                            source_key: "rocket".into(),
+                            channel: "velocity_body/x".into(),
+                        }),
+                        target_selector: None,
+                        color_slot: Some(1),
+                        dash: Some(DashStyle::Solid),
+                        width: Some(1.5),
+                        opacity: None,
+                        visible: Some(true),
+                    }],
+                    focus: Vec::new(),
+                    ghost_mode: GhostMode::All,
+                    split_by: SplitDimension::None,
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -647,14 +1011,21 @@ mod tests {
         });
         let session = from_json(&json.to_string()).expect("v13 migrates");
         let panel = &session.tabs[0].panels[0];
-        let paths: Vec<&str> = panel
-            .series
-            .iter()
-            .map(|series| series.path.as_str())
-            .collect();
-        assert_eq!(paths, vec!["run_01/alt", "run_02/alt"]);
-        assert_eq!(panel.series[1].color_slot, 2);
-        assert!(panel.highlighted_sources.is_empty());
+        assert_eq!(
+            panel.bindings[0].refs,
+            vec![
+                SeriesRef {
+                    source_key: "k1".into(),
+                    channel: "alt".into(),
+                },
+                SeriesRef {
+                    source_key: "k2".into(),
+                    channel: "alt".into(),
+                }
+            ]
+        );
+        assert_eq!(panel.overrides[1].color_slot, Some(2));
+        assert!(panel.focus.is_empty());
     }
 
     #[test]
@@ -675,8 +1046,8 @@ mod tests {
                 }]}]
         });
         let session = from_json(&json.to_string()).expect("v13 migrates");
-        assert_eq!(session.tabs[0].panels[0].series.len(), 1);
-        assert!(session.tabs[0].panels[0].highlighted_sources.is_empty());
+        assert!(session.tabs[0].panels[0].bindings[0].refs.is_empty());
+        assert!(session.tabs[0].panels[0].focus.is_empty());
     }
 
     #[test]
@@ -715,42 +1086,6 @@ mod tests {
     }
 
     #[test]
-    fn v11_sessions_gain_an_empty_set_list_and_round_trip_membership() {
-        let mut value = serde_json::to_value(Session::default()).unwrap();
-        value["schema_version"] = serde_json::json!(11);
-        value.as_object_mut().unwrap().remove("source_sets");
-        let json = serde_json::to_string(&value).unwrap();
-        let session = from_json(&json).expect("v11 migrates");
-        assert!(session.source_sets.is_empty());
-
-        let with_sets = Session {
-            source_sets: vec![SourceSetState {
-                key: uuid::Uuid::nil().to_string(),
-                label: "Runs".into(),
-                generation: 4,
-                time_domain: TimeDomainState {
-                    unit: TimeUnitState::Seconds,
-                    origin: OriginKindState::Relative,
-                    alignment_origin: 0.0,
-                },
-                members: vec![SetMemberState {
-                    source_key: uuid::Uuid::nil().to_string(),
-                    missing: vec!["imu/ay".into()],
-                    scale: 1.0,
-                    offset: 0.0,
-                }],
-            }],
-            ..session
-        };
-        let restored = from_json(&serde_json::to_string(&with_sets).unwrap()).unwrap();
-        assert_eq!(restored.source_sets, with_sets.source_sets);
-        assert_eq!(
-            restored.source_sets[0].members[0].missing,
-            vec!["imu/ay".to_owned()]
-        );
-    }
-
-    #[test]
     fn v14_sessions_gain_empty_bundle_favorites() {
         let mut value = serde_json::to_value(Session::default()).expect("serializes");
         value["schema_version"] = serde_json::json!(14);
@@ -759,7 +1094,7 @@ mod tests {
             .expect("session object")
             .remove("favorite_bundles");
         let session = from_json(&value.to_string()).expect("v14 migrates");
-        assert!(session.favorite_bundles.is_empty());
+        assert!(session.named_sets.is_empty());
     }
 
     #[test]
@@ -841,7 +1176,7 @@ mod tests {
         assert_eq!(session.tabs[0].layout.len(), 1);
         assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
         assert!((session.tabs[0].layout[0].panels[0].width - 1.0).abs() < f64::EPSILON);
-        assert!(session.favorites.is_empty());
+        assert!(session.named_sets.is_empty());
     }
 
     #[test]
@@ -862,7 +1197,7 @@ mod tests {
         assert_eq!(session.tabs[0].focused_panel_id.as_deref(), Some("panel-a"));
         assert_eq!(session.tabs[0].panels[0].id, "panel-a");
         assert_eq!(session.tabs[0].layout[0].panels[0].panel_id, "panel-a");
-        assert_eq!(session.favorites, ["rocket/velocity"]);
+        assert!(session.named_sets.is_empty());
     }
 
     #[test]
@@ -1031,8 +1366,8 @@ mod tests {
         .to_string();
         let session = from_json(&json).expect("v8 session migrates");
         let panel = &session.tabs[0].panels[0];
-        assert!(panel.color_by_time);
-        assert_eq!(panel.color_signal, None);
+        assert!(matches!(panel.color_axis, ColorAxis::Time));
+        assert_eq!(panel.color_ref, None);
         assert_eq!(session.tabs[0].maximized_panel_id, None);
     }
 

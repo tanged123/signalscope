@@ -1,5 +1,6 @@
 import type {
   Annotation,
+  Binding,
   DashStyle,
   DerivedBundleState,
   DerivedSignal,
@@ -8,7 +9,11 @@ import type {
   PanelMode,
   PanelState,
   Session,
-  SourceSetState,
+  SeriesOverride,
+  SeriesRef,
+  FocusEntry,
+  TimeDomainState,
+  NamedSet,
   SourceRecord,
   WorkspaceTab,
 } from "../generated/session";
@@ -40,12 +45,11 @@ export function emptySession(): Session {
     },
     active_tab_id: "workspace-1",
     tabs: [createWorkspaceTab(1)],
-    favorites: [],
-    favorite_bundles: [],
+    named_sets: [],
+    channel_map: [],
     derived: [],
     derived_bundles: [],
     sources: [],
-    source_sets: [],
   };
 }
 
@@ -69,10 +73,6 @@ export class WorkspaceModel {
 
   snapshot(): Readonly<Session> {
     return this.session;
-  }
-
-  setSourceSets(sets: SourceSetState[]): void {
-    this.session.source_sets = structuredClone(sets);
   }
 
   /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
@@ -201,14 +201,6 @@ export class WorkspaceModel {
     }
   }
 
-  favorites(): readonly string[] {
-    return this.session.favorites;
-  }
-
-  favoriteBundles(): readonly string[] {
-    return this.session.favorite_bundles;
-  }
-
   derived(): readonly DerivedSignal[] {
     return this.session.derived;
   }
@@ -246,27 +238,19 @@ export class WorkspaceModel {
     );
   }
 
-  removeSignal(path: string): void {
+  removeSignalRef(ref: SeriesRef, path?: string): void {
     this.session.derived = this.session.derived.filter(
       (entry) => entry.path !== path,
     );
-    this.session.favorites = this.session.favorites.filter(
-      (favorite) => favorite !== path,
-    );
+    this.session.named_sets = this.session.named_sets
+      .map((set) => ({
+        ...set,
+        refs: set.refs.filter((entry) => !sameRef(entry, ref)),
+      }))
+      .filter((set) => set.kind !== "pick" || set.refs.length > 0);
     for (const tab of this.session.tabs) {
       for (const panel of tab.panels) {
-        panel.series = panel.series.filter((series) => series.path !== path);
-        panel.annotations = panel.annotations.filter(
-          (annotation) => annotation.series_path !== path,
-        );
-        if (panel.x_signal === path) {
-          panel.x_signal = null;
-          panel.x_range = null;
-        }
-        if (panel.color_signal === path) {
-          panel.color_signal = null;
-          panel.color_by_time = false;
-        }
+        this.removeSeriesRef(panel.id, ref, path);
       }
     }
   }
@@ -401,99 +385,198 @@ export class WorkspaceModel {
     if (panel !== undefined) panel.mode = mode;
   }
 
-  setXSignal(id: string, path: string | null): void {
-    const panel = this.panel(id);
-    if (panel === undefined) return;
-    // The outgoing x signal returns to the plotted series, and the incoming
-    // one leaves them: an axis is never also a series.
-    if (panel.x_signal !== null && panel.x_signal !== path) {
-      const restored = panel.x_signal;
-      if (!panel.series.some((series) => series.path === restored)) {
-        this.addSeries(id, restored);
-      }
-    }
-    if (path !== null) this.removeSeries(id, path);
-    panel.x_signal = path;
-    panel.x_range = null;
-    panel.y_range = null;
-    panel.annotations = [];
-  }
-
   /** Enters XY mode, adopting the first plotted series as the x axis. */
   promoteSeriesToX(id: string): void {
     const panel = this.panel(id);
-    if (panel === undefined || panel.x_signal !== null) return;
-    const first = panel.series[0];
-    if (first !== undefined) this.setXSignal(id, first.path);
-  }
-
-  setColorSignal(id: string, path: string | null): void {
-    const panel = this.panel(id);
-    if (panel === undefined) return;
-    panel.color_signal = path;
-    panel.color_by_time = false;
+    if (panel === undefined || panel.x_ref !== null) return;
+    const first = panel.bindings.flatMap((binding) => binding.refs)[0];
+    if (first !== undefined) this.setXRef(id, first);
   }
 
   setColorByTime(id: string): void {
     const panel = this.panel(id);
     if (panel === undefined) return;
-    panel.color_signal = null;
-    panel.color_by_time = true;
+    panel.color_ref = null;
+    panel.color_axis = "time";
   }
 
-  addSeries(panelId: string, path: string): boolean {
+  toggleSeriesVisible(panelId: string, ref: SeriesRef): void {
+    const override = this.overrideFor(this.panel(panelId), ref);
+    if (override !== undefined) override.visible = !(override.visible ?? true);
+  }
+
+  addSeriesRef(panelId: string, ref: SeriesRef): boolean {
     const panel = this.panel(panelId);
-    if (
-      panel === undefined ||
-      panel.series.some((series) => series.path === path)
-    ) {
-      return false;
-    }
-    const used = new Set(panel.series.map((series) => series.color_slot));
-    let slot = 1;
-    while (used.has(slot)) slot += 1;
-    panel.series.push({
-      path,
-      color_slot: slot,
+    if (panel === undefined) return false;
+    const binding =
+      panel.bindings.find((entry) => entry.kind === "pick") ??
+      this.createPickBinding(panel);
+    if (binding.refs.some((entry) => sameRef(entry, ref))) return false;
+    binding.refs.push({ ...ref });
+    const used = new Set(
+      panel.overrides.flatMap((entry) =>
+        entry.color_slot === null ? [] : [entry.color_slot],
+      ),
+    );
+    let colorSlot = 1;
+    while (used.has(colorSlot)) colorSlot += 1;
+    panel.overrides.push({
+      target_ref: { ...ref },
+      target_selector: null,
+      color_slot: colorSlot,
       dash: "solid",
       width: 1.4,
+      opacity: null,
       visible: true,
     });
     return true;
   }
 
-  addSeriesBatch(panelId: string, paths: readonly string[]): boolean {
-    let added = false;
-    for (const path of paths) {
-      if (this.addSeries(panelId, path)) added = true;
-    }
-    return added;
-  }
-
-  toggleSeriesVisible(panelId: string, path: string): void {
-    const series = this.panel(panelId)?.series.find(
-      (entry) => entry.path === path,
+  addSeriesRefs(panelId: string, refs: readonly SeriesRef[]): boolean {
+    return refs.reduce(
+      (added, ref) => this.addSeriesRef(panelId, ref) || added,
+      false,
     );
-    if (series !== undefined) series.visible = !series.visible;
   }
 
-  toggleHighlight(panelId: string, path: string, localPath: string): void {
+  removeSeriesRef(panelId: string, ref: SeriesRef, path?: string): void {
+    const panel = this.session.tabs
+      .flatMap((tab) => tab.panels)
+      .find((entry) => entry.id === panelId);
+    if (panel === undefined) return;
+    panel.bindings = panel.bindings
+      .map((binding) =>
+        binding.kind === "pick"
+          ? {
+              ...binding,
+              refs: binding.refs.filter((entry) => !sameRef(entry, ref)),
+            }
+          : binding,
+      )
+      .filter((binding) => binding.kind !== "pick" || binding.refs.length > 0);
+    panel.overrides = panel.overrides.filter(
+      (entry) => entry.target_ref === null || !sameRef(entry.target_ref, ref),
+    );
+    panel.focus = panel.focus.filter(
+      (entry) => entry.ref === null || !sameRef(entry.ref, ref),
+    );
+    if (sameRef(panel.x_ref, ref)) panel.x_ref = null;
+    if (sameRef(panel.color_ref, ref)) {
+      panel.color_ref = null;
+      panel.color_axis = "none";
+    }
+    if (path !== undefined) {
+      panel.annotations = panel.annotations.filter(
+        (annotation) => annotation.series_path !== path,
+      );
+    }
+  }
+
+  setSeriesOverride(
+    panelId: string,
+    ref: SeriesRef,
+    style: { color_slot: number; dash: DashStyle; width: number },
+  ): void {
     const panel = this.panel(panelId);
-    if (
-      panel === undefined ||
-      !panel.series.some((series) => series.path === path)
-    ) {
-      return;
+    if (panel === undefined) return;
+    const override =
+      this.overrideFor(panel, ref) ??
+      (() => {
+        const created: SeriesOverride = {
+          target_ref: { ...ref },
+          target_selector: null,
+          color_slot: null,
+          dash: null,
+          width: null,
+          opacity: null,
+          visible: null,
+        };
+        panel.overrides.push(created);
+        return created;
+      })();
+    override.color_slot = style.color_slot;
+    override.dash = style.dash;
+    override.width = style.width;
+  }
+
+  toggleFocus(panelId: string, entry: FocusEntry): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    const index = panel.focus.findIndex((current) => sameFocus(current, entry));
+    if (index === -1) panel.focus.push(structuredClone(entry));
+    else panel.focus.splice(index, 1);
+  }
+
+  setXRef(panelId: string, ref: SeriesRef | null): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    if (panel.x_ref !== null && !sameRef(panel.x_ref, ref)) {
+      this.addSeriesRef(panelId, panel.x_ref);
     }
-    const current = panel.highlighted_sources.find(
-      (entry) => entry.local_path === localPath,
+    if (ref !== null) this.removeSeriesRef(panelId, ref);
+    panel.x_ref = ref === null ? null : { ...ref };
+    panel.x_range = null;
+    panel.y_range = null;
+    panel.annotations = [];
+  }
+
+  setColorRef(panelId: string, ref: SeriesRef | null): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.color_ref = ref === null ? null : { ...ref };
+    panel.color_axis = ref === null ? "none" : "signal";
+  }
+
+  namedSets(): readonly NamedSet[] {
+    return this.session.named_sets;
+  }
+
+  addNamedSet(set: NamedSet): void {
+    const index = this.session.named_sets.findIndex(
+      (entry) => entry.id === set.id,
     );
-    panel.highlighted_sources = panel.highlighted_sources.filter(
-      (entry) => entry.local_path !== localPath,
+    if (index === -1) this.session.named_sets.push(structuredClone(set));
+    else this.session.named_sets[index] = structuredClone(set);
+  }
+
+  removeNamedSet(id: string): void {
+    this.session.named_sets = this.session.named_sets.filter(
+      (set) => set.id !== id,
     );
-    if (current?.path !== path) {
-      panel.highlighted_sources.push({ local_path: localPath, path });
+  }
+
+  setSourceAlignment(
+    key: string,
+    domain: TimeDomainState,
+    scale: number,
+    offset: number,
+  ): void {
+    const source = this.session.sources.find((entry) => entry.key === key);
+    if (source !== undefined) {
+      source.time_domain = structuredClone(domain);
+      source.scale = scale;
+      source.offset = offset;
     }
+  }
+
+  private createPickBinding(panel: PanelState): Binding {
+    const binding: Binding = {
+      kind: "pick",
+      selector: null,
+      refs: [],
+      set_id: null,
+    };
+    panel.bindings.push(binding);
+    return binding;
+  }
+
+  private overrideFor(
+    panel: PanelState | undefined,
+    ref: SeriesRef,
+  ): SeriesOverride | undefined {
+    return panel?.overrides.find(
+      (entry) => entry.target_ref !== null && sameRef(entry.target_ref, ref),
+    );
   }
 
   setPanelYRange(panelId: string, range: [number, number]): void {
@@ -573,32 +656,6 @@ export class WorkspaceModel {
     }
   }
 
-  setSeriesStyle(
-    panelId: string,
-    path: string,
-    style: { color_slot: number; dash: DashStyle; width: number },
-  ): void {
-    const series = this.panel(panelId)?.series.find(
-      (entry) => entry.path === path,
-    );
-    if (series === undefined) return;
-    series.color_slot = style.color_slot;
-    series.dash = style.dash;
-    series.width = style.width;
-  }
-
-  removeSeries(panelId: string, path: string): void {
-    const panel = this.panel(panelId);
-    if (panel === undefined) return;
-    panel.series = panel.series.filter((series) => series.path !== path);
-    panel.annotations = panel.annotations.filter(
-      (annotation) => annotation.series_path !== path,
-    );
-    panel.highlighted_sources = panel.highlighted_sources.filter(
-      (entry) => entry.path !== path,
-    );
-  }
-
   resizeRows(seamIndex: number, delta: number): void {
     const above = this.activeTab().layout[seamIndex];
     const below = this.activeTab().layout[seamIndex + 1];
@@ -637,24 +694,6 @@ export class WorkspaceModel {
       });
     }
     this.activeTab().focused_panel_id = id;
-  }
-
-  toggleFavorite(path: string): void {
-    const index = this.session.favorites.indexOf(path);
-    if (index === -1) {
-      this.session.favorites.push(path);
-    } else {
-      this.session.favorites.splice(index, 1);
-    }
-  }
-
-  toggleFavoriteBundle(localPath: string): void {
-    const index = this.session.favorite_bundles.indexOf(localPath);
-    if (index === -1) {
-      this.session.favorite_bundles.push(localPath);
-    } else {
-      this.session.favorite_bundles.splice(index, 1);
-    }
   }
 
   /** Removes a cell; returns true when its row was removed too. */
@@ -704,11 +743,15 @@ export class WorkspaceModel {
       title: `Panel ${String(this.nextPanelNumber)}`,
       mode: "time",
       axis_style: "gutter",
-      x_signal: null,
-      color_signal: null,
-      color_by_time: false,
-      series: [],
-      highlighted_sources: [],
+      x_ref: null,
+      color_axis: "none",
+      color_ref: null,
+      bindings: [],
+      color_by: "source",
+      overrides: [],
+      focus: [],
+      ghost_mode: "all",
+      split_by: "none",
       y_range: null,
       x_range: null,
       x_label: null,
@@ -737,6 +780,27 @@ function nextUnusedNumber(
   let number = start;
   while (taken(number)) number += 1;
   return number;
+}
+
+function sameRef(
+  left: SeriesRef | null | undefined,
+  right: SeriesRef | null | undefined,
+): boolean {
+  return (
+    left != null &&
+    right != null &&
+    left.source_key === right.source_key &&
+    left.channel === right.channel
+  );
+}
+
+function sameFocus(left: FocusEntry, right: FocusEntry): boolean {
+  return (
+    left.kind === right.kind &&
+    sameRef(left.ref, right.ref) &&
+    left.source_key === right.source_key &&
+    left.channel === right.channel
+  );
 }
 
 function createWorkspaceTab(number: number): WorkspaceTab {

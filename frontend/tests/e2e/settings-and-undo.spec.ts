@@ -62,16 +62,8 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
   await page.keyboard.press("Escape");
 });
 
-test("undo restores chrome, favorites, and preserves panel focus", async ({
-  page,
-}) => {
+test("undo restores chrome and preserves panel focus", async ({ page }) => {
   await page.goto("/");
-  const firstStar = page.locator(".tree-scroll .tree-star").first();
-  await firstStar.click();
-  await expect(page.locator(".tree-favorites .tree-leaf")).toHaveCount(1);
-  await page.keyboard.press("Control+z");
-  await expect(page.locator(".tree-favorites .tree-leaf")).toHaveCount(0);
-
   await page.keyboard.press("n");
   const panels = page.locator(".panel");
   await panels.nth(0).click();

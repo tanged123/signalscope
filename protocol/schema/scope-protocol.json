@@ -8,20 +8,11 @@
         "t1": "f64"
       }
     },
-    "SetMemberSummary": {
-      "kind": "object",
-      "fields": {
-        "source_key": "string",
-        "missing": "string[]",
-        "scale": "f64",
-        "offset": "f64"
-      }
-    },
-    "SetTimeUnit": {
+    "SourceTimeUnit": {
       "kind": "enum",
       "variants": ["seconds", "milliseconds", "microseconds", "nanoseconds"]
     },
-    "SetOriginKind": {
+    "SourceOriginKind": {
       "kind": "enum",
       "variants": [
         "relative",
@@ -30,47 +21,19 @@
         "synthetic_index"
       ]
     },
-    "SetTimeDomainSummary": {
+    "SourceTimeDomainSummary": {
       "kind": "object",
       "fields": {
-        "unit": "SetTimeUnit",
-        "origin": "SetOriginKind",
+        "unit": "SourceTimeUnit",
+        "origin": "SourceOriginKind",
         "alignment_origin": "f64"
       }
     },
-    "SetSummary": {
+    "SourceAlignmentRequest": {
       "kind": "object",
       "fields": {
-        "set_id": "u64",
-        "set_key": "string",
-        "label": "string",
-        "generation": "u64",
-        "member_count": "u32",
-        "members": "SetMemberSummary[]",
-        "time_domain": "SetTimeDomainSummary",
-        "local_paths": "string[]",
-        "aligned": "bool"
-      }
-    },
-    "CreateSetRequest": {
-      "kind": "object",
-      "fields": {
-        "label": "string",
-        "member_keys": "string[]"
-      }
-    },
-    "UpdateSetMembersRequest": {
-      "kind": "object",
-      "fields": {
-        "set_id": "u64",
-        "member_keys": "string[]"
-      }
-    },
-    "SetTimeAlignmentRequest": {
-      "kind": "object",
-      "fields": {
-        "set_id": "u64",
         "source_key": "string",
+        "time_domain": "SourceTimeDomainSummary",
         "scale": "f64",
         "offset": "f64"
       }
@@ -286,7 +249,10 @@
         "source_key": "string",
         "prefix": "string",
         "path": "string",
-        "point_count": "u64"
+        "point_count": "u64",
+        "time_domain": "SourceTimeDomainSummary",
+        "scale": "f64",
+        "offset": "f64"
       }
     },
     "IngestStage": {
@@ -382,8 +348,7 @@
     "ExportSelection": {
       "kind": "object",
       "fields": {
-        "source_keys": "string[]",
-        "set_keys": "string[]"
+        "source_keys": "string[]"
       }
     },
     "ExportEstimate": {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Session } from "../generated/session";
+import type { Session, SourceRecord } from "../generated/session";
 import { emptySession } from "./workspace";
 import {
   HistoryStack,
@@ -104,13 +104,20 @@ describe("HistoryStack", () => {
 });
 
 describe("history session projection", () => {
-  const source = {
+  const source: SourceRecord = {
     key: "00000000-0000-0000-0000-000000000001",
     path: "/data/run.csv",
     prefix: "run",
     provider_id: null,
     decode_provenance: null,
     reconcile_legacy: false,
+    time_domain: {
+      unit: "seconds",
+      origin: "relative",
+      alignment_origin: 0,
+    },
+    scale: 1,
+    offset: 0,
   };
 
   it("excludes cursor, focus, and ingested sources", () => {

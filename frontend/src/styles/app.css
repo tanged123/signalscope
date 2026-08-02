@@ -1344,12 +1344,12 @@ button {
   outline-offset: -2px;
 }
 
-.tree-favorites {
+.tree-sets {
   min-height: var(--tree-row-height);
   padding: 0 6px;
 }
 
-.tree-favorites.drop-target {
+.tree-sets.drop-target {
   outline: 1px solid var(--amber-7);
   outline-offset: -1px;
 }
@@ -1387,49 +1387,6 @@ button {
 .tree-row:hover {
   background: var(--surface-3);
   color: var(--fg-1);
-}
-
-.tree-group {
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-}
-
-.tree-bundle {
-  color: var(--fg-1);
-  font-family: var(--font-mono);
-}
-
-.tree-bundle-caret {
-  width: 14px;
-  flex: none;
-  color: var(--fg-3);
-  text-align: center;
-}
-
-.tree-star {
-  flex: none;
-  padding: 0 2px;
-  color: var(--fg-4);
-  font-size: 0.7692rem;
-}
-
-.tree-star.active {
-  color: var(--fg-1);
-}
-
-.tree-run-count {
-  flex: none;
-  color: var(--fg-3);
-  font: 0.6923rem var(--font-mono);
-}
-
-.tree-set-mode {
-  width: 70px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  background: var(--surface-1);
-  color: var(--fg-2);
-  font: 0.6923rem var(--font-mono);
 }
 
 .tree-derived-mark {

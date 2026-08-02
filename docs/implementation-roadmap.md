@@ -18,8 +18,8 @@ amendment): quoted names are signal references, functions are bare MATLAB
 names, and the transforms are `gradient`/`cumtrapz`/`movmean`. Derived signals
 materialize into the store under one synthetic source with an in-memory
 pyramid, so every tile, sample, and panel-mode consumer is unchanged. Sessions
-reached schema v12 with ordered derived definitions, durable source records,
-and source-set membership,
+reached schema v17 with ordered derived definitions, durable source records,
+channel-by-source panel bindings, and named sets,
 and gained autosave with resume-on-launch plus named workspace files
 ([ADR 0022](adr/0022-durable-session-persistence.md)). The `localStorage` theme
 key is gone; the session is the only durable store.
@@ -32,9 +32,9 @@ sessions reconcile provider-specific references after restore while autosave
 is paused
 ([ADR 0027](adr/0027-durable-source-identity-and-restore-reconciliation.md)).
 
-Source sets group partial runs by local schema and require explicit alignment
-for absolute or event time. Bundles plot ordinary per-source member series and
-support one highlighted source per local signal path.
+Signals-at-scale P1 is landed: panels resolve channel-by-source series from a
+catalog, alignment is stored per source, and the tree exposes channels with
+read-only named sets instead of source sets, bundles, or favorites.
 
 Out-of-core storage now compacts pyramid bins, synthesizes levels 0–2, shares
 sidecar time sections, and pages columns and fine levels through a leased LRU.

@@ -10,6 +10,7 @@ use std::{
 
 use base64::Engine;
 use scope_core::{
+    alignment::{AffineTransform, OriginKind, TimeDomain, TimeUnit},
     cache::{self, CacheRoot},
     columns::Column,
     compute, expr,
@@ -21,27 +22,22 @@ use scope_core::{
     paging::PageHandle,
     preferences,
     pyramid::Pyramid,
-    restore, session,
-    sets::{
-        AffineTransform, OriginKind, SetId, SetKey, SourceSet, TimeDomain, TimeUnit, propose_sets,
-    },
-    snapshot,
+    restore, session, snapshot,
     sources::{SourceRecord, SourceRegistry},
     store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
 };
 use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
-    BatchState, BatchStatus, CreateDerivedBundleRequest, CreateSetRequest, DerivedBundleResponse,
-    DerivedRequest, Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest,
-    ExportFidelity, ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState,
-    FormatCount, FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession,
-    PickSessionRequest, RemoveDerivedBundleRequest, RemoveSignalRequest, RestoreReconcileRequest,
+    BatchState, BatchStatus, CreateDerivedBundleRequest, DerivedBundleResponse, DerivedRequest,
+    Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest, ExportFidelity,
+    ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState, FormatCount,
+    FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest,
+    RemoveDerivedBundleRequest, RemoveSignalRequest, RestoreReconcileRequest,
     RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries,
     SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest,
-    ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SetMemberSummary, SetOriginKind,
-    SetSummary, SetTimeAlignmentRequest, SetTimeDomainSummary, SetTimeUnit, SignalSummary,
-    SignalTile, SkippedMemberSummary, SourceSummary, TileRequest, TileResponse,
-    UpdateSetMembersRequest,
+    ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SignalSummary, SignalTile,
+    SkippedMemberSummary, SourceAlignmentRequest, SourceOriginKind, SourceSummary,
+    SourceTimeDomainSummary, SourceTimeUnit, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -50,8 +46,6 @@ struct DataState {
     store: SignalStore,
     pyramids: BTreeMap<SignalId, Pyramid>,
     registry: SourceRegistry,
-    sets: BTreeMap<SetId, SourceSet>,
-    next_set_id: u64,
     derived_source: Option<SourceId>,
     derived_references: BTreeMap<String, Vec<String>>,
     derived_bundles: BTreeMap<String, String>,
@@ -67,8 +61,6 @@ impl Default for DataState {
             store: SignalStore::default(),
             pyramids: BTreeMap::new(),
             registry: SourceRegistry::default(),
-            sets: BTreeMap::new(),
-            next_set_id: 0,
             derived_source: None,
             derived_references: BTreeMap::new(),
             derived_bundles: BTreeMap::new(),
@@ -126,13 +118,38 @@ fn signal_summary(signal: &Signal, source_key: SourceKey) -> SignalSummary {
     }
 }
 
-fn source_summary(source: &Source) -> SourceSummary {
+fn source_summary(source: &Source, record: Option<&SourceRecord>) -> SourceSummary {
+    let domain = record.map_or_else(TimeDomain::default, |record| record.time_domain);
+    let transform = record.map_or(
+        AffineTransform {
+            scale: 1.0,
+            offset: 0.0,
+        },
+        |record| record.transform,
+    );
     SourceSummary {
         source_id: source.id.0,
         source_key: source.key.0.to_string(),
         prefix: source.prefix.clone(),
         path: source.path.display().to_string(),
         point_count: source.point_count as u64,
+        time_domain: SourceTimeDomainSummary {
+            unit: match domain.unit {
+                TimeUnit::Seconds | TimeUnit::Unsupported => SourceTimeUnit::Seconds,
+                TimeUnit::Milliseconds => SourceTimeUnit::Milliseconds,
+                TimeUnit::Microseconds => SourceTimeUnit::Microseconds,
+                TimeUnit::Nanoseconds => SourceTimeUnit::Nanoseconds,
+            },
+            origin: match domain.origin {
+                OriginKind::Relative => SourceOriginKind::Relative,
+                OriginKind::AbsoluteEpoch => SourceOriginKind::AbsoluteEpoch,
+                OriginKind::EventAligned => SourceOriginKind::EventAligned,
+                OriginKind::SyntheticIndex => SourceOriginKind::SyntheticIndex,
+            },
+            alignment_origin: domain.alignment_origin,
+        },
+        scale: transform.scale,
+        offset: transform.offset,
     }
 }
 
@@ -422,7 +439,7 @@ fn restore_reconcile(
     outcome.conflicts = built.conflicts;
     {
         let mut data = state.lock().map_err(|error| error.to_string())?;
-        restore_sets(&restored, &mut data)?;
+        restore_alignment(&restored, &mut data)?;
     }
     Ok(Envelope::new(RestoreReconcileResponse {
         session_json: serde_json::to_string(&restored).map_err(|error| error.to_string())?,
@@ -443,30 +460,9 @@ fn restore_reconcile(
     }))
 }
 
-fn restore_sets(session: &session::Session, data: &mut DataState) -> Result<(), String> {
-    data.sets.clear();
-    data.next_set_id = 0;
-    for saved in &session.source_sets {
-        let keys = saved
-            .members
-            .iter()
-            .map(|member| {
-                uuid::Uuid::parse_str(&member.source_key)
-                    .map(SourceKey)
-                    .map_err(|error| error.to_string())
-            })
-            .collect::<Result<BTreeSet<_>, _>>()?;
-        if keys
-            .iter()
-            .any(|key| !data.store.sources().any(|source| source.key == *key))
-        {
-            continue;
-        }
-        data.next_set_id = data.next_set_id.saturating_add(1);
-        let id = SetId(data.next_set_id);
-        let mut set = build_set(&data.store, &keys, id, saved.label.clone())?;
-        set.key = SetKey(uuid::Uuid::parse_str(&saved.key).map_err(|error| error.to_string())?);
-        set.generation = saved.generation;
+fn restore_alignment(session: &session::Session, data: &mut DataState) -> Result<(), String> {
+    for saved in &session.sources {
+        let key = SourceKey(uuid::Uuid::parse_str(&saved.key).map_err(|error| error.to_string())?);
         let domain = TimeDomain {
             unit: match saved.time_domain.unit {
                 session::TimeUnitState::Seconds => TimeUnit::Seconds,
@@ -482,21 +478,14 @@ fn restore_sets(session: &session::Session, data: &mut DataState) -> Result<(), 
             },
             alignment_origin: saved.time_domain.alignment_origin,
         };
-        for saved_member in &saved.members {
-            let key = SourceKey(
-                uuid::Uuid::parse_str(&saved_member.source_key)
-                    .map_err(|error| error.to_string())?,
-            );
-            if let Some(member) = set.members.get_mut(&key) {
-                member.missing = saved_member.missing.iter().cloned().collect();
-                member.time_domain = domain;
-                member.transform = Some(AffineTransform {
-                    scale: saved_member.scale,
-                    offset: saved_member.offset,
-                });
-            }
-        }
-        data.sets.insert(id, set);
+        data.registry.set_time_domain(key, domain);
+        data.registry.set_transform(
+            key,
+            AffineTransform {
+                scale: saved.scale,
+                offset: saved.offset,
+            },
+        );
     }
     Ok(())
 }
@@ -509,6 +498,11 @@ fn core_source_record(record: &session::SourceRecord) -> Result<SourceRecord, St
         provider_id: record.provider_id.clone(),
         decode_provenance: record.decode_provenance.clone(),
         reconcile_legacy: record.reconcile_legacy,
+        time_domain: TimeDomain::default(),
+        transform: AffineTransform {
+            scale: 1.0,
+            offset: 0.0,
+        },
     })
 }
 
@@ -650,7 +644,10 @@ fn list_sources(
 ) -> Result<Envelope<Vec<SourceSummary>>, String> {
     let data = state.lock().map_err(|error| error.to_string())?;
     Ok(Envelope::new(
-        data.store.sources().map(source_summary).collect(),
+        data.store
+            .sources()
+            .map(|source| source_summary(source, data.registry.record(source.key)))
+            .collect(),
     ))
 }
 
@@ -660,7 +657,6 @@ fn list_signals(
     state: State<'_, Arc<Mutex<DataState>>>,
 ) -> Result<Envelope<Vec<SignalSummary>>, String> {
     let mut data = state.lock().map_err(|error| error.to_string())?;
-    data.ensure_sets();
     data.reexpand_derived_bundles();
     Ok(Envelope::new(
         data.store
@@ -678,181 +674,41 @@ fn list_signals(
     ))
 }
 
-fn set_summary(set: &SourceSet) -> SetSummary {
-    let domain = set
-        .members
-        .values()
-        .next()
-        .map_or_else(TimeDomain::default, |member| member.time_domain);
-    SetSummary {
-        set_id: set.id.0,
-        set_key: set.key.0.to_string(),
-        label: set.label.clone(),
-        generation: set.generation,
-        member_count: u32::try_from(set.members.len()).unwrap_or(u32::MAX),
-        members: set
-            .members
-            .values()
-            .map(|member| {
-                let transform = member.transform.unwrap_or(AffineTransform {
-                    scale: 1.0,
-                    offset: 0.0,
-                });
-                SetMemberSummary {
-                    source_key: member.source_key.0.to_string(),
-                    missing: member.missing.iter().cloned().collect(),
-                    scale: transform.scale,
-                    offset: transform.offset,
-                }
-            })
-            .collect(),
-        time_domain: SetTimeDomainSummary {
-            unit: match domain.unit {
-                TimeUnit::Seconds | TimeUnit::Unsupported => SetTimeUnit::Seconds,
-                TimeUnit::Milliseconds => SetTimeUnit::Milliseconds,
-                TimeUnit::Microseconds => SetTimeUnit::Microseconds,
-                TimeUnit::Nanoseconds => SetTimeUnit::Nanoseconds,
-            },
-            origin: match domain.origin {
-                OriginKind::Relative => SetOriginKind::Relative,
-                OriginKind::AbsoluteEpoch => SetOriginKind::AbsoluteEpoch,
-                OriginKind::EventAligned => SetOriginKind::EventAligned,
-                OriginKind::SyntheticIndex => SetOriginKind::SyntheticIndex,
-            },
-            alignment_origin: domain.alignment_origin,
-        },
-        local_paths: set.fingerprint.local_paths.iter().cloned().collect(),
-        aligned: set.alignment().is_ok(),
-    }
-}
-
-fn parse_source_keys(keys: Vec<String>) -> Result<BTreeSet<SourceKey>, String> {
-    keys.into_iter()
-        .map(|key| {
-            uuid::Uuid::parse_str(&key)
-                .map(SourceKey)
-                .map_err(|error| error.to_string())
-        })
-        .collect()
-}
-
-fn build_set(
-    store: &SignalStore,
-    keys: &BTreeSet<SourceKey>,
-    id: SetId,
-    label: String,
-) -> Result<SourceSet, String> {
-    let candidates = keys
-        .iter()
-        .map(|key| {
-            let source = store
-                .sources()
-                .find(|source| source.key == *key)
-                .ok_or_else(|| format!("unknown source key: {}", key.0))?;
-            Ok((
-                *key,
-                store
-                    .signals_of(source.id)
-                    .map(|signal| signal.local_path.clone())
-                    .collect(),
-            ))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let mut proposed = propose_sets(&candidates);
-    if proposed.len() != 1 {
-        return Err("set members must share a schema".into());
-    }
-    let mut set = proposed.remove(0);
-    set.id = id;
-    set.label = label;
-    Ok(set)
-}
-
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn list_sets(state: State<'_, Arc<Mutex<DataState>>>) -> Result<Envelope<Vec<SetSummary>>, String> {
-    let mut data = state.lock().map_err(|error| error.to_string())?;
-    data.ensure_sets();
-    data.reexpand_derived_bundles();
-    Ok(Envelope::new(data.sets.values().map(set_summary).collect()))
-}
-
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn create_set(
-    request: Envelope<CreateSetRequest>,
+fn set_source_alignment(
+    request: Envelope<SourceAlignmentRequest>,
     state: State<'_, Arc<Mutex<DataState>>>,
-) -> Result<Envelope<SetSummary>, String> {
-    let request = request.open().map_err(|error| error.to_string())?;
-    let keys = parse_source_keys(request.member_keys)?;
-    if keys.is_empty() {
-        return Err("a set requires at least one source".into());
-    }
-    let mut data = state.lock().map_err(|error| error.to_string())?;
-    data.next_set_id = data.next_set_id.saturating_add(1);
-    let id = SetId(data.next_set_id);
-    let set = build_set(&data.store, &keys, id, request.label)?;
-    let summary = set_summary(&set);
-    data.sets.insert(id, set);
-    Ok(Envelope::new(summary))
-}
-
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn update_set_members(
-    request: Envelope<UpdateSetMembersRequest>,
-    state: State<'_, Arc<Mutex<DataState>>>,
-) -> Result<Envelope<SetSummary>, String> {
-    let request = request.open().map_err(|error| error.to_string())?;
-    let keys = parse_source_keys(request.member_keys)?;
-    let mut data = state.lock().map_err(|error| error.to_string())?;
-    let id = SetId(request.set_id);
-    let previous = data
-        .sets
-        .get(&id)
-        .ok_or_else(|| format!("unknown set id: {}", id.0))?
-        .clone();
-    let mut set = build_set(&data.store, &keys, id, previous.label)?;
-    set.key = previous.key;
-    set.generation = previous.generation.saturating_add(1);
-    for (key, member) in &mut set.members {
-        if let Some(saved) = previous.members.get(key) {
-            member.time_domain = saved.time_domain;
-            member.transform = saved.transform;
-        }
-    }
-    let summary = set_summary(&set);
-    data.sets.insert(id, set);
-    Ok(Envelope::new(summary))
-}
-
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn set_time_alignment(
-    request: Envelope<SetTimeAlignmentRequest>,
-    state: State<'_, Arc<Mutex<DataState>>>,
-) -> Result<Envelope<SetSummary>, String> {
+) -> Result<Envelope<()>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let key = uuid::Uuid::parse_str(&request.source_key)
         .map(SourceKey)
         .map_err(|error| error.to_string())?;
-    let mut data = state.lock().map_err(|error| error.to_string())?;
-    let id = SetId(request.set_id);
-    let summary = {
-        let set = data
-            .sets
-            .get_mut(&id)
-            .ok_or_else(|| format!("unknown set id: {}", request.set_id))?;
-        set.set_transform(
-            key,
-            AffineTransform {
-                scale: request.scale,
-                offset: request.offset,
-            },
-        );
-        set_summary(set)
+    let domain = TimeDomain {
+        unit: match request.time_domain.unit {
+            SourceTimeUnit::Seconds => TimeUnit::Seconds,
+            SourceTimeUnit::Milliseconds => TimeUnit::Milliseconds,
+            SourceTimeUnit::Microseconds => TimeUnit::Microseconds,
+            SourceTimeUnit::Nanoseconds => TimeUnit::Nanoseconds,
+        },
+        origin: match request.time_domain.origin {
+            SourceOriginKind::Relative => OriginKind::Relative,
+            SourceOriginKind::AbsoluteEpoch => OriginKind::AbsoluteEpoch,
+            SourceOriginKind::EventAligned => OriginKind::EventAligned,
+            SourceOriginKind::SyntheticIndex => OriginKind::SyntheticIndex,
+        },
+        alignment_origin: request.time_domain.alignment_origin,
     };
-    Ok(Envelope::new(summary))
+    let mut data = state.lock().map_err(|error| error.to_string())?;
+    data.registry.set_time_domain(key, domain);
+    data.registry.set_transform(
+        key,
+        AffineTransform {
+            scale: request.scale,
+            offset: request.offset,
+        },
+    );
+    Ok(Envelope::new(()))
 }
 
 #[tauri::command]
@@ -1001,50 +857,19 @@ impl DataState {
             .map(|signal| signal.path.clone())
             .collect();
         let mut locals = BTreeMap::new();
-        for set in self.sets.values() {
-            for member in set.members.values() {
-                let Some(source) = self
-                    .store
-                    .sources()
-                    .find(|source| source.key == member.source_key)
-                else {
-                    continue;
-                };
-                locals.entry(source.key).or_insert_with(|| {
-                    (
-                        source.prefix.clone(),
-                        self.store
-                            .signals_of(source.id)
-                            .map(|signal| signal.local_path.clone())
-                            .collect(),
-                    )
-                });
-            }
-        }
-        (full_paths, locals)
-    }
-
-    fn ensure_sets(&mut self) {
-        if !self.sets.is_empty() {
-            return;
-        }
-        let candidates = self
-            .store
-            .sources()
-            .map(|source| {
+        for source in self.store.sources() {
+            locals.insert(
+                source.key,
                 (
-                    source.key,
+                    source.prefix.clone(),
                     self.store
                         .signals_of(source.id)
                         .map(|signal| signal.local_path.clone())
                         .collect(),
-                )
-            })
-            .collect::<Vec<_>>();
-        for set in propose_sets(&candidates) {
-            self.next_set_id = self.next_set_id.max(set.id.0);
-            self.sets.insert(set.id, set);
+                ),
+            );
         }
+        (full_paths, locals)
     }
 
     fn materialize_derived(
@@ -1816,10 +1641,7 @@ pub fn run() {
             restore_reconcile,
             list_sources,
             list_signals,
-            list_sets,
-            create_set,
-            update_set_members,
-            set_time_alignment,
+            set_source_alignment,
             query_tiles,
             query_samples,
             create_derived,
@@ -1883,10 +1705,8 @@ mod tests {
             (2_u8, "run_02", true),
             (3_u8, "run_03", false),
         ];
-        let mut keys = BTreeSet::new();
         for (byte, prefix, has_alt) in source_specs {
             let key = SourceKey(uuid::Uuid::from_bytes([byte; 16]));
-            keys.insert(key);
             let source = data
                 .store
                 .register_source(format!("{prefix}.csv"), key, prefix)
@@ -1912,8 +1732,6 @@ mod tests {
                     .unwrap();
             }
         }
-        let set = build_set(&data.store, &keys, SetId(1), "Runs".into()).unwrap();
-        data.sets.insert(set.id, set);
         data
     }
 
@@ -1930,6 +1748,11 @@ mod tests {
             provider_id: Some("csv".into()),
             decode_provenance: Some("abc".into()),
             reconcile_legacy: false,
+            time_domain: TimeDomain::default(),
+            transform: AffineTransform {
+                scale: 1.0,
+                offset: 0.0,
+            },
         };
         let time: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0, 3.0]);
         let pyramid = Pyramid::from_samples(&time, &[1.0, 2.0, 3.0, 4.0]);
@@ -2261,7 +2084,6 @@ mod tests {
                 .sources()
                 .map(|source| source.key.0.to_string())
                 .collect(),
-            set_keys: Vec::new(),
         };
         let estimate = estimate_for(&data, &session, "{}", 1_000, &selection).expect("estimate");
         assert_eq!(estimate.entries.len(), 8);
@@ -2321,57 +2143,5 @@ mod tests {
         assert!(data.pyramids.is_empty());
         assert!(data.derived_source.is_none());
         assert!(data.derived_references.is_empty());
-    }
-
-    #[test]
-    fn restored_sets_keep_durable_identity_membership_and_alignment() {
-        let mut data = DataState::default();
-        let keys = [
-            SourceKey(uuid::Uuid::from_u128(1)),
-            SourceKey(uuid::Uuid::from_u128(2)),
-        ];
-        for (index, key) in keys.into_iter().enumerate() {
-            let source = data
-                .store
-                .register_source(format!("{index}.csv"), key, format!("run_{index}"))
-                .unwrap();
-            data.store
-                .insert_signal(
-                    source,
-                    "value",
-                    None,
-                    Arc::from([0.0, 1.0]),
-                    Arc::from([1.0, 2.0]),
-                )
-                .unwrap();
-        }
-        let mut restored = session::Session::default();
-        restored.source_sets.push(session::SourceSetState {
-            key: uuid::Uuid::from_u128(9).to_string(),
-            label: "Monte Carlo".into(),
-            generation: 7,
-            time_domain: session::TimeDomainState {
-                unit: session::TimeUnitState::Seconds,
-                origin: session::OriginKindState::Relative,
-                alignment_origin: 0.0,
-            },
-            members: keys
-                .into_iter()
-                .enumerate()
-                .map(|(index, key)| session::SetMemberState {
-                    source_key: key.0.to_string(),
-                    missing: Vec::new(),
-                    scale: 1.0,
-                    offset: f64::from(u32::try_from(index).unwrap()) * 0.25,
-                })
-                .collect(),
-        });
-
-        restore_sets(&restored, &mut data).unwrap();
-
-        let set = data.sets.values().next().unwrap();
-        assert_eq!(set.key, SetKey(uuid::Uuid::from_u128(9)));
-        assert_eq!(set.generation, 7);
-        assert!((set.transform(keys[1]).unwrap().offset - 0.25).abs() < f64::EPSILON);
     }
 }

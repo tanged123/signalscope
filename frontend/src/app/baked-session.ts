@@ -25,12 +25,6 @@ function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
-  );
-}
-
 function isSource(value: unknown): boolean {
   return (
     isRecord(value) &&
@@ -45,33 +39,23 @@ function isSource(value: unknown): boolean {
       value.decode_provenance,
       (item): item is string => typeof item === "string",
     ) &&
-    typeof value.reconcile_legacy === "boolean"
+    typeof value.reconcile_legacy === "boolean" &&
+    isTimeDomain(value.time_domain) &&
+    typeof value.scale === "number" &&
+    typeof value.offset === "number"
   );
 }
 
-function isSourceSet(value: unknown): boolean {
+function isTimeDomain(value: unknown): boolean {
   return (
     isRecord(value) &&
-    typeof value.key === "string" &&
-    typeof value.label === "string" &&
-    typeof value.generation === "string" &&
-    isRecord(value.time_domain) &&
     ["seconds", "milliseconds", "microseconds", "nanoseconds"].includes(
-      String(value.time_domain.unit),
+      String(value.unit),
     ) &&
     ["relative", "absolute_epoch", "event_aligned", "synthetic_index"].includes(
-      String(value.time_domain.origin),
+      String(value.origin),
     ) &&
-    typeof value.time_domain.alignment_origin === "number" &&
-    Array.isArray(value.members) &&
-    value.members.every(
-      (member) =>
-        isRecord(member) &&
-        typeof member.source_key === "string" &&
-        isStringArray(member.missing) &&
-        typeof member.scale === "number" &&
-        typeof member.offset === "number",
-    )
+    typeof value.alignment_origin === "number"
   );
 }
 
@@ -83,10 +67,10 @@ function isNumberPair(value: unknown): value is [number, number] {
   );
 }
 
-function isNullable<T>(
+function isNullable(
   value: unknown,
-  predicate: (candidate: unknown) => candidate is T,
-): value is T | null {
+  predicate: (candidate: unknown) => boolean,
+): boolean {
   return value === null || predicate(value);
 }
 
@@ -105,14 +89,57 @@ function isLinkedTime(value: unknown): boolean {
   );
 }
 
-function isSeries(value: unknown): boolean {
+function isSeriesRef(value: unknown): boolean {
   return (
     isRecord(value) &&
-    typeof value.path === "string" &&
-    typeof value.color_slot === "number" &&
-    (value.dash === "solid" || value.dash === "dash" || value.dash === "dot") &&
-    typeof value.width === "number" &&
-    typeof value.visible === "boolean"
+    typeof value.source_key === "string" &&
+    typeof value.channel === "string"
+  );
+}
+
+function isBinding(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    ["query", "pick", "set"].includes(String(value.kind)) &&
+    isNullable(
+      value.selector,
+      (item): item is string => typeof item === "string",
+    ) &&
+    Array.isArray(value.refs) &&
+    value.refs.every(isSeriesRef) &&
+    isNullable(value.set_id, (item): item is string => typeof item === "string")
+  );
+}
+
+function isOverride(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNullable(value.target_ref, isSeriesRef) &&
+    isNullable(
+      value.target_selector,
+      (item): item is string => typeof item === "string",
+    ) &&
+    isNullable(
+      value.color_slot,
+      (item): item is number => typeof item === "number",
+    ) &&
+    isNullable(
+      value.dash,
+      (item): item is string =>
+        typeof item === "string" && ["solid", "dash", "dot"].includes(item),
+    ) &&
+    isNullable(
+      value.width,
+      (item): item is number => typeof item === "number",
+    ) &&
+    isNullable(
+      value.opacity,
+      (item): item is number => typeof item === "number",
+    ) &&
+    isNullable(
+      value.visible,
+      (item): item is boolean => typeof item === "boolean",
+    )
   );
 }
 
@@ -130,11 +157,19 @@ function isAnnotation(value: unknown): boolean {
   );
 }
 
-function isHighlightedSource(value: unknown): boolean {
+function isFocus(value: unknown): boolean {
   return (
     isRecord(value) &&
-    typeof value.local_path === "string" &&
-    typeof value.path === "string"
+    ["series", "source", "channel"].includes(String(value.kind)) &&
+    isNullable(value.ref, isSeriesRef) &&
+    isNullable(
+      value.source_key,
+      (item): item is string => typeof item === "string",
+    ) &&
+    isNullable(
+      value.channel,
+      (item): item is string => typeof item === "string",
+    )
   );
 }
 
@@ -147,13 +182,20 @@ function isPanel(value: unknown): boolean {
     typeof value.title === "string" &&
     ["time", "xy", "fft", "histogram"].includes(String(value.mode)) &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
-    isNullable(value.x_signal, stringOrNull) &&
-    isNullable(value.color_signal, stringOrNull) &&
-    typeof value.color_by_time === "boolean" &&
-    Array.isArray(value.series) &&
-    value.series.every(isSeries) &&
-    Array.isArray(value.highlighted_sources) &&
-    value.highlighted_sources.every(isHighlightedSource) &&
+    isNullable(value.x_ref, isSeriesRef) &&
+    ["none", "time", "signal"].includes(String(value.color_axis)) &&
+    isNullable(value.color_ref, isSeriesRef) &&
+    Array.isArray(value.bindings) &&
+    value.bindings.every(isBinding) &&
+    ["focus", "source", "channel", "set", "attr"].includes(
+      String(value.color_by),
+    ) &&
+    Array.isArray(value.overrides) &&
+    value.overrides.every(isOverride) &&
+    Array.isArray(value.focus) &&
+    value.focus.every(isFocus) &&
+    ["ghost", "all"].includes(String(value.ghost_mode)) &&
+    ["none", "source", "channel"].includes(String(value.split_by)) &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&
@@ -208,8 +250,33 @@ function isSession(value: JsonObject): value is JsonObject & Session {
     typeof value.active_tab_id === "string" &&
     Array.isArray(value.tabs) &&
     value.tabs.every(isTab) &&
-    isStringArray(value.favorites) &&
-    isStringArray(value.favorite_bundles) &&
+    Array.isArray(value.named_sets) &&
+    value.named_sets.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.id === "string" &&
+        typeof item.name === "string" &&
+        (item.kind === "query" || item.kind === "pick") &&
+        isNullable(
+          item.selector,
+          (candidate): candidate is string => typeof candidate === "string",
+        ) &&
+        Array.isArray(item.refs) &&
+        item.refs.every(isSeriesRef),
+    ) &&
+    Array.isArray(value.channel_map) &&
+    value.channel_map.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.canonical === "string" &&
+        Array.isArray(item.aliases) &&
+        item.aliases.every(
+          (alias) =>
+            isRecord(alias) &&
+            typeof alias.source_key === "string" &&
+            typeof alias.name === "string",
+        ),
+    ) &&
     Array.isArray(value.derived) &&
     value.derived.every(
       (item) =>
@@ -225,8 +292,6 @@ function isSession(value: JsonObject): value is JsonObject & Session {
         typeof item.expr === "string",
     ) &&
     Array.isArray(value.sources) &&
-    value.sources.every(isSource) &&
-    Array.isArray(value.source_sets) &&
-    value.source_sets.every(isSourceSet)
+    value.sources.every(isSource)
   );
 }

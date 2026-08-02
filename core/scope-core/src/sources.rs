@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{naming, store::SourceKey};
+use crate::{alignment, naming, store::SourceKey};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SourceRecord {
     pub key: SourceKey,
     pub path: PathBuf,
@@ -19,9 +19,13 @@ pub struct SourceRecord {
     pub provider_id: Option<String>,
     pub decode_provenance: Option<String>,
     pub reconcile_legacy: bool,
+    #[serde(default)]
+    pub time_domain: alignment::TimeDomain,
+    #[serde(default = "identity_transform")]
+    pub transform: alignment::AffineTransform,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Admission {
     Existing(SourceKey),
     New(SourceRecord),
@@ -44,6 +48,13 @@ pub struct SourceRegistry {
     by_key: BTreeMap<SourceKey, SourceRecord>,
     by_path: BTreeMap<PathBuf, SourceKey>,
     prefixes: BTreeSet<String>,
+}
+
+fn identity_transform() -> alignment::AffineTransform {
+    alignment::AffineTransform {
+        scale: 1.0,
+        offset: 0.0,
+    }
 }
 
 impl SourceRegistry {
@@ -73,6 +84,8 @@ impl SourceRegistry {
             provider_id: None,
             decode_provenance: None,
             reconcile_legacy: false,
+            time_domain: alignment::TimeDomain::default(),
+            transform: identity_transform(),
         };
         self.prefixes.insert(prefix);
         self.by_path.insert(canonical, key);
@@ -125,6 +138,20 @@ impl SourceRegistry {
             record.provider_id = Some(provider_id);
             record.decode_provenance = Some(digest);
             record.reconcile_legacy = false;
+        }
+    }
+
+    pub fn set_time_domain(&mut self, key: SourceKey, domain: alignment::TimeDomain) {
+        if let Some(record) = self.by_key.get_mut(&key) {
+            record.time_domain = domain;
+            record.transform =
+                alignment::default_transform(domain).unwrap_or_else(|| identity_transform());
+        }
+    }
+
+    pub fn set_transform(&mut self, key: SourceKey, transform: alignment::AffineTransform) {
+        if let Some(record) = self.by_key.get_mut(&key) {
+            record.transform = transform;
         }
     }
 
@@ -212,5 +239,26 @@ mod tests {
             registry.admit(&new).unwrap(),
             Admission::Existing(record.key)
         );
+    }
+
+    #[test]
+    fn source_alignment_defaults_and_normalizes_units() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.csv");
+        std::fs::write(&path, "time,v\n0,1\n").unwrap();
+        let mut registry = SourceRegistry::new();
+        let Admission::New(record) = registry.admit(&path).unwrap() else {
+            panic!("first admission is new");
+        };
+        assert_eq!(record.time_domain, alignment::TimeDomain::default());
+        assert_eq!(record.transform.scale, 1.0);
+        registry.set_time_domain(
+            record.key,
+            alignment::TimeDomain {
+                unit: alignment::TimeUnit::Milliseconds,
+                ..alignment::TimeDomain::default()
+            },
+        );
+        assert_eq!(registry.record(record.key).unwrap().transform.scale, 1e-3);
     }
 }

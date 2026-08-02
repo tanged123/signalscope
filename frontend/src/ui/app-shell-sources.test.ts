@@ -12,6 +12,13 @@ function source(index: number): SourceSummary {
     path: `/data/run_${String(index)}.csv`,
     prefix: `run_${String(index)}`,
     point_count: "1000",
+    time_domain: {
+      unit: "seconds",
+      origin: "relative",
+      alignment_origin: 0,
+    },
+    scale: 1,
+    offset: 0,
   };
 }
 

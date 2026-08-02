@@ -31,6 +31,8 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
+import { Catalog } from "../app/catalog";
+import { resolvePanel } from "../app/resolution";
 import { virtualSlice } from "../app/tree-model";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
@@ -47,7 +49,6 @@ import {
   type ExportSelection,
   type SampleResponse,
   type SampleSeries,
-  type SetSummary,
   type SignalSummary,
   type SourceSummary,
   type TileResponse,
@@ -86,49 +87,13 @@ const AUTOSAVE_DEBOUNCE_MS = 800;
 const SAMPLE_CAP = 8192;
 const DERIVED_PREFIX = "derived/";
 
-export function validateDerivedBundleName(path: string): void {
-  const name = path.startsWith(DERIVED_PREFIX)
-    ? path.slice(DERIVED_PREFIX.length)
-    : path;
-  if (name.includes("/")) {
-    throw new Error("derived bundle names are a single segment");
-  }
-}
-
-export function bundleCompletionEntries(
-  signals: readonly SignalSummary[],
-  sets: readonly SetSummary[],
-): { localPath: string; runCount: number }[] {
-  const members = new Map<string, Set<string>>();
-  for (const set of sets) {
-    const sourceKeys = new Set(set.members.map((member) => member.source_key));
-    const setMembers = new Map<string, Set<string>>();
-    for (const signal of signals) {
-      if (!sourceKeys.has(signal.source_key)) continue;
-      const paths = setMembers.get(signal.local_path) ?? new Set<string>();
-      paths.add(signal.path);
-      setMembers.set(signal.local_path, paths);
-    }
-    for (const [localPath, paths] of setMembers) {
-      if (paths.size < 2) continue;
-      const allMembers = members.get(localPath) ?? new Set<string>();
-      for (const path of paths) allMembers.add(path);
-      members.set(localPath, allMembers);
-    }
-  }
-  return [...members]
-    .filter(([, paths]) => paths.size >= 2)
-    .map(([localPath, paths]) => ({ localPath, runCount: paths.size }))
-    .sort((left, right) => left.localPath.localeCompare(right.localPath));
-}
-
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private signals: SignalSummary[] = [];
-  private sets: SetSummary[] = [];
+  private catalog = Catalog.empty();
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
@@ -219,38 +184,46 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
-        onDropSignal: (id, path) => {
-          this.plotSignal(path, id);
-        },
-        onDropBundle: (id, memberPaths) => {
-          this.plotBundle(memberPaths, id);
+        onDropSignals: (id, paths) => {
+          this.plotSignals(paths, id);
         },
         onToggleHighlight: (id, path) => {
-          const localPath = this.isDerivedPath(path)
-            ? undefined
-            : this.signalsByPath.get(path)?.local_path;
-          if (localPath === undefined) return;
-          this.workspace.toggleHighlight(id, path, localPath);
+          const ref = this.catalog.refFromPath(path);
+          if (ref === undefined) return;
+          this.workspace.toggleFocus(id, {
+            kind: "series",
+            ref,
+            source_key: null,
+            channel: ref.channel,
+          });
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         localPathFor: (path) =>
           this.isDerivedPath(path)
-            ? null
+            ? path.slice(DERIVED_PREFIX.length)
             : (this.signalsByPath.get(path)?.local_path ?? null),
         sourceKeyFor: (path) =>
           this.isDerivedPath(path)
-            ? null
+            ? "derived"
             : (this.signalsByPath.get(path)?.source_key ?? null),
+        pathForRef: (ref) => this.catalog.get(ref)?.path ?? null,
+        resolveSeries: (state) =>
+          resolvePanel(this.catalog, state, this.workspace.namedSets()),
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
-          this.workspace.setXSignal(id, path);
+          const ref = this.catalog.refFromPath(path);
+          if (ref === undefined) return;
+          this.workspace.setXRef(id, ref);
           this.workspace.focusPanel(id);
           this.afterLayoutChange();
         },
         onSetColorSignal: (id, path) => {
-          this.workspace.setColorSignal(id, path);
+          this.workspace.setColorRef(
+            id,
+            path === null ? null : (this.catalog.refFromPath(path) ?? null),
+          );
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
@@ -258,8 +231,8 @@ export class AppShell {
         onClearXSignal: (id) => {
           this.clearXSignal(id);
         },
-        onToggleSeries: (id, path) => {
-          this.workspace.toggleSeriesVisible(id, path);
+        onToggleSeries: (id, ref) => {
+          this.workspace.toggleSeriesVisible(id, ref);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -338,14 +311,14 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onSetSeriesStyle: (id, path, style) => {
-          this.workspace.setSeriesStyle(id, path, style);
+        onSetSeriesStyle: (id, ref, style) => {
+          this.workspace.setSeriesOverride(id, ref, style);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onRemoveSeries: (id, path) => {
-          this.workspace.removeSeries(id, path);
+        onRemoveSeries: (id, ref) => {
+          this.workspace.removeSeriesRef(id, ref, this.catalog.get(ref)?.path);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
@@ -361,9 +334,9 @@ export class AppShell {
           const panel = this.workspace.addPanelRow();
           this.plotSignal(path, panel.id);
         },
-        onDropBundleNewPanel: (memberPaths) => {
+        onDropSignalsNewPanel: (memberPaths) => {
           const panel = this.workspace.addPanelRow();
-          this.plotBundle(memberPaths, panel.id);
+          this.plotSignals(memberPaths, panel.id);
         },
         onMovePanel: (id, rowIndex, cellIndex) => {
           this.workspace.movePanel(id, rowIndex, cellIndex);
@@ -381,29 +354,28 @@ export class AppShell {
     );
     this.tree = new SignalTreeView(
       required(this.root, ".tree-scroll"),
-      required(this.root, ".tree-favorites"),
+      required(this.root, ".tree-sets"),
       {
         onPlotSignal: (path) => {
           this.plotSignal(path);
         },
-        onPlotBundle: (_localPath, memberPaths) => {
-          this.plotBundle(memberPaths);
+        onPlotSignals: (paths) => {
+          this.plotSignals(paths);
         },
-        onToggleFavorite: (path) => {
-          this.workspace.toggleFavorite(path);
-          this.commitHistory();
-          this.tree?.setFavorites(this.workspace.favorites());
-        },
-        onToggleFavoriteBundle: (localPath) => {
-          this.workspace.toggleFavoriteBundle(localPath);
-          this.commitHistory();
-          this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
+        onSetSelected: (set) => {
+          const paths =
+            set.kind === "pick"
+              ? set.refs
+                  .map((ref) => this.catalog.get(ref)?.path)
+                  .filter((path): path is string => path !== undefined)
+              : this.catalog
+                  .allSeries()
+                  .filter((series) => series.channel === set.selector)
+                  .map((series) => series.path);
+          this.plotSignals(paths);
         },
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
-        },
-        onRemoveDerivedBundle: (localPath) => {
-          void this.removeDerivedBundle(localPath);
         },
       },
     );
@@ -430,7 +402,8 @@ export class AppShell {
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
       const panel = this.workspace.addPanelRow();
       for (const summary of this.signals.slice(0, 2)) {
-        this.workspace.addSeries(panel.id, summary.path);
+        const ref = this.catalog.refFromPath(summary.path);
+        if (ref !== undefined) this.workspace.addSeriesRef(panel.id, ref);
       }
       this.fitWindowToPlotted();
     }
@@ -659,7 +632,7 @@ export class AppShell {
       "panel-clear-color-signal",
       "Panel: clear color signal (c:)",
       (id) => {
-        this.workspace.setColorSignal(id, null);
+        this.workspace.setColorRef(id, null);
       },
     );
     this.registerFocusedPanelCommand(
@@ -1102,7 +1075,8 @@ export class AppShell {
             hint: "then pick from tree",
             run: () => {
               this.workspace.setMode(focused, "xy");
-              this.workspace.setXSignal(focused, summary.path);
+              const ref = this.catalog.refFromPath(summary.path);
+              if (ref !== undefined) this.workspace.setXRef(focused, ref);
               this.afterLayoutChange();
             },
           }));
@@ -1122,7 +1096,8 @@ export class AppShell {
               title: `Panel: set color signal (c:)… ${summary.path}`,
               hint: "signal",
               run: () => {
-                this.workspace.setColorSignal(focused, summary.path);
+                const ref = this.catalog.refFromPath(summary.path);
+                if (ref !== undefined) this.workspace.setColorRef(focused, ref);
                 this.afterLayoutChange();
               },
             })),
@@ -1182,18 +1157,22 @@ export class AppShell {
     if (target === null) {
       target = this.workspace.addPanelRow().id;
     }
-    if (this.workspace.addSeries(target, path)) {
+    const ref = this.catalog.refFromPath(path);
+    if (ref !== undefined && this.workspace.addSeriesRef(target, ref)) {
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
     }
   }
 
-  private plotBundle(memberPaths: readonly string[], panelId?: string): void {
+  private plotSignals(memberPaths: readonly string[], panelId?: string): void {
     let target = this.workspace.focusedPanelId();
     if (panelId !== undefined) target = panelId;
     if (target === null) target = this.workspace.addPanelRow().id;
-    if (this.workspace.addSeriesBatch(target, memberPaths)) {
+    const refs = memberPaths
+      .map((path) => this.catalog.refFromPath(path))
+      .filter((ref): ref is NonNullable<typeof ref> => ref !== undefined);
+    if (this.workspace.addSeriesRefs(target, refs)) {
       this.workspace.focusPanel(target);
       this.fitWindowToPlotted();
       this.afterLayoutChange();
@@ -1282,7 +1261,9 @@ export class AppShell {
   private fitWindowToPlotted(): void {
     const extent = this.timeExtent(
       [...this.workspace.panels()].flatMap((panel) =>
-        panel.series.map((series) => series.path),
+        resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
+          (series) => series.path,
+        ),
       ),
     );
     if (extent === null) return;
@@ -1340,8 +1321,6 @@ export class AppShell {
         "active",
         this.workspace.linkedTime().linked,
       );
-      this.tree?.setFavorites(this.workspace.favorites());
-      this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     } finally {
       this.restoringHistory = false;
     }
@@ -1494,9 +1473,10 @@ export class AppShell {
         }
       },
       exportSets: () =>
-        this.workspace
-          .snapshot()
-          .source_sets.map((set) => ({ key: set.key, label: set.label })),
+        this.signals.map((source) => ({
+          key: source.source_key,
+          label: source.path,
+        })),
       pngBytes: async () => {
         const generation = this.exportGeneration;
         try {
@@ -1599,11 +1579,12 @@ export class AppShell {
     if (path !== null) this.showModeHelp(`exported ${path}`);
   }
 
-  private exportSelection(setKeys?: readonly string[]): ExportSelection {
+  private exportSelection(sourceKeys?: readonly string[]): ExportSelection {
     const session = this.workspace.snapshot();
     return {
-      source_keys: session.sources.map((source) => source.key),
-      set_keys: [...(setKeys ?? session.source_sets.map((set) => set.key))],
+      source_keys: [
+        ...(sourceKeys ?? session.sources.map((source) => source.key)),
+      ],
     };
   }
 
@@ -1847,97 +1828,29 @@ export class AppShell {
   async createDerived(path: string, expr: string): Promise<void> {
     const port = this.plane.derived;
     if (port === null) throw new Error("This snapshot cannot create signals");
-    if (this.hasBundleReference(expr)) {
-      validateDerivedBundleName(path);
-      const response = await port.createBundle(path, expr);
-      this.workspace.addDerivedBundle(response.local_path, expr);
-      await this.reloadSignals();
-      const focused = this.workspace.focusedPanelId();
-      if (focused !== null) {
-        this.workspace.addSeriesBatch(
-          focused,
-          response.created.map((summary) => summary.path),
-        );
-      }
-      if (response.skipped.length > 0) {
-        const missing = response.skipped
-          .map(
-            (entry) =>
-              entry.prefix +
-              " missing " +
-              entry.missing
-                .map((missingPath) => "'" + missingPath + "'")
-                .join(", "),
-          )
-          .join("; ");
-        this.showModeHelp(
-          "created for " +
-            String(response.created.length) +
-            " runs; " +
-            missing,
-        );
-      }
-      this.afterLayoutChange();
-      return;
-    }
     const summary = await port.create(path, expr);
     this.workspace.addDerived(summary.path, expr);
     await this.reloadSignals();
     const focused = this.workspace.focusedPanelId();
-    if (focused !== null) this.workspace.addSeries(focused, summary.path);
+    const ref = this.catalog.refFromPath(summary.path);
+    if (focused !== null && ref !== undefined)
+      this.workspace.addSeriesRef(focused, ref);
     this.afterLayoutChange();
   }
 
   private async removeDerived(path: string): Promise<void> {
     const port = this.plane.derived;
     if (port === null) return;
+    const ref = this.catalog.refFromPath(path);
+    if (ref === undefined) return;
     try {
       await port.remove(path);
-      this.workspace.removeSignal(path);
+      this.workspace.removeSignalRef(ref, path);
       await this.reloadSignals();
       this.afterLayoutChange();
     } catch (error: unknown) {
       this.reportError(error);
     }
-  }
-
-  private async removeDerivedBundle(localPath: string): Promise<void> {
-    const port = this.plane.derived;
-    if (port === null) return;
-    try {
-      await port.removeBundle(localPath);
-      for (const signal of this.signals.filter(
-        (summary) => summary.local_path === localPath,
-      )) {
-        this.workspace.removeSignal(signal.path);
-      }
-      this.workspace.removeDerivedBundle(localPath);
-      await this.reloadSignals();
-      this.afterLayoutChange();
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
-  }
-
-  private hasBundleReference(expression: string): boolean {
-    const fullPaths = new Set(this.signals.map((signal) => signal.path));
-    const bundlePaths = new Set(
-      bundleCompletionEntries(this.signals, this.sets).map(
-        (bundle) => bundle.localPath,
-      ),
-    );
-    for (const match of expression.matchAll(
-      /'((?:''|[^'])*)'|"((?:""|[^"])*)"/g,
-    )) {
-      const quote = match[1] !== undefined ? "''" : '""';
-      const replacement = quote === "''" ? "'" : '"';
-      const reference = (match[1] ?? match[2] ?? "").replaceAll(
-        quote,
-        replacement,
-      );
-      if (!fullPaths.has(reference) && bundlePaths.has(reference)) return true;
-    }
-    return false;
   }
 
   private async applyQuickTransform(
@@ -1963,55 +1876,14 @@ export class AppShell {
   }
 
   private async reloadSignals(): Promise<void> {
-    [this.signals, this.sets] = await Promise.all([
-      this.plane.listSignals(),
-      this.plane.listSets(),
-    ]);
-    this.workspace.setSourceSets(
-      this.sets.map((set) => ({
-        key: set.set_key,
-        label: set.label,
-        generation: set.generation,
-        time_domain: set.time_domain,
-        members: set.members,
-      })),
-    );
+    this.signals = await this.plane.listSignals();
+    this.catalog = Catalog.build(this.signals);
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
-    this.tree?.setSignals(this.signals.map((summary) => summary.path));
-    const prefixesBySource = new Map<string, string>();
-    for (const signal of this.signals) {
-      if (!prefixesBySource.has(signal.source_key)) {
-        prefixesBySource.set(
-          signal.source_key,
-          signal.path.endsWith(`/${signal.local_path}`)
-            ? signal.path.slice(0, -signal.local_path.length - 1)
-            : signal.path,
-        );
-      }
-    }
-    this.tree?.setSets(
-      this.sets
-        .map((set) => ({
-          key: set.set_key,
-          label: set.label,
-          prefixes: [
-            ...new Set(
-              set.members
-                .map((member) => prefixesBySource.get(member.source_key))
-                .filter((prefix): prefix is string => prefix !== undefined),
-            ),
-          ],
-        }))
-        .filter((set) => set.prefixes.length > 0),
-    );
+    this.tree?.setCatalog(this.catalog);
+    this.tree?.setNamedSets(this.workspace.namedSets());
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
-    this.formulaBar?.setBundles(
-      bundleCompletionEntries(this.signals, this.sets),
-    );
-    this.tree?.setFavorites(this.workspace.favorites());
-    this.tree?.setFavoriteBundles(this.workspace.favoriteBundles());
     this.updateStatus();
   }
 
@@ -2088,46 +1960,34 @@ export class AppShell {
     ids: string[];
     missing: string[];
   } {
-    const paths = panel.series.map((series) => series.path);
+    const resolved = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    );
+    const paths = resolved.map((series) => series.path);
     if (panel.mode === "xy") {
-      if (panel.x_signal !== null) {
-        paths.unshift(panel.x_signal);
-        const xLocal = this.isDerivedPath(panel.x_signal)
-          ? undefined
-          : this.signalsByPath.get(panel.x_signal)?.local_path;
-        if (xLocal !== undefined) {
-          for (const series of panel.series) {
-            const sourceKey = this.isDerivedPath(series.path)
-              ? undefined
-              : this.signalsByPath.get(series.path)?.source_key;
-            if (sourceKey === undefined) continue;
-            const resolved = this.signals.find(
-              (candidate) =>
-                candidate.source_key === sourceKey &&
-                candidate.local_path === xLocal,
-            );
-            if (resolved !== undefined) paths.push(resolved.path);
-          }
+      const x = panel.x_ref === null ? null : this.catalog.get(panel.x_ref);
+      if (x !== null && x !== undefined) {
+        paths.unshift(x.path);
+        for (const series of resolved) {
+          const paired = this.catalog.get({
+            source_key: series.ref.source_key,
+            channel: x.channel,
+          });
+          if (paired !== undefined) paths.push(paired.path);
         }
       }
-      if (panel.color_signal !== null) {
-        paths.push(panel.color_signal);
-        const cLocal = this.isDerivedPath(panel.color_signal)
-          ? undefined
-          : this.signalsByPath.get(panel.color_signal)?.local_path;
-        if (cLocal !== undefined) {
-          for (const series of panel.series) {
-            const sourceKey = this.isDerivedPath(series.path)
-              ? undefined
-              : this.signalsByPath.get(series.path)?.source_key;
-            if (sourceKey === undefined) continue;
-            const resolved = this.signals.find(
-              (candidate) =>
-                candidate.source_key === sourceKey &&
-                candidate.local_path === cLocal,
-            );
-            if (resolved !== undefined) paths.push(resolved.path);
-          }
+      const color =
+        panel.color_ref === null ? null : this.catalog.get(panel.color_ref);
+      if (color !== null && color !== undefined) {
+        paths.push(color.path);
+        for (const series of resolved) {
+          const paired = this.catalog.get({
+            source_key: series.ref.source_key,
+            channel: color.channel,
+          });
+          if (paired !== undefined) paths.push(paired.path);
         }
       }
     }
@@ -2218,8 +2078,15 @@ export class AppShell {
    */
   private sampleWindow(panel: PanelState): { t0: number; t1: number } {
     if (panel.mode !== "xy") return this.effectiveWindow(panel);
-    const paths = panel.series.map((series) => series.path);
-    if (panel.x_signal !== null) paths.push(panel.x_signal);
+    const paths = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    ).map((series) => series.path);
+    if (panel.x_ref !== null) {
+      const x = this.catalog.get(panel.x_ref);
+      if (x !== undefined) paths.push(x.path);
+    }
     return this.timeExtent(paths) ?? this.effectiveWindow(panel);
   }
 
@@ -2246,7 +2113,11 @@ export class AppShell {
     }
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
-    const extent = this.timeExtent(panel.series.map((series) => series.path));
+    const extent = this.timeExtent(
+      resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
+        (series) => series.path,
+      ),
+    );
     if (extent === null) {
       this.commitHistory();
       this.renderTiles();
@@ -2260,12 +2131,25 @@ export class AppShell {
   /** Removes the assigned X signal while leaving an empty XY axis slot. */
   private clearXSignal(panelId: string): void {
     const panel = this.workspace.panel(panelId);
-    const path = panel?.x_signal;
-    if (panel === undefined || path === null || path === undefined) return;
-    this.workspace.setXSignal(panelId, null);
-    this.workspace.removeSeries(panelId, path);
-    if (panel.color_signal === path) {
-      this.workspace.setColorSignal(panelId, null);
+    const ref = panel?.x_ref;
+    const path =
+      ref === null || ref === undefined ? null : this.catalog.get(ref)?.path;
+    if (
+      panel === undefined ||
+      ref === null ||
+      ref === undefined ||
+      path === undefined ||
+      path === null
+    )
+      return;
+    this.workspace.setXRef(panelId, null);
+    this.workspace.removeSeriesRef(panelId, ref, path);
+    if (
+      panel.color_ref !== null &&
+      panel.color_ref.source_key === ref.source_key &&
+      panel.color_ref.channel === ref.channel
+    ) {
+      this.workspace.setColorRef(panelId, null);
     }
     this.workspace.clearPanelXRange(panelId);
     this.afterLayoutChange();
@@ -2452,6 +2336,9 @@ export class AppShell {
         provider_id: null,
         decode_provenance: null,
         reconcile_legacy: false,
+        time_domain: source.time_domain,
+        scale: source.scale,
+        offset: source.offset,
       });
     }
     const firstName = sources[0] === undefined ? "" : basename(sources[0].path);
@@ -2463,9 +2350,51 @@ export class AppShell {
     const rows = required<HTMLElement>(this.root, ".source-rows");
     const toggleSources = (): void => {
       this.sourcesExpanded = !this.sourcesExpanded;
-      renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
+      renderSourceRows(
+        rows,
+        sources,
+        this.sourcesExpanded,
+        toggleSources,
+        (source, domain, scale, offset) => {
+          void this.applySourceAlignment(source, domain, scale, offset);
+        },
+      );
     };
-    renderSourceRows(rows, sources, this.sourcesExpanded, toggleSources);
+    renderSourceRows(
+      rows,
+      sources,
+      this.sourcesExpanded,
+      toggleSources,
+      (source, domain, scale, offset) => {
+        void this.applySourceAlignment(source, domain, scale, offset);
+      },
+    );
+  }
+
+  private async applySourceAlignment(
+    source: SourceSummary,
+    domain: SourceSummary["time_domain"],
+    scale: number,
+    offset: number,
+  ): Promise<void> {
+    try {
+      await this.plane.setSourceAlignment({
+        source_key: source.source_key,
+        time_domain: domain,
+        scale,
+        offset,
+      });
+      this.workspace.setSourceAlignment(
+        source.source_key,
+        domain,
+        scale,
+        offset,
+      );
+      this.commitHistory();
+      await this.reloadSignals();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
   }
 
   private toggleLinked(): void {
@@ -2670,6 +2599,12 @@ export function renderSourceRows(
   sources: readonly SourceSummary[],
   expanded: boolean,
   onToggle: () => void,
+  onAlignment?: (
+    source: SourceSummary,
+    domain: SourceSummary["time_domain"],
+    scale: number,
+    offset: number,
+  ) => void,
 ): void {
   const previousScrollTop =
     container.querySelector<HTMLElement>(".source-scroll")?.scrollTop ?? 0;
@@ -2678,7 +2613,9 @@ export function renderSourceRows(
     0,
   );
   if (sources.length <= 8) {
-    container.replaceChildren(...sources.map(sourceRow));
+    container.replaceChildren(
+      ...sources.map((source) => sourceRow(source, onAlignment)),
+    );
     return;
   }
   const summary = document.createElement("button");
@@ -2705,12 +2642,14 @@ export function renderSourceRows(
     windowElement.className = "source-window";
     windowElement.style.transform = `translateY(${String(slice.topPadding)}px)`;
     windowElement.append(
-      ...sources.slice(slice.start, slice.end).map(sourceRow),
+      ...sources
+        .slice(slice.start, slice.end)
+        .map((source) => sourceRow(source, onAlignment)),
     );
     spacer.append(windowElement);
     scroll.append(spacer);
     scroll.addEventListener("scroll", () => {
-      renderSourceRows(container, sources, true, onToggle);
+      renderSourceRows(container, sources, true, onToggle, onAlignment);
       const next = container.querySelector<HTMLElement>(".source-scroll");
       if (next !== null) next.scrollTop = scroll.scrollTop;
     });
@@ -2719,7 +2658,15 @@ export function renderSourceRows(
   container.replaceChildren(...children);
 }
 
-function sourceRow(source: SourceSummary): HTMLElement {
+function sourceRow(
+  source: SourceSummary,
+  onAlignment?: (
+    source: SourceSummary,
+    domain: SourceSummary["time_domain"],
+    scale: number,
+    offset: number,
+  ) => void,
+): HTMLElement {
   const row = document.createElement("div");
   row.className = "source-row";
   const name = document.createElement("span");
@@ -2730,6 +2677,50 @@ function sourceRow(source: SourceSummary): HTMLElement {
   points.className = "source-points";
   points.textContent = `${Number(source.point_count).toLocaleString()} pts`;
   row.append(name, points);
+  if (onAlignment !== undefined) {
+    const unit = document.createElement("select");
+    unit.className = "source-time-unit";
+    for (const option of [
+      "seconds",
+      "milliseconds",
+      "microseconds",
+      "nanoseconds",
+    ] as const) {
+      const item = document.createElement("option");
+      item.value = option;
+      item.textContent = option;
+      item.selected = option === source.time_domain.unit;
+      unit.append(item);
+    }
+    const scale = document.createElement("input");
+    scale.type = "number";
+    scale.step = "any";
+    scale.value = String(source.scale);
+    scale.ariaLabel = `${source.prefix} time scale`;
+    const offset = document.createElement("input");
+    offset.type = "number";
+    offset.step = "any";
+    offset.value = String(source.offset);
+    offset.ariaLabel = `${source.prefix} time offset`;
+    const apply = (): void => {
+      const nextScale = Number(scale.value);
+      const nextOffset = Number(offset.value);
+      if (!Number.isFinite(nextScale) || !Number.isFinite(nextOffset)) return;
+      onAlignment(
+        source,
+        {
+          ...source.time_domain,
+          unit: unit.value as SourceSummary["time_domain"]["unit"],
+        },
+        nextScale,
+        nextOffset,
+      );
+    };
+    unit.addEventListener("change", apply);
+    scale.addEventListener("change", apply);
+    offset.addEventListener("change", apply);
+    row.append(unit, scale, offset);
+  }
   return row;
 }
 
@@ -2764,8 +2755,8 @@ function shellMarkup(): string {
       <div class="search-wrap">
         <label>/ <input class="signal-search" placeholder="filter signals…" spellcheck="false" /></label>
       </div>
-      <div class="tree-heading">★ FAVORITES</div>
-      <div class="tree-favorites"></div>
+      <div class="tree-heading">SETS</div>
+      <div class="tree-sets"></div>
       <div class="tree-heading">SIGNALS</div>
       <div class="tree-scroll"></div>
       <div class="source-footer">

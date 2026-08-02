@@ -7,48 +7,19 @@ export interface TimeWindow {
   t1: number;
 }
 
-export interface SetMemberSummary {
-  source_key: string;
-  missing: string[];
-  scale: number;
-  offset: number;
-}
+export type SourceTimeUnit = "seconds" | "milliseconds" | "microseconds" | "nanoseconds";
 
-export type SetTimeUnit = "seconds" | "milliseconds" | "microseconds" | "nanoseconds";
+export type SourceOriginKind = "relative" | "absolute_epoch" | "event_aligned" | "synthetic_index";
 
-export type SetOriginKind = "relative" | "absolute_epoch" | "event_aligned" | "synthetic_index";
-
-export interface SetTimeDomainSummary {
-  unit: SetTimeUnit;
-  origin: SetOriginKind;
+export interface SourceTimeDomainSummary {
+  unit: SourceTimeUnit;
+  origin: SourceOriginKind;
   alignment_origin: number;
 }
 
-export interface SetSummary {
-  set_id: string;
-  set_key: string;
-  label: string;
-  generation: string;
-  member_count: number;
-  members: SetMemberSummary[];
-  time_domain: SetTimeDomainSummary;
-  local_paths: string[];
-  aligned: boolean;
-}
-
-export interface CreateSetRequest {
-  label: string;
-  member_keys: string[];
-}
-
-export interface UpdateSetMembersRequest {
-  set_id: string;
-  member_keys: string[];
-}
-
-export interface SetTimeAlignmentRequest {
-  set_id: string;
+export interface SourceAlignmentRequest {
   source_key: string;
+  time_domain: SourceTimeDomainSummary;
   scale: number;
   offset: number;
 }
@@ -213,6 +184,9 @@ export interface SourceSummary {
   prefix: string;
   path: string;
   point_count: string;
+  time_domain: SourceTimeDomainSummary;
+  scale: number;
+  offset: number;
 }
 
 export type IngestStage = "decode" | "pyramid" | "cache";
@@ -277,7 +251,6 @@ export interface ExportEstimateRequest {
 
 export interface ExportSelection {
   source_keys: string[];
-  set_keys: string[];
 }
 
 export interface ExportEstimate {

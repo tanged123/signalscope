@@ -5,11 +5,7 @@ import { describe, expect, it } from "vitest";
 import { WorkspaceModel } from "../app/workspace";
 import type { BatchStatus } from "../generated/protocol";
 import type { PanelMode } from "../generated/session";
-import {
-  AppShell,
-  renderBatchProgress,
-  validateDerivedBundleName,
-} from "./app-shell";
+import { AppShell, renderBatchProgress } from "./app-shell";
 
 interface ShellProbe {
   workspace: WorkspaceModel;
@@ -21,32 +17,46 @@ describe("panel mode transitions", () => {
     const workspace = new WorkspaceModel();
     const panel = workspace.addPanelRow();
     for (let index = 0; index < 8; index += 1) {
-      workspace.addSeries(panel.id, `run_01/s${String(index)}`);
+      workspace.addSeriesRef(panel.id, {
+        source_key: "run_01",
+        channel: `s${String(index)}`,
+      });
     }
-    workspace.addSeries(panel.id, "run_01/time");
-    workspace.setXSignal(panel.id, "run_01/time");
+    workspace.addSeriesRef(panel.id, {
+      source_key: "run_01",
+      channel: "time",
+    });
+    workspace.setXRef(panel.id, { source_key: "run_01", channel: "time" });
     workspace.setMode(panel.id, "xy");
 
     const shell = Object.create(AppShell.prototype) as ShellProbe;
     shell.workspace = workspace;
     shell.transitionPanelMode(panel.id, "time");
 
-    expect(workspace.panel(panel.id)?.x_signal).toBe("run_01/time");
-    expect(workspace.panel(panel.id)?.series).toHaveLength(8);
+    expect(workspace.panel(panel.id)?.x_ref).toEqual({
+      source_key: "run_01",
+      channel: "time",
+    });
+    expect(workspace.panel(panel.id)?.bindings[0]?.refs).toHaveLength(8);
     expect(
       workspace
         .panel(panel.id)
-        ?.series.some((series) => series.path === "run_01/time"),
+        ?.bindings.flatMap((binding) => binding.refs)
+        .some((ref) => ref.source_key === "run_01" && ref.channel === "time"),
     ).toBe(false);
 
     shell.transitionPanelMode(panel.id, "xy");
 
-    expect(workspace.panel(panel.id)?.x_signal).toBe("run_01/time");
-    expect(workspace.panel(panel.id)?.series).toHaveLength(8);
+    expect(workspace.panel(panel.id)?.x_ref).toEqual({
+      source_key: "run_01",
+      channel: "time",
+    });
+    expect(workspace.panel(panel.id)?.bindings[0]?.refs).toHaveLength(8);
     expect(
       workspace
         .panel(panel.id)
-        ?.series.some((series) => series.path === "run_01/time"),
+        ?.bindings.flatMap((binding) => binding.refs)
+        .some((ref) => ref.source_key === "run_01" && ref.channel === "time"),
     ).toBe(false);
   });
 });
@@ -80,14 +90,5 @@ describe("renderBatchProgress", () => {
     );
     expect(progress.querySelector(".ingest-bar")).toBeNull();
     expect(progress.querySelector(".ingest-cancel")).toBeNull();
-  });
-});
-
-describe("derived bundle names", () => {
-  it("rejects nested names before creating a bundle", () => {
-    expect(() => validateDerivedBundleName("derived/score/extra")).toThrow(
-      "derived bundle names are a single segment",
-    );
-    expect(() => validateDerivedBundleName("score")).not.toThrow();
   });
 });

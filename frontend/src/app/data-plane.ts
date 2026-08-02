@@ -3,7 +3,6 @@ import {
   type BatchDetailRequest,
   type BatchJob,
   type BatchStatus,
-  type CreateSetRequest,
   type CreateDerivedBundleRequest,
   type DerivedBundleResponse,
   type DerivedRequest,
@@ -33,17 +32,14 @@ import {
   type SaveExportFileRequest,
   type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
-  type SetSummary,
-  type SetTimeAlignmentRequest,
+  type SourceAlignmentRequest,
   type SignalSummary,
   type SnapshotManifest,
   type SourceSummary,
   type TileRequest,
   type TileResponse,
-  type UpdateSetMembersRequest,
 } from "../generated/protocol";
 import { open, seal, type Envelope } from "./envelope";
-import { parseBakedSession } from "./baked-session";
 import { queryPyramid } from "./pyramid-query";
 import { binsToSamples, sampleWindow } from "./samples";
 
@@ -68,17 +64,6 @@ export interface DerivedPort {
   remove(path: string): Promise<void>;
   createBundle(name: string, expr: string): Promise<DerivedBundleResponse>;
   removeBundle(name: string): Promise<void>;
-}
-
-export interface SetPort {
-  create(label: string, memberKeys: string[]): Promise<SetSummary>;
-  updateMembers(setId: string, memberKeys: string[]): Promise<SetSummary>;
-  setAlignment(
-    setId: string,
-    sourceKey: string,
-    scale: number,
-    offset: number,
-  ): Promise<SetSummary>;
 }
 
 export interface SessionPort {
@@ -130,7 +115,6 @@ export interface DataPlane {
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
-  readonly sets: SetPort | null;
   readonly session: SessionPort | null;
   readonly restore: RestorePort | null;
   readonly preferences: PreferencesPort | null;
@@ -138,7 +122,7 @@ export interface DataPlane {
   readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
-  listSets(): Promise<SetSummary[]>;
+  setSourceAlignment(request: SourceAlignmentRequest): Promise<void>;
   queryTiles(request: TileRequest): Promise<TileResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
@@ -161,8 +145,6 @@ export class TauriPlane implements DataPlane {
   readonly ingest: IngestPort;
 
   readonly derived: DerivedPort;
-  readonly sets: SetPort;
-
   readonly session: SessionPort;
 
   readonly restore: RestorePort;
@@ -252,42 +234,6 @@ export class TauriPlane implements DataPlane {
           }),
         );
       },
-    };
-    this.sets = {
-      create: async (label: string, memberKeys: string[]) =>
-        open(
-          await this.invoke<Envelope<SetSummary>>("create_set", {
-            request: seal<CreateSetRequest>({
-              label,
-              member_keys: memberKeys,
-            }),
-          }),
-        ),
-      updateMembers: async (setId: string, memberKeys: string[]) =>
-        open(
-          await this.invoke<Envelope<SetSummary>>("update_set_members", {
-            request: seal<UpdateSetMembersRequest>({
-              set_id: setId,
-              member_keys: memberKeys,
-            }),
-          }),
-        ),
-      setAlignment: async (
-        setId: string,
-        sourceKey: string,
-        scale: number,
-        offset: number,
-      ) =>
-        open(
-          await this.invoke<Envelope<SetSummary>>("set_time_alignment", {
-            request: seal<SetTimeAlignmentRequest>({
-              set_id: setId,
-              source_key: sourceKey,
-              scale,
-              offset,
-            }),
-          }),
-        ),
     };
     this.session = {
       save: async (sessionJson: string, path: string | null) =>
@@ -418,8 +364,12 @@ export class TauriPlane implements DataPlane {
     return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
   }
 
-  async listSets(): Promise<SetSummary[]> {
-    return open(await this.invoke<Envelope<SetSummary[]>>("list_sets"));
+  async setSourceAlignment(request: SourceAlignmentRequest): Promise<void> {
+    open(
+      await this.invoke<Envelope<null>>("set_source_alignment", {
+        request: seal(request),
+      }),
+    );
   }
 
   async queryTiles(request: TileRequest): Promise<TileResponse> {
@@ -458,8 +408,6 @@ export class BakedPlane implements DataPlane {
   readonly ingest = null;
 
   readonly derived = null;
-  readonly sets = null;
-
   readonly session = null;
 
   readonly restore = null;
@@ -516,47 +464,19 @@ export class BakedPlane implements DataPlane {
         prefix: this.payload.signals[0]?.summary.path.split("/")[0] ?? "demo",
         path: this.sourceLabel,
         point_count: String(points),
+        time_domain: {
+          unit: "seconds",
+          origin: "relative",
+          alignment_origin: 0,
+        },
+        scale: 1,
+        offset: 0,
       },
     ]);
   }
 
-  listSets(): Promise<SetSummary[]> {
-    const saved = parseBakedSession(this.bakedSessionJson).source_sets;
-    return Promise.resolve(
-      saved.map((set, index) => {
-        const memberKeys = new Set(
-          set.members.map((member) => member.source_key),
-        );
-        const localsBySource = new Map<string, Set<string>>();
-        for (const signal of this.payload.signals) {
-          if (!memberKeys.has(signal.summary.source_key)) continue;
-          const locals =
-            localsBySource.get(signal.summary.source_key) ?? new Set<string>();
-          locals.add(signal.summary.local_path);
-          localsBySource.set(signal.summary.source_key, locals);
-        }
-        const counts = new Map<string, number>();
-        for (const locals of localsBySource.values()) {
-          for (const local of locals) {
-            counts.set(local, (counts.get(local) ?? 0) + 1);
-          }
-        }
-        return {
-          set_id: String(index + 1),
-          set_key: set.key,
-          label: set.label,
-          generation: set.generation,
-          member_count: set.members.length,
-          members: set.members,
-          time_domain: set.time_domain,
-          local_paths: [...counts]
-            .filter(([, count]) => count >= 2)
-            .map(([local]) => local)
-            .sort((left, right) => left.localeCompare(right)),
-          aligned: true,
-        };
-      }),
-    );
+  setSourceAlignment(): Promise<void> {
+    return Promise.reject(new Error("snapshots are read-only"));
   }
 
   queryTiles(request: TileRequest): Promise<TileResponse> {
@@ -693,7 +613,7 @@ function createDemoManifest(): BakedManifest {
   return seal({
     session_json: JSON.stringify({
       app: "signalscope",
-      schema_version: 16,
+      schema_version: 17,
       theme: "dark",
       linked_time: {
         t0: 0,
@@ -715,12 +635,11 @@ function createDemoManifest(): BakedManifest {
           layout: [],
         },
       ],
-      favorites: [],
-      favorite_bundles: [],
+      named_sets: [],
+      channel_map: [],
       derived: [],
       derived_bundles: [],
       sources: [],
-      source_sets: [],
     }),
     signals: demoSignals.map(({ summary, generate }) => ({
       summary,

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::pyramid::Pyramid;
-use crate::session::{LinkedTime, PanelMode, PanelState, Session};
+use crate::session::{LinkedTime, PanelMode, PanelState, SeriesRef, Session};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{
     BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
@@ -78,21 +78,47 @@ fn effective_window(panel: &PanelState, linked: &LinkedTime) -> (f64, f64) {
     }
 }
 
-fn panel_signal_paths(panel: &PanelState) -> Vec<&str> {
-    let mut paths: Vec<&str> = panel
-        .series
+fn panel_signal_paths(session: &Session, panel: &PanelState) -> Vec<String> {
+    let mut paths = panel
+        .bindings
         .iter()
-        .map(|series| series.path.as_str())
-        .collect();
+        .flat_map(|binding| binding.refs.iter())
+        .filter_map(|reference| path_from_ref(session, reference))
+        .collect::<Vec<_>>();
     if panel.mode == PanelMode::Xy {
-        if let Some(x) = panel.x_signal.as_deref() {
+        if let Some(x) = panel
+            .x_ref
+            .as_ref()
+            .and_then(|reference| path_from_ref(session, reference))
+        {
             paths.insert(0, x);
         }
-        if let Some(color) = panel.color_signal.as_deref() {
+        if let Some(color) = panel
+            .color_ref
+            .as_ref()
+            .and_then(|reference| path_from_ref(session, reference))
+        {
             paths.push(color);
         }
     }
     paths
+}
+
+fn path_from_ref(session: &Session, reference: &SeriesRef) -> Option<String> {
+    if reference.source_key == "derived" {
+        return Some(format!("derived/{}", reference.channel));
+    }
+    session
+        .sources
+        .iter()
+        .find(|source| source.key == reference.source_key)
+        .map(|source| {
+            if source.prefix.is_empty() {
+                reference.channel.clone()
+            } else {
+                format!("{}/{}", source.prefix, reference.channel)
+            }
+        })
 }
 
 fn signal_plan<'a>(
@@ -175,7 +201,6 @@ pub fn plan<'a>(
             .sources()
             .map(|source| source.key.0.to_string())
             .collect(),
-        set_keys: Vec::new(),
     };
     plan_selected(session, store, pyramids, &selection, range, fidelity)
 }
@@ -198,8 +223,8 @@ pub fn plan_selected<'a>(
     for tab in &session.tabs {
         for panel in &tab.panels {
             if panel.mode != PanelMode::Time {
-                for path in panel_signal_paths(panel) {
-                    if let Some(signal) = store.signal_by_path(path) {
+                for path in panel_signal_paths(session, panel) {
+                    if let Some(signal) = store.signal_by_path(&path) {
                         needs_raw.insert(signal.id);
                     }
                 }
@@ -242,8 +267,8 @@ pub fn plan_selected<'a>(
                 Some((start, end)) => (start.min(t0), end.max(t1)),
                 None => (t0, t1),
             });
-            for path in panel_signal_paths(panel) {
-                if let Some(signal) = store.signal_by_path(path) {
+            for path in panel_signal_paths(session, panel) {
+                if let Some(signal) = store.signal_by_path(&path) {
                     wanted.insert(signal.id);
                 }
             }
@@ -394,7 +419,9 @@ mod tests {
 
     use super::*;
     use crate::pyramid::Pyramid;
-    use crate::session::{AxisStyle, DashStyle, PanelMode, PanelState, SeriesState, Session};
+    use crate::session::{
+        AxisStyle, Binding, BindingKind, PanelMode, PanelState, SeriesRef, Session,
+    };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
 
@@ -417,27 +444,32 @@ mod tests {
         (store, pyramids)
     }
 
-    fn series(path: &str) -> SeriesState {
-        SeriesState {
-            path: path.to_owned(),
-            color_slot: 0,
-            dash: DashStyle::Solid,
-            width: 1.5,
-            visible: true,
-        }
-    }
-
     fn panel(mode: PanelMode, paths: &[&str]) -> PanelState {
         PanelState {
             id: "panel-1".to_owned(),
             title: "Panel".to_owned(),
             mode,
             axis_style: AxisStyle::Gutter,
-            x_signal: None,
-            color_signal: None,
-            color_by_time: false,
-            series: paths.iter().map(|path| series(path)).collect(),
-            highlighted_sources: Vec::new(),
+            x_ref: None,
+            color_axis: crate::session::ColorAxis::None,
+            color_ref: None,
+            bindings: vec![Binding {
+                kind: BindingKind::Pick,
+                selector: None,
+                refs: paths
+                    .iter()
+                    .map(|path| SeriesRef {
+                        source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                        channel: (*path).to_owned(),
+                    })
+                    .collect(),
+                set_id: None,
+            }],
+            color_by: crate::session::StyleDimension::Source,
+            overrides: Vec::new(),
+            focus: Vec::new(),
+            ghost_mode: crate::session::GhostMode::All,
+            split_by: crate::session::SplitDimension::None,
             y_range: None,
             x_range: None,
             x_label: None,
@@ -451,6 +483,21 @@ mod tests {
 
     fn session_with(panels: Vec<PanelState>) -> Session {
         let mut session = Session::default();
+        session.sources.push(crate::session::SourceRecord {
+            key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            path: "/data/test.csv".into(),
+            prefix: String::new(),
+            provider_id: None,
+            decode_provenance: None,
+            reconcile_legacy: false,
+            time_domain: crate::session::TimeDomainState {
+                unit: crate::session::TimeUnitState::Seconds,
+                origin: crate::session::OriginKindState::Relative,
+                alignment_origin: 0.0,
+            },
+            scale: 1.0,
+            offset: 0.0,
+        });
         session.tabs[0].panels = panels;
         session
     }
@@ -630,10 +677,19 @@ mod tests {
     fn xy_panels_pull_x_and_color_signals() {
         let (store, pyramids) = store_with(&[("x", 10), ("y", 10), ("c", 10), ("ignored", 10)]);
         let mut xy = panel(PanelMode::Xy, &["y"]);
-        xy.x_signal = Some("x".to_owned());
-        xy.color_signal = Some("c".to_owned());
+        xy.x_ref = Some(SeriesRef {
+            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            channel: "x".into(),
+        });
+        xy.color_ref = Some(SeriesRef {
+            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            channel: "c".into(),
+        });
         let mut time = panel(PanelMode::Time, &["ignored"]);
-        time.x_signal = Some("x".to_owned());
+        time.x_ref = Some(SeriesRef {
+            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            channel: "x".into(),
+        });
         let session = session_with(vec![xy, time]);
         let export = plan(
             &session,
@@ -689,6 +745,13 @@ mod tests {
                 provider_id: None,
                 decode_provenance: None,
                 reconcile_legacy: false,
+                time_domain: crate::session::TimeDomainState {
+                    unit: crate::session::TimeUnitState::Seconds,
+                    origin: crate::session::OriginKindState::Relative,
+                    alignment_origin: 0.0,
+                },
+                scale: 1.0,
+                offset: 0.0,
             }],
             ..Session::default()
         };
@@ -919,7 +982,6 @@ mod tests {
         let selected = store.sources().next().unwrap().key.0.to_string();
         let selection = ExportSelection {
             source_keys: vec![selected],
-            set_keys: Vec::new(),
         };
         let plan = plan_selected(
             &Session::default(),

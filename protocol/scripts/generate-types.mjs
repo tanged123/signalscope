@@ -226,7 +226,7 @@ function emitObject(rust, typeScript, name, definition) {
   rust.push(`pub struct ${name} {`);
   typeScript.push(`export interface ${name} {`);
   for (const [field, type] of Object.entries(definition.fields)) {
-    const rustField = snakeCase(field);
+    const rustField = rustIdentifier(field);
     if (
       type.includes("u64") &&
       type !== "u64" &&
@@ -253,4 +253,9 @@ function emitObject(rust, typeScript, name, definition) {
   }
   rust.push("}", "");
   typeScript.push("}", "");
+}
+
+function rustIdentifier(field) {
+  const identifier = snakeCase(field);
+  return identifier === "ref" ? "r#ref" : identifier;
 }
