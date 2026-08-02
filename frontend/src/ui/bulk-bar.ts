@@ -21,7 +21,7 @@ export class BulkBar {
     private readonly selection: SelectionModel,
     private readonly callbacks: BulkBarCallbacks,
   ) {
-    element.className = "bulk-bar";
+    element.classList.add("bulk-bar");
     element.setAttribute("aria-live", "polite");
     this.unsubscribe = selection.onChange(() => this.render());
     this.render();

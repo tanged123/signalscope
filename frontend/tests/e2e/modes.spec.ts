@@ -292,7 +292,9 @@ test.describe("panel modes", () => {
     await chip.click();
     await expect(chip).toContainText("none");
 
-    const leaf = page.locator(".tree-scroll .tree-leaf").last();
+    const leaf = page
+      .locator('.outline-scroll [data-row-kind="series"]')
+      .last();
     const signalPath = await leaf.getAttribute("data-signal-path");
     const transfer = await page.evaluateHandle(() => new DataTransfer());
     await leaf.dispatchEvent("dragstart", { dataTransfer: transfer });
@@ -446,7 +448,10 @@ test.describe("panel modes", () => {
     // A panel with nothing plotted has no statistics to show, so the new panel
     // needs a signal before the strip can prove the command reached it.
     const second = page.locator(".panel").last();
-    await page.locator(".tree-scroll .tree-leaf").first().focus();
+    await page
+      .locator('.outline-scroll [data-row-kind="series"]')
+      .first()
+      .focus();
     await page.keyboard.press("Enter");
     await expect(second.locator(".binding-chip")).toHaveCount(1);
     const stats = page.locator(".panel-stats");

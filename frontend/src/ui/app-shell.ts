@@ -37,7 +37,11 @@ import { suggestMerges } from "../app/channel-map";
 import { resolvePanel } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
-import { virtualSlice } from "../app/tree-model";
+import {
+  virtualSlice,
+  type GroupBy,
+  type OutlineColumn,
+} from "../app/outline-model";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
 import {
@@ -81,13 +85,9 @@ import {
 import { FolderScanDialog } from "./folder-scan-dialog";
 import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
-import { SignalTreeView } from "./signal-tree";
-import { SignalTableView } from "./signal-table";
+import { SignalOutlineView } from "./signal-outline";
+import { SetsListView } from "./sets-list";
 import { BulkBar } from "./bulk-bar";
-import {
-  ChannelMapView,
-  type ChannelMapViewCallbacks,
-} from "./channel-map-view";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
@@ -123,11 +123,10 @@ export class AppShell {
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
-  private tree: SignalTreeView | null = null;
-  private table: SignalTableView | null = null;
+  private outline: SignalOutlineView | null = null;
+  private setsList: SetsListView | null = null;
   private bulkBar: BulkBar | null = null;
-  private channelMapView: ChannelMapView | null = null;
-  private dockMode: "tree" | "table" = "tree";
+  private readonly outlineOptInColumns = new Set<OutlineColumn>();
   private pendingSetRefs: SeriesRef[] | null = null;
   private pendingMergeAliases: ChannelAlias[] | null = null;
   private channelMenuCleanup: (() => void) | null = null;
@@ -431,41 +430,33 @@ export class AppShell {
         },
       },
     );
-    this.tree = new SignalTreeView(
-      required(this.root, ".tree-scroll"),
-      required(this.root, ".tree-sets"),
+    this.setsList = new SetsListView(required(this.root, ".tree-sets"), {
+      onSetBind: (setId) => this.bindSetToPanel(setId),
+      onSetRemove: (setId) => {
+        this.workspace.removeNamedSet(setId);
+        this.setsList?.setNamedSets(this.workspace.namedSets());
+        this.afterLayoutChange();
+      },
+    });
+    this.outline = new SignalOutlineView(
+      required(this.root, ".outline-scroll"),
+      this.selection,
       {
-        onPlotSignal: (path) => {
-          this.plotSignal(path);
-        },
-        onPlotSignals: (paths) => {
-          this.plotSignals(paths);
-        },
-        onSetBind: (setId) => {
-          this.bindSetToPanel(setId);
-        },
-        onSetRemove: (setId) => {
-          this.workspace.removeNamedSet(setId);
-          this.tree?.setNamedSets(this.workspace.namedSets());
-          this.afterLayoutChange();
-        },
+        onSelectionChange: () => {},
+        onAddToPanel: (refs) => this.addRefsToPanel(refs),
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
         },
         onMergeChannels: (aliases, clientX, clientY) => {
           this.openChannelMergeMenu(aliases, clientX, clientY);
         },
-      },
-      this.selection,
-    );
-    this.table = new SignalTableView(
-      required(this.root, ".table-scroll"),
-      this.selection,
-      {
-        onSelectionChange: () => {},
-        onPlotRow: (refs) => this.addRefsToPanel(refs),
-        onMergeChannels: (aliases, clientX, clientY) => {
-          this.openChannelMergeMenu(aliases, clientX, clientY);
+        onUnmerge: (canonical) => {
+          this.workspace.unmergeChannel(canonical);
+          this.selection.clear();
+          void this.reloadSignals().then(() => {
+            this.commitHistory();
+            this.afterLayoutChange();
+          });
         },
       },
       required<HTMLElement>(this.root, ".bulk-bar"),
@@ -492,47 +483,6 @@ export class AppShell {
         this.setFormulaOpen(false);
       },
     });
-    this.channelMapView = new ChannelMapView(this.root, {
-      onClose: () => {},
-      onUnmerge: (canonical) => {
-        this.workspace.unmergeChannel(canonical);
-        this.selection.clear();
-        void this.reloadSignals().then(() => {
-          this.commitHistory();
-          this.afterLayoutChange();
-          this.openChannelMap();
-        });
-      },
-      onMerge: (suggestion) => {
-        this.workspace.mergeChannels(
-          suggestion.canonical,
-          suggestion.names.map((entry) => ({
-            source_key: entry.sourceKey,
-            name: entry.channel,
-          })),
-        );
-        this.selection.clear();
-        void this.reloadSignals().then(() => {
-          this.commitHistory();
-          this.afterLayoutChange();
-          this.openChannelMap();
-        });
-      },
-      onKeep: (suggestion) => {
-        this.workspace.keepSeparate(
-          suggestion.names.map((entry) => ({
-            source_key: entry.sourceKey,
-            name: entry.channel,
-          })),
-        );
-        this.selection.clear();
-        void this.reloadSignals().then(() => {
-          this.commitHistory();
-          this.afterLayoutChange();
-          this.openChannelMap();
-        });
-      },
-    } satisfies ChannelMapViewCallbacks);
     this.registerCommands();
     this.commands.onRun = (id) => {
       this.usage.record(id);
@@ -864,19 +814,12 @@ export class AppShell {
       },
     });
     this.commands.register({
-      id: "toggle-dock-view",
-      title: "Toggle signals dock view",
+      id: "cycle-signal-grouping",
+      title: "Cycle signals grouping",
       keys: "mod+shift+t",
       section: "view",
       group: "docks",
-      run: () => this.toggleDockView(),
-    });
-    this.commands.register({
-      id: "open-channel-map",
-      title: "Open channel map",
-      section: "view",
-      group: "docks",
-      run: () => this.openChannelMap(),
+      run: () => this.cycleSignalGrouping(),
     });
     this.commands.register({
       id: "toggle-linked",
@@ -986,7 +929,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 1.4.4");
+        this.showModeHelp("SignalScope 1.5.0");
       },
     });
     this.commands.register({
@@ -1185,14 +1128,6 @@ export class AppShell {
     ];
   }
 
-  private openChannelMap(): void {
-    this.channelMapView?.open(
-      this.catalog,
-      this.workspace.channelMap(),
-      suggestMerges(this.catalog, this.workspace.channelMap()).slice(0, 3),
-    );
-  }
-
   private paletteEntries(mode: PaletteMode, query = ""): PaletteEntry[] {
     if (mode === "settings") return this.settingsEntries();
     // Planned and momentarily unavailable commands both stay listed so the
@@ -1319,9 +1254,17 @@ export class AppShell {
     required(this.root, ".tree-toggle").addEventListener("click", () => {
       this.commands.run("toggle-signal-tree");
     });
-    required(this.root, ".channel-map-button").addEventListener("click", () => {
-      this.openChannelMap();
+    const grouping = required<HTMLSelectElement>(
+      this.root,
+      ".signal-group-select",
+    );
+    grouping.addEventListener("change", () => {
+      this.outline?.setGroupBy(grouping.value as GroupBy);
     });
+    required<HTMLButtonElement>(
+      this.root,
+      ".outline-columns-button",
+    ).addEventListener("click", () => this.openOutlineColumnPicker());
     this.bindSignalTreeResize();
     required(this.root, ".linked-toggle").addEventListener("click", () => {
       this.commands.run("toggle-linked");
@@ -1334,8 +1277,7 @@ export class AppShell {
     });
     const search = required<HTMLInputElement>(this.root, ".signal-search");
     search.addEventListener("input", () => {
-      this.tree?.setFilter(search.value);
-      this.table?.setFilter(search.value);
+      this.outline?.setFilter(search.value);
       this.renderSearchStatus();
     });
     required<HTMLButtonElement>(this.root, ".dock-add-source").addEventListener(
@@ -1387,7 +1329,7 @@ export class AppShell {
         refs: refs ?? [],
       });
       this.pendingSetRefs = null;
-      this.tree?.setNamedSets(this.workspace.namedSets());
+      this.setsList?.setNamedSets(this.workspace.namedSets());
       this.hideSetNameRow();
       this.commitHistory();
       this.afterLayoutChange();
@@ -1414,15 +1356,6 @@ export class AppShell {
         search.focus();
       },
     );
-    for (const button of this.root.querySelectorAll<HTMLButtonElement>(
-      "[data-dock-view]",
-    )) {
-      button.addEventListener("click", () => {
-        const mode = button.dataset.dockView;
-        if (mode === "tree" || mode === "table") this.setDockView(mode);
-      });
-    }
-    this.setDockView(this.dockMode);
     this.renderSearchStatus();
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
@@ -2640,12 +2573,12 @@ export class AppShell {
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
-    this.tree?.setCatalog(this.catalog);
-    this.tree?.setNamedSets(this.workspace.namedSets());
-    this.table?.setCatalog(this.catalog);
-    this.table?.setFilter(
+    this.outline?.setCatalog(this.catalog);
+    this.outline?.setFilter(
       required<HTMLInputElement>(this.root, ".signal-search").value,
     );
+    this.setsList?.setCatalog(this.catalog);
+    this.setsList?.setNamedSets(this.workspace.namedSets());
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.renderChannelSuggestions();
     this.renderSearchStatus();
@@ -3079,7 +3012,7 @@ export class AppShell {
           }
         }
       }
-      this.tree?.setLiveValues(values);
+      this.outline?.setLiveValues(values);
     });
   }
 
@@ -3232,42 +3165,57 @@ export class AppShell {
     this.setSignalTreeOpen(workbench.classList.contains("tree-collapsed"));
   }
 
-  private toggleDockView(): void {
-    this.setDockView(this.dockMode === "tree" ? "table" : "tree");
+  private cycleSignalGrouping(): void {
+    this.outline?.cycleGroupBy();
+    const select = this.root.querySelector<HTMLSelectElement>(
+      ".signal-group-select",
+    );
+    if (select !== null && this.outline !== null)
+      select.value = this.outline.getGroupBy();
   }
 
-  private setDockView(mode: "tree" | "table"): void {
-    this.dockMode = mode;
-    const tree = required<HTMLElement>(this.root, ".tree-scroll");
-    const table = required<HTMLElement>(this.root, ".table-scroll");
-    const bulk = this.root.querySelector<HTMLElement>(".bulk-bar");
-    tree.hidden = mode !== "tree";
-    table.hidden = mode !== "table";
-    this.table?.setFooterInTable(mode === "table");
-    if (
-      mode === "tree" &&
-      bulk !== null &&
-      bulk.parentElement !== this.root.querySelector(".signal-tree")
-    ) {
-      const signalTree = required<HTMLElement>(this.root, ".signal-tree");
-      const sourceFooter = required<HTMLElement>(this.root, ".source-footer");
-      signalTree.insertBefore(bulk, sourceFooter);
-    }
-    for (const button of this.root.querySelectorAll<HTMLButtonElement>(
-      "[data-dock-view]",
-    )) {
-      const active = button.dataset.dockView === mode;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
-    }
+  private openOutlineColumnPicker(): void {
+    this.root.querySelector(".outline-columns-popover")?.remove();
+    const button = required<HTMLButtonElement>(
+      this.root,
+      ".outline-columns-button",
+    );
+    const popover = document.createElement("div");
+    popover.className = "outline-columns-popover";
+    popover.setAttribute("role", "dialog");
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = this.outlineOptInColumns.has("pts");
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) this.outlineOptInColumns.add("pts");
+      else this.outlineOptInColumns.delete("pts");
+      this.outline?.setOptInColumns([...this.outlineOptInColumns]);
+    });
+    label.append(checkbox, document.createTextNode(" PTS"));
+    popover.appendChild(label);
+    this.root.appendChild(popover);
+    button.setAttribute("aria-expanded", "true");
+    const close = (): void => {
+      popover.remove();
+      button.setAttribute("aria-expanded", "false");
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") close();
+    };
+    const onPointer = (event: PointerEvent): void => {
+      if (!popover.contains(event.target as Node) && event.target !== button)
+        close();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    checkbox.focus();
   }
 
   private selectAllDockRows(): void {
-    this.selection.setAll(
-      this.dockMode === "table"
-        ? (this.table?.filteredKeys() ?? [])
-        : (this.tree?.filteredKeys() ?? []),
-    );
+    this.selection.setAll(this.outline?.filteredKeys() ?? []);
   }
 
   private dockContains(target: EventTarget | null): boolean {
@@ -3758,14 +3706,12 @@ export function shellMarkup(): string {
       <div class="tree-sets"></div>
       <div class="tree-heading signals-heading">
         <span>SIGNALS</span>
-        <span class="signal-view-toggle" role="group" aria-label="Signals view">
-          <button type="button" data-dock-view="tree" class="active" aria-pressed="true">tree</button>
-          <button type="button" data-dock-view="table" aria-pressed="false">table</button>
-          <button type="button" class="channel-map-button" aria-label="Open channel map">map</button>
+        <span class="signal-outline-controls" aria-label="Signals grouping and columns">
+          <label class="signal-group-control"><span>group ←</span><select class="signal-group-select" aria-label="Group signals by"><option value="channel">channel</option><option value="source">source</option><option value="none">none</option></select></label>
+          <button type="button" class="outline-columns-button" aria-label="Choose signal columns" aria-expanded="false">⊞ ▾</button>
         </span>
       </div>
-      <div class="tree-scroll"></div>
-      <div class="table-scroll" hidden></div>
+      <div class="outline-scroll"></div>
       <div class="bulk-bar" hidden></div>
       <div class="source-footer">
         <div class="ingest-progress" hidden></div>

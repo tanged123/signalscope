@@ -588,7 +588,7 @@ test("signal tree toggles and collapses through its resize edge", async ({
   expect(Number(await seam.getAttribute("aria-valuenow"))).toBeGreaterThan(220);
 });
 
-test("tree filters, sets, and drag-to-plot", async ({ page }) => {
+test("outline filters, sets, and drag-to-plot", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".tree-sets")).toContainText(
     "Saved sets appear here",
@@ -597,13 +597,18 @@ test("tree filters, sets, and drag-to-plot", async ({ page }) => {
   await page.keyboard.press("/");
   await expect(page.locator(".signal-search")).toBeFocused();
   await page.locator(".signal-search").fill("body/y");
-  await expect(page.locator(".tree-scroll .tree-leaf")).toHaveCount(1);
+  await expect(
+    page.locator('.outline-scroll [data-row-kind="series"]'),
+  ).toHaveCount(1);
   await page.locator(".signal-search").fill("");
-  await expect(page.locator(".tree-scroll .tree-leaf")).toHaveCount(2);
+  await expect(
+    page.locator('.outline-scroll [data-row-kind="series"]'),
+  ).toHaveCount(2);
 
-  const firstLeaf = page.locator(".tree-scroll .tree-leaf").first();
-  await expect(firstLeaf).toHaveAttribute("role", "button");
-  await expect(firstLeaf).toHaveAccessibleName(/^Plot /);
+  const firstLeaf = page
+    .locator('.outline-scroll [data-row-kind="series"]')
+    .first();
+  await expect(firstLeaf).toHaveAttribute("data-path", /.+/);
 
   await firstLeaf.focus();
   await page.keyboard.press("n");
@@ -614,12 +619,15 @@ test("tree filters, sets, and drag-to-plot", async ({ page }) => {
 
   await page.keyboard.press("n");
   const spaceTarget = page.locator(".panel").last();
-  const secondLeaf = page.locator(".tree-scroll .tree-leaf").nth(1);
+  const secondLeaf = page
+    .locator('.outline-scroll [data-row-kind="series"]')
+    .nth(1);
   await secondLeaf.focus();
   await page.keyboard.press("Space");
-  await expect(spaceTarget.locator(".binding-chip")).toHaveCount(1);
+  await expect(page.locator(".bulk-bar")).toContainText("1 selected");
+  await expect(spaceTarget.locator(".binding-chip")).toHaveCount(0);
 
-  const leaf = page.locator(".tree-scroll .tree-leaf").first();
+  const leaf = page.locator('.outline-scroll [data-row-kind="series"]').first();
   const target = page.locator(".panel").last();
   const workspace = page.locator(".workspace");
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
@@ -634,7 +642,7 @@ test("tree filters, sets, and drag-to-plot", async ({ page }) => {
 
   await target.dispatchEvent("drop", { dataTransfer });
   await leaf.dispatchEvent("dragend", { dataTransfer });
-  await expect(target.locator(".binding-chip")).toHaveCount(2);
+  await expect(target.locator(".binding-chip")).toHaveCount(1);
   await expect(target).not.toHaveClass(/focused/);
   await expect(target).not.toHaveClass(/drop-target/);
 });

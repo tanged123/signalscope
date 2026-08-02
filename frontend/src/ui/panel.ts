@@ -6,7 +6,7 @@ import {
   overrideFor,
   type ResolvedSeries,
 } from "../app/resolution";
-import { virtualSlice } from "../app/tree-model";
+import { virtualSlice } from "../app/outline-model";
 import { evaluateSelector } from "../app/selector";
 import type {
   SampleResponse,

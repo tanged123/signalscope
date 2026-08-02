@@ -22,6 +22,16 @@ export class SelectionModel {
     this.notify();
   }
 
+  toggleMany(keys: readonly string[]): void {
+    const allSelected = keys.every((key) => this.selected.has(key));
+    for (const key of keys) {
+      if (allSelected) this.selected.delete(key);
+      else this.selected.add(key);
+    }
+    this.anchor = keys.at(-1) ?? this.anchor;
+    this.notify();
+  }
+
   selectRange(orderedVisible: readonly string[], toKey: string): void {
     const anchorIndex =
       this.anchor === null ? -1 : orderedVisible.indexOf(this.anchor);

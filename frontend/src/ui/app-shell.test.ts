@@ -104,60 +104,35 @@ interface ShellProbe {
 
 interface DockProbe {
   root: HTMLElement;
-  dockMode: "tree" | "table";
   selection: SelectionModel;
-  tree: { filteredKeys(): readonly string[] };
-  table: {
-    filteredKeys(): readonly string[];
-    setFooterInTable(mode: boolean): void;
-  };
-  setDockView(mode: "tree" | "table"): void;
+  outline: { filteredKeys(): readonly string[] };
   selectAllDockRows(): void;
 }
 
-describe("signals dock modes", () => {
-  it("swaps tree and table while keeping the shared selection", () => {
+describe("signals outline dock", () => {
+  it("keeps one outline surface and the shared selection", () => {
     const root = document.createElement("div");
-    root.innerHTML = `
-      <div class="tree-scroll"></div>
-      <div class="table-scroll"></div>
-      <button data-dock-view="tree"></button>
-      <button data-dock-view="table"></button>
-    `;
+    root.innerHTML = `<div class="outline-scroll"></div><div class="bulk-bar"></div>`;
     const shell = Object.create(AppShell.prototype) as DockProbe;
     shell.root = root;
-    shell.dockMode = "tree";
     shell.selection = new SelectionModel();
-    shell.tree = { filteredKeys: () => ["tree"] };
-    shell.table = {
-      filteredKeys: () => ["table"],
-      setFooterInTable: vi.fn(),
-    };
+    shell.outline = { filteredKeys: () => ["outline"] };
     shell.selection.toggle("shared");
 
-    shell.setDockView("table");
-
-    expect(root.querySelector<HTMLElement>(".tree-scroll")?.hidden).toBe(true);
-    expect(root.querySelector<HTMLElement>(".table-scroll")?.hidden).toBe(
-      false,
-    );
+    expect(root.querySelector(".outline-scroll")).not.toBeNull();
+    expect(root.querySelector(".signal-outline-controls")).toBeNull();
     expect(shell.selection.keys()).toEqual(["shared"]);
   });
 
-  it("selects all rows from the active dock only", () => {
+  it("selects all filtered outline rows", () => {
     const shell = Object.create(AppShell.prototype) as DockProbe;
     shell.root = document.createElement("div");
-    shell.dockMode = "table";
     shell.selection = new SelectionModel();
-    shell.tree = { filteredKeys: () => ["tree"] };
-    shell.table = {
-      filteredKeys: () => ["table-1", "table-2"],
-      setFooterInTable: vi.fn(),
-    };
+    shell.outline = { filteredKeys: () => ["outline-1", "outline-2"] };
 
     shell.selectAllDockRows();
 
-    expect(shell.selection.keys()).toEqual(["table-1", "table-2"]);
+    expect(shell.selection.keys()).toEqual(["outline-1", "outline-2"]);
   });
 });
 
@@ -380,6 +355,9 @@ describe("workspace identity", () => {
 
   it("advertises the selector grammar in the filter placeholder", () => {
     expect(shellMarkup()).toContain('placeholder="glob @ source · unit:K"');
+    expect(shellMarkup()).toContain('class="signal-group-select"');
+    expect(shellMarkup()).toContain('class="outline-columns-button"');
+    expect(shellMarkup()).not.toContain("dock-view");
   });
 });
 

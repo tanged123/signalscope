@@ -1,20 +1,13 @@
 import { expect, test } from "./fixtures";
 
-test.describe("channel map", () => {
-  test("opens the workspace channel map from the dock and palette", async ({
+test.describe("channel suggestions and outline replacement", () => {
+  test("keeps suggestions in the footer and removes the map surface", async ({
     page,
   }) => {
     await page.goto("/");
-    await page.locator(".channel-map-button").click();
-    await expect(page.locator(".channel-map-dialog")).toBeVisible();
-    await expect(page.locator(".channel-map-header h2")).toHaveText(
-      "CHANNEL MAP — WORKSPACE",
-    );
-    await page.locator(".channel-map-close").click();
-
-    await page.keyboard.press("ControlOrMeta+Shift+p");
-    await page.locator(".palette-input").fill("open channel map");
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".channel-map-dialog")).toBeVisible();
+    await expect(page.locator(".outline-scroll")).toBeVisible();
+    await expect(page.locator(".channel-map-button")).toHaveCount(0);
+    await expect(page.locator(".channel-map-dialog")).toHaveCount(0);
+    await expect(page.locator(".channel-suggestions")).toHaveCount(1);
   });
 });
