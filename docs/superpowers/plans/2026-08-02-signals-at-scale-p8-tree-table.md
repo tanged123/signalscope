@@ -270,7 +270,20 @@ outline unusable as rendered. Root causes, verified in code:
 3. **Control/row styling far from the mock:** the `group ←` select and
    `⊞ ▾` button render as large chrome instead of the mock's 10 px micro
    token; aggregate text (`3 chs`) duplicates the abbreviated header
-   (`CHS`); numeric cells are not right-aligned tabular.
+   (`CHS`); numeric cells are not right-aligned tabular; row hierarchy
+   (bright group labels, dim children, amber selection blocks, alias
+   sub-lines) is absent — the outline got fresh flat CSS instead of the
+   design's row treatment.
+4. **The repo's mock file does not contain the tree-table.** The on-disk
+   `SignalScope Signals at Scale.dc.html` still shows the OLD §6 (flat
+   table + tree/table toggle) and OLD §10 dock — `grep "group ←"` has
+   zero hits. Edward's updated mock revision has not landed in the repo.
+   Interim pixel references: `Screenshot 2026-08-01 214453.png` /
+   `Screenshot 2026-08-01 223453.png` (§10 dock) and
+   `Screenshot 2026-08-01 214630.png` (§6 wide) in the repo root. The
+   style CONTRACT below (locked 16) is extracted from the mock file's own
+   inline CSS — the new tree-table is visually the §10 tree-row treatment
+   composed with the §6 table treatment, both of which ARE in the file.
 
 Process lesson (again): the jsdom tests asserted structure but nothing
 about track alignment — the §10 screenshot comparison is part of DONE.
@@ -298,7 +311,58 @@ about track alignment — the §10 screenshot comparison is part of DONE.
     `appearance: none` on the select, hairline border only on
     focus-visible), options lowercase; `⊞ ▾` matches. Same height as the
     SETS/SIGNALS headings — the controls must not inflate the heading row.
-15. **Sources section (answers "what is this for"):** the per-source rows
+    15a. **Style contract (exact values, lifted from the mock's inline CSS —
+    `SignalScope Signals at Scale.dc.html` §10 dock lines ~253–279 and §6
+    table lines ~166–172). Implement these verbatim as tokens/classes; do not
+    approximate:**
+
+- **Container:** dock base `font: 11px var(--font-mono)` (mock dock is
+  11.5px UI / 11px mono rows), `tabular-nums`. Row vertical rhythm:
+  `padding: 2px 6px` per row (≈19–20 px tall), NOT `min-height` +
+  centering slack. Alias sub-line: own row, `padding: 1px 6px 1px 22px`,
+  `font-size: 10px`, `--fg-3`.
+- **Header row:** `background: var(--surface-2)`, `border-bottom: 1px
+solid var(--border)`, `color: var(--fg-3)`, `font-size: 10px`,
+  `letter-spacing: .06em`, `padding: 5px 10px→5px 6px` at dock width;
+  PTS/VALUE header cells `text-align: right`.
+- **Row states:** group label `--fg-1`; child/series label `--fg-2`;
+  hover `--surface-3`; selected rows `background: var(--amber-3)` +
+  `color: var(--fg-1)` full-row block, check `▣` inherits; unselected
+  check `▢` in `--fg-4`. Data cells: UNIT `--fg-3`; counts, PTS, VALUE
+  right-aligned `--fg-3` 10px (VALUE `--fg-1` when live/selected per the
+  mock's `2.3117`).
+- **Row furniture:** caret `--fg-3`, `width: 10px; text-align: center`,
+  text glyph `▸/▾`; `ƒx` glyph `--amber-7` 10px in the caret slot;
+  `N names` chip `padding: 0 4px; background: var(--amber-3); color:
+var(--amber-9); border-radius: 2px; font-size: 9px`; near-match row
+  count `--cmd-yellow`, `merge` `--amber-7`, `keep` `--fg-4` (already per
+  P7 — do not regress it).
+- **Bulk footer:** `padding: 5px 10px`, `background: var(--surface-2)`,
+  `border-top: 1px solid var(--border-strong)`; `N selected` `--fg-1`;
+  actions plain text `--amber-7` with `gap: 14px`; right-aligned hint
+  `--fg-4` (`⇧click range · ⌘A all filtered`).
+- **`group ← channel ▾` token** uses the mock's segmented-toggle
+  vocabulary (§10 line 264): `border: 1px solid var(--border-strong);
+border-radius: 2px; font-size: 9px`, `group ←` in `--fg-3`, the current
+  value `padding: 1px 6px; background: var(--surface-4); color:
+var(--fg-1)`. The native `<select>` hides behind it via
+  `appearance: none` on these exact metrics. `⊞ ▾` matches at the same
+  height. The heading row keeps its `padding: 8px 8px 4px` / 10px /
+  `.08em` treatment.
+- **Wide (§6) tracks for reference:** `26px 1fr 90px 50px 60px 70px`
+  (check · channel · source · unit · pts · value) — locked 11's minima
+  must relax toward these proportions as the pane widens (the flexible
+  outline track already does this; fixed tracks may grow via
+  `minmax(min, max-content)` capped near the §6 widths).
+
+15b. **Acceptance for the style pass:** side-by-side against
+`Screenshot 2026-08-01 223453.png` (280 px dock) and
+`Screenshot 2026-08-01 214630.png` (§6 wide), the implementation must be
+indistinguishable at arm's length: same row rhythm, same color
+hierarchy, same selection treatment, same control chrome. "Tests green"
+does not close this task — the screenshot comparison does.
+
+16. **Sources section (answers "what is this for"):** the per-source rows
     (`run_01.csv · 3,003 pts · align ▾`) were the P6 alignment rail. The
     outline now owns the source dimension, so the listing is duplicate UI
     and is **deleted**. What survives, unchanged, in the dock footer area:
@@ -326,8 +390,8 @@ about track alignment — the §10 screenshot comparison is part of DONE.
   - Aggregate cell reads `9` at `applyWidth(280)` and `9 srcs` at `applyWidth(400)` (locked 13, same threshold as the header abbreviation).
   - Series-row checkbox marker and group-row checkbox button both sit in cell 1 (`.outline-check-cell`); caret sits in cell 2.
 - [ ] **Step 2: Implement** locked 11–12: build the template from visible columns; move the checkbox out of the outline cell into a dedicated first cell for both row kinds; caret + label (+ badges) in cell 2; drop logic re-ordered per locked 11.
-- [ ] **Step 3: Styling pass** per locked 13–14: right-aligned tabular numeric cells, UNIT `--fg-3`, amber selected tint (port the P7 `signal-table` selected/hover rules to the outline classes if they died with `signal-table.ts`), compact heading token, lowercase select options.
-- [ ] **Step 4:** `./scripts/test.sh unit signal-outline` — PASS. Screenshot the 280 px dock against §10 and a wide dock against §6; attach to the handoff. **Commit** `fix(ui): outline rows share the header grid; column budget fits the 280px dock`.
+- [ ] **Step 3: Styling pass** per the style contract (locked 13–14 and 15a) — implement the contract's values verbatim: row rhythm from padding not min-height slack, group/child/selected color hierarchy, right-aligned tabular numeric cells, UNIT `--fg-3`, amber full-row selection, caret/`ƒx`/chip furniture, bulk footer treatment, and the segmented `group ← channel ▾` token with the hidden native select. Lowercase select options. Every literal above becomes a token or references an existing one (`--amber-3`, `--surface-2`, …) — light theme must keep working.
+- [ ] **Step 4:** `./scripts/test.sh unit signal-outline` — PASS. Screenshot the 280 px dock against `Screenshot 2026-08-01 223453.png` and a wide dock against `Screenshot 2026-08-01 214630.png`; the task is DONE only when they match per locked 15b. Attach both to the handoff with a list of any remaining deltas. **Commit** `fix(ui): outline rows share the header grid; column budget and style match the mock`.
 
 ---
 
