@@ -1,6 +1,8 @@
 import type {
   Annotation,
   Binding,
+  ChannelAlias,
+  ChannelMapEntry,
   DashStyle,
   DerivedBundleState,
   DerivedSignal,
@@ -259,6 +261,46 @@ export class WorkspaceModel {
 
   sources(): readonly SourceRecord[] {
     return this.session.sources;
+  }
+
+  channelMap(): readonly ChannelMapEntry[] {
+    return this.session.channel_map;
+  }
+
+  mergeChannels(canonical: string, aliases: readonly ChannelAlias[]): void {
+    const unique = uniqueAliases(aliases);
+    if (canonical === "" || unique.length === 0) return;
+    const moved = new Set(unique.map(aliasKey));
+    this.session.channel_map = this.session.channel_map
+      .map((entry) => ({
+        canonical: entry.canonical,
+        aliases: entry.aliases.filter((alias) => !moved.has(aliasKey(alias))),
+      }))
+      .filter(
+        (entry) => entry.canonical !== canonical && entry.aliases.length > 0,
+      );
+    this.session.channel_map.push({
+      canonical,
+      aliases: unique.map((alias) => ({ ...alias })),
+    });
+  }
+
+  unmergeChannel(canonical: string): void {
+    this.session.channel_map = this.session.channel_map.filter(
+      (entry) => entry.canonical !== canonical,
+    );
+  }
+
+  keepSeparate(aliases: readonly ChannelAlias[]): void {
+    const grouped = new Map<string, ChannelAlias[]>();
+    for (const alias of uniqueAliases(aliases)) {
+      const group = grouped.get(alias.name) ?? [];
+      group.push(alias);
+      grouped.set(alias.name, group);
+    }
+    for (const [canonical, group] of grouped) {
+      this.mergeChannels(canonical, group);
+    }
   }
 
   addSource(record: SourceRecord): void {
@@ -916,6 +958,20 @@ function sameRef(
     left.source_key === right.source_key &&
     left.channel === right.channel
   );
+}
+
+function aliasKey(alias: ChannelAlias): string {
+  return `${alias.source_key}\u0000${alias.name}`;
+}
+
+function uniqueAliases(aliases: readonly ChannelAlias[]): ChannelAlias[] {
+  const seen = new Set<string>();
+  return aliases.flatMap((alias) => {
+    const key = aliasKey(alias);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ source_key: alias.source_key, name: alias.name }];
+  });
 }
 
 function sameFocus(left: FocusEntry, right: FocusEntry): boolean {

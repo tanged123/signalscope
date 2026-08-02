@@ -7,7 +7,6 @@ export function historySnapshot(session: Readonly<Session>): Session {
     ...structuredClone(session),
     sources: [],
     named_sets: [],
-    channel_map: [],
   };
   snapshot.linked_time.cursorT = null;
   for (const tab of snapshot.tabs) tab.focused_panel_id = null;
@@ -22,7 +21,6 @@ export function restoreTransientSessionState(
     ...structuredClone(historical),
     sources: structuredClone(current.sources),
     named_sets: structuredClone(current.named_sets),
-    channel_map: structuredClone(current.channel_map),
   };
   restored.linked_time.cursorT = current.linked_time.cursorT;
   for (const tab of restored.tabs) {

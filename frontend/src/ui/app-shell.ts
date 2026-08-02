@@ -2361,7 +2361,7 @@ export class AppShell {
 
   private async reloadSignals(): Promise<void> {
     this.signals = await this.plane.listSignals();
-    this.catalog = Catalog.build(this.signals);
+    this.catalog = Catalog.build(this.signals, this.workspace.channelMap());
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
