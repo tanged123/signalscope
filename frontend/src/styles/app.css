@@ -390,8 +390,14 @@ button {
 
 .set-name-row {
   display: flex;
+  margin: 0 4px;
   gap: 4px;
-  padding-top: 5px;
+  padding: 0 4px;
+}
+
+.tree-set-draft-mark {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
 }
 
 .set-name-input {
@@ -404,6 +410,8 @@ button {
 }
 
 .set-name-row button {
+  width: 18px;
+  padding: 0;
   border: 1px solid var(--border-strong);
   background: var(--surface-2);
   color: var(--fg-2);

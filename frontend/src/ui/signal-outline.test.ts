@@ -78,6 +78,26 @@ describe("SignalOutlineView", () => {
     expect(grouped.selection.size()).toBe(1_000);
   });
 
+  it("selects and clears a channel group when its row is clicked", () => {
+    const { list, selection } = viewFor(
+      Catalog.build([signal("run-01", "temp"), signal("run-02", "temp")]),
+    );
+
+    list.querySelector<HTMLElement>('[data-row-kind="group"]')?.click();
+    expect(selection.size()).toBe(2);
+    expect(
+      list.querySelector('[data-row-kind="group"] .outline-select')
+        ?.textContent,
+    ).toBe("▣");
+
+    list.querySelector<HTMLElement>('[data-row-kind="group"]')?.click();
+    expect(selection.size()).toBe(0);
+    expect(
+      list.querySelector('[data-row-kind="group"] .outline-select')
+        ?.textContent,
+    ).toBe("▢");
+  });
+
   it("renders fixed columns and keeps VALUE blank without a cursor", () => {
     const { list, view } = viewFor(
       Catalog.build([signal("run-01", "temp", 42)]),

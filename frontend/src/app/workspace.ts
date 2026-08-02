@@ -911,12 +911,10 @@ function sameRef(
 }
 
 function sameFocus(left: FocusEntry, right: FocusEntry): boolean {
-  return (
-    left.kind === right.kind &&
-    sameRef(left.ref, right.ref) &&
-    left.source_key === right.source_key &&
-    left.channel === right.channel
-  );
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "series") return sameRef(left.ref, right.ref);
+  if (left.kind === "source") return left.source_key === right.source_key;
+  return left.channel === right.channel;
 }
 
 function createWorkspaceTab(number: number): WorkspaceTab {

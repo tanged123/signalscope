@@ -186,7 +186,7 @@ export class SignalOutlineView {
     element.draggable = true;
     element.addEventListener("click", (event) => {
       if ((event.target as HTMLElement).closest("button") !== null) return;
-      this.toggleGroup(row);
+      this.toggleKeys(row.childKeys);
     });
     element.addEventListener("dblclick", () =>
       this.callbacks.onAddToPanel(row.refs),

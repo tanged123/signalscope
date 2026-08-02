@@ -489,6 +489,32 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.focus).toEqual([]);
   });
 
+  it("removes source and channel focus entries when toggled again", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const entries = [
+      {
+        kind: "source" as const,
+        ref: null,
+        source_key: "run_01",
+        channel: null,
+      },
+      {
+        kind: "channel" as const,
+        ref: null,
+        source_key: null,
+        channel: "temp",
+      },
+    ];
+
+    for (const entry of entries) {
+      model.toggleFocus(panel.id, entry);
+      model.toggleFocus(panel.id, entry);
+    }
+
+    expect(model.focusEntries(panel.id)).toEqual([]);
+  });
+
   it("colour-by-time replaces the colour signal", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

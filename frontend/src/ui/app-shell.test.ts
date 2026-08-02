@@ -152,6 +152,17 @@ describe("selection actions", () => {
     expect(markup).not.toContain("source-alignment-popover");
   });
 
+  it("renders set naming inline beneath the SETS heading", () => {
+    const root = document.createElement("div");
+    root.innerHTML = shellMarkup();
+    const heading = root.querySelector(".sets-heading");
+    const editor = root.querySelector(".set-name-row");
+
+    expect(heading?.nextElementSibling).toBe(editor);
+    expect(root.querySelector(".search-wrap .set-name-row")).toBeNull();
+    expect(editor?.classList.contains("tree-set-draft")).toBe(true);
+  });
+
   it("enables manual-set creation only when signals are selected", () => {
     const ref: SeriesRef = { source_key: "run-01", channel: "temp" };
     const catalog = Catalog.build([bulkSummary(ref.source_key, ref.channel)]);

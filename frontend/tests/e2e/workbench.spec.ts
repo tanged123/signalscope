@@ -679,9 +679,21 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await second.dispatchEvent("drop", { dataTransfer });
   await expect(second.locator(".binding-chip")).toHaveCount(1);
 
+  await second.locator(".panel-close").click();
+  await first.locator(".panel-close").click();
+  await expect(page.locator(".panel")).toHaveCount(0);
+  const emptyTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await setRow.dispatchEvent("dragstart", { dataTransfer: emptyTransfer });
+  const workspace = page.locator(".workspace");
+  await workspace.dispatchEvent("dragover", { dataTransfer: emptyTransfer });
+  await expect(workspace).toHaveClass(/drop-target/);
+  await workspace.dispatchEvent("drop", { dataTransfer: emptyTransfer });
+  await expect(page.locator(".panel")).toHaveCount(1);
+  await expect(page.locator(".panel .binding-chip")).toHaveCount(1);
+
   await setRow.focus();
   await page.keyboard.press("Delete");
-  await expect(second.locator(".binding-chip")).toHaveCount(0);
+  await expect(page.locator(".panel .binding-chip")).toHaveCount(0);
 });
 
 test("legend strip stays bounded", async ({ page }) => {

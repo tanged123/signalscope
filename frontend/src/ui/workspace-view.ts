@@ -5,9 +5,11 @@ import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
   PanelView,
+  SET_DRAG_TYPE,
   SIGNAL_DRAG_TYPE,
   dragData,
   hasDragType,
+  parseSetPayload,
   parseSignalPayload,
   type PanelCallbacks,
 } from "./panel";
@@ -17,6 +19,7 @@ export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
   onDropSignalNewPanel(path: string): void;
   onDropSignalsNewPanel?(paths: readonly string[]): void;
+  onDropSetNewPanel(setId: string): void;
   onMovePanel(
     id: string,
     targetRowIndex: number,
@@ -249,7 +252,8 @@ export class WorkspaceView {
   private bindWorkspaceDrop(): void {
     this.root.addEventListener("dragover", (event) => {
       if (
-        hasDragType(event, SIGNAL_DRAG_TYPE) &&
+        (hasDragType(event, SIGNAL_DRAG_TYPE) ||
+          hasDragType(event, SET_DRAG_TYPE)) &&
         this.isWorkspaceBackground(event.target)
       ) {
         event.preventDefault();
@@ -264,6 +268,13 @@ export class WorkspaceView {
     this.root.addEventListener("drop", (event) => {
       this.root.classList.remove("drop-target");
       if (!this.isWorkspaceBackground(event.target)) return;
+      const setPayload = dragData(event, SET_DRAG_TYPE);
+      if (setPayload !== null) {
+        event.preventDefault();
+        const setId = parseSetPayload(setPayload);
+        if (setId !== null) this.callbacks.onDropSetNewPanel(setId);
+        return;
+      }
       const path = dragData(event, SIGNAL_DRAG_TYPE);
       if (path !== null) {
         event.preventDefault();

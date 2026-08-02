@@ -403,6 +403,12 @@ export class AppShell {
           const panel = this.workspace.addPanelRow();
           this.plotSignals(memberPaths, panel.id);
         },
+        onDropSetNewPanel: (setId) => {
+          if (!this.workspace.namedSets().some((set) => set.id === setId))
+            return;
+          const panel = this.workspace.addPanelRow();
+          this.bindSetToPanel(setId, panel.id);
+        },
         onMovePanel: (id, rowIndex, cellIndex) => {
           this.workspace.movePanel(id, rowIndex, cellIndex);
           this.afterLayoutChange();
@@ -895,7 +901,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 3.1.0");
+        this.showModeHelp("SignalScope 3.1.1");
       },
     });
     this.commands.register({
@@ -3040,11 +3046,6 @@ export function shellMarkup(): string {
           <input class="signal-search" placeholder="Search signals…" spellcheck="false" />
         </div>
         <div class="search-count"></div>
-        <div class="set-name-row" hidden>
-          <input class="set-name-input" placeholder="set name" spellcheck="false" aria-label="Set name" />
-          <button class="set-name-save" type="button">save</button>
-          <button class="set-name-cancel" type="button">cancel</button>
-        </div>
       </div>
       <div class="tree-heading sets-heading">
         <span>SETS</span>
@@ -3056,6 +3057,12 @@ export function shellMarkup(): string {
         >
           ★+
         </button>
+      </div>
+      <div class="set-name-row tree-row tree-set-draft" hidden>
+        <span class="tree-set-draft-mark">★</span>
+        <input class="set-name-input" placeholder="set name" spellcheck="false" aria-label="Set name" />
+        <button class="set-name-save" type="button" title="Save set" aria-label="Save set">✓</button>
+        <button class="set-name-cancel" type="button" title="Cancel" aria-label="Cancel">✕</button>
       </div>
       <div class="tree-sets"></div>
       <div class="tree-heading signals-heading">SIGNALS</div>
