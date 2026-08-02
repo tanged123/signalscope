@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Vitest, Playwright.
 
-**Spec:** `docs/superpowers/specs/2026-08-01-signals-at-scale-design.md` (§ "Style rules", "Matrix legend", "Ghost by default"). Read it first. Assumes P2 as landed at `dd1dbe6`.
+**Spec:** `docs/superpowers/specs/2026-08-01-signals-at-scale-design.md` (§ "Style rules", "Matrix legend", "Ghost by default"). Read it first. Assumes P2 is landed on the staging branch.
 
 ## Global Constraints
 

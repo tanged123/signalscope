@@ -9,7 +9,7 @@ import type {
 import type { Catalog, CatalogSeries } from "./catalog";
 import { parseSelector, seriesMatches, type Selector } from "./selector";
 
-export type SeriesDisplay = "focus" | "rule" | "ghost";
+type SeriesDisplay = "focus" | "rule" | "ghost";
 
 export interface ResolvedSeries {
   ref: SeriesRef;

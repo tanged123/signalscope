@@ -66,6 +66,11 @@ rosters, grouped binding chips, focus/ghost controls, plot hit navigation, and
 grouped cursor readouts keep large multi-source panels bounded while preserving
 keyboard access and session round-trips.
 
+Signals-at-scale P4 is landed: the signals dock now provides a virtualized,
+sortable selector-filtered table with series/channel granularity, shared
+tree/table multi-selection, and bulk add, style, hide, save-set, and derive
+actions without requesting sample data.
+
 Phase 1 visualization foundations closed with a validated categorical palette
 that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
 a headless renderer harness and coherent tick pipeline, unbounded series
