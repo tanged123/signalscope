@@ -491,3 +491,12 @@ git log -5 --oneline
 ```
 
 Expected: no unstaged or staged changes; the four implementation commits plus the approved design commit are visible.
+
+## 2026-08-02 amendment: selection cleanup
+
+The later selection-cleanup implementation supersedes this plan's source
+alignment and bulk-footer work. Protocol v14 and session v19 remove disconnected
+alignment state. Outline selection is retained only for range/group selection
+and multi-signal drag payloads. Manual sets are created from SETS through `★+`,
+`F`, or a selected-signal drop; panel legends own style and visibility, and the
+formula editor owns derivation.

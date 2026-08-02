@@ -66,3 +66,15 @@ values, source alignment, and removal of merge affordances. Session tests cover
 the v17-to-v18 ref migration and generated conformance fixture. End-to-end
 tests cover the simplified heading, collapsed channel rows, expansion,
 selection, source alignment, and cursor value clearing.
+
+## 2026-08-02 amendment: selection cleanup
+
+Source alignment and the bulk selection footer are deleted. Alignment metadata
+was not applied to tile or sample queries, so protocol v14 and session v19
+remove it; v18 sessions migrate by dropping the disconnected fields. Any future
+clock normalization must transform every time-bearing query consistently.
+
+Outline selection remains only for range selection, group selection, and
+multi-signal drag payloads. Manual sets originate in SETS through the visible
+`★+` action, the `F` command, or a selected-signal drop. Styling and visibility
+remain panel-legend actions, while derivation remains in the formula editor.

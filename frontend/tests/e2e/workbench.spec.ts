@@ -624,6 +624,7 @@ test("outline filters, sets, and drag-to-plot", async ({ page }) => {
     .nth(1);
   await secondLeaf.focus();
   await page.keyboard.press("Space");
+  await expect(secondLeaf).toHaveClass(/selected/);
   await expect(page.locator(".sets-save-selection")).toBeEnabled();
   await expect(spaceTarget.locator(".binding-chip")).toHaveCount(0);
 
@@ -678,7 +679,7 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await expect(second.locator(".binding-chip")).toHaveCount(0);
 });
 
-test("legend strip and source rows stay bounded", async ({ page }) => {
+test("legend strip stays bounded", async ({ page }) => {
   await page.goto("/");
   const panel = page.locator(".panel").first();
   const strip = panel.locator(".panel-legend-strip");
@@ -688,13 +689,6 @@ test("legend strip and source rows stay bounded", async ({ page }) => {
   await expect(panel.locator(".panel-header .legend-count-token")).toHaveCount(
     0,
   );
-
-  const sourceRow = page
-    .locator('.signal-outline-row[data-row-kind="series"]')
-    .first();
-  await sourceRow.hover();
-  await expect(sourceRow.locator(".source-align")).toHaveCount(0);
-  await expect(page.locator(".source-alignment-popover")).toHaveCount(0);
 });
 
 test("seam drag resizes panel rows", async ({ page }) => {
