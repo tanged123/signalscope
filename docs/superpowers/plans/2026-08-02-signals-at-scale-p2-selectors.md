@@ -73,7 +73,7 @@ describe("compileGlob", () => {
     ["temp", ["temperature", "TEMP", "a/temp"]],
     ["derived/temp*", ["temp", "derived2/temp"]],
     ["temp?", ["temp", "temp12"]],
-    ["command|response", ["commandx", "respons"]],
+    ["command|response", ["commandx", "respond"]],
     ["run_0[1-3]", ["run_04", "run_0"]],
   ];
   it.each(accepts)("%s accepts %s", (glob, values) => {

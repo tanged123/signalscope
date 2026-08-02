@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { Catalog } from "./catalog";
-import { compileGlob, evaluateSelector, parseSelector } from "./selector";
+import {
+  compileGlob,
+  evaluateSelector,
+  parseSelector,
+  seriesMatches,
+  type Selector,
+  type SelectorAttr,
+} from "./selector";
 
 function catalogFixture(): Catalog {
   const entries: readonly [string, string, string | null][] = [
@@ -67,6 +74,17 @@ describe("evaluateSelector", () => {
       evaluateSelector(catalog, "temp")?.series.map((entry) => entry.channel),
     ).toEqual(["temp", "temp", "temp"]);
   });
+
+  it("matches an individual series with the parsed selector contract", () => {
+    const parsed = parseSelector("temp unit:K");
+    if (!parsed.ok) throw new Error(parsed.error);
+    const selector: Selector = parsed.selector;
+    const unit: SelectorAttr = { key: "unit", value: "K" };
+    const series = catalog.allSeries()[0];
+    if (series === undefined) throw new Error("catalog fixture is empty");
+    expect(selector.attrs).toContainEqual(unit);
+    expect(seriesMatches(selector, series)).toBe(true);
+  });
 });
 
 describe("compileGlob", () => {
@@ -82,7 +100,7 @@ describe("compileGlob", () => {
     ["temp", ["temperature", "TEMP", "a/temp"]],
     ["derived/temp*", ["temp", "derived2/temp"]],
     ["temp?", ["temp", "temp12"]],
-    ["command|response", ["commandx", "respons"]],
+    ["command|response", ["commandx", "respond"]],
     ["run_0[1-3]", ["run_04", "run_0"]],
   ];
 
