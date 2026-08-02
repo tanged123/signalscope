@@ -4,7 +4,7 @@ import type {
   AnnotationDomain,
   PanelMode,
 } from "../generated/session";
-import { nearestVertex } from "./plot-hit";
+import { nearestLine, nearestVertex } from "./plot-hit";
 import {
   formatValue,
   invertX,
@@ -88,9 +88,24 @@ export interface PlotDelta {
   second: PlotPoint;
 }
 
+export interface SeriesHit {
+  path: string;
+  distance: number;
+}
+
+export interface SeriesHitAdapter {
+  seriesAt(
+    layout: PlotLayout,
+    x: number,
+    y: number,
+    threshold: number,
+  ): SeriesHit | null;
+}
+
 export interface PreparedPlot {
   readonly domain: AnnotationDomain;
   readonly interaction: PlotInteractionPolicy;
+  readonly hitAdapter: SeriesHitAdapter;
   autoRanges(): {
     x: readonly [number, number] | null;
     y: readonly [number, number] | null;
@@ -113,6 +128,7 @@ export interface PreparedPlot {
 interface PreparedSeries {
   path: string;
   colorIndex: number;
+  visible?: boolean;
 }
 
 export interface TimePlotInput {
@@ -202,6 +218,20 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
   return {
     domain: "time",
     interaction: POLICIES.time,
+    hitAdapter: {
+      seriesAt(layout, x, y, threshold) {
+        const hit = nearestLine(
+          input.series
+            .filter((series) => series.visible !== false)
+            .map((series) => ({ path: series.path, bins: series.bins })),
+          layout,
+          x,
+          y,
+          threshold,
+        );
+        return hit === null ? null : { path: hit.path, distance: hit.distance };
+      },
+    },
     autoRanges() {
       const y = timeAutoYRange(input.series.flatMap((series) => series.bins));
       return y === null
@@ -292,6 +322,18 @@ export function prepareXyPlot(input: XyPlotInput): PreparedPlot {
   return {
     domain: "time",
     interaction: POLICIES.xy,
+    hitAdapter: {
+      seriesAt(layout, x, y, threshold) {
+        const hit = nearestXyPoint(
+          input.series.filter((series) => series.visible !== false),
+          layout,
+          x,
+          y,
+          threshold,
+        );
+        return hit === null ? null : { path: hit.path, distance: 0 };
+      },
+    },
     autoRanges() {
       const traces = input.series.map((series) => series.trace);
       const x = traceExtent(traces, "x", input.window.t0, input.window.t1);
@@ -423,6 +465,23 @@ export function prepareFftPlot(input: FftPlotInput): PreparedPlot {
   return {
     domain: "frequency",
     interaction: POLICIES.fft,
+    hitAdapter: {
+      seriesAt(layout, x, y, threshold) {
+        return nearestPolyline(
+          input.series
+            .filter((series) => series.visible !== false)
+            .map((series) => ({
+              path: series.path,
+              x: series.frequency,
+              y: series.amplitudeDb,
+            })),
+          layout,
+          x,
+          y,
+          threshold,
+        );
+      },
+    },
     autoRanges() {
       let min = Number.POSITIVE_INFINITY;
       let max = Number.NEGATIVE_INFINITY;
@@ -542,6 +601,26 @@ export function prepareHistogramPlot(input: HistogramPlotInput): PreparedPlot {
   return {
     domain: "distribution",
     interaction: POLICIES.histogram,
+    hitAdapter: {
+      seriesAt(layout, x, y, threshold) {
+        return nearestPolyline(
+          input.series
+            .filter((series) => series.visible !== false)
+            .map((series) => {
+              const points = histogramPoints(input.edges, series.counts);
+              return {
+                path: series.path,
+                x: points.filter((_, index) => index % 2 === 0),
+                y: points.filter((_, index) => index % 2 === 1),
+              };
+            }),
+          layout,
+          x,
+          y,
+          threshold,
+        );
+      },
+    },
     autoRanges() {
       const first = input.edges[0];
       const last = input.edges[input.edges.length - 1];
@@ -643,6 +722,83 @@ function cursor(
     })),
     link,
   };
+}
+
+function nearestPolyline(
+  series: readonly {
+    path: string;
+    x: readonly number[];
+    y: readonly number[];
+  }[],
+  layout: PlotLayout,
+  px: number,
+  py: number,
+  threshold: number,
+): SeriesHit | null {
+  let best: SeriesHit | null = null;
+  let bestSquared = threshold * threshold;
+  for (const entry of series) {
+    let previous: { x: number; y: number } | null = null;
+    const count = Math.min(entry.x.length, entry.y.length);
+    for (let index = 0; index < count; index += 1) {
+      const valueX = entry.x[index] ?? Number.NaN;
+      const valueY = entry.y[index] ?? Number.NaN;
+      if (!Number.isFinite(valueX) || !Number.isFinite(valueY)) {
+        previous = null;
+        continue;
+      }
+      const current = {
+        x: projectX(layout, valueX),
+        y: projectY(layout, valueY),
+      };
+      if (previous !== null) {
+        const hit = segmentDistance(previous, current, px, py);
+        if (hit <= bestSquared) {
+          bestSquared = hit;
+          best = { path: entry.path, distance: Math.sqrt(hit) };
+        }
+      }
+      previous = current;
+    }
+  }
+  return best;
+}
+
+function segmentDistance(
+  first: { x: number; y: number },
+  second: { x: number; y: number },
+  px: number,
+  py: number,
+): number {
+  const dx = second.x - first.x;
+  const dy = second.y - first.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const fraction =
+    lengthSquared === 0
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            ((px - first.x) * dx + (py - first.y) * dy) / lengthSquared,
+          ),
+        );
+  const x = first.x + dx * fraction;
+  const y = first.y + dy * fraction;
+  return (x - px) ** 2 + (y - py) ** 2;
+}
+
+function histogramPoints(
+  edges: readonly number[],
+  counts: readonly number[],
+): number[] {
+  const points: number[] = [];
+  points.push(edges[0] ?? 0, 0);
+  counts.forEach((count, index) => {
+    points.push(edges[index] ?? 0, count, edges[index + 1] ?? 0, count);
+  });
+  points.push(edges[edges.length - 1] ?? 0, 0);
+  return points;
 }
 
 function reading(

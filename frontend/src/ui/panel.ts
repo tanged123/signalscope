@@ -37,7 +37,6 @@ import {
   type Range,
 } from "../app/plot-math";
 import { histogram } from "../app/histogram";
-import { nearestLine } from "../app/plot-hit";
 import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
@@ -50,10 +49,10 @@ import {
   type PlotCursor,
   type PreparedPlot,
   type ResolvedAnnotation,
+  type SeriesHitAdapter,
 } from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
 import { lerpSample, pairSamples, type XyTrace } from "../app/xy";
-import { nearestXyPoint } from "../app/xy-hit";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
@@ -531,6 +530,7 @@ export class PanelView {
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private preparedPlot: PreparedPlot | null = null;
+  private hitAdapter: SeriesHitAdapter | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
   private xyTraces: {
     path: string;
@@ -945,9 +945,11 @@ export class PanelView {
     this.lastSamples = samples;
     this.lastWindow = { ...window };
     this.preparedPlot = null;
+    this.hitAdapter = null;
     this.domainSeries = [];
     this.hasColorbar = false;
     const elapsed = this.renderForMode(rendered, tiles, samples, window);
+    this.hitAdapter = this.preparedPlot?.hitAdapter ?? null;
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
@@ -1583,12 +1585,16 @@ export class PanelView {
   plotClick(
     offsetX: number,
     offsetY: number,
-    modifiers: { alt: boolean } = { alt: false },
+    modifiers: { alt: boolean; shift: boolean } = {
+      alt: false,
+      shift: false,
+    },
   ): void {
-    // Preserve the existing annotation gesture at a rendered vertex. A line
-    // click away from a vertex is the focus gesture for the series underneath.
-    if (this.removeAt(offsetX, offsetY, 9)) return;
-    if (this.pinAt(offsetX, offsetY, 14)) return;
+    if (!modifiers.alt && !modifiers.shift) {
+      if (this.removeAt(offsetX, offsetY, 9)) return;
+      if (this.pinAt(offsetX, offsetY, 14)) return;
+      return;
+    }
     const hit = this.seriesHit(offsetX, offsetY, 6);
     if (hit !== null) {
       const series = this.lastState?.series.find(
@@ -1596,7 +1602,7 @@ export class PanelView {
       );
       if (series !== undefined) {
         if (modifiers.alt) this.callbacks.onMuteSeries(this.id, series.ref);
-        else {
+        else if (modifiers.shift) {
           this.callbacks.onFocusToggle(this.id, {
             kind: "series",
             ref: series.ref,
@@ -1615,41 +1621,9 @@ export class PanelView {
     threshold: number,
   ): { path: string; distance: number } | null {
     const layout = this.renderer.lastLayout();
-    const state = this.lastState;
-    if (layout === null || state === null) return null;
-    if (state.mode === "time") {
-      const byPath = new Map(
-        state.series.map((series) => [series.path, series]),
-      );
-      const hit = nearestLine(
-        (this.lastTiles?.series ?? [])
-          .filter((tile) => byPath.get(tile.signal_path)?.visible === true)
-          .map((tile) => ({ path: tile.signal_path, bins: tile.bins })),
-        layout,
-        offsetX,
-        offsetY,
-        threshold,
-      );
-      return hit === null ? null : { path: hit.path, distance: hit.distance };
-    }
-    if (state.mode === "xy") {
-      const hit = nearestXyPoint(
-        this.xyTraces,
-        layout,
-        offsetX,
-        offsetY,
-        threshold,
-      );
-      return hit === null ? null : { path: hit.path, distance: 0 };
-    }
-    const hit = this.preparedPlot?.annotationAt(
-      layout,
-      { x: offsetX, y: offsetY },
-      threshold,
-    );
-    return hit === null || hit === undefined
+    return layout === null || this.hitAdapter === null
       ? null
-      : { path: hit.path, distance: 0 };
+      : this.hitAdapter.seriesAt(layout, offsetX, offsetY, threshold);
   }
 
   private updateHover(
@@ -1675,7 +1649,7 @@ export class PanelView {
     const tag = this.hoverTag ?? document.createElement("div");
     this.hoverTag = tag;
     tag.className = "plot-hover-tag";
-    tag.textContent = `${series.path} — click to focus`;
+    tag.textContent = `${series.path} — ⇧click to focus`;
     tag.hidden = false;
     this.element.append(tag);
     const tagRect = tag.getBoundingClientRect();

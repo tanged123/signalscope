@@ -33,7 +33,11 @@ export interface PlotInteractionHost {
   applyXRange(min: number, max: number): void;
   applyYRange(min: number, max: number): void;
   fitView(): void;
-  plotClick(x: number, y: number, modifiers: { alt: boolean }): void;
+  plotClick(
+    x: number,
+    y: number,
+    modifiers: { alt: boolean; shift: boolean },
+  ): void;
   setGesture(hint: string | null): void;
   setBox(box: InteractionBox | null): void;
   axisEditZone(x: number, y: number): "x" | "y" | "c" | null;
@@ -241,6 +245,7 @@ export class PlotInteractionController {
       if (!promoted) {
         this.host.plotClick(event.offsetX, event.offsetY, {
           alt: event.altKey,
+          shift: event.shiftKey,
         });
         return;
       }

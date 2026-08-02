@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   SampleResponse,
   SampleSeries,
@@ -7,6 +7,8 @@ import type {
 import type { FocusEntry, PanelState } from "../generated/session";
 import type { PathRenderOptions, PlotPath } from "../render/canvas-renderer";
 import { Catalog } from "../app/catalog";
+import type { PreparedPlot } from "../app/plot-capabilities";
+import type { PlotLayout } from "../app/plot-math";
 
 import { AppShell } from "./app-shell";
 import {
@@ -23,6 +25,7 @@ import {
   type RenderSeries,
   xChipLabel,
 } from "./panel";
+import type { PanelCallbacks } from "./panel";
 
 function sample(
   path: string,
@@ -54,6 +57,12 @@ function localPathFor(path: string): string | null {
 }
 
 const xyCallbacks = { localPathFor, sourceKeyFor };
+
+const gestureLayout: PlotLayout = {
+  plot: { x: 0, y: 0, width: 100, height: 100 },
+  xRange: { min: 0, max: 10 },
+  yRange: { min: 0, max: 10 },
+};
 
 function visible(path: string): RenderSeries {
   return {
@@ -238,6 +247,97 @@ describe("panel series", () => {
 
   it("keeps the panel member cap available for ordinary series", () => {
     expect(MAX_SERIES_PER_PANEL).toBe(64);
+  });
+
+  describe.each(["time", "xy", "fft", "histogram"] as const)(
+    "%s plot gestures",
+    (mode) => {
+      it("uses shift-click for focus and alt-click for mute", () => {
+        const onFocusToggle = vi.fn();
+        const onMuteSeries = vi.fn();
+        const callbacks = {
+          onFocusToggle,
+          onMuteSeries,
+        } as unknown as PanelCallbacks;
+        const view = Object.create(PanelView.prototype) as unknown as {
+          callbacks: PanelCallbacks;
+          renderer: { lastLayout(): PlotLayout };
+          lastState: RenderPanelState;
+          preparedPlot: PreparedPlot;
+          hitAdapter: PreparedPlot["hitAdapter"];
+          plotClick(
+            x: number,
+            y: number,
+            modifiers: { alt: boolean; shift: boolean },
+          ): void;
+        };
+        const series = visible("run_01/temp");
+        view.callbacks = callbacks;
+        view.renderer = { lastLayout: () => gestureLayout };
+        view.lastState = { ...xyState("run_01/temp", [series]), mode };
+        view.preparedPlot = {
+          annotationAt: () => null,
+          hitAdapter: {
+            seriesAt: () => ({ path: series.path, distance: 0 }),
+          },
+        } as unknown as PreparedPlot;
+        view.hitAdapter = view.preparedPlot.hitAdapter;
+
+        view.plotClick(50, 50, { alt: false, shift: false });
+        expect(onFocusToggle).not.toHaveBeenCalled();
+        expect(onMuteSeries).not.toHaveBeenCalled();
+
+        view.plotClick(50, 50, { alt: false, shift: true });
+        expect(onFocusToggle).toHaveBeenCalledTimes(1);
+
+        view.plotClick(50, 50, { alt: true, shift: false });
+        expect(onMuteSeries).toHaveBeenCalledTimes(1);
+      });
+    },
+  );
+
+  it("keeps annotation pinning on plain click while shift-click bypasses it", () => {
+    const onPinAnnotation = vi.fn();
+    const onFocusToggle = vi.fn();
+    const callbacks = {
+      onPinAnnotation,
+      onFocusToggle,
+    } as unknown as PanelCallbacks;
+    const series = visible("run_01/temp");
+    const view = Object.create(PanelView.prototype) as unknown as {
+      callbacks: PanelCallbacks;
+      renderer: { lastLayout(): PlotLayout };
+      lastState: RenderPanelState;
+      preparedPlot: PreparedPlot;
+      hitAdapter: PreparedPlot["hitAdapter"];
+      plotClick(
+        x: number,
+        y: number,
+        modifiers: { alt: boolean; shift: boolean },
+      ): void;
+    };
+    view.callbacks = callbacks;
+    view.renderer = { lastLayout: () => gestureLayout };
+    view.lastState = xyState("run_01/temp", [series]);
+    view.preparedPlot = {
+      annotationAt: () => ({
+        path: series.path,
+        domain: "time",
+        anchor: 1,
+        pinnedValue: 2,
+      }),
+      resolveAnnotation: () => null,
+      hitAdapter: { seriesAt: () => ({ path: series.path, distance: 0 }) },
+    } as unknown as PreparedPlot;
+    view.hitAdapter = view.preparedPlot.hitAdapter;
+
+    view.plotClick(50, 50, { alt: false, shift: false });
+    expect(onPinAnnotation).toHaveBeenCalledTimes(1);
+    expect(onFocusToggle).not.toHaveBeenCalled();
+
+    view.plotClick(50, 50, { alt: false, shift: true });
+    expect(onPinAnnotation).toHaveBeenCalledTimes(1);
+    expect(onFocusToggle).toHaveBeenCalledTimes(1);
   });
 
   it("parses signal drag paths", () => {
