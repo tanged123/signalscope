@@ -42,6 +42,7 @@ function viewFor(
     onSelectionChange: vi.fn(),
     onAddToPanel,
     onRemoveDerived: vi.fn(),
+    onRemoveDerivedBundle: vi.fn(),
     ...callbacks,
   });
   view.setCatalog(catalog);
@@ -160,6 +161,23 @@ describe("SignalOutlineView", () => {
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
     expect(selection.size()).toBe(0);
+  });
+
+  it("renders a derived collection with one bundle removal action", () => {
+    const onRemoveDerivedBundle = vi.fn();
+    const { list } = viewFor(
+      Catalog.build([
+        signal("run-01", "derived/score"),
+        signal("run-02", "derived/score"),
+      ]),
+      { onRemoveDerivedBundle },
+    );
+    const group = list.querySelector<HTMLElement>('[data-row-kind="group"]');
+
+    expect(group?.textContent).toContain("ƒx");
+    expect(group?.textContent).toContain("score — 2 srcs");
+    group?.querySelector<HTMLButtonElement>(".outline-derived-remove")?.click();
+    expect(onRemoveDerivedBundle).toHaveBeenCalledWith("derived/score");
   });
 
   it("keeps group and series rows on the fixed header grid", () => {

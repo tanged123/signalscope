@@ -103,6 +103,33 @@ export function statusAggregate(
   return `${sourceCount.toLocaleString()} sources · ${signalCount.toLocaleString()} signals · ${pointCount.toLocaleString()} pts`;
 }
 
+export function bundleCompletionEntries(
+  signals: readonly SignalSummary[],
+): { localPath: string; runCount: number }[] {
+  const sourcesByChannel = new Map<string, Set<string>>();
+  for (const signal of signals) {
+    const sources = sourcesByChannel.get(signal.local_path) ?? new Set();
+    sources.add(signal.source_key);
+    sourcesByChannel.set(signal.local_path, sources);
+  }
+  return [...sourcesByChannel]
+    .filter(([, sources]) => sources.size >= 2)
+    .map(([localPath, sources]) => ({
+      localPath,
+      runCount: sources.size,
+    }))
+    .sort((left, right) => left.localPath.localeCompare(right.localPath));
+}
+
+export function validateDerivedBundleName(path: string): void {
+  const name = path.startsWith(DERIVED_PREFIX)
+    ? path.slice(DERIVED_PREFIX.length)
+    : path;
+  if (name.includes("/")) {
+    throw new Error("derived bundle names are a single segment");
+  }
+}
+
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
@@ -449,6 +476,9 @@ export class AppShell {
         onAddToPanel: (refs) => this.addRefsToPanel(refs),
         onRemoveDerived: (path) => {
           void this.removeDerived(path);
+        },
+        onRemoveDerivedBundle: (localPath) => {
+          void this.removeDerivedBundle(localPath);
         },
       },
     );
@@ -910,7 +940,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 3.1.2");
+        this.showModeHelp("SignalScope 3.1.3");
       },
     });
     this.commands.register({
@@ -2224,6 +2254,34 @@ export class AppShell {
   async createDerived(path: string, expr: string): Promise<void> {
     const port = this.plane.derived;
     if (port === null) throw new Error("This snapshot cannot create signals");
+    if (this.hasBundleReference(expr)) {
+      validateDerivedBundleName(path);
+      const response = await port.createBundle(path, expr);
+      this.workspace.addDerivedBundle(response.local_path, expr);
+      await this.reloadSignals();
+      const focused = this.workspace.focusedPanelId();
+      if (focused !== null) {
+        const refs = response.created
+          .map((summary) => this.catalog.refFromPath(summary.path))
+          .filter((ref): ref is SeriesRef => ref !== undefined);
+        if (this.workspace.addSeriesRefs(focused, refs)) {
+          this.afterSeriesAdded(focused, refs);
+        }
+      }
+      if (response.skipped.length > 0) {
+        const missing = response.skipped
+          .map(
+            (entry) =>
+              `${entry.prefix} missing ${entry.missing.map((item) => `'${item}'`).join(", ")}`,
+          )
+          .join("; ");
+        this.showModeHelp(
+          `created for ${String(response.created.length)} sources; ${missing}`,
+        );
+      }
+      this.afterLayoutChange();
+      return;
+    }
     const summary = await port.create(path, expr);
     this.workspace.addDerived(summary.path, expr);
     await this.reloadSignals();
@@ -2249,6 +2307,44 @@ export class AppShell {
     } catch (error: unknown) {
       this.reportError(error);
     }
+  }
+
+  private async removeDerivedBundle(localPath: string): Promise<void> {
+    const port = this.plane.derived;
+    if (port === null) return;
+    try {
+      const refs = this.signals
+        .filter((summary) => summary.local_path === localPath)
+        .flatMap((summary) => {
+          const ref = this.catalog.refFromPath(summary.path);
+          return ref === undefined ? [] : [{ ref, path: summary.path }];
+        });
+      await port.removeBundle(localPath);
+      for (const entry of refs) {
+        this.workspace.removeSignalRef(entry.ref, entry.path);
+      }
+      this.workspace.removeDerivedBundle(localPath);
+      await this.reloadSignals();
+      this.afterLayoutChange();
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
+  private hasBundleReference(expression: string): boolean {
+    const fullPaths = new Set(this.signals.map((signal) => signal.path));
+    const bundlePaths = new Set(
+      bundleCompletionEntries(this.signals).map((bundle) => bundle.localPath),
+    );
+    for (const match of expression.matchAll(
+      /'((?:''|[^'])*)'|"((?:""|[^"])*)"/g,
+    )) {
+      const doubled = match[1] === undefined ? '""' : "''";
+      const quote = match[1] === undefined ? '"' : "'";
+      const reference = (match[1] ?? match[2] ?? "").replaceAll(doubled, quote);
+      if (!fullPaths.has(reference) && bundlePaths.has(reference)) return true;
+    }
+    return false;
   }
 
   private async applyQuickTransform(
@@ -2287,6 +2383,7 @@ export class AppShell {
     this.setsList?.setCatalog(this.catalog);
     this.setsList?.setNamedSets(this.workspace.namedSets());
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
+    this.formulaBar?.setBundles(bundleCompletionEntries(this.signals));
     this.renderSearchStatus();
     this.updateStatus();
   }

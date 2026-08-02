@@ -116,6 +116,21 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
   await expect(page.locator(".binding-chip")).toHaveCount(0);
 });
 
+test("overflowing workspace tabs keep their controls clear", async ({
+  page,
+}) => {
+  await page.goto("/");
+  for (let index = 0; index < 10; index += 1) {
+    await page.locator(".workspace-tab-add").click();
+  }
+
+  const tabs = page.locator(".workspace-tabs");
+  await expect(tabs).toHaveCSS("scrollbar-width", "none");
+  const active = page.locator(".workspace-tab.active");
+  await expect(active.locator(".workspace-tab-select")).toBeVisible();
+  await expect(active.locator(".workspace-tab-close")).toBeVisible();
+});
+
 test("command palette runs workspace-scoped panel commands", async ({
   page,
 }) => {
@@ -424,7 +439,7 @@ test("formula component creates and recalls accepted formulas", async ({
   await input.press("Enter");
   await expect(host.locator(".formula-error")).toContainText("unknown signal");
   await expect(host.locator(".formula-error-guidance")).toHaveText(
-    "Signal references use quoted paths. Drag from the tree to insert.",
+    "Signal and channel references use quoted paths. Drag from the tree to insert.",
   );
   await expect(input).toHaveValue("derived/bad = 'missing/path'");
 

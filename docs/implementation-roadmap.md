@@ -39,7 +39,10 @@ is paused
 
 Signals-at-scale P1 is landed: panels resolve channel-by-source series from a
 catalog, source identity is stored per source, and the tree exposes channels
-with read-only named sets instead of source sets, bundles, or favorites.
+with read-only named sets instead of source sets, bundle rows, or favorites.
+Shared channel collections still use the derived-bundle evaluator: dropping or
+typing a shared channel in the formula bar materializes one ordinary derived
+member per eligible source.
 
 Out-of-core storage now compacts pyramid bins, synthesizes levels 0–2, shares
 sidecar time sections, and pages columns and fine levels through a leased LRU.

@@ -12,6 +12,7 @@ import type { PanelMode, SeriesRef } from "../generated/session";
 import {
   AppShell,
   arrivalModeFor,
+  bundleCompletionEntries,
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
@@ -161,6 +162,74 @@ function bulkSummary(source: string, channel: string): SignalSummary {
     last_value: 1,
   };
 }
+
+describe("derived channel collections", () => {
+  it("offers channels shared by multiple sources as bundle references", () => {
+    expect(
+      bundleCompletionEntries([
+        bulkSummary("run-01", "alt"),
+        bulkSummary("run-02", "alt"),
+        bulkSummary("run-01", "temp"),
+      ]),
+    ).toEqual([{ localPath: "alt", runCount: 2 }]);
+  });
+
+  it("creates one derived member per source through the bundle port", async () => {
+    const created = [
+      bulkSummary("run-01", "derived/score"),
+      bulkSummary("run-02", "derived/score"),
+    ];
+    const createBundle = vi.fn().mockResolvedValue({
+      local_path: "derived/score",
+      created,
+      skipped: [],
+    });
+    const shell = Object.create(AppShell.prototype) as {
+      plane: unknown;
+      workspace: WorkspaceModel;
+      signals: SignalSummary[];
+      catalog: Catalog;
+      reloadSignals(): Promise<void>;
+      afterSeriesAdded(panelId: string, refs: readonly SeriesRef[]): void;
+      afterLayoutChange(): void;
+      createDerived(path: string, expr: string): Promise<void>;
+    };
+    shell.plane = {
+      derived: {
+        createBundle,
+      },
+    };
+    shell.workspace = new WorkspaceModel();
+    shell.signals = [
+      bulkSummary("run-01", "alt"),
+      bulkSummary("run-02", "alt"),
+    ];
+    shell.catalog = Catalog.build(shell.signals);
+    const panel = shell.workspace.addPanelRow();
+    shell.workspace.focusPanel(panel.id);
+    shell.reloadSignals = vi.fn(() => {
+      shell.signals = [...created];
+      shell.catalog = Catalog.build(created);
+      return Promise.resolve();
+    });
+    shell.afterSeriesAdded = vi.fn();
+    shell.afterLayoutChange = vi.fn();
+
+    await shell.createDerived("derived/score", "'alt' * 2");
+
+    expect(createBundle).toHaveBeenCalledWith("derived/score", "'alt' * 2");
+    expect(shell.workspace.derivedBundles()).toEqual([
+      { name: "score", expr: "'alt' * 2" },
+    ]);
+    expect(shell.workspace.panel(panel.id)?.bindings[0]).toMatchObject({
+      kind: "pick",
+      refs: [
+        { source_key: "run-01", channel: "derived/score" },
+        { source_key: "run-02", channel: "derived/score" },
+      ],
+    });
+  });
+});
 
 interface SelectionProbe {
   workspace: WorkspaceModel;

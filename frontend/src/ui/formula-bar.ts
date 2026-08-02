@@ -8,14 +8,19 @@ import {
   completionContext,
   formulaCompletions,
   type CompletionContext,
+  type FormulaBundleCompletion,
   type FormulaCompletion,
 } from "../app/formula-completion";
 import { required } from "./dom";
-import { parseSignalPayload, SIGNAL_DRAG_TYPE } from "./panel";
+import {
+  parseSignalPayload,
+  parseSignalRefsPayload,
+  SIGNAL_DRAG_TYPE,
+} from "./panel";
 
 const HELP_SEEN_KEY = "signalscope.formulaHelpSeen";
 const ERROR_GUIDANCE =
-  "Signal references use quoted paths. Drag from the tree to insert.";
+  "Signal and channel references use quoted paths. Drag from the tree to insert.";
 
 function helpWasSeen(): boolean {
   try {
@@ -47,6 +52,7 @@ export class FormulaBar {
   private readonly helpExample: HTMLElement;
   private readonly completionList: HTMLElement;
   private signals: readonly string[] = [];
+  private bundles: readonly FormulaBundleCompletion[] = [];
   private history: string[] = [];
   private historyIndex = 0;
   private derivedCounter = 0;
@@ -95,7 +101,17 @@ export class FormulaBar {
     });
     element.addEventListener("drop", (event) => {
       const data = event.dataTransfer?.getData(SIGNAL_DRAG_TYPE) ?? "";
-      const path = parseSignalPayload(data)[0] ?? null;
+      const paths = parseSignalPayload(data);
+      const refs = parseSignalRefsPayload(data);
+      const firstChannel = refs[0]?.channel;
+      const sharedChannel =
+        paths.length > 1 &&
+        refs.length === paths.length &&
+        firstChannel !== undefined &&
+        refs.every((ref) => ref.channel === firstChannel)
+          ? firstChannel
+          : null;
+      const path = sharedChannel ?? paths[0] ?? null;
       element.classList.remove("drop-target");
       const reference = path;
       if (reference === null || reference === "") {
@@ -131,6 +147,10 @@ export class FormulaBar {
   setSignals(paths: readonly string[]): void {
     this.signals = [...paths];
     this.renderHelpExample();
+  }
+
+  setBundles(bundles: readonly FormulaBundleCompletion[]): void {
+    this.bundles = bundles.map((bundle) => ({ ...bundle }));
   }
 
   focusWithExpression(expression: string): void {
@@ -234,7 +254,9 @@ export class FormulaBar {
     const caret = this.input.selectionStart ?? this.input.value.length;
     const context = completionContext(this.input.value, caret, manual);
     const completions =
-      context === null ? [] : formulaCompletions(context, this.signals);
+      context === null
+        ? []
+        : formulaCompletions(context, this.signals, this.bundles);
     if (context === null || completions.length === 0) {
       this.clearCompletions();
       return;
@@ -319,12 +341,12 @@ export function formulaBarMarkup(): string {
     <span class="formula-mark">ƒx</span>
     <input class="formula-input" role="combobox" aria-label="Derived signal formula" aria-autocomplete="list" aria-controls="formula-completions" aria-expanded="false" placeholder="derived/name = expression · drop signals here" spellcheck="false" />
     <span class="formula-error" role="alert" hidden></span>
-    <span class="formula-error-guidance" hidden>Signal references use quoted full paths. Drag from the tree to insert.</span>
+    <span class="formula-error-guidance" hidden>Signal and channel references use quoted paths. Drag from the tree to insert.</span>
     <button type="button" class="formula-help-button" aria-label="Formula help" aria-controls="formula-help" aria-expanded="false">?</button>
     <div class="formula-help-popover" id="formula-help" role="dialog" aria-label="Derived formula help" hidden>
       <strong>Derived formulas</strong>
       <code>derived/name = expression</code>
-      <span>Signal references use quoted paths. Drag from the tree to insert.</span>
+      <span>Signal paths derive once; shared channel names derive per source.</span>
       <code class="formula-help-example"></code>
       <code>gradient(x) · cumtrapz(x) · movmean(x, 51)</code>
       <code>abs(x) · hypot(x, y) · rad2deg(x) · deg2rad(x)</code>

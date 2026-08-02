@@ -74,6 +74,25 @@ describe("formulaCompletions", () => {
     expect(matches).toHaveLength(50);
   });
 
+  it("offers shared channels as collection references", () => {
+    const matches = formulaCompletions(
+      {
+        source: "signal",
+        query: "alt",
+        start: 0,
+        end: 0,
+      },
+      [],
+      [{ localPath: "alt", runCount: 3 }],
+    );
+
+    expect(matches[0]).toMatchObject({
+      label: "alt",
+      detail: "3 sources",
+      replacement: "'alt'",
+    });
+  });
+
   it("describes language entries and applies call shapes", () => {
     const context = {
       source: "language" as const,

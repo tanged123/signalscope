@@ -153,7 +153,12 @@ button {
   flex: 1;
   align-items: stretch;
   overflow-x: auto;
+  scrollbar-width: none;
   border-width: 0;
+}
+
+.workspace-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .workspace-tab {

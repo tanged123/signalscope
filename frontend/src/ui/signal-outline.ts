@@ -18,6 +18,7 @@ export interface SignalOutlineCallbacks {
   onSelectionChange(): void;
   onAddToPanel(refs: readonly SeriesRef[]): void;
   onRemoveDerived(path: string): void;
+  onRemoveDerivedBundle(localPath: string): void;
 }
 
 export class SignalOutlineView {
@@ -223,10 +224,32 @@ export class SignalOutlineView {
       event.stopPropagation();
       this.toggleGroup(row);
     });
+    const derived = row.label.startsWith("derived/");
+    first.appendChild(caret);
+    if (derived) {
+      const mark = document.createElement("span");
+      mark.className = "outline-caret tree-derived-mark";
+      mark.textContent = "ƒx";
+      mark.title = "Derived signal collection";
+      first.appendChild(mark);
+    }
     const label = document.createElement("span");
     label.className = "signal-outline-label signal-path";
-    label.textContent = `${row.label} — ${row.aggregate}`;
-    first.append(caret, label);
+    label.textContent = `${derived ? row.label.slice(8) : row.label} — ${row.aggregate}`;
+    first.appendChild(label);
+
+    if (derived) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "outline-derived-remove";
+      remove.textContent = "✕";
+      remove.title = `Remove ${row.label}`;
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.callbacks.onRemoveDerivedBundle(row.label);
+      });
+      first.appendChild(remove);
+    }
 
     element.append(checkCell, first, this.valueCell(""));
     return element;

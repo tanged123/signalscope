@@ -21,6 +21,11 @@ export interface FormulaCompletion {
   caretOffset: number;
 }
 
+export interface FormulaBundleCompletion {
+  localPath: string;
+  runCount: number;
+}
+
 const LANGUAGE = [
   ["abs", "absolute value", "abs()", 4],
   ["sqrt", "square root", "sqrt()", 5],
@@ -142,6 +147,7 @@ function matchRank(label: string, query: string): number | null {
 export function formulaCompletions(
   context: CompletionContext,
   signalPaths: readonly string[],
+  bundles: readonly FormulaBundleCompletion[] = [],
 ): FormulaCompletion[] {
   const entries: FormulaCompletion[] =
     context.source === "signal"
@@ -152,6 +158,16 @@ export function formulaCompletions(
               kind: "signal" as const,
               label: path,
               detail: "signal",
+              replacement,
+              caretOffset: replacement.length,
+            };
+          }),
+          ...bundles.map(({ localPath, runCount }) => {
+            const replacement = quoteSignalPath(localPath);
+            return {
+              kind: "signal" as const,
+              label: localPath,
+              detail: `${String(runCount)} sources`,
               replacement,
               caretOffset: replacement.length,
             };
