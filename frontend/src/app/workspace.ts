@@ -48,7 +48,6 @@ export function emptySession(): Session {
     active_tab_id: "workspace-1",
     tabs: [createWorkspaceTab(1)],
     named_sets: [],
-    channel_map: [],
     derived: [],
     derived_bundles: [],
     sources: [],

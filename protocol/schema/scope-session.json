@@ -1,5 +1,5 @@
 {
-  "schema_version": 17,
+  "schema_version": 18,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -106,14 +106,6 @@
         "selector": "string?",
         "refs": "SeriesRef[]"
       }
-    },
-    "ChannelAlias": {
-      "kind": "object",
-      "fields": { "source_key": "string", "name": "string" }
-    },
-    "ChannelMapEntry": {
-      "kind": "object",
-      "fields": { "canonical": "string", "aliases": "ChannelAlias[]" }
     },
     "Annotation": {
       "kind": "object",
@@ -237,7 +229,6 @@
         "active_tab_id": "string",
         "tabs": "WorkspaceTab[]",
         "named_sets": "NamedSet[]",
-        "channel_map": "ChannelMapEntry[]",
         "derived": "DerivedSignal[]",
         "derived_bundles": "DerivedBundleState[]",
         "sources": "SourceRecord[]"

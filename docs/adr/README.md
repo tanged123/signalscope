@@ -31,5 +31,6 @@ Accepted decisions:
 27. [Durable source identity and restore reconciliation](0027-durable-source-identity-and-restore-reconciliation.md)
 28. [Ensemble run-mean envelope (superseded)](0028-ensemble-run-mean-envelope.md)
 29. [Out-of-core columns, pyramids, and ensembles](0029-out-of-core-storage.md)
+30. [Source-local channel identity](0030-source-local-channel-identity.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

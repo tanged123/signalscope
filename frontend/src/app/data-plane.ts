@@ -638,7 +638,6 @@ function createDemoManifest(): BakedManifest {
         },
       ],
       named_sets: [],
-      channel_map: [],
       derived: [],
       derived_bundles: [],
       sources: [],

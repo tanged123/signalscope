@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 17,
+  "schema_version": 18,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -43,7 +43,6 @@
       "refs": []
     }
   ],
-  "channel_map": [],
   "derived": [
     {
       "path": "derived/speed",

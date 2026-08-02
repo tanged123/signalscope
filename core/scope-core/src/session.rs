@@ -32,7 +32,6 @@ impl Default for Session {
                 layout: Vec::new(),
             }],
             named_sets: Vec::new(),
-            channel_map: Vec::new(),
             derived: Vec::new(),
             derived_bundles: Vec::new(),
             sources: Vec::new(),
@@ -200,6 +199,11 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             migrate_v16_bindings(&mut value);
             value["schema_version"] = serde_json::json!(17);
             migrate(17, value)
+        }
+        17 => {
+            migrate_v17_channel_refs(&mut value);
+            value["schema_version"] = serde_json::json!(18);
+            migrate(18, value)
         }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
@@ -501,6 +505,73 @@ fn migrate_v16_bindings(value: &mut serde_json::Value) {
             source["offset"] = offset;
         }
     }
+}
+
+fn migrate_v17_channel_refs(value: &mut serde_json::Value) {
+    let aliases: std::collections::HashMap<(String, String), String> = value
+        .get("channel_map")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| {
+            let canonical = entry
+                .get("canonical")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            entry
+                .get("aliases")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(move |alias| {
+                    Some((
+                        (
+                            alias.get("source_key")?.as_str()?.to_owned(),
+                            canonical.clone(),
+                        ),
+                        alias.get("name")?.as_str()?.to_owned(),
+                    ))
+                })
+        })
+        .collect();
+
+    fn rewrite_refs(
+        value: &mut serde_json::Value,
+        aliases: &std::collections::HashMap<(String, String), String>,
+    ) {
+        match value {
+            serde_json::Value::Array(entries) => {
+                for entry in entries {
+                    rewrite_refs(entry, aliases);
+                }
+            }
+            serde_json::Value::Object(object) => {
+                let source_key = object
+                    .get("source_key")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                let channel = object
+                    .get("channel")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                if let (Some(source_key), Some(channel)) = (source_key, channel) {
+                    if let Some(name) = aliases.get(&(source_key, channel)) {
+                        object.insert("channel".into(), serde_json::json!(name));
+                    }
+                }
+                for entry in object.values_mut() {
+                    rewrite_refs(entry, aliases);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(object) = value.as_object_mut() {
+        object.remove("channel_map");
+    }
+    rewrite_refs(value, &aliases);
 }
 
 fn take_string_array(
@@ -823,6 +894,93 @@ mod tests {
             source.time_domain.unit,
             TimeUnitState::Milliseconds
         ));
+    }
+
+    #[test]
+    fn migrates_v17_channel_refs() {
+        let mut value = serde_json::to_value(Session::default()).expect("serializes");
+        value["schema_version"] = serde_json::json!(17);
+        value["channel_map"] = serde_json::json!([{
+            "canonical": "temp",
+            "aliases": [
+                {"source_key": "run-01", "name": "temperature"},
+                {"source_key": "run-02", "name": "T_amb"}
+            ]
+        }]);
+        value["named_sets"] = serde_json::json!([{
+            "id": "set-1",
+            "name": "Temperatures",
+            "kind": "pick",
+            "selector": "temp",
+            "refs": [
+                {"source_key": "run-01", "channel": "temp"},
+                {"source_key": "run-03", "channel": "pressure"}
+            ]
+        }]);
+        value["tabs"][0]["panels"] = serde_json::json!([{
+            "id": "panel-1",
+            "title": "Temperatures",
+            "mode": "xy",
+            "axis_style": "gutter",
+            "x_ref": {"source_key": "run-01", "channel": "temp"},
+            "color_axis": "signal",
+            "color_ref": {"source_key": "run-02", "channel": "temp"},
+            "bindings": [{
+                "kind": "pick",
+                "selector": "temp",
+                "refs": [{"source_key": "run-02", "channel": "temp"}],
+                "set_id": null
+            }],
+            "color_by": "source",
+            "overrides": [{
+                "target_ref": {"source_key": "run-01", "channel": "temp"},
+                "target_selector": "temp",
+                "color_slot": 1,
+                "dash": "solid",
+                "width": 1.4,
+                "opacity": null,
+                "visible": true
+            }],
+            "focus": [{
+                "kind": "series",
+                "ref": {"source_key": "run-02", "channel": "temp"},
+                "source_key": null,
+                "channel": null
+            }],
+            "ghost_mode": "all",
+            "split_by": "none",
+            "y_range": null,
+            "x_range": null,
+            "x_label": null,
+            "y_label": null,
+            "c_label": null,
+            "time_window": null,
+            "annotations": [],
+            "show_stats": false
+        }]);
+
+        let session = from_json(&value.to_string()).expect("v17 migrates");
+        let panel = &session.tabs[0].panels[0];
+        assert_eq!(session.schema_version, 18);
+        assert_eq!(session.named_sets[0].refs[0].channel, "temperature");
+        assert_eq!(session.named_sets[0].refs[1].channel, "pressure");
+        assert_eq!(session.named_sets[0].selector.as_deref(), Some("temp"));
+        assert_eq!(panel.x_ref.as_ref().unwrap().channel, "temperature");
+        assert_eq!(panel.color_ref.as_ref().unwrap().channel, "T_amb");
+        assert_eq!(panel.bindings[0].refs[0].channel, "T_amb");
+        assert_eq!(panel.bindings[0].selector.as_deref(), Some("temp"));
+        assert_eq!(
+            panel.overrides[0].target_ref.as_ref().unwrap().channel,
+            "temperature"
+        );
+        assert_eq!(panel.overrides[0].target_selector.as_deref(), Some("temp"));
+        assert_eq!(panel.focus[0].r#ref.as_ref().unwrap().channel, "T_amb");
+        assert!(
+            serde_json::to_value(session)
+                .expect("serializes")
+                .get("channel_map")
+                .is_none()
+        );
     }
 
     #[test]

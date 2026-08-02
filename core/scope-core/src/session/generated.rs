@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 17;
+pub const SESSION_SCHEMA_VERSION: u32 = 18;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -190,18 +190,6 @@ pub struct NamedSet {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct ChannelAlias {
-    pub source_key: String,
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct ChannelMapEntry {
-    pub canonical: String,
-    pub aliases: Vec<ChannelAlias>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Annotation {
     pub id: String,
     pub series_path: String,
@@ -330,7 +318,6 @@ pub struct Session {
     pub active_tab_id: String,
     pub tabs: Vec<WorkspaceTab>,
     pub named_sets: Vec<NamedSet>,
-    pub channel_map: Vec<ChannelMapEntry>,
     pub derived: Vec<DerivedSignal>,
     pub derived_bundles: Vec<DerivedBundleState>,
     pub sources: Vec<SourceRecord>,

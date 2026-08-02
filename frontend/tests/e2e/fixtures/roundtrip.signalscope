@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 17,
+  "schema_version": 18,
   "theme": "light",
   "linked_time": {
     "t0": 0.0,
@@ -95,7 +95,6 @@
     }
   ],
   "named_sets": [],
-  "channel_map": [],
   "derived": [],
   "derived_bundles": [],
   "sources": [

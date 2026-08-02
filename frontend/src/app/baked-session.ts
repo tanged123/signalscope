@@ -264,19 +264,6 @@ function isSession(value: JsonObject): value is JsonObject & Session {
         Array.isArray(item.refs) &&
         item.refs.every(isSeriesRef),
     ) &&
-    Array.isArray(value.channel_map) &&
-    value.channel_map.every(
-      (item) =>
-        isRecord(item) &&
-        typeof item.canonical === "string" &&
-        Array.isArray(item.aliases) &&
-        item.aliases.every(
-          (alias) =>
-            isRecord(alias) &&
-            typeof alias.source_key === "string" &&
-            typeof alias.name === "string",
-        ),
-    ) &&
     Array.isArray(value.derived) &&
     value.derived.every(
       (item) =>

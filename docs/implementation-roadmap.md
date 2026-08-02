@@ -18,8 +18,8 @@ amendment): quoted names are signal references, functions are bare MATLAB
 names, and the transforms are `gradient`/`cumtrapz`/`movmean`. Derived signals
 materialize into the store under one synthetic source with an in-memory
 pyramid, so every tile, sample, and panel-mode consumer is unchanged. Sessions
-reached schema v17 with ordered derived definitions, durable source records,
-channel-by-source panel bindings, and named sets,
+reached schema v18 with ordered derived definitions, durable source records,
+source-local channel-by-source panel bindings, and named sets,
 and gained autosave with resume-on-launch plus named workspace files
 ([ADR 0022](adr/0022-durable-session-persistence.md)). The `localStorage` theme
 key is gone; the session is the only durable store.
@@ -78,6 +78,11 @@ time panels can facet by source or channel with linked-y small multiples and a
 16-cell overflow guard. Tooltip row expansion and facet annotations remain
 follow-ups because annotations stay attached to the unsplit plot in this
 phase.
+
+The channel map and facet splitting were subsequently removed. Channel
+identity is source-local, named sets cover reusable grouping, and schema v18
+migrates explicit mapped references before deleting the map
+([ADR 0030](adr/0030-source-local-channel-identity.md)).
 
 Phase 1 visualization foundations closed with a validated categorical palette
 that reserves amber ([ADR 0011](adr/0011-series-palette-and-reserved-amber.md)),
