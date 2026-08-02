@@ -123,6 +123,50 @@ afterEach(() => {
 });
 
 describe("PanelView facets", () => {
+  it("renders the legend and focus strip below a header without roster tokens", () => {
+    mockCanvas();
+    globalThis.ResizeObserver = class {
+      observe(): void {}
+      disconnect(): void {}
+      unobserve(): void {}
+    } as unknown as typeof ResizeObserver;
+    const catalog = Catalog.build([
+      signal("run-01", "temp"),
+      signal("run-02", "temp"),
+    ]);
+    const view = new PanelView("panel", callbacks(catalog));
+    const panel = state();
+    panel.split_by = "none";
+    panel.focus = [
+      {
+        kind: "series",
+        ref: { source_key: "run-01", channel: "temp" },
+        source_key: null,
+        channel: null,
+      },
+    ];
+    view.update(panel, false);
+
+    const strip = view.element.querySelector<HTMLElement>(
+      ".panel-legend-strip",
+    );
+    expect(strip).not.toBeNull();
+    expect(strip?.querySelectorAll(".legend-count-token")).toHaveLength(2);
+    expect(strip?.querySelectorAll(".matrix-focus-chip")).toHaveLength(1);
+    expect(strip?.querySelector(".color-rule-token")?.textContent).toBe(
+      "color ← source",
+    );
+    expect(strip?.textContent).toContain(
+      "hover explore · ⇧click focus · ⌥ mute · esc clear",
+    );
+    expect(
+      view.element.querySelectorAll(".panel-header .legend-count-token"),
+    ).toHaveLength(0);
+    expect(
+      view.element.querySelector<HTMLElement>(".panel-focus-chip")?.hidden,
+    ).toBe(false);
+  });
+
   it("renders bounded facet cells and fans the linked cursor line out", () => {
     mockCanvas();
     globalThis.ResizeObserver = class {

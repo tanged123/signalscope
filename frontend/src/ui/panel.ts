@@ -2117,6 +2117,8 @@ export class PanelView {
       token.textContent = `split ← ${state.split_by} · ${String(layout?.cells.length ?? 0)} cells`;
       legend.appendChild(token);
     }
+    required<HTMLElement>(this.element, ".panel-gesture-hint").textContent =
+      "hover explore · ⇧click focus · ⌥ mute · esc clear";
   }
 
   private colorRuleToken(state: RenderPanelState): HTMLButtonElement {
@@ -2962,7 +2964,6 @@ function panelMarkup(): string {
       <span class="panel-bindings"></span>
       <span class="panel-focus-chip" hidden></span>
       <button class="panel-ghost-toggle" type="button" aria-pressed="false">all</button>
-      <span class="panel-legend"></span>
       <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
       <button class="panel-action panel-split-by" title="Split time panel by source or channel">split ▸</button>
@@ -2979,6 +2980,10 @@ function panelMarkup(): string {
         <button class="panel-action panel-close" title="Close panel">✕</button>
       </span>
     </header>
+    <div class="panel-legend-strip">
+      <span class="panel-legend"></span>
+      <span class="panel-gesture-hint">color ← source · hover explore · ⇧click focus · ⌥ mute · esc clear</span>
+    </div>
     <div class="plot-wrap">
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
