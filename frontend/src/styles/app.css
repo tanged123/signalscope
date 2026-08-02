@@ -840,7 +840,8 @@ button {
 
 .legend-count-token,
 .matrix-focus-chip,
-.matrix-focus-overflow {
+.matrix-focus-overflow,
+.legend-ghost-token {
   display: inline-flex;
   min-width: 0;
   flex: none;
@@ -858,9 +859,20 @@ button {
 }
 
 .legend-count-token,
-.matrix-focus-overflow {
+.matrix-focus-overflow,
+.legend-ghost-token {
   padding: 2px 5px;
   font: 0.7692rem var(--font-mono);
+}
+
+.legend-ghost-token {
+  color: var(--fg-3);
+}
+
+.legend-ghost-token:hover,
+.legend-ghost-token:focus-visible {
+  background: var(--surface-3);
+  color: var(--fg-1);
 }
 
 .color-rule-token {

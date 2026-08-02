@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it, vi } from "vitest";
 import type {
   SampleResponse,
@@ -18,6 +20,7 @@ import {
   bindingChipEntries,
   focusHeaderLabel,
   focusChips,
+  legendTokenLabel,
   matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
@@ -614,6 +617,107 @@ describe("panel series", () => {
     const result = focusChips(catalog, state);
     expect(result.chips).toHaveLength(8);
     expect(result.overflow).toBe(2);
+  });
+
+  it("compresses a focused dimension into a value plus remainder count", () => {
+    const catalog = Catalog.build(
+      Array.from({ length: 12 }, (_, index) => ({
+        signal_id: `run-${String(index + 1)}-temp`,
+        source_id: `k${String(index + 1)}`,
+        source_key: `k${String(index + 1)}`,
+        local_path: "temp",
+        path: `run_${String(index + 1).padStart(2, "0")}/temp`,
+        unit: "K",
+        point_count: "2",
+        t_min: 0,
+        t_max: 1,
+        last_value: null,
+      })),
+    );
+    const state = xyState(
+      "run_01/temp",
+      Array.from({ length: 12 }, (_, index) =>
+        visible(`run_${String(index + 1).padStart(2, "0")}/temp`),
+      ),
+    );
+    state.focus = [
+      { kind: "channel", ref: null, source_key: null, channel: "temp" },
+    ];
+    expect(legendTokenLabel(catalog, state, "channel", 12)).toBe("temp +11 ▾");
+    state.focus = [];
+    expect(legendTokenLabel(catalog, state, "channel", 12)).toBe("12 ▾");
+  });
+
+  it("renders one dash key per rendered channel in a focused source chip", () => {
+    const catalog = Catalog.build([
+      summary("run_07/temp"),
+      summary("run_07/temp_sp"),
+    ]);
+    const state = xyState("run_07/temp", [
+      visible("run_07/temp"),
+      visible("run_07/temp_sp"),
+    ]);
+    state.focus = [
+      { kind: "source", ref: null, source_key: "k7", channel: null },
+    ];
+    const view = Object.create(PanelView.prototype) as unknown as {
+      callbacks: Pick<PanelCallbacks, "catalog">;
+      focusChipElements(current: RenderPanelState): HTMLElement[];
+    };
+    view.callbacks = { catalog: () => catalog };
+    const [chip] = view.focusChipElements(state);
+    expect(chip?.querySelectorAll(".matrix-focus-key")).toHaveLength(2);
+  });
+
+  it("shows line-style state and opens a ghost-filtered roster", () => {
+    const catalog = Catalog.build([
+      summary("run_07/temp"),
+      summary("run_08/temp"),
+    ]);
+    const state = xyState("run_07/temp", [
+      visible("run_07/temp"),
+      { ...visible("run_08/temp"), display: "ghost", focused: false },
+    ]);
+    state.ghost_mode = "ghost";
+    const view = Object.create(PanelView.prototype) as unknown as {
+      callbacks: Pick<PanelCallbacks, "catalog">;
+      element: HTMLElement;
+      updateLegend(current: RenderPanelState): void;
+    };
+    view.callbacks = { catalog: () => catalog };
+    view.element = document.createElement("article");
+    view.element.innerHTML =
+      '<div class="panel-legend"></div><span class="panel-gesture-hint"></span>';
+    view.updateLegend(state);
+    expect(view.element.querySelector(".panel-gesture-hint")?.textContent).toBe(
+      "· line style flat · hover explore · ⇧click focus · ⌥ mute · esc clear",
+    );
+    state.overrides = [
+      {
+        target_ref: { source_key: "run-07", channel: "temp" },
+        target_selector: null,
+        color_slot: null,
+        dash: "dash",
+        width: null,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    view.updateLegend(state);
+    expect(
+      view.element.querySelector(".panel-gesture-hint")?.textContent,
+    ).toContain("line style ◆ overridden");
+    const ghost = view.element.querySelector<HTMLButtonElement>(
+      ".legend-ghost-token",
+    );
+    expect(ghost?.textContent).toBe("1 ghosts ▾");
+    ghost?.click();
+    expect(
+      view.element.querySelector<HTMLElement>(".matrix-roster")?.dataset.filter,
+    ).toBe("ghost");
+    expect(
+      view.element.querySelector(".matrix-roster-row")?.textContent,
+    ).toContain("run_08");
   });
 
   it("groups pick bindings and counts live query and set members", () => {

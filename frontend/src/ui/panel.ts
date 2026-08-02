@@ -213,6 +213,7 @@ export interface MatrixLegendRow {
   count: number;
   selector: string;
   focused: boolean;
+  ghosted: boolean;
   overridden: boolean;
   hue: number | null;
 }
@@ -270,12 +271,14 @@ export function matrixLegendRows(
         count: 1,
         selector: dimension === "source" ? `* @ ${value}` : `${value} @ *`,
         focused: focus,
+        ghosted: series.display === "ghost",
         overridden: series.overridden,
         hue: state.color_by === dimension ? series.hue : null,
       });
     } else {
       existing.count += 1;
       existing.focused ||= focus;
+      existing.ghosted ||= series.display === "ghost";
       existing.overridden ||= series.overridden;
       if (existing.hue === null && state.color_by === dimension) {
         existing.hue = series.hue;
@@ -316,6 +319,29 @@ export function focusChips(
     chips: chips.slice(0, limit),
     overflow: Math.max(0, chips.length - limit),
   };
+}
+
+export function legendTokenLabel(
+  catalog: Catalog,
+  state: Pick<RenderPanelState, "series" | "focus">,
+  dimension: LegendDimension,
+  count: number,
+): string {
+  const focusedValues = new Set(
+    state.series
+      .filter((series) =>
+        state.focus.some((entry) => focusMatches(entry, series.ref)),
+      )
+      .map((series) =>
+        dimension === "source"
+          ? (catalog.get(series.ref)?.sourceName ?? series.ref.source_key)
+          : series.ref.channel,
+      ),
+  );
+  const [focused] = focusedValues;
+  return focused !== undefined && focusedValues.size === 1 && count > 1
+    ? `${focused} +${String(count - 1)} ▾`
+    : `${String(count)} ▾`;
 }
 
 export function bindingChipEntries(
@@ -2239,6 +2265,7 @@ export class PanelView {
       this.legendCountToken("source", counts.sources, state),
       ...this.focusChipElements(state),
       this.legendCountToken("channel", counts.channels, state),
+      ...(state.ghost_mode === "ghost" ? [this.ghostToken(state)] : []),
       this.colorRuleToken(state),
     );
     if (state.mode === "time" && state.split_by !== "none") {
@@ -2255,8 +2282,33 @@ export class PanelView {
       token.textContent = `split ← ${state.split_by} · ${String(layout?.cells.length ?? 0)} cells`;
       legend.appendChild(token);
     }
+    const lineStyle = state.overrides.some(
+      (override) => override.dash !== null || override.width !== null,
+    )
+      ? "line style ◆ overridden"
+      : "line style flat";
     required<HTMLElement>(this.element, ".panel-gesture-hint").textContent =
-      "hover explore · ⇧click focus · ⌥ mute · esc clear";
+      `· ${lineStyle} · hover explore · ⇧click focus · ⌥ mute · esc clear`;
+  }
+
+  private ghostToken(state: RenderPanelState): HTMLButtonElement {
+    const token = document.createElement("button");
+    token.className = "legend-ghost-token";
+    token.type = "button";
+    const ghosts = state.series.filter((series) => series.display === "ghost");
+    token.textContent = `${String(ghosts.length)} ghosts ▾`;
+    token.title = "Browse ghost series";
+    token.setAttribute("aria-haspopup", "dialog");
+    token.addEventListener("click", (event) => {
+      this.openRoster(
+        "source",
+        state,
+        event.currentTarget as HTMLElement,
+        false,
+        true,
+      );
+    });
+    return token;
   }
 
   private colorRuleToken(state: RenderPanelState): HTMLButtonElement {
@@ -2333,7 +2385,12 @@ export class PanelView {
   ): HTMLButtonElement {
     const token = document.createElement("button");
     token.className = "legend-count-token";
-    token.textContent = `${dimension === "source" ? "SRC" : "CH"} ${String(count)} ▾`;
+    token.textContent = legendTokenLabel(
+      this.callbacks.catalog(),
+      state,
+      dimension,
+      count,
+    );
     token.title = `Browse ${dimension} roster`;
     token.setAttribute("aria-haspopup", "dialog");
     token.addEventListener("click", (event) => {
@@ -2347,13 +2404,25 @@ export class PanelView {
     const chips = result.chips.map((focus) => {
       const chip = document.createElement("span");
       chip.className = "matrix-focus-chip";
-      const marker = document.createElement("span");
-      marker.className = "matrix-focus-key";
-      marker.style.color =
-        focus.hue === null
-          ? "var(--fg-4)"
-          : `var(--series-${String(colorIndexForHue(focus.hue) + 1)})`;
-      marker.textContent = "—";
+      const matching = state.series.filter(
+        (series) => focusMatches(focus.entry, series.ref) && series.visible,
+      );
+      const keys = new Map<string, number | null>();
+      for (const series of matching) {
+        if (!keys.has(series.ref.channel))
+          keys.set(series.ref.channel, series.hue);
+      }
+      if (keys.size === 0) keys.set("focus", focus.hue);
+      const markers = [...keys.values()].map((hue) => {
+        const marker = document.createElement("span");
+        marker.className = "matrix-focus-key";
+        marker.style.color =
+          hue === null
+            ? "var(--fg-4)"
+            : `var(--series-${String(colorIndexForHue(hue) + 1)})`;
+        marker.textContent = "—";
+        return marker;
+      });
       const name = document.createElement("span");
       name.textContent = `${focus.overridden ? "◆ " : ""}${focus.label}`;
       const remove = document.createElement("button");
@@ -2364,7 +2433,7 @@ export class PanelView {
       remove.addEventListener("click", () => {
         this.callbacks.onFocusToggle(this.id, focus.entry);
       });
-      chip.append(marker, name, remove);
+      chip.append(...markers, name, remove);
       return chip;
     });
     if (result.overflow > 0) {
@@ -2407,10 +2476,12 @@ export class PanelView {
     state: RenderPanelState,
     anchor: HTMLElement,
     focusedOnly = false,
+    ghostOnly = false,
   ): void {
     this.closeRoster();
     const roster = document.createElement("div");
     roster.className = "matrix-roster";
+    if (ghostOnly) roster.dataset.filter = "ghost";
     roster.setAttribute("role", "dialog");
     roster.setAttribute("aria-label", `${dimension} roster`);
     const search = document.createElement("input");
@@ -2426,7 +2497,9 @@ export class PanelView {
         state,
         dimension,
         search.value,
-      ).filter((row) => !focusedOnly || row.focused);
+      ).filter(
+        (row) => (!focusedOnly || row.focused) && (!ghostOnly || row.ghosted),
+      );
       const slice = virtualSlice(all.length, rows.scrollTop, 224, 24);
       rows.replaceChildren();
       rows.style.height = `${String(slice.totalHeight)}px`;
