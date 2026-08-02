@@ -992,7 +992,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 1.4.2");
+        this.showModeHelp("SignalScope 1.4.3");
       },
     });
     this.commands.register({
@@ -3777,7 +3777,12 @@ export function shellMarkup(): string {
         <div class="ingest-progress" hidden></div>
         <div class="channel-suggestions" hidden></div>
         <div class="source-rows"></div>
-        <div class="dock-footer"></div>
+        <div class="dock-footer">
+          <div class="dock-load-row">
+            <button class="dock-add-source" type="button">+ source</button>
+            <span class="dock-formats">CSV · MCAP</span>
+          </div>
+        </div>
       </div>
     </aside>
 

@@ -163,4 +163,5 @@ it("keeps the filter prefix outside the input", () => {
   const markup = shellMarkup();
   expect(markup).toContain('class="search-filter-row"');
   expect(markup).toContain('<span class="search-filter-prefix">/</span>');
+  expect(markup).toContain('class="dock-add-source"');
 });

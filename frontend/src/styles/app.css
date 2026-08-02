@@ -1105,6 +1105,18 @@ button {
   color: var(--amber-7);
 }
 
+.rules-channel-shortcut {
+  padding: 0;
+  color: var(--fg-3);
+  font: inherit;
+  white-space: nowrap;
+}
+
+.rules-channel-shortcut:hover,
+.rules-channel-shortcut:focus-visible {
+  color: var(--amber-7);
+}
+
 .rules-palette {
   display: inline-flex;
   gap: 2px;

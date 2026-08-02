@@ -806,6 +806,11 @@ describe("panel series", () => {
       )
       ?.click();
     expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
+    view.openRulesPopover(state, anchor);
+    view.element
+      .querySelector<HTMLButtonElement>(".rules-channel-shortcut")
+      ?.click();
+    expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
   });
 
   it("groups pick bindings and counts live query and set members", () => {

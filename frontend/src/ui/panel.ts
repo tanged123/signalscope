@@ -2738,11 +2738,19 @@ export class PanelView {
       });
       dimensions.append(button);
     }
+    const channelShortcut = document.createElement("button");
+    channelShortcut.type = "button";
+    channelShortcut.className = "rules-channel-shortcut";
+    channelShortcut.textContent = "color ← channel";
+    channelShortcut.addEventListener("click", () => {
+      this.callbacks.onSetColorBy(this.id, "channel");
+      this.closeRulesPopover();
+    });
     colorDimension.addEventListener("click", () => {
       dimensions.hidden = !dimensions.hidden;
       colorDimension.setAttribute("aria-expanded", String(!dimensions.hidden));
     });
-    colorRow.append(colorDimension, palette, dimensions);
+    colorRow.append(colorDimension, channelShortcut, palette, dimensions);
     rules.append(colorRow);
     for (const text of ["dash ← — flat", "width ← — flat"]) {
       const row = document.createElement("div");
