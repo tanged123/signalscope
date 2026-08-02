@@ -22,6 +22,7 @@ export interface Palette {
   border: string;
   fg2: string;
   fg3: string;
+  fg4: string;
   grid: string;
   series: string[];
   sequential: string[];
@@ -32,13 +33,17 @@ export interface Palette {
 export interface RenderOptions {
   xLabel: string;
   yLabel: string;
-  colorSlots: readonly number[];
-  dashes: readonly DashStyle[];
   yRange: readonly [number, number];
   axisStyle?: AxisStyle;
-  widths?: readonly number[];
+  styles?: readonly SeriesStroke[];
   emphasisIndex?: number;
-  dimmed?: readonly boolean[];
+}
+
+export interface SeriesStroke {
+  hue: number | null;
+  dash: DashStyle;
+  width: number;
+  alpha: number;
 }
 
 export interface PlotPath {
@@ -86,8 +91,11 @@ export const SERIES_TOKENS = [
 // SignalScope keeps --series-8 as the first dashed rollover for compatibility.
 export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
-const DASH_CYCLE = ["solid", "dash", "dot"] as const;
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
+
+function hueIndex(hue: number): number {
+  return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
+}
 
 function plotFontSize(styles: CSSStyleDeclaration): number {
   const parsed = Number.parseFloat(styles.getPropertyValue("--plot-font-size"));
@@ -106,18 +114,6 @@ export function labelFont(palette: {
   fontSize: number;
 }): string {
   return `${String(palette.fontSize + 0.5)}px ${palette.fontPlot}`;
-}
-
-export function resolveSeriesStyle(
-  colorSlot: number,
-  dash: DashStyle,
-): { colorIndex: number; dash: DashStyle } {
-  const zero = Math.max(0, Math.trunc(colorSlot) - 1);
-  const band = Math.floor(zero / COLOR_SLOTS) % DASH_CYCLE.length;
-  return {
-    colorIndex: zero % COLOR_SLOTS,
-    dash: dash === "solid" ? (DASH_CYCLE[band] ?? "solid") : dash,
-  };
 }
 
 export function dashPattern(dash: DashStyle): number[] {
@@ -211,22 +207,32 @@ export class CanvasRenderer {
         : { axisStyle: options.axisStyle }),
     });
     response.series.forEach((series, index) => {
-      const style = resolveSeriesStyle(
-        options.colorSlots[index] ?? index + 1,
-        options.dashes[index] ?? "solid",
-      );
+      const stroke = options.styles?.[index] ?? {
+        hue: (index % COLOR_SLOTS) + 1,
+        dash: "solid" as const,
+        width: 1.4,
+        alpha: 1,
+      };
+      const ghost = stroke.hue === null;
+      const emphasized = options.emphasisIndex === index;
+      const color =
+        stroke.hue === null
+          ? colors.fg4
+          : (colors.series[hueIndex(stroke.hue)] ?? colors.fg2);
+      const alpha = emphasized
+        ? Math.min(1, stroke.alpha + 0.4)
+        : options.emphasisIndex !== undefined && !ghost
+          ? 0.25
+          : stroke.alpha;
       this.drawSeries(
         context,
         plot,
         project,
         series,
-        colors.series[style.colorIndex] ?? colors.fg2,
-        style.dash,
-        (options.widths?.[index] ?? 1.4) +
-          (options.emphasisIndex === index ? 0.4 : 0),
-        options.emphasisIndex !== undefined
-          ? options.emphasisIndex !== index
-          : (options.dimmed?.[index] ?? false),
+        color,
+        stroke.dash,
+        stroke.width + (emphasized ? 0.4 : 0),
+        alpha,
       );
     });
     finishAxes();
@@ -508,6 +514,7 @@ export class CanvasRenderer {
       border: styles.getPropertyValue("--border-strong").trim(),
       fg2: styles.getPropertyValue("--fg-2").trim(),
       fg3: styles.getPropertyValue("--fg-3").trim(),
+      fg4: styles.getPropertyValue("--fg-4").trim(),
       grid: styles.getPropertyValue("--grid").trim(),
       series: SERIES_TOKENS.map((token) =>
         styles.getPropertyValue(token).trim(),
@@ -613,7 +620,7 @@ export class CanvasRenderer {
     color: string,
     dash: DashStyle,
     width: number,
-    dimmed: boolean,
+    alpha: number,
   ): void {
     const { toX, toY } = project;
 
@@ -623,7 +630,7 @@ export class CanvasRenderer {
     context.clip();
     context.strokeStyle = color;
     context.lineWidth = width;
-    context.globalAlpha = dimmed ? 0.35 : 1;
+    context.globalAlpha = alpha;
     context.setLineDash(dashPattern(dash));
     context.beginPath();
     let penDown = false;

@@ -41,7 +41,6 @@ import { lerpSample, pairSamples, type XyTrace } from "../app/xy";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
-  resolveSeriesStyle,
   type PathRenderOptions,
   type PlotPath,
   type RenderOptions,
@@ -80,6 +79,11 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
 ];
 
 const XY_HOVER_RADIUS = 40;
+
+function colorIndexForHue(hue: number | null): number {
+  if (hue === null) return 0;
+  return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
+}
 
 export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
 
@@ -147,11 +151,14 @@ type XyPairingCallbacks = Pick<PanelCallbacks, "localPathFor" | "sourceKeyFor">;
 export interface RenderSeries {
   ref: SeriesRef;
   path: string;
-  color_slot: number;
+  display: ResolvedSeries["display"];
+  hue: number | null;
   dash: DashStyle;
   width: number;
+  opacity: number;
   visible: boolean;
   focused: boolean;
+  overridden: boolean;
 }
 
 export type RenderPanelState = Omit<
@@ -183,11 +190,14 @@ function renderState(
     series: resolved.map((entry) => ({
       ref: entry.ref,
       path: entry.path,
-      color_slot: entry.colorSlot,
+      display: entry.display,
+      hue: entry.hue,
       dash: entry.dash,
       width: entry.width,
+      opacity: entry.opacity,
       visible: entry.visible,
       focused: entry.focused,
+      overridden: entry.overridden,
     })),
   };
 }
@@ -662,10 +672,7 @@ export class PanelView {
         const series = bySeries.get(tile.signal_path);
         return {
           path: tile.signal_path,
-          colorIndex: resolveSeriesStyle(
-            series?.color_slot ?? 1,
-            series?.dash ?? "solid",
-          ).colorIndex,
+          colorIndex: colorIndexForHue(series?.hue ?? 1),
           bins: tile.bins,
         };
       }),
@@ -682,17 +689,16 @@ export class PanelView {
     const options: RenderOptions = {
       xLabel: state.x_label ?? "time (s)",
       yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
-      colorSlots: shown.map(
-        (tile) => bySeries.get(tile.signal_path)?.color_slot ?? 1,
-      ),
-      dashes: shown.map(
-        (tile) => bySeries.get(tile.signal_path)?.dash ?? "solid",
-      ),
       yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
-      widths: shown.map((tile) => bySeries.get(tile.signal_path)?.width ?? 1.4),
-      dimmed: shown.map((tile) => {
-        return !(bySeries.get(tile.signal_path)?.focused ?? true);
+      styles: shown.map((tile) => {
+        const series = bySeries.get(tile.signal_path);
+        return {
+          hue: series?.hue ?? null,
+          dash: series?.dash ?? "solid",
+          width: series?.width ?? 1.4,
+          alpha: series?.opacity ?? 1,
+        };
       }),
       ...(this.emphasizePath !== null &&
       shown.some((tile) => tile.signal_path === this.emphasizePath)
@@ -731,11 +737,10 @@ export class PanelView {
         this.callbacks,
       );
       if (resolved === undefined) continue;
-      const style = resolveSeriesStyle(series.color_slot, series.dash);
       this.xyTraces.push({
         path: series.path,
-        colorIndex: style.colorIndex,
-        dash: style.dash,
+        colorIndex: colorIndexForHue(series.hue),
+        dash: series.dash,
         width: series.width,
         trace: pairSamples(resolved, ySeries),
       });
@@ -904,17 +909,16 @@ export class PanelView {
       result.frequency.forEach((frequency, index) => {
         points.push(frequency, result.amplitudeDb[index] ?? -120);
       });
-      const style = resolveSeriesStyle(series.color_slot, series.dash);
       this.domainSeries.push({
         path: series.path,
-        colorIndex: style.colorIndex,
+        colorIndex: colorIndexForHue(series.hue),
         x: result.frequency,
         y: result.amplitudeDb,
       });
       paths.push({
         points,
-        colorIndex: style.colorIndex,
-        dash: style.dash,
+        colorIndex: colorIndexForHue(series.hue),
+        dash: series.dash,
         width: series.width,
       });
     }
@@ -981,22 +985,18 @@ export class PanelView {
       });
       points.push(edges[edges.length - 1] ?? 0, 0);
       const series = visible[index];
-      const style = resolveSeriesStyle(
-        series?.color_slot ?? 1,
-        series?.dash ?? "solid",
-      );
       if (series !== undefined) {
         histogramSeries.push({
           path: series.path,
-          colorIndex: style.colorIndex,
+          colorIndex: colorIndexForHue(series.hue),
           counts,
           sourceValues: columns[index] ?? [],
         });
       }
       return {
         points,
-        colorIndex: style.colorIndex,
-        dash: style.dash,
+        colorIndex: colorIndexForHue(series?.hue ?? 1),
+        dash: series?.dash ?? "solid",
         width: series?.width ?? 1.4,
       };
     });
@@ -1251,8 +1251,7 @@ export class PanelView {
       return [
         {
           value,
-          colorIndex: resolveSeriesStyle(series.color_slot, series.dash)
-            .colorIndex,
+          colorIndex: colorIndexForHue(series.hue),
         },
       ];
     });
@@ -1545,10 +1544,16 @@ export class PanelView {
     body.className = "legend-chip-body";
     body.title = `${series.path} — click to toggle visibility`;
     const line = document.createElement("span");
-    const style = resolveSeriesStyle(series.color_slot, series.dash);
+    const style = {
+      colorIndex: colorIndexForHue(series.hue),
+      dash: series.dash,
+    };
     line.className = `legend-line dash-${style.dash}`;
     line.setAttribute("aria-hidden", "true");
-    line.style.color = `var(--series-${String(style.colorIndex + 1)})`;
+    line.style.color =
+      series.hue === null
+        ? "var(--fg-4)"
+        : `var(--series-${String(style.colorIndex + 1)})`;
     const name = document.createElement("span");
     name.className = "legend-name";
     name.textContent = signalLabel(series.path);
@@ -1612,7 +1617,7 @@ export class PanelView {
       swatch.setAttribute("aria-label", `Colour slot ${String(slot)}`);
       swatch.classList.toggle(
         "active",
-        resolveSeriesStyle(series.color_slot, "solid").colorIndex + 1 === slot,
+        colorIndexForHue(series.hue) + 1 === slot,
       );
       swatch.addEventListener("click", () => {
         this.callbacks.onSetSeriesStyle(this.id, series.ref, {
@@ -1633,7 +1638,7 @@ export class PanelView {
       button.classList.toggle("active", series.dash === dash);
       button.addEventListener("click", () => {
         this.callbacks.onSetSeriesStyle(this.id, series.ref, {
-          color_slot: series.color_slot,
+          color_slot: series.hue ?? 1,
           dash,
           width: series.width,
         });
@@ -1650,7 +1655,7 @@ export class PanelView {
     width.setAttribute("aria-label", "Line width");
     width.addEventListener("change", () => {
       this.callbacks.onSetSeriesStyle(this.id, series.ref, {
-        color_slot: series.color_slot,
+        color_slot: series.hue ?? 1,
         dash: series.dash,
         width: Number(width.value),
       });

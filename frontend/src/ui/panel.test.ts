@@ -59,11 +59,14 @@ function visible(path: string): RenderSeries {
       channel: localPathFor(path) ?? path,
     },
     path,
-    color_slot: 1,
+    display: "focus",
+    hue: 1,
     dash: "solid",
     width: 1.4,
+    opacity: 1,
     visible: true,
     focused: true,
+    overridden: false,
   };
 }
 
