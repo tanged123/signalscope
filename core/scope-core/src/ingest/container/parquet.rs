@@ -11,12 +11,14 @@ use crate::ingest::{
     registry::{Confidence, FormatProvider},
 };
 
-use super::{ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath};
+use super::{
+    check_declared_size, ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath,
+};
 
 const PARQUET_MAGIC: &[u8] = b"PAR1";
 
 pub fn is_parquet_magic(probe: &[u8]) -> bool {
-    probe.starts_with(PARQUET_MAGIC) || probe.ends_with(PARQUET_MAGIC)
+    probe.starts_with(PARQUET_MAGIC)
 }
 
 pub(crate) fn provider() -> FormatProvider {
@@ -86,6 +88,9 @@ impl ContainerReader for ParquetContainer {
                 shape: vec![row_count],
             })
             .collect::<Vec<_>>();
+        for entry in &entries {
+            check_declared_size(entry)?;
+        }
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(Self {
             path: path.to_owned(),
@@ -107,6 +112,7 @@ impl ContainerReader for ParquetContainer {
         if entry.kind != DatasetKind::Numeric {
             return Err(ContainerError::NotNumeric(path.to_owned()));
         }
+        check_declared_size(entry)?;
         let index = *self
             .columns
             .get(path)
@@ -210,6 +216,8 @@ fn backend_error(error: impl std::fmt::Display) -> ContainerError {
 
 #[cfg(test)]
 mod tests {
+    use crate::ingest::container::MAX_DATASET_BYTES;
+
     use super::*;
     use arrow_array::{Float64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
@@ -249,10 +257,39 @@ mod tests {
     }
 
     #[test]
-    fn the_magic_is_recognized_at_both_ends_of_the_file() {
+    fn only_a_leading_magic_claims_a_probe_window() {
         assert!(is_parquet_magic(b"PAR1\x00\x00"));
-        assert!(is_parquet_magic(b"\x00\x00PAR1"));
+        assert!(
+            !is_parquet_magic(b"\x00\x00PAR1"),
+            "a trailing match inside the probe window is not a Parquet header"
+        );
         assert!(!is_parquet_magic(b"PAR2\x00\x00"));
+    }
+
+    #[test]
+    fn a_file_whose_probe_window_ends_in_the_magic_is_not_claimed() {
+        let mut probe = vec![b'x'; crate::ingest::registry::PROBE_BYTES - 4];
+        probe.extend_from_slice(b"PAR1");
+        let registry = crate::ingest::registry::ProviderRegistry::builtin();
+        let selected = registry.select_bytes(&probe);
+        assert!(
+            selected.is_err() || selected.unwrap().id() != "parquet",
+            "parquet must not claim a file merely because the probe ends in PAR1"
+        );
+    }
+
+    #[test]
+    fn a_column_longer_than_the_ceiling_is_refused() {
+        let entry = DatasetEntry {
+            path: "ax".into(),
+            kind: DatasetKind::Numeric,
+            len: MAX_DATASET_BYTES / 8 + 1,
+            shape: vec![MAX_DATASET_BYTES / 8 + 1],
+        };
+        assert!(matches!(
+            check_declared_size(&entry),
+            Err(ContainerError::Unsupported(_))
+        ));
     }
 
     fn write_parquet(columns: &[(&str, &[f64])]) -> tempfile::NamedTempFile {

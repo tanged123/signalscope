@@ -5,6 +5,30 @@ use thiserror::Error;
 /// Canonical path of a dataset inside a container.
 pub type DatasetPath = str;
 
+/// Maximum group nesting walked during listing. HDF5 links can point at an
+/// ancestor, so an unbounded walk on an untrusted file overflows the stack.
+pub const MAX_GROUP_DEPTH: usize = 64;
+
+/// Maximum datasets listed from one container.
+pub const MAX_DATASET_ENTRIES: usize = 50_000;
+
+/// Largest column a container reader will materialize, in bytes.
+pub const MAX_DATASET_BYTES: usize = 1024 * 1024 * 1024;
+
+/// Checks the declared materialized size before a container allocates it.
+///
+/// Returns an unsupported error when the declared size exceeds the ceiling.
+pub fn check_declared_size(entry: &DatasetEntry) -> Result<(), ContainerError> {
+    let declared = entry.len.saturating_mul(std::mem::size_of::<f64>());
+    if declared > MAX_DATASET_BYTES {
+        return Err(ContainerError::Unsupported(format!(
+            "dataset {} declares {declared} bytes, above the {MAX_DATASET_BYTES} byte ceiling",
+            entry.path
+        )));
+    }
+    Ok(())
+}
+
 pub mod hdf5;
 pub mod parquet;
 
@@ -83,6 +107,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+
+    #[test]
+    fn the_dataset_ceiling_is_below_a_plausible_working_budget() {
+        assert!(MAX_DATASET_BYTES <= 2 * 1024 * 1024 * 1024);
+    }
 
     #[derive(Default)]
     pub(crate) struct FakeContainer {

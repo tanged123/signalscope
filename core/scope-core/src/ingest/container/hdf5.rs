@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use hdf5_metno::{File, Group};
+use hdf5_metno::{File, Group, LinkType};
 
 use crate::ingest::{
     DecodeContext, DecodedSource, Decoder, IngestError,
@@ -8,7 +8,10 @@ use crate::ingest::{
     registry::{Confidence, FormatProvider},
 };
 
-use super::{ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath};
+use super::{
+    check_declared_size, ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath,
+    MAX_DATASET_ENTRIES, MAX_GROUP_DEPTH,
+};
 
 const HDF5_MAGIC: &[u8] = b"\x89HDF\r\n\x1a\n";
 
@@ -58,7 +61,7 @@ impl ContainerReader for Hdf5Container {
     fn open(path: &Path) -> Result<Self, ContainerError> {
         let file = File::open(path).map_err(backend_error)?;
         let mut entries = Vec::new();
-        collect_datasets(&file, "", &mut entries)?;
+        collect_datasets(&file, "", 0, &mut entries)?;
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(Self {
             path: path.to_owned(),
@@ -79,6 +82,7 @@ impl ContainerReader for Hdf5Container {
         if entry.kind != DatasetKind::Numeric {
             return Err(ContainerError::NotNumeric(path.to_owned()));
         }
+        check_declared_size(entry)?;
         File::open(&self.path)
             .map_err(backend_error)?
             .dataset(path)
@@ -147,9 +151,23 @@ fn backend_error(error: impl std::fmt::Display) -> ContainerError {
 fn collect_datasets(
     group: &Group,
     prefix: &str,
+    depth: usize,
     entries: &mut Vec<DatasetEntry>,
 ) -> Result<(), ContainerError> {
-    for name in group.member_names().map_err(backend_error)? {
+    if depth > MAX_GROUP_DEPTH {
+        return Err(ContainerError::Unsupported(format!(
+            "container nests deeper than {MAX_GROUP_DEPTH} groups"
+        )));
+    }
+    let members = group
+        .iter_visit_default(Vec::new(), |_, name, info, names: &mut Vec<String>| {
+            if info.link_type == LinkType::Hard {
+                names.push(name.to_owned());
+            }
+            true
+        })
+        .map_err(backend_error)?;
+    for name in members {
         let path = if prefix.is_empty() {
             name.clone()
         } else {
@@ -172,6 +190,11 @@ fn collect_datasets(
                 hdf5_metno::types::TypeDescriptor::Compound(_) => DatasetKind::Compound,
                 _ => DatasetKind::Unsupported,
             };
+            if entries.len() >= MAX_DATASET_ENTRIES {
+                return Err(ContainerError::Unsupported(format!(
+                    "container lists more than {MAX_DATASET_ENTRIES} datasets"
+                )));
+            }
             entries.push(DatasetEntry {
                 path,
                 kind,
@@ -179,7 +202,7 @@ fn collect_datasets(
                 shape,
             });
         } else if let Ok(child) = group.group(&name) {
-            collect_datasets(&child, &path, entries)?;
+            collect_datasets(&child, &path, depth + 1, entries)?;
         }
     }
     Ok(())
@@ -188,6 +211,8 @@ fn collect_datasets(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+
+    use crate::ingest::container::MAX_DATASET_BYTES;
 
     use super::*;
 
@@ -244,10 +269,84 @@ mod tests {
         assert!(Hdf5Container::open(file.path()).is_err());
     }
 
+    #[test]
+    fn a_cyclic_group_link_is_an_error_not_a_stack_overflow() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cycle.h5");
+        let file = File::create(&path).unwrap();
+        let outer = file.create_group("a").unwrap();
+        let inner = outer.create_group("b").unwrap();
+        inner.link_hard("/a", "loop").unwrap();
+        drop(file);
+
+        let error = Hdf5Container::open(&path).err().unwrap();
+        assert!(matches!(error, ContainerError::Unsupported(_)));
+    }
+
+    #[test]
+    fn a_deeply_nested_container_is_rejected_at_the_depth_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("deep.h5");
+        let file = File::create(&path).unwrap();
+        let mut group = file.create_group("g0").unwrap();
+        for level in 1..(MAX_GROUP_DEPTH + 8) {
+            group = group.create_group(&format!("g{level}")).unwrap();
+        }
+        drop(file);
+
+        assert!(matches!(
+            Hdf5Container::open(&path).err().unwrap(),
+            ContainerError::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn an_external_link_never_reads_outside_the_container() {
+        let directory = tempfile::tempdir().unwrap();
+        let secret = directory.path().join("secret.h5");
+        write_hdf5_at(&secret, &[("private", &[1.0, 2.0, 3.0])]);
+        let path = directory.path().join("host.h5");
+        let file = File::create(&path).unwrap();
+        file.link_external(&secret.display().to_string(), "/", "elsewhere")
+            .unwrap();
+        drop(file);
+
+        let container = Hdf5Container::open(&path).unwrap();
+        assert!(
+            container.datasets().is_empty(),
+            "external link contents must not be listed: {:?}",
+            container.datasets()
+        );
+    }
+
+    #[test]
+    fn a_dataset_declaring_more_than_the_ceiling_is_refused_before_allocating() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("huge.h5");
+        let file = File::create(&path).unwrap();
+        file.new_dataset::<f64>()
+            .shape([MAX_DATASET_BYTES / 8 + 1024])
+            .chunk([1])
+            .create("huge")
+            .unwrap();
+        drop(file);
+
+        let container = Hdf5Container::open(&path).unwrap();
+        assert!(matches!(
+            container.read_f64("huge"),
+            Err(ContainerError::Unsupported(_))
+        ));
+    }
+
     fn write_hdf5(datasets: &[(&str, &[f64])]) -> tempfile::NamedTempFile {
         let file = tempfile::NamedTempFile::new().unwrap();
+        write_hdf5_at(file.path(), datasets);
+        file
+    }
+
+    fn write_hdf5_at(path: &Path, datasets: &[(&str, &[f64])]) {
         {
-            let hdf5 = File::create(file.path()).unwrap();
+            let hdf5 = File::create(path).unwrap();
             for (path, values) in datasets {
                 let dataset = hdf5
                     .new_dataset::<f64>()
@@ -257,7 +356,6 @@ mod tests {
                 dataset.write(*values).unwrap();
             }
         }
-        file
     }
 
     fn write_hdf5_mixed() -> tempfile::NamedTempFile {
