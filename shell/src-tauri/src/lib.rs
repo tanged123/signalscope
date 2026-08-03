@@ -396,9 +396,7 @@ fn save_recipe(
     let recipe = scope_core::ingest::recipe::parse_recipe(&request.recipe_toml)
         .map_err(|error| error.to_string())?;
     let destination = match request.destination {
-        RecipeDestination::Sidecar => {
-            sidecar_destination(Path::new(&request.path))?
-        }
+        RecipeDestination::Sidecar => sidecar_destination(Path::new(&request.path))?,
         RecipeDestination::UserDirectory => {
             let preferences = preferences_path(&app)
                 .ok()
@@ -463,10 +461,7 @@ fn sidecar_destination(source: &Path) -> Result<PathBuf, String> {
     let file_name = source
         .file_name()
         .ok_or_else(|| "source path has no file name".to_owned())?;
-    Ok(source.with_file_name(format!(
-        "{}.scope.toml",
-        file_name.to_string_lossy()
-    )))
+    Ok(source.with_file_name(format!("{}.scope.toml", file_name.to_string_lossy())))
 }
 
 fn format_descriptors(registry: &ProviderRegistry) -> Vec<FormatDescriptor> {
@@ -624,6 +619,7 @@ fn batch_status_response(status: scope_core::ingest::batch::BatchStatus) -> Batc
             .map(|failure| BatchFailure {
                 path: failure.path.display().to_string(),
                 error: failure.error,
+                recipe_required: failure.recipe_required,
             })
             .collect(),
     }
@@ -1831,7 +1827,10 @@ t0 = 0.0
             SAMPLE_RECIPE_TOML,
         );
 
-        assert!(written.is_ok(), "a planted symlink must not block the write");
+        assert!(
+            written.is_ok(),
+            "a planted symlink must not block the write"
+        );
         assert_eq!(
             std::fs::read_to_string(&victim).unwrap(),
             "precious",

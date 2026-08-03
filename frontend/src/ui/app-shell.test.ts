@@ -22,6 +22,7 @@ import {
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
+import { ImportWizard } from "./import-wizard";
 
 it("arrival mode focuses small additions and ghosts large additions", () => {
   expect(arrivalModeFor(0)).toBe("none");
@@ -174,6 +175,95 @@ describe("drag-drop routing", () => {
     expect(probe.ingestPaths).not.toHaveBeenCalled();
     const error = (probe.reportError.mock.calls as unknown[][])[0]?.[0];
     expect(String(error)).toContain(".csv");
+  });
+});
+
+describe("recipe-required ingest failures", () => {
+  function ingestProbe(
+    batchStatus: BatchStatus,
+    introspect: ReturnType<typeof vi.fn>,
+  ) {
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      plane: { ingest: Record<string, unknown> };
+      reloadSignals: ReturnType<typeof vi.fn>;
+      afterLayoutChange: ReturnType<typeof vi.fn>;
+      reportError: ReturnType<typeof vi.fn>;
+      ingestPaths(paths: string[]): Promise<void>;
+    };
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<div class="ingest-progress" hidden></div>';
+    shell.reloadSignals = vi.fn(() => Promise.resolve());
+    shell.afterLayoutChange = vi.fn();
+    shell.reportError = vi.fn();
+    shell.plane = {
+      ingest: {
+        startBatch: vi.fn(() => Promise.resolve("job")),
+        batchStatus: vi.fn(() => Promise.resolve(batchStatus)),
+        releaseBatch: vi.fn(() => Promise.resolve()),
+        introspect,
+      },
+    };
+    return shell;
+  }
+
+  it("still reloads signals when an unflagged wizard mount is unavailable", async () => {
+    const introspect = vi.fn(() =>
+      Promise.reject(new Error("unsupported container magic")),
+    );
+    const shell = ingestProbe(
+      {
+        state: "partial",
+        fraction: 1,
+        total: "1",
+        done: "0",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/runs/mystery.bin",
+            error: "unsupported format",
+            recipe_required: false,
+          },
+        ],
+      },
+      introspect,
+    );
+
+    await shell.ingestPaths(["/runs"]);
+
+    expect(introspect).not.toHaveBeenCalled();
+    expect(shell.reloadSignals).toHaveBeenCalled();
+  });
+
+  it("contains a failed recipe wizard mount and still reloads signals", async () => {
+    const introspect = vi.fn(() =>
+      Promise.reject(new Error("unsupported container magic")),
+    );
+    const shell = ingestProbe(
+      {
+        state: "partial",
+        fraction: 1,
+        total: "1",
+        done: "0",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/runs/mystery.h5",
+            error: "HDF5 input requires a validated container recipe",
+            recipe_required: true,
+          },
+        ],
+      },
+      introspect,
+    );
+
+    await shell.ingestPaths(["/runs"]);
+
+    expect(introspect).toHaveBeenCalledWith("/runs/mystery.h5");
+    expect(shell.reportError).toHaveBeenCalled();
+    expect(shell.reloadSignals).toHaveBeenCalled();
   });
 });
 

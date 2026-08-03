@@ -1732,13 +1732,15 @@ export class AppShell {
           if (jobId !== null) void port.cancelBatch(jobId);
         });
       });
-      const unsupported = status.recent_failures.find((failure) =>
-        /unsupported format|requires a validated container recipe/i.test(
-          failure.error,
-        ),
+      const needsRecipe = status.recent_failures.find(
+        (failure) => failure.recipe_required,
       );
-      if (unsupported !== undefined && typeof port.introspect === "function") {
-        await ImportWizard.mount(this.plane, unsupported.path);
+      if (needsRecipe !== undefined && typeof port.introspect === "function") {
+        try {
+          await ImportWizard.mount(this.plane, needsRecipe.path);
+        } catch (error: unknown) {
+          this.reportError(error);
+        }
       }
       keepProgress = status.recent_failures.length > 0;
       await this.reloadSignals();

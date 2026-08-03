@@ -197,6 +197,8 @@ pub enum IngestError {
     Cancelled,
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
+    #[error("{container} input requires a validated container recipe")]
+    RecipeRequired { container: String },
     #[error("recorded provider is unavailable: {provider_id}")]
     ProviderUnavailable { provider_id: String },
     #[error(transparent)]

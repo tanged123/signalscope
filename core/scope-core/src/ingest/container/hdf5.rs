@@ -9,8 +9,8 @@ use crate::ingest::{
 };
 
 use super::{
-    check_declared_size, ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath,
-    MAX_DATASET_ENTRIES, MAX_GROUP_DEPTH,
+    ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath, MAX_DATASET_ENTRIES,
+    MAX_GROUP_DEPTH, check_declared_size,
 };
 
 const HDF5_MAGIC: &[u8] = b"\x89HDF\r\n\x1a\n";
@@ -46,9 +46,9 @@ impl Decoder for Hdf5Decoder {
         _path: &Path,
         _context: &mut DecodeContext<'_>,
     ) -> Result<DecodedSource, IngestError> {
-        Err(IngestError::UnsupportedFormat(
-            "HDF5 input requires a validated container recipe".into(),
-        ))
+        Err(IngestError::RecipeRequired {
+            container: "HDF5".into(),
+        })
     }
 }
 
@@ -267,6 +267,17 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), b"\x89HDF\r\n\x1a\ntruncated").unwrap();
         assert!(Hdf5Container::open(file.path()).is_err());
+    }
+
+    #[test]
+    fn an_hdf5_file_without_a_recipe_reports_that_a_recipe_is_required() {
+        let progress: &'static mut dyn FnMut(f64) = Box::leak(Box::new(|_| {}));
+        let cancel = Box::leak(Box::new(crate::ingest::CancelToken::default()));
+        let mut context = DecodeContext { progress, cancel };
+        let error = Hdf5Decoder
+            .decode(Path::new("flight.h5"), &mut context)
+            .unwrap_err();
+        assert!(matches!(error, IngestError::RecipeRequired { .. }));
     }
 
     #[test]

@@ -64,4 +64,37 @@ describe("ImportWizard", () => {
     expect(row?.innerHTML).not.toContain("<img");
     expect(row?.textContent).toContain("<img src=x onerror=alert(1)>");
   });
+
+  it("never proposes a dataset with no preview evidence as the timebase", () => {
+    const wizard = ImportWizard.fromOutline({
+      container: "hdf5",
+      datasets: [
+        {
+          path: "run/image",
+          kind: "numeric",
+          len: "1000000",
+          shape: [1000, 1000],
+          sample_preview: [],
+        },
+        {
+          path: "run/elapsed",
+          kind: "numeric",
+          len: "300",
+          shape: [300],
+          sample_preview: [0, 0.1, 0.2],
+        },
+      ],
+    });
+    expect(wizard.proposedTime()).toBe("run/elapsed");
+  });
+
+  it("closes on Escape and removes itself from the document", () => {
+    const wizard = ImportWizard.fromOutline(outline);
+    document.body.append(wizard.render());
+    expect(document.querySelector(".import-wizard")).not.toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(document.querySelector(".import-wizard")).toBeNull();
+  });
 });

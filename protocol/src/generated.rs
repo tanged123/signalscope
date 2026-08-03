@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -111,6 +111,7 @@ pub enum FileState {
 pub struct BatchFailure {
     pub path: String,
     pub error: String,
+    pub recipe_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

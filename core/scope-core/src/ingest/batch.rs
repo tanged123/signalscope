@@ -52,6 +52,7 @@ pub enum FileState {
 pub struct FileFailure {
     pub path: PathBuf,
     pub error: String,
+    pub recipe_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,6 +84,7 @@ struct FileEntry {
     weight: u64,
     state: FileState,
     error: Option<String>,
+    recipe_required: bool,
 }
 
 struct Inner {
@@ -108,6 +110,7 @@ impl BatchProgress {
                         path,
                         state: FileState::Pending,
                         error: None,
+                        recipe_required: false,
                     })
                     .collect(),
                 cancelled: false,
@@ -124,7 +127,20 @@ impl BatchProgress {
     }
 
     pub fn failed(&self, index: usize, error: impl Into<String>) {
-        self.set_state(index, FileState::Failed, Some(error.into()));
+        self.failed_with_recipe(index, error, false);
+    }
+
+    fn failed_with_recipe(
+        &self,
+        index: usize,
+        error: impl Into<String>,
+        recipe_required: bool,
+    ) {
+        if let Some(entry) = self.lock().entries.get_mut(index) {
+            entry.state = FileState::Failed;
+            entry.error = Some(error.into());
+            entry.recipe_required = recipe_required;
+        }
     }
 
     pub fn cancelled(&self, index: usize) {
@@ -178,6 +194,7 @@ impl BatchProgress {
                 entry.error.as_ref().map(|error| FileFailure {
                     path: entry.path.clone(),
                     error: error.clone(),
+                    recipe_required: entry.recipe_required,
                 })
             })
             .take(RECENT_FAILURE_LIMIT)
@@ -237,6 +254,7 @@ impl BatchProgress {
         if let Some(entry) = self.lock().entries.get_mut(index) {
             entry.state = state;
             entry.error = error;
+            entry.recipe_required = false;
         }
     }
 
@@ -301,7 +319,7 @@ struct Job {
 #[derive(Clone)]
 enum FlightOutcome {
     Done,
-    Failed(String),
+    Failed(String, bool),
     Cancelled,
 }
 
@@ -546,7 +564,9 @@ impl Worker {
             };
             match outcome {
                 FlightOutcome::Done => self.progress.succeeded(item.index),
-                FlightOutcome::Failed(error) => self.progress.failed(item.index, error),
+                FlightOutcome::Failed(error, recipe_required) => self
+                    .progress
+                    .failed_with_recipe(item.index, error, recipe_required),
                 FlightOutcome::Cancelled => self.progress.cancelled(item.index),
             }
         }
@@ -560,7 +580,9 @@ impl Worker {
                 FlightOutcome::Done
             }
             Err(ProcessError::Cancelled) => FlightOutcome::Cancelled,
-            Err(ProcessError::Failed(error)) => FlightOutcome::Failed(error),
+            Err(ProcessError::Failed(error, recipe_required)) => {
+                FlightOutcome::Failed(error, recipe_required)
+            }
         }
     }
 
@@ -607,6 +629,7 @@ impl Worker {
                             crate::restore::restore_source(record, Some(&resolved))
                                 .expect_err("non-matched recipe status always errors")
                                 .to_string(),
+                            false,
                         ));
                     }
                     provider_id = Some(format!("recipe:{}", resolved.recipe.id));
@@ -622,10 +645,11 @@ impl Worker {
                         crate::restore::restore_source(record, None)
                             .expect_err("a missing recipe always errors")
                             .to_string(),
+                        false,
                     ));
                 }
                 Ok(None) => {}
-                Err(error) => return Err(ProcessError::Failed(error.to_string())),
+                Err(error) => return Err(ProcessError::Failed(error.to_string(), false)),
             }
         }
         let outcome = if let Some(directory) = &self.cache_directory {
@@ -701,26 +725,33 @@ impl Worker {
         committed.recipe_digest = recipe_digest;
         self.sink
             .commit(&committed, decoded, pyramids)
-            .map_err(|error| match error {
-                IngestError::Cancelled => ProcessError::Cancelled,
-                error => ProcessError::Failed(error.to_string()),
-            })?;
+            .map_err(failed_ingest)?;
         Ok((outcome.provider_id, outcome.provenance, charge))
     }
 }
 
 enum ProcessError {
     Cancelled,
-    Failed(String),
+    Failed(String, bool),
 }
 
 fn failed(error: &impl ToString) -> ProcessError {
-    ProcessError::Failed(error.to_string())
+    ProcessError::Failed(error.to_string(), false)
+}
+
+fn failed_ingest(error: IngestError) -> ProcessError {
+    match error {
+        IngestError::Cancelled => ProcessError::Cancelled,
+        error => {
+            let recipe_required = matches!(error, IngestError::RecipeRequired { .. });
+            ProcessError::Failed(error.to_string(), recipe_required)
+        }
+    }
 }
 
 fn process_cache_error(error: CacheError) -> ProcessError {
     match error {
-        CacheError::Ingest(IngestError::Cancelled) => ProcessError::Cancelled,
+        CacheError::Ingest(error) => failed_ingest(error),
         error => failed(&error),
     }
 }
@@ -813,6 +844,7 @@ mod tests {
                 recent_failures: vec![FileFailure {
                     path: PathBuf::from("1.csv"),
                     error: "invalid".into(),
+                    recipe_required: false,
                 }],
             }
         );

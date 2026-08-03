@@ -21,6 +21,9 @@ export class ImportWizard {
   private timePath: string | null;
   private nameRule: WizardNameRule = { kind: "keep" };
   private unitSource: WizardUnitSource = { kind: "none" };
+  private rendered: HTMLElement | null = null;
+  private previousActive: Element | null = null;
+  private escapeHandler: ((event: KeyboardEvent) => void) | null = null;
 
   private constructor(
     private readonly outline: ContainerOutline,
@@ -42,6 +45,18 @@ export class ImportWizard {
     const wizard = new ImportWizard(outline, path, plane);
     document.body.append(wizard.render());
     return wizard;
+  }
+
+  close(): void {
+    this.rendered?.remove();
+    this.rendered = null;
+    if (this.escapeHandler !== null) {
+      document.removeEventListener("keydown", this.escapeHandler);
+      this.escapeHandler = null;
+    }
+    if (this.previousActive instanceof HTMLElement) {
+      this.previousActive.focus();
+    }
   }
 
   proposedTime(): string | null {
@@ -127,8 +142,15 @@ export class ImportWizard {
   }
 
   render(): HTMLElement {
+    if (this.rendered !== null) return this.rendered;
+    this.previousActive ??= document.activeElement;
     const root = document.createElement("section");
     root.className = "import-wizard";
+    this.rendered = root;
+    this.escapeHandler = (event) => {
+      if (event.key === "Escape") this.close();
+    };
+    document.addEventListener("keydown", this.escapeHandler);
     const heading = document.createElement("h2");
     heading.textContent = "Import container";
     root.append(heading);
@@ -232,6 +254,7 @@ export class ImportWizard {
         void this.save(this.plane, destination)
           .then((response) => {
             status.textContent = `Saved ${response.recipe_id} to ${response.saved_to}`;
+            this.close();
           })
           .catch((error: unknown) => {
             status.textContent =
@@ -240,6 +263,11 @@ export class ImportWizard {
       });
       actions.append(button);
     }
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "Close";
+    close.addEventListener("click", () => this.close());
+    actions.append(close);
     actions.append(status);
     root.append(actions);
     return root;
@@ -253,6 +281,7 @@ export class ImportWizard {
 }
 
 function monotonicPreview(values: readonly number[]): boolean {
+  if (values.length === 0) return false;
   return values.every(
     (value, index) =>
       Number.isFinite(value) &&

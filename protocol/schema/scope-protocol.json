@@ -1,5 +1,5 @@
 {
-  "protocol_version": 16,
+  "protocol_version": 17,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -54,7 +54,8 @@
       "kind": "object",
       "fields": {
         "path": "string",
-        "error": "string"
+        "error": "string",
+        "recipe_required": "bool"
       }
     },
     "BatchStatus": {

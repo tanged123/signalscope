@@ -12,7 +12,7 @@ use crate::ingest::{
 };
 
 use super::{
-    check_declared_size, ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath,
+    ContainerError, ContainerReader, DatasetEntry, DatasetKind, DatasetPath, check_declared_size,
 };
 
 const PARQUET_MAGIC: &[u8] = b"PAR1";
@@ -48,9 +48,9 @@ impl Decoder for ParquetDecoder {
         _path: &Path,
         _context: &mut DecodeContext<'_>,
     ) -> Result<DecodedSource, IngestError> {
-        Err(IngestError::UnsupportedFormat(
-            "Parquet input requires a validated container recipe".into(),
-        ))
+        Err(IngestError::RecipeRequired {
+            container: "Parquet".into(),
+        })
     }
 }
 
