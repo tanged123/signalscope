@@ -2158,56 +2158,6 @@ button {
   pointer-events: none;
 }
 
-.source-open-overlay {
-  position: fixed;
-  z-index: 30;
-  display: grid;
-  background: var(--surface-overlay);
-  inset: 0;
-  place-items: center;
-}
-
-.source-open-dialog {
-  display: grid;
-  width: min(280px, 90vw);
-  gap: 8px;
-  padding: 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  background: var(--surface-1);
-}
-
-.source-open-title {
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-  color: var(--fg-1);
-  font: 0.9231rem var(--font-mono);
-}
-
-.source-open-choices {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.source-open-dialog button {
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  color: var(--fg-2);
-}
-
-.source-open-dialog button:hover,
-.source-open-dialog button:focus-visible {
-  background: var(--surface-3);
-  color: var(--fg-1);
-}
-
-.source-open-dialog .source-open-cancel {
-  justify-self: end;
-  border-color: transparent;
-}
-
 .palette-overlay {
   position: fixed;
   z-index: 10;

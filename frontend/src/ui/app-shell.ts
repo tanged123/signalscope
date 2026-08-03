@@ -88,7 +88,6 @@ import {
 import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalOutlineView } from "./signal-outline";
-import { SourceOpenDialog } from "./source-open-dialog";
 import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
@@ -176,7 +175,6 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
-  private sourceOpenDialog: SourceOpenDialog | null = null;
   private dropUnsubscribe: (() => void) | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
@@ -623,6 +621,16 @@ export class AppShell {
       enabled: () => this.plane.ingest !== null,
       run: () => {
         this.openSources();
+      },
+    });
+    this.commands.register({
+      id: "open-folder",
+      title: "Open folder…",
+      section: "file",
+      group: "open",
+      enabled: () => this.plane.ingest !== null,
+      run: () => {
+        this.openFolder();
       },
     });
     this.commands.register({
@@ -1683,10 +1691,12 @@ export class AppShell {
 
   private openSources(): void {
     if (this.plane.ingest === null) return;
-    this.sourceOpenDialog ??= new SourceOpenDialog(this.root);
-    this.sourceOpenDialog.open((kind) => {
-      void this.pickAndIngest(kind);
-    });
+    void this.pickAndIngest("files");
+  }
+
+  private openFolder(): void {
+    if (this.plane.ingest === null) return;
+    void this.pickAndIngest("folder");
   }
 
   private async pickAndIngest(kind: SourceOpenKind): Promise<void> {

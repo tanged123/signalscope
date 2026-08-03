@@ -175,6 +175,34 @@ describe("drag-drop routing", () => {
   });
 });
 
+describe("direct open", () => {
+  interface OpenProbe {
+    plane: { ingest: unknown };
+    pickAndIngest: ReturnType<typeof vi.fn>;
+    openSources(): void;
+    openFolder(): void;
+  }
+
+  function openProbe(): OpenProbe {
+    const probe = Object.create(AppShell.prototype) as OpenProbe;
+    probe.plane = { ingest: {} };
+    probe.pickAndIngest = vi.fn(() => Promise.resolve());
+    return probe;
+  }
+
+  it("opens the native file picker with no intermediate chooser", () => {
+    const probe = openProbe();
+    probe.openSources();
+    expect(probe.pickAndIngest).toHaveBeenCalledWith("files");
+  });
+
+  it("opens the folder picker from the demoted command", () => {
+    const probe = openProbe();
+    probe.openFolder();
+    expect(probe.pickAndIngest).toHaveBeenCalledWith("folder");
+  });
+});
+
 interface ArrivalProbe {
   workspace: WorkspaceModel;
   catalog: Catalog;
