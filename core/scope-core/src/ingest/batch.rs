@@ -616,7 +616,11 @@ impl Worker {
                     .map(|path| path.display().to_string()),
                 ..crate::preferences::Preferences::default()
             };
-            match crate::ingest::recipe::resolve::resolve_for(&record.path, &preferences) {
+            match crate::ingest::recipe::resolve::resolve_for_recipe(
+                &record.path,
+                &preferences,
+                record.recipe_id.as_deref(),
+            ) {
                 Ok(Some(resolved)) => {
                     if crate::restore::recipe_status(record, Some(&resolved))
                         != crate::restore::RecipeStatus::Matched
@@ -653,33 +657,22 @@ impl Worker {
                 Err(error) => return Err(ProcessError::Failed(error.to_string(), false)),
             }
         }
-        let outcome = if let Some(directory) = &self.cache_directory {
-            cache::ingest_or_load_at_with_provider(
-                &registry,
-                provider_id.as_deref(),
-                recipe_digest.as_deref(),
-                &CacheRoot::app_owned(directory),
-                &record.path,
-                &mut temporary,
-                record.key,
-                &record.prefix,
-                &mut context,
-                &mut stage_progress,
-            )
-        } else {
-            cache::ingest_or_load_at_with_provider(
-                &registry,
-                provider_id.as_deref(),
-                recipe_digest.as_deref(),
-                &CacheRoot::beside_source(&record.path),
-                &record.path,
-                &mut temporary,
-                record.key,
-                &record.prefix,
-                &mut context,
-                &mut stage_progress,
-            )
-        }
+        let cache_root = self.cache_directory.as_deref().map_or_else(
+            || CacheRoot::beside_source(&record.path),
+            CacheRoot::app_owned,
+        );
+        let outcome = cache::ingest_or_load_at_with_provider(
+            &registry,
+            provider_id.as_deref(),
+            recipe_digest.as_deref(),
+            &cache_root,
+            &record.path,
+            &mut temporary,
+            record.key,
+            &record.prefix,
+            &mut context,
+            &mut stage_progress,
+        )
         .map_err(process_cache_error)?;
         if self.cancel.is_cancelled() {
             return Err(ProcessError::Cancelled);
@@ -1018,6 +1011,24 @@ mod tests {
         let store = sink.store.lock().unwrap();
         assert_eq!(store.sources().next().unwrap().key, record.key);
         assert!(store.signal_by_path("saved/value").is_some());
+    }
+
+    #[test]
+    fn recipe_required_failure_is_flagged_for_a_container_without_a_recipe() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("layout.h5");
+        std::fs::write(&path, b"\x89HDF\r\n\x1a\n").unwrap();
+        let jobs = BatchJobs::new(BatchOptions::for_tests());
+        let job = jobs.submit(vec![path], std::sync::Arc::new(RecordingSink::default()));
+
+        let status = jobs.wait_for_tests(job);
+
+        assert!(status.recent_failures.iter().any(|failure| {
+            failure.recipe_required
+                && failure
+                    .error
+                    .contains("requires a validated container recipe")
+        }));
     }
 
     /// A recorded recipe that has vanished must stay offerable to the import

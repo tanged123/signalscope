@@ -61,18 +61,25 @@ record parser-summary {
   column-count: u32,
 }
 
+record input-chunk {
+  bytes: list<u8>,
+  end-of-input: bool,
+}
+
 interface parser {
   open: func(source-name: string, source-size: u64) -> result<_, parser-error>;
-  next-batch: func() -> result<option<column-batch>, parser-error>;
+  next-batch: func(input: input-chunk) -> result<option<column-batch>, parser-error>;
   finish: func() -> result<parser-summary, parser-error>;
   cancel: func();
 }
 ```
 
 The exact WIT spelling is owned by the eventual protocol package; the logical
-operations and field meanings above are fixed here. A plugin emits one column
-at a time, and the host owns the source stream, batch sequencing, and commit.
-The plugin does not receive a path or an open file handle.
+operations and field meanings above are fixed here. After `open`, the host
+streams bounded source chunks through `next-batch`; `end-of-input` is true only
+on the final chunk. The plugin may buffer chunks between calls and emits one
+column batch at a time. The host owns source reading, batch sequencing, and
+commit. The plugin does not receive a path or an open file handle.
 
 ## Host validation and transaction
 

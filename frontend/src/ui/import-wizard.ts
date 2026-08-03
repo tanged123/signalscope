@@ -6,6 +6,10 @@ import type {
 } from "../generated/protocol";
 import type { DataPlane } from "../app/data-plane";
 
+const MAX_RECIPE_BYTES = 256 * 1024;
+const MAX_SELECTIONS = 1_024;
+let nextWizardId = 0;
+
 export type WizardNameRule =
   | { kind: "keep" }
   | { kind: "strip"; prefix: string }
@@ -21,6 +25,7 @@ export class ImportWizard {
   private timePath: string | null;
   private nameRule: WizardNameRule = { kind: "keep" };
   private unitSource: WizardUnitSource = { kind: "none" };
+  private readonly selectedSignals: Set<string>;
   private rendered: HTMLElement | null = null;
   private previousActive: Element | null = null;
   private escapeHandler: ((event: KeyboardEvent) => void) | null = null;
@@ -32,6 +37,10 @@ export class ImportWizard {
     private readonly onSaved?: (path: string) => void | Promise<void>,
   ) {
     this.timePath = this.proposedTime();
+    this.selectedSignals = new Set(
+      this.signalCandidates().map((dataset) => dataset.path),
+    );
+    if (this.timePath !== null) this.selectedSignals.delete(this.timePath);
   }
 
   static fromOutline(outline: ContainerOutline): ImportWizard {
@@ -49,6 +58,7 @@ export class ImportWizard {
     }
     const wizard = new ImportWizard(outline, path, plane, onSaved);
     document.body.append(wizard.render());
+    wizard.focusTimeSelect();
     return wizard;
   }
 
@@ -85,9 +95,11 @@ export class ImportWizard {
   }
 
   selectableSignals(): string[] {
-    return this.numericDatasets()
+    return this.signalCandidates()
       .map((dataset) => dataset.path)
-      .filter((path) => path !== this.timePath);
+      .filter(
+        (path) => path !== this.timePath && this.selectedSignals.has(path),
+      );
   }
 
   setTime(path: string | null): void {
@@ -97,7 +109,11 @@ export class ImportWizard {
     ) {
       throw new Error("unknown time dataset: " + path);
     }
+    if (this.timePath !== null && this.timePath !== path) {
+      this.selectedSignals.add(this.timePath);
+    }
     this.timePath = path;
+    if (path !== null) this.selectedSignals.delete(path);
   }
 
   setNameRule(rule: WizardNameRule): void {
@@ -109,13 +125,17 @@ export class ImportWizard {
   }
 
   toToml(): string {
+    const selectedSignals = this.selectableSignals();
+    if (selectedSignals.length > MAX_SELECTIONS) {
+      throw new Error("recipe has more than 1,024 selections");
+    }
     const id = recipeId(this.sourcePath, this.outline.container);
     const time =
       this.timePath === null
         ? 'kind = "index"\ndt = 1.0\nt0 = 0.0'
         : 'kind = "dataset"\npath = ' + quoteToml(this.timePath);
     const unit = unitSourceToml(this.unitSource);
-    const selections = this.selectableSignals().flatMap((path) => [
+    const selections = selectedSignals.flatMap((path) => [
       "[[selection]]",
       "datasets = " + quoteToml(path),
       "name = " + quoteToml(nameRuleValue(this.nameRule)),
@@ -125,12 +145,16 @@ export class ImportWizard {
       time,
       "",
     ]);
-    return [
+    const toml = [
       "id = " + quoteToml(id),
       "container = " + quoteToml(this.outline.container),
       "",
       ...selections,
     ].join("\n");
+    if (new TextEncoder().encode(toml).byteLength > MAX_RECIPE_BYTES) {
+      throw new Error("recipe exceeds the 256 KiB limit");
+    }
+    return toml;
   }
 
   async save(
@@ -151,12 +175,37 @@ export class ImportWizard {
     this.previousActive ??= document.activeElement;
     const root = document.createElement("section");
     root.className = "import-wizard";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
     this.rendered = root;
+    const headingId = "import-wizard-heading-" + String(++nextWizardId);
     this.escapeHandler = (event) => {
       if (event.key === "Escape") this.close();
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !root.contains(active))) {
+        event.preventDefault();
+        last?.focus();
+      } else if (
+        !event.shiftKey &&
+        (active === last || !root.contains(active))
+      ) {
+        event.preventDefault();
+        first?.focus();
+      }
     };
     document.addEventListener("keydown", this.escapeHandler);
     const heading = document.createElement("h2");
+    heading.id = headingId;
+    root.setAttribute("aria-labelledby", headingId);
     heading.textContent = "Import container";
     root.append(heading);
     const container = document.createElement("p");
@@ -166,11 +215,12 @@ export class ImportWizard {
     const timeLabel = document.createElement("label");
     timeLabel.textContent = "Timebase";
     const timeSelect = document.createElement("select");
+    timeSelect.className = "wizard-time-select";
     const indexOption = document.createElement("option");
     indexOption.value = "";
     indexOption.textContent = "Index (1 s)";
     timeSelect.append(indexOption);
-    for (const dataset of this.numericDatasets()) {
+    for (const dataset of this.signalCandidates()) {
       const option = document.createElement("option");
       option.value = dataset.path;
       option.textContent = dataset.path;
@@ -179,64 +229,90 @@ export class ImportWizard {
     }
     timeSelect.addEventListener("change", () => {
       this.setTime(timeSelect.value || null);
+      syncSignalCheckboxes();
     });
     timeLabel.append(timeSelect);
     root.append(timeLabel);
     const nameLabel = document.createElement("label");
     nameLabel.textContent = "Names";
     const nameSelect = document.createElement("select");
+    const nameRules = new Map<string, WizardNameRule>();
     const keepNames = document.createElement("option");
-    keepNames.value = "keep";
+    keepNames.value = "name-keep";
     keepNames.textContent = "Keep dataset paths";
+    nameRules.set(keepNames.value, { kind: "keep" });
     nameSelect.append(keepNames);
     const firstSlash = this.selectableSignals()[0]?.indexOf("/") ?? -1;
     if (firstSlash > 0) {
       const prefix =
         this.selectableSignals()[0]?.slice(0, firstSlash + 1) ?? "";
       const stripNames = document.createElement("option");
-      stripNames.value = prefix;
+      stripNames.value = "name-strip-0";
       stripNames.textContent = `Strip ${prefix}`;
+      nameRules.set(stripNames.value, { kind: "strip", prefix });
       nameSelect.append(stripNames);
     }
     nameSelect.addEventListener("change", () => {
-      this.setNameRule(
-        nameSelect.value === "keep"
-          ? { kind: "keep" }
-          : { kind: "strip", prefix: nameSelect.value },
-      );
+      const rule = nameRules.get(nameSelect.value);
+      if (rule !== undefined) this.setNameRule(rule);
     });
     nameLabel.append(nameSelect);
     root.append(nameLabel);
     const unitLabel = document.createElement("label");
     unitLabel.textContent = "Units";
     const unitSelect = document.createElement("select");
-    for (const [value, label] of [
-      ["none", "No unit"],
-      ["attribute:units", "Read units attribute"] as const,
-    ]) {
+    const unitSources = new Map<string, WizardUnitSource>([
+      ["unit-none", { kind: "none" }],
+      ["unit-attribute-units", { kind: "attribute", name: "units" }],
+    ]);
+    for (const [value] of unitSources) {
       const option = document.createElement("option");
       option.value = value;
-      option.textContent = label;
+      option.textContent =
+        value === "unit-none" ? "No unit" : "Read units attribute";
       unitSelect.append(option);
     }
     unitSelect.addEventListener("change", () => {
-      this.setUnitSource(
-        unitSelect.value === "none"
-          ? { kind: "none" }
-          : { kind: "attribute", name: unitSelect.value.slice(10) },
-      );
+      const source = unitSources.get(unitSelect.value);
+      if (source !== undefined) this.setUnitSource(source);
     });
     unitLabel.append(unitSelect);
     root.append(unitLabel);
     const list = document.createElement("div");
     list.className = "wizard-datasets";
+    const checkboxPaths = new Map<HTMLInputElement, string>();
+    const syncSignalCheckboxes = () => {
+      for (const checkbox of list.querySelectorAll<HTMLInputElement>(
+        ".wizard-signal",
+      )) {
+        const path = checkboxPaths.get(checkbox);
+        if (path === undefined) continue;
+        checkbox.disabled = path === this.timePath;
+        checkbox.checked =
+          path !== this.timePath && this.selectedSignals.has(path);
+      }
+    };
     for (const dataset of this.outline.datasets) {
       const row = document.createElement("div");
       row.className = "wizard-dataset";
-      row.textContent =
+      if (dataset.kind === "numeric") {
+        const checkbox = document.createElement("input");
+        checkbox.className = "wizard-signal";
+        checkbox.type = "checkbox";
+        checkboxPaths.set(checkbox, dataset.path);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) this.selectedSignals.add(dataset.path);
+          else this.selectedSignals.delete(dataset.path);
+        });
+        row.append(checkbox);
+      }
+      const text = document.createElement("span");
+      text.textContent =
         dataset.path + " · " + dataset.kind + " · " + dataset.len;
+      row.append(text);
       list.append(row);
     }
+    syncSignalCheckboxes();
     root.append(list);
     const actions = document.createElement("div");
     actions.className = "wizard-actions";
@@ -286,6 +362,18 @@ export class ImportWizard {
     return this.outline.datasets.filter(
       (dataset) => dataset.kind === "numeric",
     );
+  }
+
+  private signalCandidates(): DatasetOutline[] {
+    return this.numericDatasets().filter(
+      (dataset) => dataset.sample_preview.length > 0,
+    );
+  }
+
+  private focusTimeSelect(): void {
+    this.rendered
+      ?.querySelector<HTMLSelectElement>(".wizard-time-select")
+      ?.focus();
   }
 }
 

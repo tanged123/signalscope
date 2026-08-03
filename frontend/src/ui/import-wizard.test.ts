@@ -106,6 +106,38 @@ describe("ImportWizard", () => {
     expect(wizard.proposedTime()).toBe("run/elapsed");
   });
 
+  it("has no candidates when previews contain no usable numeric data", () => {
+    const wizard = ImportWizard.fromOutline({
+      container: "hdf5",
+      datasets: [
+        {
+          path: "run/image",
+          kind: "numeric",
+          len: "1000000",
+          shape: [1000, 1000],
+          sample_preview: [],
+        },
+        {
+          path: "run/name",
+          kind: "text",
+          len: "2",
+          shape: [2],
+          sample_preview: [],
+        },
+        {
+          path: "run/compound",
+          kind: "compound",
+          len: "2",
+          shape: [2],
+          sample_preview: [],
+        },
+      ],
+    });
+
+    expect(wizard.proposedTime()).toBeNull();
+    expect(wizard.selectableSignals()).toEqual([]);
+  });
+
   it("closes on Escape and removes itself from the document", () => {
     const wizard = ImportWizard.fromOutline(outline);
     document.body.append(wizard.render());

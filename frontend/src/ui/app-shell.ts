@@ -983,7 +983,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.19.0");
+        this.showModeHelp("SignalScope 0.19.1");
       },
     });
     this.commands.register({
@@ -1782,7 +1782,7 @@ export class AppShell {
       const needsRecipe = status.recent_failures.find(
         (failure) => failure.recipe_required,
       );
-      if (needsRecipe !== undefined && typeof port.introspect === "function") {
+      if (needsRecipe !== undefined) {
         try {
           await ImportWizard.mount(this.plane, needsRecipe.path, (path) =>
             this.ingestPaths([path]),

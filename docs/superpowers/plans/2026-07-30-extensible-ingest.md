@@ -1280,10 +1280,13 @@ nondecreasing, `time`/`t`/`timestamp` names preferred), lets the user confirm or
 pick another, choose a naming rule and unit source, and saves the result. Saving
 writes through `save_recipe`, which **parses and validates the TOML natively
 before writing** — the wizard never persists a recipe the parser would reject.
-All dataset text uses `textContent`. The wizard opens automatically when a batch
-file fails with `SelectionError::Unsupported` and a container reader recognizes
-its magic — picked, folder-scanned, and window-dropped files all funnel through
-the same batch path, so every arrival route gets the wizard.
+All dataset text uses `textContent`. The wizard opens automatically when a
+recognized HDF5 or Parquet batch file fails through the explicit
+recipe-required error path. `SelectionError::Unsupported` remains the
+unsupported-format path for inputs no provider recognizes.
+
+The picked, folder-scanned, and window-dropped files all funnel through the
+same batch path, so every arrival route gets the same trigger.
 
 - [ ] **Step 4: Run the tests**
 

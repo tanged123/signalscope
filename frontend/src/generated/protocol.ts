@@ -78,9 +78,11 @@ export interface IntrospectRequest {
   path: string;
 }
 
+export type DatasetOutlineKind = "numeric" | "text" | "compound" | "unsupported";
+
 export interface DatasetOutline {
   path: string;
-  kind: string;
+  kind: DatasetOutlineKind;
   len: string;
   shape: number[];
   sample_preview: number[];

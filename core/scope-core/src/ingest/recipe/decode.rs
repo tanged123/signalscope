@@ -281,6 +281,8 @@ fn signal_name(rule: &NameRule, dataset: &str, index: usize) -> Result<String, I
     Ok(name)
 }
 
+/// Matches complete path segments: `*` spans one segment and `**` spans many;
+/// partial-segment wildcards such as `run_*` are not supported.
 fn glob_matches(pattern: &str, path: &str) -> bool {
     let pattern = pattern.split('/').collect::<Vec<_>>();
     let path = path.split('/').collect::<Vec<_>>();
@@ -342,6 +344,14 @@ mod tests {
                 .get(path)
                 .cloned()
                 .ok_or_else(|| ContainerError::NoSuchDataset(path.to_owned()))
+        }
+
+        fn read_preview_f64(
+            &self,
+            path: &DatasetPath,
+            limit: usize,
+        ) -> Result<Vec<f64>, ContainerError> {
+            Ok(self.read_f64(path)?.into_iter().take(limit).collect())
         }
 
         fn attribute(&self, path: &DatasetPath, name: &str) -> Option<String> {

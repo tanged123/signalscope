@@ -45,6 +45,20 @@ pub fn resolve_for(
     source: &Path,
     preferences: &Preferences,
 ) -> Result<Option<ResolvedRecipe>, ResolveError> {
+    resolve_for_recipe(source, preferences, None)
+}
+
+/// Resolves a recipe, optionally requiring a specific recipe id from the user
+/// recipe directory.
+///
+/// # Errors
+///
+/// Returns [`ResolveError`] when a candidate recipe cannot be read or parsed.
+pub fn resolve_for_recipe(
+    source: &Path,
+    preferences: &Preferences,
+    requested_id: Option<&str>,
+) -> Result<Option<ResolvedRecipe>, ResolveError> {
     let Some(container) = container_kind(source) else {
         return Ok(None);
     };
@@ -78,15 +92,22 @@ pub fn resolve_for(
         })
         .collect::<Vec<_>>();
     recipes.sort_unstable();
+    let mut user_directory_error = None;
     for path in recipes {
         let recipe = load_recipe(&path, RecipeOrigin::UserDirectory(path.clone()), &container);
         match recipe {
-            Ok(recipe) => return Ok(Some(recipe)),
-            Err(ResolveError::ContainerMismatch { .. }) => {}
-            Err(error) => return Err(error),
+            Ok(recipe)
+                if requested_id.is_none_or(|requested_id| recipe.recipe.id == requested_id) =>
+            {
+                return Ok(Some(recipe));
+            }
+            Ok(_) | Err(ResolveError::ContainerMismatch { .. }) => {}
+            Err(error) => {
+                user_directory_error.get_or_insert(error);
+            }
         }
     }
-    Ok(None)
+    user_directory_error.map_or(Ok(None), Err)
 }
 
 fn load_recipe(
@@ -139,6 +160,7 @@ fn container_kind(source: &Path) -> Option<ContainerKind> {
 }
 
 fn container_matches(expected: &ContainerKind, actual: &ContainerKind) -> bool {
+    // MATLAB v7.3 files use HDF5 containers, so HDF5 recipes also match MAT sources.
     matches!(
         (expected, actual),
         (ContainerKind::Hdf5, ContainerKind::Hdf5)
@@ -203,6 +225,42 @@ t0 = 0.0
             .unwrap()
             .unwrap();
         assert!(matches!(resolved.origin, RecipeOrigin::UserDirectory(_)));
+    }
+
+    #[test]
+    fn the_requested_user_recipe_id_wins_over_directory_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = source(directory.path(), "foo.h5");
+        let user = tempfile::tempdir().unwrap();
+        fs::write(
+            user.path().join("a.toml"),
+            RECIPE.replace("flight-h5", "first"),
+        )
+        .unwrap();
+        fs::write(
+            user.path().join("z.toml"),
+            RECIPE.replace("flight-h5", "wanted"),
+        )
+        .unwrap();
+
+        let resolved = resolve_for_recipe(&source, &preferences(Some(user.path())), Some("wanted"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.recipe.id, "wanted");
+    }
+
+    #[test]
+    fn malformed_user_recipe_is_skipped_when_a_later_recipe_is_valid() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = source(directory.path(), "foo.h5");
+        let user = tempfile::tempdir().unwrap();
+        fs::write(user.path().join("a-malformed.toml"), "id = ").unwrap();
+        fs::write(user.path().join("z-valid.toml"), RECIPE).unwrap();
+
+        let resolved = resolve_for(&source, &preferences(Some(user.path())))
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.recipe.id, "flight-h5");
     }
 
     #[test]

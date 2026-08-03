@@ -39,6 +39,14 @@ pub struct FormatProvider {
     decoder: Arc<DecoderFactory>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderDescriptor {
+    pub id: String,
+    pub label: String,
+    pub extensions: Vec<String>,
+    pub priority: i32,
+}
+
 impl fmt::Debug for FormatProvider {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -146,7 +154,15 @@ impl ProviderRegistry {
     }
 
     pub fn register(&mut self, provider: FormatProvider) {
-        self.providers.push(provider);
+        if let Some(existing) = self
+            .providers
+            .iter_mut()
+            .find(|existing| existing.id() == provider.id())
+        {
+            *existing = provider;
+        } else {
+            self.providers.push(provider);
+        }
     }
 
     #[must_use]
@@ -217,18 +233,16 @@ impl ProviderRegistry {
     }
 
     #[must_use]
-    pub fn descriptors(&self) -> Vec<(&str, &str, &[String], i32)> {
+    pub fn descriptors(&self) -> Vec<ProviderDescriptor> {
         let mut providers = self.providers.iter().collect::<Vec<_>>();
         providers.sort_unstable_by(|left, right| left.id.cmp(&right.id));
         providers
             .into_iter()
-            .map(|provider| {
-                (
-                    provider.id(),
-                    provider.label(),
-                    provider.extensions(),
-                    provider.priority(),
-                )
+            .map(|provider| ProviderDescriptor {
+                id: provider.id().to_owned(),
+                label: provider.label().to_owned(),
+                extensions: provider.extensions().to_owned(),
+                priority: provider.priority(),
             })
             .collect()
     }
@@ -309,6 +323,35 @@ mod tests {
             empty_claim.select_bytes(b"x"),
             Err(SelectionError::Unsupported { .. })
         ));
+    }
+
+    #[test]
+    fn registering_an_existing_id_replaces_the_provider_everywhere() {
+        let mut registry = ProviderRegistry::empty();
+        registry.register(FormatProvider::new(
+            "same",
+            "first",
+            &["same"],
+            0,
+            1,
+            |_| Confidence::Likely,
+            || Box::new(NullDecoder),
+        ));
+        registry.register(FormatProvider::new(
+            "same",
+            "second",
+            &["same"],
+            0,
+            1,
+            |_| Confidence::Likely,
+            || Box::new(NullDecoder),
+        ));
+
+        assert_eq!(registry.provider("same").unwrap().label(), "second");
+        assert_eq!(
+            registry.select_bytes(b"anything").unwrap().label(),
+            "second"
+        );
     }
 
     #[test]

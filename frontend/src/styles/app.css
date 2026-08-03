@@ -2150,11 +2150,11 @@ button {
   z-index: 40;
   display: grid;
   place-items: center;
-  border: 2px dashed var(--amber-7);
+  border: 1px dashed var(--amber-7);
   border-radius: 4px;
   background: color-mix(in srgb, var(--surface-void) 78%, transparent);
   color: var(--fg-1);
-  font: 1.1rem var(--font-mono);
+  font: 1.1rem var(--font-ui);
   pointer-events: none;
 }
 

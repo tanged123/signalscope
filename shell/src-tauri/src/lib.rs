@@ -31,15 +31,16 @@ use scope_core::{
 use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
     BatchState, BatchStatus, ContainerOutline, CreateDerivedBundleRequest, DatasetOutline,
-    DerivedBundleResponse, DerivedRequest, DragDropForward, DragDropKind, Envelope, ExportEstimate,
-    ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange,
-    ExportSelection, ExportWriteRequest, FileState, FormatCount, FormatDescriptor,
-    IngestBatchRequest, IntrospectRequest, LoadSessionRequest, LoadedSession, PickSessionRequest,
-    RecipeDestination, RemoveDerivedBundleRequest, RemoveSignalRequest, RestoreReconcileRequest,
-    RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries,
-    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveRecipeRequest, SaveRecipeResponse,
-    SaveSessionRequest, ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SignalSummary,
-    SignalTile, SkippedMemberSummary, SourceSummary, TileRequest, TileResponse,
+    DatasetOutlineKind, DerivedBundleResponse, DerivedRequest, DragDropForward, DragDropKind,
+    Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest, ExportFidelity,
+    ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState, FormatCount,
+    FormatDescriptor, IngestBatchRequest, IntrospectRequest, LoadSessionRequest, LoadedSession,
+    PickSessionRequest, RecipeDestination, RemoveDerivedBundleRequest, RemoveSignalRequest,
+    RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
+    SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
+    SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest, ScanSourcesRequest,
+    ScanSourcesResponse, SessionDialogMode, SignalSummary, SignalTile, SkippedMemberSummary,
+    SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -372,12 +373,17 @@ fn introspect_container_blocking(
             DatasetOutline {
                 path: entry.path,
                 kind: match entry.kind {
-                    scope_core::ingest::container::DatasetKind::Numeric => "numeric",
-                    scope_core::ingest::container::DatasetKind::Text => "text",
-                    scope_core::ingest::container::DatasetKind::Compound => "compound",
-                    scope_core::ingest::container::DatasetKind::Unsupported => "unsupported",
-                }
-                .into(),
+                    scope_core::ingest::container::DatasetKind::Numeric => {
+                        DatasetOutlineKind::Numeric
+                    }
+                    scope_core::ingest::container::DatasetKind::Text => DatasetOutlineKind::Text,
+                    scope_core::ingest::container::DatasetKind::Compound => {
+                        DatasetOutlineKind::Compound
+                    }
+                    scope_core::ingest::container::DatasetKind::Unsupported => {
+                        DatasetOutlineKind::Unsupported
+                    }
+                },
                 len: entry.len as u64,
                 shape: entry
                     .shape
@@ -448,16 +454,37 @@ fn save_recipe_blocking(
 /// Writes a recipe through a uniquely named temporary in the destination
 /// directory. `OpenOptions::create_new` never follows a pre-planted symlink.
 fn write_recipe_file(destination: &Path, contents: &str) -> Result<(), String> {
-    use std::io::Write as _;
-
     static NEXT_RECIPE_ID: AtomicU64 = AtomicU64::new(0);
     let suffix = NEXT_RECIPE_ID.fetch_add(1, Ordering::Relaxed);
+    write_recipe_file_with_suffix(destination, contents, suffix)
+}
+
+fn write_recipe_file_with_suffix(
+    destination: &Path,
+    contents: &str,
+    suffix: u64,
+) -> Result<(), String> {
+    use std::io::Write as _;
+
     let temporary = destination.with_extension(format!("toml.{suffix}.tmp"));
-    let mut file = std::fs::OpenOptions::new()
+    let (temporary, mut file) = match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&temporary)
-        .map_err(|error| error.to_string())?;
+    {
+        Ok(file) => (temporary, file),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let next_suffix = suffix.saturating_add(1);
+            let next_temporary = destination.with_extension(format!("toml.{next_suffix}.tmp"));
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&next_temporary)
+                .map_err(|error| error.to_string())?;
+            (next_temporary, file)
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     let result = file
         .write_all(contents.as_bytes())
         .and_then(|()| file.sync_all())
@@ -489,10 +516,10 @@ fn format_descriptors(registry: &ProviderRegistry) -> Vec<FormatDescriptor> {
     registry
         .descriptors()
         .into_iter()
-        .map(|(id, label, extensions, _)| FormatDescriptor {
-            id: id.into(),
-            label: label.into(),
-            extensions: extensions.to_vec(),
+        .map(|descriptor| FormatDescriptor {
+            id: descriptor.id,
+            label: descriptor.label,
+            extensions: descriptor.extensions,
         })
         .collect()
 }
@@ -690,7 +717,7 @@ fn expand_source(
     path: &Path,
     recursive: bool,
     expanded: &mut Vec<PathBuf>,
-    descriptors: &[(&str, &str, &[String], i32)],
+    descriptors: &[scope_core::ingest::registry::ProviderDescriptor],
 ) -> Result<(), String> {
     if !path.is_dir() {
         expanded.push(path.to_owned());
@@ -770,19 +797,26 @@ fn scan_sources(
     }))
 }
 
-fn supported_path(descriptors: &[(&str, &str, &[String], i32)], path: &Path) -> bool {
+fn supported_path(
+    descriptors: &[scope_core::ingest::registry::ProviderDescriptor],
+    path: &Path,
+) -> bool {
     format_label(descriptors, path).is_some()
 }
 
-fn format_label(descriptors: &[(&str, &str, &[String], i32)], path: &Path) -> Option<String> {
+fn format_label(
+    descriptors: &[scope_core::ingest::registry::ProviderDescriptor],
+    path: &Path,
+) -> Option<String> {
     path.extension()
         .and_then(|extension| extension.to_str())
         .and_then(|extension| {
-            descriptors.iter().find_map(|(_, label, extensions, _)| {
-                extensions
+            descriptors.iter().find_map(|descriptor| {
+                descriptor
+                    .extensions
                     .iter()
                     .any(|candidate| candidate.eq_ignore_ascii_case(extension))
-                    .then(|| (*label).to_owned())
+                    .then(|| descriptor.label.clone())
             })
         })
 }
@@ -1887,13 +1921,10 @@ t0 = 0.0
         std::fs::write(&source, b"\x89HDF\r\n\x1a\n").unwrap();
         let victim = directory.path().join("victim.txt");
         std::fs::write(&victim, b"precious").unwrap();
-        std::os::unix::fs::symlink(&victim, directory.path().join("data.h5.scope.toml.tmp"))
-            .unwrap();
+        let destination = directory.path().join("data.h5.scope.toml");
+        std::os::unix::fs::symlink(&victim, destination.with_extension("toml.0.tmp")).unwrap();
 
-        let written = write_recipe_file(
-            &directory.path().join("data.h5.scope.toml"),
-            SAMPLE_RECIPE_TOML,
-        );
+        let written = write_recipe_file_with_suffix(&destination, SAMPLE_RECIPE_TOML, 0);
 
         assert!(
             written.is_ok(),

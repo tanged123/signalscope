@@ -105,11 +105,15 @@
       "kind": "object",
       "fields": { "path": "string" }
     },
+    "DatasetOutlineKind": {
+      "kind": "enum",
+      "variants": ["numeric", "text", "compound", "unsupported"]
+    },
     "DatasetOutline": {
       "kind": "object",
       "fields": {
         "path": "string",
-        "kind": "string",
+        "kind": "DatasetOutlineKind",
         "len": "u64",
         "shape": "u32[]",
         "sample_preview": "f64[]"

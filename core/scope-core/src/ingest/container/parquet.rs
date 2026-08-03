@@ -1,8 +1,8 @@
-use std::{collections::BTreeMap, fs::File, path::Path};
+use std::{collections::BTreeMap, fs::File, path::Path, sync::Arc};
 
 use arrow_array::{Array, Float64Array};
 use arrow_cast::cast;
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Schema};
 use parquet::arrow::{ProjectionMask, arrow_reader::ParquetRecordBatchReaderBuilder};
 
 use crate::ingest::{
@@ -58,6 +58,7 @@ pub struct ParquetContainer {
     path: std::path::PathBuf,
     entries: Vec<DatasetEntry>,
     columns: BTreeMap<String, usize>,
+    schema: Arc<Schema>,
 }
 
 impl ContainerReader for ParquetContainer {
@@ -67,6 +68,15 @@ impl ContainerReader for ParquetContainer {
         let schema = builder.schema().clone();
         let row_count = usize::try_from(builder.metadata().file_metadata().num_rows())
             .map_err(|_| ContainerError::Backend("Parquet row count is negative".into()))?;
+        let mut names = std::collections::BTreeSet::new();
+        for field in schema.fields() {
+            if !names.insert(field.name().clone()) {
+                return Err(ContainerError::Unsupported(format!(
+                    "Parquet schema contains duplicate top-level field name: {}",
+                    field.name()
+                )));
+            }
+        }
         let columns = schema
             .fields()
             .iter()
@@ -88,14 +98,12 @@ impl ContainerReader for ParquetContainer {
                 shape: vec![row_count],
             })
             .collect::<Vec<_>>();
-        for entry in &entries {
-            check_declared_size(entry)?;
-        }
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(Self {
             path: path.to_owned(),
             entries,
             columns,
+            schema,
         })
     }
 
@@ -113,12 +121,20 @@ impl ContainerReader for ParquetContainer {
             return Err(ContainerError::NotNumeric(path.to_owned()));
         }
         check_declared_size(entry)?;
-        let index = *self
-            .columns
+        self.columns
             .get(path)
             .ok_or_else(|| ContainerError::NoSuchDataset(path.to_owned()))?;
         let file = File::open(&self.path)?;
         let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(backend_error)?;
+        let index = builder
+            .metadata()
+            .file_metadata()
+            .schema_descr()
+            .root_schema()
+            .get_fields()
+            .iter()
+            .position(|field| field.name() == path)
+            .ok_or_else(|| ContainerError::NoSuchDataset(path.to_owned()))?;
         let projection =
             ProjectionMask::roots(builder.metadata().file_metadata().schema_descr(), [index]);
         read_projected_column(builder, projection, entry.len, None)
@@ -137,19 +153,34 @@ impl ContainerReader for ParquetContainer {
         if entry.kind != DatasetKind::Numeric {
             return Err(ContainerError::NotNumeric(path.to_owned()));
         }
-        let index = *self
-            .columns
+        self.columns
             .get(path)
             .ok_or_else(|| ContainerError::NoSuchDataset(path.to_owned()))?;
         let file = File::open(&self.path)?;
         let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(backend_error)?;
+        let index = builder
+            .metadata()
+            .file_metadata()
+            .schema_descr()
+            .root_schema()
+            .get_fields()
+            .iter()
+            .position(|field| field.name() == path)
+            .ok_or_else(|| ContainerError::NoSuchDataset(path.to_owned()))?;
         let projection =
             ProjectionMask::roots(builder.metadata().file_metadata().schema_descr(), [index]);
         read_projected_column(builder, projection, limit, Some(limit))
     }
 
-    fn attribute(&self, _path: &DatasetPath, _name: &str) -> Option<String> {
-        None
+    fn attribute(&self, path: &DatasetPath, name: &str) -> Option<String> {
+        let field = self.schema.field_with_name(path).ok()?;
+        if name == "units" {
+            ["units", "unit", "Units"]
+                .into_iter()
+                .find_map(|name| field.metadata().get(name).cloned())
+        } else {
+            field.metadata().get(name).cloned()
+        }
     }
 }
 
@@ -222,7 +253,7 @@ mod tests {
     use arrow_array::{Float64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
     use parquet::arrow::ArrowWriter;
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
     #[test]
     fn columns_are_listed_by_name_and_read_as_f64() {
@@ -247,12 +278,47 @@ mod tests {
     }
 
     #[test]
+    fn units_are_read_from_arrow_field_metadata() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let field = Field::new("ax", DataType::Float64, false)
+            .with_metadata(HashMap::from([("unit".into(), "m/s".into())]));
+        write_batch(
+            file.path(),
+            vec![field],
+            vec![Arc::new(Float64Array::from(vec![1.0]))],
+        );
+
+        let container = ParquetContainer::open(file.path()).unwrap();
+        assert_eq!(container.attribute("ax", "units").as_deref(), Some("m/s"));
+    }
+
+    #[test]
     fn non_numeric_columns_are_listed_but_not_readable_as_f64() {
         let file = write_parquet_with_strings();
         let container = ParquetContainer::open(file.path()).unwrap();
         assert!(matches!(
             container.read_f64("label"),
             Err(ContainerError::NotNumeric(_))
+        ));
+    }
+
+    #[test]
+    fn duplicate_top_level_names_are_rejected() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        write_batch(
+            file.path(),
+            vec![
+                Field::new("value", DataType::Float64, false),
+                Field::new("value", DataType::Float64, false),
+            ],
+            vec![
+                Arc::new(Float64Array::from(vec![1.0])) as Arc<dyn Array>,
+                Arc::new(Float64Array::from(vec![2.0])) as Arc<dyn Array>,
+            ],
+        );
+        assert!(matches!(
+            ParquetContainer::open(file.path()),
+            Err(ContainerError::Unsupported(message)) if message.contains("duplicate")
         ));
     }
 

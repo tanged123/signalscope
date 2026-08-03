@@ -265,10 +265,14 @@ export class TauriPlane implements DataPlane {
               handler(open(raw.payload));
             },
           ),
-        }).then((id) => {
-          eventId = id;
-          if (disposed) unlisten();
-        });
+        })
+          .then((id) => {
+            eventId = id;
+            if (disposed) unlisten();
+          })
+          .catch((error: unknown) => {
+            console.error("drag-drop listener registration failed", error);
+          });
         return () => {
           disposed = true;
           unlisten();

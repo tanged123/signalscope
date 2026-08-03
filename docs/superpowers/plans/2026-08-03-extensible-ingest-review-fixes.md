@@ -548,12 +548,16 @@ symlinks):
         std::fs::write(&source, b"\x89HDF\r\n\x1a\n").unwrap();
         let victim = directory.path().join("victim.txt");
         std::fs::write(&victim, b"precious").unwrap();
-        std::os::unix::fs::symlink(&victim, directory.path().join("data.h5.scope.toml.tmp"))
+        std::os::unix::fs::symlink(
+            &victim,
+            directory.path().join("data.h5.scope.toml.0.tmp"),
+        )
             .unwrap();
 
-        let written = write_recipe_file(
+        let written = write_recipe_file_with_suffix(
             &directory.path().join("data.h5.scope.toml"),
             SAMPLE_RECIPE_TOML,
+            0,
         );
 
         assert!(written.is_ok(), "a planted symlink must not block the write");

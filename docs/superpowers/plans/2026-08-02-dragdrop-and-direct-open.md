@@ -738,8 +738,8 @@ In `app.css`, near the other overlay styles:
   z-index: 40;
   display: grid;
   place-items: center;
-  border: 2px dashed var(--accent, #d9a441);
-  border-radius: 8px;
+  border: 1px dashed var(--accent, #d9a441);
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg, #14161a) 78%, transparent);
   font-size: 1.1rem;
   pointer-events: none;
@@ -872,7 +872,7 @@ Expected: PASS, including lint/knip with the deleted files gone.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A frontend/src
+git add frontend/src/app/data-plane.ts frontend/src/app/drop.ts frontend/src/app/drop.test.ts frontend/src/ui/app-shell.ts frontend/src/ui/app-shell.test.ts frontend/src/styles/app.css
 git commit -m "refactor(ui): open the file picker directly and demote folder open"
 ```
 

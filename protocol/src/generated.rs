@@ -163,10 +163,19 @@ pub struct IntrospectRequest {
     pub path: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatasetOutlineKind {
+    Numeric,
+    Text,
+    Compound,
+    Unsupported,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct DatasetOutline {
     pub path: String,
-    pub kind: String,
+    pub kind: DatasetOutlineKind,
     #[serde(with = "u64_string")]
     pub len: u64,
     pub shape: Vec<u32>,

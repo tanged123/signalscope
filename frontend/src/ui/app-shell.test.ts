@@ -265,6 +265,48 @@ describe("recipe-required ingest failures", () => {
     expect(shell.reportError).toHaveBeenCalled();
     expect(shell.reloadSignals).toHaveBeenCalled();
   });
+
+  it("mounts the recipe wizard when introspection succeeds", async () => {
+    const introspect = vi.fn(() =>
+      Promise.resolve({
+        container: "hdf5",
+        datasets: [
+          {
+            path: "run/time",
+            kind: "numeric",
+            len: "2",
+            shape: [2],
+            sample_preview: [0, 1],
+          },
+        ],
+      }),
+    );
+    const shell = ingestProbe(
+      {
+        state: "partial",
+        fraction: 1,
+        total: "1",
+        done: "0",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/runs/mystery.h5",
+            error: "HDF5 input requires a validated container recipe",
+            recipe_required: true,
+          },
+        ],
+      },
+      introspect,
+    );
+
+    await shell.ingestPaths(["/runs"]);
+
+    expect(document.querySelector(".import-wizard")).not.toBeNull();
+    expect(shell.reportError).not.toHaveBeenCalled();
+    expect(shell.reloadSignals).toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  });
 });
 
 describe("direct open", () => {

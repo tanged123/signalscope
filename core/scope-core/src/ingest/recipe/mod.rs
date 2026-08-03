@@ -170,6 +170,11 @@ pub fn parse_recipe(source: &str) -> Result<Recipe, RecipeError> {
             RecipeError::Parse(message)
         }
     })?;
+    if recipe.selections.len() > MAX_SELECTIONS {
+        return Err(RecipeError::Invalid(
+            "recipe has more than 1,024 selections".into(),
+        ));
+    }
     validate(&recipe)?;
     Ok(recipe)
 }

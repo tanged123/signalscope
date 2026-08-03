@@ -98,9 +98,7 @@ pub trait ContainerReader: Send + Sync {
         &self,
         path: &DatasetPath,
         limit: usize,
-    ) -> Result<Vec<f64>, ContainerError> {
-        Ok(self.read_f64(path)?.into_iter().take(limit).collect())
-    }
+    ) -> Result<Vec<f64>, ContainerError>;
 
     fn attribute(&self, path: &DatasetPath, name: &str) -> Option<String>;
 }
@@ -147,6 +145,14 @@ mod tests {
                 .get(path)
                 .cloned()
                 .ok_or_else(|| ContainerError::NoSuchDataset(path.to_owned()))
+        }
+
+        fn read_preview_f64(
+            &self,
+            path: &DatasetPath,
+            limit: usize,
+        ) -> Result<Vec<f64>, ContainerError> {
+            Ok(self.read_f64(path)?.into_iter().take(limit).collect())
         }
 
         fn attribute(&self, path: &DatasetPath, name: &str) -> Option<String> {

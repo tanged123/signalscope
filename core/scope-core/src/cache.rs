@@ -895,6 +895,33 @@ mod tests {
         )
     }
 
+    fn ingest_or_load_with_recipe_test(
+        source: &Path,
+        root: &CacheRoot,
+        recipe_digest: &str,
+        store: &mut SignalStore,
+    ) -> Result<IngestOutcome, CacheError> {
+        let cancel = CancelToken::default();
+        let mut decode = |_| {};
+        let mut context = DecodeContext {
+            progress: &mut decode,
+            cancel: &cancel,
+        };
+        let mut stage = |_, _| {};
+        ingest_or_load_at_with_provider(
+            &ProviderRegistry::builtin(),
+            Some("csv"),
+            Some(recipe_digest),
+            root,
+            source,
+            store,
+            key(),
+            &naming::default_prefix(source),
+            &mut context,
+            &mut stage,
+        )
+    }
+
     fn csv_source(dir: &tempfile::TempDir) -> PathBuf {
         let path = dir.path().join("flight.csv");
         let mut file = File::create(&path).unwrap();
@@ -1123,6 +1150,21 @@ mod tests {
         );
         assert_eq!(cached.loaded.pyramids.len(), outcome.loaded.pyramids.len());
         assert!(stages.iter().all(|stage| *stage == IngestStage::Cache));
+    }
+
+    #[test]
+    fn ingest_path_provenance_changes_with_the_recipe_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let root = CacheRoot::app_owned(dir.path().join("cache").as_path());
+        let first =
+            ingest_or_load_with_recipe_test(&source, &root, "recipe-a", &mut SignalStore::new())
+                .unwrap();
+        let second =
+            ingest_or_load_with_recipe_test(&source, &root, "recipe-b", &mut SignalStore::new())
+                .unwrap();
+
+        assert_ne!(first.provenance, second.provenance);
     }
 
     #[test]

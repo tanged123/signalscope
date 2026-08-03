@@ -119,9 +119,9 @@ fn provider_info(provider: &registry::FormatProvider) -> provenance::ProviderInf
 fn selection_error(error: SelectionError) -> IngestError {
     match error {
         SelectionError::Io { source, .. } => IngestError::Io(source),
-        SelectionError::Unsupported { path, known } => IngestError::UnsupportedFormat(format!(
-            "unsupported input {path}; known formats: {known}"
-        )),
+        error @ SelectionError::Unsupported { .. } => {
+            IngestError::UnsupportedFormat(error.to_string())
+        }
     }
 }
 
@@ -195,7 +195,7 @@ pub enum IngestError {
     NoDataRows,
     #[error("ingest was cancelled")]
     Cancelled,
-    #[error("unsupported format: {0}")]
+    #[error("{0}")]
     UnsupportedFormat(String),
     #[error("{container} input requires a validated container recipe")]
     RecipeRequired { container: String },
@@ -243,6 +243,19 @@ mod tests {
     use std::io::Write;
 
     use super::*;
+
+    #[test]
+    fn unsupported_selection_error_is_rendered_once() {
+        let error = selection_error(SelectionError::Unsupported {
+            path: "flight.bin".into(),
+            known: "csv".into(),
+        });
+        assert_eq!(
+            error.to_string(),
+            "unsupported input flight.bin; known formats: csv"
+        );
+        assert_eq!(error.to_string().matches("unsupported").count(), 1);
+    }
 
     #[test]
     fn dispatch_treats_short_csv_text_as_csv() {

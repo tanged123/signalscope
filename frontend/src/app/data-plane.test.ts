@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   DragDropForward,
   EnvelopeBin,
@@ -178,6 +178,25 @@ describe("onDragDrop", () => {
       (call) => call.command === "plugin:event|unlisten",
     );
     expect(unlisten?.args?.eventId).toBe(7);
+  });
+
+  it("reports a failed event listener registration", async () => {
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = new Error("event plugin unavailable");
+    const plane = new TauriPlane(
+      () => Promise.reject(failure),
+      () => 0,
+    );
+
+    plane.ingest.onDragDrop(() => undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(report).toHaveBeenCalledWith(
+      "drag-drop listener registration failed",
+      failure,
+    );
+    report.mockRestore();
   });
 });
 
