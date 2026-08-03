@@ -121,13 +121,14 @@ Before handoff, run the narrowest relevant script and then the broader gate
 proportional to risk. At minimum, run `./scripts/format.sh` plus the affected
 test suite; for cross-layer changes run `./scripts/ci.sh all` or explain why a
 narrower check is sufficient. Report commands and results. Do not claim a GUI
-or platform build was tested if it was not.
+or platform build was tested if it was not. Try not to overtly test either, run
+`./scripts/ci.sh e2e` only at the end of a finished entire implementation plan.
 
 Install the repository hook with `./scripts/install-hooks.sh`. Do not use a
 blanket `git add -A` or silently stage unrelated work. Review staged and
 unstaged diffs separately before committing.
 
-Every completed PR must include a synchronized version bump as its final change before handoff. Only 
+Every completed PR must include a synchronized version bump as its final change before handoff. Only
 do a version bump when the PR is absolutely completed, do not version bump for intermediate commits.
 Choose `major`for breaking API, protocol, schema, or session-compatibility changes; `minor`
 for backward-compatible user-facing features or capabilities; and `patch` for
