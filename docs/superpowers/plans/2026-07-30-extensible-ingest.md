@@ -21,11 +21,23 @@ protocol/session/preferences, TypeScript frontend for the import wizard.
 
 ## Global Constraints
 
-- **Execute `2026-07-30-multi-source-scale.md` (Part A) first.** This plan
-  consumes its seams: `Decoder::decode(&Path, &mut DecodeContext) -> Result<DecodedSource, IngestError>`,
-  `ingest::provenance::{ProviderInfo, provenance_digest}`, `sources::SourceRecord`
-  (`provider_id`, `decode_provenance`), the batch executor, and
+- **Part A (`2026-07-30-multi-source-scale.md`) is complete.** Its seams exist
+  today: `Decoder::decode(&self, &Path, &mut DecodeContext) -> Result<DecodedSource, IngestError>`
+  (`ingest/mod.rs`), `ingest::provenance::{ProviderInfo, provenance_digest}`,
+  `ingest::provider_for(SourceFormat)` (`ingest/mod.rs:72` — the lookup Task 2
+  replaces), `sources::SourceRecord` (`provider_id`, `decode_provenance`,
+  `set_provenance`), the batch executor (`ingest/batch.rs`), `list_formats`
+  serving `FormatDescriptor { id, label, extensions }` (`id` is currently the
+  first extension; registry descriptors supply stable provider ids), and
   `./scripts/test.sh core|shell|unit <filter>`.
+- **Drag-and-drop and direct open landed 2026-08-02**
+  (`2026-08-02-dragdrop-and-direct-open.md`, ADR 0032). Window drops and
+  `Open folder…` both expand through the shell's `scan_sources`, whose
+  `supported_path`/`format_label` accept check is extension-based today and
+  must move to the registry (Task 2), and
+  `frontend/src/app/drop.ts::unsupportedDropMessage` already names formats
+  from `list_formats`, so the drop path picks up new formats with no frontend
+  change (Task 3).
 - Every command goes through `./scripts/*`.
 - `protocol/schema/*.json` is the single schema source; never hand-edit generated
   Rust or TypeScript; keep `pnpm codegen:check` green.
@@ -71,6 +83,7 @@ protocol/session/preferences, TypeScript frontend for the import wizard.
 `ingest/{csv,mcap}.rs` (become providers), `ingest/provenance.rs`
 (`provider_for` → registry lookup), `cache.rs`, `preferences.rs`, `session.rs`,
 `shell/src-tauri/src/lib.rs`, `protocol/schema/*.json`,
+`frontend/src/app/drop.test.ts`,
 `frontend/src/ui/{app-shell,import-wizard}.ts`, `flake.nix`,
 `scripts/setup-appimage.sh`, `docs/adr/*`.
 
@@ -295,14 +308,18 @@ fn text_confidence(probe: &[u8]) -> Confidence { … }
 MCAP's `sniff` returns `Certain` on the 8-byte magic, otherwise `No`. CSV
 returns `Likely` when the gate passes, otherwise `No`; its priority is the
 lowest of the built-ins so any future container provider wins on a tie.
-`provenance::provider_for` is replaced by
+`ingest::provider_for` is replaced by
 `ProviderInfo { id: registered.id().to_owned(), cache_abi: registered.cache_abi() }`
 — **the digest inputs and therefore existing cache entries are unchanged for
 `csv` and `mcap`.** Change `ProviderInfo::id` from `&'static str` to `String`
 in the same commit so runtime-registered providers fit.
 
 Update `ingest::dispatch`, `cache::ingest_or_load`, `scope-bake`, and the shell
-to thread an `&ProviderRegistry`. Delete the now-wrong
+to thread an `&ProviderRegistry`. In the shell that includes the
+`supported_path`/`format_label` accept check behind `scan_sources` — the path
+both `Open folder…` and window drag-drop expand through — which must derive
+from `registry.descriptors()` in this commit, since `SUPPORTED_FORMATS` is
+deleted here. Delete the now-wrong
 `dispatch_treats_short_files_as_csv` test and replace it with the four above.
 
 - [ ] **Step 4: Run the tests**
@@ -323,14 +340,18 @@ git commit -m "feat(ingest): dispatch through providers and fail closed on unkno
 
 **Files:**
 
-- Modify: `shell/src-tauri/src/lib.rs`, `frontend/src/ui/app-shell.ts`,
-  `frontend/src/app/data-plane.ts`
+- Modify: `shell/src-tauri/src/lib.rs`
+- Test: `frontend/src/app/drop.test.ts`
 
 **Interfaces:**
 
-- Consumes: `FormatDescriptor` (added by Part A Task 12), `registry.descriptors()`.
-- Produces: `list_formats` served from the registry; the picker's filters and
-  the drag-and-drop accept list derive from the same source.
+- Consumes: `FormatDescriptor` (shipped; `list_formats` serves it today from
+  `SUPPORTED_FORMATS` with the first extension standing in for `id`),
+  `registry.descriptors()`, `drop.ts::unsupportedDropMessage` (shipped).
+- Produces: `format_descriptors(&ProviderRegistry) -> Vec<FormatDescriptor>`
+  with stable provider ids; `list_formats` and `pick_sources`' filters serve
+  from it, so the picker, folder open, and window drag-drop agree with
+  dispatch.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -350,35 +371,34 @@ git commit -m "feat(ingest): dispatch through providers and fail closed on unkno
 ```
 
 ```ts
-it("offers one combined filter plus one per registered format", async () => {
-  const plane = fakePlaneWithFormats([
-    { id: "csv", label: "Delimited text", extensions: ["csv", "tsv"] },
-    { id: "mcap", label: "MCAP recordings", extensions: ["mcap"] },
-  ]);
-  const shell = await AppShell.mount(plane);
-  expect(await shell.pickerFilters()).toEqual([
-    {
-      name: "Supported telemetry (CSV, TSV, MCAP)",
-      extensions: ["csv", "tsv", "mcap"],
-    },
-    { name: "Delimited text", extensions: ["csv", "tsv"] },
-    { name: "MCAP recordings", extensions: ["mcap"] },
-  ]);
+it("names newly registered formats in the unsupported-drop message", async () => {
+  const port = scanningPort({}); // extend the existing drop.test.ts fake so
+  // listFormats returns a registered container format alongside the built-ins:
+  // [{ id: "csv", label: "Delimited text", extensions: ["csv", "tsv"] },
+  //  { id: "hdf5", label: "HDF5 containers", extensions: ["h5", "hdf5"] }]
+  const message = await unsupportedDropMessage(port);
+  expect(message).toContain(".h5");
+  expect(message).toContain(".csv");
 });
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `./scripts/test.sh shell format_descriptors` and `./scripts/test.sh unit app-shell`
-Expected: FAIL — `format_descriptors` not found / `pickerFilters` missing.
+Run: `./scripts/test.sh shell format_descriptors` and `./scripts/test.sh unit drop`
+Expected: Rust FAIL — `format_descriptors` not found. The drop-message test
+passes immediately — `unsupportedDropMessage` already renders whatever
+`list_formats` returns; the test pins that seam so a registry regression
+surfaces in the frontend suite.
 
 - [ ] **Step 3: Implement it**
 
-`list_formats` returns `registry.descriptors()` mapped to `FormatDescriptor`.
-`pick_sources` builds its filters from that list instead of `SUPPORTED_FORMATS`.
-The frontend caches the list once per session and uses it for the drop-zone
-accept check, showing the same unsupported-format message the native side
-produces.
+`format_descriptors` maps `registry.descriptors()` to `FormatDescriptor`,
+with real provider ids replacing today's first-extension stand-in.
+`list_formats` and `pick_sources`' filters (combined filter first, then one
+per format) serve from it. No frontend change: `unsupportedDropMessage`
+already names formats from `list_formats`, and the native accept check behind
+`scan_sources` moved to the registry in Task 2, so the picker, folder open,
+and drops stay in agreement.
 
 - [ ] **Step 4: Run the tests**
 
@@ -470,11 +490,13 @@ git commit -m "feat(ingest): reopen sources with their recorded provider"
 
 **Files:**
 
-- Create: `docs/adr/0030-format-provider-registry.md`
+- Create: `docs/adr/0033-format-provider-registry.md` (0030–0032 are taken:
+  source-local channel identity, remove-source-alignment, drag-drop event
+  forwarding)
 - Modify: `docs/adr/README.md`, `docs/adr/0009-ingest-jobs-and-progress.md`
   (dispatch note), `docs/implementation-roadmap.md`
 
-- [ ] **Step 1: Write ADR 0030**
+- [ ] **Step 1: Write ADR 0033**
 
 Record: the registry replaces the enum; the fixed probe window; the
 `(confidence, priority, id)` selection order and why order-independence matters
@@ -1260,7 +1282,8 @@ writes through `save_recipe`, which **parses and validates the TOML natively
 before writing** — the wizard never persists a recipe the parser would reject.
 All dataset text uses `textContent`. The wizard opens automatically when a batch
 file fails with `SelectionError::Unsupported` and a container reader recognizes
-its magic.
+its magic — picked, folder-scanned, and window-dropped files all funnel through
+the same batch path, so every arrival route gets the wizard.
 
 - [ ] **Step 4: Run the tests**
 
@@ -1280,12 +1303,12 @@ git commit -m "feat(frontend): add the container import wizard"
 
 **Files:**
 
-- Create: `docs/adr/0031-declarative-container-recipes.md`
+- Create: `docs/adr/0034-declarative-container-recipes.md`
 - Modify: `docs/adr/README.md`, `docs/adr/0023-global-preferences-file.md`
   (recipe-directory amendment), `docs/implementation-roadmap.md`, `README.md`
   (supported formats)
 
-- [ ] **Step 1: Write ADR 0031**
+- [ ] **Step 1: Write ADR 0034**
 
 Record: recipes are data, enforced by `deny_unknown_fields` plus a closed
 container enum and selector validation; sidecar-then-user-directory resolution;
@@ -1367,7 +1390,7 @@ fail the file and leave the store unchanged.
 
 Confirm the draft preserves ADR 0002 layer boundaries (the plugin host lives in
 `ingest`, nothing depends on the shell), ADR 0009 as amended by ADR 0026
-(off-lock decode, host-side commit), and ADR 0030 (registry selection, cache-ABI
+(off-lock decode, host-side commit), and ADR 0033 (registry selection, cache-ABI
 per provider). Note any conflict explicitly in the spec rather than resolving it
 silently.
 
@@ -1408,7 +1431,8 @@ spec with both constraints fixed. The spec's "P4: another preferences schema bum
 (recipe directory) and a session bump recording the recipe id and content digest
 used per source" is Tasks 11 and 12.
 
-**Dependencies on Part A.** `Decoder`/`DecodeContext`/`DecodedSource` (A5),
+**Dependencies on Part A (complete; verified in-tree 2026-08-03).**
+`Decoder`/`DecodeContext`/`DecodedSource` (A5),
 `provenance_digest` and `ProviderInfo` (A7), `SourceRecord` provider fields (A4,
 A14), `FormatDescriptor` (A12), and the filtered test wrappers (A1). Task 2 is
 the only task that changes a Part A signature (`ProviderInfo::id` becomes
