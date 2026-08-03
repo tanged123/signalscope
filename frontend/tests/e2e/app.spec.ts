@@ -43,7 +43,7 @@ test("shared presentation plane renders the demo workspace", async ({
   await expect(page.locator(".plot-tip")).toBeHidden();
   // The mod glyph follows the platform running the browser, so the expectation
   // is derived the same way rather than pinned to a macOS-only "⌘".
-  const mod = await page.evaluate(() =>
+  const mod = await page.evaluate<string>(() =>
     /mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘" : "Ctrl+",
   );
   await expect(page.locator(".palette-hints")).toHaveText(
@@ -64,8 +64,8 @@ test("application menu mirrors commands and marks planned work", async ({
   page,
 }) => {
   await page.goto("/");
-  const mod = await page.evaluate(() =>
-    /mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘" : "Ctrl+",
+  const openFolderKeys = await page.evaluate<string>(() =>
+    /mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘⌥O" : "Ctrl+Alt+O",
   );
   const button = page.locator(".menu-button");
   await button.click();
@@ -77,7 +77,7 @@ test("application menu mirrors commands and marks planned work", async ({
   ).toHaveCount(1);
   const openFolder = menu.locator(".app-menu-item", { hasText: "Open folder" });
   await expect(openFolder).toHaveCount(1);
-  await expect(openFolder).toContainText(`${mod}⇧O`);
+  await expect(openFolder.locator(".app-menu-keys")).toHaveText(openFolderKeys);
   const unavailable = menu.locator(".app-menu-item", {
     hasText: "Open Workspace",
   });

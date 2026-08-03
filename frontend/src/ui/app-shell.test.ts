@@ -206,7 +206,7 @@ describe("direct open", () => {
 });
 
 describe("open command shortcuts", () => {
-  it("opens a folder with the dedicated mod-shift-o shortcut", () => {
+  it("opens a folder with the dedicated mod-alt-o shortcut", () => {
     const shell = new AppShell(document.createElement("div"), {
       sourceLabel: "test",
       ingest: {} as NonNullable<DataPlane["ingest"]>,
@@ -235,13 +235,13 @@ describe("open command shortcuts", () => {
       internals.commands
         .listAll()
         .find((command) => command.id === "open-folder")?.keys,
-    ).toBe("mod+shift+o");
+    ).toBe("mod+alt+o");
     expect(
       internals.commands.handleKey(
         new KeyboardEvent("keydown", {
           key: "o",
           ctrlKey: true,
-          shiftKey: true,
+          altKey: true,
         }),
       ),
     ).toBe(true);
