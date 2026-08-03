@@ -1,0 +1,46 @@
+# SignalScope recipe for sweep.parquet.
+#
+# Parquet columns are flat names rather than a group tree, so each selection
+# names one column. "*" would match every column including the timebase, and
+# there are no partial wildcards ("*_m" matches nothing), so listing the
+# columns explicitly is both correct and self-documenting. It also lets each
+# column declare its unit, which Parquet has no place to store.
+
+id = "sweep-parquet"
+container = "parquet"
+
+[[selection]]
+datasets = "altitude_m"
+name = "keep"
+unit = "m"
+
+[selection.time]
+kind = "dataset"
+path = "time_s"
+
+[[selection]]
+datasets = "velocity_mps"
+name = "keep"
+unit = "m/s"
+
+[selection.time]
+kind = "dataset"
+path = "time_s"
+
+[[selection]]
+datasets = "pitch_deg"
+name = "keep"
+unit = "deg"
+
+[selection.time]
+kind = "dataset"
+path = "time_s"
+
+[[selection]]
+datasets = "chamber_pressure_pa"
+name = "keep"
+unit = "Pa"
+
+[selection.time]
+kind = "dataset"
+path = "time_s"
