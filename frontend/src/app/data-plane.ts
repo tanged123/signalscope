@@ -6,6 +6,7 @@ import {
   type CreateDerivedBundleRequest,
   type DerivedBundleResponse,
   type DerivedRequest,
+  type DragDropForward,
   type EnvelopeBin,
   type ExportEstimate,
   type ExportEstimateRequest,
@@ -57,6 +58,8 @@ export interface IngestPort {
   cancelBatch(jobId: string): Promise<void>;
   releaseBatch(jobId: string): Promise<void>;
   listFormats(): Promise<FormatDescriptor[]>;
+  /** Forwarded window drag-drop events. Returns an unsubscribe. */
+  onDragDrop(handler: (event: DragDropForward) => void): () => void;
 }
 
 export interface DerivedPort {
@@ -130,6 +133,7 @@ type BakedManifest = Envelope<SnapshotManifest>;
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  transformCallback<T>(callback: (payload: T) => void): number;
 }
 
 declare global {
@@ -152,7 +156,10 @@ export class TauriPlane implements DataPlane {
 
   readonly exporter: ExportPort;
 
-  constructor(private readonly invoke: TauriInternals["invoke"]) {
+  constructor(
+    private readonly invoke: TauriInternals["invoke"],
+    private readonly transformCallback: TauriInternals["transformCallback"],
+  ) {
     this.ingest = {
       pickSources: async () =>
         open(await this.invoke<Envelope<string[]>>("pick_sources")),
@@ -202,6 +209,34 @@ export class TauriPlane implements DataPlane {
       },
       listFormats: async () =>
         open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
+      onDragDrop: (handler) => {
+        let eventId: number | null = null;
+        let disposed = false;
+        const unlisten = () => {
+          if (eventId === null) return;
+          void this.invoke("plugin:event|unlisten", {
+            event: "scope://drag-drop",
+            eventId,
+          });
+          eventId = null;
+        };
+        void this.invoke<number>("plugin:event|listen", {
+          event: "scope://drag-drop",
+          target: { kind: "Any" },
+          handler: this.transformCallback(
+            (raw: { payload: Envelope<DragDropForward> }) => {
+              handler(open(raw.payload));
+            },
+          ),
+        }).then((id) => {
+          eventId = id;
+          if (disposed) unlisten();
+        });
+        return () => {
+          disposed = true;
+          unlisten();
+        };
+      },
     };
     this.derived = {
       create: async (path: string, expr: string) =>
@@ -529,7 +564,10 @@ export function selectDataPlane(): DataPlane {
   const internals = window.__TAURI_INTERNALS__;
   return internals === undefined
     ? BakedPlane.fromDocument()
-    : new TauriPlane(internals.invoke.bind(internals));
+    : new TauriPlane(
+        internals.invoke.bind(internals),
+        internals.transformCallback.bind(internals),
+      );
 }
 
 function createDemoManifest(): BakedManifest {

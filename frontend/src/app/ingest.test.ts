@@ -30,6 +30,7 @@ function fakePort(statuses: BatchStatus[]): FakePort {
       return Promise.resolve();
     },
     listFormats: () => Promise.resolve([]),
+    onDragDrop: () => () => undefined,
   };
 }
 

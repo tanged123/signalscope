@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { EnvelopeBin, SignalSummary } from "../generated/protocol";
+import type {
+  DragDropForward,
+  EnvelopeBin,
+  SignalSummary,
+} from "../generated/protocol";
 import { BakedPlane, TauriPlane } from "./data-plane";
 import { seal } from "./envelope";
 
@@ -76,23 +80,25 @@ describe("BakedPlane.querySamples", () => {
 
 describe("batch ingest port", () => {
   it("keeps wire identity fields as strings", async () => {
-    const plane = new TauriPlane(() =>
-      Promise.resolve(
-        seal([
-          {
-            signal_id: "9007199254740993",
-            source_id: "9007199254740995",
-            source_key: "00000000-0000-0000-0000-000000000003",
-            local_path: "speed",
-            path: "vehicle/speed",
-            unit: "m/s",
-            point_count: "2",
-            t_min: 0,
-            t_max: 1,
-            last_value: null,
-          },
-        ]) as never,
-      ),
+    const plane = new TauriPlane(
+      () =>
+        Promise.resolve(
+          seal([
+            {
+              signal_id: "9007199254740993",
+              source_id: "9007199254740995",
+              source_key: "00000000-0000-0000-0000-000000000003",
+              local_path: "speed",
+              path: "vehicle/speed",
+              unit: "m/s",
+              point_count: "2",
+              t_min: 0,
+              t_max: 1,
+              last_value: null,
+            },
+          ]) as never,
+        ),
+      () => 0,
     );
 
     const [signal] = await plane.listSignals();
@@ -102,22 +108,25 @@ describe("batch ingest port", () => {
   });
 
   it("starts a batch and reports aggregate progress", async () => {
-    const plane = new TauriPlane((command) => {
-      if (command === "ingest_batch") {
-        return Promise.resolve(seal({ job_id: "7" }) as never);
-      }
-      return Promise.resolve(
-        seal({
-          state: "running",
-          fraction: 0,
-          total: "2",
-          done: "0",
-          failed: "0",
-          current_paths: [],
-          recent_failures: [],
-        }) as never,
-      );
-    });
+    const plane = new TauriPlane(
+      (command) => {
+        if (command === "ingest_batch") {
+          return Promise.resolve(seal({ job_id: "7" }) as never);
+        }
+        return Promise.resolve(
+          seal({
+            state: "running",
+            fraction: 0,
+            total: "2",
+            done: "0",
+            failed: "0",
+            current_paths: [],
+            recent_failures: [],
+          }) as never,
+        );
+      },
+      () => 0,
+    );
 
     const jobId = await plane.ingest.startBatch(["/a.csv", "/b.csv"]);
     const status = await plane.ingest.batchStatus(jobId);
@@ -126,22 +135,71 @@ describe("batch ingest port", () => {
   });
 });
 
+describe("onDragDrop", () => {
+  function dragPlane() {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    let registered: ((raw: { payload: unknown }) => void) | null = null;
+    const invoke = <T>(command: string, args?: Record<string, unknown>) => {
+      calls.push({ command, ...(args === undefined ? {} : { args }) });
+      return Promise.resolve(7 as T);
+    };
+    const transformCallback = <T>(callback: (payload: T) => void) => {
+      registered = callback as unknown as (raw: { payload: unknown }) => void;
+      return 42;
+    };
+    const plane = new TauriPlane(invoke, transformCallback);
+    return {
+      plane,
+      calls,
+      deliver: (payload: unknown) => registered?.({ payload }),
+    };
+  }
+
+  it("subscribes through the event plugin and opens envelope payloads", async () => {
+    const { plane, calls, deliver } = dragPlane();
+    const seen: DragDropForward[] = [];
+    plane.ingest.onDragDrop((event) => seen.push(event));
+    await Promise.resolve();
+
+    const listen = calls.find((call) => call.command === "plugin:event|listen");
+    expect(listen?.args?.event).toBe("scope://drag-drop");
+    deliver(seal<DragDropForward>({ kind: "drop", paths: ["/data/a.csv"] }));
+    expect(seen).toEqual([{ kind: "drop", paths: ["/data/a.csv"] }]);
+  });
+
+  it("unlistens with the registered event id on unsubscribe", async () => {
+    const { plane, calls } = dragPlane();
+    const unsubscribe = plane.ingest.onDragDrop(() => undefined);
+    await Promise.resolve();
+    unsubscribe();
+    await Promise.resolve();
+
+    const unlisten = calls.find(
+      (call) => call.command === "plugin:event|unlisten",
+    );
+    expect(unlisten?.args?.eventId).toBe(7);
+  });
+});
+
 describe("restore port", () => {
   it("submits and reconciles one restore batch", async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
-    const plane = new TauriPlane((command, args) => {
-      calls.push({ command, ...(args === undefined ? {} : { args }) });
-      return Promise.resolve(
-        command === "restore_sources"
-          ? (seal({ job_id: "9" }) as never)
-          : (seal({
-              session_json: "{}",
-              rewritten: "2",
-              conflicts: [],
-              unresolved: [],
-            }) as never),
-      );
-    });
+    const plane = new TauriPlane(
+      (command, args) => {
+        calls.push({ command, ...(args === undefined ? {} : { args }) });
+        return Promise.resolve(
+          command === "restore_sources"
+            ? (seal({ job_id: "9" }) as never)
+            : (seal({
+                session_json: "{}",
+                rewritten: "2",
+                conflicts: [],
+                unresolved: [],
+              }) as never),
+        );
+      },
+      () => 0,
+    );
 
     const jobId = await plane.restore.start("{}");
     const response = await plane.restore.reconcile("{}", jobId);
@@ -175,7 +233,7 @@ describe("TauriPlane.querySamples", () => {
           ),
         ) as T,
       );
-    const response = await new TauriPlane(invoke).querySamples({
+    const response = await new TauriPlane(invoke, () => 0).querySamples({
       request_id: "samples-2",
       signal_ids: ["7"],
       window: { t0: 0, t1: 2 },
@@ -189,20 +247,23 @@ describe("TauriPlane.querySamples", () => {
 describe("derived port", () => {
   it("creates a derived signal through the native plane", async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
-    const plane = new TauriPlane((command, args) => {
-      calls.push({ command, ...(args === undefined ? {} : { args }) });
-      return Promise.resolve(
-        seal({
-          signal_id: "7",
-          path: "derived/speed",
-          unit: null,
-          point_count: "3",
-          t_min: 0,
-          t_max: 2,
-          last_value: null,
-        }) as never,
-      );
-    });
+    const plane = new TauriPlane(
+      (command, args) => {
+        calls.push({ command, ...(args === undefined ? {} : { args }) });
+        return Promise.resolve(
+          seal({
+            signal_id: "7",
+            path: "derived/speed",
+            unit: null,
+            point_count: "3",
+            t_min: 0,
+            t_max: 2,
+            last_value: null,
+          }) as never,
+        );
+      },
+      () => 0,
+    );
     const summary = await plane.derived.create("derived/speed", "'a/x' * 2");
     expect(summary.path).toBe("derived/speed");
     expect(calls[0]?.command).toBe("create_derived");
@@ -210,10 +271,13 @@ describe("derived port", () => {
 
   it("removes a derived signal through the native plane", async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
-    const plane = new TauriPlane((command, args) => {
-      calls.push({ command, ...(args === undefined ? {} : { args }) });
-      return Promise.resolve(seal(null) as never);
-    });
+    const plane = new TauriPlane(
+      (command, args) => {
+        calls.push({ command, ...(args === undefined ? {} : { args }) });
+        return Promise.resolve(seal(null) as never);
+      },
+      () => 0,
+    );
     await plane.derived.remove("derived/speed");
     expect(calls[0]?.command).toBe("remove_signal");
   });
@@ -227,15 +291,18 @@ describe("derived port", () => {
 describe("session port", () => {
   it("starts a new native session through the native plane", async () => {
     const calls: string[] = [];
-    const plane = new TauriPlane((command) => {
-      calls.push(command);
-      return Promise.resolve(
-        seal({
-          session_json: '{"app":"signalscope"}',
-          path: null,
-        }) as never,
-      );
-    });
+    const plane = new TauriPlane(
+      (command) => {
+        calls.push(command);
+        return Promise.resolve(
+          seal({
+            session_json: '{"app":"signalscope"}',
+            path: null,
+          }) as never,
+        );
+      },
+      () => 0,
+    );
 
     const loaded = await plane.session.reset();
 
@@ -247,27 +314,30 @@ describe("session port", () => {
 describe("export port", () => {
   it("routes export calls through native commands", async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
-    const plane = new TauriPlane((command, args) => {
-      calls.push({ command, ...(args === undefined ? {} : { args }) });
-      if (command === "export_estimate") {
-        return Promise.resolve(
-          seal({
-            entries: [
-              {
-                range: "visible",
-                fidelity: "standard",
-                bytes: "10",
-                series_total: "1",
-                series_decimated: "1",
-                series_full_rate: "0",
-                coarsest_ratio: "4",
-              },
-            ],
-          }) as never,
-        );
-      }
-      return Promise.resolve(seal("/tmp/out.html") as never);
-    });
+    const plane = new TauriPlane(
+      (command, args) => {
+        calls.push({ command, ...(args === undefined ? {} : { args }) });
+        if (command === "export_estimate") {
+          return Promise.resolve(
+            seal({
+              entries: [
+                {
+                  range: "visible",
+                  fidelity: "standard",
+                  bytes: "10",
+                  series_total: "1",
+                  series_decimated: "1",
+                  series_full_rate: "0",
+                  coarsest_ratio: "4",
+                },
+              ],
+            }) as never,
+          );
+        }
+        return Promise.resolve(seal("/tmp/out.html") as never);
+      },
+      () => 0,
+    );
 
     const selection = { source_keys: ["source"] };
     const estimate = await plane.exporter.estimate("{}", selection);
@@ -289,16 +359,19 @@ describe("export port", () => {
 
   it("selects one export folder and writes named files into it", async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
-    const plane = new TauriPlane((command, args) => {
-      calls.push({ command, ...(args === undefined ? {} : { args }) });
-      return Promise.resolve(
-        seal(
-          command === "pick_export_directory"
-            ? "/tmp/exports"
-            : "/tmp/exports/plot.png",
-        ) as never,
-      );
-    });
+    const plane = new TauriPlane(
+      (command, args) => {
+        calls.push({ command, ...(args === undefined ? {} : { args }) });
+        return Promise.resolve(
+          seal(
+            command === "pick_export_directory"
+              ? "/tmp/exports"
+              : "/tmp/exports/plot.png",
+          ) as never,
+        );
+      },
+      () => 0,
+    );
 
     expect(await plane.exporter.pickDirectory()).toBe("/tmp/exports");
     expect(
