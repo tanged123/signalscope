@@ -397,11 +397,7 @@ fn save_recipe(
         .map_err(|error| error.to_string())?;
     let destination = match request.destination {
         RecipeDestination::Sidecar => {
-            let source = Path::new(&request.path);
-            let file_name = source
-                .file_name()
-                .ok_or_else(|| "source path has no file name".to_owned())?;
-            source.with_file_name(format!("{}.scope.toml", file_name.to_string_lossy()))
+            sidecar_destination(Path::new(&request.path))?
         }
         RecipeDestination::UserDirectory => {
             let preferences = preferences_path(&app)
@@ -421,18 +417,56 @@ fn save_recipe(
             directory.join(format!("{}.toml", recipe.id))
         }
     };
-    if let Some(parent) = destination.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let temporary = destination.with_extension("toml.tmp");
-    std::fs::write(&temporary, request.recipe_toml).map_err(|error| error.to_string())?;
-    std::fs::rename(&temporary, &destination).map_err(|error| error.to_string())?;
+    write_recipe_file(&destination, &request.recipe_toml)?;
     let digest = scope_core::ingest::recipe::content_digest(&recipe);
     Ok(Envelope::new(SaveRecipeResponse {
         recipe_id: recipe.id,
         digest,
         saved_to: destination.display().to_string(),
     }))
+}
+
+/// Writes a recipe through a uniquely named temporary in the destination
+/// directory. OpenOptions::create_new never follows a pre-planted symlink.
+fn write_recipe_file(destination: &Path, contents: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    static NEXT_RECIPE_ID: AtomicU64 = AtomicU64::new(0);
+    let suffix = NEXT_RECIPE_ID.fetch_add(1, Ordering::Relaxed);
+    let temporary = destination.with_extension(format!("toml.{suffix}.tmp"));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
+    let result = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|error| error.to_string());
+    drop(file);
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(&temporary, destination) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+/// Returns the sidecar path beside an existing regular source file.
+fn sidecar_destination(source: &Path) -> Result<PathBuf, String> {
+    if !source.is_file() {
+        return Err("recipe source is not an existing file".to_owned());
+    }
+    let file_name = source
+        .file_name()
+        .ok_or_else(|| "source path has no file name".to_owned())?;
+    Ok(source.with_file_name(format!(
+        "{}.scope.toml",
+        file_name.to_string_lossy()
+    )))
 }
 
 fn format_descriptors(registry: &ProviderRegistry) -> Vec<FormatDescriptor> {
@@ -1767,6 +1801,50 @@ mod tests {
     };
 
     use super::*;
+
+    const SAMPLE_RECIPE_TOML: &str = r#"id = "flight"
+container = "hdf5"
+
+[[selection]]
+datasets = "signal"
+name = "keep"
+
+[selection.time]
+kind = "index"
+dt = 1.0
+t0 = 0.0
+"#;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_temporary_symlink_cannot_redirect_a_recipe_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("data.h5");
+        std::fs::write(&source, b"\x89HDF\r\n\x1a\n").unwrap();
+        let victim = directory.path().join("victim.txt");
+        std::fs::write(&victim, b"precious").unwrap();
+        std::os::unix::fs::symlink(&victim, directory.path().join("data.h5.scope.toml.tmp"))
+            .unwrap();
+
+        let written = write_recipe_file(
+            &directory.path().join("data.h5.scope.toml"),
+            SAMPLE_RECIPE_TOML,
+        );
+
+        assert!(written.is_ok(), "a planted symlink must not block the write");
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "precious",
+            "the victim file must be untouched"
+        );
+    }
+
+    #[test]
+    fn a_sidecar_destination_requires_an_existing_regular_source_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("nope.h5");
+        assert!(sidecar_destination(&missing).is_err());
+    }
 
     #[test]
     fn drag_forwarding_serializes_kind_and_display_paths() {
