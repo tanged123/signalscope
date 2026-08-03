@@ -4,12 +4,12 @@ Sample files for the non-CSV formats, all describing the same synthetic
 60-second launch (1,200 samples at 20 Hz). Load one with `Open…`, `Ctrl+Shift+O`
 for the whole folder, or by dropping it on the window.
 
-| File | Format | What it exercises |
-| --- | --- | --- |
-| `flight_run.h5` + `.scope.toml` | HDF5 | Nested groups, one shared timebase, units read from HDF5 attributes |
+| File                            | Format  | What it exercises                                                      |
+| ------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `flight_run.h5` + `.scope.toml` | HDF5    | Nested groups, one shared timebase, units read from HDF5 attributes    |
 | `sweep.parquet` + `.scope.toml` | Parquet | Flat columns, one column as the timebase, units declared in the recipe |
-| `flight_run.mcap` | MCAP | Three JSON topics flattened into signal paths, including a boolean |
-| `flight_run_no_recipe.h5` | HDF5 | No sidecar, so the import wizard opens and writes a recipe for you |
+| `flight_run.mcap`               | MCAP    | Three JSON topics flattened into signal paths, including a boolean     |
+| `flight_run_no_recipe.h5`       | HDF5    | No sidecar, so the import wizard opens and writes a recipe for you     |
 
 CSV needs no recipe — see `../demo_flight.csv` and `../monte_carlo/`.
 

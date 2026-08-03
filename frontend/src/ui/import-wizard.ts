@@ -29,6 +29,7 @@ export class ImportWizard {
     private readonly outline: ContainerOutline,
     private readonly sourcePath: string | null = null,
     private readonly plane: DataPlane | null = null,
+    private readonly onSaved?: (path: string) => void | Promise<void>,
   ) {
     this.timePath = this.proposedTime();
   }
@@ -37,12 +38,16 @@ export class ImportWizard {
     return new ImportWizard(outline);
   }
 
-  static async mount(plane: DataPlane, path: string): Promise<ImportWizard> {
+  static async mount(
+    plane: DataPlane,
+    path: string,
+    onSaved?: (path: string) => void | Promise<void>,
+  ): Promise<ImportWizard> {
     const outline = await plane.ingest?.introspect(path);
     if (outline === undefined) {
       throw new Error("container introspection is unavailable");
     }
-    const wizard = new ImportWizard(outline, path, plane);
+    const wizard = new ImportWizard(outline, path, plane, onSaved);
     document.body.append(wizard.render());
     return wizard;
   }
@@ -251,10 +256,14 @@ export class ImportWizard {
         this.sourcePath === null;
       button.addEventListener("click", () => {
         if (this.plane === null) return;
+        const path = this.sourcePath;
         void this.save(this.plane, destination)
-          .then((response) => {
+          .then(async (response) => {
             status.textContent = `Saved ${response.recipe_id} to ${response.saved_to}`;
             this.close();
+            // A saved recipe is only useful once the file it describes is
+            // loaded, so finish the job rather than asking for another click.
+            if (path !== null) await this.onSaved?.(path);
           })
           .catch((error: unknown) => {
             status.textContent =

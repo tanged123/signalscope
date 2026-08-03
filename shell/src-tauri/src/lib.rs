@@ -420,19 +420,23 @@ fn save_recipe_blocking(
                 .filter(|path| path.exists())
                 .and_then(|path| preferences::load_from_path(&path).ok())
                 .unwrap_or_default();
-            let directory = if let Some(directory) = preferences.recipe_directory {
-                PathBuf::from(directory)
-            } else {
-                app.path()
-                    .app_data_dir()
-                    .map_err(|error| error.to_string())?
-                    .join("recipes")
-            };
+            let directory = recipe_directory(app, &preferences)
+                .ok_or_else(|| "no recipe directory is available".to_owned())?;
             std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
             directory.join(format!("{}.toml", recipe.id))
         }
     };
     write_recipe_file(&destination, &request.recipe_toml)?;
+    // Saving a recipe is how the user reconfirms a source whose recorded
+    // recipe went missing or changed, so drop the stale identity: otherwise
+    // the re-ingest below compares this new recipe against the old digest and
+    // fails exactly as it just did.
+    if let Ok(canonical) = std::fs::canonicalize(&request.path) {
+        let state = app.state::<Arc<Mutex<DataState>>>();
+        if let Ok(mut data) = state.lock() {
+            data.registry.forget_recipe(&canonical);
+        }
+    }
     let digest = scope_core::ingest::recipe::content_digest(&recipe);
     Ok(Envelope::new(SaveRecipeResponse {
         recipe_id: recipe.id,
@@ -1665,6 +1669,22 @@ fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join("cache"))
 }
 
+/// The directory user recipes are saved to and resolved from. Saving and
+/// resolving must agree: a recipe written somewhere resolution never reads is
+/// a silent no-op, so both go through here rather than defaulting separately.
+fn recipe_directory(app: &AppHandle, preferences: &preferences::Preferences) -> Option<PathBuf> {
+    preferences
+        .recipe_directory
+        .as_ref()
+        .map(PathBuf::from)
+        .or_else(|| {
+            app.path()
+                .app_data_dir()
+                .ok()
+                .map(|data| data.join("recipes"))
+        })
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn load_preferences(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
@@ -1729,6 +1749,7 @@ pub fn run() {
             };
             let root = preferences
                 .cache_root
+                .as_ref()
                 .map(PathBuf::from)
                 .unwrap_or(cache_path(app.handle()).map_err(std::io::Error::other)?);
             let defaults = BudgetConfig::from_available(8 * 1024 * 1024 * 1024);
@@ -1756,7 +1777,7 @@ pub fn run() {
                 budget: Arc::new(budget),
                 terminal_ttl: Duration::from_secs(300),
                 cache_directory: Some(root),
-                recipe_directory: preferences.recipe_directory.map(PathBuf::from),
+                recipe_directory: recipe_directory(app.handle(), &preferences),
                 provider_registry: Arc::new(ProviderRegistry::builtin()),
             }));
             Ok(())

@@ -621,11 +621,14 @@ impl Worker {
                     if crate::restore::recipe_status(record, Some(&resolved))
                         != crate::restore::RecipeStatus::Matched
                     {
+                        // Offerable to the import wizard: reconfirming means
+                        // writing a recipe, which is the only thing that can
+                        // clear this state.
                         return Err(ProcessError::Failed(
                             crate::restore::restore_source(record, Some(&resolved))
                                 .expect_err("non-matched recipe status always errors")
                                 .to_string(),
-                            false,
+                            true,
                         ));
                     }
                     provider_id = Some(format!("recipe:{}", resolved.recipe.id));
@@ -637,11 +640,13 @@ impl Worker {
                     ));
                 }
                 Ok(None) if record.recipe_id.is_some() || record.recipe_digest.is_some() => {
+                    // Relinking means writing a recipe, so this failure must
+                    // reach the import wizard exactly like a first import.
                     return Err(ProcessError::Failed(
                         crate::restore::restore_source(record, None)
                             .expect_err("a missing recipe always errors")
                             .to_string(),
-                        false,
+                        true,
                     ));
                 }
                 Ok(None) => {}
@@ -1013,5 +1018,42 @@ mod tests {
         let store = sink.store.lock().unwrap();
         assert_eq!(store.sources().next().unwrap().key, record.key);
         assert!(store.signal_by_path("saved/value").is_some());
+    }
+
+    /// A recorded recipe that has vanished must stay offerable to the import
+    /// wizard. The failure text tells the user to relink, and `recipe_required`
+    /// is the only thing that opens the surface which can do it — without it
+    /// the source is permanently unloadable.
+    #[test]
+    fn a_missing_or_changed_recipe_still_offers_the_import_wizard() {
+        for (label, recorded_digest) in [("missing", "aaaa"), ("changed", "bbbb")] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("layout.h5");
+            std::fs::write(&path, b"\x89HDF\r\n\x1a\n").unwrap();
+            let record = SourceRecord {
+                key: crate::store::SourceKey(uuid::Uuid::from_bytes([9; 16])),
+                path: path.clone(),
+                prefix: "layout".into(),
+                provider_id: Some("recipe:layout-hdf5".into()),
+                decode_provenance: None,
+                recipe_id: Some("layout-hdf5".into()),
+                recipe_digest: Some(recorded_digest.into()),
+                reconcile_legacy: false,
+            };
+            let jobs = BatchJobs::new(BatchOptions::for_tests());
+            jobs.replace_sources(vec![record]).unwrap();
+            let job = jobs.submit(vec![path], std::sync::Arc::new(RecordingSink::default()));
+            let status = jobs.wait_for_tests(job);
+
+            let failure = status
+                .recent_failures
+                .first()
+                .unwrap_or_else(|| panic!("{label}: expected a failure"));
+            assert!(
+                failure.recipe_required,
+                "{label}: {} must offer the wizard",
+                failure.error
+            );
+        }
     }
 }

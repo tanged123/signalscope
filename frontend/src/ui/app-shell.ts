@@ -1740,7 +1740,9 @@ export class AppShell {
       );
       if (needsRecipe !== undefined && typeof port.introspect === "function") {
         try {
-          await ImportWizard.mount(this.plane, needsRecipe.path);
+          await ImportWizard.mount(this.plane, needsRecipe.path, (path) =>
+            this.ingestPaths([path]),
+          );
         } catch (error: unknown) {
           this.reportError(error);
         }

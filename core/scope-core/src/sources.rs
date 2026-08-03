@@ -132,6 +132,26 @@ impl SourceRegistry {
         }
     }
 
+    /// Forgets the recipe recorded for the source at `path`, returning whether
+    /// one was found.
+    ///
+    /// Writing a recipe is how a user reconfirms a source whose recorded
+    /// recipe went missing or changed. Without this the next ingest would
+    /// compare the freshly written recipe against the stale recorded digest
+    /// and fail again, leaving the source permanently unloadable.
+    pub fn forget_recipe(&mut self, path: &Path) -> bool {
+        let Some(record) = self
+            .by_key
+            .values_mut()
+            .find(|record| record.path.as_path() == path)
+        else {
+            return false;
+        };
+        record.recipe_id = None;
+        record.recipe_digest = None;
+        true
+    }
+
     pub fn records(&self) -> impl Iterator<Item = &SourceRecord> {
         self.by_key.values()
     }
@@ -140,6 +160,41 @@ impl SourceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forgetting_a_recipe_clears_only_the_matching_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let kept = directory.path().join("kept.h5");
+        let cleared = directory.path().join("cleared.h5");
+        std::fs::write(&kept, b"a").unwrap();
+        std::fs::write(&cleared, b"b").unwrap();
+
+        let mut registry = SourceRegistry::new();
+        let mut admit = |path: &Path| match registry.admit(path).unwrap() {
+            Admission::Existing(key) => key,
+            Admission::New(record) => record.key,
+        };
+        let kept_key = admit(&kept);
+        let cleared_key = admit(&cleared);
+        for (key, id) in [(kept_key, "kept-hdf5"), (cleared_key, "cleared-hdf5")] {
+            let record = registry.by_key.get_mut(&key).unwrap();
+            record.recipe_id = Some(id.to_owned());
+            record.recipe_digest = Some("digest".to_owned());
+        }
+
+        assert!(registry.forget_recipe(&cleared));
+        assert_eq!(registry.record(cleared_key).unwrap().recipe_id, None);
+        assert_eq!(registry.record(cleared_key).unwrap().recipe_digest, None);
+        assert_eq!(
+            registry.record(kept_key).unwrap().recipe_id.as_deref(),
+            Some("kept-hdf5"),
+            "an unrelated source keeps its recipe"
+        );
+        assert!(
+            !registry.forget_recipe(&directory.path().join("absent.h5")),
+            "an unknown path reports that nothing was forgotten"
+        );
+    }
 
     #[test]
     fn repeating_a_path_is_idempotent_but_new_files_get_new_keys() {
