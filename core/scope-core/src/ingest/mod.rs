@@ -245,7 +245,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dispatch_treats_short_files_as_csv() {
+    fn dispatch_treats_short_csv_text_as_csv() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(b"a,b\n1,2\n").unwrap();
         let mut store = SignalStore::new();

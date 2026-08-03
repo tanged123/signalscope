@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::preferences::Preferences;
 
-use super::{ContainerKind, Recipe, RecipeError, content_digest, parse_recipe};
+use super::{ContainerKind, Recipe, content_digest, parse_recipe};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecipeOrigin {
@@ -30,12 +30,8 @@ pub enum ResolveError {
         #[source]
         source: std::io::Error,
     },
-    #[error("recipe {path} is invalid: {source}")]
-    Parse {
-        path: PathBuf,
-        #[source]
-        source: RecipeError,
-    },
+    #[error("recipe {path} is invalid: {message}")]
+    Parse { path: PathBuf, message: String },
     #[error("recipe {path} does not match source container")]
     ContainerMismatch { path: PathBuf },
 }
@@ -53,7 +49,10 @@ pub fn resolve_for(
         return Ok(None);
     };
     let sidecar = sidecar_path(source);
-    if sidecar.is_file() {
+    if matches!(
+        fs::symlink_metadata(&sidecar),
+        Ok(metadata) if metadata.file_type().is_file()
+    ) {
         return load_recipe(&sidecar, RecipeOrigin::Sidecar(sidecar.clone()), &container).map(Some);
     }
 
@@ -99,9 +98,14 @@ fn load_recipe(
         path: path.to_owned(),
         source,
     })?;
-    let recipe = parse_recipe(&source).map_err(|source| ResolveError::Parse {
+    let recipe = parse_recipe(&source).map_err(|error| ResolveError::Parse {
         path: path.to_owned(),
-        source,
+        message: error
+            .to_string()
+            .lines()
+            .next()
+            .unwrap_or("invalid recipe")
+            .into(),
     })?;
     if !container_matches(expected, &recipe.container) {
         return Err(ResolveError::ContainerMismatch {
@@ -222,8 +226,38 @@ t0 = 0.0
         ));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn a_recipe_directory_outside_the_configured_root_is_ignored() {
+    fn a_symlinked_sidecar_is_not_resolved() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = source(directory.path(), "foo.h5");
+        let target = directory.path().join("recipe.toml");
+        fs::write(&target, RECIPE).unwrap();
+        symlink(&target, directory.path().join("foo.h5.scope.toml")).unwrap();
+        assert!(resolve_for(&source, &preferences(None)).unwrap().is_none());
+    }
+
+    #[test]
+    fn malformed_recipe_errors_do_not_echo_source_contents() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = source(directory.path(), "foo.h5");
+        let secret = "private-content-that-must-not-be-disclosed";
+        fs::write(
+            directory.path().join("foo.h5.scope.toml"),
+            format!("id = {secret}"),
+        )
+        .unwrap();
+        let error = resolve_for(&source, &preferences(None))
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains(secret));
+        assert!(!error.contains('|'));
+    }
+
+    #[test]
+    fn a_missing_recipe_directory_resolves_to_none() {
         let directory = tempfile::tempdir().unwrap();
         let result = resolve_for(
             &source(directory.path(), "foo.h5"),

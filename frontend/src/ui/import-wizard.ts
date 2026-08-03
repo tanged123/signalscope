@@ -322,10 +322,26 @@ function recipeId(sourcePath: string | null, container: string): string {
 function quoteToml(value: string): string {
   return (
     '"' +
-    value
-      .replaceAll("\\", "\\\\")
-      .replaceAll('"', '\\"')
-      .replaceAll("\n", "\\n") +
+    Array.from(value.replaceAll("\\", "\\\\").replaceAll('"', '\\"'))
+      .map((character) => {
+        const code = character.charCodeAt(0);
+        if (code >= 0x20 && code !== 0x7f) return character;
+        switch (character) {
+          case "\b":
+            return "\\b";
+          case "\t":
+            return "\\t";
+          case "\n":
+            return "\\n";
+          case "\f":
+            return "\\f";
+          case "\r":
+            return "\\r";
+          default:
+            return `\\u${code.toString(16).padStart(4, "0")}`;
+        }
+      })
+      .join("") +
     '"'
   );
 }

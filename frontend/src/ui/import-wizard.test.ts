@@ -48,6 +48,24 @@ describe("ImportWizard", () => {
     expect(toml).not.toMatch(/command|plugin|decoder/);
   });
 
+  it("escapes every TOML control character in generated paths", () => {
+    const wizard = ImportWizard.fromOutline({
+      ...outline,
+      datasets: [
+        ...outline.datasets,
+        {
+          path: "run/\t\u0007label",
+          kind: "numeric",
+          len: "3",
+          shape: [3],
+          sample_preview: [1, 2, 3],
+        },
+      ],
+    });
+    expect(wizard.toToml()).toContain('datasets = "run/\\t\\u0007label"');
+    expect(wizard.toToml()).not.toContain("\u0007");
+  });
+
   it("renders untrusted dataset names as text", () => {
     const first = outline.datasets[0];
     if (first === undefined) throw new Error("expected a dataset");

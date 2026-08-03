@@ -130,12 +130,7 @@ impl BatchProgress {
         self.failed_with_recipe(index, error, false);
     }
 
-    fn failed_with_recipe(
-        &self,
-        index: usize,
-        error: impl Into<String>,
-        recipe_required: bool,
-    ) {
+    fn failed_with_recipe(&self, index: usize, error: impl Into<String>, recipe_required: bool) {
         if let Some(entry) = self.lock().entries.get_mut(index) {
             entry.state = FileState::Failed;
             entry.error = Some(error.into());
@@ -564,9 +559,10 @@ impl Worker {
             };
             match outcome {
                 FlightOutcome::Done => self.progress.succeeded(item.index),
-                FlightOutcome::Failed(error, recipe_required) => self
-                    .progress
-                    .failed_with_recipe(item.index, error, recipe_required),
+                FlightOutcome::Failed(error, recipe_required) => {
+                    self.progress
+                        .failed_with_recipe(item.index, error, recipe_required)
+                }
                 FlightOutcome::Cancelled => self.progress.cancelled(item.index),
             }
         }

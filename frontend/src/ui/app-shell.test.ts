@@ -19,10 +19,10 @@ import {
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
+  formatHint,
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
-import { ImportWizard } from "./import-wizard";
 
 it("arrival mode focuses small additions and ghosts large additions", () => {
   expect(arrivalModeFor(0)).toBe("none");
@@ -651,6 +651,15 @@ describe("workspace identity", () => {
 });
 
 describe("source dock rail", () => {
+  it("derives the empty-state format hint from registered extensions", () => {
+    expect(
+      formatHint([
+        { id: "parquet", label: "Parquet", extensions: ["parquet", "pq"] },
+        { id: "csv", label: "CSV", extensions: ["csv"] },
+      ]),
+    ).toBe("CSV · PARQUET · PQ");
+  });
+
   it("formats the status identity as one aggregate readout", () => {
     expect(statusAggregate(2, 17, 2_000)).toBe(
       "2 sources · 17 signals · 2,000 pts",
@@ -691,9 +700,7 @@ describe("source dock rail", () => {
   it("shows the supported-format hint only for an empty workspace", () => {
     const element = document.createElement("div");
     renderDockFooter(element, [], 0, vi.fn());
-    expect(element.querySelector(".dock-formats")?.textContent).toBe(
-      "CSV · MCAP",
-    );
+    expect(element.querySelector(".dock-formats")?.textContent).toBe("—");
     expect(element.querySelector(".dock-add-source")?.textContent).toBe(
       "+ source",
     );

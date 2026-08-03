@@ -26,10 +26,7 @@ pub enum RecipeStatus {
 }
 
 #[must_use]
-pub fn recipe_status(
-    record: &SourceRecord,
-    resolved: Option<&ResolvedRecipe>,
-) -> RecipeStatus {
+pub fn recipe_status(record: &SourceRecord, resolved: Option<&ResolvedRecipe>) -> RecipeStatus {
     match (
         record.recipe_id.as_deref(),
         record.recipe_digest.as_deref(),

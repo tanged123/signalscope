@@ -7,6 +7,11 @@ use thiserror::Error;
 pub mod decode;
 pub mod resolve;
 
+pub(crate) const MAX_RECIPE_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_SELECTIONS: usize = 1_024;
+pub(crate) const MAX_ID_BYTES: usize = 128;
+pub(crate) const MAX_TEXT_BYTES: usize = 64 * 1024;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContainerKind {
@@ -140,6 +145,21 @@ pub enum RecipeError {
 ///
 /// Returns [`RecipeError`] when TOML parsing or recipe validation fails.
 pub fn parse_recipe(source: &str) -> Result<Recipe, RecipeError> {
+    if source.len() > MAX_RECIPE_BYTES {
+        return Err(RecipeError::Invalid(
+            "recipe exceeds the 256 KiB limit".into(),
+        ));
+    }
+    if source
+        .lines()
+        .filter(|line| line.trim() == "[[selection]]")
+        .count()
+        > MAX_SELECTIONS
+    {
+        return Err(RecipeError::Invalid(
+            "recipe has more than 1,024 selections".into(),
+        ));
+    }
     let recipe = toml::from_str::<Recipe>(source).map_err(|error| {
         let message = error.to_string();
         if message.contains("unknown field") {
@@ -174,6 +194,9 @@ fn field(hasher: &mut Sha256, value: &[u8]) {
 }
 
 fn validate(recipe: &Recipe) -> Result<(), RecipeError> {
+    if recipe.id.len() > MAX_ID_BYTES {
+        return Err(RecipeError::Invalid("id must be at most 128 bytes".into()));
+    }
     if recipe.id.trim().is_empty()
         || recipe.id.contains('\0')
         || recipe.id.contains('/')
@@ -193,14 +216,10 @@ fn validate(recipe: &Recipe) -> Result<(), RecipeError> {
     for selection in &recipe.selections {
         validate_selector(&selection.datasets)?;
         if let Some(unit) = &selection.unit {
-            if unit.contains('\0') {
-                return Err(RecipeError::Invalid("unit contains NUL".into()));
-            }
+            validate_text("unit", unit)?;
         }
         if let Some(attribute) = &selection.unit_attribute {
-            if attribute.contains('\0') {
-                return Err(RecipeError::Invalid("unit attribute contains NUL".into()));
-            }
+            validate_text("unit attribute", attribute)?;
         }
         match &selection.time {
             TimeSource::Dataset(dataset) => validate_selector(&dataset.path)?,
@@ -213,6 +232,19 @@ fn validate(recipe: &Recipe) -> Result<(), RecipeError> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_text(label: &str, value: &str) -> Result<(), RecipeError> {
+    if value.len() > MAX_TEXT_BYTES {
+        return Err(RecipeError::Invalid(format!(
+            "{label} exceeds the {} KiB limit",
+            MAX_TEXT_BYTES / 1024
+        )));
+    }
+    if value.contains('\0') {
+        return Err(RecipeError::Invalid(format!("{label} contains NUL")));
     }
     Ok(())
 }
@@ -356,6 +388,53 @@ t0 = 0.0"#;
                 Err(RecipeError::Invalid(_))
             ));
         }
+    }
+
+    #[test]
+    fn recipe_limits_are_inclusive_at_the_boundary() {
+        let base = "id = \"x\"\ncontainer = \"hdf5\"\n\n[[selection]]\ndatasets = \"run/*\"\nname = \"keep\"\n[selection.time]\nkind = \"index\"\ndt = 1.0\nt0 = 0.0\n";
+        let padding = "#".to_owned() + &"x".repeat(MAX_RECIPE_BYTES - base.len() - 1);
+        let valid = format!("{base}{padding}");
+        assert_eq!(valid.len(), MAX_RECIPE_BYTES);
+        assert!(parse_recipe(&valid).is_ok());
+        assert!(matches!(
+            parse_recipe(&(valid + "x")),
+            Err(RecipeError::Invalid(message)) if message.contains("256 KiB")
+        ));
+
+        let long_id = format!(
+            "id = {:?}\ncontainer = \"hdf5\"\n\n[[selection]]\ndatasets = \"run/*\"\nname = \"keep\"\n[selection.time]\nkind = \"index\"\ndt = 1.0\nt0 = 0.0\n",
+            "x".repeat(MAX_ID_BYTES + 1)
+        );
+        assert!(parse_recipe(&long_id).is_err());
+    }
+
+    #[test]
+    fn recipe_selection_count_is_bounded() {
+        let mut source = String::from("id = \"x\"\ncontainer = \"hdf5\"\n");
+        for _ in 0..MAX_SELECTIONS {
+            source.push_str("\n[[selection]]\ndatasets = \"run/*\"\nname = \"keep\"\n[selection.time]\nkind = \"index\"\ndt = 1.0\nt0 = 0.0\n");
+        }
+        assert!(parse_recipe(&source).is_ok());
+        source.push_str("\n[[selection]]\ndatasets = \"run/*\"\nname = \"keep\"\n[selection.time]\nkind = \"index\"\ndt = 1.0\nt0 = 0.0\n");
+        assert!(matches!(
+            parse_recipe(&source),
+            Err(RecipeError::Invalid(message)) if message.contains("1,024")
+        ));
+    }
+
+    #[test]
+    fn recipe_unit_text_is_bounded() {
+        let source = |unit: &str| {
+            format!(
+                "id = \"x\"\ncontainer = \"hdf5\"\n\n[[selection]]\ndatasets = \"run/*\"\nname = \"keep\"\nunit = {unit:?}\n[selection.time]\nkind = \"index\"\ndt = 1.0\nt0 = 0.0\n"
+            )
+        };
+        assert!(parse_recipe(&source(&"x".repeat(MAX_TEXT_BYTES))).is_ok());
+        assert!(matches!(
+            parse_recipe(&source(&"x".repeat(MAX_TEXT_BYTES + 1))),
+            Err(RecipeError::Invalid(message)) if message.contains("unit exceeds")
+        ));
     }
 
     #[test]

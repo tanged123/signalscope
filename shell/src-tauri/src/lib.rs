@@ -324,7 +324,15 @@ fn list_formats() -> Envelope<Vec<FormatDescriptor>> {
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn introspect_container(
+async fn introspect_container(
+    request: Envelope<IntrospectRequest>,
+) -> Result<Envelope<ContainerOutline>, String> {
+    tauri::async_runtime::spawn_blocking(move || introspect_container_blocking(request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn introspect_container_blocking(
     request: Envelope<IntrospectRequest>,
 ) -> Result<Envelope<ContainerOutline>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
@@ -388,7 +396,16 @@ fn introspect_container(
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
-fn save_recipe(
+async fn save_recipe(
+    request: Envelope<SaveRecipeRequest>,
+    app: AppHandle,
+) -> Result<Envelope<SaveRecipeResponse>, String> {
+    tauri::async_runtime::spawn_blocking(move || save_recipe_blocking(request, app))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn save_recipe_blocking(
     request: Envelope<SaveRecipeRequest>,
     app: AppHandle,
 ) -> Result<Envelope<SaveRecipeResponse>, String> {
@@ -656,9 +673,10 @@ fn expand_sources_with_registry(
     paths: Vec<String>,
     registry: &ProviderRegistry,
 ) -> Result<Vec<PathBuf>, String> {
+    let descriptors = registry.descriptors();
     let mut expanded = Vec::new();
     for path in paths {
-        expand_source(Path::new(&path), true, &mut expanded, registry)?;
+        expand_source(Path::new(&path), true, &mut expanded, &descriptors)?;
     }
     expanded.sort();
     Ok(expanded)
@@ -668,7 +686,7 @@ fn expand_source(
     path: &Path,
     recursive: bool,
     expanded: &mut Vec<PathBuf>,
-    registry: &ProviderRegistry,
+    descriptors: &[(&str, &str, &[String], i32)],
 ) -> Result<(), String> {
     if !path.is_dir() {
         expanded.push(path.to_owned());
@@ -687,9 +705,9 @@ fn expand_source(
             .is_dir()
         {
             if recursive {
-                expand_source(&path, true, expanded, registry)?;
+                expand_source(&path, true, expanded, descriptors)?;
             }
-        } else if supported_path(registry, &path) {
+        } else if supported_path(descriptors, &path) {
             expanded.push(path);
         }
     }
@@ -715,14 +733,15 @@ fn scan_sources(
 ) -> Result<Envelope<ScanSourcesResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let registry = ProviderRegistry::builtin();
+    let descriptors = registry.descriptors();
     let mut paths = Vec::new();
     expand_source(
         Path::new(&request.path),
         request.recursive,
         &mut paths,
-        &registry,
+        &descriptors,
     )?;
-    paths.retain(|path| supported_path(&registry, path));
+    paths.retain(|path| supported_path(&descriptors, path));
     paths.sort();
 
     let mut total_bytes = 0_u64;
@@ -732,7 +751,7 @@ fn scan_sources(
         .filter_map(|path| {
             let metadata = std::fs::metadata(&path).ok()?;
             total_bytes = total_bytes.saturating_add(metadata.len());
-            let label = format_label(&registry, &path)?;
+            let label = format_label(&descriptors, &path)?;
             *counts.entry(label).or_default() += 1;
             Some(path.display().to_string())
         })
@@ -747,22 +766,21 @@ fn scan_sources(
     }))
 }
 
-fn supported_path(registry: &ProviderRegistry, path: &Path) -> bool {
-    format_label(registry, path).is_some()
+fn supported_path(descriptors: &[(&str, &str, &[String], i32)], path: &Path) -> bool {
+    format_label(descriptors, path).is_some()
 }
 
-fn format_label(registry: &ProviderRegistry, path: &Path) -> Option<String> {
+fn format_label(descriptors: &[(&str, &str, &[String], i32)], path: &Path) -> Option<String> {
     path.extension()
         .and_then(|extension| extension.to_str())
         .and_then(|extension| {
-            registry
-                .descriptors()
+            descriptors
                 .into_iter()
                 .find_map(|(_, label, extensions, _)| {
                     extensions
                         .iter()
                         .any(|candidate| candidate.eq_ignore_ascii_case(extension))
-                        .then(|| label.to_owned())
+                        .then(|| (*label).to_owned())
                 })
         })
 }

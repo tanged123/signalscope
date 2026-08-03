@@ -22,7 +22,7 @@ pub fn is_hdf5_magic(probe: &[u8]) -> bool {
 pub(crate) fn provider() -> FormatProvider {
     FormatProvider::new(
         "hdf5",
-        "HDF5 containers (H5, HDF5, MATLAB v7.3)",
+        "HDF5 containers (H5, HDF5, MAT extension)",
         &["h5", "hdf5", "mat"],
         0,
         CACHE_ABI_HDF5,
@@ -53,6 +53,8 @@ impl Decoder for Hdf5Decoder {
 }
 
 pub struct Hdf5Container {
+    // hdf5 handles are not Send + Sync, so ContainerReader keeps the path and
+    // reopens it for each bounded read instead of caching a backend handle.
     path: PathBuf,
     entries: Vec<DatasetEntry>,
 }
@@ -244,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn a_matlab_v7_3_file_opens_as_hdf5() {
+    fn an_hdf5_file_with_a_mat_extension_opens_as_hdf5() {
         let file = write_hdf5(&[("/signal", &[1.0, 2.0])]);
         let container = Hdf5Container::open(file.path()).unwrap();
         assert!(

@@ -59,6 +59,7 @@ import {
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
+  type FormatDescriptor,
   type SampleResponse,
   type SampleSeries,
   type SignalSummary,
@@ -195,6 +196,7 @@ export class AppShell {
   private prefsSaveTimer: number | null = null;
   private workspacePath: string | null = null;
   private dirty = false;
+  private supportedFormatHint = "—";
   private restoringHistory = false;
   private historyGestureKey: string | null = null;
   private historyCoalesceTimer: number | null = null;
@@ -206,6 +208,7 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    await this.loadFormatHint();
     await this.loadPreferences();
     await this.restoreSession();
     this.history.reset(historySnapshot(this.workspace.snapshot()));
@@ -2950,9 +2953,23 @@ export class AppShell {
       `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
     const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
     if (dockFooter !== null) {
-      renderDockFooter(dockFooter, sources, this.signals.length, () => {
-        this.openSources();
-      });
+      renderDockFooter(
+        dockFooter,
+        sources,
+        this.signals.length,
+        () => this.openSources(),
+        this.supportedFormatHint,
+      );
+    }
+  }
+
+  private async loadFormatHint(): Promise<void> {
+    const ingest = this.plane.ingest;
+    if (ingest === null) return;
+    try {
+      this.supportedFormatHint = formatHint(await ingest.listFormats());
+    } catch {
+      this.supportedFormatHint = "—";
     }
   }
 
@@ -3169,6 +3186,7 @@ export function renderDockFooter(
   sources: readonly SourceSummary[],
   signalCount: number,
   onAddSource: () => void,
+  supportedFormats = "—",
 ): void {
   const totalPoints = sources.reduce(
     (total, source) => total + Number(source.point_count),
@@ -3193,9 +3211,19 @@ export function renderDockFooter(
   const formats = document.createElement("span");
   formats.className = "dock-formats";
   formats.textContent =
-    sources.length === 0 ? "CSV · MCAP" : loadedSourceFormats(sources);
+    sources.length === 0 ? supportedFormats : loadedSourceFormats(sources);
   load.append(add, formats);
   container.replaceChildren(aggregate, load);
+}
+
+export function formatHint(formats: readonly FormatDescriptor[]): string {
+  const extensions = new Set<string>();
+  for (const format of formats) {
+    for (const extension of format.extensions) {
+      extensions.add(extension.toUpperCase());
+    }
+  }
+  return [...extensions].sort().join(" · ") || "—";
 }
 
 function loadedSourceFormats(sources: readonly SourceSummary[]): string {
@@ -3267,7 +3295,7 @@ export function shellMarkup(): string {
         <div class="dock-footer">
           <div class="dock-load-row">
             <button class="dock-add-source" type="button">+ source</button>
-            <span class="dock-formats">CSV · MCAP</span>
+            <span class="dock-formats"></span>
           </div>
         </div>
       </div>

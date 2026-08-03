@@ -13,7 +13,7 @@ use crate::{
     naming::normalize_segment,
 };
 
-use super::{ContainerKind, NameRule, Recipe, RecipeError, Selection, TimeSource};
+use super::{ContainerKind, MAX_TEXT_BYTES, NameRule, Recipe, RecipeError, Selection, TimeSource};
 use crate::ingest::container::{ContainerError, ContainerReader, DatasetKind};
 
 #[derive(Clone)]
@@ -141,16 +141,30 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
                 .order
                 .as_deref()
                 .map_or(values.clone(), |order| apply_permutation(order, &values));
-            let name = signal_name(&selection.name, &entry.path, signals.len());
+            let name = signal_name(&selection.name, &entry.path, signals.len())?;
             if !names.insert(name.clone()) {
                 return Err(RecipeError::DuplicateName(name).into());
             }
-            let unit = selection.unit.clone().or_else(|| {
-                selection
-                    .unit_attribute
-                    .as_deref()
-                    .and_then(|attribute| container.attribute(&entry.path, attribute))
-            });
+            let unit = selection
+                .unit
+                .clone()
+                .or_else(|| {
+                    selection
+                        .unit_attribute
+                        .as_deref()
+                        .and_then(|attribute| container.attribute(&entry.path, attribute))
+                })
+                .map(|unit| {
+                    (unit.len() <= MAX_TEXT_BYTES)
+                        .then_some(unit)
+                        .ok_or_else(|| {
+                            RecipeError::Invalid(format!(
+                                "unit exceeds the {} KiB limit",
+                                MAX_TEXT_BYTES / 1024
+                            ))
+                        })
+                })
+                .transpose()?;
             signals.push(DecodedSignal {
                 local_path: name,
                 unit,
@@ -162,8 +176,12 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
     if signals.is_empty() {
         return Err(IngestError::NoDataRows);
     }
-    let row_count = signals[0].values.len();
-    if row_count == 0 {
+    let row_count = signals
+        .iter()
+        .map(|signal| signal.values.len())
+        .max()
+        .unwrap_or(0);
+    if row_count == 0 || signals.iter().any(|signal| signal.values.is_empty()) {
         return Err(IngestError::NoDataRows);
     }
     Ok(DecodedSource { row_count, signals })
@@ -199,14 +217,16 @@ fn read_time<R: ContainerReader + ?Sized>(
     container: &R,
 ) -> Result<Vec<f64>, IngestError> {
     match &selection.time {
-        TimeSource::Dataset(dataset_time) => container
-            .read_f64(&dataset_time.path)
-            .map_err(|error| match error {
-            ContainerError::NoSuchDataset(_) => {
-                RecipeError::MissingTime(dataset_time.path.clone()).into()
-            }
-            other => container_error(&other),
-        }),
+        TimeSource::Dataset(dataset_time) => {
+            container
+                .read_f64(&dataset_time.path)
+                .map_err(|error| match error {
+                    ContainerError::NoSuchDataset(_) => {
+                        RecipeError::MissingTime(dataset_time.path.clone()).into()
+                    }
+                    other => container_error(&other),
+                })
+        }
         TimeSource::Sibling(sibling_time) => {
             let group = dataset.rsplit_once('/').map_or("", |(group, _)| group);
             let path = if group.is_empty() {
@@ -219,11 +239,9 @@ fn read_time<R: ContainerReader + ?Sized>(
                 other => container_error(&other),
             })
         }
-        TimeSource::Index(index_time) => {
-            Ok((0..length)
-                .map(|index| index_time.t0 + index as f64 * index_time.dt)
-                .collect())
-        }
+        TimeSource::Index(index_time) => Ok((0..length)
+            .map(|index| index_time.t0 + index as f64 * index_time.dt)
+            .collect()),
     }
 }
 
@@ -240,7 +258,7 @@ fn timebase_key(selection: &Selection, dataset: &str, length: usize) -> String {
     }
 }
 
-fn signal_name(rule: &NameRule, dataset: &str, index: usize) -> String {
+fn signal_name(rule: &NameRule, dataset: &str, index: usize) -> Result<String, IngestError> {
     let leaf = dataset.rsplit_once('/').map_or(dataset, |(_, leaf)| leaf);
     let raw = match rule {
         NameRule::Keep => dataset.to_owned(),
@@ -251,11 +269,16 @@ fn signal_name(rule: &NameRule, dataset: &str, index: usize) -> String {
             .replace("{leaf}", leaf)
             .replace("{index}", &index.to_string()),
     };
-    raw.split('/')
+    let name = raw
+        .split('/')
         .map(normalize_segment)
         .filter(|segment| !segment.is_empty())
         .collect::<Vec<_>>()
-        .join("/")
+        .join("/");
+    if name.is_empty() {
+        return Err(RecipeError::InvalidSelector(dataset.into()).into());
+    }
+    Ok(name)
 }
 
 fn glob_matches(pattern: &str, path: &str) -> bool {
@@ -302,6 +325,7 @@ mod tests {
     struct FakeContainer {
         entries: Vec<DatasetEntry>,
         columns: BTreeMap<String, Vec<f64>>,
+        attributes: BTreeMap<(String, String), String>,
     }
 
     impl ContainerReader for FakeContainer {
@@ -320,8 +344,10 @@ mod tests {
                 .ok_or_else(|| ContainerError::NoSuchDataset(path.to_owned()))
         }
 
-        fn attribute(&self, _: &DatasetPath, _: &str) -> Option<String> {
-            None
+        fn attribute(&self, path: &DatasetPath, name: &str) -> Option<String> {
+            self.attributes
+                .get(&(path.to_owned(), name.to_owned()))
+                .cloned()
         }
     }
 
@@ -386,6 +412,19 @@ kind = "sibling"
 name = "t"
 "#;
 
+    const UNIT_ATTRIBUTE: &str = r#"
+id = "unit"
+container = "hdf5"
+[[selection]]
+datasets = "v"
+name = "keep"
+unit_attribute = "units"
+[selection.time]
+kind = "index"
+dt = 1.0
+t0 = 0.0
+"#;
+
     #[test]
     fn a_shared_time_dataset_serves_every_selected_signal() {
         let container = fake_container(&[
@@ -397,11 +436,13 @@ name = "t"
         assert_eq!(decoded.row_count, 3);
         assert_eq!(decoded.signals.len(), 2);
         assert_eq!(decoded.signals[0].local_path, "telemetry/ax");
-        assert!(
-            decoded.signals[0]
-                .time
-                .same_values(&decoded.signals[1].time)
-        );
+        let Column::Owned(first) = &decoded.signals[0].time else {
+            panic!("expected owned time column");
+        };
+        let Column::Owned(second) = &decoded.signals[1].time else {
+            panic!("expected owned time column");
+        };
+        assert!(std::sync::Arc::ptr_eq(first, second));
     }
 
     #[test]
@@ -422,6 +463,62 @@ name = "t"
         let decoded = decode_with(&container, &recipe(SIBLING_TIME), &mut context()).unwrap();
         assert_eq!(decoded.signals.len(), 2);
         assert_eq!(decoded.signals[1].time.as_slice().as_ref(), &[0.0, 2.0]);
+    }
+
+    #[test]
+    fn row_count_covers_every_sibling_group_and_empty_signals_are_rejected() {
+        let container = fake_container(&[
+            ("a/t", vec![0.0, 1.0]),
+            ("a/v", vec![1.0, 2.0]),
+            ("b/t", vec![0.0, 1.0, 2.0, 3.0, 4.0]),
+            ("b/v", vec![3.0, 4.0, 5.0, 6.0, 7.0]),
+        ]);
+        let decoded = decode_with(&container, &recipe(SIBLING_TIME), &mut context()).unwrap();
+        assert_eq!(decoded.row_count, 5);
+
+        let empty = fake_container(&[
+            ("a/t", vec![0.0, 1.0]),
+            ("a/v", vec![1.0, 2.0]),
+            ("b/t", vec![]),
+            ("b/v", vec![]),
+        ]);
+        assert!(matches!(
+            decode_with(&empty, &recipe(SIBLING_TIME), &mut context()),
+            Err(IngestError::NoDataRows)
+        ));
+    }
+
+    #[test]
+    fn a_name_that_normalizes_to_empty_is_rejected() {
+        const EMPTY_NAME: &str = r#"
+id = "empty-name"
+container = "hdf5"
+[[selection]]
+datasets = "a"
+name = "strip:a"
+[selection.time]
+kind = "index"
+dt = 1.0
+t0 = 0.0
+"#;
+        let container = fake_container(&[("a", vec![1.0])]);
+        assert!(matches!(
+            decode_with(&container, &recipe(EMPTY_NAME), &mut context()),
+            Err(IngestError::Recipe(RecipeError::InvalidSelector(_)))
+        ));
+    }
+
+    #[test]
+    fn an_oversized_container_unit_attribute_is_rejected() {
+        let mut container = fake_container(&[("v", vec![1.0])]);
+        container
+            .attributes
+            .insert(("v".into(), "units".into()), "x".repeat(MAX_TEXT_BYTES + 1));
+        assert!(matches!(
+            decode_with(&container, &recipe(UNIT_ATTRIBUTE), &mut context()),
+            Err(IngestError::Recipe(RecipeError::Invalid(message)))
+                if message.contains("unit exceeds")
+        ));
     }
 
     #[test]
