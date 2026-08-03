@@ -8,6 +8,11 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
+import {
+  classifyDrop,
+  expandDropPaths,
+  unsupportedDropMessage,
+} from "../app/drop";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
@@ -50,6 +55,7 @@ import {
 } from "../app/plot-math";
 import {
   type BatchStatus,
+  type DragDropForward,
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
@@ -171,6 +177,7 @@ export class AppShell {
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
   private sourceOpenDialog: SourceOpenDialog | null = null;
+  private dropUnsubscribe: (() => void) | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -518,6 +525,14 @@ export class AppShell {
       },
     });
     this.registerCommands();
+    this.dropUnsubscribe?.();
+    this.dropUnsubscribe = null;
+    const dragPort = this.plane.ingest;
+    if (dragPort !== null) {
+      this.dropUnsubscribe = dragPort.onDragDrop((event) => {
+        this.onDragDrop(event);
+      });
+    }
     this.commands.onRun = (id) => {
       this.usage.record(id);
     };
@@ -1618,6 +1633,52 @@ export class AppShell {
     this.workspace.focusPanel(panelId);
     this.fitWindowToPlotted();
     this.afterLayoutChange();
+  }
+
+  private modalOpen(): boolean {
+    return (
+      this.palette?.isOpen() === true || this.exportDialog?.isOpen() === true
+    );
+  }
+
+  private onDragDrop(event: DragDropForward): void {
+    const overlay = required<HTMLElement>(this.root, ".drop-overlay");
+    if (event.kind === "enter") {
+      overlay.hidden = this.modalOpen();
+      return;
+    }
+    overlay.hidden = true;
+    if (event.kind === "leave" || this.modalOpen()) return;
+    void this.handleDrop(event.paths);
+  }
+
+  private async handleDrop(paths: string[]): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null || paths.length === 0) return;
+    const plan = classifyDrop(paths);
+    if (plan.kind === "rejected") {
+      this.reportError(new Error(plan.message));
+      return;
+    }
+    if (plan.kind === "workspace") {
+      await this.loadSession(plan.path);
+      return;
+    }
+    try {
+      const expansion = await expandDropPaths(port, plan.paths);
+      for (const failed of expansion.failures) {
+        this.reportError(new Error(`could not scan ${failed}`));
+      }
+      if (expansion.files.length === 0) {
+        if (expansion.failures.length === 0) {
+          this.reportError(new Error(await unsupportedDropMessage(port)));
+        }
+        return;
+      }
+      await this.ingestPaths(expansion.files);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
   }
 
   private openSources(): void {
@@ -3221,6 +3282,7 @@ export function shellMarkup(): string {
       <span class="status-separator"></span>
       <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
     </footer>
+    <div class="drop-overlay" hidden>Drop files or a folder to load</div>
   </main>`;
 }
 

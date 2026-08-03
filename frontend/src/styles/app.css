@@ -2144,6 +2144,20 @@ button {
   color: var(--status-error);
 }
 
+.drop-overlay {
+  position: fixed;
+  inset: 12px;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--amber-7);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-void) 78%, transparent);
+  color: var(--fg-1);
+  font: 1.1rem var(--font-mono);
+  pointer-events: none;
+}
+
 .source-open-overlay {
   position: fixed;
   z-index: 30;

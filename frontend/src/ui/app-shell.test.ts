@@ -84,6 +84,97 @@ interface ShellProbe {
   transitionPanelMode(panelId: string, mode: PanelMode): void;
 }
 
+interface DropProbe {
+  root: HTMLElement;
+  plane: { ingest: unknown };
+  palette: { isOpen(): boolean } | null;
+  exportDialog: { isOpen(): boolean } | null;
+  loadSession: ReturnType<typeof vi.fn>;
+  ingestPaths: ReturnType<typeof vi.fn>;
+  reportError: ReturnType<typeof vi.fn>;
+  onDragDrop(event: { kind: string; paths: string[] }): void;
+  handleDrop(paths: string[]): Promise<void>;
+}
+
+function dropProbe(ingest: unknown, modalOpen = false): DropProbe {
+  const probe = Object.create(AppShell.prototype) as DropProbe;
+  probe.root = document.createElement("div");
+  probe.root.innerHTML = `<div class="drop-overlay" hidden></div>`;
+  probe.plane = { ingest };
+  probe.palette = { isOpen: () => modalOpen };
+  probe.exportDialog = null;
+  probe.loadSession = vi.fn(() => Promise.resolve());
+  probe.ingestPaths = vi.fn(() => Promise.resolve());
+  probe.reportError = vi.fn();
+  return probe;
+}
+
+const scanIngest = (files: string[]) => ({
+  scanSources: () =>
+    Promise.resolve({
+      files,
+      total_bytes: "0",
+      format_counts: [],
+    }),
+  listFormats: () =>
+    Promise.resolve([
+      { id: "csv", label: "Delimited text", extensions: ["csv"] },
+    ]),
+});
+
+describe("drag-drop routing", () => {
+  it("shows the overlay on enter and hides it on leave", () => {
+    const probe = dropProbe(scanIngest([]));
+    const overlay = probe.root.querySelector(".drop-overlay");
+    probe.onDragDrop({ kind: "enter", paths: [] });
+    expect(overlay?.hasAttribute("hidden")).toBe(false);
+    probe.onDragDrop({ kind: "leave", paths: [] });
+    expect(overlay?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("ignores drops and keeps the overlay hidden while a modal is open", () => {
+    const probe = dropProbe(scanIngest(["/a.csv"]), true);
+    probe.onDragDrop({ kind: "enter", paths: [] });
+    expect(
+      probe.root.querySelector(".drop-overlay")?.hasAttribute("hidden"),
+    ).toBe(true);
+    probe.onDragDrop({ kind: "drop", paths: ["/a.csv"] });
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+  });
+
+  it("opens a dropped workspace file through loadSession", async () => {
+    const probe = dropProbe(scanIngest([]));
+    await probe.handleDrop(["/w/flight.signalscope"]);
+    expect(probe.loadSession).toHaveBeenCalledWith("/w/flight.signalscope");
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+  });
+
+  it("expands data drops into the batch ingest path", async () => {
+    const probe = dropProbe(scanIngest(["/runs/a.csv", "/runs/b.csv"]));
+    await probe.handleDrop(["/runs"]);
+    expect(probe.ingestPaths).toHaveBeenCalledWith([
+      "/runs/a.csv",
+      "/runs/b.csv",
+    ]);
+  });
+
+  it("rejects mixed drops and reports the reason", async () => {
+    const probe = dropProbe(scanIngest([]));
+    await probe.handleDrop(["/w/a.signalscope", "/d/a.csv"]);
+    expect(probe.reportError).toHaveBeenCalled();
+    expect(probe.loadSession).not.toHaveBeenCalled();
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+  });
+
+  it("reports the supported formats when a drop expands to nothing", async () => {
+    const probe = dropProbe(scanIngest([]));
+    await probe.handleDrop(["/empty"]);
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+    const error = (probe.reportError.mock.calls as unknown[][])[0]?.[0];
+    expect(String(error)).toContain(".csv");
+  });
+});
+
 interface ArrivalProbe {
   workspace: WorkspaceModel;
   catalog: Catalog;
