@@ -38,18 +38,18 @@ codegen, TypeScript frontend, vitest (jsdom).
 
 ## File Structure
 
-| File                                        | Change | Responsibility                                        |
-| ------------------------------------------- | ------ | ----------------------------------------------------- |
-| `protocol/schema/scope-protocol.json`       | Modify | `DragDropKind`, `DragDropForward`, version 15.        |
-| `shell/src-tauri/src/lib.rs`                | Modify | Forward window drag-drop events; `drag_forward`.      |
-| `frontend/src/app/data-plane.ts`            | Modify | `IngestPort.onDragDrop`, raw event-plugin listen.     |
-| `frontend/src/app/drop.ts`                  | Create | Drop classification, expansion, unsupported message.  |
-| `frontend/src/app/drop.test.ts`             | Create | Tests for the above.                                  |
-| `frontend/src/ui/app-shell.ts`              | Modify | Overlay, modal guard, drop routing, direct open.      |
-| `frontend/src/ui/source-open-dialog.ts`     | Delete | Chooser modal dies.                                   |
-| `frontend/src/ui/source-open-dialog.test.ts`| Delete | With it.                                              |
-| `frontend/src/styles/app.css`               | Modify | `.drop-overlay` styles; delete `.source-open-*`.      |
-| `docs/adr/0032-drag-drop-event-forwarding.md`| Create| Record the push-event protocol surface.               |
+| File                                          | Change | Responsibility                                       |
+| --------------------------------------------- | ------ | ---------------------------------------------------- |
+| `protocol/schema/scope-protocol.json`         | Modify | `DragDropKind`, `DragDropForward`, version 15.       |
+| `shell/src-tauri/src/lib.rs`                  | Modify | Forward window drag-drop events; `drag_forward`.     |
+| `frontend/src/app/data-plane.ts`              | Modify | `IngestPort.onDragDrop`, raw event-plugin listen.    |
+| `frontend/src/app/drop.ts`                    | Create | Drop classification, expansion, unsupported message. |
+| `frontend/src/app/drop.test.ts`               | Create | Tests for the above.                                 |
+| `frontend/src/ui/app-shell.ts`                | Modify | Overlay, modal guard, drop routing, direct open.     |
+| `frontend/src/ui/source-open-dialog.ts`       | Delete | Chooser modal dies.                                  |
+| `frontend/src/ui/source-open-dialog.test.ts`  | Delete | With it.                                             |
+| `frontend/src/styles/app.css`                 | Modify | `.drop-overlay` styles; delete `.source-open-*`.     |
+| `docs/adr/0032-drag-drop-event-forwarding.md` | Create | Record the push-event protocol surface.              |
 
 ---
 
@@ -197,12 +197,18 @@ describe("onDragDrop", () => {
       calls.push({ command, args });
       return 7 as never; // event id from plugin:event|listen
     };
-    const transformCallback = (callback: (raw: { payload: unknown }) => void) => {
+    const transformCallback = (
+      callback: (raw: { payload: unknown }) => void,
+    ) => {
       registered = callback;
       return 42;
     };
     const plane = new TauriPlane(invoke, transformCallback);
-    return { plane, calls, deliver: (payload: unknown) => registered?.({ payload }) };
+    return {
+      plane,
+      calls,
+      deliver: (payload: unknown) => registered?.({ payload }),
+    };
   }
 
   it("subscribes through the event plugin and opens envelope payloads", async () => {
@@ -224,7 +230,9 @@ describe("onDragDrop", () => {
     unsubscribe();
     await Promise.resolve();
 
-    const unlisten = calls.find((call) => call.command === "plugin:event|unlisten");
+    const unlisten = calls.find(
+      (call) => call.command === "plugin:event|unlisten",
+    );
     expect(unlisten?.args?.eventId).toBe(7);
   });
 });
@@ -707,18 +715,18 @@ Subscribe in the initialization block that constructs the palette
 (`app-shell.ts:511`), after `this.registerCommands()`:
 
 ```ts
-    const dragPort = this.plane.ingest;
-    if (dragPort !== null) {
-      this.dropUnsubscribe = dragPort.onDragDrop((event) => {
-        this.onDragDrop(event);
-      });
-    }
+const dragPort = this.plane.ingest;
+if (dragPort !== null) {
+  this.dropUnsubscribe = dragPort.onDragDrop((event) => {
+    this.onDragDrop(event);
+  });
+}
 ```
 
 In `shellMarkup`, add as the last child of the shell root markup:
 
 ```html
-      <div class="drop-overlay" hidden>Drop files or a folder to load</div>
+<div class="drop-overlay" hidden>Drop files or a folder to load</div>
 ```
 
 In `app.css`, near the other overlay styles:
@@ -838,16 +846,16 @@ in `registerCommands` (the `open-sources` entry itself is unchanged — its
 `run` already calls `this.openSources()`):
 
 ```ts
-    this.commands.register({
-      id: "open-folder",
-      title: "Open folder…",
-      section: "file",
-      group: "open",
-      enabled: () => this.plane.ingest !== null,
-      run: () => {
-        this.openFolder();
-      },
-    });
+this.commands.register({
+  id: "open-folder",
+  title: "Open folder…",
+  section: "file",
+  group: "open",
+  enabled: () => this.plane.ingest !== null,
+  run: () => {
+    this.openFolder();
+  },
+});
 ```
 
 Delete: the `SourceOpenDialog` import (app-shell.ts:85), the
