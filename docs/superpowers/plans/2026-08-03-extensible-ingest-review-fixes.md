@@ -48,23 +48,23 @@ security review, not assumed.
 
 ## File Structure
 
-| File                                                  | Change | Responsibility                                           |
-| ----------------------------------------------------- | ------ | -------------------------------------------------------- |
-| `core/scope-core/src/ingest/recipe/mod.rs`            | Modify | Deny unknown fields at every nesting level.               |
-| `core/scope-core/src/ingest/container/mod.rs`         | Modify | Shared limit constants and their error arm.               |
-| `core/scope-core/src/ingest/container/hdf5.rs`        | Modify | Bounded walk, link filtering, declared-size ceiling.      |
-| `core/scope-core/src/ingest/container/parquet.rs`     | Modify | Declared-size ceiling, magic fix.                         |
-| `core/scope-core/src/ingest/mod.rs`                   | Modify | `IngestError::RecipeRequired`.                            |
-| `core/scope-core/src/ingest/batch.rs`                 | Modify | Call `restore::recipe_status` instead of reimplementing.  |
-| `core/scope-core/src/restore.rs`                      | Modify | Single recipe-status implementation, now exercised.       |
-| `core/scope-core/src/ingest/recipe/decode.rs`         | Modify | Reject empty names; `row_count` across all signals.       |
-| `core/scope-core/src/ingest/recipe/resolve.rs`        | Modify | No symlink sidecars; error without source excerpt.        |
-| `shell/src-tauri/src/lib.rs`                          | Modify | Symlink-proof recipe write; hoisted descriptors.          |
-| `protocol/schema/scope-protocol.json`                 | Modify | `BatchFailure.recipe_required`, version 17.               |
-| `frontend/src/ui/import-wizard.ts`                    | Modify | Timebase evidence, dismissal, escaping.                   |
-| `frontend/src/ui/app-shell.ts`                        | Modify | Isolated wizard mount, registry-derived format hint.      |
-| `scripts/build-windows.sh` / `Cargo.toml`             | Modify | HDF5 on Windows.                                          |
-| `docs/adr/003{3,4}-*.md`                              | Modify | Correct the claims the review falsified.                  |
+| File                                              | Change | Responsibility                                           |
+| ------------------------------------------------- | ------ | -------------------------------------------------------- |
+| `core/scope-core/src/ingest/recipe/mod.rs`        | Modify | Deny unknown fields at every nesting level.              |
+| `core/scope-core/src/ingest/container/mod.rs`     | Modify | Shared limit constants and their error arm.              |
+| `core/scope-core/src/ingest/container/hdf5.rs`    | Modify | Bounded walk, link filtering, declared-size ceiling.     |
+| `core/scope-core/src/ingest/container/parquet.rs` | Modify | Declared-size ceiling, magic fix.                        |
+| `core/scope-core/src/ingest/mod.rs`               | Modify | `IngestError::RecipeRequired`.                           |
+| `core/scope-core/src/ingest/batch.rs`             | Modify | Call `restore::recipe_status` instead of reimplementing. |
+| `core/scope-core/src/restore.rs`                  | Modify | Single recipe-status implementation, now exercised.      |
+| `core/scope-core/src/ingest/recipe/decode.rs`     | Modify | Reject empty names; `row_count` across all signals.      |
+| `core/scope-core/src/ingest/recipe/resolve.rs`    | Modify | No symlink sidecars; error without source excerpt.       |
+| `shell/src-tauri/src/lib.rs`                      | Modify | Symlink-proof recipe write; hoisted descriptors.         |
+| `protocol/schema/scope-protocol.json`             | Modify | `BatchFailure.recipe_required`, version 17.              |
+| `frontend/src/ui/import-wizard.ts`                | Modify | Timebase evidence, dismissal, escaping.                  |
+| `frontend/src/ui/app-shell.ts`                    | Modify | Isolated wizard mount, registry-derived format hint.     |
+| `scripts/build-windows.sh` / `Cargo.toml`         | Modify | HDF5 on Windows.                                         |
+| `docs/adr/003{3,4}-*.md`                          | Modify | Correct the claims the review falsified.                 |
 
 ---
 
@@ -983,13 +983,18 @@ it("still reloads signals when the wizard fails to mount", async () => {
   probe.plane = {
     ingest: {
       ...scanIngest(["/runs/a.csv"]),
-      introspect: () => Promise.reject(new Error("unsupported container magic")),
+      introspect: () =>
+        Promise.reject(new Error("unsupported container magic")),
     },
   };
 
   await probe.ingestPathsReal(["/runs"], {
     recent_failures: [
-      { path: "/runs/mystery.bin", error: "unsupported format", recipe_required: false },
+      {
+        path: "/runs/mystery.bin",
+        error: "unsupported format",
+        recipe_required: false,
+      },
     ],
   });
 
@@ -1039,19 +1044,19 @@ builds failures.
 `app-shell.ts`: gate on the flag and contain the failure.
 
 ```ts
-      const needsRecipe = status.recent_failures.find(
-        (failure) => failure.recipe_required,
-      );
-      if (needsRecipe !== undefined && typeof port.introspect === "function") {
-        try {
-          await ImportWizard.mount(this.plane, needsRecipe.path);
-        } catch (error: unknown) {
-          this.reportError(error);
-        }
-      }
-      keepProgress = status.recent_failures.length > 0;
-      await this.reloadSignals();
-      this.afterLayoutChange();
+const needsRecipe = status.recent_failures.find(
+  (failure) => failure.recipe_required,
+);
+if (needsRecipe !== undefined && typeof port.introspect === "function") {
+  try {
+    await ImportWizard.mount(this.plane, needsRecipe.path);
+  } catch (error: unknown) {
+    this.reportError(error);
+  }
+}
+keepProgress = status.recent_failures.length > 0;
+await this.reloadSignals();
+this.afterLayoutChange();
 ```
 
 `import-wizard.ts`: require preview evidence, and give the wizard a lifecycle.
@@ -1373,11 +1378,9 @@ the answer in `AGENTS.md` so the next plan does not re-litigate it.
 
 ## Self-Review
 
-**Finding coverage.** Windows build → Task 8. HDF5 unbounded recursion → Task
-2. Container allocation from declared size → Task 3. HDF5 external links →
+**Finding coverage.** Windows build → Task 8. HDF5 unbounded recursion → Task 2. Container allocation from declared size → Task 3. HDF5 external links →
 Task 2. `save_recipe` symlink write → Task 4. `TimeSource` unknown fields →
-Task 1. Dead/duplicated recipe-status plus Task 12's four missing tests → Task
-6. Parquet magic false positive → Task 5. Wizard timebase, mount failure, and
+Task 1. Dead/duplicated recipe-status plus Task 12's four missing tests → Task 6. Parquet magic false positive → Task 5. Wizard timebase, mount failure, and
 dismissal → Task 7. Symlinked sidecar and error disclosure, unbounded recipe
 and attribute sizes, introspection cost, decode quadratic, `row_count`, empty
 names, `quoteToml`, descriptor hoisting, `spawn_blocking`, hardcoded format
