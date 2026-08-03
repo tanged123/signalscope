@@ -14,9 +14,10 @@ use scope_core::{
     columns::Column,
     compute, expr,
     ingest::{
-        self, DecodedSource, IngestError, IngestSummary, SUPPORTED_FORMATS,
+        self, DecodedSource, IngestError, IngestSummary,
         admission::{BudgetConfig, MemoryBudget, ResidentCharge},
         batch::{BatchJobs, BatchOptions, CommitSink},
+        registry::ProviderRegistry,
     },
     paging::PageHandle,
     preferences,
@@ -185,9 +186,10 @@ impl CommitSink for ShellCommitSink {
 #[tauri::command]
 async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        let extensions: Vec<&str> = SUPPORTED_FORMATS
+        let descriptors = format_descriptors(&ProviderRegistry::builtin());
+        let extensions: Vec<&str> = descriptors
             .iter()
-            .flat_map(|(_, extensions)| extensions.iter().copied())
+            .flat_map(|descriptor| descriptor.extensions.iter().map(String::as_str))
             .collect();
         let combined = format!(
             "Supported telemetry ({})",
@@ -198,8 +200,13 @@ async fn pick_sources(app: AppHandle) -> Result<Envelope<Vec<String>>, String> {
                 .join(", ")
         );
         let mut dialog = app.dialog().file().add_filter(combined, &extensions);
-        for (label, extensions) in SUPPORTED_FORMATS {
-            dialog = dialog.add_filter(*label, extensions);
+        for descriptor in &descriptors {
+            let extensions = descriptor
+                .extensions
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            dialog = dialog.add_filter(&descriptor.label, &extensions);
         }
         dialog.blocking_pick_files()
     })
@@ -310,19 +317,19 @@ fn release_batch(
 
 #[tauri::command]
 fn list_formats() -> Envelope<Vec<FormatDescriptor>> {
-    Envelope::new(
-        SUPPORTED_FORMATS
-            .iter()
-            .map(|(label, extensions)| FormatDescriptor {
-                id: extensions.first().copied().unwrap_or_default().into(),
-                label: (*label).into(),
-                extensions: extensions
-                    .iter()
-                    .map(|extension| (*extension).into())
-                    .collect(),
-            })
-            .collect(),
-    )
+    Envelope::new(format_descriptors(&ProviderRegistry::builtin()))
+}
+
+fn format_descriptors(registry: &ProviderRegistry) -> Vec<FormatDescriptor> {
+    registry
+        .descriptors()
+        .into_iter()
+        .map(|(id, label, extensions, _)| FormatDescriptor {
+            id: id.into(),
+            label: label.into(),
+            extensions: extensions.to_vec(),
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -492,15 +499,28 @@ fn file_state(state: scope_core::ingest::batch::FileState) -> FileState {
 }
 
 fn expand_sources(paths: Vec<String>) -> Result<Vec<PathBuf>, String> {
+    let registry = ProviderRegistry::builtin();
+    expand_sources_with_registry(paths, &registry)
+}
+
+fn expand_sources_with_registry(
+    paths: Vec<String>,
+    registry: &ProviderRegistry,
+) -> Result<Vec<PathBuf>, String> {
     let mut expanded = Vec::new();
     for path in paths {
-        expand_source(Path::new(&path), true, &mut expanded)?;
+        expand_source(Path::new(&path), true, &mut expanded, registry)?;
     }
     expanded.sort();
     Ok(expanded)
 }
 
-fn expand_source(path: &Path, recursive: bool, expanded: &mut Vec<PathBuf>) -> Result<(), String> {
+fn expand_source(
+    path: &Path,
+    recursive: bool,
+    expanded: &mut Vec<PathBuf>,
+    registry: &ProviderRegistry,
+) -> Result<(), String> {
     if !path.is_dir() {
         expanded.push(path.to_owned());
         return Ok(());
@@ -518,9 +538,9 @@ fn expand_source(path: &Path, recursive: bool, expanded: &mut Vec<PathBuf>) -> R
             .is_dir()
         {
             if recursive {
-                expand_source(&path, true, expanded)?;
+                expand_source(&path, true, expanded, registry)?;
             }
-        } else if supported_path(&path) {
+        } else if supported_path(registry, &path) {
             expanded.push(path);
         }
     }
@@ -545,9 +565,15 @@ fn scan_sources(
     request: Envelope<ScanSourcesRequest>,
 ) -> Result<Envelope<ScanSourcesResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
+    let registry = ProviderRegistry::builtin();
     let mut paths = Vec::new();
-    expand_source(Path::new(&request.path), request.recursive, &mut paths)?;
-    paths.retain(|path| supported_path(path));
+    expand_source(
+        Path::new(&request.path),
+        request.recursive,
+        &mut paths,
+        &registry,
+    )?;
+    paths.retain(|path| supported_path(&registry, path));
     paths.sort();
 
     let mut total_bytes = 0_u64;
@@ -557,8 +583,8 @@ fn scan_sources(
         .filter_map(|path| {
             let metadata = std::fs::metadata(&path).ok()?;
             total_bytes = total_bytes.saturating_add(metadata.len());
-            let label = format_label(&path)?;
-            *counts.entry(label.to_owned()).or_default() += 1;
+            let label = format_label(&registry, &path)?;
+            *counts.entry(label).or_default() += 1;
             Some(path.display().to_string())
         })
         .collect();
@@ -572,20 +598,23 @@ fn scan_sources(
     }))
 }
 
-fn supported_path(path: &Path) -> bool {
-    format_label(path).is_some()
+fn supported_path(registry: &ProviderRegistry, path: &Path) -> bool {
+    format_label(registry, path).is_some()
 }
 
-fn format_label(path: &Path) -> Option<&'static str> {
+fn format_label(registry: &ProviderRegistry, path: &Path) -> Option<String> {
     path.extension()
         .and_then(|extension| extension.to_str())
         .and_then(|extension| {
-            SUPPORTED_FORMATS.iter().find_map(|(label, extensions)| {
-                extensions
-                    .iter()
-                    .any(|candidate| candidate.eq_ignore_ascii_case(extension))
-                    .then_some(*label)
-            })
+            registry
+                .descriptors()
+                .into_iter()
+                .find_map(|(_, label, extensions, _)| {
+                    extensions
+                        .iter()
+                        .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+                        .then(|| label.to_owned())
+                })
         })
 }
 
@@ -1562,6 +1591,7 @@ pub fn run() {
                 budget: Arc::new(budget),
                 terminal_ttl: Duration::from_secs(300),
                 cache_directory: Some(root),
+                provider_registry: Arc::new(ProviderRegistry::builtin()),
             }));
             Ok(())
         })
@@ -1606,7 +1636,11 @@ mod tests {
     use std::sync::Arc;
 
     use scope_core::{
-        ingest::{DecodedSignal, DecodedSource, batch::CommitSink},
+        ingest::{
+            DecodedSignal, DecodedSource,
+            batch::CommitSink,
+            registry::{Confidence, FormatProvider, ProviderRegistry},
+        },
         sources::SourceRecord,
     };
 
@@ -1624,6 +1658,29 @@ mod tests {
 
         let leave = drag_forward(DragDropKind::Leave, &[]).open().unwrap();
         assert!(leave.paths.is_empty());
+    }
+
+    #[test]
+    fn the_picker_filters_come_from_the_registry_not_a_static_table() {
+        let mut registry = ProviderRegistry::builtin();
+        registry.register(FormatProvider::new(
+            "hdf5",
+            "HDF5 containers",
+            &["h5", "hdf5"],
+            5,
+            1,
+            |_| Confidence::No,
+            || Box::new(scope_core::ingest::CsvDecoder),
+        ));
+        let descriptors = format_descriptors(&registry);
+
+        assert!(descriptors.iter().any(|entry| entry.id == "hdf5"));
+        let extensions: Vec<_> = descriptors
+            .iter()
+            .flat_map(|entry| entry.extensions.clone())
+            .collect();
+        assert!(extensions.contains(&"h5".to_owned()));
+        assert!(extensions.contains(&"csv".to_owned()));
     }
 
     fn data_with_signal(path: &str) -> (DataState, SourceId) {

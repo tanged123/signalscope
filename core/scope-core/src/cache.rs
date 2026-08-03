@@ -37,6 +37,7 @@ use crate::{
     ingest::{
         self, DecodeContext, IngestError, IngestSummary,
         provenance::{fingerprint, provenance_digest},
+        registry::ProviderRegistry,
     },
     paging::{PageCache, PageError, PageHandle},
     preferences::Preferences,
@@ -281,7 +282,21 @@ pub fn ingest_or_load(
     context: &mut DecodeContext<'_>,
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
-    ingest_or_load_at(
+    let registry = ProviderRegistry::builtin();
+    ingest_or_load_with_registry(&registry, source, store, key, prefix, context, progress)
+}
+
+pub(crate) fn ingest_or_load_with_registry(
+    registry: &ProviderRegistry,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
+    ingest_or_load_at_with_registry(
+        registry,
         &CacheRoot::beside_source(source),
         source,
         store,
@@ -307,7 +322,44 @@ pub fn ingest_or_load_at(
     context: &mut DecodeContext<'_>,
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
-    let provider = ingest::provider_for(ingest::sniff_format(source)?);
+    let registry = ProviderRegistry::builtin();
+    ingest_or_load_at_with_registry(
+        &registry, root, source, store, key, prefix, context, progress,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ingest_or_load_at_with_registry(
+    registry: &ProviderRegistry,
+    root: &CacheRoot,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
+    ingest_or_load_at_with_provider(
+        registry, None, root, source, store, key, prefix, context, progress,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ingest_or_load_at_with_provider(
+    registry: &ProviderRegistry,
+    provider_id: Option<&str>,
+    root: &CacheRoot,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
+    let provider = match provider_id {
+        Some(provider_id) => ingest::provider_for_id(registry, provider_id)?,
+        None => ingest::provider_for_path(registry, source)?,
+    };
     let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
     let mut on_cache = |fraction| progress(IngestStage::Cache, fraction);
     if let Some(loaded) =
@@ -315,13 +367,21 @@ pub fn ingest_or_load_at(
     {
         return Ok(IngestOutcome {
             loaded,
-            provider_id: provider.id.to_owned(),
+            provider_id: provider.id.clone(),
             provenance,
             sidecar_error: None,
         });
     }
 
-    let summary = ingest::ingest_path(source, store, key, prefix, context)?;
+    let summary = ingest::ingest_path_with_provider(
+        registry,
+        provider_id,
+        source,
+        store,
+        key,
+        prefix,
+        context,
+    )?;
     let total = summary.signals.len().max(1);
     let mut pyramids = Vec::new();
     for (index, id) in summary.signals.iter().enumerate() {
@@ -350,7 +410,7 @@ pub fn ingest_or_load_at(
     };
     Ok(IngestOutcome {
         loaded: LoadedCache { summary, pyramids },
-        provider_id: provider.id.to_owned(),
+        provider_id: provider.id,
         provenance,
         sidecar_error,
     })
@@ -465,7 +525,19 @@ pub fn try_load(
     prefix: &str,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LoadedCache>, CacheError> {
-    let provider = ingest::provider_for(ingest::sniff_format(source)?);
+    let registry = ProviderRegistry::builtin();
+    try_load_with_registry(&registry, source, store, key, prefix, progress)
+}
+
+pub(crate) fn try_load_with_registry(
+    registry: &ProviderRegistry,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Option<LoadedCache>, CacheError> {
+    let provider = ingest::provider_for_path(registry, source)?;
     let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
     try_load_from_root(
         &CacheRoot::beside_source(source),
@@ -834,7 +906,8 @@ mod tests {
             .iter()
             .map(|(id, pyramid)| (store.signal(*id).unwrap(), pyramid))
             .collect();
-        let provider = ingest::provider_for(ingest::sniff_format(source).unwrap());
+        let registry = ProviderRegistry::builtin();
+        let provider = ingest::provider_for_path(&registry, source).unwrap();
         let provenance = provenance_digest(&provider, &fingerprint(source).unwrap(), &[]);
         write(
             source,

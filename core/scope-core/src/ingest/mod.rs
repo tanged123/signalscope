@@ -6,12 +6,13 @@ mod csv;
 mod decoded;
 mod mcap;
 pub mod provenance;
+pub mod registry;
 
 pub use self::csv::CsvDecoder;
 pub use self::decoded::*;
 pub use self::mcap::McapDecoder;
 
-use std::{fs::File, io::Read, path::Path};
+use std::path::Path;
 
 use crate::{
     naming::normalize_segment,
@@ -38,47 +39,87 @@ pub trait Decoder {
     ) -> Result<DecodedSource, IngestError>;
 }
 
-const MCAP_MAGIC: [u8; 8] = *b"\x89MCAP0\r\n";
+use self::registry::{ProviderRegistry, SelectionError};
 
-/// Ingestible formats as (label, extensions), for hosts building file
-/// pickers. Actual dispatch sniffs content, not extensions.
-pub const SUPPORTED_FORMATS: &[(&str, &[&str])] = &[
-    (
-        "Delimited text (CSV, TSV, TXT, DAT)",
-        &["csv", "tsv", "txt", "dat"],
-    ),
-    ("MCAP recordings (MCAP)", &["mcap"]),
-];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceFormat {
-    Csv,
-    Mcap,
+/// Selects a provider by content and decodes a source without committing it.
+///
+/// # Errors
+///
+/// Returns an unsupported-format, IO, cancellation, or decoder error.
+pub fn dispatch(
+    registry: &ProviderRegistry,
+    path: &Path,
+    context: &mut DecodeContext<'_>,
+) -> Result<(provenance::ProviderInfo, DecodedSource), IngestError> {
+    let provider = registry.select(path).map_err(selection_error)?;
+    decode_with_provider(provider, path, context)
 }
 
-pub(crate) fn sniff_format(path: &Path) -> Result<SourceFormat, IngestError> {
-    let mut magic = Vec::with_capacity(MCAP_MAGIC.len());
-    File::open(path)?
-        .take(MCAP_MAGIC.len() as u64)
-        .read_to_end(&mut magic)?;
-    Ok(if magic == MCAP_MAGIC {
-        SourceFormat::Mcap
-    } else {
-        SourceFormat::Csv
-    })
+/// Decodes a source using its recorded provider id.
+///
+/// # Errors
+///
+/// Returns a provider-unavailable, IO, cancellation, or decoder error.
+pub fn dispatch_with_provider(
+    registry: &ProviderRegistry,
+    provider_id: &str,
+    path: &Path,
+    context: &mut DecodeContext<'_>,
+) -> Result<(provenance::ProviderInfo, DecodedSource), IngestError> {
+    let provider =
+        registry
+            .provider(provider_id)
+            .ok_or_else(|| IngestError::ProviderUnavailable {
+                provider_id: provider_id.to_owned(),
+            })?;
+    decode_with_provider(provider, path, context)
 }
 
-#[must_use]
-pub fn provider_for(format: SourceFormat) -> provenance::ProviderInfo {
-    match format {
-        SourceFormat::Csv => provenance::ProviderInfo {
-            id: "csv",
-            cache_abi: provenance::CACHE_ABI_CSV,
-        },
-        SourceFormat::Mcap => provenance::ProviderInfo {
-            id: "mcap",
-            cache_abi: provenance::CACHE_ABI_MCAP,
-        },
+fn decode_with_provider(
+    provider: &registry::FormatProvider,
+    path: &Path,
+    context: &mut DecodeContext<'_>,
+) -> Result<(provenance::ProviderInfo, DecodedSource), IngestError> {
+    let info = provider_info(provider);
+    let decoded = provider.decoder().decode(path, context)?;
+    Ok((info, decoded))
+}
+
+pub(crate) fn provider_for_path(
+    registry: &ProviderRegistry,
+    path: &Path,
+) -> Result<provenance::ProviderInfo, IngestError> {
+    registry
+        .select(path)
+        .map(provider_info)
+        .map_err(selection_error)
+}
+
+pub(crate) fn provider_for_id(
+    registry: &ProviderRegistry,
+    provider_id: &str,
+) -> Result<provenance::ProviderInfo, IngestError> {
+    registry
+        .provider(provider_id)
+        .map(provider_info)
+        .ok_or_else(|| IngestError::ProviderUnavailable {
+            provider_id: provider_id.to_owned(),
+        })
+}
+
+fn provider_info(provider: &registry::FormatProvider) -> provenance::ProviderInfo {
+    provenance::ProviderInfo {
+        id: provider.id().to_owned(),
+        cache_abi: provider.cache_abi(),
+    }
+}
+
+fn selection_error(error: SelectionError) -> IngestError {
+    match error {
+        SelectionError::Io { source, .. } => IngestError::Io(source),
+        SelectionError::Unsupported { path, known } => IngestError::UnsupportedFormat(format!(
+            "unsupported input {path}; known formats: {known}"
+        )),
     }
 }
 
@@ -89,6 +130,7 @@ pub fn provider_for(format: SourceFormat) -> provenance::ProviderInfo {
 /// Returns [`IngestError`] when the source cannot be read, decoded, or
 /// registered.
 pub fn ingest_path(
+    registry: &ProviderRegistry,
     path: impl AsRef<Path>,
     store: &mut SignalStore,
     key: SourceKey,
@@ -96,9 +138,23 @@ pub fn ingest_path(
     context: &mut DecodeContext<'_>,
 ) -> Result<IngestSummary, IngestError> {
     let path = path.as_ref();
-    let decoded = match sniff_format(path)? {
-        SourceFormat::Csv => CsvDecoder.decode(path, context)?,
-        SourceFormat::Mcap => McapDecoder.decode(path, context)?,
+    let (_, decoded) = dispatch(registry, path, context)?;
+    commit(store, key, prefix, path, decoded)
+}
+
+pub(crate) fn ingest_path_with_provider(
+    registry: &ProviderRegistry,
+    provider_id: Option<&str>,
+    path: impl AsRef<Path>,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+) -> Result<IngestSummary, IngestError> {
+    let path = path.as_ref();
+    let (_, decoded) = match provider_id {
+        Some(provider_id) => dispatch_with_provider(registry, provider_id, path, context)?,
+        None => dispatch(registry, path, context)?,
     };
     commit(store, key, prefix, path, decoded)
 }
@@ -137,6 +193,10 @@ pub enum IngestError {
     NoDataRows,
     #[error("ingest was cancelled")]
     Cancelled,
+    #[error("unsupported format: {0}")]
+    UnsupportedFormat(String),
+    #[error("recorded provider is unavailable: {provider_id}")]
+    ProviderUnavailable { provider_id: String },
     #[error(transparent)]
     Csv(#[from] ::csv::Error),
     #[error(transparent)]
@@ -163,6 +223,7 @@ pub(crate) fn ingest_for_test(
         cancel: &cancel,
     };
     ingest_path(
+        &ProviderRegistry::builtin(),
         path,
         store,
         SourceKey(uuid::Uuid::new_v4()),
@@ -211,6 +272,73 @@ mod tests {
         assert_eq!(
             gps.values().iter().filter(|value| value.is_nan()).count(),
             2
+        );
+    }
+
+    #[test]
+    fn reopen_uses_the_recorded_provider_and_never_sniffs_another() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "time,value\n0,1\n1,2").unwrap();
+        let mut registry = ProviderRegistry::builtin();
+        registry.register(registry::FormatProvider::new(
+            "greedy",
+            "Greedy",
+            &["csv"],
+            100,
+            1,
+            |_| registry::Confidence::Likely,
+            || Box::new(CsvDecoder),
+        ));
+        let cancel = CancelToken::default();
+        let mut progress = |_| {};
+        let mut context = DecodeContext {
+            progress: &mut progress,
+            cancel: &cancel,
+        };
+
+        let (info, _) =
+            dispatch_with_provider(&registry, "csv", file.path(), &mut context).unwrap();
+        assert_eq!(info.id, "csv");
+    }
+
+    #[test]
+    fn a_missing_provider_reports_instead_of_falling_back() {
+        let registry = ProviderRegistry::builtin();
+        let cancel = CancelToken::default();
+        let mut progress = |_| {};
+        let mut context = DecodeContext {
+            progress: &mut progress,
+            cancel: &cancel,
+        };
+        let error = dispatch_with_provider(
+            &registry,
+            "acme-lab-format",
+            Path::new("missing.data"),
+            &mut context,
+        )
+        .unwrap_err();
+        assert!(matches!(error, IngestError::ProviderUnavailable { .. }));
+        assert!(error.to_string().contains("acme-lab-format"));
+    }
+
+    #[test]
+    fn a_provider_change_invalidates_the_cache_for_that_source() {
+        let fingerprint = provenance::Fingerprint {
+            source_len: 1,
+            mtime_ns: 2,
+            head_crc: 3,
+        };
+        let first = provenance::ProviderInfo {
+            id: "csv".into(),
+            cache_abi: provenance::CACHE_ABI_CSV,
+        };
+        let second = provenance::ProviderInfo {
+            id: "csv-v2".into(),
+            cache_abi: provenance::CACHE_ABI_CSV,
+        };
+        assert_ne!(
+            provenance::provenance_digest(&first, &fingerprint, &[]),
+            provenance::provenance_digest(&second, &fingerprint, &[])
         );
     }
 

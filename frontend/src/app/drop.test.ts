@@ -6,6 +6,10 @@ import { classifyDrop, expandDropPaths, unsupportedDropMessage } from "./drop";
 function scanningPort(
   scans: Record<string, string[]>,
   failing: string[] = [],
+  formats = [
+    { id: "csv", label: "Delimited text", extensions: ["csv", "tsv"] },
+    { id: "mcap", label: "MCAP recordings", extensions: ["mcap"] },
+  ],
 ): IngestPort {
   return {
     scanSources: (path: string) => {
@@ -16,11 +20,7 @@ function scanningPort(
         format_counts: [],
       });
     },
-    listFormats: () =>
-      Promise.resolve([
-        { id: "csv", label: "Delimited text", extensions: ["csv", "tsv"] },
-        { id: "mcap", label: "MCAP recordings", extensions: ["mcap"] },
-      ]),
+    listFormats: () => Promise.resolve(formats),
   } as unknown as IngestPort;
 }
 
@@ -81,5 +81,20 @@ describe("unsupportedDropMessage", () => {
     expect(message).toContain(".csv");
     expect(message).toContain(".tsv");
     expect(message).toContain(".mcap");
+  });
+
+  it("names newly registered formats", async () => {
+    const message = await unsupportedDropMessage(
+      scanningPort(
+        {},
+        [],
+        [
+          { id: "csv", label: "Delimited text", extensions: ["csv", "tsv"] },
+          { id: "hdf5", label: "HDF5 containers", extensions: ["h5", "hdf5"] },
+        ],
+      ),
+    );
+    expect(message).toContain(".h5");
+    expect(message).toContain(".csv");
   });
 });

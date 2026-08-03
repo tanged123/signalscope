@@ -44,3 +44,9 @@ the out-of-core store. The MCAP reader currently loads the whole file into
 memory, matching the in-memory Phase 1 store; the `Decoder` seam hides the
 change when mmap-backed columns land. Live sources later become long-lived
 jobs publishing the same status shape.
+
+## 2026-08-03 amendment
+
+ADR 0033 replaces the closed format enum with a deterministic runtime provider
+registry. The fixed probe window, fail-closed unknown-input behavior, and
+recorded-provider reopen rule apply to every ingest job.

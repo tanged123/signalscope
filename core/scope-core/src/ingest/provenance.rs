@@ -7,9 +7,9 @@ use sha2::{Digest, Sha256};
 pub const CACHE_ABI_CSV: u32 = 1;
 pub const CACHE_ABI_MCAP: u32 = 1;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderInfo {
-    pub id: &'static str,
+    pub id: String,
     pub cache_abi: u32,
 }
 
@@ -75,7 +75,7 @@ mod tests {
 
     fn info() -> ProviderInfo {
         ProviderInfo {
-            id: "csv",
+            id: "csv".into(),
             cache_abi: CACHE_ABI_CSV,
         }
     }
@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(digest, provenance_digest(&info(), &base, &[]));
 
         let other_abi = ProviderInfo {
-            id: "csv",
+            id: "csv".into(),
             cache_abi: CACHE_ABI_CSV + 1,
         };
         assert_ne!(digest, provenance_digest(&other_abi, &base, &[]));
@@ -100,7 +100,7 @@ mod tests {
             digest,
             provenance_digest(
                 &ProviderInfo {
-                    id: "mcap",
+                    id: "mcap".into(),
                     cache_abi: CACHE_ABI_CSV,
                 },
                 &base,

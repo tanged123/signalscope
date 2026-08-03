@@ -14,6 +14,7 @@ use crate::{
     cache::{self, CacheError, CacheRoot},
     ingest::{
         CancelToken, DecodeContext, DecodedSignal, DecodedSource, IngestError, IngestSummary,
+        registry::ProviderRegistry,
     },
     pyramid::Pyramid,
     sources::{Admission, SourceError, SourceRecord, SourceRegistry},
@@ -269,6 +270,7 @@ pub struct BatchOptions {
     pub budget: Arc<MemoryBudget>,
     pub terminal_ttl: Duration,
     pub cache_directory: Option<PathBuf>,
+    pub provider_registry: Arc<ProviderRegistry>,
 }
 
 impl BatchOptions {
@@ -282,6 +284,7 @@ impl BatchOptions {
             })),
             terminal_ttl: Duration::from_secs(60),
             cache_directory: None,
+            provider_registry: Arc::new(ProviderRegistry::builtin()),
         }
     }
 }
@@ -395,6 +398,7 @@ impl BatchJobs {
                 resident: Arc::clone(&self.resident),
                 budget: Arc::clone(&self.options.budget),
                 cache_directory: self.options.cache_directory.clone(),
+                provider_registry: Arc::clone(&self.options.provider_registry),
                 sink: Arc::clone(&sink),
             };
             handles.push(thread::spawn(move || worker.run()));
@@ -507,6 +511,7 @@ struct Worker {
     resident: Arc<Mutex<Vec<ResidentCharge>>>,
     budget: Arc<MemoryBudget>,
     cache_directory: Option<PathBuf>,
+    provider_registry: Arc<ProviderRegistry>,
     sink: Arc<dyn CommitSink>,
 }
 
@@ -574,7 +579,9 @@ impl Worker {
         };
         let mut stage_progress = |_, _| {};
         let outcome = if let Some(directory) = &self.cache_directory {
-            cache::ingest_or_load_at(
+            cache::ingest_or_load_at_with_provider(
+                &self.provider_registry,
+                record.provider_id.as_deref(),
                 &CacheRoot::app_owned(directory),
                 &record.path,
                 &mut temporary,
@@ -584,7 +591,10 @@ impl Worker {
                 &mut stage_progress,
             )
         } else {
-            cache::ingest_or_load(
+            cache::ingest_or_load_at_with_provider(
+                &self.provider_registry,
+                record.provider_id.as_deref(),
+                &CacheRoot::beside_source(&record.path),
                 &record.path,
                 &mut temporary,
                 record.key,

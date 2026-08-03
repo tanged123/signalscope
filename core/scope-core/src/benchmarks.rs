@@ -8,6 +8,7 @@ use crate::{
         DecodedSource, IngestError, IngestSummary,
         admission::{BudgetConfig, MemoryBudget},
         batch::{BatchJobs, BatchOptions, BatchState, CommitSink},
+        registry::ProviderRegistry,
     },
     pyramid::{FINEST_STORED_LEVEL, Pyramid},
     sources::SourceRecord,
@@ -66,6 +67,7 @@ fn bench_batch_ingests_one_thousand_synthetic_runs() {
         })),
         terminal_ttl: Duration::from_secs(60),
         cache_directory: None,
+        provider_registry: Arc::new(ProviderRegistry::builtin()),
     });
 
     let started = Instant::now();
