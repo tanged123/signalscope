@@ -1,5 +1,5 @@
 {
-  "protocol_version": 14,
+  "protocol_version": 15,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -271,6 +271,17 @@
     "SessionDialogMode": {
       "kind": "enum",
       "variants": ["open", "save"]
+    },
+    "DragDropKind": {
+      "kind": "enum",
+      "variants": ["enter", "drop", "leave"]
+    },
+    "DragDropForward": {
+      "kind": "object",
+      "fields": {
+        "kind": "DragDropKind",
+        "paths": "string[]"
+      }
     },
     "PickSessionRequest": {
       "kind": "object",

@@ -28,14 +28,15 @@ use scope_core::{
 use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
     BatchState, BatchStatus, CreateDerivedBundleRequest, DerivedBundleResponse, DerivedRequest,
-    Envelope, ExportEstimate, ExportEstimateEntry, ExportEstimateRequest, ExportFidelity,
-    ExportFileKind, ExportRange, ExportSelection, ExportWriteRequest, FileState, FormatCount,
-    FormatDescriptor, IngestBatchRequest, LoadSessionRequest, LoadedSession, PickSessionRequest,
-    RemoveDerivedBundleRequest, RemoveSignalRequest, RestoreReconcileRequest,
-    RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries,
-    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveSessionRequest,
-    ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SignalSummary, SignalTile,
-    SkippedMemberSummary, SourceSummary, TileRequest, TileResponse,
+    DragDropForward, DragDropKind, Envelope, ExportEstimate, ExportEstimateEntry,
+    ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange, ExportSelection,
+    ExportWriteRequest, FileState, FormatCount, FormatDescriptor, IngestBatchRequest,
+    LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveDerivedBundleRequest,
+    RemoveSignalRequest, RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest,
+    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
+    SaveExportFileToDirectoryRequest, SaveSessionRequest, ScanSourcesRequest, ScanSourcesResponse,
+    SessionDialogMode, SignalSummary, SignalTile, SkippedMemberSummary, SourceSummary, TileRequest,
+    TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -524,6 +525,18 @@ fn expand_source(path: &Path, recursive: bool, expanded: &mut Vec<PathBuf>) -> R
         }
     }
     Ok(())
+}
+
+/// Envelope payload for a forwarded window drag-drop event. Paths use
+/// `display()` like every other path the shell hands the frontend.
+fn drag_forward(kind: DragDropKind, paths: &[PathBuf]) -> Envelope<DragDropForward> {
+    Envelope::new(DragDropForward {
+        kind,
+        paths: paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+    })
 }
 
 #[tauri::command]
@@ -1497,6 +1510,20 @@ pub fn run() {
     let workers = std::thread::available_parallelism().map_or(1, usize::from);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            use tauri::{DragDropEvent, Emitter, WindowEvent};
+            let WindowEvent::DragDrop(event) = event else {
+                return;
+            };
+            let payload = match event {
+                DragDropEvent::Enter { paths, .. } => drag_forward(DragDropKind::Enter, paths),
+                DragDropEvent::Drop { paths, .. } => drag_forward(DragDropKind::Drop, paths),
+                DragDropEvent::Leave => drag_forward(DragDropKind::Leave, &[]),
+                // Over fires at pointer-move frequency; never forwarded.
+                _ => return,
+            };
+            let _ = window.emit("scope://drag-drop", payload);
+        })
         .manage(Arc::new(Mutex::new(DataState::default())))
         .manage(RestoreGate::default())
         .setup(move |app| {
@@ -1584,6 +1611,20 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn drag_forwarding_serializes_kind_and_display_paths() {
+        let payload = drag_forward(
+            DragDropKind::Drop,
+            &[std::path::PathBuf::from("/data/run 01.csv")],
+        );
+        let opened = payload.open().unwrap();
+        assert!(matches!(opened.kind, DragDropKind::Drop));
+        assert_eq!(opened.paths, ["/data/run 01.csv"]);
+
+        let leave = drag_forward(DragDropKind::Leave, &[]).open().unwrap();
+        assert!(leave.paths.is_empty());
+    }
 
     fn data_with_signal(path: &str) -> (DataState, SourceId) {
         let mut data = DataState::default();
