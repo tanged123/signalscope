@@ -14,7 +14,7 @@ import {
 describe("preferences", () => {
   it("defaults match the spec", () => {
     const prefs = defaultPreferences();
-    expect(prefs.schema_version).toBe(2);
+    expect(prefs.schema_version).toBe(3);
     expect(prefs.ui_font_family).toBe("inter");
     expect(prefs.plot_font_family).toBe("jetbrains");
     expect(prefs.ui_font_size).toBe(13);

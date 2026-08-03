@@ -270,6 +270,7 @@ pub struct BatchOptions {
     pub budget: Arc<MemoryBudget>,
     pub terminal_ttl: Duration,
     pub cache_directory: Option<PathBuf>,
+    pub recipe_directory: Option<PathBuf>,
     pub provider_registry: Arc<ProviderRegistry>,
 }
 
@@ -284,6 +285,7 @@ impl BatchOptions {
             })),
             terminal_ttl: Duration::from_secs(60),
             cache_directory: None,
+            recipe_directory: None,
             provider_registry: Arc::new(ProviderRegistry::builtin()),
         }
     }
@@ -398,6 +400,7 @@ impl BatchJobs {
                 resident: Arc::clone(&self.resident),
                 budget: Arc::clone(&self.options.budget),
                 cache_directory: self.options.cache_directory.clone(),
+                recipe_directory: self.options.recipe_directory.clone(),
                 provider_registry: Arc::clone(&self.options.provider_registry),
                 sink: Arc::clone(&sink),
             };
@@ -511,6 +514,7 @@ struct Worker {
     resident: Arc<Mutex<Vec<ResidentCharge>>>,
     budget: Arc<MemoryBudget>,
     cache_directory: Option<PathBuf>,
+    recipe_directory: Option<PathBuf>,
     provider_registry: Arc<ProviderRegistry>,
     sink: Arc<dyn CommitSink>,
 }
@@ -560,6 +564,7 @@ impl Worker {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn prepare_and_commit(
         &self,
         record: &SourceRecord,
@@ -578,10 +583,58 @@ impl Worker {
             cancel: &self.cancel,
         };
         let mut stage_progress = |_, _| {};
+        let mut registry = (*self.provider_registry).clone();
+        let mut provider_id = record.provider_id.clone();
+        let mut recipe_id = record.recipe_id.clone();
+        let mut recipe_digest = record.recipe_digest.clone();
+        if provider_id
+            .as_deref()
+            .is_none_or(|provider| provider.starts_with("recipe:"))
+        {
+            let preferences = crate::preferences::Preferences {
+                recipe_directory: self
+                    .recipe_directory
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                ..crate::preferences::Preferences::default()
+            };
+            match crate::ingest::recipe::resolve::resolve_for(&record.path, &preferences) {
+                Ok(Some(resolved)) => {
+                    if record
+                        .recipe_id
+                        .as_deref()
+                        .is_some_and(|id| id != resolved.recipe.id)
+                        || record
+                            .recipe_digest
+                            .as_deref()
+                            .is_some_and(|digest| digest != resolved.digest)
+                    {
+                        return Err(ProcessError::Failed(
+                            "recorded recipe changed; reconfirm the recipe before restoring".into(),
+                        ));
+                    }
+                    provider_id = Some(format!("recipe:{}", resolved.recipe.id));
+                    recipe_id = Some(resolved.recipe.id.clone());
+                    recipe_digest = Some(resolved.digest.clone());
+                    registry.register(crate::ingest::recipe::decode::provider(
+                        resolved.recipe,
+                        resolved.digest,
+                    ));
+                }
+                Ok(None) if record.recipe_id.is_some() || record.recipe_digest.is_some() => {
+                    return Err(ProcessError::Failed(
+                        "recorded recipe is missing; relink the recipe before restoring".into(),
+                    ));
+                }
+                Ok(None) => {}
+                Err(error) => return Err(ProcessError::Failed(error.to_string())),
+            }
+        }
         let outcome = if let Some(directory) = &self.cache_directory {
             cache::ingest_or_load_at_with_provider(
-                &self.provider_registry,
-                record.provider_id.as_deref(),
+                &registry,
+                provider_id.as_deref(),
+                recipe_digest.as_deref(),
                 &CacheRoot::app_owned(directory),
                 &record.path,
                 &mut temporary,
@@ -592,8 +645,9 @@ impl Worker {
             )
         } else {
             cache::ingest_or_load_at_with_provider(
-                &self.provider_registry,
-                record.provider_id.as_deref(),
+                &registry,
+                provider_id.as_deref(),
+                recipe_digest.as_deref(),
                 &CacheRoot::beside_source(&record.path),
                 &record.path,
                 &mut temporary,
@@ -645,6 +699,8 @@ impl Worker {
         let mut committed = record.clone();
         committed.provider_id = Some(outcome.provider_id.clone());
         committed.decode_provenance = Some(outcome.provenance.clone());
+        committed.recipe_id = recipe_id;
+        committed.recipe_digest = recipe_digest;
         self.sink
             .commit(&committed, decoded, pyramids)
             .map_err(|error| match error {
@@ -919,6 +975,8 @@ mod tests {
             prefix: "saved".into(),
             provider_id: None,
             decode_provenance: None,
+            recipe_id: None,
+            recipe_digest: None,
             reconcile_legacy: true,
         };
         let jobs = BatchJobs::new(BatchOptions::for_tests());

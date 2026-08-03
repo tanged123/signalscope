@@ -730,6 +730,8 @@ mod tests {
             prefix: String::new(),
             provider_id: None,
             decode_provenance: None,
+            recipe_id: None,
+            recipe_digest: None,
             reconcile_legacy: false,
         });
         session.tabs[0].panels = panels;
@@ -1112,6 +1114,8 @@ mod tests {
                 prefix: "secret".into(),
                 provider_id: None,
                 decode_provenance: None,
+                recipe_id: None,
+                recipe_digest: None,
                 reconcile_legacy: false,
             }],
             ..Session::default()

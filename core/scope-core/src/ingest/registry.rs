@@ -140,6 +140,8 @@ impl ProviderRegistry {
         let mut registry = Self::empty();
         registry.register(super::csv::provider());
         registry.register(super::mcap::provider());
+        registry.register(super::container::hdf5::provider());
+        registry.register(super::container::parquet::provider());
         registry
     }
 

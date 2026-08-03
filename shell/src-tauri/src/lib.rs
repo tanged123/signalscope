@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Read,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -17,6 +18,7 @@ use scope_core::{
         self, DecodedSource, IngestError, IngestSummary,
         admission::{BudgetConfig, MemoryBudget, ResidentCharge},
         batch::{BatchJobs, BatchOptions, CommitSink},
+        container::ContainerReader,
         registry::ProviderRegistry,
     },
     paging::PageHandle,
@@ -28,16 +30,16 @@ use scope_core::{
 };
 use scope_protocol::{
     AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchFailure, BatchFileStatus, BatchJob,
-    BatchState, BatchStatus, CreateDerivedBundleRequest, DerivedBundleResponse, DerivedRequest,
-    DragDropForward, DragDropKind, Envelope, ExportEstimate, ExportEstimateEntry,
-    ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange, ExportSelection,
-    ExportWriteRequest, FileState, FormatCount, FormatDescriptor, IngestBatchRequest,
-    LoadSessionRequest, LoadedSession, PickSessionRequest, RemoveDerivedBundleRequest,
-    RemoveSignalRequest, RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest,
-    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
-    SaveExportFileToDirectoryRequest, SaveSessionRequest, ScanSourcesRequest, ScanSourcesResponse,
-    SessionDialogMode, SignalSummary, SignalTile, SkippedMemberSummary, SourceSummary, TileRequest,
-    TileResponse,
+    BatchState, BatchStatus, ContainerOutline, CreateDerivedBundleRequest, DatasetOutline,
+    DerivedBundleResponse, DerivedRequest, DragDropForward, DragDropKind, Envelope, ExportEstimate,
+    ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind, ExportRange,
+    ExportSelection, ExportWriteRequest, FileState, FormatCount, FormatDescriptor,
+    IngestBatchRequest, IntrospectRequest, LoadSessionRequest, LoadedSession, PickSessionRequest,
+    RecipeDestination, RemoveDerivedBundleRequest, RemoveSignalRequest, RestoreReconcileRequest,
+    RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest, SampleResponse, SampleSeries,
+    SaveExportFileRequest, SaveExportFileToDirectoryRequest, SaveRecipeRequest, SaveRecipeResponse,
+    SaveSessionRequest, ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SignalSummary,
+    SignalTile, SkippedMemberSummary, SourceSummary, TileRequest, TileResponse,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -320,6 +322,119 @@ fn list_formats() -> Envelope<Vec<FormatDescriptor>> {
     Envelope::new(format_descriptors(&ProviderRegistry::builtin()))
 }
 
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn introspect_container(
+    request: Envelope<IntrospectRequest>,
+) -> Result<Envelope<ContainerOutline>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let path = Path::new(&request.path);
+    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut probe = Vec::with_capacity(scope_core::ingest::registry::PROBE_BYTES);
+    std::io::Read::by_ref(&mut file)
+        .take(scope_core::ingest::registry::PROBE_BYTES as u64)
+        .read_to_end(&mut probe)
+        .map_err(|error| error.to_string())?;
+    let (container, reader): (String, Box<dyn ContainerReader>) =
+        if scope_core::ingest::container::hdf5::is_hdf5_magic(&probe) {
+            let reader = scope_core::ingest::container::hdf5::Hdf5Container::open(path)
+                .map_err(|error| error.to_string())?;
+            ("hdf5".into(), Box::new(reader))
+        } else if scope_core::ingest::container::parquet::is_parquet_magic(&probe) {
+            let reader = scope_core::ingest::container::parquet::ParquetContainer::open(path)
+                .map_err(|error| error.to_string())?;
+            ("parquet".into(), Box::new(reader))
+        } else {
+            return Err("unsupported container magic".into());
+        };
+    let datasets = reader
+        .datasets()
+        .to_vec()
+        .into_iter()
+        .map(|entry| {
+            let preview = match entry.kind {
+                scope_core::ingest::container::DatasetKind::Numeric => reader
+                    .read_preview_f64(&entry.path, 8)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .take(8)
+                    .collect(),
+                _ => Vec::new(),
+            };
+            DatasetOutline {
+                path: entry.path,
+                kind: match entry.kind {
+                    scope_core::ingest::container::DatasetKind::Numeric => "numeric",
+                    scope_core::ingest::container::DatasetKind::Text => "text",
+                    scope_core::ingest::container::DatasetKind::Compound => "compound",
+                    scope_core::ingest::container::DatasetKind::Unsupported => "unsupported",
+                }
+                .into(),
+                len: entry.len as u64,
+                shape: entry
+                    .shape
+                    .into_iter()
+                    .map(|value| u32::try_from(value).unwrap_or(u32::MAX))
+                    .collect(),
+                sample_preview: preview,
+            }
+        })
+        .collect();
+    Ok(Envelope::new(ContainerOutline {
+        container,
+        datasets,
+    }))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn save_recipe(
+    request: Envelope<SaveRecipeRequest>,
+    app: AppHandle,
+) -> Result<Envelope<SaveRecipeResponse>, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let recipe = scope_core::ingest::recipe::parse_recipe(&request.recipe_toml)
+        .map_err(|error| error.to_string())?;
+    let destination = match request.destination {
+        RecipeDestination::Sidecar => {
+            let source = Path::new(&request.path);
+            let file_name = source
+                .file_name()
+                .ok_or_else(|| "source path has no file name".to_owned())?;
+            source.with_file_name(format!("{}.scope.toml", file_name.to_string_lossy()))
+        }
+        RecipeDestination::UserDirectory => {
+            let preferences = preferences_path(&app)
+                .ok()
+                .filter(|path| path.exists())
+                .and_then(|path| preferences::load_from_path(&path).ok())
+                .unwrap_or_default();
+            let directory = if let Some(directory) = preferences.recipe_directory {
+                PathBuf::from(directory)
+            } else {
+                app.path()
+                    .app_data_dir()
+                    .map_err(|error| error.to_string())?
+                    .join("recipes")
+            };
+            std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+            directory.join(format!("{}.toml", recipe.id))
+        }
+    };
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = destination.with_extension("toml.tmp");
+    std::fs::write(&temporary, request.recipe_toml).map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, &destination).map_err(|error| error.to_string())?;
+    let digest = scope_core::ingest::recipe::content_digest(&recipe);
+    Ok(Envelope::new(SaveRecipeResponse {
+        recipe_id: recipe.id,
+        digest,
+        saved_to: destination.display().to_string(),
+    }))
+}
+
 fn format_descriptors(registry: &ProviderRegistry) -> Vec<FormatDescriptor> {
     registry
         .descriptors()
@@ -392,6 +507,8 @@ fn restore_reconcile(
             record
                 .decode_provenance
                 .clone_from(&current.decode_provenance);
+            record.recipe_id.clone_from(&current.recipe_id);
+            record.recipe_digest.clone_from(&current.recipe_digest);
             let Some(source) = data.store.sources().find(|source| source.key == key) else {
                 missing.insert(key);
                 continue;
@@ -449,6 +566,8 @@ fn core_source_record(record: &session::SourceRecord) -> Result<SourceRecord, St
         prefix: record.prefix.clone(),
         provider_id: record.provider_id.clone(),
         decode_provenance: record.decode_provenance.clone(),
+        recipe_id: record.recipe_id.clone(),
+        recipe_digest: record.recipe_digest.clone(),
         reconcile_legacy: record.reconcile_legacy,
     })
 }
@@ -1591,6 +1710,7 @@ pub fn run() {
                 budget: Arc::new(budget),
                 terminal_ttl: Duration::from_secs(300),
                 cache_directory: Some(root),
+                recipe_directory: preferences.recipe_directory.map(PathBuf::from),
                 provider_registry: Arc::new(ProviderRegistry::builtin()),
             }));
             Ok(())
@@ -1605,6 +1725,8 @@ pub fn run() {
             cancel_batch,
             release_batch,
             list_formats,
+            introspect_container,
+            save_recipe,
             restore_sources,
             restore_reconcile,
             list_sources,
@@ -1755,6 +1877,8 @@ mod tests {
             prefix: "run".into(),
             provider_id: Some("csv".into()),
             decode_provenance: Some("abc".into()),
+            recipe_id: None,
+            recipe_digest: None,
             reconcile_legacy: false,
         };
         let time: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0, 3.0]);

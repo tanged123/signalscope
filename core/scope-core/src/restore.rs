@@ -16,6 +16,62 @@ use crate::{
     store::SourceKey,
 };
 
+use crate::ingest::recipe::resolve::ResolvedRecipe;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecipeStatus {
+    Matched,
+    Changed,
+    Missing,
+}
+
+#[must_use]
+pub fn recipe_status(
+    record: &crate::session::SourceRecord,
+    resolved: Option<&ResolvedRecipe>,
+) -> RecipeStatus {
+    match (
+        record.recipe_id.as_deref(),
+        record.recipe_digest.as_deref(),
+        resolved,
+    ) {
+        (None, None, None) => RecipeStatus::Matched,
+        (Some(id), Some(digest), Some(resolved))
+            if id == resolved.recipe.id && digest == resolved.digest =>
+        {
+            RecipeStatus::Matched
+        }
+        (Some(_), Some(_), None) => RecipeStatus::Missing,
+        _ => RecipeStatus::Changed,
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum RecipeRestoreError {
+    #[error("recipe changed; reconfirm the recipe before restoring this source")]
+    Changed,
+    #[error("recipe is missing; relink the recipe before restoring this source")]
+    Missing,
+}
+
+/// Rejects a source until its recorded recipe has been resolved and compared.
+///
+/// # Errors
+///
+/// Returns [`RecipeRestoreError::Changed`] when the resolved digest differs,
+/// or [`RecipeRestoreError::Missing`] when the recorded recipe cannot be
+/// resolved.
+pub fn restore_source(
+    record: &crate::session::SourceRecord,
+    resolved: Option<&ResolvedRecipe>,
+) -> Result<(), RecipeRestoreError> {
+    match recipe_status(record, resolved) {
+        RecipeStatus::Matched => Ok(()),
+        RecipeStatus::Changed => Err(RecipeRestoreError::Changed),
+        RecipeStatus::Missing => Err(RecipeRestoreError::Missing),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LegacyNaming {
     Csv,
@@ -259,6 +315,8 @@ mod tests {
                     prefix: "run_a".into(),
                     provider_id: Some("mcap".into()),
                     decode_provenance: None,
+                    recipe_id: None,
+                    recipe_digest: None,
                     reconcile_legacy: true,
                 },
                 crate::session::SourceRecord {
@@ -267,6 +325,8 @@ mod tests {
                     prefix: "run_b".into(),
                     provider_id: Some("mcap".into()),
                     decode_provenance: None,
+                    recipe_id: None,
+                    recipe_digest: None,
                     reconcile_legacy: false,
                 },
             ],
@@ -373,6 +433,8 @@ mod tests {
                 prefix: String::new(),
                 provider_id: None,
                 decode_provenance: None,
+                recipe_id: None,
+                recipe_digest: None,
                 reconcile_legacy: false,
             }],
             named_sets: vec![NamedSet {
@@ -468,6 +530,8 @@ mod tests {
             prefix: "run_a".into(),
             provider_id: None,
             decode_provenance: None,
+            recipe_id: None,
+            recipe_digest: None,
             reconcile_legacy: true,
         };
         let paths = vec!["imu/ax".into()];

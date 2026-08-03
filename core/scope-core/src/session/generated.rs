@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 19;
+pub const SESSION_SCHEMA_VERSION: u32 = 20;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -278,6 +278,10 @@ pub struct SourceRecord {
     pub provider_id: Option<String>,
     #[serde(default)]
     pub decode_provenance: Option<String>,
+    #[serde(default)]
+    pub recipe_id: Option<String>,
+    #[serde(default)]
+    pub recipe_digest: Option<String>,
     pub reconcile_legacy: bool,
 }
 

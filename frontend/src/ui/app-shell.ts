@@ -80,6 +80,7 @@ import {
 } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
 import { FormulaBar, formulaBarMarkup } from "./formula-bar";
+import { ImportWizard } from "./import-wizard";
 import {
   ExportDialog,
   type ExportFormat,
@@ -978,7 +979,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.18.0");
+        this.showModeHelp("SignalScope 0.19.0");
       },
     });
     this.commands.register({
@@ -1731,6 +1732,14 @@ export class AppShell {
           if (jobId !== null) void port.cancelBatch(jobId);
         });
       });
+      const unsupported = status.recent_failures.find((failure) =>
+        /unsupported format|requires a validated container recipe/i.test(
+          failure.error,
+        ),
+      );
+      if (unsupported !== undefined && typeof port.introspect === "function") {
+        await ImportWizard.mount(this.plane, unsupported.path);
+      }
       keepProgress = status.recent_failures.length > 0;
       await this.reloadSignals();
       this.afterLayoutChange();
@@ -2918,6 +2927,8 @@ export class AppShell {
         prefix: source.prefix,
         provider_id: null,
         decode_provenance: null,
+        recipe_id: null,
+        recipe_digest: null,
         reconcile_legacy: false,
       });
     }

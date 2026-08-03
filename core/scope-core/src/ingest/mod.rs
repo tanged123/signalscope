@@ -2,10 +2,12 @@
 
 pub mod admission;
 pub mod batch;
+pub mod container;
 mod csv;
 mod decoded;
 mod mcap;
 pub mod provenance;
+pub mod recipe;
 pub mod registry;
 
 pub use self::csv::CsvDecoder;
@@ -209,6 +211,8 @@ pub enum IngestError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Source(#[from] crate::sources::SourceError),
+    #[error(transparent)]
+    Recipe(#[from] recipe::RecipeError),
 }
 
 #[cfg(test)]

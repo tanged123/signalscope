@@ -18,6 +18,8 @@ pub struct SourceRecord {
     pub prefix: String,
     pub provider_id: Option<String>,
     pub decode_provenance: Option<String>,
+    pub recipe_id: Option<String>,
+    pub recipe_digest: Option<String>,
     pub reconcile_legacy: bool,
 }
 
@@ -72,6 +74,8 @@ impl SourceRegistry {
             prefix: prefix.clone(),
             provider_id: None,
             decode_provenance: None,
+            recipe_id: None,
+            recipe_digest: None,
             reconcile_legacy: false,
         };
         self.prefixes.insert(prefix);

@@ -340,7 +340,7 @@ pub(crate) fn ingest_or_load_at_with_registry(
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
     ingest_or_load_at_with_provider(
-        registry, None, root, source, store, key, prefix, context, progress,
+        registry, None, None, root, source, store, key, prefix, context, progress,
     )
 }
 
@@ -348,6 +348,7 @@ pub(crate) fn ingest_or_load_at_with_registry(
 pub(crate) fn ingest_or_load_at_with_provider(
     registry: &ProviderRegistry,
     provider_id: Option<&str>,
+    recipe_digest: Option<&str>,
     root: &CacheRoot,
     source: &Path,
     store: &mut SignalStore,
@@ -360,7 +361,8 @@ pub(crate) fn ingest_or_load_at_with_provider(
         Some(provider_id) => ingest::provider_for_id(registry, provider_id)?,
         None => ingest::provider_for_path(registry, source)?,
     };
-    let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
+    let options = recipe_digest.map_or_else(Vec::new, |digest| vec![("recipe", digest)]);
+    let provenance = provenance_digest(&provider, &fingerprint(source)?, &options);
     let mut on_cache = |fraction| progress(IngestStage::Cache, fraction);
     if let Some(loaded) =
         try_load_from_root(root, source, store, key, prefix, &provenance, &mut on_cache)?

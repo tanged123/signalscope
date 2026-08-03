@@ -15,6 +15,10 @@ allow = [
   "MPL-2.0",
   "Unicode-3.0",
   "Zlib",
+  # hdf5-metno-sys uses libloading for the system HDF5 library.
+  "ISC",
+  # Arrow's ahash dependency uses tiny-keccak under its CC0 license.
+  "CC0-1.0",
 ]
 
 [sources]

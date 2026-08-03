@@ -29,6 +29,7 @@ impl Default for Preferences {
             cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
             ingest_working_bytes: None,
             ingest_resident_bytes: None,
+            recipe_directory: None,
         }
     }
 }
@@ -122,11 +123,11 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
     from_json(&std::fs::read_to_string(path)?)
 }
 
-/// Migration ladder (ADR 0005 pattern): v2 is current; each future bump adds
+/// Migration ladder (ADR 0005 pattern): v3 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION | 1 => Ok(repair_current(value)),
+        PREFERENCES_SCHEMA_VERSION | 1 | 2 => Ok(repair_current(value)),
         version => Err(PreferencesError::UnsupportedVersion(version)),
     }
 }
@@ -169,6 +170,11 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
             .unwrap_or(defaults.cache_max_bytes),
         ingest_working_bytes: u64_value(value, "ingest_working_bytes").filter(|bytes| *bytes > 0),
         ingest_resident_bytes: u64_value(value, "ingest_resident_bytes").filter(|bytes| *bytes > 0),
+        recipe_directory: value
+            .get("recipe_directory")
+            .and_then(serde_json::Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned),
     }
 }
 

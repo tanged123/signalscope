@@ -1,149 +1,160 @@
 import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
+import { PROTOCOL_VERSION } from "../../src/generated/protocol";
+import { SESSION_SCHEMA_VERSION } from "../../src/generated/session";
 
 async function installDerivedPlane(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const envelope = <T>(payload: T) => ({ protocol_version: 15, payload });
-    const base = {
-      source_id: "0",
-      source_key: "demo",
-      unit: null,
-      point_count: "2",
-      t_min: 0,
-      t_max: 1,
-      last_value: null,
-    };
-    let signals = [
-      {
-        ...base,
-        signal_id: "1",
-        local_path: "velocity_body/x",
-        path: "rocket/velocity_body/x",
-      },
-      {
-        ...base,
-        signal_id: "2",
-        local_path: "velocity_body/y",
-        path: "rocket/velocity_body/y",
-      },
-    ];
-    const session = JSON.stringify({
-      app: "signalscope",
-      schema_version: 19,
-      theme: "dark",
-      linked_time: {
-        t0: 0,
-        t1: 1,
-        linked: true,
-        paused: false,
-        cursorT: null,
-        mode: "fixed",
-      },
-      active_tab_id: "workspace-1",
-      tabs: [
+  await page.addInitScript(
+    ({ protocolVersion, sessionSchemaVersion }) => {
+      const envelope = <T>(payload: T) => ({
+        protocol_version: protocolVersion,
+        payload,
+      });
+      const base = {
+        source_id: "0",
+        source_key: "demo",
+        unit: null,
+        point_count: "2",
+        t_min: 0,
+        t_max: 1,
+        last_value: null,
+      };
+      let signals = [
         {
-          id: "workspace-1",
-          title: "Workspace 1",
-          cursor_mode: "none",
-          focused_panel_id: null,
-          maximized_panel_id: null,
-          panels: [],
-          layout: [],
+          ...base,
+          signal_id: "1",
+          local_path: "velocity_body/x",
+          path: "rocket/velocity_body/x",
         },
-      ],
-      named_sets: [],
-      derived: [],
-      derived_bundles: [],
-      sources: [],
-    });
-    const internals = {
-      // Keep the mock's Promise contract aligned with Tauri's invoke API.
-      // eslint-disable-next-line @typescript-eslint/require-await
-      invoke: async (command: string, args?: Record<string, unknown>) => {
-        const request = args?.["request"] as
-          | { payload?: Record<string, unknown> }
-          | undefined;
-        const payload = request?.payload ?? {};
-        switch (command) {
-          case "load_preferences":
-            return envelope(null);
-          case "load_session":
-          case "reset_session":
-            return envelope({ session_json: session, path: null });
-          case "restore_sources":
-            return envelope({ job_id: "restore" });
-          case "batch_status":
-            return envelope({
-              state: "done",
-              fraction: 1,
-              total: "0",
-              done: "0",
-              failed: "0",
-              current_paths: [],
-              recent_failures: [],
-            });
-          case "restore_reconcile":
-            return envelope({
-              session_json: payload["session_json"] ?? session,
-              rewritten: "0",
-              conflicts: [],
-              unresolved: [],
-            });
-          case "release_batch":
-          case "save_preferences":
-          case "remove_derived_bundle":
-            return envelope(null);
-          case "save_session":
-            return envelope("test.signalscope");
-          case "list_signals":
-            return envelope(signals);
-          case "list_sources":
-            return envelope([
-              {
-                source_id: "0",
-                source_key: "demo",
-                prefix: "rocket",
-                path: "fixture.csv",
-                point_count: "4",
-              },
-            ]);
-          case "query_tiles":
-          case "query_samples":
-            return envelope({
-              request_id: payload["request_id"] ?? "test",
-              series: [],
-            });
-          case "create_derived": {
-            const path = String(payload["path"]);
-            const summary = {
-              ...base,
-              signal_id: `derived:${path}`,
-              source_id: "derived",
-              source_key: "derived",
-              local_path: path.slice("derived/".length),
-              path,
-              point_count: "0",
-            };
-            signals = [...signals, summary];
-            return envelope(summary);
+        {
+          ...base,
+          signal_id: "2",
+          local_path: "velocity_body/y",
+          path: "rocket/velocity_body/y",
+        },
+      ];
+      const session = JSON.stringify({
+        app: "signalscope",
+        schema_version: sessionSchemaVersion,
+        theme: "dark",
+        linked_time: {
+          t0: 0,
+          t1: 1,
+          linked: true,
+          paused: false,
+          cursorT: null,
+          mode: "fixed",
+        },
+        active_tab_id: "workspace-1",
+        tabs: [
+          {
+            id: "workspace-1",
+            title: "Workspace 1",
+            cursor_mode: "none",
+            focused_panel_id: null,
+            maximized_panel_id: null,
+            panels: [],
+            layout: [],
+          },
+        ],
+        named_sets: [],
+        derived: [],
+        derived_bundles: [],
+        sources: [],
+      });
+      const internals = {
+        // Keep the mock's Promise contract aligned with Tauri's invoke API.
+        // eslint-disable-next-line @typescript-eslint/require-await
+        invoke: async (command: string, args?: Record<string, unknown>) => {
+          const request = args?.["request"] as
+            | { payload?: Record<string, unknown> }
+            | undefined;
+          const payload = request?.payload ?? {};
+          switch (command) {
+            case "load_preferences":
+              return envelope(null);
+            case "load_session":
+            case "reset_session":
+              return envelope({ session_json: session, path: null });
+            case "restore_sources":
+              return envelope({ job_id: "restore" });
+            case "batch_status":
+              return envelope({
+                state: "done",
+                fraction: 1,
+                total: "0",
+                done: "0",
+                failed: "0",
+                current_paths: [],
+                recent_failures: [],
+              });
+            case "restore_reconcile":
+              return envelope({
+                session_json: payload["session_json"] ?? session,
+                rewritten: "0",
+                conflicts: [],
+                unresolved: [],
+              });
+            case "release_batch":
+            case "save_preferences":
+            case "remove_derived_bundle":
+              return envelope(null);
+            case "save_session":
+              return envelope("test.signalscope");
+            case "list_signals":
+              return envelope(signals);
+            case "list_sources":
+              return envelope([
+                {
+                  source_id: "0",
+                  source_key: "demo",
+                  prefix: "rocket",
+                  path: "fixture.csv",
+                  point_count: "4",
+                },
+              ]);
+            case "query_tiles":
+            case "query_samples":
+              return envelope({
+                request_id: payload["request_id"] ?? "test",
+                series: [],
+              });
+            case "create_derived": {
+              const path = String(payload["path"]);
+              const summary = {
+                ...base,
+                signal_id: `derived:${path}`,
+                source_id: "derived",
+                source_key: "derived",
+                local_path: path.slice("derived/".length),
+                path,
+                point_count: "0",
+              };
+              signals = [...signals, summary];
+              return envelope(summary);
+            }
+            case "remove_signal": {
+              const path = String(payload["path"]);
+              signals = signals.filter((signal) => signal.path !== path);
+              return envelope(null);
+            }
+            default:
+              throw new Error(`unexpected test command: ${command}`);
           }
-          case "remove_signal": {
-            const path = String(payload["path"]);
-            signals = signals.filter((signal) => signal.path !== path);
-            return envelope(null);
-          }
-          default:
-            throw new Error(`unexpected test command: ${command}`);
+        },
+        transformCallback: () => 0,
+      };
+      (
+        window as unknown as {
+          __TAURI_INTERNALS__: typeof internals;
         }
-      },
-      transformCallback: () => 0,
-    };
-    (
-      window as unknown as {
-        __TAURI_INTERNALS__: typeof internals;
-      }
-    ).__TAURI_INTERNALS__ = internals;
-  });
+      ).__TAURI_INTERNALS__ = internals;
+    },
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+    },
+  );
 }
 
 test("the fixed channel outline filters, selects, and saves a frozen set", async ({

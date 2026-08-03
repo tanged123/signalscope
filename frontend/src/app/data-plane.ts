@@ -3,6 +3,7 @@ import {
   type BatchDetailRequest,
   type BatchJob,
   type BatchStatus,
+  type ContainerOutline,
   type CreateDerivedBundleRequest,
   type DerivedBundleResponse,
   type DerivedRequest,
@@ -17,6 +18,7 @@ import {
   type ExportWriteRequest,
   type FormatDescriptor,
   type IngestBatchRequest,
+  type IntrospectRequest,
   type LoadedSession,
   type LoadSessionRequest,
   type PickSessionRequest,
@@ -25,6 +27,9 @@ import {
   type RestoreReconcileRequest,
   type RestoreReconcileResponse,
   type RestoreSourcesRequest,
+  type RecipeDestination,
+  type SaveRecipeRequest,
+  type SaveRecipeResponse,
   type SampleRequest,
   type SampleResponse,
   type SaveSessionRequest,
@@ -58,6 +63,12 @@ export interface IngestPort {
   cancelBatch(jobId: string): Promise<void>;
   releaseBatch(jobId: string): Promise<void>;
   listFormats(): Promise<FormatDescriptor[]>;
+  introspect(path: string): Promise<ContainerOutline>;
+  saveRecipe(
+    path: string,
+    recipeToml: string,
+    destination: RecipeDestination,
+  ): Promise<SaveRecipeResponse>;
   /** Forwarded window drag-drop events. Returns an unsubscribe. */
   onDragDrop(handler: (event: DragDropForward) => void): () => void;
 }
@@ -209,6 +220,29 @@ export class TauriPlane implements DataPlane {
       },
       listFormats: async () =>
         open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
+      introspect: async (path: string) =>
+        open(
+          await this.invoke<Envelope<ContainerOutline>>(
+            "introspect_container",
+            {
+              request: seal<IntrospectRequest>({ path }),
+            },
+          ),
+        ),
+      saveRecipe: async (
+        path: string,
+        recipeToml: string,
+        destination: RecipeDestination,
+      ) =>
+        open(
+          await this.invoke<Envelope<SaveRecipeResponse>>("save_recipe", {
+            request: seal<SaveRecipeRequest>({
+              path,
+              recipe_toml: recipeToml,
+              destination,
+            }),
+          }),
+        ),
       onDragDrop: (handler) => {
         let eventId: number | null = null;
         let disposed = false;

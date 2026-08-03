@@ -211,6 +211,27 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(19);
             migrate(19, value)
         }
+        19 => {
+            if let Some(sources) = value
+                .get_mut("sources")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for source in sources {
+                    source
+                        .as_object_mut()
+                        .expect("session source is an object")
+                        .entry("recipe_id")
+                        .or_insert(serde_json::Value::Null);
+                    source
+                        .as_object_mut()
+                        .expect("session source is an object")
+                        .entry("recipe_digest")
+                        .or_insert(serde_json::Value::Null);
+                }
+            }
+            value["schema_version"] = serde_json::json!(20);
+            migrate(20, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -737,6 +758,8 @@ mod tests {
             prefix: crate::naming::default_prefix(Path::new(path)),
             provider_id: None,
             decode_provenance: None,
+            recipe_id: None,
+            recipe_digest: None,
             reconcile_legacy: false,
         }
     }
@@ -897,7 +920,7 @@ mod tests {
 
         let session = from_json(&value.to_string()).expect("v17 migrates");
         let panel = &session.tabs[0].panels[0];
-        assert_eq!(session.schema_version, 19);
+        assert_eq!(session.schema_version, 20);
         assert_eq!(session.named_sets[0].refs[0].channel, "temperature");
         assert_eq!(session.named_sets[0].refs[1].channel, "pressure");
         assert_eq!(session.named_sets[0].selector.as_deref(), Some("temp"));
@@ -942,7 +965,7 @@ mod tests {
 
         let session = from_json(&value.to_string()).expect("migrates");
 
-        assert_eq!(session.schema_version, 19);
+        assert_eq!(session.schema_version, 20);
         let serialized = serde_json::to_value(session).expect("serializes");
         let source = &serialized["sources"][0];
         assert!(source.get("time_domain").is_none());

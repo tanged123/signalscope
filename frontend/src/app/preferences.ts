@@ -58,6 +58,7 @@ export function defaultPreferences(): Preferences {
     cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
     ingest_working_bytes: null,
     ingest_resident_bytes: null,
+    recipe_directory: null,
   };
 }
 
@@ -91,7 +92,12 @@ export function parsePreferences(json: string): Preferences | null {
     return null;
   }
   const value = parsed as Partial<Preferences>;
-  if (value.schema_version !== 1 && value.schema_version !== 2) return null;
+  if (
+    value.schema_version !== 1 &&
+    value.schema_version !== 2 &&
+    value.schema_version !== 3
+  )
+    return null;
   const defaults = defaultPreferences();
   const family = (candidate: unknown, fallback: FontFamily): FontFamily =>
     FONT_FAMILIES.includes(candidate as FontFamily)
@@ -124,6 +130,11 @@ export function parsePreferences(json: string): Preferences | null {
       defaults.cache_max_bytes,
     ingest_working_bytes: bytes(value.ingest_working_bytes, null),
     ingest_resident_bytes: bytes(value.ingest_resident_bytes, null),
+    recipe_directory:
+      typeof value.recipe_directory === "string" &&
+      value.recipe_directory.length > 0
+        ? value.recipe_directory
+        : null,
   };
 }
 

@@ -67,6 +67,7 @@ fn bench_batch_ingests_one_thousand_synthetic_runs() {
         })),
         terminal_ttl: Duration::from_secs(60),
         cache_directory: None,
+        recipe_directory: None,
         provider_registry: Arc::new(ProviderRegistry::builtin()),
     });
 

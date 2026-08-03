@@ -7,13 +7,19 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+arrow-cast.workspace = true
 crc32fast.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
 csv.workspace = true
+hdf5-metno.workspace = true
 mcap.workspace = true
+parquet.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 scope-protocol.workspace = true
 sha2.workspace = true
+toml.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 

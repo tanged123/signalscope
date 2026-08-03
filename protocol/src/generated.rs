@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -155,6 +155,48 @@ pub struct FormatDescriptor {
     pub id: String,
     pub label: String,
     pub extensions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IntrospectRequest {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DatasetOutline {
+    pub path: String,
+    pub kind: String,
+    #[serde(with = "u64_string")]
+    pub len: u64,
+    pub shape: Vec<u32>,
+    pub sample_preview: Vec<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ContainerOutline {
+    pub container: String,
+    pub datasets: Vec<DatasetOutline>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecipeDestination {
+    Sidecar,
+    UserDirectory,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveRecipeRequest {
+    pub path: String,
+    pub recipe_toml: String,
+    pub destination: RecipeDestination,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveRecipeResponse {
+    pub recipe_id: String,
+    pub digest: String,
+    pub saved_to: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

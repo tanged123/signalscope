@@ -1,5 +1,5 @@
 {
-  "protocol_version": 15,
+  "protocol_version": 16,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -98,6 +98,47 @@
         "id": "string",
         "label": "string",
         "extensions": "string[]"
+      }
+    },
+    "IntrospectRequest": {
+      "kind": "object",
+      "fields": { "path": "string" }
+    },
+    "DatasetOutline": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "kind": "string",
+        "len": "u64",
+        "shape": "u32[]",
+        "sample_preview": "f64[]"
+      }
+    },
+    "ContainerOutline": {
+      "kind": "object",
+      "fields": {
+        "container": "string",
+        "datasets": "DatasetOutline[]"
+      }
+    },
+    "RecipeDestination": {
+      "kind": "enum",
+      "variants": ["sidecar", "user_directory"]
+    },
+    "SaveRecipeRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "recipe_toml": "string",
+        "destination": "RecipeDestination"
+      }
+    },
+    "SaveRecipeResponse": {
+      "kind": "object",
+      "fields": {
+        "recipe_id": "string",
+        "digest": "string",
+        "saved_to": "string"
       }
     },
     "RestoreSourcesRequest": {

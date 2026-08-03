@@ -35,5 +35,6 @@ Accepted decisions:
 31. [Remove source alignment metadata](0031-remove-source-alignment.md)
 32. [Forward native window drag-drop events](0032-drag-drop-event-forwarding.md)
 33. [Runtime format provider registry](0033-format-provider-registry.md)
+34. [Declarative container recipes](0034-declarative-container-recipes.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

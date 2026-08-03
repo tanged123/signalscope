@@ -2158,6 +2158,83 @@ button {
   pointer-events: none;
 }
 
+.import-wizard {
+  position: fixed;
+  z-index: 45;
+  top: 12vh;
+  left: 50%;
+  width: min(620px, calc(100vw - 24px));
+  max-height: 76vh;
+  overflow: auto;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--fg-1);
+  font: 0.8077rem var(--font-ui);
+}
+
+.import-wizard h2,
+.wizard-container {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wizard-container {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.wizard-dataset {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.import-wizard label,
+.wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.import-wizard select,
+.wizard-actions button {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-1);
+  font: inherit;
+}
+
+.import-wizard select {
+  min-width: 0;
+  flex: 1;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+}
+
+.wizard-actions button {
+  padding: 4px 7px;
+  cursor: pointer;
+}
+
+.wizard-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wizard-status {
+  min-width: 0;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 .palette-overlay {
   position: fixed;
   z-index: 10;
