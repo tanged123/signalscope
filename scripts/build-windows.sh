@@ -13,7 +13,7 @@ MINGW* | MSYS* | CYGWIN*) ;;
   ;;
 esac
 
-for command_name in cargo node npm; do
+for command_name in cargo node npm cmake; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name" >&2
     exit 1
