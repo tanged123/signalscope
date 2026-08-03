@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 
 async function installDerivedPlane(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const envelope = <T>(payload: T) => ({ protocol_version: 14, payload });
+    const envelope = <T>(payload: T) => ({ protocol_version: 15, payload });
     const base = {
       source_id: "0",
       source_key: "demo",
@@ -136,6 +136,7 @@ async function installDerivedPlane(page: Page): Promise<void> {
             throw new Error(`unexpected test command: ${command}`);
         }
       },
+      transformCallback: () => 0,
     };
     (
       window as unknown as {

@@ -74,7 +74,7 @@ test("application menu mirrors commands and marks planned work", async ({
   ).toHaveCount(1);
   await expect(
     menu.locator(".app-menu-item", { hasText: "Open folder" }),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   const unavailable = menu.locator(".app-menu-item", {
     hasText: "Open Workspace",
   });

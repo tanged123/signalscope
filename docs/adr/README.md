@@ -33,5 +33,6 @@ Accepted decisions:
 29. [Out-of-core columns, pyramids, and ensembles](0029-out-of-core-storage.md)
 30. [Source-local channel identity](0030-source-local-channel-identity.md)
 31. [Remove source alignment metadata](0031-remove-source-alignment.md)
+32. [Forward native window drag-drop events](0032-drag-drop-event-forwarding.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.
