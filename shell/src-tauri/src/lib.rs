@@ -1617,6 +1617,35 @@ async fn save_export_file(
 }
 
 #[tauri::command]
+async fn pick_recipe_directory(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|error| error.to_string())?;
+    Ok(Envelope::new(
+        picked
+            .and_then(|folder| folder.into_path().ok())
+            .map(|path| path.display().to_string()),
+    ))
+}
+
+/// The recipe directory currently in use. The renderer must never build this
+/// path itself: the default is the per-OS app data directory, which only the
+/// host can resolve.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn effective_recipe_directory(app: AppHandle) -> Result<Envelope<String>, String> {
+    let preferences = preferences_path(&app)
+        .ok()
+        .filter(|path| path.exists())
+        .and_then(|path| preferences::load_from_path(&path).ok())
+        .unwrap_or_default();
+    let directory = recipe_directory(&app, &preferences)
+        .ok_or_else(|| "no recipe directory is available".to_owned())?;
+    Ok(Envelope::new(directory.display().to_string()))
+}
+
+#[tauri::command]
 async fn pick_export_directory(app: AppHandle) -> Result<Envelope<Option<String>>, String> {
     let picked =
         tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
@@ -1812,6 +1841,8 @@ pub fn run() {
             export_write,
             save_export_file,
             pick_export_directory,
+            pick_recipe_directory,
+            effective_recipe_directory,
             save_export_file_to_directory,
             load_preferences,
             save_preferences

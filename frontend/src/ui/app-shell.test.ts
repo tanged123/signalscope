@@ -787,3 +787,83 @@ describe("renderBatchProgress", () => {
     expect(progress.querySelector(".ingest-cancel")).toBeNull();
   });
 });
+
+describe("recipe directory settings entries", () => {
+  interface RecipeProbe {
+    plane: { preferences: unknown };
+    prefs: { recipe_directory: string | null };
+    recipeDirectory: string | null;
+    updatePreferences: ReturnType<typeof vi.fn>;
+    refreshRecipeDirectory: ReturnType<typeof vi.fn>;
+    reportError: ReturnType<typeof vi.fn>;
+    recipeDirectoryEntries(): {
+      title: string;
+      hint: string;
+      run: () => void;
+    }[];
+  }
+
+  function recipeProbe(
+    custom: string | null,
+    picked: string | null = "/picked/recipes",
+  ): RecipeProbe {
+    const probe = Object.create(AppShell.prototype) as RecipeProbe;
+    probe.plane = {
+      preferences: {
+        effectiveRecipeDirectory: async () => custom ?? "/default/recipes",
+        pickRecipeDirectory: async () => picked,
+      },
+    };
+    probe.prefs = { recipe_directory: custom };
+    probe.recipeDirectory = custom ?? "/default/recipes";
+    probe.updatePreferences = vi.fn();
+    probe.refreshRecipeDirectory = vi.fn(async () => undefined);
+    probe.reportError = vi.fn();
+    return probe;
+  }
+
+  it("shows the host-resolved directory and hides reset while on the default", () => {
+    const entries = recipeProbe(null).recipeDirectoryEntries();
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.title).toBe("Recipe directory");
+    expect(entries[0]?.hint).toBe("/default/recipes");
+  });
+
+  it("offers reset only while a custom directory is set", () => {
+    const entries = recipeProbe("/home/me/recipes").recipeDirectoryEntries();
+
+    expect(entries.map((entry) => entry.title)).toEqual([
+      "Recipe directory",
+      "Use default recipe directory",
+    ]);
+    expect(entries[0]?.hint).toBe("/home/me/recipes");
+  });
+
+  it("stores the picked directory", async () => {
+    const probe = recipeProbe(null);
+    probe.recipeDirectoryEntries()[0]?.run();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(probe.updatePreferences).toHaveBeenCalledWith({
+      recipe_directory: "/picked/recipes",
+    });
+  });
+
+  it("leaves the directory unchanged when the picker is cancelled", async () => {
+    const probe = recipeProbe("/home/me/recipes", null);
+    probe.recipeDirectoryEntries()[0]?.run();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(probe.updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it("clears the preference back to the default", () => {
+    const probe = recipeProbe("/home/me/recipes");
+    probe.recipeDirectoryEntries()[1]?.run();
+
+    expect(probe.updatePreferences).toHaveBeenCalledWith({
+      recipe_directory: null,
+    });
+  });
+});

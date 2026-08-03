@@ -98,6 +98,9 @@ export interface RestorePort {
 export interface PreferencesPort {
   load(): Promise<string | null>;
   save(preferencesJson: string): Promise<void>;
+  /** The recipe directory in use, resolved by the host, never built here. */
+  effectiveRecipeDirectory(): Promise<string>;
+  pickRecipeDirectory(): Promise<string | null>;
 }
 
 export interface ExportPort {
@@ -360,6 +363,12 @@ export class TauriPlane implements DataPlane {
           }),
         );
       },
+      effectiveRecipeDirectory: async () =>
+        open(await this.invoke<Envelope<string>>("effective_recipe_directory")),
+      pickRecipeDirectory: async () =>
+        open(
+          await this.invoke<Envelope<string | null>>("pick_recipe_directory"),
+        ),
     };
     this.exporter = {
       estimate: async (sessionJson: string, selection: ExportSelection) =>

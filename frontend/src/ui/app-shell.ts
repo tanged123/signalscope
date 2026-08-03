@@ -194,6 +194,7 @@ export class AppShell {
   private autosaveTimer: number | null = null;
   private prefs: Preferences = defaultPreferences();
   private prefsSaveTimer: number | null = null;
+  private recipeDirectory: string | null = null;
   private workspacePath: string | null = null;
   private dirty = false;
   private supportedFormatHint = "—";
@@ -1116,6 +1117,48 @@ export class AppShell {
     });
   }
 
+  /**
+   * The recipe directory entries. The reset entry is listed only while a
+   * custom directory is set, so the palette never offers an action that would
+   * do nothing.
+   */
+  private recipeDirectoryEntries(): PaletteEntry[] {
+    const port = this.plane.preferences;
+    if (port === null) return [];
+    const custom = this.prefs.recipe_directory;
+    const entries: PaletteEntry[] = [
+      {
+        title: "Recipe directory",
+        hint: this.recipeDirectory ?? "unavailable",
+        keepOpen: true,
+        run: () => {
+          void port
+            .pickRecipeDirectory()
+            .then(async (picked) => {
+              if (picked === null) return;
+              this.updatePreferences({ recipe_directory: picked });
+              await this.refreshRecipeDirectory();
+            })
+            .catch((error: unknown) => {
+              this.reportError(error);
+            });
+        },
+      },
+    ];
+    if (custom !== null) {
+      entries.push({
+        title: "Use default recipe directory",
+        hint: "",
+        keepOpen: true,
+        run: () => {
+          this.updatePreferences({ recipe_directory: null });
+          void this.refreshRecipeDirectory();
+        },
+      });
+    }
+    return entries;
+  }
+
   private settingsEntries(): PaletteEntry[] {
     const cycleFont = (key: "ui_font_family" | "plot_font_family"): void => {
       const index = FONT_FAMILIES.indexOf(this.prefs[key]);
@@ -1146,6 +1189,7 @@ export class AppShell {
           this.toggleTheme();
         },
       },
+      ...this.recipeDirectoryEntries(),
       {
         title: "UI font",
         hint: fontLabel(this.prefs.ui_font_family),
@@ -1915,8 +1959,25 @@ export class AppShell {
       } catch (error: unknown) {
         console.warn("preferences load failed; using defaults", error);
       }
+      await this.refreshRecipeDirectory();
     }
     applyPreferences(this.prefs, document.documentElement);
+  }
+
+  /**
+   * Caches the host-resolved recipe directory so the settings entries can
+   * show it synchronously. The default is the per-OS app data directory, so
+   * it is never derived here.
+   */
+  private async refreshRecipeDirectory(): Promise<void> {
+    const port = this.plane.preferences;
+    if (port === null) return;
+    try {
+      this.recipeDirectory = await port.effectiveRecipeDirectory();
+    } catch (error: unknown) {
+      console.warn("recipe directory is unavailable", error);
+      this.recipeDirectory = null;
+    }
   }
 
   private updatePreferences(
