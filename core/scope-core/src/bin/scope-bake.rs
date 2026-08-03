@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use scope_core::{
-    ingest::{self, CancelToken, DecodeContext},
+    ingest::{self, CancelToken, DecodeContext, registry::ProviderRegistry},
     naming,
     pyramid::Pyramid,
     session, snapshot,
@@ -80,6 +80,7 @@ where
 fn run(args: &Args) -> Result<(), String> {
     let mut store = SignalStore::new();
     let mut pyramids = BTreeMap::new();
+    let registry = ProviderRegistry::builtin();
     for path in &args.data {
         let cancel = CancelToken::default();
         let mut progress = |_| {};
@@ -88,6 +89,7 @@ fn run(args: &Args) -> Result<(), String> {
             cancel: &cancel,
         };
         let summary = ingest::ingest_path(
+            &registry,
             path,
             &mut store,
             SourceKey(uuid::Uuid::new_v4()),

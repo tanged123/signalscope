@@ -18,7 +18,7 @@ panel grids over the same loaded sources and linked time window.
 
 ## Interactive demo
 
-[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=0.15.9)](https://tanged123.github.io/signalscope/demo.html)
+[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=0.19.1)](https://tanged123.github.io/signalscope/demo.html)
 
 **[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)**
 to zoom, inspect values, and explore the exported workspace in your browser.
@@ -81,6 +81,12 @@ formulas, and Escape closes the bar. Angle conversions use `rad2deg(x)` and
 - `.mcap`: MCAP recordings containing channels whose message encoding is
   `json`. Numeric and boolean fields are flattened into signal paths. Other
   MCAP message encodings are reported but not decoded yet.
+- `.h5` and `.hdf5`: HDF5 containers. Dataset layouts are selected by a
+  validated `.scope.toml` sidecar or a user recipe directory.
+- `.mat`: MATLAB v7.3 files, which use the HDF5 container format. Other MATLAB
+  file variants are unsupported.
+- `.parquet` and `.pq`: Parquet columns selected by the same declarative recipe
+  format.
 
 Build the workbench and the portable snapshot template:
 
@@ -139,6 +145,10 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/ci.sh quality     # dependency, workflow, shell, spelling, unused code
 ./scripts/ci.sh rust        # reproduce one named GitHub Actions job
 nix fmt                     # format the workspace
+
+Windows installer builds require CMake in addition to Git Bash. Linux builds
+use the pinned Nix shell, which supplies HDF5; AppImage builds additionally
+require libhdf5-dev.
 ```
 
 `./scripts/ci.sh quality` is implemented by `quality_checks()` in

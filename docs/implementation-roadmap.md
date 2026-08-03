@@ -37,6 +37,16 @@ sessions reconcile provider-specific references after restore while autosave
 is paused
 ([ADR 0027](adr/0027-durable-source-identity-and-restore-reconciliation.md)).
 
+Format dispatch now uses a deterministic runtime provider registry with a
+bounded content probe and fail-closed unknown-input handling
+([ADR 0033](adr/0033-format-provider-registry.md)). Native format pickers,
+folder scans, and drag-drop acceptance derive from the same provider metadata.
+
+Declarative container recipes now cover HDF5 and Parquet. Native
+readers expose bounded dataset outlines, recipes resolve from source sidecars
+before the user recipe directory, and session schema v20 records the recipe
+id and content digest used for each source ([ADR 0034](adr/0034-declarative-container-recipes.md)).
+
 Signals-at-scale P1 is landed: panels resolve channel-by-source series from a
 catalog, source identity is stored per source, and the tree exposes channels
 with read-only named sets instead of source sets, bundle rows, or favorites.

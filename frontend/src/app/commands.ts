@@ -63,14 +63,15 @@ export class CommandRegistry {
 }
 
 function comboFor(event: KeyboardEvent): string | null {
-  if (event.altKey) return null;
   // Shifted ctrl+= arrives as "+" on row-number layouts; both spellings mean
   // the same zoom-in binding, so "+" folds into "=" and drops its shift.
   const key = event.key === "+" ? "=" : event.key.toLowerCase();
   if (event.metaKey || event.ctrlKey) {
+    const alt = event.altKey ? "alt+" : "";
     const shift = event.shiftKey && key !== "=" ? "shift+" : "";
-    return `mod+${shift}${key}`;
+    return `mod+${alt}${shift}${key}`;
   }
+  if (event.altKey) return null;
   if (event.shiftKey && key.length > 1) return `shift+${key}`;
   return key;
 }
@@ -92,11 +93,11 @@ export function reservedWhileEditing(event: KeyboardEvent): boolean {
 }
 
 /**
- * `comboFor` accepts either metaKey or ctrlKey for `mod`, so the label has to
- * follow the platform the user is actually on: ⌘ on Apple hardware, Ctrl
+ * `comboFor` accepts either metaKey or ctrlKey for `mod`, so the labels have to
+ * follow the platform the user is actually on: ⌘/⌥ on Apple hardware, Ctrl/Alt
  * everywhere else. The trailing "+" keeps "Ctrl+⇧P" legible next to "⌘⇧P".
  */
-function modLabel(): string {
+function isApplePlatform(): boolean {
   const nav = globalThis.navigator as
     | (Navigator & { userAgentData?: { platform?: string } })
     | undefined;
@@ -104,7 +105,15 @@ function modLabel(): string {
   // the user-agent string is the portable signal. `navigator.platform` is
   // deprecated and unavailable here.
   const platform = nav?.userAgentData?.platform ?? nav?.userAgent ?? "";
-  return /mac|iphone|ipad|ipod/i.test(platform) ? "⌘" : "Ctrl+";
+  return /mac|iphone|ipad|ipod/i.test(platform);
+}
+
+function modLabel(): string {
+  return isApplePlatform() ? "⌘" : "Ctrl+";
+}
+
+function altLabel(): string {
+  return isApplePlatform() ? "⌥" : "Alt+";
 }
 
 /** Display form of a `comboFor` combo, e.g. "mod+p" → "⌘P" or "Ctrl+P". */
@@ -113,7 +122,13 @@ export function formatCombo(keys: string): string {
   return keys
     .split("+")
     .map((part) =>
-      part === "mod" ? mod : part === "shift" ? "⇧" : part.toUpperCase(),
+      part === "mod"
+        ? mod
+        : part === "alt"
+          ? altLabel()
+          : part === "shift"
+            ? "⇧"
+            : part.toUpperCase(),
     )
     .join("");
 }

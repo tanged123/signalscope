@@ -8,6 +8,11 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
+import {
+  classifyDrop,
+  expandDropPaths,
+  unsupportedDropMessage,
+} from "../app/drop";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
@@ -50,9 +55,11 @@ import {
 } from "../app/plot-math";
 import {
   type BatchStatus,
+  type DragDropForward,
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
+  type FormatDescriptor,
   type SampleResponse,
   type SampleSeries,
   type SignalSummary,
@@ -74,6 +81,7 @@ import {
 } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
 import { FormulaBar, formulaBarMarkup } from "./formula-bar";
+import { ImportWizard } from "./import-wizard";
 import {
   ExportDialog,
   type ExportFormat,
@@ -82,7 +90,6 @@ import {
 import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalOutlineView } from "./signal-outline";
-import { SourceOpenDialog } from "./source-open-dialog";
 import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
@@ -170,7 +177,7 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
-  private sourceOpenDialog: SourceOpenDialog | null = null;
+  private dropUnsubscribe: (() => void) | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -187,8 +194,10 @@ export class AppShell {
   private autosaveTimer: number | null = null;
   private prefs: Preferences = defaultPreferences();
   private prefsSaveTimer: number | null = null;
+  private recipeDirectory: string | null = null;
   private workspacePath: string | null = null;
   private dirty = false;
+  private supportedFormatHint = "—";
   private restoringHistory = false;
   private historyGestureKey: string | null = null;
   private historyCoalesceTimer: number | null = null;
@@ -200,6 +209,7 @@ export class AppShell {
 
   async mount(): Promise<void> {
     this.root.innerHTML = shellMarkup();
+    await this.loadFormatHint();
     await this.loadPreferences();
     await this.restoreSession();
     this.history.reset(historySnapshot(this.workspace.snapshot()));
@@ -518,6 +528,14 @@ export class AppShell {
       },
     });
     this.registerCommands();
+    this.dropUnsubscribe?.();
+    this.dropUnsubscribe = null;
+    const dragPort = this.plane.ingest;
+    if (dragPort !== null) {
+      this.dropUnsubscribe = dragPort.onDragDrop((event) => {
+        this.onDragDrop(event);
+      });
+    }
     this.commands.onRun = (id) => {
       this.usage.record(id);
     };
@@ -608,6 +626,17 @@ export class AppShell {
       enabled: () => this.plane.ingest !== null,
       run: () => {
         this.openSources();
+      },
+    });
+    this.commands.register({
+      id: "open-folder",
+      title: "Open folder…",
+      keys: "mod+alt+o",
+      section: "file",
+      group: "open",
+      enabled: () => this.plane.ingest !== null,
+      run: () => {
+        this.openFolder();
       },
     });
     this.commands.register({
@@ -954,7 +983,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.15.9");
+        this.showModeHelp("SignalScope 0.19.1");
       },
     });
     this.commands.register({
@@ -1088,6 +1117,48 @@ export class AppShell {
     });
   }
 
+  /**
+   * The recipe directory entries. The reset entry is listed only while a
+   * custom directory is set, so the palette never offers an action that would
+   * do nothing.
+   */
+  private recipeDirectoryEntries(): PaletteEntry[] {
+    const port = this.plane.preferences;
+    if (port === null) return [];
+    const custom = this.prefs.recipe_directory;
+    const entries: PaletteEntry[] = [
+      {
+        title: "Recipe directory",
+        hint: this.recipeDirectory ?? "unavailable",
+        keepOpen: true,
+        run: () => {
+          void port
+            .pickRecipeDirectory()
+            .then(async (picked) => {
+              if (picked === null) return;
+              this.updatePreferences({ recipe_directory: picked });
+              await this.refreshRecipeDirectory();
+            })
+            .catch((error: unknown) => {
+              this.reportError(error);
+            });
+        },
+      },
+    ];
+    if (custom !== null) {
+      entries.push({
+        title: "Use default recipe directory",
+        hint: "",
+        keepOpen: true,
+        run: () => {
+          this.updatePreferences({ recipe_directory: null });
+          void this.refreshRecipeDirectory();
+        },
+      });
+    }
+    return entries;
+  }
+
   private settingsEntries(): PaletteEntry[] {
     const cycleFont = (key: "ui_font_family" | "plot_font_family"): void => {
       const index = FONT_FAMILIES.indexOf(this.prefs[key]);
@@ -1118,6 +1189,7 @@ export class AppShell {
           this.toggleTheme();
         },
       },
+      ...this.recipeDirectoryEntries(),
       {
         title: "UI font",
         hint: fontLabel(this.prefs.ui_font_family),
@@ -1620,12 +1692,60 @@ export class AppShell {
     this.afterLayoutChange();
   }
 
+  private modalOpen(): boolean {
+    return (
+      this.palette?.isOpen() === true || this.exportDialog?.isOpen() === true
+    );
+  }
+
+  private onDragDrop(event: DragDropForward): void {
+    const overlay = required<HTMLElement>(this.root, ".drop-overlay");
+    if (event.kind === "enter") {
+      overlay.hidden = this.modalOpen();
+      return;
+    }
+    overlay.hidden = true;
+    if (event.kind === "leave" || this.modalOpen()) return;
+    void this.handleDrop(event.paths);
+  }
+
+  private async handleDrop(paths: string[]): Promise<void> {
+    const port = this.plane.ingest;
+    if (port === null || paths.length === 0) return;
+    const plan = classifyDrop(paths);
+    if (plan.kind === "rejected") {
+      this.reportError(new Error(plan.message));
+      return;
+    }
+    if (plan.kind === "workspace") {
+      await this.loadSession(plan.path);
+      return;
+    }
+    try {
+      const expansion = await expandDropPaths(port, plan.paths);
+      for (const failed of expansion.failures) {
+        this.reportError(new Error(`could not scan ${failed}`));
+      }
+      if (expansion.files.length === 0) {
+        if (expansion.failures.length === 0) {
+          this.reportError(new Error(await unsupportedDropMessage(port)));
+        }
+        return;
+      }
+      await this.ingestPaths(expansion.files);
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
+  }
+
   private openSources(): void {
     if (this.plane.ingest === null) return;
-    this.sourceOpenDialog ??= new SourceOpenDialog(this.root);
-    this.sourceOpenDialog.open((kind) => {
-      void this.pickAndIngest(kind);
-    });
+    void this.pickAndIngest("files");
+  }
+
+  private openFolder(): void {
+    if (this.plane.ingest === null) return;
+    void this.pickAndIngest("folder");
   }
 
   private async pickAndIngest(kind: SourceOpenKind): Promise<void> {
@@ -1659,6 +1779,18 @@ export class AppShell {
           if (jobId !== null) void port.cancelBatch(jobId);
         });
       });
+      const needsRecipe = status.recent_failures.find(
+        (failure) => failure.recipe_required,
+      );
+      if (needsRecipe !== undefined) {
+        try {
+          await ImportWizard.mount(this.plane, needsRecipe.path, (path) =>
+            this.ingestPaths([path]),
+          );
+        } catch (error: unknown) {
+          this.reportError(error);
+        }
+      }
       keepProgress = status.recent_failures.length > 0;
       await this.reloadSignals();
       this.afterLayoutChange();
@@ -1827,8 +1959,25 @@ export class AppShell {
       } catch (error: unknown) {
         console.warn("preferences load failed; using defaults", error);
       }
+      await this.refreshRecipeDirectory();
     }
     applyPreferences(this.prefs, document.documentElement);
+  }
+
+  /**
+   * Caches the host-resolved recipe directory so the settings entries can
+   * show it synchronously. The default is the per-OS app data directory, so
+   * it is never derived here.
+   */
+  private async refreshRecipeDirectory(): Promise<void> {
+    const port = this.plane.preferences;
+    if (port === null) return;
+    try {
+      this.recipeDirectory = await port.effectiveRecipeDirectory();
+    } catch (error: unknown) {
+      console.warn("recipe directory is unavailable", error);
+      this.recipeDirectory = null;
+    }
   }
 
   private updatePreferences(
@@ -2846,6 +2995,8 @@ export class AppShell {
         prefix: source.prefix,
         provider_id: null,
         decode_provenance: null,
+        recipe_id: null,
+        recipe_digest: null,
         reconcile_legacy: false,
       });
     }
@@ -2865,9 +3016,23 @@ export class AppShell {
       `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
     const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
     if (dockFooter !== null) {
-      renderDockFooter(dockFooter, sources, this.signals.length, () => {
-        this.openSources();
-      });
+      renderDockFooter(
+        dockFooter,
+        sources,
+        this.signals.length,
+        () => this.openSources(),
+        this.supportedFormatHint,
+      );
+    }
+  }
+
+  private async loadFormatHint(): Promise<void> {
+    const ingest = this.plane.ingest;
+    if (ingest === null) return;
+    try {
+      this.supportedFormatHint = formatHint(await ingest.listFormats());
+    } catch {
+      this.supportedFormatHint = "—";
     }
   }
 
@@ -3084,6 +3249,7 @@ export function renderDockFooter(
   sources: readonly SourceSummary[],
   signalCount: number,
   onAddSource: () => void,
+  supportedFormats = "—",
 ): void {
   const totalPoints = sources.reduce(
     (total, source) => total + Number(source.point_count),
@@ -3108,9 +3274,19 @@ export function renderDockFooter(
   const formats = document.createElement("span");
   formats.className = "dock-formats";
   formats.textContent =
-    sources.length === 0 ? "CSV · MCAP" : loadedSourceFormats(sources);
+    sources.length === 0 ? supportedFormats : loadedSourceFormats(sources);
   load.append(add, formats);
   container.replaceChildren(aggregate, load);
+}
+
+export function formatHint(formats: readonly FormatDescriptor[]): string {
+  const extensions = new Set<string>();
+  for (const format of formats) {
+    for (const extension of format.extensions) {
+      extensions.add(extension.toUpperCase());
+    }
+  }
+  return [...extensions].sort().join(" · ") || "—";
 }
 
 function loadedSourceFormats(sources: readonly SourceSummary[]): string {
@@ -3182,7 +3358,7 @@ export function shellMarkup(): string {
         <div class="dock-footer">
           <div class="dock-load-row">
             <button class="dock-add-source" type="button">+ source</button>
-            <span class="dock-formats">CSV · MCAP</span>
+            <span class="dock-formats"></span>
           </div>
         </div>
       </div>
@@ -3221,6 +3397,7 @@ export function shellMarkup(): string {
       <span class="status-separator"></span>
       <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
     </footer>
+    <div class="drop-overlay" hidden>Drop files or a folder to load</div>
   </main>`;
 }
 

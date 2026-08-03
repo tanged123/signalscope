@@ -11,6 +11,10 @@ use super::{
     DecodeContext, DecodedSignal, DecodedSource, Decoder, IngestError, apply_permutation_in_place,
     normalize_segment, sort_permutation,
 };
+use super::{
+    provenance::CACHE_ABI_CSV,
+    registry::{Confidence, FormatProvider},
+};
 
 const TIME_NAMES: &[&str] = &[
     "t",
@@ -26,6 +30,41 @@ const TIME_NAMES: &[&str] = &[
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CsvDecoder;
+
+pub(crate) fn provider() -> FormatProvider {
+    FormatProvider::new(
+        "csv",
+        "Delimited text (CSV, TSV, TXT, DAT)",
+        &["csv", "tsv", "txt", "dat"],
+        0,
+        CACHE_ABI_CSV,
+        text_confidence,
+        || Box::new(CsvDecoder),
+    )
+}
+
+fn text_confidence(probe: &[u8]) -> Confidence {
+    if probe.is_empty() || probe.contains(&0) {
+        return Confidence::No;
+    }
+    let utf8 = match std::str::from_utf8(probe) {
+        Ok(_) => true,
+        Err(error) if error.error_len().is_none() => true,
+        Err(_) => false,
+    };
+    if !utf8 {
+        return Confidence::No;
+    }
+    let controls = probe
+        .iter()
+        .filter(|&&byte| byte < 0x20 && !matches!(byte, b'\t' | b'\n' | b'\r'))
+        .count();
+    if controls.saturating_mul(100) <= probe.len().saturating_mul(2) {
+        Confidence::Likely
+    } else {
+        Confidence::No
+    }
+}
 
 impl CsvDecoder {
     #[allow(clippy::cast_precision_loss)] // progress fractions tolerate rounding

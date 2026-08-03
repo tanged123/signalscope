@@ -1,5 +1,5 @@
 {
-  "protocol_version": 14,
+  "protocol_version": 17,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -54,7 +54,8 @@
       "kind": "object",
       "fields": {
         "path": "string",
-        "error": "string"
+        "error": "string",
+        "recipe_required": "bool"
       }
     },
     "BatchStatus": {
@@ -98,6 +99,51 @@
         "id": "string",
         "label": "string",
         "extensions": "string[]"
+      }
+    },
+    "IntrospectRequest": {
+      "kind": "object",
+      "fields": { "path": "string" }
+    },
+    "DatasetOutlineKind": {
+      "kind": "enum",
+      "variants": ["numeric", "text", "compound", "unsupported"]
+    },
+    "DatasetOutline": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "kind": "DatasetOutlineKind",
+        "len": "u64",
+        "shape": "u32[]",
+        "sample_preview": "f64[]"
+      }
+    },
+    "ContainerOutline": {
+      "kind": "object",
+      "fields": {
+        "container": "string",
+        "datasets": "DatasetOutline[]"
+      }
+    },
+    "RecipeDestination": {
+      "kind": "enum",
+      "variants": ["sidecar", "user_directory"]
+    },
+    "SaveRecipeRequest": {
+      "kind": "object",
+      "fields": {
+        "path": "string",
+        "recipe_toml": "string",
+        "destination": "RecipeDestination"
+      }
+    },
+    "SaveRecipeResponse": {
+      "kind": "object",
+      "fields": {
+        "recipe_id": "string",
+        "digest": "string",
+        "saved_to": "string"
       }
     },
     "RestoreSourcesRequest": {
@@ -271,6 +317,17 @@
     "SessionDialogMode": {
       "kind": "enum",
       "variants": ["open", "save"]
+    },
+    "DragDropKind": {
+      "kind": "enum",
+      "variants": ["enter", "drop", "leave"]
+    },
+    "DragDropForward": {
+      "kind": "object",
+      "fields": {
+        "kind": "DragDropKind",
+        "paths": "string[]"
+      }
     },
     "PickSessionRequest": {
       "kind": "object",

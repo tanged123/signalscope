@@ -37,6 +37,7 @@ use crate::{
     ingest::{
         self, DecodeContext, IngestError, IngestSummary,
         provenance::{fingerprint, provenance_digest},
+        registry::ProviderRegistry,
     },
     paging::{PageCache, PageError, PageHandle},
     preferences::Preferences,
@@ -281,7 +282,21 @@ pub fn ingest_or_load(
     context: &mut DecodeContext<'_>,
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
-    ingest_or_load_at(
+    let registry = ProviderRegistry::builtin();
+    ingest_or_load_with_registry(&registry, source, store, key, prefix, context, progress)
+}
+
+pub(crate) fn ingest_or_load_with_registry(
+    registry: &ProviderRegistry,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
+    ingest_or_load_at_with_registry(
+        registry,
         &CacheRoot::beside_source(source),
         source,
         store,
@@ -307,21 +322,68 @@ pub fn ingest_or_load_at(
     context: &mut DecodeContext<'_>,
     progress: &mut dyn FnMut(IngestStage, f64),
 ) -> Result<IngestOutcome, CacheError> {
-    let provider = ingest::provider_for(ingest::sniff_format(source)?);
-    let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
+    let registry = ProviderRegistry::builtin();
+    ingest_or_load_at_with_registry(
+        &registry, root, source, store, key, prefix, context, progress,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ingest_or_load_at_with_registry(
+    registry: &ProviderRegistry,
+    root: &CacheRoot,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
+    ingest_or_load_at_with_provider(
+        registry, None, None, root, source, store, key, prefix, context, progress,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ingest_or_load_at_with_provider(
+    registry: &ProviderRegistry,
+    provider_id: Option<&str>,
+    recipe_digest: Option<&str>,
+    root: &CacheRoot,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    context: &mut DecodeContext<'_>,
+    progress: &mut dyn FnMut(IngestStage, f64),
+) -> Result<IngestOutcome, CacheError> {
+    let provider = match provider_id {
+        Some(provider_id) => ingest::provider_for_id(registry, provider_id)?,
+        None => ingest::provider_for_path(registry, source)?,
+    };
+    let options = recipe_digest.map_or_else(Vec::new, |digest| vec![("recipe", digest)]);
+    let provenance = provenance_digest(&provider, &fingerprint(source)?, &options);
     let mut on_cache = |fraction| progress(IngestStage::Cache, fraction);
     if let Some(loaded) =
         try_load_from_root(root, source, store, key, prefix, &provenance, &mut on_cache)?
     {
         return Ok(IngestOutcome {
             loaded,
-            provider_id: provider.id.to_owned(),
+            provider_id: provider.id.clone(),
             provenance,
             sidecar_error: None,
         });
     }
 
-    let summary = ingest::ingest_path(source, store, key, prefix, context)?;
+    let summary = ingest::ingest_path_with_provider(
+        registry,
+        provider_id,
+        source,
+        store,
+        key,
+        prefix,
+        context,
+    )?;
     let total = summary.signals.len().max(1);
     let mut pyramids = Vec::new();
     for (index, id) in summary.signals.iter().enumerate() {
@@ -350,7 +412,7 @@ pub fn ingest_or_load_at(
     };
     Ok(IngestOutcome {
         loaded: LoadedCache { summary, pyramids },
-        provider_id: provider.id.to_owned(),
+        provider_id: provider.id,
         provenance,
         sidecar_error,
     })
@@ -465,7 +527,19 @@ pub fn try_load(
     prefix: &str,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<LoadedCache>, CacheError> {
-    let provider = ingest::provider_for(ingest::sniff_format(source)?);
+    let registry = ProviderRegistry::builtin();
+    try_load_with_registry(&registry, source, store, key, prefix, progress)
+}
+
+pub(crate) fn try_load_with_registry(
+    registry: &ProviderRegistry,
+    source: &Path,
+    store: &mut SignalStore,
+    key: SourceKey,
+    prefix: &str,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Option<LoadedCache>, CacheError> {
+    let provider = ingest::provider_for_path(registry, source)?;
     let provenance = provenance_digest(&provider, &fingerprint(source)?, &[]);
     try_load_from_root(
         &CacheRoot::beside_source(source),
@@ -761,6 +835,29 @@ mod tests {
         SourceKey(uuid::Uuid::new_v4())
     }
 
+    fn provenance_for_recipe(id: &str, digest: &str) -> String {
+        crate::ingest::provenance::provenance_digest(
+            &crate::ingest::provenance::ProviderInfo {
+                id: id.into(),
+                cache_abi: 1,
+            },
+            &crate::ingest::provenance::Fingerprint {
+                source_len: 10,
+                mtime_ns: 20,
+                head_crc: 30,
+            },
+            &[("recipe", digest)],
+        )
+    }
+
+    #[test]
+    fn the_recipe_digest_is_part_of_the_cache_key() {
+        assert_ne!(
+            provenance_for_recipe("flight-h5", "aaaa"),
+            provenance_for_recipe("flight-h5", "bbbb")
+        );
+    }
+
     fn try_load_test(
         source: &Path,
         store: &mut SignalStore,
@@ -789,6 +886,33 @@ mod tests {
         };
         let mut stage = |stage, fraction| (sink.borrow_mut())(stage, fraction);
         ingest_or_load(
+            source,
+            store,
+            key(),
+            &naming::default_prefix(source),
+            &mut context,
+            &mut stage,
+        )
+    }
+
+    fn ingest_or_load_with_recipe_test(
+        source: &Path,
+        root: &CacheRoot,
+        recipe_digest: &str,
+        store: &mut SignalStore,
+    ) -> Result<IngestOutcome, CacheError> {
+        let cancel = CancelToken::default();
+        let mut decode = |_| {};
+        let mut context = DecodeContext {
+            progress: &mut decode,
+            cancel: &cancel,
+        };
+        let mut stage = |_, _| {};
+        ingest_or_load_at_with_provider(
+            &ProviderRegistry::builtin(),
+            Some("csv"),
+            Some(recipe_digest),
+            root,
             source,
             store,
             key(),
@@ -834,7 +958,8 @@ mod tests {
             .iter()
             .map(|(id, pyramid)| (store.signal(*id).unwrap(), pyramid))
             .collect();
-        let provider = ingest::provider_for(ingest::sniff_format(source).unwrap());
+        let registry = ProviderRegistry::builtin();
+        let provider = ingest::provider_for_path(&registry, source).unwrap();
         let provenance = provenance_digest(&provider, &fingerprint(source).unwrap(), &[]);
         write(
             source,
@@ -1025,6 +1150,21 @@ mod tests {
         );
         assert_eq!(cached.loaded.pyramids.len(), outcome.loaded.pyramids.len());
         assert!(stages.iter().all(|stage| *stage == IngestStage::Cache));
+    }
+
+    #[test]
+    fn ingest_path_provenance_changes_with_the_recipe_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let root = CacheRoot::app_owned(dir.path().join("cache").as_path());
+        let first =
+            ingest_or_load_with_recipe_test(&source, &root, "recipe-a", &mut SignalStore::new())
+                .unwrap();
+        let second =
+            ingest_or_load_with_recipe_test(&source, &root, "recipe-b", &mut SignalStore::new())
+                .unwrap();
+
+        assert_ne!(first.provenance, second.provenance);
     }
 
     #[test]

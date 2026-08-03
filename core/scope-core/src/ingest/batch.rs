@@ -14,6 +14,7 @@ use crate::{
     cache::{self, CacheError, CacheRoot},
     ingest::{
         CancelToken, DecodeContext, DecodedSignal, DecodedSource, IngestError, IngestSummary,
+        registry::ProviderRegistry,
     },
     pyramid::Pyramid,
     sources::{Admission, SourceError, SourceRecord, SourceRegistry},
@@ -51,6 +52,7 @@ pub enum FileState {
 pub struct FileFailure {
     pub path: PathBuf,
     pub error: String,
+    pub recipe_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -82,6 +84,7 @@ struct FileEntry {
     weight: u64,
     state: FileState,
     error: Option<String>,
+    recipe_required: bool,
 }
 
 struct Inner {
@@ -107,6 +110,7 @@ impl BatchProgress {
                         path,
                         state: FileState::Pending,
                         error: None,
+                        recipe_required: false,
                     })
                     .collect(),
                 cancelled: false,
@@ -123,7 +127,15 @@ impl BatchProgress {
     }
 
     pub fn failed(&self, index: usize, error: impl Into<String>) {
-        self.set_state(index, FileState::Failed, Some(error.into()));
+        self.failed_with_recipe(index, error, false);
+    }
+
+    fn failed_with_recipe(&self, index: usize, error: impl Into<String>, recipe_required: bool) {
+        if let Some(entry) = self.lock().entries.get_mut(index) {
+            entry.state = FileState::Failed;
+            entry.error = Some(error.into());
+            entry.recipe_required = recipe_required;
+        }
     }
 
     pub fn cancelled(&self, index: usize) {
@@ -177,6 +189,7 @@ impl BatchProgress {
                 entry.error.as_ref().map(|error| FileFailure {
                     path: entry.path.clone(),
                     error: error.clone(),
+                    recipe_required: entry.recipe_required,
                 })
             })
             .take(RECENT_FAILURE_LIMIT)
@@ -236,6 +249,7 @@ impl BatchProgress {
         if let Some(entry) = self.lock().entries.get_mut(index) {
             entry.state = state;
             entry.error = error;
+            entry.recipe_required = false;
         }
     }
 
@@ -269,6 +283,8 @@ pub struct BatchOptions {
     pub budget: Arc<MemoryBudget>,
     pub terminal_ttl: Duration,
     pub cache_directory: Option<PathBuf>,
+    pub recipe_directory: Option<PathBuf>,
+    pub provider_registry: Arc<ProviderRegistry>,
 }
 
 impl BatchOptions {
@@ -282,6 +298,8 @@ impl BatchOptions {
             })),
             terminal_ttl: Duration::from_secs(60),
             cache_directory: None,
+            recipe_directory: None,
+            provider_registry: Arc::new(ProviderRegistry::builtin()),
         }
     }
 }
@@ -296,7 +314,7 @@ struct Job {
 #[derive(Clone)]
 enum FlightOutcome {
     Done,
-    Failed(String),
+    Failed(String, bool),
     Cancelled,
 }
 
@@ -395,6 +413,8 @@ impl BatchJobs {
                 resident: Arc::clone(&self.resident),
                 budget: Arc::clone(&self.options.budget),
                 cache_directory: self.options.cache_directory.clone(),
+                recipe_directory: self.options.recipe_directory.clone(),
+                provider_registry: Arc::clone(&self.options.provider_registry),
                 sink: Arc::clone(&sink),
             };
             handles.push(thread::spawn(move || worker.run()));
@@ -507,6 +527,8 @@ struct Worker {
     resident: Arc<Mutex<Vec<ResidentCharge>>>,
     budget: Arc<MemoryBudget>,
     cache_directory: Option<PathBuf>,
+    recipe_directory: Option<PathBuf>,
+    provider_registry: Arc<ProviderRegistry>,
     sink: Arc<dyn CommitSink>,
 }
 
@@ -537,7 +559,10 @@ impl Worker {
             };
             match outcome {
                 FlightOutcome::Done => self.progress.succeeded(item.index),
-                FlightOutcome::Failed(error) => self.progress.failed(item.index, error),
+                FlightOutcome::Failed(error, recipe_required) => {
+                    self.progress
+                        .failed_with_recipe(item.index, error, recipe_required);
+                }
                 FlightOutcome::Cancelled => self.progress.cancelled(item.index),
             }
         }
@@ -551,10 +576,13 @@ impl Worker {
                 FlightOutcome::Done
             }
             Err(ProcessError::Cancelled) => FlightOutcome::Cancelled,
-            Err(ProcessError::Failed(error)) => FlightOutcome::Failed(error),
+            Err(ProcessError::Failed(error, recipe_required)) => {
+                FlightOutcome::Failed(error, recipe_required)
+            }
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn prepare_and_commit(
         &self,
         record: &SourceRecord,
@@ -573,26 +601,78 @@ impl Worker {
             cancel: &self.cancel,
         };
         let mut stage_progress = |_, _| {};
-        let outcome = if let Some(directory) = &self.cache_directory {
-            cache::ingest_or_load_at(
-                &CacheRoot::app_owned(directory),
+        let mut registry = (*self.provider_registry).clone();
+        let mut provider_id = record.provider_id.clone();
+        let mut recipe_id = record.recipe_id.clone();
+        let mut recipe_digest = record.recipe_digest.clone();
+        if provider_id
+            .as_deref()
+            .is_none_or(|provider| provider.starts_with("recipe:"))
+        {
+            let preferences = crate::preferences::Preferences {
+                recipe_directory: self
+                    .recipe_directory
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                ..crate::preferences::Preferences::default()
+            };
+            match crate::ingest::recipe::resolve::resolve_for_recipe(
                 &record.path,
-                &mut temporary,
-                record.key,
-                &record.prefix,
-                &mut context,
-                &mut stage_progress,
-            )
-        } else {
-            cache::ingest_or_load(
-                &record.path,
-                &mut temporary,
-                record.key,
-                &record.prefix,
-                &mut context,
-                &mut stage_progress,
-            )
+                &preferences,
+                record.recipe_id.as_deref(),
+            ) {
+                Ok(Some(resolved)) => {
+                    if crate::restore::recipe_status(record, Some(&resolved))
+                        != crate::restore::RecipeStatus::Matched
+                    {
+                        // Offerable to the import wizard: reconfirming means
+                        // writing a recipe, which is the only thing that can
+                        // clear this state.
+                        return Err(ProcessError::Failed(
+                            crate::restore::restore_source(record, Some(&resolved))
+                                .expect_err("non-matched recipe status always errors")
+                                .to_string(),
+                            true,
+                        ));
+                    }
+                    provider_id = Some(format!("recipe:{}", resolved.recipe.id));
+                    recipe_id = Some(resolved.recipe.id.clone());
+                    recipe_digest = Some(resolved.digest.clone());
+                    registry.register(crate::ingest::recipe::decode::provider(
+                        resolved.recipe,
+                        resolved.digest,
+                    ));
+                }
+                Ok(None) if record.recipe_id.is_some() || record.recipe_digest.is_some() => {
+                    // Relinking means writing a recipe, so this failure must
+                    // reach the import wizard exactly like a first import.
+                    return Err(ProcessError::Failed(
+                        crate::restore::restore_source(record, None)
+                            .expect_err("a missing recipe always errors")
+                            .to_string(),
+                        true,
+                    ));
+                }
+                Ok(None) => {}
+                Err(error) => return Err(ProcessError::Failed(error.to_string(), false)),
+            }
         }
+        let cache_root = self.cache_directory.as_deref().map_or_else(
+            || CacheRoot::beside_source(&record.path),
+            CacheRoot::app_owned,
+        );
+        let outcome = cache::ingest_or_load_at_with_provider(
+            &registry,
+            provider_id.as_deref(),
+            recipe_digest.as_deref(),
+            &cache_root,
+            &record.path,
+            &mut temporary,
+            record.key,
+            &record.prefix,
+            &mut context,
+            &mut stage_progress,
+        )
         .map_err(process_cache_error)?;
         if self.cancel.is_cancelled() {
             return Err(ProcessError::Cancelled);
@@ -635,28 +715,37 @@ impl Worker {
         let mut committed = record.clone();
         committed.provider_id = Some(outcome.provider_id.clone());
         committed.decode_provenance = Some(outcome.provenance.clone());
+        committed.recipe_id = recipe_id;
+        committed.recipe_digest = recipe_digest;
         self.sink
             .commit(&committed, decoded, pyramids)
-            .map_err(|error| match error {
-                IngestError::Cancelled => ProcessError::Cancelled,
-                error => ProcessError::Failed(error.to_string()),
-            })?;
+            .map_err(failed_ingest)?;
         Ok((outcome.provider_id, outcome.provenance, charge))
     }
 }
 
 enum ProcessError {
     Cancelled,
-    Failed(String),
+    Failed(String, bool),
 }
 
 fn failed(error: &impl ToString) -> ProcessError {
-    ProcessError::Failed(error.to_string())
+    ProcessError::Failed(error.to_string(), false)
+}
+
+fn failed_ingest(error: IngestError) -> ProcessError {
+    match error {
+        IngestError::Cancelled => ProcessError::Cancelled,
+        error => {
+            let recipe_required = matches!(error, IngestError::RecipeRequired { .. });
+            ProcessError::Failed(error.to_string(), recipe_required)
+        }
+    }
 }
 
 fn process_cache_error(error: CacheError) -> ProcessError {
     match error {
-        CacheError::Ingest(IngestError::Cancelled) => ProcessError::Cancelled,
+        CacheError::Ingest(error) => failed_ingest(error),
         error => failed(&error),
     }
 }
@@ -749,6 +838,7 @@ mod tests {
                 recent_failures: vec![FileFailure {
                     path: PathBuf::from("1.csv"),
                     error: "invalid".into(),
+                    recipe_required: false,
                 }],
             }
         );
@@ -909,6 +999,8 @@ mod tests {
             prefix: "saved".into(),
             provider_id: None,
             decode_provenance: None,
+            recipe_id: None,
+            recipe_digest: None,
             reconcile_legacy: true,
         };
         let jobs = BatchJobs::new(BatchOptions::for_tests());
@@ -919,5 +1011,60 @@ mod tests {
         let store = sink.store.lock().unwrap();
         assert_eq!(store.sources().next().unwrap().key, record.key);
         assert!(store.signal_by_path("saved/value").is_some());
+    }
+
+    #[test]
+    fn recipe_required_failure_is_flagged_for_a_container_without_a_recipe() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("layout.h5");
+        std::fs::write(&path, b"\x89HDF\r\n\x1a\n").unwrap();
+        let jobs = BatchJobs::new(BatchOptions::for_tests());
+        let job = jobs.submit(vec![path], std::sync::Arc::new(RecordingSink::default()));
+
+        let status = jobs.wait_for_tests(job);
+
+        assert!(status.recent_failures.iter().any(|failure| {
+            failure.recipe_required
+                && failure
+                    .error
+                    .contains("requires a validated container recipe")
+        }));
+    }
+
+    /// A recorded recipe that has vanished must stay offerable to the import
+    /// wizard. The failure text tells the user to relink, and `recipe_required`
+    /// is the only thing that opens the surface which can do it — without it
+    /// the source is permanently unloadable.
+    #[test]
+    fn a_missing_or_changed_recipe_still_offers_the_import_wizard() {
+        for (label, recorded_digest) in [("missing", "aaaa"), ("changed", "bbbb")] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("layout.h5");
+            std::fs::write(&path, b"\x89HDF\r\n\x1a\n").unwrap();
+            let record = SourceRecord {
+                key: crate::store::SourceKey(uuid::Uuid::from_bytes([9; 16])),
+                path: path.clone(),
+                prefix: "layout".into(),
+                provider_id: Some("recipe:layout-hdf5".into()),
+                decode_provenance: None,
+                recipe_id: Some("layout-hdf5".into()),
+                recipe_digest: Some(recorded_digest.into()),
+                reconcile_legacy: false,
+            };
+            let jobs = BatchJobs::new(BatchOptions::for_tests());
+            jobs.replace_sources(vec![record]).unwrap();
+            let job = jobs.submit(vec![path], std::sync::Arc::new(RecordingSink::default()));
+            let status = jobs.wait_for_tests(job);
+
+            let failure = status
+                .recent_failures
+                .first()
+                .unwrap_or_else(|| panic!("{label}: expected a failure"));
+            assert!(
+                failure.recipe_required,
+                "{label}: {} must offer the wizard",
+                failure.error
+            );
+        }
     }
 }

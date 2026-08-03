@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -111,6 +111,7 @@ pub enum FileState {
 pub struct BatchFailure {
     pub path: String,
     pub error: String,
+    pub recipe_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -155,6 +156,57 @@ pub struct FormatDescriptor {
     pub id: String,
     pub label: String,
     pub extensions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IntrospectRequest {
+    pub path: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatasetOutlineKind {
+    Numeric,
+    Text,
+    Compound,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DatasetOutline {
+    pub path: String,
+    pub kind: DatasetOutlineKind,
+    #[serde(with = "u64_string")]
+    pub len: u64,
+    pub shape: Vec<u32>,
+    pub sample_preview: Vec<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ContainerOutline {
+    pub container: String,
+    pub datasets: Vec<DatasetOutline>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecipeDestination {
+    Sidecar,
+    UserDirectory,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveRecipeRequest {
+    pub path: String,
+    pub recipe_toml: String,
+    pub destination: RecipeDestination,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SaveRecipeResponse {
+    pub recipe_id: String,
+    pub digest: String,
+    pub saved_to: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -336,6 +388,20 @@ pub struct DerivedBundleResponse {
 pub enum SessionDialogMode {
     Open,
     Save,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DragDropKind {
+    Enter,
+    Drop,
+    Leave,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DragDropForward {
+    pub kind: DragDropKind,
+    pub paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

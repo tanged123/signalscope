@@ -29,6 +29,7 @@ fi
   file \
   libayatana-appindicator3-dev \
   libfuse2 \
+  libhdf5-dev \
   librsvg2-dev \
   libssl-dev \
   libwebkit2gtk-4.1-dev \

@@ -1,0 +1,36 @@
+# SignalScope recipe for flight_run.h5.
+#
+# A recipe is pure data: it selects datasets, names them, and says where their
+# time comes from. It can never name a program, plugin, or a path outside the
+# container.
+#
+# The file sits beside the data and is named "<data file>.scope.toml", so
+# SignalScope picks it up automatically when you open flight_run.h5.
+
+id = "flight-run-h5"
+container = "hdf5"
+
+# One selection per group. "*" matches exactly one path segment (there are no
+# partial wildcards like "*_m"), and "**" would match any depth. Note that
+# neither pattern matches "run/time": a timebase should not also be plotted as
+# a signal, and nothing excludes it automatically.
+[[selection]]
+datasets = "run/vehicle/*"
+# "strip:run/" trims the leading "run/" from each name, so
+# "run/vehicle/altitude_m" is listed as "vehicle/altitude_m".
+name = "strip:run/"
+# Take each signal's unit from that dataset's HDF5 "units" attribute.
+unit_attribute = "units"
+
+[selection.time]
+kind = "dataset"
+path = "run/time"
+
+[[selection]]
+datasets = "run/propulsion/*"
+name = "strip:run/"
+unit_attribute = "units"
+
+[selection.time]
+kind = "dataset"
+path = "run/time"

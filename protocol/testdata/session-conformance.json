@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 19,
+  "schema_version": 20,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -57,6 +57,8 @@
       "prefix": "run",
       "provider_id": null,
       "decode_provenance": null,
+      "recipe_id": null,
+      "recipe_digest": null,
       "reconcile_legacy": false
     }
   ]

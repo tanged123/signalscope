@@ -92,6 +92,25 @@ describe("CommandRegistry", () => {
     expect(ran).toEqual(["signals", "commands"]);
   });
 
+  it("dispatches mod+alt shortcuts", () => {
+    const registry = new CommandRegistry();
+    let runs = 0;
+    registry.register(
+      command({
+        id: "open-folder",
+        keys: "mod+alt+o",
+        run: () => {
+          runs += 1;
+        },
+      }),
+    );
+
+    expect(registry.handleKey(key("o", { ctrlKey: true, altKey: true }))).toBe(
+      true,
+    );
+    expect(runs).toBe(1);
+  });
+
   it("matches mod+= for ctrl+= and ctrl+shift+= (plus)", () => {
     const registry = new CommandRegistry();
     let runs = 0;
@@ -168,6 +187,7 @@ describe("formatCombo", () => {
     });
     expect(formatCombo("mod+p")).toBe("⌘P");
     expect(formatCombo("mod+shift+p")).toBe("⌘⇧P");
+    expect(formatCombo("mod+alt+o")).toBe("⌘⌥O");
   });
 
   it("spells mod as Ctrl everywhere else", () => {
@@ -176,6 +196,7 @@ describe("formatCombo", () => {
     });
     expect(formatCombo("mod+p")).toBe("Ctrl+P");
     expect(formatCombo("mod+shift+p")).toBe("Ctrl+⇧P");
+    expect(formatCombo("mod+alt+o")).toBe("Ctrl+Alt+O");
   });
 
   it("prefers userAgentData over the user-agent string", () => {

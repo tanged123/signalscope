@@ -82,6 +82,8 @@ function sourceRecord(overrides: Partial<SourceRecord> = {}): SourceRecord {
     prefix: "run",
     provider_id: null,
     decode_provenance: null,
+    recipe_id: null,
+    recipe_digest: null,
     reconcile_legacy: false,
     ...overrides,
   };

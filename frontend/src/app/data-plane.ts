@@ -3,9 +3,11 @@ import {
   type BatchDetailRequest,
   type BatchJob,
   type BatchStatus,
+  type ContainerOutline,
   type CreateDerivedBundleRequest,
   type DerivedBundleResponse,
   type DerivedRequest,
+  type DragDropForward,
   type EnvelopeBin,
   type ExportEstimate,
   type ExportEstimateRequest,
@@ -16,6 +18,7 @@ import {
   type ExportWriteRequest,
   type FormatDescriptor,
   type IngestBatchRequest,
+  type IntrospectRequest,
   type LoadedSession,
   type LoadSessionRequest,
   type PickSessionRequest,
@@ -24,6 +27,9 @@ import {
   type RestoreReconcileRequest,
   type RestoreReconcileResponse,
   type RestoreSourcesRequest,
+  type RecipeDestination,
+  type SaveRecipeRequest,
+  type SaveRecipeResponse,
   type SampleRequest,
   type SampleResponse,
   type SaveSessionRequest,
@@ -57,6 +63,14 @@ export interface IngestPort {
   cancelBatch(jobId: string): Promise<void>;
   releaseBatch(jobId: string): Promise<void>;
   listFormats(): Promise<FormatDescriptor[]>;
+  introspect(path: string): Promise<ContainerOutline>;
+  saveRecipe(
+    path: string,
+    recipeToml: string,
+    destination: RecipeDestination,
+  ): Promise<SaveRecipeResponse>;
+  /** Forwarded window drag-drop events. Returns an unsubscribe. */
+  onDragDrop(handler: (event: DragDropForward) => void): () => void;
 }
 
 export interface DerivedPort {
@@ -84,6 +98,9 @@ export interface RestorePort {
 export interface PreferencesPort {
   load(): Promise<string | null>;
   save(preferencesJson: string): Promise<void>;
+  /** The recipe directory in use, resolved by the host, never built here. */
+  effectiveRecipeDirectory(): Promise<string>;
+  pickRecipeDirectory(): Promise<string | null>;
 }
 
 export interface ExportPort {
@@ -130,6 +147,7 @@ type BakedManifest = Envelope<SnapshotManifest>;
 
 interface TauriInternals {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  transformCallback<T>(callback: (payload: T) => void): number;
 }
 
 declare global {
@@ -152,7 +170,10 @@ export class TauriPlane implements DataPlane {
 
   readonly exporter: ExportPort;
 
-  constructor(private readonly invoke: TauriInternals["invoke"]) {
+  constructor(
+    private readonly invoke: TauriInternals["invoke"],
+    private readonly transformCallback: TauriInternals["transformCallback"],
+  ) {
     this.ingest = {
       pickSources: async () =>
         open(await this.invoke<Envelope<string[]>>("pick_sources")),
@@ -202,6 +223,61 @@ export class TauriPlane implements DataPlane {
       },
       listFormats: async () =>
         open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
+      introspect: async (path: string) =>
+        open(
+          await this.invoke<Envelope<ContainerOutline>>(
+            "introspect_container",
+            {
+              request: seal<IntrospectRequest>({ path }),
+            },
+          ),
+        ),
+      saveRecipe: async (
+        path: string,
+        recipeToml: string,
+        destination: RecipeDestination,
+      ) =>
+        open(
+          await this.invoke<Envelope<SaveRecipeResponse>>("save_recipe", {
+            request: seal<SaveRecipeRequest>({
+              path,
+              recipe_toml: recipeToml,
+              destination,
+            }),
+          }),
+        ),
+      onDragDrop: (handler) => {
+        let eventId: number | null = null;
+        let disposed = false;
+        const unlisten = () => {
+          if (eventId === null) return;
+          void this.invoke("plugin:event|unlisten", {
+            event: "scope://drag-drop",
+            eventId,
+          });
+          eventId = null;
+        };
+        void this.invoke<number>("plugin:event|listen", {
+          event: "scope://drag-drop",
+          target: { kind: "Any" },
+          handler: this.transformCallback(
+            (raw: { payload: Envelope<DragDropForward> }) => {
+              handler(open(raw.payload));
+            },
+          ),
+        })
+          .then((id) => {
+            eventId = id;
+            if (disposed) unlisten();
+          })
+          .catch((error: unknown) => {
+            console.error("drag-drop listener registration failed", error);
+          });
+        return () => {
+          disposed = true;
+          unlisten();
+        };
+      },
     };
     this.derived = {
       create: async (path: string, expr: string) =>
@@ -291,6 +367,12 @@ export class TauriPlane implements DataPlane {
           }),
         );
       },
+      effectiveRecipeDirectory: async () =>
+        open(await this.invoke<Envelope<string>>("effective_recipe_directory")),
+      pickRecipeDirectory: async () =>
+        open(
+          await this.invoke<Envelope<string | null>>("pick_recipe_directory"),
+        ),
     };
     this.exporter = {
       estimate: async (sessionJson: string, selection: ExportSelection) =>
@@ -529,7 +611,10 @@ export function selectDataPlane(): DataPlane {
   const internals = window.__TAURI_INTERNALS__;
   return internals === undefined
     ? BakedPlane.fromDocument()
-    : new TauriPlane(internals.invoke.bind(internals));
+    : new TauriPlane(
+        internals.invoke.bind(internals),
+        internals.transformCallback.bind(internals),
+      );
 }
 
 function createDemoManifest(): BakedManifest {

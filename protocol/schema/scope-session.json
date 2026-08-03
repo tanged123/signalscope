@@ -1,5 +1,5 @@
 {
-  "schema_version": 19,
+  "schema_version": 20,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -192,6 +192,8 @@
         "prefix": "string",
         "provider_id": "string?",
         "decode_provenance": "string?",
+        "recipe_id": "string?",
+        "recipe_digest": "string?",
         "reconcile_legacy": "bool"
       }
     },

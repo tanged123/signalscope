@@ -30,6 +30,9 @@ function fakePort(statuses: BatchStatus[]): FakePort {
       return Promise.resolve();
     },
     listFormats: () => Promise.resolve([]),
+    introspect: () => Promise.reject(new Error("not used in ingest tests")),
+    saveRecipe: () => Promise.reject(new Error("not used in ingest tests")),
+    onDragDrop: () => () => undefined,
   };
 }
 
@@ -52,7 +55,9 @@ describe("runBatchIngest", () => {
         done: "1",
         failed: "1",
         current_paths: [],
-        recent_failures: [{ path: "/b.csv", error: "unsupported" }],
+        recent_failures: [
+          { path: "/b.csv", error: "unsupported", recipe_required: false },
+        ],
       },
     ]);
     const seen: string[] = [];
@@ -77,7 +82,9 @@ describe("runBatchIngest", () => {
         done: "0",
         failed: "1",
         current_paths: [],
-        recent_failures: [{ path: "/a.csv", error: "boom" }],
+        recent_failures: [
+          { path: "/a.csv", error: "boom", recipe_required: false },
+        ],
       },
     ]);
     await expect(

@@ -26,6 +26,13 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         lib = pkgs.lib;
+        hdf5Root = pkgs.symlinkJoin {
+          name = "hdf5";
+          paths = [
+            pkgs.hdf5
+            pkgs.hdf5.dev
+          ];
+        };
 
         treefmtEval = treefmt-nix.lib.evalModule pkgs {
           projectRootFile = "flake.nix";
@@ -73,6 +80,7 @@
               cargo-tauri
               clippy
               ffmpeg
+              hdf5Root
               llvmPackages.llvm
               nodejs_22
               pnpm
@@ -89,6 +97,7 @@
           shellHook = ''
             export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-2}"
             export RUST_BACKTRACE=1
+            export HDF5_DIR="${hdf5Root}"
             ${lib.optionalString pkgs.stdenv.isLinux ''
               export PLAYWRIGHT_BROWSERS_PATH=0
               export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"

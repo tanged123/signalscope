@@ -13,9 +13,35 @@ use super::{
     DecodeContext, DecodedSignal, DecodedSource, Decoder, IngestError, apply_permutation,
     normalize_segment, sort_permutation,
 };
+use super::{
+    provenance::CACHE_ABI_MCAP,
+    registry::{Confidence, FormatProvider},
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct McapDecoder;
+
+pub(crate) fn provider() -> FormatProvider {
+    FormatProvider::new(
+        "mcap",
+        "MCAP recordings (MCAP)",
+        &["mcap"],
+        0,
+        CACHE_ABI_MCAP,
+        |probe| {
+            if is_mcap_magic(probe) {
+                Confidence::Certain
+            } else {
+                Confidence::No
+            }
+        },
+        || Box::new(McapDecoder),
+    )
+}
+
+pub(crate) fn is_mcap_magic(probe: &[u8]) -> bool {
+    probe.starts_with(b"\x89MCAP0\r\n")
+}
 
 #[derive(Default)]
 struct TopicColumns {

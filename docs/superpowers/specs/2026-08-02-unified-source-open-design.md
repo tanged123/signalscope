@@ -1,5 +1,9 @@
 # Unified Source Open Design
 
+> **Superseded** by `2026-08-02-dragdrop-and-direct-open-design.md`: the
+> chooser modal is deleted in favor of direct open, a demoted folder command,
+> and window-wide drag-and-drop.
+
 ## Decision
 
 SignalScope exposes one `Open…` command. It opens a compact modal choice for

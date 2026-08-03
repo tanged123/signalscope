@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkspaceModel } from "../app/workspace";
 import { SelectionModel } from "../app/selection";
 import { Catalog } from "../app/catalog";
+import type { CommandRegistry } from "../app/commands";
+import type { DataPlane } from "../app/data-plane";
 import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
@@ -17,6 +19,7 @@ import {
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
+  formatHint,
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
@@ -83,6 +86,300 @@ interface ShellProbe {
   workspace: WorkspaceModel;
   transitionPanelMode(panelId: string, mode: PanelMode): void;
 }
+
+interface DropProbe {
+  root: HTMLElement;
+  plane: { ingest: unknown };
+  palette: { isOpen(): boolean } | null;
+  exportDialog: { isOpen(): boolean } | null;
+  loadSession: ReturnType<typeof vi.fn>;
+  ingestPaths: ReturnType<typeof vi.fn>;
+  reportError: ReturnType<typeof vi.fn>;
+  onDragDrop(event: { kind: string; paths: string[] }): void;
+  handleDrop(paths: string[]): Promise<void>;
+}
+
+function dropProbe(ingest: unknown, modalOpen = false): DropProbe {
+  const probe = Object.create(AppShell.prototype) as DropProbe;
+  probe.root = document.createElement("div");
+  probe.root.innerHTML = `<div class="drop-overlay" hidden></div>`;
+  probe.plane = { ingest };
+  probe.palette = { isOpen: () => modalOpen };
+  probe.exportDialog = null;
+  probe.loadSession = vi.fn(() => Promise.resolve());
+  probe.ingestPaths = vi.fn(() => Promise.resolve());
+  probe.reportError = vi.fn();
+  return probe;
+}
+
+const scanIngest = (files: string[]) => ({
+  scanSources: () =>
+    Promise.resolve({
+      files,
+      total_bytes: "0",
+      format_counts: [],
+    }),
+  listFormats: () =>
+    Promise.resolve([
+      { id: "csv", label: "Delimited text", extensions: ["csv"] },
+    ]),
+});
+
+describe("drag-drop routing", () => {
+  it("shows the overlay on enter and hides it on leave", () => {
+    const probe = dropProbe(scanIngest([]));
+    const overlay = probe.root.querySelector(".drop-overlay");
+    probe.onDragDrop({ kind: "enter", paths: [] });
+    expect(overlay?.hasAttribute("hidden")).toBe(false);
+    probe.onDragDrop({ kind: "leave", paths: [] });
+    expect(overlay?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("ignores drops and keeps the overlay hidden while a modal is open", () => {
+    const probe = dropProbe(scanIngest(["/a.csv"]), true);
+    probe.onDragDrop({ kind: "enter", paths: [] });
+    expect(
+      probe.root.querySelector(".drop-overlay")?.hasAttribute("hidden"),
+    ).toBe(true);
+    probe.onDragDrop({ kind: "drop", paths: ["/a.csv"] });
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+  });
+
+  it("opens a dropped workspace file through loadSession", async () => {
+    const probe = dropProbe(scanIngest([]));
+    await probe.handleDrop(["/w/flight.signalscope"]);
+    expect(probe.loadSession).toHaveBeenCalledWith("/w/flight.signalscope");
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+  });
+
+  it("expands data drops into the batch ingest path", async () => {
+    const probe = dropProbe(scanIngest(["/runs/a.csv", "/runs/b.csv"]));
+    await probe.handleDrop(["/runs"]);
+    expect(probe.ingestPaths).toHaveBeenCalledWith([
+      "/runs/a.csv",
+      "/runs/b.csv",
+    ]);
+  });
+
+  it("rejects mixed drops and reports the reason", async () => {
+    const probe = dropProbe(scanIngest([]));
+    await probe.handleDrop(["/w/a.signalscope", "/d/a.csv"]);
+    expect(probe.reportError).toHaveBeenCalled();
+    expect(probe.loadSession).not.toHaveBeenCalled();
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+  });
+
+  it("reports the supported formats when a drop expands to nothing", async () => {
+    const probe = dropProbe(scanIngest([]));
+    await probe.handleDrop(["/empty"]);
+    expect(probe.ingestPaths).not.toHaveBeenCalled();
+    const error = (probe.reportError.mock.calls as unknown[][])[0]?.[0];
+    expect(String(error)).toContain(".csv");
+  });
+});
+
+describe("recipe-required ingest failures", () => {
+  function ingestProbe(
+    batchStatus: BatchStatus,
+    introspect: ReturnType<typeof vi.fn>,
+  ) {
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      plane: { ingest: Record<string, unknown> };
+      reloadSignals: ReturnType<typeof vi.fn>;
+      afterLayoutChange: ReturnType<typeof vi.fn>;
+      reportError: ReturnType<typeof vi.fn>;
+      ingestPaths(paths: string[]): Promise<void>;
+    };
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<div class="ingest-progress" hidden></div>';
+    shell.reloadSignals = vi.fn(() => Promise.resolve());
+    shell.afterLayoutChange = vi.fn();
+    shell.reportError = vi.fn();
+    shell.plane = {
+      ingest: {
+        startBatch: vi.fn(() => Promise.resolve("job")),
+        batchStatus: vi.fn(() => Promise.resolve(batchStatus)),
+        releaseBatch: vi.fn(() => Promise.resolve()),
+        introspect,
+      },
+    };
+    return shell;
+  }
+
+  it("still reloads signals when an unflagged wizard mount is unavailable", async () => {
+    const introspect = vi.fn(() =>
+      Promise.reject(new Error("unsupported container magic")),
+    );
+    const shell = ingestProbe(
+      {
+        state: "partial",
+        fraction: 1,
+        total: "1",
+        done: "0",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/runs/mystery.bin",
+            error: "unsupported format",
+            recipe_required: false,
+          },
+        ],
+      },
+      introspect,
+    );
+
+    await shell.ingestPaths(["/runs"]);
+
+    expect(introspect).not.toHaveBeenCalled();
+    expect(shell.reloadSignals).toHaveBeenCalled();
+  });
+
+  it("contains a failed recipe wizard mount and still reloads signals", async () => {
+    const introspect = vi.fn(() =>
+      Promise.reject(new Error("unsupported container magic")),
+    );
+    const shell = ingestProbe(
+      {
+        state: "partial",
+        fraction: 1,
+        total: "1",
+        done: "0",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/runs/mystery.h5",
+            error: "HDF5 input requires a validated container recipe",
+            recipe_required: true,
+          },
+        ],
+      },
+      introspect,
+    );
+
+    await shell.ingestPaths(["/runs"]);
+
+    expect(introspect).toHaveBeenCalledWith("/runs/mystery.h5");
+    expect(shell.reportError).toHaveBeenCalled();
+    expect(shell.reloadSignals).toHaveBeenCalled();
+  });
+
+  it("mounts the recipe wizard when introspection succeeds", async () => {
+    const introspect = vi.fn(() =>
+      Promise.resolve({
+        container: "hdf5",
+        datasets: [
+          {
+            path: "run/time",
+            kind: "numeric",
+            len: "2",
+            shape: [2],
+            sample_preview: [0, 1],
+          },
+        ],
+      }),
+    );
+    const shell = ingestProbe(
+      {
+        state: "partial",
+        fraction: 1,
+        total: "1",
+        done: "0",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/runs/mystery.h5",
+            error: "HDF5 input requires a validated container recipe",
+            recipe_required: true,
+          },
+        ],
+      },
+      introspect,
+    );
+
+    await shell.ingestPaths(["/runs"]);
+
+    expect(document.querySelector(".import-wizard")).not.toBeNull();
+    expect(shell.reportError).not.toHaveBeenCalled();
+    expect(shell.reloadSignals).toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  });
+});
+
+describe("direct open", () => {
+  interface OpenProbe {
+    plane: { ingest: unknown };
+    pickAndIngest: ReturnType<typeof vi.fn>;
+    openSources(): void;
+    openFolder(): void;
+  }
+
+  function openProbe(): OpenProbe {
+    const probe = Object.create(AppShell.prototype) as OpenProbe;
+    probe.plane = { ingest: {} };
+    probe.pickAndIngest = vi.fn(() => Promise.resolve());
+    return probe;
+  }
+
+  it("opens the native file picker with no intermediate chooser", () => {
+    const probe = openProbe();
+    probe.openSources();
+    expect(probe.pickAndIngest).toHaveBeenCalledWith("files");
+  });
+
+  it("opens the folder picker from the demoted command", () => {
+    const probe = openProbe();
+    probe.openFolder();
+    expect(probe.pickAndIngest).toHaveBeenCalledWith("folder");
+  });
+});
+
+describe("open command shortcuts", () => {
+  it("opens a folder with the dedicated mod-alt-o shortcut", () => {
+    const shell = new AppShell(document.createElement("div"), {
+      sourceLabel: "test",
+      ingest: {} as NonNullable<DataPlane["ingest"]>,
+      derived: null,
+      session: null,
+      restore: null,
+      preferences: null,
+      exporter: null,
+      listSignals: () => Promise.resolve([]),
+      listSources: () => Promise.resolve([]),
+      queryTiles: () => Promise.reject(new Error("not used")),
+      querySamples: () => Promise.reject(new Error("not used")),
+    } satisfies DataPlane);
+    const internals = shell as unknown as {
+      commands: CommandRegistry;
+      openFolder: () => void;
+      registerCommands: () => void;
+    };
+    const openFolder = vi
+      .spyOn(internals, "openFolder")
+      .mockImplementation(() => undefined);
+
+    internals.registerCommands();
+
+    expect(
+      internals.commands
+        .listAll()
+        .find((command) => command.id === "open-folder")?.keys,
+    ).toBe("mod+alt+o");
+    expect(
+      internals.commands.handleKey(
+        new KeyboardEvent("keydown", {
+          key: "o",
+          ctrlKey: true,
+          altKey: true,
+        }),
+      ),
+    ).toBe(true);
+    expect(openFolder).toHaveBeenCalledOnce();
+  });
+});
 
 interface ArrivalProbe {
   workspace: WorkspaceModel;
@@ -396,6 +693,15 @@ describe("workspace identity", () => {
 });
 
 describe("source dock rail", () => {
+  it("derives the empty-state format hint from registered extensions", () => {
+    expect(
+      formatHint([
+        { id: "parquet", label: "Parquet", extensions: ["parquet", "pq"] },
+        { id: "csv", label: "CSV", extensions: ["csv"] },
+      ]),
+    ).toBe("CSV · PARQUET · PQ");
+  });
+
   it("formats the status identity as one aggregate readout", () => {
     expect(statusAggregate(2, 17, 2_000)).toBe(
       "2 sources · 17 signals · 2,000 pts",
@@ -436,9 +742,7 @@ describe("source dock rail", () => {
   it("shows the supported-format hint only for an empty workspace", () => {
     const element = document.createElement("div");
     renderDockFooter(element, [], 0, vi.fn());
-    expect(element.querySelector(".dock-formats")?.textContent).toBe(
-      "CSV · MCAP",
-    );
+    expect(element.querySelector(".dock-formats")?.textContent).toBe("—");
     expect(element.querySelector(".dock-add-source")?.textContent).toBe(
       "+ source",
     );
@@ -523,5 +827,86 @@ describe("renderBatchProgress", () => {
     );
     expect(progress.querySelector(".ingest-bar")).toBeNull();
     expect(progress.querySelector(".ingest-cancel")).toBeNull();
+  });
+});
+
+describe("recipe directory settings entries", () => {
+  interface RecipeProbe {
+    plane: { preferences: unknown };
+    prefs: { recipe_directory: string | null };
+    recipeDirectory: string | null;
+    updatePreferences: ReturnType<typeof vi.fn>;
+    refreshRecipeDirectory: ReturnType<typeof vi.fn>;
+    reportError: ReturnType<typeof vi.fn>;
+    recipeDirectoryEntries(): {
+      title: string;
+      hint: string;
+      run: () => void;
+    }[];
+  }
+
+  function recipeProbe(
+    custom: string | null,
+    picked: string | null = "/picked/recipes",
+  ): RecipeProbe {
+    const probe = Object.create(AppShell.prototype) as RecipeProbe;
+    probe.plane = {
+      preferences: {
+        effectiveRecipeDirectory: () =>
+          Promise.resolve(custom ?? "/default/recipes"),
+        pickRecipeDirectory: () => Promise.resolve(picked),
+      },
+    };
+    probe.prefs = { recipe_directory: custom };
+    probe.recipeDirectory = custom ?? "/default/recipes";
+    probe.updatePreferences = vi.fn();
+    probe.refreshRecipeDirectory = vi.fn(() => Promise.resolve(undefined));
+    probe.reportError = vi.fn();
+    return probe;
+  }
+
+  it("shows the host-resolved directory and hides reset while on the default", () => {
+    const entries = recipeProbe(null).recipeDirectoryEntries();
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.title).toBe("Recipe directory");
+    expect(entries[0]?.hint).toBe("/default/recipes");
+  });
+
+  it("offers reset only while a custom directory is set", () => {
+    const entries = recipeProbe("/home/me/recipes").recipeDirectoryEntries();
+
+    expect(entries.map((entry) => entry.title)).toEqual([
+      "Recipe directory",
+      "Use default recipe directory",
+    ]);
+    expect(entries[0]?.hint).toBe("/home/me/recipes");
+  });
+
+  it("stores the picked directory", async () => {
+    const probe = recipeProbe(null);
+    probe.recipeDirectoryEntries()[0]?.run();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(probe.updatePreferences).toHaveBeenCalledWith({
+      recipe_directory: "/picked/recipes",
+    });
+  });
+
+  it("leaves the directory unchanged when the picker is cancelled", async () => {
+    const probe = recipeProbe("/home/me/recipes", null);
+    probe.recipeDirectoryEntries()[0]?.run();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(probe.updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it("clears the preference back to the default", () => {
+    const probe = recipeProbe("/home/me/recipes");
+    probe.recipeDirectoryEntries()[1]?.run();
+
+    expect(probe.updatePreferences).toHaveBeenCalledWith({
+      recipe_directory: null,
+    });
   });
 });

@@ -45,3 +45,11 @@ required; beside-source write failures remain non-fatal.
 ADR 0029 extends this root to page-backed columns, derived spills, and
 generation-keyed ensemble materializations. Live page leases prevent eviction
 and deletion.
+
+## 2026-08-03 amendment: user recipe directory
+
+Schema 3 adds an optional read-only `recipe_directory` for declarative HDF5,
+MATLAB v7.3, and Parquet recipes. Resolution checks a source sidecar before
+this directory; files are parsed as data and never executed. Missing or
+malformed recipes do not change appearance or cache preferences, but a
+malformed candidate is reported to the caller rather than silently skipped.
