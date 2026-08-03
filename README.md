@@ -81,10 +81,10 @@ formulas, and Escape closes the bar. Angle conversions use `rad2deg(x)` and
 - `.mcap`: MCAP recordings containing channels whose message encoding is
   `json`. Numeric and boolean fields are flattened into signal paths. Other
   MCAP message encodings are reported but not decoded yet.
-- `.h5`, `.hdf5`, and MATLAB v7.3 `.mat`: HDF5 containers. Dataset layouts are
-  selected by a validated `.scope.toml` sidecar or a user recipe directory.
+- `.h5`, `.hdf5`, and `.mat`: HDF5 containers. Dataset layouts are selected by
+  a validated `.scope.toml` sidecar or a user recipe directory.
 - `.parquet` and `.pq`: Parquet columns selected by the same declarative recipe
-  format. Older MATLAB files are not supported yet.
+  format.
 
 Build the workbench and the portable snapshot template:
 
@@ -143,6 +143,10 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/ci.sh quality     # dependency, workflow, shell, spelling, unused code
 ./scripts/ci.sh rust        # reproduce one named GitHub Actions job
 nix fmt                     # format the workspace
+
+Windows installer builds require CMake in addition to Git Bash. Linux builds
+use the pinned Nix shell, which supplies HDF5; AppImage builds additionally
+require libhdf5-dev.
 ```
 
 `./scripts/ci.sh quality` is implemented by `quality_checks()` in

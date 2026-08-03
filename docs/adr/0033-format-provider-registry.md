@@ -28,7 +28,9 @@ Provider ids and cache-ABI versions are part of decode provenance. Reopening a
 source uses its recorded provider id; an unavailable provider is reported and
 never replaced by a fresh sniff. Registry-derived descriptors drive native
 pickers, folder scanning, drag-drop acceptance, and the format-listing
-protocol response.
+protocol response. Parquet claims only a leading `PAR1` magic because the
+footer is outside the bounded probe window; the reader validates the complete
+file when it opens it.
 
 ## Consequences
 

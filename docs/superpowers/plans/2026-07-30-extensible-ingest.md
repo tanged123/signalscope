@@ -1404,6 +1404,20 @@ git commit -m "docs: specify sandboxed parser plugins"
 
 ---
 
+## Implementation notes
+
+The shipped implementation corrected four details in this plan:
+
+- Parquet provider detection claims leading `PAR1` magic; it does not require
+  the footer in the bounded probe window.
+- The shared-timebase test asserts `Arc::ptr_eq`; an intermediate version used
+  `same_values`, which only compared contents.
+- HDF5 and Parquet providers claim certain format magic, so the wizard is
+  triggered by the explicit recipe-required failure rather than an unreachable
+  `SelectionError::Unsupported` branch.
+- Windows static HDF5 builds require CMake in addition to the Git Bash build
+  environment.
+
 ## Deferred (explicitly out of scope for this plan)
 
 - **MATLAB ≤ v7.2 files.** v7.3 is HDF5 and Task 7 covers it. Older versions need

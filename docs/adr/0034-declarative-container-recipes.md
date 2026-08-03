@@ -6,7 +6,7 @@
 
 ## Context
 
-HDF5, MATLAB v7.3, and Parquet files can contain arbitrary dataset layouts.
+HDF5 and Parquet files can contain arbitrary dataset layouts.
 Adding a Rust decoder for every layout is not practical, but sidecar files are
 untrusted input and must never select executable code. Recipes also need stable
 cache and session identity when a layout changes.
@@ -19,7 +19,13 @@ only a closed container kind, dataset selectors, time sources, names, and units.
 Every recipe struct denies unknown fields, the container kind is a closed enum,
 and selectors reject absolute paths, parent traversal, and NUL bytes. Recipes
 cannot name a plugin, decoder, command, executable, or path outside the
-container.
+container. A nesting-exhaustive test pins the unknown-field rule at every
+recipe and time-source level.
+
+Container limits are part of the trust boundary: readers cap group depth,
+dataset count, and declared materialized size, and enumerate hard links only.
+Recipes cannot reach outside a container because readers refuse external links;
+selector validation alone is not the containment guarantee.
 
 Resolution checks `<source>.scope.toml` first, then sorted TOML files in the
 configured user recipe directory. A malformed recipe is an error rather than a
@@ -42,5 +48,5 @@ protocol, but it cannot parse or execute one in the presentation plane.
 Users can describe common project layouts without a Rust change, and semantic
 recipe edits invalidate the affected cache. Recipe files are portable data,
 but a recipe is intentionally tied to its container kind and the source's
-recorded digest. Older MATLAB files (before v7.3) and live sources remain
-unsupported until separate reader seams are accepted.
+recorded digest. MATLAB-specific layouts and live sources remain unsupported
+until separate reader seams are accepted.
