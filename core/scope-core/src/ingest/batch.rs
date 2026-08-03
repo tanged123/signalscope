@@ -561,7 +561,7 @@ impl Worker {
                 FlightOutcome::Done => self.progress.succeeded(item.index),
                 FlightOutcome::Failed(error, recipe_required) => {
                     self.progress
-                        .failed_with_recipe(item.index, error, recipe_required)
+                        .failed_with_recipe(item.index, error, recipe_required);
                 }
                 FlightOutcome::Cancelled => self.progress.cancelled(item.index),
             }

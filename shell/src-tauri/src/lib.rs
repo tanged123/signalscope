@@ -400,14 +400,14 @@ async fn save_recipe(
     request: Envelope<SaveRecipeRequest>,
     app: AppHandle,
 ) -> Result<Envelope<SaveRecipeResponse>, String> {
-    tauri::async_runtime::spawn_blocking(move || save_recipe_blocking(request, app))
+    tauri::async_runtime::spawn_blocking(move || save_recipe_blocking(request, &app))
         .await
         .map_err(|error| error.to_string())?
 }
 
 fn save_recipe_blocking(
     request: Envelope<SaveRecipeRequest>,
-    app: AppHandle,
+    app: &AppHandle,
 ) -> Result<Envelope<SaveRecipeResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let recipe = scope_core::ingest::recipe::parse_recipe(&request.recipe_toml)
@@ -415,7 +415,7 @@ fn save_recipe_blocking(
     let destination = match request.destination {
         RecipeDestination::Sidecar => sidecar_destination(Path::new(&request.path))?,
         RecipeDestination::UserDirectory => {
-            let preferences = preferences_path(&app)
+            let preferences = preferences_path(app)
                 .ok()
                 .filter(|path| path.exists())
                 .and_then(|path| preferences::load_from_path(&path).ok())
@@ -442,7 +442,7 @@ fn save_recipe_blocking(
 }
 
 /// Writes a recipe through a uniquely named temporary in the destination
-/// directory. OpenOptions::create_new never follows a pre-planted symlink.
+/// directory. `OpenOptions::create_new` never follows a pre-planted symlink.
 fn write_recipe_file(destination: &Path, contents: &str) -> Result<(), String> {
     use std::io::Write as _;
 
@@ -774,14 +774,12 @@ fn format_label(descriptors: &[(&str, &str, &[String], i32)], path: &Path) -> Op
     path.extension()
         .and_then(|extension| extension.to_str())
         .and_then(|extension| {
-            descriptors
-                .into_iter()
-                .find_map(|(_, label, extensions, _)| {
-                    extensions
-                        .iter()
-                        .any(|candidate| candidate.eq_ignore_ascii_case(extension))
-                        .then(|| (*label).to_owned())
-                })
+            descriptors.iter().find_map(|(_, label, extensions, _)| {
+                extensions
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+                    .then(|| (*label).to_owned())
+            })
         })
 }
 

@@ -17,7 +17,10 @@ pub const MAX_DATASET_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Checks the declared materialized size before a container allocates it.
 ///
-/// Returns an unsupported error when the declared size exceeds the ceiling.
+/// # Errors
+///
+/// Returns [`ContainerError::Unsupported`] when the declared size exceeds the
+/// materialization ceiling.
 pub fn check_declared_size(entry: &DatasetEntry) -> Result<(), ContainerError> {
     let declared = entry.len.saturating_mul(std::mem::size_of::<f64>());
     if declared > MAX_DATASET_BYTES {
@@ -110,7 +113,9 @@ mod tests {
 
     #[test]
     fn the_dataset_ceiling_is_below_a_plausible_working_budget() {
-        assert!(MAX_DATASET_BYTES <= 2 * 1024 * 1024 * 1024);
+        const {
+            assert!(MAX_DATASET_BYTES <= 2 * 1024 * 1024 * 1024);
+        }
     }
 
     #[derive(Default)]
