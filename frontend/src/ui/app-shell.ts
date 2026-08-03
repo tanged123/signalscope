@@ -626,6 +626,7 @@ export class AppShell {
     this.commands.register({
       id: "open-folder",
       title: "Open folder…",
+      keys: "mod+shift+o",
       section: "file",
       group: "open",
       enabled: () => this.plane.ingest !== null,
@@ -977,7 +978,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.16.0");
+        this.showModeHelp("SignalScope 0.17.0");
       },
     });
     this.commands.register({

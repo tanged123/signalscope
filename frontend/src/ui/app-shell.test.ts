@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkspaceModel } from "../app/workspace";
 import { SelectionModel } from "../app/selection";
 import { Catalog } from "../app/catalog";
+import type { CommandRegistry } from "../app/commands";
+import type { DataPlane } from "../app/data-plane";
 import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
@@ -200,6 +202,50 @@ describe("direct open", () => {
     const probe = openProbe();
     probe.openFolder();
     expect(probe.pickAndIngest).toHaveBeenCalledWith("folder");
+  });
+});
+
+describe("open command shortcuts", () => {
+  it("opens a folder with the dedicated mod-shift-o shortcut", () => {
+    const shell = new AppShell(document.createElement("div"), {
+      sourceLabel: "test",
+      ingest: {} as NonNullable<DataPlane["ingest"]>,
+      derived: null,
+      session: null,
+      restore: null,
+      preferences: null,
+      exporter: null,
+      listSignals: () => Promise.resolve([]),
+      listSources: () => Promise.resolve([]),
+      queryTiles: () => Promise.reject(new Error("not used")),
+      querySamples: () => Promise.reject(new Error("not used")),
+    } satisfies DataPlane);
+    const internals = shell as unknown as {
+      commands: CommandRegistry;
+      openFolder: () => void;
+      registerCommands: () => void;
+    };
+    const openFolder = vi
+      .spyOn(internals, "openFolder")
+      .mockImplementation(() => undefined);
+
+    internals.registerCommands();
+
+    expect(
+      internals.commands
+        .listAll()
+        .find((command) => command.id === "open-folder")?.keys,
+    ).toBe("mod+shift+o");
+    expect(
+      internals.commands.handleKey(
+        new KeyboardEvent("keydown", {
+          key: "o",
+          ctrlKey: true,
+          shiftKey: true,
+        }),
+      ),
+    ).toBe(true);
+    expect(openFolder).toHaveBeenCalledOnce();
   });
 });
 

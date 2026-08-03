@@ -64,6 +64,9 @@ test("application menu mirrors commands and marks planned work", async ({
   page,
 }) => {
   await page.goto("/");
+  const mod = await page.evaluate(() =>
+    /mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘" : "Ctrl+",
+  );
   const button = page.locator(".menu-button");
   await button.click();
   const menu = page.locator(".app-menu");
@@ -72,9 +75,9 @@ test("application menu mirrors commands and marks planned work", async ({
   await expect(
     menu.locator(".app-menu-item", { hasText: /^Open…O$/ }),
   ).toHaveCount(1);
-  await expect(
-    menu.locator(".app-menu-item", { hasText: "Open folder" }),
-  ).toHaveCount(1);
+  const openFolder = menu.locator(".app-menu-item", { hasText: "Open folder" });
+  await expect(openFolder).toHaveCount(1);
+  await expect(openFolder).toContainText(`${mod}⇧O`);
   const unavailable = menu.locator(".app-menu-item", {
     hasText: "Open Workspace",
   });
