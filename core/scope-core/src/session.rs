@@ -821,6 +821,23 @@ mod tests {
     }
 
     #[test]
+    fn the_previous_version_gains_null_recipe_fields() {
+        let session = from_json(&v16_fixture().to_string()).expect("migrates");
+        assert!(
+            session
+                .sources
+                .iter()
+                .all(|record| record.recipe_id.is_none())
+        );
+        assert!(
+            session
+                .sources
+                .iter()
+                .all(|record| record.recipe_digest.is_none())
+        );
+    }
+
+    #[test]
     fn v16_axes_highlights_and_favorites_migrate() {
         let session = from_json(&v16_fixture().to_string()).unwrap();
         let panel = &session.tabs[0].panels[0];

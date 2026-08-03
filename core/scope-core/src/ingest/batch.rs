@@ -600,17 +600,13 @@ impl Worker {
             };
             match crate::ingest::recipe::resolve::resolve_for(&record.path, &preferences) {
                 Ok(Some(resolved)) => {
-                    if record
-                        .recipe_id
-                        .as_deref()
-                        .is_some_and(|id| id != resolved.recipe.id)
-                        || record
-                            .recipe_digest
-                            .as_deref()
-                            .is_some_and(|digest| digest != resolved.digest)
+                    if crate::restore::recipe_status(record, Some(&resolved))
+                        != crate::restore::RecipeStatus::Matched
                     {
                         return Err(ProcessError::Failed(
-                            "recorded recipe changed; reconfirm the recipe before restoring".into(),
+                            crate::restore::restore_source(record, Some(&resolved))
+                                .expect_err("non-matched recipe status always errors")
+                                .to_string(),
                         ));
                     }
                     provider_id = Some(format!("recipe:{}", resolved.recipe.id));
@@ -623,7 +619,9 @@ impl Worker {
                 }
                 Ok(None) if record.recipe_id.is_some() || record.recipe_digest.is_some() => {
                     return Err(ProcessError::Failed(
-                        "recorded recipe is missing; relink the recipe before restoring".into(),
+                        crate::restore::restore_source(record, None)
+                            .expect_err("a missing recipe always errors")
+                            .to_string(),
                     ));
                 }
                 Ok(None) => {}

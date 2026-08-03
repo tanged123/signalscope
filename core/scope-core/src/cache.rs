@@ -835,6 +835,29 @@ mod tests {
         SourceKey(uuid::Uuid::new_v4())
     }
 
+    fn provenance_for_recipe(id: &str, digest: &str) -> String {
+        crate::ingest::provenance::provenance_digest(
+            &crate::ingest::provenance::ProviderInfo {
+                id: id.into(),
+                cache_abi: 1,
+            },
+            &crate::ingest::provenance::Fingerprint {
+                source_len: 10,
+                mtime_ns: 20,
+                head_crc: 30,
+            },
+            &[("recipe", digest)],
+        )
+    }
+
+    #[test]
+    fn the_recipe_digest_is_part_of_the_cache_key() {
+        assert_ne!(
+            provenance_for_recipe("flight-h5", "aaaa"),
+            provenance_for_recipe("flight-h5", "bbbb")
+        );
+    }
+
     fn try_load_test(
         source: &Path,
         store: &mut SignalStore,
