@@ -810,14 +810,15 @@ describe("recipe directory settings entries", () => {
     const probe = Object.create(AppShell.prototype) as RecipeProbe;
     probe.plane = {
       preferences: {
-        effectiveRecipeDirectory: async () => custom ?? "/default/recipes",
-        pickRecipeDirectory: async () => picked,
+        effectiveRecipeDirectory: () =>
+          Promise.resolve(custom ?? "/default/recipes"),
+        pickRecipeDirectory: () => Promise.resolve(picked),
       },
     };
     probe.prefs = { recipe_directory: custom };
     probe.recipeDirectory = custom ?? "/default/recipes";
     probe.updatePreferences = vi.fn();
-    probe.refreshRecipeDirectory = vi.fn(async () => undefined);
+    probe.refreshRecipeDirectory = vi.fn(() => Promise.resolve(undefined));
     probe.reportError = vi.fn();
     return probe;
   }
