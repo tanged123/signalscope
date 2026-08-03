@@ -199,36 +199,44 @@ fn read_time<R: ContainerReader + ?Sized>(
     container: &R,
 ) -> Result<Vec<f64>, IngestError> {
     match &selection.time {
-        TimeSource::Dataset { path } => container.read_f64(path).map_err(|error| match error {
-            ContainerError::NoSuchDataset(_) => RecipeError::MissingTime(path.clone()).into(),
+        TimeSource::Dataset(dataset_time) => container
+            .read_f64(&dataset_time.path)
+            .map_err(|error| match error {
+            ContainerError::NoSuchDataset(_) => {
+                RecipeError::MissingTime(dataset_time.path.clone()).into()
+            }
             other => container_error(&other),
         }),
-        TimeSource::Sibling { name } => {
+        TimeSource::Sibling(sibling_time) => {
             let group = dataset.rsplit_once('/').map_or("", |(group, _)| group);
             let path = if group.is_empty() {
-                name.clone()
+                sibling_time.name.clone()
             } else {
-                format!("{group}/{name}")
+                format!("{group}/{}", sibling_time.name)
             };
             container.read_f64(&path).map_err(|error| match error {
                 ContainerError::NoSuchDataset(_) => RecipeError::MissingTime(path).into(),
                 other => container_error(&other),
             })
         }
-        TimeSource::Index { dt, t0 } => {
-            Ok((0..length).map(|index| *t0 + index as f64 * *dt).collect())
+        TimeSource::Index(index_time) => {
+            Ok((0..length)
+                .map(|index| index_time.t0 + index as f64 * index_time.dt)
+                .collect())
         }
     }
 }
 
 fn timebase_key(selection: &Selection, dataset: &str, length: usize) -> String {
     match &selection.time {
-        TimeSource::Dataset { path } => format!("dataset:{path}"),
-        TimeSource::Sibling { name } => {
+        TimeSource::Dataset(dataset_time) => format!("dataset:{}", dataset_time.path),
+        TimeSource::Sibling(sibling_time) => {
             let group = dataset.rsplit_once('/').map_or("", |(group, _)| group);
-            format!("sibling:{group}/{name}")
+            format!("sibling:{group}/{}", sibling_time.name)
         }
-        TimeSource::Index { dt, t0 } => format!("index:{dt:?}:{t0:?}:{length}"),
+        TimeSource::Index(index_time) => {
+            format!("index:{:?}:{:?}:{length}", index_time.dt, index_time.t0)
+        }
     }
 }
 

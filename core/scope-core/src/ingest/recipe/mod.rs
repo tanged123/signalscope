@@ -37,9 +37,28 @@ pub struct Selection {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum TimeSource {
-    Dataset { path: String },
-    Sibling { name: String },
-    Index { dt: f64, t0: f64 },
+    Dataset(DatasetTime),
+    Sibling(SiblingTime),
+    Index(IndexTime),
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatasetTime {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiblingTime {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexTime {
+    pub dt: f64,
+    pub t0: f64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -184,10 +203,10 @@ fn validate(recipe: &Recipe) -> Result<(), RecipeError> {
             }
         }
         match &selection.time {
-            TimeSource::Dataset { path } => validate_selector(path)?,
-            TimeSource::Sibling { name } => validate_selector(name)?,
-            TimeSource::Index { dt, t0 } => {
-                if !dt.is_finite() || *dt <= 0.0 || !t0.is_finite() {
+            TimeSource::Dataset(dataset) => validate_selector(&dataset.path)?,
+            TimeSource::Sibling(sibling) => validate_selector(&sibling.name)?,
+            TimeSource::Index(index) => {
+                if !index.dt.is_finite() || index.dt <= 0.0 || !index.t0.is_finite() {
                     return Err(RecipeError::Invalid(
                         "index time requires finite dt > 0 and finite t0".into(),
                     ));
@@ -257,11 +276,11 @@ t0 = 0.0
         assert_eq!(recipe.selections.len(), 2);
         assert!(matches!(
             &recipe.selections[0].time,
-            TimeSource::Dataset { path } if path == "run/time"
+            TimeSource::Dataset(dataset) if dataset.path == "run/time"
         ));
         assert!(matches!(
-            recipe.selections[1].time,
-            TimeSource::Index { dt, .. } if (dt - 0.01).abs() < 1e-12
+            &recipe.selections[1].time,
+            TimeSource::Index(index) if (index.dt - 0.01).abs() < 1e-12
         ));
         assert_eq!(
             recipe.selections[0].unit_attribute.as_deref(),
@@ -270,28 +289,40 @@ t0 = 0.0
     }
 
     #[test]
-    fn a_recipe_can_never_name_executable_code() {
-        for hostile in [
-            r#"id="x"
-container="hdf5"
-command = "rm -rf /""#,
-            r#"id="x"
-container="hdf5"
-plugin = "./evil.so""#,
-            r#"id="x"
-container="hdf5"
-decoder = "/usr/bin/python""#,
-            r#"id="x"
-container="native""#,
-        ] {
-            let error = parse_recipe(hostile).unwrap_err();
-            assert!(
-                matches!(
-                    error,
-                    RecipeError::UnknownField(_) | RecipeError::UnknownContainer(_)
-                ),
-                "hostile recipe accepted: {hostile}"
-            );
+    fn a_recipe_can_never_name_executable_code_at_any_nesting_level() {
+        const HOSTILE_KEYS: [&str; 4] = ["command", "plugin", "decoder", "exec"];
+        const SITES: [(&str, &str); 5] = [
+            ("top level", "id=\"x\"\ncontainer=\"hdf5\"\n{hostile}\n"),
+            (
+                "selection",
+                "id=\"x\"\ncontainer=\"hdf5\"\n[[selection]]\ndatasets=\"a\"\nname=\"keep\"\n{hostile}\n[selection.time]\nkind=\"index\"\ndt=1.0\nt0=0.0\n",
+            ),
+            (
+                "index time",
+                "id=\"x\"\ncontainer=\"hdf5\"\n[[selection]]\ndatasets=\"a\"\nname=\"keep\"\n[selection.time]\nkind=\"index\"\ndt=1.0\nt0=0.0\n{hostile}\n",
+            ),
+            (
+                "dataset time",
+                "id=\"x\"\ncontainer=\"hdf5\"\n[[selection]]\ndatasets=\"a\"\nname=\"keep\"\n[selection.time]\nkind=\"dataset\"\npath=\"t\"\n{hostile}\n",
+            ),
+            (
+                "sibling time",
+                "id=\"x\"\ncontainer=\"hdf5\"\n[[selection]]\ndatasets=\"a\"\nname=\"keep\"\n[selection.time]\nkind=\"sibling\"\nname=\"t\"\n{hostile}\n",
+            ),
+        ];
+
+        for (label, template) in SITES {
+            for key in HOSTILE_KEYS {
+                let hostile = format!("{key} = \"/usr/bin/python\"");
+                let recipe = template.replace("{hostile}", &hostile);
+                let error = parse_recipe(&recipe)
+                    .err()
+                    .unwrap_or_else(|| panic!("hostile key `{key}` accepted at {label}"));
+                assert!(
+                    matches!(error, RecipeError::UnknownField(_)),
+                    "hostile key `{key}` at {label} produced {error:?}, not UnknownField"
+                );
+            }
         }
     }
 
