@@ -538,13 +538,14 @@ impl Pyramid {
         let Ok(values) = values.range(sample_start..sample_end) else {
             return BinLevel::default();
         };
+        let mut stack = Vec::with_capacity(index + 2);
         let mut level = BinLevel::with_capacity(range.len());
         for bin in 0..range.len() {
             let start = bin.saturating_mul(width);
             if start >= time.len() {
                 break;
             }
-            let merged = fold_bin(&time, &values, start, width);
+            let merged = fold_bin(&time, &values, start, width, &mut stack);
             level.push(&merged);
         }
         level
@@ -594,10 +595,15 @@ pub struct PyramidQuery {
     pub bins: BinLevel,
 }
 
-fn fold_bin(time: &[f64], values: &[f64], start: usize, width: usize) -> EnvelopeBin {
+fn fold_bin(
+    time: &[f64],
+    values: &[f64],
+    start: usize,
+    width: usize,
+    stack: &mut Vec<(u32, EnvelopeBin)>,
+) -> EnvelopeBin {
     let end = (start + width).min(time.len());
-    let mut stack: Vec<(u32, EnvelopeBin)> =
-        Vec::with_capacity(width.trailing_zeros() as usize + 2);
+    stack.clear();
     for index in start..end {
         let mut rank = 0_u32;
         let mut bin = sample_bin(time[index], values[index]);
