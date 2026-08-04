@@ -575,7 +575,12 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
         let levels = entry
             .levels
             .iter()
-            .filter_map(|level| entry.pyramid.level_window(level.index, entry.window))
+            .filter_map(|level| {
+                entry
+                    .pyramid
+                    .level_window(level.index, entry.window)
+                    .map(|level| level.to_wire_vec())
+            })
             .collect();
         signals.push(BakedSignal {
             summary: signal_summary(

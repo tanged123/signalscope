@@ -123,9 +123,7 @@ impl CachedBinLevel {
 
     fn range(&self, range: std::ops::Range<usize>) -> Option<BinLevel> {
         match self {
-            Self::Resident(level) => Some(BinLevel::from_wire(
-                &range.map(|index| level.to_wire(index)).collect::<Vec<_>>(),
-            )),
+            Self::Resident(level) => Some(level.slice(range)),
             Self::Paged(level) => level.range(range),
         }
     }
@@ -366,20 +364,12 @@ impl Pyramid {
 
     /// Materializes one logical level, bounded to a time window when present.
     #[must_use]
-    pub fn level_window(
-        &self,
-        index: usize,
-        window: Option<(f64, f64)>,
-    ) -> Option<Vec<EnvelopeBin>> {
+    pub fn level_window(&self, index: usize, window: Option<(f64, f64)>) -> Option<BinLevel> {
         let range = self.level_window_range(index, window)?;
         if index < self.first_stored_level {
-            Some(self.synthesize_level(index, range).to_wire_vec())
+            Some(self.synthesize_level(index, range))
         } else {
-            Some(
-                self.merged[index - self.first_stored_level]
-                    .range(range)?
-                    .to_wire_vec(),
-            )
+            Some(self.merged[index - self.first_stored_level].range(range)?)
         }
     }
 
@@ -437,7 +427,7 @@ impl Pyramid {
         let Some((time, _)) = self.columns() else {
             return PyramidQuery {
                 level: 0,
-                bins: Vec::new(),
+                bins: BinLevel::default(),
             };
         };
         if time.value(0).ok().is_none_or(|first| t1 < first)
@@ -448,7 +438,7 @@ impl Pyramid {
         {
             return PyramidQuery {
                 level: 0,
-                bins: Vec::new(),
+                bins: BinLevel::default(),
             };
         }
         let target = usize::try_from(pixel_width.max(1))
@@ -543,7 +533,7 @@ impl Pyramid {
 #[derive(Clone, Debug)]
 pub struct PyramidQuery {
     pub level: u32,
-    pub bins: Vec<EnvelopeBin>,
+    pub bins: BinLevel,
 }
 
 fn synthesize_bin(time: &[f64], values: &[f64], index: usize, start: usize) -> EnvelopeBin {
@@ -689,6 +679,16 @@ mod tests {
     }
 
     #[test]
+    fn query_returns_columnar_bins_identical_to_wire() {
+        let time = (0..10_000).map(f64::from).collect::<Vec<_>>();
+        let values = time.iter().map(|value| value.sin()).collect::<Vec<_>>();
+        let pyramid = Pyramid::from_samples(&time, &values);
+        let query = pyramid.query(0.0, 9_999.0, 200);
+        assert!(query.bins.len() <= 402);
+        assert_eq!(query.bins.to_wire_vec().len(), query.bins.len());
+    }
+
+    #[test]
     fn query_includes_neighbor_bins_for_viewport_edge_strokes() {
         let pyramid =
             Pyramid::from_samples(&[0.0, 1.0, 2.0, 3.0, 4.0], &[0.0, 1.0, 4.0, 9.0, 16.0]);
@@ -696,7 +696,12 @@ mod tests {
 
         assert_eq!(query.level, 0);
         assert_eq!(
-            query.bins.iter().map(|bin| bin.t0).collect::<Vec<_>>(),
+            query
+                .bins
+                .to_wire_vec()
+                .iter()
+                .map(|bin| bin.t0)
+                .collect::<Vec<_>>(),
             [1.0, 2.0, 3.0]
         );
     }
@@ -714,8 +719,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(levels[0].len(), 13);
-        assert_eq!(levels[0].first().map(|bin| bin.t0), Some(49_999.0));
-        assert_eq!(levels[0].last().map(|bin| bin.t1), Some(50_011.0));
+        assert_eq!(levels[0].to_wire(0).t0, 49_999.0);
+        assert_eq!(levels[0].to_wire(levels[0].len() - 1).t1, 50_011.0);
         assert!(levels.iter().all(|level| level.len() <= 13));
     }
 
@@ -744,7 +749,10 @@ mod tests {
         ] {
             for index in 0..pyramid.level_count() {
                 assert_eq!(pyramid.level_window_count(index, window), Some(0));
-                assert_eq!(pyramid.level_window(index, window), Some(Vec::new()));
+                assert_eq!(
+                    pyramid.level_window(index, window),
+                    Some(BinLevel::default())
+                );
             }
         }
     }
@@ -760,7 +768,7 @@ mod tests {
         let query = pyramid.query(0.0, 999.0, 600);
         assert_eq!(query.level, 0);
         assert_eq!(query.bins.len(), 1_000);
-        assert_eq!(query.bins[3].min, Some(3.0_f64.cos()));
+        assert_eq!(query.bins.to_wire(3).min, Some(3.0_f64.cos()));
     }
 
     #[test]
@@ -889,7 +897,7 @@ mod tests {
                         t1,
                         pixel_width,
                         level: query.level,
-                        bins: query.bins,
+                        bins: query.bins.to_wire_vec(),
                     }
                 })
                 .collect(),

@@ -888,7 +888,7 @@ fn query_tiles(
             signal_path: signal.path.clone(),
             unit: signal.unit.clone(),
             level: query.level,
-            bins: query.bins,
+            bins: query.bins.to_wire_vec(),
         });
     }
 

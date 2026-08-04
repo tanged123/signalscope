@@ -534,7 +534,7 @@ fn bench_tile_wire_cost() {
                 signal_path: format!("run_{index:04}/response"),
                 unit: None,
                 level: query.level,
-                bins: query.bins,
+                bins: query.bins.to_wire_vec(),
             }
         })
         .collect();

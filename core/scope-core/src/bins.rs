@@ -1,12 +1,14 @@
+use std::ops::Range;
+
 use scope_protocol::EnvelopeBin;
 
 use crate::paging::PageHandle;
 
-const HAS_FIRST: u8 = 1 << 0;
-const HAS_LAST: u8 = 1 << 1;
-const HAS_MIN: u8 = 1 << 2;
-const HAS_MAX: u8 = 1 << 3;
-const HAS_GAP: u8 = 1 << 4;
+pub const HAS_FIRST: u8 = 1 << 0;
+pub const HAS_LAST: u8 = 1 << 1;
+pub const HAS_MIN: u8 = 1 << 2;
+pub const HAS_MAX: u8 = 1 << 3;
+pub const HAS_GAP: u8 = 1 << 4;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BinLevel {
@@ -89,6 +91,23 @@ impl BinLevel {
 
     pub fn to_wire_vec(&self) -> Vec<EnvelopeBin> {
         (0..self.len()).map(|index| self.to_wire(index)).collect()
+    }
+
+    #[must_use]
+    pub fn slice(&self, range: Range<usize>) -> Self {
+        Self {
+            t0: self.t0[range.clone()].to_vec(),
+            t1: self.t1[range.clone()].to_vec(),
+            first: self.first[range.clone()].to_vec(),
+            last: self.last[range.clone()].to_vec(),
+            min: self.min[range.clone()].to_vec(),
+            max: self.max[range.clone()].to_vec(),
+            sum: self.sum[range.clone()].to_vec(),
+            sum_sq: self.sum_sq[range.clone()].to_vec(),
+            sample_count: self.sample_count[range.clone()].to_vec(),
+            finite_count: self.finite_count[range.clone()].to_vec(),
+            flags: self.flags[range].to_vec(),
+        }
     }
 
     pub(crate) fn decode_cache(bytes: &[u8]) -> Option<Self> {
@@ -319,5 +338,13 @@ mod tests {
         assert!(wire.has_gap);
         assert_eq!(wire.sample_count, u64::from(u32::MAX));
         assert!(level.last[0].is_nan());
+    }
+
+    #[test]
+    fn slice_matches_wire_roundtrip() {
+        let level = BinLevel::from_wire(&[bin(), bin(), bin()]);
+        let sliced = level.slice(1..3);
+        assert_eq!(sliced.len(), 2);
+        assert_eq!(sliced.to_wire(0), level.to_wire(1));
     }
 }
