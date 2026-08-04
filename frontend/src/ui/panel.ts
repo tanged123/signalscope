@@ -938,7 +938,6 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
-    _revision = 0,
   ): number {
     const stateKey = JSON.stringify(state);
     if (
