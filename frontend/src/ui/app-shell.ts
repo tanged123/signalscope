@@ -14,6 +14,10 @@ import {
   unsupportedDropMessage,
 } from "../app/drop";
 import type { DataPlane, IngestPort } from "../app/data-plane";
+import {
+  columnsValueAtTime,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -47,12 +51,7 @@ import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
-import {
-  formatCursorTime,
-  formatValue,
-  valueAtTime,
-  zoomRange,
-} from "../app/plot-math";
+import { formatCursorTime, formatValue, zoomRange } from "../app/plot-math";
 import {
   type BatchStatus,
   type DragDropForward,
@@ -64,7 +63,6 @@ import {
   type SampleSeries,
   type SignalSummary,
   type SourceSummary,
-  type TileResponse,
 } from "../generated/protocol";
 import type {
   CursorMode,
@@ -182,7 +180,7 @@ export class AppShell {
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
-  private tilesByPanel = new Map<string, TileResponse>();
+  private tilesByPanel = new Map<string, ColumnarTileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
@@ -2547,7 +2545,7 @@ export class AppShell {
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
     );
-    const nextTiles = new Map<string, TileResponse>();
+    const nextTiles = new Map<string, ColumnarTileResponse>();
     const nextSamples = new Map<string, SampleResponse>();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
@@ -2960,10 +2958,10 @@ export class AppShell {
       if (this.pendingCursorT !== null) {
         for (const tiles of this.tilesByPanel.values()) {
           for (const tile of tiles.series) {
-            if (!values.has(tile.signal_path)) {
+            if (!values.has(tile.signalPath)) {
               values.set(
-                tile.signal_path,
-                formatValue(valueAtTime(tile.bins, this.pendingCursorT)),
+                tile.signalPath,
+                formatValue(columnsValueAtTime(tile.bins, this.pendingCursorT)),
               );
             }
           }

@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
+import { binColumnsFromWire } from "./bin-columns";
 import type { PlotLayout } from "./plot-math";
 import { nearestLine, nearestVertex } from "./plot-hit";
 
@@ -27,7 +28,12 @@ function bin(t0: number, t1: number, first: number, last: number): EnvelopeBin {
 
 test("nearestVertex snaps globally within its threshold", () => {
   const hit = nearestVertex(
-    [{ path: "a/b", bins: [bin(0, 1, 5, 6), bin(1, 2, 6, 2)] }],
+    [
+      {
+        path: "a/b",
+        bins: binColumnsFromWire([bin(0, 1, 5, 6), bin(1, 2, 6, 2)]),
+      },
+    ],
     layout,
     22,
     78,
@@ -39,7 +45,7 @@ test("nearestVertex snaps globally within its threshold", () => {
 
 test("nearestLine hits the rendered envelope within a pixel tolerance", () => {
   const hit = nearestLine(
-    [{ path: "a/b", bins: [bin(4, 6, 5, 7)] }],
+    [{ path: "a/b", bins: binColumnsFromWire([bin(4, 6, 5, 7)]) }],
     layout,
     51,
     45,
@@ -55,6 +61,12 @@ test("nearestLine does not connect bins across a gap", () => {
   const second = bin(9, 10, 8, 8);
 
   expect(
-    nearestLine([{ path: "a/b", bins: [first, second] }], layout, 50, 50, 8),
+    nearestLine(
+      [{ path: "a/b", bins: binColumnsFromWire([first, second]) }],
+      layout,
+      50,
+      50,
+      8,
+    ),
   ).toBeNull();
 });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { SignalTile, TileResponse } from "../generated/protocol";
+import type { EnvelopeBin } from "../generated/protocol";
+import {
+  binColumnsFromWire,
+  type ColumnarTile,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import {
   CanvasRenderer,
   dashPattern,
@@ -171,31 +176,40 @@ const TEST_PALETTE: Palette = {
 function tile(
   path: string,
   bins: readonly { t0: number; t1: number; v: number; gap?: boolean }[],
-): SignalTile {
+): ColumnarTile {
   return {
-    signal_path: path,
+    signalId: "1",
+    signalPath: path,
     unit: null,
-    bins: bins.map((bin) => ({
-      t0: bin.t0,
-      t1: bin.t1,
-      first: bin.v,
-      last: bin.v,
-      min: bin.v,
-      max: bin.v,
-      count: 1,
-      has_gap: bin.gap ?? false,
-    })),
-  } as unknown as SignalTile;
+    level: 0,
+    bins: binColumnsFromWire(
+      bins.map(
+        (bin): EnvelopeBin => ({
+          t0: bin.t0,
+          t1: bin.t1,
+          first: bin.v,
+          last: bin.v,
+          min: bin.v,
+          max: bin.v,
+          sum: bin.v,
+          sum_sq: bin.v * bin.v,
+          finite_count: "1",
+          sample_count: "1",
+          has_gap: bin.gap ?? false,
+        }),
+      ),
+    ),
+  };
 }
 
 function renderOnce(
-  series: SignalTile[],
+  series: ColumnarTile[],
   options: Partial<RenderOptions> = {},
 ): DrawCall[] {
   const { calls, context } = recordingContext();
   const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
   renderer.setPalette(TEST_PALETTE);
-  const response = { request_id: "test", series } as TileResponse;
+  const response: ColumnarTileResponse = { requestId: "test", series };
   renderer.render(
     response,
     { min: 0, max: 10 },
@@ -488,7 +502,7 @@ describe("render", () => {
     renderer.setPalette(TEST_PALETTE);
     expect(renderer.lastLayout()).toBeNull();
     renderer.render(
-      { request_id: "test", series: [] },
+      { requestId: "test", series: [] },
       { min: 0, max: 10 },
       {
         xLabel: "time (s)",

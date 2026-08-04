@@ -39,8 +39,8 @@ use scope_protocol::{
     RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
     SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
     SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest, ScanSourcesRequest,
-    ScanSourcesResponse, SessionDialogMode, SignalSummary, SignalTile, SkippedMemberSummary,
-    SourceSummary, TileRequest, TileResponse,
+    ScanSourcesResponse, SessionDialogMode, SignalSummary, SkippedMemberSummary, SourceSummary,
+    TileRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -861,49 +861,6 @@ fn signal_summaries(data: &DataState) -> Vec<SignalSummary> {
             )
         })
         .collect()
-}
-
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn query_tiles(
-    request: Envelope<TileRequest>,
-    state: State<'_, Arc<Mutex<DataState>>>,
-) -> Result<Envelope<TileResponse>, String> {
-    let request = request.open().map_err(|error| error.to_string())?;
-    let data = state.lock().map_err(|error| error.to_string())?;
-    let per_series = request.max_total_bins.map(|budget| {
-        (budget / u32::try_from(request.signal_ids.len().max(1)).unwrap_or(u32::MAX)).max(64)
-    });
-    let mut series = Vec::new();
-    for raw_id in request.signal_ids {
-        let signal_id = SignalId(raw_id);
-        let signal = data
-            .store
-            .signal(signal_id)
-            .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
-        let pyramid = data
-            .pyramids
-            .get(&signal_id)
-            .ok_or_else(|| format!("pyramid is unavailable for signal id: {raw_id}"))?;
-        let query = pyramid.query_with_target(
-            request.window.t0,
-            request.window.t1,
-            request.pixel_width,
-            per_series,
-        );
-        series.push(SignalTile {
-            signal_id: raw_id,
-            signal_path: signal.path.clone(),
-            unit: signal.unit.clone(),
-            level: query.level,
-            bins: query.bins.to_wire_vec(),
-        });
-    }
-
-    Ok(Envelope::new(TileResponse {
-        request_id: request.request_id,
-        series,
-    }))
 }
 
 #[tauri::command]
@@ -1951,7 +1908,6 @@ pub fn run() {
             restore_reconcile,
             list_sources,
             list_signals,
-            query_tiles,
             query_tiles_bin,
             query_samples,
             create_derived,

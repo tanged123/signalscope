@@ -1,5 +1,13 @@
-import type { SignalTile, TileResponse } from "../generated/protocol";
 import type { AxisStyle, DashStyle } from "../generated/session";
+import {
+  HAS_FIRST,
+  HAS_GAP,
+  HAS_LAST,
+  HAS_MAX,
+  HAS_MIN,
+  type ColumnarTile,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import {
   logTicks,
   projectX,
@@ -194,7 +202,7 @@ export class CanvasRenderer {
   }
 
   render(
-    response: TileResponse,
+    response: ColumnarTileResponse,
     xRange: Range,
     options: RenderOptions,
   ): number {
@@ -629,7 +637,7 @@ export class CanvasRenderer {
     context: CanvasRenderingContext2D,
     plot: PlotRect,
     project: Projection,
-    series: SignalTile,
+    series: ColumnarTile,
     color: string,
     dash: DashStyle,
     width: number,
@@ -647,27 +655,27 @@ export class CanvasRenderer {
     context.setLineDash(dashPattern(dash));
     context.beginPath();
     let penDown = false;
-    for (const bin of series.bins) {
+    const { t0, t1, first, last, min, max, flags, count } = series.bins;
+    for (let index = 0; index < count; index += 1) {
+      const binFlags = flags[index] as number;
       if (
-        bin.first === null ||
-        bin.last === null ||
-        bin.min === null ||
-        bin.max === null
+        (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
+        (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
       ) {
         penDown = false;
         continue;
       }
-      const x = toX((bin.t0 + bin.t1) * 0.5);
-      const firstY = toY(bin.first);
-      if (!penDown || bin.has_gap) {
+      const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
+      const firstY = toY(first[index] as number);
+      if (!penDown || (binFlags & HAS_GAP) !== 0) {
         context.moveTo(x, firstY);
       } else {
         context.lineTo(x, firstY);
       }
-      context.lineTo(x, toY(bin.min));
-      context.lineTo(x, toY(bin.max));
-      context.lineTo(x, toY(bin.last));
-      penDown = !bin.has_gap;
+      context.lineTo(x, toY(min[index] as number));
+      context.lineTo(x, toY(max[index] as number));
+      context.lineTo(x, toY(last[index] as number));
+      penDown = (binFlags & HAS_GAP) === 0;
     }
     context.stroke();
     context.globalAlpha = 1;

@@ -111,3 +111,111 @@ export function sliceColumns(
     flags: bins.flags.subarray(start, end),
   };
 }
+
+export function columnsYExtent(
+  bins: BinColumns,
+): { min: number; max: number } | null {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < bins.count; index += 1) {
+    const flags = bins.flags[index] as number;
+    if (flags & HAS_MIN) min = Math.min(min, bins.min[index] as number);
+    if (flags & HAS_MAX) max = Math.max(max, bins.max[index] as number);
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
+}
+
+export function columnsStats(
+  bins: BinColumns,
+  t0: number,
+  t1: number,
+): {
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  rms: number | null;
+  n: number;
+} {
+  let min: number | null = null;
+  let max: number | null = null;
+  let sum = 0;
+  let sumSq = 0;
+  let n = 0;
+  for (let index = 0; index < bins.count; index += 1) {
+    const binT0 = bins.t0[index] as number;
+    const binT1 = bins.t1[index] as number;
+    if (binT1 < t0 || binT0 > t1) continue;
+    const flags = bins.flags[index] as number;
+    if (flags & HAS_MIN) {
+      const value = bins.min[index] as number;
+      min = min === null ? value : Math.min(min, value);
+    }
+    if (flags & HAS_MAX) {
+      const value = bins.max[index] as number;
+      max = max === null ? value : Math.max(max, value);
+    }
+    sum += bins.sum[index] as number;
+    sumSq += bins.sumSq[index] as number;
+    n += bins.finiteCount[index] as number;
+  }
+  return {
+    min,
+    max,
+    mean: n > 0 ? sum / n : null,
+    rms: n > 0 ? Math.sqrt(sumSq / n) : null,
+    n,
+  };
+}
+
+export function columnsValueAtTime(
+  bins: BinColumns,
+  time: number,
+): number | null {
+  if (bins.count === 0) return null;
+  const center = (index: number): number =>
+    ((bins.t0[index] as number) + (bins.t1[index] as number)) * 0.5;
+  let low = 0;
+  let high = bins.count - 1;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (center(middle) < time) low = middle + 1;
+    else high = middle;
+  }
+  const nextT0 = bins.t0[low] as number;
+  const nextT1 = bins.t1[low] as number;
+  const nextFlags = bins.flags[low] as number;
+  const nextCenter = center(low);
+  if (time >= nextT0 && time <= nextT1 && nextT1 > nextT0) {
+    if (!(nextFlags & HAS_FIRST) || !(nextFlags & HAS_LAST)) return null;
+    const alpha = (time - nextT0) / (nextT1 - nextT0);
+    return (
+      (bins.first[low] as number) +
+      ((bins.last[low] as number) - (bins.first[low] as number)) * alpha
+    );
+  }
+  if (time === nextCenter) {
+    return nextFlags & HAS_LAST ? (bins.last[low] as number) : null;
+  }
+  const previous = low - 1;
+  if (
+    previous < 0 ||
+    !((bins.flags[previous] as number) & HAS_LAST) ||
+    !(nextFlags & HAS_FIRST) ||
+    nextFlags & HAS_GAP
+  ) {
+    return null;
+  }
+  const previousCenter = center(previous);
+  if (
+    time < previousCenter ||
+    time > nextCenter ||
+    nextCenter <= previousCenter
+  ) {
+    return null;
+  }
+  const alpha = (time - previousCenter) / (nextCenter - previousCenter);
+  return (
+    (bins.last[previous] as number) +
+    ((bins.first[low] as number) - (bins.last[previous] as number)) * alpha
+  );
+}
