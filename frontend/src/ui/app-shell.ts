@@ -45,6 +45,7 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
+import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
 import { resolvePanel } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
@@ -164,6 +165,7 @@ export class AppShell {
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
+  private readonly tileWindowCache = new TileWindowCache();
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
@@ -2523,6 +2525,7 @@ export class AppShell {
   private async reloadSignals(): Promise<void> {
     this.signals = await this.plane.listSignals();
     this.catalog = Catalog.build(this.signals);
+    this.tileWindowCache.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2557,15 +2560,45 @@ export class AppShell {
         try {
           if (panel.mode === "time") {
             const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+            const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
+            const idsKey = [...ids].sort().join("\u0000");
+            const cached = this.tileWindowCache.slice(
+              panel.id,
+              idsKey,
+              pixelWidth,
+              window.t0,
+              window.t1,
+            );
+            if (cached !== null) {
+              nextTiles.set(panel.id, cached);
+              return;
+            }
+            const paddedWindow = TileWindowCache.padWindow(
+              window.t0,
+              window.t1,
+            );
+            const response = await this.plane.queryTiles({
+              request_id: crypto.randomUUID(),
+              signal_ids: ids,
+              window: paddedWindow,
+              pixel_width: pixelWidth,
+              max_total_bins: TILE_BIN_BUDGET,
+            });
+            this.tileWindowCache.store(panel.id, {
+              response,
+              window: paddedWindow,
+              pixelWidth,
+              idsKey,
+            });
             nextTiles.set(
               panel.id,
-              await this.plane.queryTiles({
-                request_id: crypto.randomUUID(),
-                signal_ids: ids,
-                window,
-                pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
-                max_total_bins: TILE_BIN_BUDGET,
-              }),
+              this.tileWindowCache.slice(
+                panel.id,
+                idsKey,
+                pixelWidth,
+                window.t0,
+                window.t1,
+              ) ?? response,
             );
           } else {
             const contextRequest = {
