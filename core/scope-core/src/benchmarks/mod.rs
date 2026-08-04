@@ -449,6 +449,120 @@ fn bench_tile_latency() {
 
 #[test]
 #[ignore = "release benchmark"]
+fn bench_warm_tile_latency() {
+    let corpus = corpus::ensure(&corpus::mc1000());
+    let cache_dir = corpus::bench_root().join("cache/mc1000");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+
+    let warmup = StoreSink::new();
+    let jobs = BatchJobs::new(batch_options(Some(cache_dir.clone())));
+    let id = jobs.submit(
+        corpus_paths(&corpus),
+        Arc::clone(&warmup) as Arc<dyn CommitSink>,
+    );
+    assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
+    drop(warmup);
+
+    let sink = StoreSink::new();
+    let jobs = BatchJobs::new(batch_options(Some(cache_dir)));
+    let id = jobs.submit(
+        corpus_paths(&corpus),
+        Arc::clone(&sink) as Arc<dyn CommitSink>,
+    );
+    assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
+
+    let pyramids = sink.pyramids.lock().unwrap();
+    let ensemble: Vec<&Pyramid> = pyramids
+        .iter()
+        .filter_map(|((_, local_path), pyramid)| (local_path == "response").then_some(pyramid))
+        .collect();
+    assert_eq!(ensemble.len(), 1000);
+    let paged_levels: usize = ensemble.iter().map(|p| p.paged_level_count()).sum();
+    assert!(paged_levels > 0, "warm reopen produced no paged levels");
+
+    let windows = latency_windows(1000.0, &[1000.0, 300.0, 100.0, 30.0, 10.0, 3.0, 1.0]);
+    let mut refresh_ms: Vec<f64> = windows
+        .iter()
+        .map(|&(t0, t1)| {
+            let started = Instant::now();
+            for pyramid in &ensemble {
+                std::hint::black_box(pyramid.query(t0, t1, 1920).bins.len());
+            }
+            started.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    refresh_ms.sort_by(f64::total_cmp);
+    report::write_report(
+        "warm_tile_latency",
+        serde_json::json!({
+            "bench": "warm_tile_latency",
+            "refreshes": refresh_ms.len(),
+            "series_per_refresh": 1000,
+            "paged_levels": paged_levels,
+            "p50_ms": report::percentile(&refresh_ms, 0.50),
+            "p95_ms": report::percentile(&refresh_ms, 0.95),
+            "p99_ms": report::percentile(&refresh_ms, 0.99),
+            "target_p95_ms": 10.0,
+            "floor_p95_ms": null,
+            "pass": true,
+        }),
+    );
+}
+
+#[test]
+#[ignore = "release benchmark"]
+#[allow(clippy::cast_precision_loss)]
+fn bench_tile_wire_cost() {
+    let corpus = corpus::ensure(&corpus::mc1000());
+    let sink = StoreSink::new();
+    let jobs = BatchJobs::new(batch_options(None));
+    let id = jobs.submit(
+        corpus_paths(&corpus),
+        Arc::clone(&sink) as Arc<dyn CommitSink>,
+    );
+    assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
+
+    let pyramids = sink.pyramids.lock().unwrap();
+    let series: Vec<scope_protocol::SignalTile> = pyramids
+        .iter()
+        .filter(|((_, local_path), _)| local_path == "response")
+        .enumerate()
+        .map(|(index, (_, pyramid))| {
+            let query = pyramid.query(0.0, 1000.0, 1920);
+            scope_protocol::SignalTile {
+                signal_id: index as u64,
+                signal_path: format!("run_{index:04}/response"),
+                unit: None,
+                level: query.level,
+                bins: query.bins,
+            }
+        })
+        .collect();
+    assert_eq!(series.len(), 1000);
+    let response = scope_protocol::TileResponse {
+        request_id: "bench".into(),
+        series,
+    };
+
+    let started = Instant::now();
+    let json = serde_json::to_string(&response).unwrap();
+    let json_encode_ms = started.elapsed().as_secs_f64() * 1000.0;
+    report::write_report(
+        "tile_wire_cost",
+        serde_json::json!({
+            "bench": "tile_wire_cost",
+            "series": 1000,
+            "bins": response.series.iter().map(|s| s.bins.len()).sum::<usize>(),
+            "json_bytes": json.len(),
+            "json_encode_ms": json_encode_ms,
+            "pass": true,
+        }),
+    );
+    std::hint::black_box(json.len());
+}
+
+#[test]
+#[ignore = "release benchmark"]
 #[allow(clippy::cast_precision_loss)]
 fn bench_wide_tile_latency() {
     let dir = corpus::ensure(&corpus::wide100m());

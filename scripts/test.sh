@@ -45,9 +45,9 @@ bench_e2e() {
   fi
   local -a data_args=()
   local file selected=0
-  # The core suite covers all 1,000 runs. Keep the browser artifact bounded:
-  # scope-bake retains every input pyramid until snapshot planning completes.
-  local browser_files=2
+  # Full corpus by default so the browser bench proves 1000 sources; PR smoke
+  # jobs pass SIGNALSCOPE_BENCH_FILES=2 to stay bounded.
+  local browser_files="${SIGNALSCOPE_BENCH_FILES:-1000}"
   for file in "$corpus_dir"/run_*.csv; do
     if [ "$selected" -eq "$browser_files" ]; then
       break
@@ -57,7 +57,7 @@ bench_e2e() {
   done
   [ "$selected" -eq "$browser_files" ]
   local out="$signalscope_root/build/bench/mc1000.html"
-  local max_bytes=268435456
+  local max_bytes="${SIGNALSCOPE_BENCH_MAX_BYTES:-1073741824}"
   local fidelity=preview started elapsed bytes
   started=$SECONDS
   "$signalscope_scripts_dir/export.sh" "${data_args[@]}" \

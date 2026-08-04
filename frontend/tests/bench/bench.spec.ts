@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "../e2e/fixtures";
 import { interact, startFrameProbe, stopFrameProbe } from "./measure";
@@ -28,6 +28,9 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
   await startFrameProbe(page);
   await interact(page);
   const stats = await stopFrameProbe(page);
+  const bake = JSON.parse(
+    readFileSync(new URL("bake.json", reportDir), "utf8"),
+  ) as { input_files: number };
 
   mkdirSync(fileURLToPath(reportDir), { recursive: true });
   writeFileSync(
@@ -35,6 +38,7 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
     JSON.stringify(
       {
         bench: "e2e_mc1000",
+        input_files: bake.input_files,
         first_plot_ms: firstPlotMs,
         frame_p95_ms: stats.p95Ms,
         frame_max_ms: stats.maxMs,
