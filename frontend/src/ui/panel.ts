@@ -1754,10 +1754,15 @@ export class PanelView {
   private renderStats(): void {
     const strip = required<HTMLElement>(this.element, ".panel-stats");
     const state = this.lastState;
-    const groups = this.preparedPlot?.stats() ?? [];
-    const show = state !== null && state.show_stats && groups.length > 0;
+    const show = state !== null && state.show_stats;
     strip.hidden = !show;
     if (!show) {
+      strip.replaceChildren();
+      return;
+    }
+    const groups = this.preparedPlot?.stats() ?? [];
+    if (groups.length === 0) {
+      strip.hidden = true;
       strip.replaceChildren();
       return;
     }

@@ -208,6 +208,7 @@ export function policyFor(mode: PanelMode): PlotInteractionPolicy {
 }
 
 export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
+  const extents = input.series.map((series) => columnsYExtent(series.bins));
   const resolve = (annotation: Annotation): ResolvedAnnotation | null => {
     if (annotation.domain !== "time") return null;
     const series = input.series.find(
@@ -238,8 +239,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
     autoRanges() {
       let min = Number.POSITIVE_INFINITY;
       let max = Number.NEGATIVE_INFINITY;
-      for (const series of input.series) {
-        const extent = columnsYExtent(series.bins);
+      for (const extent of extents) {
         if (extent === null) continue;
         min = Math.min(min, extent.min);
         max = Math.max(max, extent.max);
