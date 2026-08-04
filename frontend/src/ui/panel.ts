@@ -1,4 +1,8 @@
 import { formatCombo } from "../app/commands";
+import {
+  columnsValueAtTime,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import type { Catalog } from "../app/catalog";
 import {
   appliedOverrides,
@@ -8,11 +12,7 @@ import {
 } from "../app/resolution";
 import { virtualSlice } from "../app/outline-model";
 import { evaluateSelector } from "../app/selector";
-import type {
-  SampleResponse,
-  SampleSeries,
-  TileResponse,
-} from "../generated/protocol";
+import type { SampleResponse, SampleSeries } from "../generated/protocol";
 import type {
   AxisStyle,
   Binding,
@@ -31,7 +31,6 @@ import {
   insidePlot,
   projectX,
   projectY,
-  valueAtTime,
   type PlotLayout,
   type Range,
 } from "../app/plot-math";
@@ -560,9 +559,11 @@ export class PanelView {
   private readonly yAxis = new YAxisPolicy();
   private lastState: RenderPanelState | null = null;
   private lastInputState: PanelState | null = null;
-  private lastTiles: TileResponse | null = null;
+  private lastStateKey: string | null = null;
+  private lastTiles: ColumnarTileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
+  private lastMissingEmpty = true;
   private preparedPlot: PreparedPlot | null = null;
   private hitAdapter: SeriesHitAdapter | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
@@ -933,17 +934,32 @@ export class PanelView {
 
   renderData(
     state: PanelState,
-    tiles: TileResponse | null,
+    tiles: ColumnarTileResponse | null,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
   ): number {
+    const stateKey = JSON.stringify(state);
+    if (
+      stateKey === this.lastStateKey &&
+      tiles === this.lastTiles &&
+      samples === this.lastSamples &&
+      this.lastWindow !== null &&
+      window.t0 === this.lastWindow.t0 &&
+      window.t1 === this.lastWindow.t1 &&
+      missing.length === 0 &&
+      this.lastMissingEmpty
+    ) {
+      return 0;
+    }
     const rendered = renderState(state, this.callbacks);
     this.lastInputState = state;
+    this.lastStateKey = stateKey;
     this.lastState = rendered;
     this.lastTiles = tiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
+    this.lastMissingEmpty = missing.length === 0;
     this.preparedPlot = null;
     this.hitAdapter = null;
     this.domainSeries = [];
@@ -966,7 +982,7 @@ export class PanelView {
 
   private renderForMode(
     state: RenderPanelState,
-    tiles: TileResponse | null,
+    tiles: ColumnarTileResponse | null,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
@@ -980,14 +996,14 @@ export class PanelView {
       state.series.map((series) => [series.path, series]),
     );
     const shown = tiles.series.filter(
-      (tile) => bySeries.get(tile.signal_path)?.visible ?? true,
+      (tile) => bySeries.get(tile.signalPath)?.visible ?? true,
     );
-    const response = { request_id: tiles.request_id, series: shown };
+    const response = { requestId: tiles.requestId, series: shown };
     this.preparedPlot = prepareTimePlot({
       series: shown.map((tile) => {
-        const series = bySeries.get(tile.signal_path);
+        const series = bySeries.get(tile.signalPath);
         return {
-          path: tile.signal_path,
+          path: tile.signalPath,
           colorIndex: colorIndexForHue(series?.hue ?? 1),
           bins: tile.bins,
         };
@@ -1008,7 +1024,7 @@ export class PanelView {
       yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       styles: shown.map((tile) => {
-        const series = bySeries.get(tile.signal_path);
+        const series = bySeries.get(tile.signalPath);
         return {
           hue: series?.hue ?? null,
           dash: series?.dash ?? "solid",
@@ -1019,7 +1035,7 @@ export class PanelView {
       ...(this.emphasizePaths !== null
         ? {
             emphasisIndices: shown.flatMap((tile, index) =>
-              this.emphasizePaths?.has(tile.signal_path) ? [index] : [],
+              this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
             ),
           }
         : {}),
@@ -1535,8 +1551,10 @@ export class PanelView {
     if (state === null) return;
     const values = new Map(
       (this.lastTiles?.series ?? []).map((tile) => [
-        tile.signal_path,
-        this.cursorT === null ? null : valueAtTime(tile.bins, this.cursorT),
+        tile.signalPath,
+        this.cursorT === null
+          ? null
+          : columnsValueAtTime(tile.bins, this.cursorT),
       ]),
     );
     const series = state.series
@@ -1706,9 +1724,9 @@ export class PanelView {
       });
     }
     return (this.lastTiles?.series ?? []).flatMap((tile) => {
-      const series = bySeries.get(tile.signal_path);
+      const series = bySeries.get(tile.signalPath);
       if (series?.visible !== true) return [];
-      const value = valueAtTime(tile.bins, cursorT);
+      const value = columnsValueAtTime(tile.bins, cursorT);
       if (value === null) return [];
       return [
         {
@@ -1735,10 +1753,15 @@ export class PanelView {
   private renderStats(): void {
     const strip = required<HTMLElement>(this.element, ".panel-stats");
     const state = this.lastState;
-    const groups = this.preparedPlot?.stats() ?? [];
-    const show = state !== null && state.show_stats && groups.length > 0;
+    const show = state !== null && state.show_stats;
     strip.hidden = !show;
     if (!show) {
+      strip.replaceChildren();
+      return;
+    }
+    const groups = this.preparedPlot?.stats() ?? [];
+    if (groups.length === 0) {
+      strip.hidden = true;
       strip.replaceChildren();
       return;
     }

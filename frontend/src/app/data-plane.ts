@@ -42,12 +42,19 @@ import {
   type SnapshotManifest,
   type SourceSummary,
   type TileRequest,
-  type TileResponse,
 } from "../generated/protocol";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
+import {
+  binColumnsFromWire,
+  binColumnsFromWireRange,
+  sliceColumns,
+  type BinColumns,
+  type ColumnarTileResponse,
+} from "./bin-columns";
 import { open, seal, type Envelope } from "./envelope";
-import { queryPyramid } from "./pyramid-query";
+import { queryPyramidRange } from "./pyramid-query";
 import { binsToSamples, sampleWindow } from "./samples";
+import { decodeTileResponse } from "./tile-binary";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
@@ -139,7 +146,7 @@ export interface DataPlane {
   readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
-  queryTiles(request: TileRequest): Promise<TileResponse>;
+  queryTiles(request: TileRequest): Promise<ColumnarTileResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
@@ -445,11 +452,12 @@ export class TauriPlane implements DataPlane {
     return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
   }
 
-  async queryTiles(request: TileRequest): Promise<TileResponse> {
-    return open(
-      await this.invoke<Envelope<TileResponse>>("query_tiles", {
+  async queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
+    return decodeTileResponse(
+      await this.invoke<ArrayBuffer>("query_tiles_bin", {
         request: seal(request),
       }),
+      request.request_id,
     );
   }
 
@@ -503,6 +511,8 @@ export class BakedPlane implements DataPlane {
     { time: number[]; values: number[] }
   >();
 
+  private readonly levelColumns = new Map<string, Map<number, BinColumns>>();
+
   constructor(manifest: BakedManifest) {
     this.payload = open(manifest);
     this.bakedSessionJson = this.payload.session_json;
@@ -541,28 +551,71 @@ export class BakedPlane implements DataPlane {
     ]);
   }
 
-  queryTiles(request: TileRequest): Promise<TileResponse> {
+  queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
     const requested = new Set(request.signal_ids);
     return Promise.resolve({
-      request_id: request.request_id,
+      requestId: request.request_id,
       series: this.payload.signals
         .filter((signal) => requested.has(signal.summary.signal_id))
         .map((signal) => {
-          const query = queryPyramid(
+          // 64-bin floor per ADR 0036 makes `max_total_bins` a soft cap; keep
+          // in sync with the shell's `query_tiles_bin`.
+          const perSeries =
+            request.max_total_bins === null
+              ? undefined
+              : Math.max(
+                  64,
+                  Math.floor(
+                    request.max_total_bins /
+                      Math.max(1, request.signal_ids.length),
+                  ),
+                );
+          const range = queryPyramidRange(
             signal.levels,
             request.window.t0,
             request.window.t1,
             request.pixel_width,
+            perSeries,
+          );
+          const bins = this.columnsFor(
+            signal,
+            range.level,
+            range.start,
+            range.end,
           );
           return {
-            signal_id: signal.summary.signal_id,
-            signal_path: signal.summary.path,
+            signalId: signal.summary.signal_id,
+            signalPath: signal.summary.path,
             unit: signal.summary.unit,
-            level: query.level,
-            bins: query.bins,
+            level: range.level,
+            bins,
           };
         }),
     });
+  }
+
+  private columnsFor(
+    signal: BakedManifest["payload"]["signals"][number],
+    level: number,
+    start: number,
+    end: number,
+  ): BinColumns {
+    let levels = this.levelColumns.get(signal.summary.signal_id);
+    if (levels === undefined) {
+      levels = new Map();
+      this.levelColumns.set(signal.summary.signal_id, levels);
+    }
+    let columns = levels.get(level);
+    if (columns === undefined) {
+      const wire = signal.levels[level] ?? [];
+      if (start <= 0 && end >= wire.length) {
+        columns = binColumnsFromWire(wire);
+        levels.set(level, columns);
+        return columns;
+      }
+      return binColumnsFromWireRange(wire, start, end);
+    }
+    return sliceColumns(columns, start, end);
   }
 
   querySamples(request: SampleRequest): Promise<SampleResponse> {

@@ -698,7 +698,7 @@ fn decode_paged_signal(
         merged.push(if count > RESIDENT_LEVEL_BINS {
             CachedBinLevel::Paged(PagedBinLevel::new(handle, count)?)
         } else {
-            CachedBinLevel::Resident(BinLevel::decode_cache(&handle.bytes().ok()?)?)
+            CachedBinLevel::Resident(Box::new(BinLevel::decode_cache(&handle.bytes().ok()?)?))
         });
         expected_len = expected_len.div_ceil(2);
     }
@@ -782,25 +782,25 @@ fn encode_bins(bins: &BinLevel) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + bins.len() * BinLevel::BYTES_PER_BIN);
     out.extend_from_slice(&(bins.len() as u64).to_le_bytes());
     for values in [
-        &bins.t0,
-        &bins.t1,
-        &bins.first,
-        &bins.last,
-        &bins.min,
-        &bins.max,
-        &bins.sum,
-        &bins.sum_sq,
+        bins.t0_column(),
+        bins.t1_column(),
+        bins.first_column(),
+        bins.last_column(),
+        bins.min_column(),
+        bins.max_column(),
+        bins.sum_column(),
+        bins.sum_sq_column(),
     ] {
         for value in values {
             out.extend_from_slice(&value.to_le_bytes());
         }
     }
-    for values in [&bins.sample_count, &bins.finite_count] {
+    for values in [bins.sample_count_column(), bins.finite_count_column()] {
         for value in values {
             out.extend_from_slice(&value.to_le_bytes());
         }
     }
-    out.extend_from_slice(&bins.flags);
+    out.extend_from_slice(bins.flags_column());
     pad_to_8(&mut out);
     out
 }

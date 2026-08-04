@@ -11,6 +11,7 @@ import type { PathRenderOptions, PlotPath } from "../render/canvas-renderer";
 import { Catalog } from "../app/catalog";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
+import type { ResolvedSeries } from "../app/resolution";
 
 import { AppShell } from "./app-shell";
 import {
@@ -224,10 +225,14 @@ interface AppShellProbe {
   workspace: {
     derived(): { path: string }[];
     namedSets(): never[];
+    revision(): number;
+    resolutionRevision(): number;
   };
   signals: SignalSummary[];
   signalsByPath: Map<string, SignalSummary>;
   catalog: Catalog;
+  catalogRevision: number;
+  resolutionCache: Map<string, { key: string; resolved: ResolvedSeries[] }>;
   panelSignalIds(panel: PanelState): { ids: string[]; missing: string[] };
 }
 
@@ -236,10 +241,14 @@ function appShellProbe(...signals: SignalSummary[]): AppShellProbe {
   shell.workspace = {
     derived: () => [{ path: "derived/score" }],
     namedSets: () => [],
+    revision: () => 0,
+    resolutionRevision: () => 0,
   };
   shell.signals = signals;
   shell.signalsByPath = new Map(signals.map((entry) => [entry.path, entry]));
   shell.catalog = Catalog.build(signals);
+  shell.catalogRevision = 0;
+  shell.resolutionCache = new Map();
   return shell;
 }
 

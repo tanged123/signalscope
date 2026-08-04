@@ -1,5 +1,14 @@
-import type { SignalTile, TileResponse } from "../generated/protocol";
 import type { AxisStyle, DashStyle } from "../generated/session";
+import {
+  HAS_FIRST,
+  HAS_GAP,
+  HAS_LAST,
+  HAS_MAX,
+  HAS_MIN,
+  type BinColumns,
+  type ColumnarTile,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import {
   logTicks,
   projectX,
@@ -94,6 +103,8 @@ export const SERIES_TOKENS = [
 export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
+const SOLID: number[] = [];
+const MAX_BATCHED_SERIES = 4;
 
 function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
@@ -156,6 +167,18 @@ interface FrameSpec {
   rightGutter?: number;
 }
 
+interface ResolvedStroke {
+  color: string;
+  dash: DashStyle;
+  width: number;
+  alpha: number;
+}
+
+interface PathSink {
+  moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void;
+}
+
 export class CanvasRenderer {
   private palette: Palette | null = null;
   private readonly surface: CanvasSurface;
@@ -163,6 +186,14 @@ export class CanvasRenderer {
   private colorbarGradient: CanvasGradient | null = null;
   private colorbarBottom = 0;
   private sequentialRamp: ColormapRamp | null = null;
+  private lastStroke: string | null = null;
+  private lastWidth = Number.NaN;
+  private lastAlpha = Number.NaN;
+  private lastDash: number[] | null = null;
+  private readonly pathCache = new WeakMap<
+    BinColumns,
+    { key: string; path: Path2D }
+  >();
 
   constructor(canvas: HTMLCanvasElement) {
     this.surface = new CanvasSurface(canvas);
@@ -194,7 +225,7 @@ export class CanvasRenderer {
   }
 
   render(
-    response: TileResponse,
+    response: ColumnarTileResponse,
     xRange: Range,
     options: RenderOptions,
   ): number {
@@ -208,7 +239,25 @@ export class CanvasRenderer {
         ? {}
         : { axisStyle: options.axisStyle }),
     });
-    response.series.forEach((series, index) => {
+    context.save();
+    context.beginPath();
+    context.rect(plot.x, plot.y, plot.width, plot.height);
+    context.clip();
+    context.lineJoin = "bevel";
+    context.lineCap = "butt";
+    const pathKey = [
+      xRange.min,
+      xRange.max,
+      options.yRange[0],
+      options.yRange[1],
+      plot.x,
+      plot.y,
+      plot.width,
+      plot.height,
+    ]
+      .map(String)
+      .join(",");
+    const styleFor = (index: number): ResolvedStroke => {
       const stroke = options.styles?.[index] ?? {
         hue: (index % COLOR_SLOTS) + 1,
         dash: "solid" as const,
@@ -231,17 +280,54 @@ export class CanvasRenderer {
         : hasEmphasis && !ghost
           ? 0.25
           : stroke.alpha;
-      this.drawSeries(
-        context,
-        plot,
-        project,
-        series,
+      return {
         color,
-        stroke.dash,
-        stroke.width + (emphasized ? 0.4 : 0),
+        dash: stroke.dash,
+        width: stroke.width + (emphasized ? 0.4 : 0),
         alpha,
-      );
-    });
+      };
+    };
+    const hasEmphasis =
+      options.emphasisIndex !== undefined ||
+      (options.emphasisIndices?.length ?? 0) > 0;
+    const canBatch =
+      response.series.length > 128 &&
+      !hasEmphasis &&
+      response.series.every((_, index) => {
+        const style = styleFor(index);
+        return style.alpha === 1 && style.dash === "solid";
+      });
+    if (canBatch) {
+      const groups = new Map<
+        string,
+        { style: ResolvedStroke; path: Path2D; count: number }[]
+      >();
+      response.series.forEach((series, index) => {
+        const style = styleFor(index);
+        const key = `${style.color}\u0000${String(style.width)}`;
+        const styledGroups = groups.get(key) ?? [];
+        let group = styledGroups.at(-1);
+        if (group === undefined || group.count === MAX_BATCHED_SERIES) {
+          group = { style, path: new Path2D(), count: 0 };
+          styledGroups.push(group);
+          groups.set(key, styledGroups);
+        }
+        this.appendSeriesPath(group.path, plot, project, series.bins);
+        group.count += 1;
+      });
+      for (const styledGroups of groups.values()) {
+        for (const group of styledGroups) {
+          this.setStroke(context, group.style);
+          context.stroke(group.path);
+        }
+      }
+    } else {
+      response.series.forEach((series, index) => {
+        const style = styleFor(index);
+        this.drawSeries(context, plot, project, series, style, pathKey);
+      });
+    }
+    context.restore();
     finishAxes();
     return performance.now() - started;
   }
@@ -290,6 +376,10 @@ export class CanvasRenderer {
    */
   private beginFrame(spec: FrameSpec): Frame {
     const { context, width, height } = this.surface.prepare();
+    this.lastStroke = null;
+    this.lastWidth = Number.NaN;
+    this.lastAlpha = Number.NaN;
+    this.lastDash = null;
     const colors = this.resolvePalette();
     context.fillStyle = colors.background;
     context.fillRect(0, 0, width, height);
@@ -629,50 +719,149 @@ export class CanvasRenderer {
     context: CanvasRenderingContext2D,
     plot: PlotRect,
     project: Projection,
-    series: SignalTile,
-    color: string,
-    dash: DashStyle,
-    width: number,
-    alpha: number,
+    series: ColumnarTile,
+    style: ResolvedStroke,
+    pathKey: string,
+  ): void {
+    this.setStroke(context, style);
+    context.stroke(this.seriesPath(plot, project, series, pathKey));
+  }
+
+  private setStroke(
+    context: CanvasRenderingContext2D,
+    style: ResolvedStroke,
+  ): void {
+    if (this.lastStroke !== style.color) {
+      context.strokeStyle = style.color;
+      this.lastStroke = style.color;
+    }
+    if (this.lastWidth !== style.width) {
+      context.lineWidth = style.width;
+      this.lastWidth = style.width;
+    }
+    if (this.lastAlpha !== style.alpha) {
+      context.globalAlpha = style.alpha;
+      this.lastAlpha = style.alpha;
+    }
+    const dashPatternValue =
+      style.dash === "solid" ? SOLID : dashPattern(style.dash);
+    if (this.lastDash !== dashPatternValue) {
+      context.setLineDash(dashPatternValue);
+      this.lastDash = dashPatternValue;
+    }
+  }
+
+  private seriesPath(
+    plot: PlotRect,
+    project: Projection,
+    series: ColumnarTile,
+    pathKey: string,
+  ): Path2D {
+    const bins = series.bins;
+    const cached = this.pathCache.get(bins);
+    if (cached?.key === pathKey) return cached.path;
+    const path = new Path2D();
+    this.appendSeriesPath(path, plot, project, bins);
+    this.pathCache.set(bins, { key: pathKey, path });
+    return path;
+  }
+
+  private appendSeriesPath(
+    path: PathSink,
+    plot: PlotRect,
+    project: Projection,
+    bins: BinColumns,
   ): void {
     const { toX, toY } = project;
-
-    context.save();
-    context.beginPath();
-    context.rect(plot.x, plot.y, plot.width, plot.height);
-    context.clip();
-    context.strokeStyle = color;
-    context.lineWidth = width;
-    context.globalAlpha = alpha;
-    context.setLineDash(dashPattern(dash));
-    context.beginPath();
     let penDown = false;
-    for (const bin of series.bins) {
-      if (
-        bin.first === null ||
-        bin.last === null ||
-        bin.min === null ||
-        bin.max === null
-      ) {
-        penDown = false;
-        continue;
-      }
-      const x = toX((bin.t0 + bin.t1) * 0.5);
-      const firstY = toY(bin.first);
-      if (!penDown || bin.has_gap) {
-        context.moveTo(x, firstY);
+    const { t0, t1, first, last, min, max, flags, count } = bins;
+    const emitColumn = (
+      x: number,
+      yFirst: number,
+      yMin: number,
+      yMax: number,
+      yLast: number,
+      gap: boolean,
+    ): void => {
+      if (!penDown || gap) {
+        path.moveTo(x, yFirst);
       } else {
-        context.lineTo(x, firstY);
+        path.lineTo(x, yFirst);
       }
-      context.lineTo(x, toY(bin.min));
-      context.lineTo(x, toY(bin.max));
-      context.lineTo(x, toY(bin.last));
-      penDown = !bin.has_gap;
+      if (yMin !== yMax) {
+        if (yMin !== yFirst && yMin !== yLast) path.lineTo(x, yMin);
+        if (yMax !== yFirst && yMax !== yLast) path.lineTo(x, yMax);
+        path.lineTo(x, yLast);
+      } else if (yLast !== yFirst) {
+        path.lineTo(x, yLast);
+      }
+      penDown = !gap;
+    };
+    if (count > 2 * plot.width) {
+      let colX = Number.NaN;
+      let cFirst = 0;
+      let cLast = 0;
+      let cMin = 0;
+      let cMax = 0;
+      let colGap = false;
+      const flushColumn = (): void => {
+        if (Number.isNaN(colX)) return;
+        emitColumn(colX, toY(cFirst), toY(cMin), toY(cMax), toY(cLast), colGap);
+      };
+      for (let index = 0; index < count; index += 1) {
+        const binFlags = flags[index] as number;
+        if (
+          (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
+          (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
+        ) {
+          flushColumn();
+          colX = Number.NaN;
+          penDown = false;
+          continue;
+        }
+        const x =
+          plot.x +
+          Math.floor(
+            toX(((t0[index] as number) + (t1[index] as number)) * 0.5) - plot.x,
+          ) +
+          0.5;
+        if (x !== colX) {
+          flushColumn();
+          colX = x;
+          cFirst = first[index] as number;
+          cLast = last[index] as number;
+          cMin = min[index] as number;
+          cMax = max[index] as number;
+          colGap = (binFlags & HAS_GAP) !== 0;
+        } else {
+          cLast = last[index] as number;
+          if ((min[index] as number) < cMin) cMin = min[index] as number;
+          if ((max[index] as number) > cMax) cMax = max[index] as number;
+          colGap ||= (binFlags & HAS_GAP) !== 0;
+        }
+      }
+      flushColumn();
+    } else {
+      for (let index = 0; index < count; index += 1) {
+        const binFlags = flags[index] as number;
+        if (
+          (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
+          (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
+        ) {
+          penDown = false;
+          continue;
+        }
+        const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
+        emitColumn(
+          x,
+          toY(first[index] as number),
+          toY(min[index] as number),
+          toY(max[index] as number),
+          toY(last[index] as number),
+          (binFlags & HAS_GAP) !== 0,
+        );
+      }
     }
-    context.stroke();
-    context.globalAlpha = 1;
-    context.setLineDash([]);
-    context.restore();
   }
 
   private drawInlineFurniture(

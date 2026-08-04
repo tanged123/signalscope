@@ -28,4 +28,4 @@ if [ "${1:-}" = "--no-build" ]; then
 else
   "$signalscope_scripts_dir/build.sh" web
 fi
-cargo run --quiet -p scope-core --bin scope-bake -- "$@"
+cargo run --quiet --release -p scope-core --bin scope-bake -- "$@"

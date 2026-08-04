@@ -3,7 +3,7 @@ resolver = "2"
 members = ["core/scope-core", "protocol", "shell/src-tauri"]
 
 [workspace.package]
-version = "0.19.1"
+version = "0.20.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/tanged123/signalscope"
@@ -26,14 +26,25 @@ parquet = { version = "56", default-features = false, features = [
   "zstd",
 ] }
 toml = "0.9"
-scope-core = { path = "core/scope-core", version = "0.19.1" }
-scope-protocol = { path = "protocol", version = "0.19.1" }
+scope-core = { path = "core/scope-core", version = "0.20.1" }
+scope-protocol = { path = "protocol", version = "0.20.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
+
+# The dev-profile workbench (`cargo tauri dev`) runs the full ingest and
+# pyramid pipeline; unoptimized scope-core is ~5x slower on multi-GB opens.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.scope-core]
+opt-level = 2
+
+[profile.dev.package.scope-protocol]
+opt-level = 2
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

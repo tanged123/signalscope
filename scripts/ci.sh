@@ -8,7 +8,7 @@ mode="${1:-all}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|build|appimage|windows]
+Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|bench|build|appimage|windows]
 
 Each named mode matches the GitHub Actions job with the same name:
 
@@ -21,6 +21,7 @@ Each named mode matches the GitHub Actions job with the same name:
   frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
             snapshot artifact checks.
   e2e       Playwright desktop smoke tests.
+  bench     Full benchmark suite; writes build/bench/report.json.
   build     Native Tauri bundles via ./scripts/build.sh native.
   appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
   windows   Windows-only NSIS installer build; runs outside the Nix shell.
@@ -54,6 +55,7 @@ check_format_read_only() {
 
 check_e2e() {
   bake_roundtrip_artifact
+  bake_bench_smoke_artifact
   pnpm e2e
 }
 
@@ -81,6 +83,9 @@ frontend)
   ;;
 e2e)
   check_e2e
+  ;;
+bench)
+  "$signalscope_scripts_dir/test.sh" bench all
   ;;
 build)
   exec "$signalscope_scripts_dir/build.sh" native

@@ -14,6 +14,10 @@ import {
   unsupportedDropMessage,
 } from "../app/drop";
 import type { DataPlane, IngestPort } from "../app/data-plane";
+import {
+  columnsValueAtTime,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -41,18 +45,14 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
+import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
-import { resolvePanel } from "../app/resolution";
+import { resolvePanel, type ResolvedSeries } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
-import {
-  formatCursorTime,
-  formatValue,
-  valueAtTime,
-  zoomRange,
-} from "../app/plot-math";
+import { formatCursorTime, formatValue, zoomRange } from "../app/plot-math";
 import {
   type BatchStatus,
   type DragDropForward,
@@ -64,7 +64,6 @@ import {
   type SampleSeries,
   type SignalSummary,
   type SourceSummary,
-  type TileResponse,
 } from "../generated/protocol";
 import type {
   CursorMode,
@@ -100,6 +99,7 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
+const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
@@ -165,9 +165,15 @@ export class AppShell {
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
+  private readonly tileWindowCache = new TileWindowCache();
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
+  private catalogRevision = 0;
+  private readonly resolutionCache = new Map<
+    string,
+    { key: string; resolved: ResolvedSeries[] }
+  >();
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
@@ -181,11 +187,13 @@ export class AppShell {
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
-  private tilesByPanel = new Map<string, TileResponse>();
+  private tilesByPanel = new Map<string, ColumnarTileResponse>();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
+  private refreshPromise: Promise<void> | null = null;
+  private refreshQueued = false;
   private renderScheduled = false;
   private refreshTimer: number | null = null;
   private helpTimer: number | null = null;
@@ -200,6 +208,7 @@ export class AppShell {
   private supportedFormatHint = "—";
   private restoringHistory = false;
   private historyGestureKey: string | null = null;
+  private historyDirty: string | null = null;
   private historyCoalesceTimer: number | null = null;
 
   constructor(
@@ -304,9 +313,7 @@ export class AppShell {
           if (panel?.ghost_mode === "ghost") {
             this.focusFirstSeries(
               id,
-              resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
-                (series) => series.ref,
-              ),
+              this.resolvedFor(panel).map((series) => series.ref),
             );
           }
           this.commitHistory();
@@ -342,8 +349,7 @@ export class AppShell {
         pathForRef: (ref) => this.catalog.get(ref)?.path ?? null,
         catalog: () => this.catalog,
         namedSets: () => this.workspace.namedSets(),
-        resolveSeries: (state) =>
-          resolvePanel(this.catalog, state, this.workspace.namedSets()),
+        resolveSeries: (state) => this.resolvedFor(state),
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
           const ref = this.catalog.refFromPath(path);
@@ -391,7 +397,7 @@ export class AppShell {
         },
         onYRange: (id, range) => {
           this.workspace.setPanelYRange(id, [range[0], range[1]]);
-          this.commitHistory(`range:${id}`);
+          this.markHistoryDirty(`range:${id}`);
           this.scheduleRender();
         },
         onXRange: (id, range) => {
@@ -983,7 +989,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.19.1");
+        this.showModeHelp("SignalScope 0.20.1");
       },
     });
     this.commands.register({
@@ -1823,9 +1829,7 @@ export class AppShell {
   private fitWindowToPlotted(): void {
     const extent = this.timeExtent(
       [...this.workspace.panels()].flatMap((panel) =>
-        resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
-          (series) => series.path,
-        ),
+        this.resolvedFor(panel).map((series) => series.path),
       ),
     );
     if (extent === null) return;
@@ -1856,8 +1860,30 @@ export class AppShell {
     }, 250);
   }
 
+  private markHistoryDirty(coalesceKey: string): void {
+    if (this.restoringHistory) return;
+    this.historyDirty = coalesceKey;
+    this.clearHistoryCoalesceTimer();
+    this.historyCoalesceTimer = window.setTimeout(() => {
+      this.historyCoalesceTimer = null;
+      const key = this.historyDirty;
+      this.historyDirty = null;
+      if (key !== null) {
+        this.history.commit(historySnapshot(this.workspace.snapshot()), key);
+      }
+      this.history.commit(historySnapshot(this.workspace.snapshot()));
+    }, 250);
+  }
+
   private closeHistoryCoalescing(): void {
     this.clearHistoryCoalesceTimer();
+    const key = this.historyDirty;
+    this.historyDirty = null;
+    if (key !== null) {
+      this.history.commit(historySnapshot(this.workspace.snapshot()), key);
+      this.history.commit(historySnapshot(this.workspace.snapshot()));
+      return;
+    }
     this.history.commit(historySnapshot(this.workspace.snapshot()));
   }
 
@@ -2524,6 +2550,8 @@ export class AppShell {
   private async reloadSignals(): Promise<void> {
     this.signals = await this.plane.listSignals();
     this.catalog = Catalog.build(this.signals);
+    this.catalogRevision += 1;
+    this.tileWindowCache.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2540,13 +2568,35 @@ export class AppShell {
     this.updateStatus();
   }
 
-  private async refreshTiles(): Promise<void> {
+  private refreshTiles(): Promise<void> {
+    this.refreshQueued = true;
+    if (this.refreshPromise !== null) {
+      return this.refreshPromise;
+    }
+    this.refreshPromise = (async () => {
+      try {
+        while (this.hasQueuedRefresh()) {
+          this.refreshQueued = false;
+          await this.refreshTilesPass();
+        }
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+    return this.refreshPromise;
+  }
+
+  private hasQueuedRefresh(): boolean {
+    return this.refreshQueued;
+  }
+
+  private async refreshTilesPass(): Promise<void> {
     const refreshToken = ++this.refreshToken;
     const width = Math.max(
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
     );
-    const nextTiles = new Map<string, TileResponse>();
+    const nextTiles = new Map<string, ColumnarTileResponse>();
     const nextSamples = new Map<string, SampleResponse>();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
@@ -2558,14 +2608,45 @@ export class AppShell {
         try {
           if (panel.mode === "time") {
             const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+            const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
+            const idsKey = [...ids].sort().join("\u0000");
+            const cached = this.tileWindowCache.slice(
+              panel.id,
+              idsKey,
+              pixelWidth,
+              window.t0,
+              window.t1,
+            );
+            if (cached !== null) {
+              nextTiles.set(panel.id, cached);
+              return;
+            }
+            const paddedWindow = TileWindowCache.padWindow(
+              window.t0,
+              window.t1,
+            );
+            const response = await this.plane.queryTiles({
+              request_id: crypto.randomUUID(),
+              signal_ids: ids,
+              window: paddedWindow,
+              pixel_width: pixelWidth,
+              max_total_bins: TILE_BIN_BUDGET,
+            });
+            this.tileWindowCache.store(panel.id, {
+              response,
+              window: paddedWindow,
+              pixelWidth,
+              idsKey,
+            });
             nextTiles.set(
               panel.id,
-              await this.plane.queryTiles({
-                request_id: crypto.randomUUID(),
-                signal_ids: ids,
-                window,
-                pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
-              }),
+              this.tileWindowCache.slice(
+                panel.id,
+                idsKey,
+                pixelWidth,
+                window.t0,
+                window.t1,
+              ) ?? response,
             );
           } else {
             const contextRequest = {
@@ -2613,11 +2694,7 @@ export class AppShell {
     ids: string[];
     missing: string[];
   } {
-    const resolved = resolvePanel(
-      this.catalog,
-      panel,
-      this.workspace.namedSets(),
-    );
+    const resolved = this.resolvedFor(panel);
     const paths = resolved.map((series) => series.path);
     if (panel.mode === "xy") {
       const x = panel.x_ref === null ? null : this.catalog.get(panel.x_ref);
@@ -2652,6 +2729,19 @@ export class AppShell {
       else ids.push(id);
     }
     return { ids, missing };
+  }
+
+  private resolvedFor(panel: PanelState): ResolvedSeries[] {
+    const key = `${String(this.catalogRevision)}:${String(this.workspace.resolutionRevision())}`;
+    const cached = this.resolutionCache.get(panel.id);
+    if (cached?.key === key) return cached.resolved;
+    const resolved = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    );
+    this.resolutionCache.set(panel.id, { key, resolved });
+    return resolved;
   }
 
   private isDerivedPath(path: string): boolean {
@@ -2695,8 +2785,8 @@ export class AppShell {
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
     }
-    this.commitHistory(`range:${panelId}`);
-    this.renderTiles();
+    this.markHistoryDirty(`range:${panelId}`);
+    this.scheduleRender();
     this.scheduleRefresh();
   }
 
@@ -2709,8 +2799,8 @@ export class AppShell {
       return;
     }
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
-    this.commitHistory(`range:${panelId}`);
-    this.renderTiles();
+    this.markHistoryDirty(`range:${panelId}`);
+    this.scheduleRender();
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
@@ -2731,11 +2821,7 @@ export class AppShell {
    */
   private sampleWindow(panel: PanelState): { t0: number; t1: number } {
     if (panel.mode !== "xy") return this.effectiveWindow(panel);
-    const paths = resolvePanel(
-      this.catalog,
-      panel,
-      this.workspace.namedSets(),
-    ).map((series) => series.path);
+    const paths = this.resolvedFor(panel).map((series) => series.path);
     if (panel.x_ref !== null) {
       const x = this.catalog.get(panel.x_ref);
       if (x !== undefined) paths.push(x.path);
@@ -2743,7 +2829,7 @@ export class AppShell {
     return this.timeExtent(paths) ?? this.effectiveWindow(panel);
   }
 
-  private scheduleRefresh(delay = 150): void {
+  private scheduleRefresh(delay = 50): void {
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => {
       this.refreshTimer = null;
@@ -2767,9 +2853,7 @@ export class AppShell {
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
     const extent = this.timeExtent(
-      resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
-        (series) => series.path,
-      ),
+      this.resolvedFor(panel).map((series) => series.path),
     );
     if (extent === null) {
       this.commitHistory();
@@ -2880,11 +2964,7 @@ export class AppShell {
       tip.hidden = true;
       return;
     }
-    const resolved = resolvePanel(
-      this.catalog,
-      panel,
-      this.workspace.namedSets(),
-    );
+    const resolved = this.resolvedFor(panel);
     const ghostChannels = new Map(
       resolved
         .filter((series) => series.display === "ghost")
@@ -2958,10 +3038,10 @@ export class AppShell {
       if (this.pendingCursorT !== null) {
         for (const tiles of this.tilesByPanel.values()) {
           for (const tile of tiles.series) {
-            if (!values.has(tile.signal_path)) {
+            if (!values.has(tile.signalPath)) {
               values.set(
-                tile.signal_path,
-                formatValue(valueAtTime(tile.bins, this.pendingCursorT)),
+                tile.signalPath,
+                formatValue(columnsValueAtTime(tile.bins, this.pendingCursorT)),
               );
             }
           }

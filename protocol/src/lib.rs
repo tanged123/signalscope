@@ -2,9 +2,14 @@
 
 mod envelope;
 mod generated;
+pub mod tile_binary;
 
 pub use envelope::{Envelope, VersionError};
 pub use generated::*;
+pub use tile_binary::{
+    BinaryTileSeries, OwnedBinarySeries, TileBinaryError, decode_tile_response,
+    encode_tile_response,
+};
 
 #[cfg(test)]
 mod tests {
@@ -18,5 +23,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(request.signal_ids, vec![9_007_199_254_740_993]);
+        assert_eq!(request.max_total_bins, None);
     }
 }

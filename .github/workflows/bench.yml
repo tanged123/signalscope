@@ -1,0 +1,31 @@
+name: bench
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: bench
+      - run: ./scripts/ci.sh bench
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench-report
+          path: |
+            build/bench/report.json
+            build/bench/report/
+          if-no-files-found: warn

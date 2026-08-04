@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { SignalTile, TileResponse } from "../generated/protocol";
+import type { EnvelopeBin } from "../generated/protocol";
+import {
+  binColumnsFromWire,
+  type ColumnarTile,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import {
   CanvasRenderer,
   dashPattern,
@@ -171,47 +176,75 @@ const TEST_PALETTE: Palette = {
 function tile(
   path: string,
   bins: readonly { t0: number; t1: number; v: number; gap?: boolean }[],
-): SignalTile {
+): ColumnarTile {
   return {
-    signal_path: path,
+    signalId: "1",
+    signalPath: path,
     unit: null,
-    bins: bins.map((bin) => ({
-      t0: bin.t0,
-      t1: bin.t1,
-      first: bin.v,
-      last: bin.v,
-      min: bin.v,
-      max: bin.v,
-      count: 1,
-      has_gap: bin.gap ?? false,
-    })),
-  } as unknown as SignalTile;
+    level: 0,
+    bins: binColumnsFromWire(
+      bins.map(
+        (bin): EnvelopeBin => ({
+          t0: bin.t0,
+          t1: bin.t1,
+          first: bin.v,
+          last: bin.v,
+          min: bin.v,
+          max: bin.v,
+          sum: bin.v,
+          sum_sq: bin.v * bin.v,
+          finite_count: "1",
+          sample_count: "1",
+          has_gap: bin.gap ?? false,
+        }),
+      ),
+    ),
+  };
 }
 
 function renderOnce(
-  series: SignalTile[],
+  series: ColumnarTile[],
   options: Partial<RenderOptions> = {},
 ): DrawCall[] {
   const { calls, context } = recordingContext();
+  const globalWithPath = globalThis as unknown as {
+    Path2D?: typeof Path2D;
+  };
+  const previousPath2D = globalWithPath.Path2D;
+  class RecordingPath2D {
+    moveTo(x: number, y: number): void {
+      calls.push({ op: "moveTo", args: [x, y] });
+    }
+
+    lineTo(x: number, y: number): void {
+      calls.push({ op: "lineTo", args: [x, y] });
+    }
+  }
+  globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
   const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
   renderer.setPalette(TEST_PALETTE);
-  const response = { request_id: "test", series } as TileResponse;
-  renderer.render(
-    response,
-    { min: 0, max: 10 },
-    {
-      xLabel: "time (s)",
-      yLabel: "value",
-      styles: series.map<SeriesStroke>((_, index) => ({
-        hue: index + 1,
-        dash: "solid",
-        width: 1.4,
-        alpha: 1,
-      })),
-      yRange: [-1, 5],
-      ...options,
-    },
-  );
+  const response: ColumnarTileResponse = { requestId: "test", series };
+  try {
+    renderer.render(
+      response,
+      { min: 0, max: 10 },
+      {
+        xLabel: "time (s)",
+        yLabel: "value",
+        styles: series.map<SeriesStroke>((_, index) => ({
+          hue: index + 1,
+          dash: "solid",
+          width: 1.4,
+          alpha: 1,
+        })),
+        yRange: [-1, 5],
+        ...options,
+      },
+    );
+  } finally {
+    if (previousPath2D === undefined) delete globalWithPath.Path2D;
+    else globalWithPath.Path2D = previousPath2D;
+  }
   return calls;
 }
 
@@ -488,7 +521,7 @@ describe("render", () => {
     renderer.setPalette(TEST_PALETTE);
     expect(renderer.lastLayout()).toBeNull();
     renderer.render(
-      { request_id: "test", series: [] },
+      { requestId: "test", series: [] },
       { min: 0, max: 10 },
       {
         xLabel: "time (s)",
@@ -543,6 +576,17 @@ describe("render", () => {
     expect(strokes).toContain("#edb120");
   });
 
+  it("batches solid high-cardinality strokes into bounded paths", () => {
+    const calls = renderOnce(
+      Array.from({ length: 129 }, (_, index) =>
+        tile(String(index), [{ t0: 0, t1: 1, v: index }]),
+      ),
+    );
+    expect(calls.filter((call) => call.op === "stroke").length).toBeLessThan(
+      50,
+    );
+  });
+
   it("draws a ghost with the fixed neutral stroke", () => {
     const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
       styles: [{ hue: null, dash: "solid", width: 1.3, alpha: 0.5 }],
@@ -586,6 +630,81 @@ describe("render", () => {
     expect(calls).toContainEqual({ op: "=lineWidth", args: [1.6] });
   });
 
+  it("merges dense bins into pixel columns", () => {
+    const calls = renderOnce([
+      tile(
+        "dense",
+        Array.from({ length: 700 }, (_, index) => ({
+          t0: index / 70,
+          t1: (index + 1) / 70,
+          v: Math.sin(index / 10),
+        })),
+      ),
+    ]);
+    const seriesStart = calls.findIndex(
+      (call) =>
+        call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.series[0],
+    );
+    const seriesEnd = calls.findIndex(
+      (call, index) => index > seriesStart && call.op === "stroke",
+    );
+    const vertices = calls
+      .slice(seriesStart, seriesEnd)
+      .filter((call) => call.op === "moveTo" || call.op === "lineTo");
+    expect(vertices.length).toBeLessThan(700);
+  });
+
+  it("reuses geometry when only series emphasis changes", () => {
+    const { calls, context } = recordingContext();
+    const pathCalls: string[] = [];
+    const globalWithPath = globalThis as unknown as {
+      Path2D?: typeof Path2D;
+    };
+    const previousPath2D = globalWithPath.Path2D;
+    class RecordingPath2D {
+      moveTo(): void {
+        pathCalls.push("moveTo");
+      }
+
+      lineTo(): void {
+        pathCalls.push("lineTo");
+      }
+    }
+    globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
+    try {
+      const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
+      renderer.setPalette(TEST_PALETTE);
+      const response = {
+        requestId: "test",
+        series: [tile("a", [{ t0: 0, t1: 1, v: 1 }])],
+      };
+      const options: RenderOptions = {
+        xLabel: "time (s)",
+        yLabel: "value",
+        yRange: [-1, 5],
+        styles: [{ hue: 1, dash: "solid", width: 1.4, alpha: 1 }],
+      };
+      renderer.render(response, { min: 0, max: 10 }, options);
+      const firstGeometryCount = pathCalls.length;
+      renderer.render(
+        response,
+        { min: 0, max: 10 },
+        {
+          ...options,
+          emphasisIndex: 0,
+        },
+      );
+      expect(firstGeometryCount).toBeGreaterThan(0);
+      expect(pathCalls).toHaveLength(firstGeometryCount);
+      expect(
+        calls.filter((call) => call.op === "stroke").length,
+      ).toBeGreaterThan(1);
+    } finally {
+      if (previousPath2D === undefined) delete globalWithPath.Path2D;
+      else globalWithPath.Path2D = previousPath2D;
+    }
+  });
+
   it("multiplies a dimmed path's configured alpha", () => {
     const { context, calls } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
@@ -625,7 +744,7 @@ describe("render", () => {
       .filter((call) => call.op === "setLineDash")
       .map((call) => JSON.stringify(call.args[0]));
     expect(patterns).toContain(JSON.stringify([6, 4]));
-    expect(patterns.at(-1)).toBe(JSON.stringify([]));
+    expect(patterns.at(-1)).toBe(JSON.stringify([6, 4]));
   });
 
   it("clips series strokes to the plot rectangle", () => {

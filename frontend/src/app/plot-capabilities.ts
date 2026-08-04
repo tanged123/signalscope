@@ -1,9 +1,14 @@
-import type { EnvelopeBin } from "../generated/protocol";
 import type {
   Annotation,
   AnnotationDomain,
   PanelMode,
 } from "../generated/session";
+import {
+  columnsStats,
+  columnsValueAtTime,
+  columnsYExtent,
+  type BinColumns,
+} from "./bin-columns";
 import { nearestLine, nearestVertex, segmentHit } from "./plot-hit";
 import {
   formatValue,
@@ -11,10 +16,8 @@ import {
   paddedExtent,
   projectX,
   projectY,
-  valueAtTime,
   type PlotLayout,
 } from "./plot-math";
-import { visibleStats } from "./stats";
 import { lerpSample, traceExtent, type XyTrace } from "./xy";
 import { nearestXyPoint } from "./xy-hit";
 
@@ -132,7 +135,7 @@ interface PreparedSeries {
 }
 
 export interface TimePlotInput {
-  series: readonly (PreparedSeries & { bins: readonly EnvelopeBin[] })[];
+  series: readonly (PreparedSeries & { bins: BinColumns })[];
   window: { t0: number; t1: number };
 }
 
@@ -205,13 +208,16 @@ export function policyFor(mode: PanelMode): PlotInteractionPolicy {
 }
 
 export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
+  const extents = input.series.map((series) =>
+    columnsYExtent(series.bins, input.window),
+  );
   const resolve = (annotation: Annotation): ResolvedAnnotation | null => {
     if (annotation.domain !== "time") return null;
     const series = input.series.find(
       (entry) => entry.path === annotation.series_path,
     );
     if (series === undefined) return null;
-    const y = valueAtTime(series.bins, annotation.anchor);
+    const y = columnsValueAtTime(series.bins, annotation.anchor);
     if (y === null) return null;
     return resolved(annotation, annotation.anchor, y, series.colorIndex);
   };
@@ -233,7 +239,14 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
       },
     },
     autoRanges() {
-      const y = timeAutoYRange(input.series.flatMap((series) => series.bins));
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (const extent of extents) {
+        if (extent === null) continue;
+        min = Math.min(min, extent.min);
+        max = Math.max(max, extent.max);
+      }
+      const y = paddedExtent(min, max);
       return y === null
         ? { x: null, y: null }
         : { x: [input.window.t0, input.window.t1], y };
@@ -241,7 +254,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
     cursorAt(layout, point) {
       const x = invertX(layout, point.x);
       const rows = input.series.flatMap((series) => {
-        const value = valueAtTime(series.bins, x);
+        const value = columnsValueAtTime(series.bins, x);
         return value === null
           ? []
           : [reading(series.path, value, null, series.colorIndex)];
@@ -271,7 +284,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
     resolveAnnotation: resolve,
     stats() {
       return input.series.map((series) => {
-        const stats = visibleStats(
+        const stats = columnsStats(
           series.bins,
           input.window.t0,
           input.window.t1,
@@ -281,16 +294,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
           stat("max", stats.max),
           stat("mean", stats.mean),
           stat("rms", stats.rms),
-          stat(
-            "n",
-            series.bins.reduce(
-              (count, bin) =>
-                bin.t1 < input.window.t0 || bin.t0 > input.window.t1
-                  ? count
-                  : count + Number(bin.finite_count),
-              0,
-            ),
-          ),
+          stat("n", stats.n),
         ]);
       });
     },
@@ -876,22 +880,6 @@ function numericStats(values: readonly number[]): {
     rms: count === 0 ? null : Math.sqrt(sumSq / count),
     count,
   };
-}
-
-function timeAutoYRange(
-  bins: readonly { min: number | null; max: number | null }[],
-): [number, number] | null {
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  for (const bin of bins) {
-    if (bin.min !== null && Number.isFinite(bin.min)) {
-      min = Math.min(min, bin.min);
-    }
-    if (bin.max !== null && Number.isFinite(bin.max)) {
-      max = Math.max(max, bin.max);
-    }
-  }
-  return paddedExtent(min, max);
 }
 
 function statItems(summary: ReturnType<typeof numericStats>): PlotStat[] {

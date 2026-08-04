@@ -66,3 +66,19 @@ bake_roundtrip_artifact() {
     --fidelity full \
     --out build/export/roundtrip-full.html
 }
+
+bake_bench_smoke_artifact() {
+  local -a data_args=()
+  local file out="$signalscope_root/build/bench/smoke.html" max_bytes=268435456 bytes
+  for file in "$signalscope_root"/examples/monte_carlo/run_*.csv; do
+    data_args+=(--data "$file")
+  done
+  "$signalscope_scripts_dir/export.sh" --no-build "${data_args[@]}" \
+    --workspace "$signalscope_root/examples/bench/smoke.workspace.json" \
+    --range all --fidelity full --out "$out"
+  bytes=$(stat -c %s "$out")
+  if [ "$bytes" -gt "$max_bytes" ]; then
+    echo "baked smoke snapshot is $bytes bytes (limit $max_bytes)" >&2
+    return 1
+  fi
+}

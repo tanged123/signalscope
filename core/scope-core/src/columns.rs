@@ -37,6 +37,7 @@ impl Column {
                 Self::Owned(values) => Arc::clone(values),
                 Self::Paged(handle) => handle.values().expect("paged column read"),
             },
+            range: 0..self.len(),
         }
     }
 
@@ -44,14 +45,19 @@ impl Column {
     ///
     /// Returns an error when a page-backed range cannot be read.
     pub fn range(&self, range: Range<usize>) -> Result<ColumnGuard, PageError> {
-        let values = match self {
-            Self::Owned(values) => values
-                .get(range)
-                .map(Arc::from)
-                .ok_or(PageError::InvalidRange)?,
-            Self::Paged(handle) => handle.values_range(range)?,
-        };
-        Ok(ColumnGuard { values })
+        match self {
+            Self::Owned(values) => {
+                values.get(range.clone()).ok_or(PageError::InvalidRange)?;
+                Ok(ColumnGuard {
+                    values: Arc::clone(values),
+                    range,
+                })
+            }
+            Self::Paged(handle) => Ok(ColumnGuard {
+                values: handle.values_range(range.clone())?,
+                range: 0..range.len(),
+            }),
+        }
     }
 
     /// # Errors
@@ -71,6 +77,9 @@ impl Column {
         &self,
         mut predicate: impl FnMut(f64) -> bool,
     ) -> Result<usize, PageError> {
+        if let Self::Paged(handle) = self {
+            return handle.partition_point(0, self.len(), predicate);
+        }
         let mut left = 0;
         let mut right = self.len();
         while left < right {
@@ -112,7 +121,7 @@ impl Column {
         }
         let left = self.as_slice();
         let right = other.as_slice();
-        Arc::ptr_eq(&left.values, &right.values) || *left == *right
+        (Arc::ptr_eq(&left.values, &right.values) && left.range == right.range) || *left == *right
     }
 }
 
@@ -137,11 +146,14 @@ pub enum WeakColumn {
 impl WeakColumn {
     #[must_use]
     pub fn upgrade(&self) -> Option<ColumnGuard> {
+        let values = match self {
+            Self::Owned(values) => values.upgrade()?,
+            Self::Paged(handle) => handle.values().ok()?,
+        };
+        let len = values.len();
         Some(ColumnGuard {
-            values: match self {
-                Self::Owned(values) => values.upgrade()?,
-                Self::Paged(handle) => handle.values().ok()?,
-            },
+            values,
+            range: 0..len,
         })
     }
 
@@ -157,12 +169,17 @@ impl WeakColumn {
 #[derive(Clone)]
 pub struct ColumnGuard {
     values: Arc<[f64]>,
+    range: Range<usize>,
 }
 
 impl ColumnGuard {
     #[must_use]
     pub fn shared(&self) -> Arc<[f64]> {
-        Arc::clone(&self.values)
+        if self.range.start == 0 && self.range.end == self.values.len() {
+            Arc::clone(&self.values)
+        } else {
+            Arc::from(&self.values[self.range.clone()])
+        }
     }
 }
 
@@ -170,7 +187,7 @@ impl Deref for ColumnGuard {
     type Target = [f64];
 
     fn deref(&self) -> &Self::Target {
-        &self.values
+        &self.values[self.range.clone()]
     }
 }
 

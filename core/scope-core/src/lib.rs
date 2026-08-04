@@ -21,6 +21,7 @@ pub mod session;
 pub mod snapshot;
 pub mod sources;
 pub mod store;
+pub mod tile_wire;
 
 #[cfg(test)]
 mod benchmarks;

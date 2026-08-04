@@ -1,6 +1,7 @@
 import { formatCombo } from "../app/commands";
+import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { WorkspaceModel } from "../app/workspace";
-import type { SampleResponse, TileResponse } from "../generated/protocol";
+import type { SampleResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
@@ -112,7 +113,7 @@ export class WorkspaceView {
   }
 
   renderData(
-    tilesByPanel: ReadonlyMap<string, TileResponse>,
+    tilesByPanel: ReadonlyMap<string, ColumnarTileResponse>,
     samplesByPanel: ReadonlyMap<string, SampleResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],

@@ -40,9 +40,18 @@ export default defineConfig({
       },
       outputDir: "../build/demo/recording",
     },
+    {
+      name: "bench",
+      testDir: "./tests/bench",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
+      },
+    },
   ],
   webServer:
-    process.env.SIGNALSCOPE_DEMO === "1"
+    process.env.SIGNALSCOPE_DEMO === "1" ||
+    process.env.SIGNALSCOPE_BENCH === "1"
       ? undefined
       : {
           command: "pnpm dev",

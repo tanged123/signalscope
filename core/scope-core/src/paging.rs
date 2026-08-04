@@ -1,7 +1,7 @@
 //! Leased byte-range cache over sidecar files.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry as MapEntry},
     fs::File,
     ops::Range,
     path::{Path, PathBuf},
@@ -157,6 +157,86 @@ impl PageHandle {
             .ok_or(PageError::InvalidRange)
     }
 
+    /// Finds a partition point without re-reading or copying one value at a
+    /// time from the page cache.
+    pub(crate) fn partition_point(
+        &self,
+        byte_offset: usize,
+        value_count: usize,
+        mut predicate: impl FnMut(f64) -> bool,
+    ) -> Result<usize, PageError> {
+        let byte_len = value_count
+            .checked_mul(size_of::<f64>())
+            .and_then(|len| byte_offset.checked_add(len))
+            .ok_or(PageError::InvalidRange)?;
+        if byte_len > self.byte_len() || byte_offset % size_of::<f64>() != 0 {
+            return Err(PageError::InvalidRange);
+        }
+        if let Some(values) = &self.memory {
+            let start = byte_offset / size_of::<f64>();
+            let end = start
+                .checked_add(value_count)
+                .ok_or(PageError::InvalidRange)?;
+            let values = values.get(start..end).ok_or(PageError::InvalidRange)?;
+            let mut left = 0;
+            let mut right = values.len();
+            while left < right {
+                let middle = left + (right - left) / 2;
+                if predicate(values[middle]) {
+                    left = middle + 1;
+                } else {
+                    right = middle;
+                }
+            }
+            return Ok(left);
+        }
+
+        let cache = self.cache.clone().unwrap_or_else(|| {
+            PageCache::new(
+                self.path.parent().unwrap_or_else(|| Path::new(".")),
+                self.byte_len(),
+            )
+        });
+        let page_size = cache.page_size();
+        let mut pages: HashMap<usize, (usize, Arc<[u8]>)> = HashMap::new();
+        let value_at = |index: usize,
+                        pages: &mut HashMap<usize, (usize, Arc<[u8]>)>|
+         -> Result<f64, PageError> {
+            let offset = byte_offset
+                .checked_add(
+                    index
+                        .checked_mul(size_of::<f64>())
+                        .ok_or(PageError::InvalidRange)?,
+                )
+                .ok_or(PageError::InvalidRange)?;
+            let page = offset / page_size;
+            if let MapEntry::Vacant(entry) = pages.entry(page) {
+                entry.insert(cache.read_page(self, page)?);
+            }
+            let (page_start, bytes) = pages.get(&page).ok_or(PageError::InvalidRange)?;
+            let local = offset
+                .checked_sub(*page_start)
+                .ok_or(PageError::InvalidRange)?;
+            let value = bytes
+                .get(local..local + size_of::<f64>())
+                .ok_or(PageError::InvalidRange)?;
+            Ok(f64::from_le_bytes(
+                value.try_into().map_err(|_| PageError::InvalidRange)?,
+            ))
+        };
+        let mut left = 0;
+        let mut right = value_count;
+        while left < right {
+            let middle = left + (right - left) / 2;
+            if predicate(value_at(middle, &mut pages)?) {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+        Ok(left)
+    }
+
     /// Loads the complete byte region.
     ///
     /// # Errors
@@ -210,15 +290,17 @@ impl std::fmt::Debug for PageCache {
 struct State {
     root: PathBuf,
     capacity: usize,
+    page_bytes: usize,
     clock: u64,
+    resident: usize,
     entries: HashMap<Key, Entry>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Key {
     path: PathBuf,
-    offset: u64,
-    len: usize,
+    region: u64,
+    page: u64,
 }
 
 struct Entry {
@@ -229,7 +311,7 @@ struct Entry {
 
 pub struct Lease {
     cache: Arc<Mutex<State>>,
-    key: Key,
+    keys: Vec<Key>,
     bytes: Arc<[u8]>,
 }
 
@@ -237,7 +319,7 @@ impl std::fmt::Debug for Lease {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Lease")
-            .field("key", &self.key)
+            .field("keys", &self.keys)
             .field("bytes", &self.bytes.len())
             .finish_non_exhaustive()
     }
@@ -257,8 +339,11 @@ impl Lease {
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        if let Some(entry) = lock(&self.cache).entries.get_mut(&self.key) {
-            entry.leases = entry.leases.saturating_sub(1);
+        let mut state = lock(&self.cache);
+        for key in &self.keys {
+            if let Some(entry) = state.entries.get_mut(key) {
+                entry.leases = entry.leases.saturating_sub(1);
+            }
         }
     }
 }
@@ -270,16 +355,49 @@ impl PageCache {
             inner: Arc::new(Mutex::new(State {
                 root: root.into(),
                 capacity: capacity_bytes,
+                page_bytes: 64 * 1024,
                 clock: 0,
+                resident: 0,
                 entries: HashMap::new(),
             })),
         }
+    }
+
+    #[cfg(test)]
+    fn with_page_bytes(root: impl Into<PathBuf>, capacity_bytes: usize, page_bytes: usize) -> Self {
+        assert!(page_bytes > 0);
+        Self {
+            inner: Arc::new(Mutex::new(State {
+                root: root.into(),
+                capacity: capacity_bytes,
+                page_bytes,
+                clock: 0,
+                resident: 0,
+                entries: HashMap::new(),
+            })),
+        }
+    }
+
+    fn page_size(&self) -> usize {
+        lock(&self.inner).page_bytes
+    }
+
+    fn read_page(&self, handle: &PageHandle, page: usize) -> Result<(usize, Arc<[u8]>), PageError> {
+        let page_size = self.page_size();
+        let start = page.checked_mul(page_size).ok_or(PageError::InvalidRange)?;
+        let end = start.saturating_add(page_size).min(handle.byte_len());
+        if start >= end {
+            return Err(PageError::InvalidRange);
+        }
+        let lease = self.read(handle, start..end)?;
+        Ok((start, lease.shared()))
     }
 
     /// # Errors
     ///
     /// Returns an error for invalid ranges, short reads, IO failures, or when
     /// outstanding leases hold the available capacity.
+    #[allow(clippy::too_many_lines)]
     pub fn read(&self, handle: &PageHandle, range: Range<usize>) -> Result<Lease, PageError> {
         if range.start > range.end || handle.len.is_some_and(|len| range.end > len) {
             return Err(PageError::InvalidRange);
@@ -287,76 +405,155 @@ impl PageCache {
         if handle.memory.is_some() {
             return Err(PageError::MemoryHandle);
         }
-        let offset = handle
-            .offset
-            .checked_add(u64::try_from(range.start).map_err(|_| PageError::InvalidRange)?)
-            .ok_or(PageError::InvalidRange)?;
-        let key = Key {
-            path: handle.path.clone(),
-            offset,
-            len: range.len(),
+        let len = if let Some(len) = handle.len {
+            len
+        } else {
+            let file_len = std::fs::metadata(&handle.path)?.len();
+            let region_len = file_len
+                .checked_sub(handle.offset)
+                .and_then(|len| usize::try_from(len).ok())
+                .unwrap_or_default();
+            region_len.max(range.end)
         };
-        {
-            let mut state = lock(&self.inner);
-            if !key.path.starts_with(&state.root) {
-                return Err(PageError::OutsideRoot(key.path));
+        let (page_size, first, last) = {
+            let state = lock(&self.inner);
+            if !handle.path.starts_with(&state.root) {
+                return Err(PageError::OutsideRoot(handle.path.clone()));
             }
-            state.clock = state.clock.wrapping_add(1);
-            let used_at = state.clock;
-            if let Some(entry) = state.entries.get_mut(&key) {
-                entry.leases += 1;
-                entry.used_at = used_at;
+            if range.is_empty() {
                 return Ok(Lease {
                     cache: Arc::clone(&self.inner),
-                    key,
-                    bytes: Arc::clone(&entry.bytes),
+                    keys: Vec::new(),
+                    bytes: Arc::from([]),
                 });
+            }
+            let first = range.start / state.page_bytes;
+            let last = (range.end - 1) / state.page_bytes;
+            (state.page_bytes, first, last)
+        };
+
+        // Lease each page the moment it is resident, under a single lock per
+        // pass: a page with `leases == 0` can be evicted by `make_room` — from
+        // this read's own insertions or a concurrent `read` — before the lease
+        // count rises. Leased pages are never evicted, so the missing set
+        // shrinks every pass and the loop terminates.
+        let total = last - first + 1;
+        let mut slots: Vec<Option<Arc<[u8]>>> = vec![None; total];
+        let mut keys: Vec<Key> = Vec::with_capacity(total);
+        let mut loaded: HashMap<Key, Arc<[u8]>> = HashMap::new();
+        let result = (|| -> Result<(), PageError> {
+            loop {
+                let mut missing: Vec<(Key, usize, usize)> = Vec::new();
+                {
+                    let mut state = lock(&self.inner);
+                    for (slot, page) in (first..=last).enumerate() {
+                        if slots[slot].is_some() {
+                            continue;
+                        }
+                        let key = Key {
+                            path: handle.path.clone(),
+                            region: handle.offset,
+                            page: u64::try_from(page).map_err(|_| PageError::InvalidRange)?,
+                        };
+                        state.clock = state.clock.wrapping_add(1);
+                        let used_at = state.clock;
+                        if let Some(entry) = state.entries.get_mut(&key) {
+                            entry.leases += 1;
+                            entry.used_at = used_at;
+                            slots[slot] = Some(Arc::clone(&entry.bytes));
+                            keys.push(key);
+                        } else if let Some(bytes) = loaded.remove(&key) {
+                            make_room(&mut state, bytes.len())?;
+                            state.resident += bytes.len();
+                            slots[slot] = Some(Arc::clone(&bytes));
+                            state.entries.insert(
+                                key.clone(),
+                                Entry {
+                                    bytes,
+                                    leases: 1,
+                                    used_at,
+                                },
+                            );
+                            keys.push(key);
+                        } else {
+                            let page_start =
+                                page.checked_mul(page_size).ok_or(PageError::InvalidRange)?;
+                            let page_len = page_size
+                                .min(len.checked_sub(page_start).ok_or(PageError::InvalidRange)?);
+                            missing.push((key, page_start, page_len));
+                        }
+                    }
+                }
+                if missing.is_empty() {
+                    return Ok(());
+                }
+                let file = File::open(&handle.path)?;
+                for (key, page_start, page_len) in missing {
+                    let mut bytes = vec![0; page_len];
+                    let offset = handle
+                        .offset
+                        .checked_add(
+                            u64::try_from(page_start).map_err(|_| PageError::InvalidRange)?,
+                        )
+                        .ok_or(PageError::InvalidRange)?;
+                    let read = read_at(&file, &mut bytes, offset)?;
+                    if read != page_len {
+                        return Err(PageError::ShortRead {
+                            expected: page_len,
+                            actual: read,
+                        });
+                    }
+                    loaded.insert(key, Arc::<[u8]>::from(bytes));
+                }
+            }
+        })();
+        if let Err(error) = result {
+            let mut state = lock(&self.inner);
+            for key in &keys {
+                if let Some(entry) = state.entries.get_mut(key) {
+                    entry.leases = entry.leases.saturating_sub(1);
+                }
+            }
+            return Err(error);
+        }
+        let pages: Vec<Arc<[u8]>> = slots.into_iter().flatten().collect();
+        debug_assert_eq!(pages.len(), total);
+
+        let mut bytes = Vec::with_capacity(range.len());
+        for (page, page_data) in pages.iter().enumerate() {
+            let page_start = (first + page).saturating_mul(page_size);
+            let start = range.start.saturating_sub(page_start).min(page_data.len());
+            let end = range.end.saturating_sub(page_start).min(page_data.len());
+            if start < end {
+                bytes.extend_from_slice(&page_data[start..end]);
             }
         }
 
-        let requested = range.len();
-        let mut bytes = vec![0; requested];
-        let file = File::open(&handle.path)?;
-        let read = read_at(&file, &mut bytes, offset)?;
-        if read != requested {
-            return Err(PageError::ShortRead {
-                expected: requested,
-                actual: read,
-            });
-        }
-        let bytes: Arc<[u8]> = bytes.into();
-        let mut state = lock(&self.inner);
-        state.clock = state.clock.wrapping_add(1);
-        let used_at = state.clock;
-        if let Some(entry) = state.entries.get_mut(&key) {
-            entry.leases += 1;
-            entry.used_at = used_at;
-            return Ok(Lease {
-                cache: Arc::clone(&self.inner),
-                key,
-                bytes: Arc::clone(&entry.bytes),
-            });
-        }
-        make_room(&mut state, requested)?;
-        state.entries.insert(
-            key.clone(),
-            Entry {
-                bytes: Arc::clone(&bytes),
-                leases: 1,
-                used_at,
-            },
-        );
+        let bytes = if pages.len() == 1
+            && range.start == first.saturating_mul(page_size)
+            && range.end == range.start.saturating_add(pages[0].len())
+        {
+            Arc::clone(&pages[0])
+        } else {
+            bytes.into()
+        };
         Ok(Lease {
             cache: Arc::clone(&self.inner),
-            key,
+            keys,
             bytes,
         })
     }
 
     pub fn evict_unleased(&self) {
-        lock(&self.inner)
+        let mut state = lock(&self.inner);
+        let removed: usize = state
             .entries
-            .retain(|_, entry| entry.leases > 0);
+            .values()
+            .filter(|entry| entry.leases == 0)
+            .map(|entry| entry.bytes.len())
+            .sum();
+        state.entries.retain(|_, entry| entry.leases > 0);
+        state.resident = state.resident.saturating_sub(removed);
     }
 
     #[must_use]
@@ -371,7 +568,7 @@ impl PageCache {
 
     #[must_use]
     pub fn resident_bytes(&self) -> usize {
-        resident_bytes(&lock(&self.inner))
+        lock(&self.inner).resident
     }
 
     /// # Errors
@@ -397,7 +594,14 @@ impl PageCache {
                 capacity: state.capacity,
             });
         }
+        let removed: usize = state
+            .entries
+            .iter()
+            .filter(|(key, _)| key.path == handle.path)
+            .map(|(_, entry)| entry.bytes.len())
+            .sum();
         state.entries.retain(|key, _| key.path != handle.path);
+        state.resident = state.resident.saturating_sub(removed);
         drop(state);
         std::fs::remove_file(&handle.path)?;
         Ok(())
@@ -405,7 +609,7 @@ impl PageCache {
 }
 
 fn make_room(state: &mut State, requested: usize) -> Result<(), PageError> {
-    while resident_bytes(state).saturating_add(requested) > state.capacity {
+    while state.resident.saturating_add(requested) > state.capacity {
         let candidate = state
             .entries
             .iter()
@@ -424,13 +628,11 @@ fn make_room(state: &mut State, requested: usize) -> Result<(), PageError> {
                 capacity: state.capacity,
             });
         };
-        state.entries.remove(&candidate);
+        if let Some(entry) = state.entries.remove(&candidate) {
+            state.resident = state.resident.saturating_sub(entry.bytes.len());
+        }
     }
     Ok(())
-}
-
-fn resident_bytes(state: &State) -> usize {
-    state.entries.values().map(|entry| entry.bytes.len()).sum()
 }
 
 fn lock(mutex: &Mutex<State>) -> MutexGuard<'_, State> {
@@ -498,43 +700,103 @@ mod tests {
     use super::*;
     use std::io::Write as _;
 
-    const PAGE_BYTES: usize = 64;
+    const PAGE_BYTES_TEST: usize = 64;
 
     fn page(directory: &tempfile::TempDir, name: &str, byte: u8) -> PageHandle {
         let path = directory.path().join(name);
         let mut file = File::create(&path).unwrap();
-        file.write_all(&[byte; PAGE_BYTES]).unwrap();
+        file.write_all(&[byte; PAGE_BYTES_TEST]).unwrap();
         PageHandle::new(path)
+    }
+
+    #[test]
+    fn repeated_probes_hit_one_page() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("column");
+        let values: Vec<u8> = (0..PAGE_BYTES_TEST * 2)
+            .map(|i| u8::try_from(i % 251).expect("modulo fits in u8"))
+            .collect();
+        std::fs::write(&path, &values).unwrap();
+        let cache = PageCache::with_page_bytes(directory.path(), 1024 * 1024, PAGE_BYTES_TEST);
+        let handle = PageHandle::cached(cache.clone(), &path, 0, values.len());
+        drop(cache.read(&handle, 0..8).unwrap());
+        let resident = cache.resident_bytes();
+        drop(cache.read(&handle, 16..24).unwrap());
+        assert_eq!(cache.resident_bytes(), resident);
+        drop(
+            cache
+                .read(&handle, PAGE_BYTES_TEST..PAGE_BYTES_TEST + 8)
+                .unwrap(),
+        );
+        assert_eq!(cache.resident_bytes(), resident * 2);
+    }
+
+    #[test]
+    fn partition_point_reuses_loaded_pages() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("column");
+        let values: Vec<f64> = (0..32).map(f64::from).collect();
+        let bytes: Vec<u8> = values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        std::fs::write(&path, bytes).unwrap();
+        let cache = PageCache::with_page_bytes(directory.path(), 1024 * 1024, PAGE_BYTES_TEST);
+        let handle = PageHandle::cached(cache.clone(), &path, 0, values.len() * size_of::<f64>());
+        assert_eq!(
+            handle
+                .partition_point(0, values.len(), |value| value < 19.5)
+                .unwrap(),
+            20
+        );
+        assert_eq!(cache.resident_bytes(), PAGE_BYTES_TEST * 2);
+    }
+
+    #[test]
+    fn cross_page_reads_assemble_correct_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("column");
+        let values: Vec<u8> = (0..PAGE_BYTES_TEST * 3)
+            .map(|i| u8::try_from(i % 251).expect("modulo fits in u8"))
+            .collect();
+        std::fs::write(&path, &values).unwrap();
+        let cache = PageCache::with_page_bytes(directory.path(), 1024 * 1024, PAGE_BYTES_TEST);
+        let handle = PageHandle::cached(cache.clone(), &path, 0, values.len());
+        let range = PAGE_BYTES_TEST - 5..PAGE_BYTES_TEST * 2 + 7;
+        let lease = cache.read(&handle, range.clone()).unwrap();
+        assert_eq!(lease.bytes(), &values[range]);
+        assert_eq!(cache.resident_bytes(), PAGE_BYTES_TEST * 3);
     }
 
     #[test]
     fn eviction_never_touches_a_leased_range() {
         let directory = tempfile::tempdir().unwrap();
-        let cache = PageCache::new(directory.path(), 2 * PAGE_BYTES);
+        let cache =
+            PageCache::with_page_bytes(directory.path(), 2 * PAGE_BYTES_TEST, PAGE_BYTES_TEST);
         let held = cache
-            .read(&page(&directory, "a", 1), 0..PAGE_BYTES)
+            .read(&page(&directory, "a", 1), 0..PAGE_BYTES_TEST)
             .unwrap();
         cache
-            .read(&page(&directory, "b", 2), 0..PAGE_BYTES)
+            .read(&page(&directory, "b", 2), 0..PAGE_BYTES_TEST)
             .unwrap();
         cache
-            .read(&page(&directory, "c", 3), 0..PAGE_BYTES)
+            .read(&page(&directory, "c", 3), 0..PAGE_BYTES_TEST)
             .unwrap();
 
-        assert_eq!(held.bytes().len(), PAGE_BYTES);
-        assert!(cache.leased_bytes() >= PAGE_BYTES);
-        assert!(cache.resident_bytes() <= 2 * PAGE_BYTES);
+        assert_eq!(held.bytes().len(), PAGE_BYTES_TEST);
+        assert!(cache.leased_bytes() >= PAGE_BYTES_TEST);
+        assert!(cache.resident_bytes() <= 2 * PAGE_BYTES_TEST);
     }
 
     #[test]
     fn full_leases_reject_a_new_read() {
         let directory = tempfile::tempdir().unwrap();
-        let cache = PageCache::new(directory.path(), PAGE_BYTES);
+        let cache = PageCache::with_page_bytes(directory.path(), PAGE_BYTES_TEST, PAGE_BYTES_TEST);
         let _held = cache
-            .read(&page(&directory, "a", 1), 0..PAGE_BYTES)
+            .read(&page(&directory, "a", 1), 0..PAGE_BYTES_TEST)
             .unwrap();
         let error = cache
-            .read(&page(&directory, "b", 2), 0..PAGE_BYTES)
+            .read(&page(&directory, "b", 2), 0..PAGE_BYTES_TEST)
             .unwrap_err();
 
         assert!(matches!(error, PageError::CapacityHeld { .. }));
@@ -544,8 +806,8 @@ mod tests {
     fn deletion_waits_for_leases() {
         let directory = tempfile::tempdir().unwrap();
         let handle = page(&directory, "a", 1);
-        let cache = PageCache::new(directory.path(), PAGE_BYTES);
-        let held = cache.read(&handle, 0..PAGE_BYTES).unwrap();
+        let cache = PageCache::with_page_bytes(directory.path(), PAGE_BYTES_TEST, PAGE_BYTES_TEST);
+        let held = cache.read(&handle, 0..PAGE_BYTES_TEST).unwrap();
         assert!(matches!(
             cache.delete(&handle),
             Err(PageError::CapacityHeld { .. })
@@ -563,10 +825,10 @@ mod tests {
             .write(true)
             .open(handle.path())
             .unwrap()
-            .set_len((PAGE_BYTES / 2) as u64)
+            .set_len((PAGE_BYTES_TEST / 2) as u64)
             .unwrap();
-        let error = PageCache::new(directory.path(), PAGE_BYTES)
-            .read(&handle, 0..PAGE_BYTES)
+        let error = PageCache::with_page_bytes(directory.path(), PAGE_BYTES_TEST, PAGE_BYTES_TEST)
+            .read(&handle, 0..PAGE_BYTES_TEST)
             .unwrap_err();
 
         assert!(matches!(error, PageError::ShortRead { .. }));

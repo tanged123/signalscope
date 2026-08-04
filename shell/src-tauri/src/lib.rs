@@ -39,8 +39,8 @@ use scope_protocol::{
     RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
     SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
     SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest, ScanSourcesRequest,
-    ScanSourcesResponse, SessionDialogMode, SignalSummary, SignalTile, SkippedMemberSummary,
-    SourceSummary, TileRequest, TileResponse,
+    ScanSourcesResponse, SessionDialogMode, SignalSummary, SkippedMemberSummary, SourceSummary,
+    TileRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -864,38 +864,57 @@ fn signal_summaries(data: &DataState) -> Vec<SignalSummary> {
 }
 
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn query_tiles(
+async fn query_tiles_bin(
     request: Envelope<TileRequest>,
     state: State<'_, Arc<Mutex<DataState>>>,
-) -> Result<Envelope<TileResponse>, String> {
+) -> Result<tauri::ipc::Response, String> {
     let request = request.open().map_err(|error| error.to_string())?;
-    let data = state.lock().map_err(|error| error.to_string())?;
-    let mut series = Vec::new();
-    for raw_id in request.signal_ids {
-        let signal_id = SignalId(raw_id);
-        let signal = data
-            .store
-            .signal(signal_id)
-            .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
-        let pyramid = data
-            .pyramids
-            .get(&signal_id)
-            .ok_or_else(|| format!("pyramid is unavailable for signal id: {raw_id}"))?;
-        let query = pyramid.query(request.window.t0, request.window.t1, request.pixel_width);
-        series.push(SignalTile {
-            signal_id: raw_id,
-            signal_path: signal.path.clone(),
-            unit: signal.unit.clone(),
-            level: query.level,
-            bins: query.bins,
+    let state = state.inner().clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let data = state.lock().map_err(|error| error.to_string())?;
+        // 64-bin floor per ADR 0036 makes `max_total_bins` a soft cap; keep in
+        // sync with `BakedPlane.queryTiles`.
+        let per_series = request.max_total_bins.map(|budget| {
+            (budget / u32::try_from(request.signal_ids.len().max(1)).unwrap_or(u32::MAX)).max(64)
         });
-    }
-
-    Ok(Envelope::new(TileResponse {
-        request_id: request.request_id,
-        series,
-    }))
+        let mut owned: Vec<(u64, String, Option<String>, u32, scope_core::bins::BinLevel)> =
+            Vec::with_capacity(request.signal_ids.len());
+        for raw_id in &request.signal_ids {
+            let signal_id = SignalId(*raw_id);
+            let signal = data
+                .store
+                .signal(signal_id)
+                .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
+            let pyramid = data
+                .pyramids
+                .get(&signal_id)
+                .ok_or_else(|| format!("pyramid is unavailable for signal id: {raw_id}"))?;
+            let query = pyramid.query_with_target(
+                request.window.t0,
+                request.window.t1,
+                request.pixel_width,
+                per_series,
+            );
+            owned.push((
+                *raw_id,
+                signal.path.clone(),
+                signal.unit.clone(),
+                query.level,
+                query.bins,
+            ));
+        }
+        drop(data);
+        let series: Vec<_> = owned
+            .iter()
+            .map(|(id, path, unit, level, bins)| {
+                scope_core::tile_wire::binary_series(*id, path, unit.as_deref(), *level, bins)
+            })
+            .collect();
+        Ok::<_, String>(scope_protocol::tile_binary::encode_tile_response(&series))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]
@@ -912,8 +931,7 @@ fn query_samples(
             .store
             .signal(SignalId(raw_id))
             .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
-        let time = signal.time();
-        let values = signal.values();
+        let (time, values) = windowed_slice(signal, request.window.t0, request.window.t1)?;
         let slice = compute::sample_window(
             &time,
             &values,
@@ -935,6 +953,37 @@ fn query_samples(
         request_id: request.request_id,
         series,
     }))
+}
+
+fn windowed_slice(
+    signal: &Signal,
+    t0: f64,
+    t1: f64,
+) -> Result<
+    (
+        scope_core::columns::ColumnGuard,
+        scope_core::columns::ColumnGuard,
+    ),
+    String,
+> {
+    let time_column = signal.time_column();
+    let start = time_column
+        .partition_point(|time| time < t0)
+        .map_err(|error| error.to_string())?
+        .saturating_sub(1);
+    let end = time_column
+        .partition_point(|time| time <= t1)
+        .map_err(|error| error.to_string())?
+        .saturating_add(1)
+        .min(time_column.len());
+    let time = time_column
+        .range(start..end)
+        .map_err(|error| error.to_string())?;
+    let values = signal
+        .values_column()
+        .range(start..end)
+        .map_err(|error| error.to_string())?;
+    Ok((time, values))
 }
 
 const DERIVED_PREFIX: &str = "derived/";
@@ -1861,7 +1910,7 @@ pub fn run() {
             restore_reconcile,
             list_sources,
             list_signals,
-            query_tiles,
+            query_tiles_bin,
             query_samples,
             create_derived,
             create_derived_bundle,
@@ -1956,6 +2005,26 @@ t0 = 0.0
 
         let leave = drag_forward(DragDropKind::Leave, &[]).open().unwrap();
         assert!(leave.paths.is_empty());
+    }
+
+    #[test]
+    fn sample_slice_reads_only_the_window() {
+        let times: Arc<[f64]> = (0..=1000).map(f64::from).collect();
+        let values: Arc<[f64]> = (0..=1000).map(f64::from).collect();
+        let signal = Signal::new(
+            SignalId(1),
+            SourceId(1),
+            "signal",
+            "signal",
+            None,
+            times,
+            values,
+        )
+        .unwrap();
+        let (time, values) = windowed_slice(&signal, 10.0, 20.0).unwrap();
+        assert!(time.first().is_some_and(|time| *time >= 9.0));
+        assert!(time.last().is_some_and(|time| *time <= 21.0));
+        assert_eq!(time.len(), values.len());
     }
 
     #[test]

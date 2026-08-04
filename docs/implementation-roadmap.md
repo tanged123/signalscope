@@ -70,6 +70,8 @@ large campaigns cannot push export controls outside the viewport.
 
 Benchmark cold multi-GB first plot, cache build and reuse, tile latency, 100M-point pan/zoom, NaN gaps, corrupt inputs, accessibility invariants, release bundles, and artifact-size regression thresholds.
 
+The benchmark track landed ([ADR 0035](adr/0035-benchmark-harness-and-performance-floors.md)) with deterministic corpus tiers, core performance floors, a Playwright bench project, a weekly workflow, and the `./scripts/test.sh bench` entry point.
+
 Parquet is included when it does not delay MCAP and the core interaction path. Live streaming, layout-preset UI, Monte Carlo envelope ergonomics, 3D, and `scope-serverd` remain v2.
 
 The July 2026 UI audit pass replaced the global toolbar with three permanent
@@ -100,6 +102,8 @@ time panels can facet by source or channel with linked-y small multiples and a
 16-cell overflow guard. Tooltip row expansion and facet annotations remain
 follow-ups because annotations stay attached to the unsplit plot in this
 phase.
+
+The plotting performance overhaul ([implementation plan](superpowers/plans/2026-08-04-plotting-performance-overhaul.md)) now reports a 6.0 s mc1000 first plot for 1,000 inputs; core tile p95 is 14.2 ms cold and 14.6 ms warm. Browser frame p95 remains 66.5 ms and the longest stall 2.1 s on the benchmark runner, so both still exceed their 33 ms and 250 ms budgets.
 
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18

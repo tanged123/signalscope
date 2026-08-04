@@ -32,6 +32,7 @@ coverage_frontend() {
   echo "Generating frontend coverage..."
   pnpm --filter @signalscope/frontend test:coverage
   bake_roundtrip_artifact
+  bake_bench_smoke_artifact
   SIGNALSCOPE_COVERAGE=1 pnpm e2e
   (
     cd "$signalscope_root/frontend"

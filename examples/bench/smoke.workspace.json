@@ -1,0 +1,115 @@
+{
+  "app": "signalscope",
+  "schema_version": 20,
+  "theme": "dark",
+  "linked_time": {
+    "t0": 0,
+    "t1": 10,
+    "linked": true,
+    "paused": false,
+    "cursorT": null,
+    "mode": "fixed"
+  },
+  "active_tab_id": "workspace-1",
+  "tabs": [
+    {
+      "id": "workspace-1",
+      "title": "Smoke",
+      "cursor_mode": "none",
+      "focused_panel_id": null,
+      "maximized_panel_id": null,
+      "panels": [
+        {
+          "id": "panel-ensemble",
+          "title": "ensemble response",
+          "mode": "time",
+          "axis_style": "gutter",
+          "x_ref": null,
+          "color_axis": "none",
+          "color_ref": null,
+          "bindings": [
+            {
+              "kind": "query",
+              "selector": "response @*",
+              "refs": [],
+              "set_id": null
+            }
+          ],
+          "color_by": "source",
+          "overrides": [],
+          "focus": [],
+          "ghost_mode": "all",
+          "split_by": "none",
+          "y_range": null,
+          "x_range": null,
+          "x_label": null,
+          "y_label": null,
+          "c_label": null,
+          "time_window": null,
+          "annotations": [],
+          "show_stats": false
+        },
+        {
+          "id": "panel-detail",
+          "title": "command and temperature",
+          "mode": "time",
+          "axis_style": "gutter",
+          "x_ref": null,
+          "color_axis": "none",
+          "color_ref": null,
+          "bindings": [
+            {
+              "kind": "query",
+              "selector": "command @*",
+              "refs": [],
+              "set_id": null
+            },
+            {
+              "kind": "query",
+              "selector": "response @*",
+              "refs": [],
+              "set_id": null
+            }
+          ],
+          "color_by": "channel",
+          "overrides": [],
+          "focus": [],
+          "ghost_mode": "all",
+          "split_by": "none",
+          "y_range": null,
+          "x_range": null,
+          "x_label": null,
+          "y_label": null,
+          "c_label": null,
+          "time_window": null,
+          "annotations": [],
+          "show_stats": false
+        }
+      ],
+      "layout": [
+        {
+          "height": 0.5,
+          "panels": [
+            {
+              "panel_id": "panel-ensemble",
+              "width": 1
+            }
+          ]
+        },
+        {
+          "height": 0.5,
+          "panels": [
+            {
+              "panel_id": "panel-detail",
+              "width": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "named_sets": [],
+  "derived": [],
+  "derived_bundles": [],
+  "sources": []
+}

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { binColumnsFromWire } from "./bin-columns";
 import type { Annotation } from "../generated/session";
 import type { PlotLayout } from "./plot-math";
 import {
@@ -48,7 +49,7 @@ test("time capabilities link cursors and expose raw visible statistics", () => {
       {
         path: "demo/y",
         colorIndex: 0,
-        bins: [
+        bins: binColumnsFromWire([
           {
             t0: 0,
             t1: 5,
@@ -62,7 +63,7 @@ test("time capabilities link cursors and expose raw visible statistics", () => {
             sample_count: "2",
             has_gap: false,
           },
-        ],
+        ]),
       },
     ],
     window: { t0: 0, t1: 5 },
