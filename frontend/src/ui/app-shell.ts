@@ -192,7 +192,7 @@ export class AppShell {
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
-  private refreshInFlight = false;
+  private refreshPromise: Promise<void> | null = null;
   private refreshQueued = false;
   private renderScheduled = false;
   private refreshTimer: number | null = null;
@@ -2568,20 +2568,22 @@ export class AppShell {
     this.updateStatus();
   }
 
-  private async refreshTiles(): Promise<void> {
-    if (this.refreshInFlight) {
-      this.refreshQueued = true;
-      return;
+  private refreshTiles(): Promise<void> {
+    this.refreshQueued = true;
+    if (this.refreshPromise !== null) {
+      return this.refreshPromise;
     }
-    this.refreshInFlight = true;
-    try {
-      do {
-        this.refreshQueued = false;
-        await this.refreshTilesPass();
-      } while (this.hasQueuedRefresh());
-    } finally {
-      this.refreshInFlight = false;
-    }
+    this.refreshPromise = (async () => {
+      try {
+        while (this.hasQueuedRefresh()) {
+          this.refreshQueued = false;
+          await this.refreshTilesPass();
+        }
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+    return this.refreshPromise;
   }
 
   private hasQueuedRefresh(): boolean {

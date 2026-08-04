@@ -601,7 +601,7 @@ JSON tiles become a versioned little-endian columnar payload, decoded in the web
 
 Binary layout (all little-endian; document verbatim in the ADR):
 
-```
+```text
 header  (16 B): magic "SSTB" (0x42545353 LE) u32 | protocol_version u32 |
                 series_count u32 | reserved u32 = 0
 per series:
@@ -1055,7 +1055,7 @@ private markHistoryDirty(coalesceKey: string): void {
 }
 ```
 
-`applyTimeWindow`/`applyXRange` call `this.markHistoryDirty(\`range:${panelId}\`)`instead of`this.commitHistory(...)`. All other `commitHistory()` call sites (structural edits) are unchanged. Undo granularity is preserved: one entry per settled gesture, exactly what the coalesce-key mechanism produced, but with zero clones during motion.
+`applyTimeWindow`/`applyXRange` call ``this.markHistoryDirty(`range:${panelId}`)`` instead of `this.commitHistory(...)`. All other `commitHistory()` call sites (structural edits) are unchanged. Undo granularity is preserved: one entry per settled gesture, exactly what the coalesce-key mechanism produced, but with zero clones during motion.
 
 - [ ] **Step 3: Extend the history test** (wherever `HistoryStack`/undo behavior is unit-tested; if only `history.ts` is tested directly, add an app-level test is overkill — instead assert in the existing suite that `HistoryStack.commit` still coalesces; the deferral itself is covered by the e2e bench frame floor).
 - [ ] **Step 4: Run** `./scripts/test.sh frontend`; manual smoke: drag/zoom, then Ctrl+Z restores the pre-gesture window in one step.

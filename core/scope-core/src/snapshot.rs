@@ -65,6 +65,8 @@ pub enum SnapshotError {
     MissingPyramid(SignalId),
     #[error("signal {0:?} has no source")]
     MissingSource(SignalId),
+    #[error("signal {signal:?} level {level} window is unavailable")]
+    MissingLevel { signal: SignalId, level: usize },
     #[error("manifest serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
     #[error("manifest output is not UTF-8: {0}")]
@@ -565,7 +567,10 @@ fn signal_summary(
 ///
 /// # Errors
 ///
-/// Returns [`SnapshotError::Serialize`] when the session cannot be encoded.
+/// Returns [`SnapshotError::Serialize`] when the session cannot be encoded and
+/// [`SnapshotError::MissingLevel`] when a planned level window cannot be
+/// decoded; levels are positional, so a missing level fails the bake instead
+/// of silently shifting later levels toward the finest slot.
 pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, SnapshotError> {
     let mut baked_session = session.clone();
     baked_session.sources.clear();
@@ -575,13 +580,17 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
         let levels = entry
             .levels
             .iter()
-            .filter_map(|level| {
+            .map(|level| {
                 entry
                     .pyramid
                     .level_window(level.index, entry.window)
-                    .map(|level| level.to_wire_vec())
+                    .map(|window| window.to_wire_vec())
+                    .ok_or(SnapshotError::MissingLevel {
+                        signal: entry.signal.id,
+                        level: level.index,
+                    })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         signals.push(BakedSignal {
             summary: signal_summary(
                 entry.signal,

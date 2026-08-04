@@ -432,77 +432,92 @@ impl PageCache {
             (state.page_bytes, first, last)
         };
 
-        let missing: Vec<(Key, usize, usize)> = {
-            let state = lock(&self.inner);
-            (first..=last)
-                .filter_map(|page| {
-                    let page_start = page.checked_mul(page_size)?;
-                    let page_len = page_size.min(len.checked_sub(page_start)?);
-                    let key = Key {
-                        path: handle.path.clone(),
-                        region: handle.offset,
-                        page: u64::try_from(page).ok()?,
-                    };
-                    (!state.entries.contains_key(&key)).then_some((key, page_start, page_len))
-                })
-                .collect()
-        };
-
-        if !missing.is_empty() {
-            let file = File::open(&handle.path)?;
-            let mut loaded = Vec::with_capacity(missing.len());
-            for (key, page_start, page_len) in missing {
-                let mut bytes = vec![0; page_len];
-                let offset = handle
-                    .offset
-                    .checked_add(u64::try_from(page_start).map_err(|_| PageError::InvalidRange)?)
-                    .ok_or(PageError::InvalidRange)?;
-                let read = read_at(&file, &mut bytes, offset)?;
-                if read != page_len {
-                    return Err(PageError::ShortRead {
-                        expected: page_len,
-                        actual: read,
-                    });
+        // Lease each page the moment it is resident, under a single lock per
+        // pass: a page with `leases == 0` can be evicted by `make_room` — from
+        // this read's own insertions or a concurrent `read` — before the lease
+        // count rises. Leased pages are never evicted, so the missing set
+        // shrinks every pass and the loop terminates.
+        let total = last - first + 1;
+        let mut slots: Vec<Option<Arc<[u8]>>> = vec![None; total];
+        let mut keys: Vec<Key> = Vec::with_capacity(total);
+        let mut loaded: HashMap<Key, Arc<[u8]>> = HashMap::new();
+        let result = (|| -> Result<(), PageError> {
+            loop {
+                let mut missing: Vec<(Key, usize, usize)> = Vec::new();
+                {
+                    let mut state = lock(&self.inner);
+                    for (slot, page) in (first..=last).enumerate() {
+                        if slots[slot].is_some() {
+                            continue;
+                        }
+                        let key = Key {
+                            path: handle.path.clone(),
+                            region: handle.offset,
+                            page: u64::try_from(page).map_err(|_| PageError::InvalidRange)?,
+                        };
+                        state.clock = state.clock.wrapping_add(1);
+                        let used_at = state.clock;
+                        if let Some(entry) = state.entries.get_mut(&key) {
+                            entry.leases += 1;
+                            entry.used_at = used_at;
+                            slots[slot] = Some(Arc::clone(&entry.bytes));
+                            keys.push(key);
+                        } else if let Some(bytes) = loaded.remove(&key) {
+                            make_room(&mut state, bytes.len())?;
+                            state.resident += bytes.len();
+                            slots[slot] = Some(Arc::clone(&bytes));
+                            state.entries.insert(
+                                key.clone(),
+                                Entry {
+                                    bytes,
+                                    leases: 1,
+                                    used_at,
+                                },
+                            );
+                            keys.push(key);
+                        } else {
+                            let page_start =
+                                page.checked_mul(page_size).ok_or(PageError::InvalidRange)?;
+                            let page_len = page_size
+                                .min(len.checked_sub(page_start).ok_or(PageError::InvalidRange)?);
+                            missing.push((key, page_start, page_len));
+                        }
+                    }
                 }
-                loaded.push((key, Arc::<[u8]>::from(bytes)));
+                if missing.is_empty() {
+                    return Ok(());
+                }
+                let file = File::open(&handle.path)?;
+                for (key, page_start, page_len) in missing {
+                    let mut bytes = vec![0; page_len];
+                    let offset = handle
+                        .offset
+                        .checked_add(
+                            u64::try_from(page_start).map_err(|_| PageError::InvalidRange)?,
+                        )
+                        .ok_or(PageError::InvalidRange)?;
+                    let read = read_at(&file, &mut bytes, offset)?;
+                    if read != page_len {
+                        return Err(PageError::ShortRead {
+                            expected: page_len,
+                            actual: read,
+                        });
+                    }
+                    loaded.insert(key, Arc::<[u8]>::from(bytes));
+                }
             }
-
+        })();
+        if let Err(error) = result {
             let mut state = lock(&self.inner);
-            for (key, bytes) in loaded {
-                if state.entries.contains_key(&key) {
-                    continue;
+            for key in &keys {
+                if let Some(entry) = state.entries.get_mut(key) {
+                    entry.leases = entry.leases.saturating_sub(1);
                 }
-                make_room(&mut state, bytes.len())?;
-                state.resident += bytes.len();
-                let used_at = state.clock;
-                state.entries.insert(
-                    key,
-                    Entry {
-                        bytes,
-                        leases: 0,
-                        used_at,
-                    },
-                );
             }
+            return Err(error);
         }
-
-        let mut state = lock(&self.inner);
-        let mut keys = Vec::with_capacity(last - first + 1);
-        let mut pages = Vec::with_capacity(last - first + 1);
-        for page in first..=last {
-            let key = Key {
-                path: handle.path.clone(),
-                region: handle.offset,
-                page: u64::try_from(page).map_err(|_| PageError::InvalidRange)?,
-            };
-            state.clock = state.clock.wrapping_add(1);
-            let used_at = state.clock;
-            let entry = state.entries.get_mut(&key).ok_or(PageError::InvalidRange)?;
-            entry.leases += 1;
-            entry.used_at = used_at;
-            keys.push(key);
-            pages.push(Arc::clone(&entry.bytes));
-        }
+        let pages: Vec<Arc<[u8]>> = slots.into_iter().flatten().collect();
+        debug_assert_eq!(pages.len(), total);
 
         let mut bytes = Vec::with_capacity(range.len());
         for (page, page_data) in pages.iter().enumerate() {
@@ -513,7 +528,6 @@ impl PageCache {
                 bytes.extend_from_slice(&page_data[start..end]);
             }
         }
-        drop(state);
 
         let bytes = if pages.len() == 1
             && range.start == first.saturating_mul(page_size)

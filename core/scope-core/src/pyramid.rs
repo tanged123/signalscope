@@ -9,7 +9,7 @@ use crate::{
     store::Signal,
 };
 
-type RawColumns = (Arc<[f64]>, Arc<[f64]>);
+type ColumnPair = (Column, Column);
 use scope_protocol::EnvelopeBin;
 
 pub const FINEST_STORED_LEVEL: usize = 3;
@@ -53,7 +53,7 @@ pub struct Pyramid {
     sample_count: usize,
     first_stored_level: usize,
     merged: Vec<CachedBinLevel>,
-    raw_columns: Arc<OnceLock<Option<RawColumns>>>,
+    column_cache: Arc<OnceLock<Option<ColumnPair>>>,
     synthesized_level: Arc<OnceLock<Option<BinLevel>>>,
 }
 
@@ -253,7 +253,7 @@ impl Pyramid {
             sample_count: time.len(),
             first_stored_level,
             merged,
-            raw_columns: Arc::new(OnceLock::new()),
+            column_cache: Arc::new(OnceLock::new()),
             synthesized_level: Arc::new(OnceLock::new()),
         }
     }
@@ -288,7 +288,7 @@ impl Pyramid {
                 .into_iter()
                 .map(|level| CachedBinLevel::Resident(Box::new(level)))
                 .collect(),
-            raw_columns: Arc::new(OnceLock::new()),
+            column_cache: Arc::new(OnceLock::new()),
             synthesized_level: Arc::new(OnceLock::new()),
         }
     }
@@ -302,7 +302,7 @@ impl Pyramid {
             sample_count: signal.len(),
             first_stored_level: FINEST_STORED_LEVEL,
             merged,
-            raw_columns: Arc::new(OnceLock::new()),
+            column_cache: Arc::new(OnceLock::new()),
             synthesized_level: Arc::new(OnceLock::new()),
         }
     }
@@ -401,15 +401,19 @@ impl Pyramid {
         }
         if index < self.first_stored_level {
             let (time, _) = self.cached_columns()?;
-            if time.first().is_none_or(|first| t1 < *first)
-                || time.last().is_none_or(|last| t0 > *last)
+            if time.value(0).ok().is_none_or(|first| t1 < first)
+                || time
+                    .value(time.len().saturating_sub(1))
+                    .ok()
+                    .is_none_or(|last| t0 > last)
             {
                 return Some(0..0);
             }
             let width = 1 << index;
-            let start = (time.partition_point(|time| *time < t0) / width).saturating_sub(1);
+            let start = (time.partition_point(|time| time < t0).ok()? / width).saturating_sub(1);
             let end = time
-                .partition_point(|time| *time <= t1)
+                .partition_point(|time| time <= t1)
+                .ok()?
                 .div_ceil(width)
                 .saturating_add(1)
                 .min(len);
@@ -437,7 +441,11 @@ impl Pyramid {
                 bins: BinLevel::default(),
             };
         };
-        if time.first().is_none_or(|first| t1 < *first) || time.last().is_none_or(|last| t0 > *last)
+        if time.value(0).ok().is_none_or(|first| t1 < first)
+            || time
+                .value(time.len().saturating_sub(1))
+                .ok()
+                .is_none_or(|last| t0 > last)
         {
             return PyramidQuery {
                 level: 0,
@@ -452,8 +460,15 @@ impl Pyramid {
                     .and_then(|max_bins| usize::try_from(max_bins).ok())
                     .unwrap_or(usize::MAX),
             );
-        let raw_start = time.partition_point(|time| *time < t0);
-        let raw_end = time.partition_point(|time| *time <= t1);
+        let (Ok(raw_start), Ok(raw_end)) = (
+            time.partition_point(|time| time < t0),
+            time.partition_point(|time| time <= t1),
+        ) else {
+            return PyramidQuery {
+                level: 0,
+                bins: BinLevel::default(),
+            };
+        };
         if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
             return PyramidQuery {
                 level: 0,
@@ -595,22 +610,22 @@ impl Pyramid {
         }
     }
 
-    fn cached_columns(&self) -> Option<&RawColumns> {
-        self.raw_columns
-            .get_or_init(|| {
-                self.columns()
-                    .map(|(time, values)| (time.as_slice().shared(), values.as_slice().shared()))
-            })
-            .as_ref()
+    // Caches column handles, not materialized slices: paged columns stay
+    // paged, and every probe goes through the fallible `Column` API instead
+    // of `as_slice`, which would load the full column and panic on a failed
+    // page read.
+    fn cached_columns(&self) -> Option<&ColumnPair> {
+        self.column_cache.get_or_init(|| self.columns()).as_ref()
     }
 
     fn cached_synthesized_level(&self, index: usize) -> Option<&BinLevel> {
         let full_range = 0..level_len(self.sample_count, index);
         self.synthesized_level
             .get_or_init(|| {
-                self.cached_columns().map(|(time, values)| {
-                    synthesize_level_from_columns(time, values, index, full_range).into_shared()
-                })
+                let (time, values) = self.cached_columns()?;
+                let time = time.range(0..time.len()).ok()?;
+                let values = values.range(0..values.len()).ok()?;
+                Some(synthesize_level_from_columns(&time, &values, index, full_range).into_shared())
             })
             .as_ref()
     }

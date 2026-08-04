@@ -29,9 +29,11 @@ cleanup so a failed floor remains diagnosable. The manual native workflow
 remains the acceptance authority; its checklist is recorded in the Phase 5
 benchmark specification.
 
-The composed interaction budget is a core tile-refresh p95 maximum of 20 ms
-plus a browser frame p95 maximum of 33 ms inside a 30 fps budget. Stalls over
-250 ms fail the browser scenario.
+The interaction budgets are enforced independently: a core tile-refresh p95
+maximum of 20 ms and a browser frame p95 maximum of 33 ms (the 30 fps frame
+budget). Tile refresh overlaps frame production, and per-stage p95 values do
+not compose into an end-to-end p95, so no summed end-to-end budget is
+claimed. Stalls over 250 ms fail the browser scenario.
 
 ## Consequences
 

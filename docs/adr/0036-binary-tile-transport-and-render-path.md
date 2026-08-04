@@ -29,8 +29,11 @@ exact strings.
 Requests may carry a total bin budget. The presentation plane sends 250,000
 bins for a multi-series tile request; each host assigns
 `max(64, floor(budget / signal_count))` to a series, and pyramid selection
-clamps its `2 * pixel_width` target to that share. This keeps density bounded
-while preserving pyramid extrema and gap semantics.
+clamps its `2 * pixel_width` target to that share. The 64-bin floor keeps
+every series drawable, which makes `max_total_bins` a soft cap: when
+`signal_count * 64` exceeds the budget, the response may carry up to
+`signal_count * 64` bins. This keeps density bounded while preserving pyramid
+extrema and gap semantics.
 
 The core page cache stores fixed-size pages and updates residency counters
 incrementally. The frontend requests aligned, padded time windows, slices

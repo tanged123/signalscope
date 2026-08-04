@@ -872,6 +872,8 @@ async fn query_tiles_bin(
     let state = state.inner().clone();
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let data = state.lock().map_err(|error| error.to_string())?;
+        // 64-bin floor per ADR 0036 makes `max_total_bins` a soft cap; keep in
+        // sync with `BakedPlane.queryTiles`.
         let per_series = request.max_total_bins.map(|budget| {
             (budget / u32::try_from(request.signal_ids.len().max(1)).unwrap_or(u32::MAX)).max(64)
         });
