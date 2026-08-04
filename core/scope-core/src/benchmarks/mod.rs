@@ -532,7 +532,7 @@ fn bench_tile_wire_cost() {
     assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
 
     let pyramids = sink.pyramids.lock().unwrap();
-    let per_series = (250_000_u32 / 1000).max(64);
+    let per_series = 250_000_u32 / 1000;
     let queried: Vec<(String, u32, BinLevel)> = pyramids
         .iter()
         .filter(|((_, local_path), _)| local_path == "response")

@@ -59,6 +59,12 @@ pub struct OwnedBinarySeries {
 }
 
 #[must_use]
+/// Encodes a set of columnar tile series into the native tile framing.
+///
+/// # Panics
+///
+/// Panics when a series count, bin count, path, unit, or column length cannot
+/// be represented by the binary framing fields.
 pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
     let capacity = 16 + series.iter().map(series_bytes).sum::<usize>();
     let mut bytes = Vec::with_capacity(capacity);
@@ -116,6 +122,12 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
     bytes
 }
 
+/// Decodes a native columnar tile response.
+///
+/// # Errors
+///
+/// Returns a [`TileBinaryError`] when the header, series metadata, columns, or
+/// padding is malformed or truncated.
 pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, TileBinaryError> {
     if bytes.len() < 16 {
         return Err(TileBinaryError::Truncated);
@@ -216,11 +228,11 @@ fn series_bytes(series: &BinaryTileSeries<'_>) -> usize {
 }
 
 fn validate_series(series: &BinaryTileSeries<'_>) {
-    assert!(series.signal_path.len() <= usize::from(u16::MAX));
+    assert!(u16::try_from(series.signal_path.len()).is_ok());
     assert!(
         series
             .unit
-            .is_none_or(|unit| unit.len() <= usize::from(u16::MAX))
+            .is_none_or(|unit| u16::try_from(unit.len()).is_ok())
     );
     assert_eq!(series.bin_count, series.t0.len());
     assert_eq!(series.bin_count, series.t1.len());
@@ -391,7 +403,7 @@ mod tests {
         }
 
         let mut at = 16;
-        for expected in series.iter() {
+        for expected in &series {
             at += 24;
             at = align8(at + expected.signal_path.len() + expected.unit.map_or(0, str::len));
             for _ in 0..8 {
