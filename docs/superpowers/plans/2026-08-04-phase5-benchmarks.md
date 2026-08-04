@@ -933,30 +933,35 @@ bench_e2e() {
     cargo test --release -p scope-core -- --ignored --test-threads=1 bench_corpus_mc1000
   fi
   local -a data_args=()
-  local file
+  local file selected=0
+  # The core suite covers all 1,000 runs. Keep the browser artifact bounded:
+  # scope-bake retains every input pyramid until snapshot planning completes.
+  local browser_files=2
   for file in "$corpus_dir"/run_*.csv; do
+    if [ "$selected" -eq "$browser_files" ]; then
+      break
+    fi
     data_args+=(--data "$file")
+    selected=$((selected + 1))
   done
+  [ "$selected" -eq "$browser_files" ]
   local out="$signalscope_root/build/bench/mc1000.html"
   local max_bytes=268435456 # 256 MiB: keeps the file:// load tractable in Chromium
-  local fidelity started elapsed bytes
-  for fidelity in high standard; do
-    started=$SECONDS
-    "$signalscope_scripts_dir/export.sh" "${data_args[@]}" \
-      --workspace "$signalscope_root/examples/bench/mc1000.workspace.json" \
-      --range all --fidelity "$fidelity" --out "$out"
-    elapsed=$((SECONDS - started))
-    bytes=$(stat -c %s "$out")
-    if [ "$bytes" -le "$max_bytes" ]; then
-      mkdir -p "$signalscope_root/build/bench/report"
-      printf '{ "bench": "bake", "seconds": %d, "bytes": %d, "fidelity": "%s" }\n' \
-        "$elapsed" "$bytes" "$fidelity" >"$signalscope_root/build/bench/report/bake.json"
-      SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend bench
-      return
-    fi
-  done
-  echo "baked snapshot exceeds $max_bytes bytes at every fidelity" >&2
-  exit 1
+  local fidelity=preview started elapsed bytes
+  started=$SECONDS
+  "$signalscope_scripts_dir/export.sh" "${data_args[@]}" \
+    --workspace "$signalscope_root/examples/bench/mc1000.workspace.json" \
+    --range visible --fidelity "$fidelity" --out "$out"
+  elapsed=$((SECONDS - started))
+  bytes=$(stat -c %s "$out")
+  if [ "$bytes" -gt "$max_bytes" ]; then
+    echo "baked snapshot is $bytes bytes (limit $max_bytes)" >&2
+    exit 1
+  fi
+  mkdir -p "$signalscope_root/build/bench/report"
+  printf '{ "bench": "bake", "seconds": %d, "bytes": %d, "fidelity": "%s", "input_files": %d }\n' \
+    "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake.json"
+  SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend bench
 }
 ```
 
@@ -1390,4 +1395,5 @@ This is a separate workflow, so the `ci-ok` needs-list in `ci.yml` is untouched 
 
 - Spec coverage: corpus tiers (T1), cold open / warm reopen (T3), huge build (T4), tile latency + NaN gaps (T5), workspace fixtures (T6), bench subcommands + bake fallback (T7), Playwright bench + floors (T8), smoke tier in PR CI (T9), report collector (T10), CI gate + weekly workflow (T11), ADR + roadmap (T12), gates + bump + manual checklist handoff (T13).
 - Deviation from spec, decided at planning: Tier S is the checked-in `examples/monte_carlo` (8 runs) rather than a generated 10-file miniature — zero PR-CI generation cost, already maintained by `quality_checks`. The smoke workspace binds `response`/`command` because `run_08` intentionally lacks `temperature`.
+- Deviation from the initial bake fallback: the browser benchmark uses the first two generated `mc1000` runs at preview fidelity and `visible` range. Baking all 1,000 runs retains every pyramid and produced multi-gigabyte snapshots before the fallback could run; the core benchmark still exercises the full corpus, while the bounded browser slice preserves the composed interaction check within WSL and CI memory budgets.
 - Known API-adaptation points are flagged inline (StoreSink error mapping, `session::load_from_path` name, decoder `local_path` values, ci.yml action versions). Implementers must adapt to the real signatures, not force the sketches.

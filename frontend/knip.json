@@ -1,6 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip/schema.json",
-  "entry": ["scripts/*.mjs", "tests/demo/*.ts", "tests/e2e/*.ts"],
+  "entry": [
+    "scripts/*.mjs",
+    "tests/demo/*.ts",
+    "tests/e2e/*.ts",
+    "tests/bench/*.ts"
+  ],
   "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs", "*.config.ts"],
   "ignore": ["src/generated/**"],
   "ignoreBinaries": ["ffmpeg"]

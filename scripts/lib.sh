@@ -66,3 +66,14 @@ bake_roundtrip_artifact() {
     --fidelity full \
     --out build/export/roundtrip-full.html
 }
+
+bake_bench_smoke_artifact() {
+  local -a data_args=()
+  local file
+  for file in "$signalscope_root"/examples/monte_carlo/run_*.csv; do
+    data_args+=(--data "$file")
+  done
+  "$signalscope_scripts_dir/export.sh" --no-build "${data_args[@]}" \
+    --workspace "$signalscope_root/examples/bench/smoke.workspace.json" \
+    --range all --fidelity full --out "$signalscope_root/build/bench/smoke.html"
+}

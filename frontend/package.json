@@ -1,6 +1,6 @@
 {
   "name": "@signalscope/frontend",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "check:deps": "node scripts/check-runtime-deps.mjs",
     "check:unused": "knip",
     "demo": "playwright test --project=demo",
+    "bench": "playwright test --project=bench",
     "dev": "vite --host 127.0.0.1 --port 4173",
     "e2e": "playwright test --project=desktop",
     "lint": "eslint src tests",

@@ -70,6 +70,8 @@ large campaigns cannot push export controls outside the viewport.
 
 Benchmark cold multi-GB first plot, cache build and reuse, tile latency, 100M-point pan/zoom, NaN gaps, corrupt inputs, accessibility invariants, release bundles, and artifact-size regression thresholds.
 
+The benchmark track landed ([ADR 0035](adr/0035-benchmark-harness-and-performance-floors.md)) with deterministic corpus tiers, core performance floors, a Playwright bench project, a weekly workflow, and the `./scripts/test.sh bench` entry point.
+
 Parquet is included when it does not delay MCAP and the core interaction path. Live streaming, layout-preset UI, Monte Carlo envelope ergonomics, 3D, and `scope-serverd` remain v2.
 
 The July 2026 UI audit pass replaced the global toolbar with three permanent
