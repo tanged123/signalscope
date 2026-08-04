@@ -103,6 +103,8 @@ time panels can facet by source or channel with linked-y small multiples and a
 follow-ups because annotations stay attached to the unsplit plot in this
 phase.
 
+The plotting performance overhaul ([implementation plan](superpowers/plans/2026-08-04-plotting-performance-overhaul.md)) now reports a 5.6 s mc1000 first plot for 1,000 inputs; frame p95 remains 100 ms on the benchmark runner, above the 33 ms floor.
+
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18
 migrates explicit mapped references before deleting the map
