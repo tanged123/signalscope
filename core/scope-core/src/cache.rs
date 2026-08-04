@@ -698,7 +698,7 @@ fn decode_paged_signal(
         merged.push(if count > RESIDENT_LEVEL_BINS {
             CachedBinLevel::Paged(PagedBinLevel::new(handle, count)?)
         } else {
-            CachedBinLevel::Resident(BinLevel::decode_cache(&handle.bytes().ok()?)?)
+            CachedBinLevel::Resident(Box::new(BinLevel::decode_cache(&handle.bytes().ok()?)?))
         });
         expected_len = expected_len.div_ceil(2);
     }

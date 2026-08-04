@@ -1,7 +1,7 @@
 //! Leased byte-range cache over sidecar files.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry as MapEntry},
     fs::File,
     ops::Range,
     path::{Path, PathBuf},
@@ -169,7 +169,7 @@ impl PageHandle {
             .checked_mul(size_of::<f64>())
             .and_then(|len| byte_offset.checked_add(len))
             .ok_or(PageError::InvalidRange)?;
-        if byte_len > self.byte_len() || !byte_offset.is_multiple_of(size_of::<f64>()) {
+        if byte_len > self.byte_len() || byte_offset % size_of::<f64>() != 0 {
             return Err(PageError::InvalidRange);
         }
         if let Some(values) = &self.memory {
@@ -210,8 +210,8 @@ impl PageHandle {
                 )
                 .ok_or(PageError::InvalidRange)?;
             let page = offset / page_size;
-            if !pages.contains_key(&page) {
-                pages.insert(page, cache.read_page(self, page)?);
+            if let MapEntry::Vacant(entry) = pages.entry(page) {
+                entry.insert(cache.read_page(self, page)?);
             }
             let (page_start, bytes) = pages.get(&page).ok_or(PageError::InvalidRange)?;
             let local = offset
@@ -385,10 +385,7 @@ impl PageCache {
     fn read_page(&self, handle: &PageHandle, page: usize) -> Result<(usize, Arc<[u8]>), PageError> {
         let page_size = self.page_size();
         let start = page.checked_mul(page_size).ok_or(PageError::InvalidRange)?;
-        let end = start
-            .checked_add(page_size)
-            .unwrap_or(usize::MAX)
-            .min(handle.byte_len());
+        let end = start.saturating_add(page_size).min(handle.byte_len());
         if start >= end {
             return Err(PageError::InvalidRange);
         }

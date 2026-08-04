@@ -8,6 +8,8 @@ use crate::{
     paging::PageHandle,
     store::Signal,
 };
+
+type RawColumns = (Arc<[f64]>, Arc<[f64]>);
 use scope_protocol::EnvelopeBin;
 
 pub const FINEST_STORED_LEVEL: usize = 3;
@@ -51,13 +53,13 @@ pub struct Pyramid {
     sample_count: usize,
     first_stored_level: usize,
     merged: Vec<CachedBinLevel>,
-    raw_columns: Arc<OnceLock<Option<(Arc<[f64]>, Arc<[f64]>)>>>,
+    raw_columns: Arc<OnceLock<Option<RawColumns>>>,
     synthesized_level: Arc<OnceLock<Option<BinLevel>>>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum CachedBinLevel {
-    Resident(BinLevel),
+    Resident(Box<BinLevel>),
     Paged(PagedBinLevel),
 }
 
@@ -98,7 +100,7 @@ impl PagedBinLevel {
 impl CachedBinLevel {
     pub(crate) fn materialize(&self) -> Option<BinLevel> {
         match self {
-            Self::Resident(level) => Some(level.clone()),
+            Self::Resident(level) => Some((**level).clone()),
             Self::Paged(level) => level.range(0..level.len),
         }
     }
@@ -238,7 +240,7 @@ impl Pyramid {
         let mut previous = BinLevel::from_wire(&level_one);
         while !previous.is_empty() {
             if logical_level >= first_stored_level {
-                merged.push(CachedBinLevel::Resident(previous.clone()));
+                merged.push(CachedBinLevel::Resident(Box::new(previous.clone())));
             }
             if previous.len() == 1 {
                 break;
@@ -282,7 +284,10 @@ impl Pyramid {
             },
             sample_count,
             first_stored_level: FINEST_STORED_LEVEL,
-            merged: merged.into_iter().map(CachedBinLevel::Resident).collect(),
+            merged: merged
+                .into_iter()
+                .map(|level| CachedBinLevel::Resident(Box::new(level)))
+                .collect(),
             raw_columns: Arc::new(OnceLock::new()),
             synthesized_level: Arc::new(OnceLock::new()),
         }
@@ -590,7 +595,7 @@ impl Pyramid {
         }
     }
 
-    fn cached_columns(&self) -> Option<&(Arc<[f64]>, Arc<[f64]>)> {
+    fn cached_columns(&self) -> Option<&RawColumns> {
         self.raw_columns
             .get_or_init(|| {
                 self.columns()
@@ -639,13 +644,15 @@ fn synthesize_level_from_columns(
         level.sum.extend(
             values
                 .iter()
-                .map(|value| value.is_finite().then_some(*value).unwrap_or(0.0)),
+                .map(|value| if value.is_finite() { *value } else { 0.0 }),
         );
-        level.sum_sq.extend(
-            values
-                .iter()
-                .map(|value| value.is_finite().then_some(*value * *value).unwrap_or(0.0)),
-        );
+        level.sum_sq.extend(values.iter().map(|value| {
+            if value.is_finite() {
+                *value * *value
+            } else {
+                0.0
+            }
+        }));
         level.sample_count.resize(values.len(), 1);
         level
             .finite_count
