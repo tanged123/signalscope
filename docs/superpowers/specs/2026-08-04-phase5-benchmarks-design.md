@@ -59,9 +59,9 @@ reported numbers over time.
 - **Tier B `wide100m`.** One CSV, 12.5M rows × 8 channels = 100M values
   (≈2 GB text) with embedded NaN gaps. Covers cold multi-GB first plot and
   100M-point pan/zoom.
-- **Tier S `mc-smoke`.** A 10-file miniature of Tier A. The bench code paths
-  run against it inside the ordinary PR suites so the harness cannot rot
-  between scheduled full runs.
+- **Tier S `mc-smoke`.** The checked-in eight-run `examples/monte_carlo`
+  corpus. The bench code paths run against it inside the ordinary PR suites
+  so the harness cannot rot between scheduled full runs.
 
 ## Core scenarios
 
@@ -82,14 +82,15 @@ throughput floor) remain unchanged.
 ## E2E monte-carlo scenario
 
 - **Bench workspace fixture.** A checked-in workspace file defines the
-  acceptance layout: a time panel with one shared channel bound across all
-  1000 sources, plus a second panel with 2–3 more channels.
-- **Bake.** `./scripts/export.sh --data <1000 files> --workspace <fixture>
---fidelity high --out build/bench/mc1000.html`. Bake wall time is reported
-  without a floor (export path, not open path). If `high` exceeds the
-  ADR 0024 snapshot size budget the bench drops to `standard`; the fidelity
-  used is recorded in the report. If every fidelity exceeds the budget the
-  bench fails explicitly rather than measuring a truncated corpus.
+  acceptance layout: a time panel with one shared channel bound across the
+  available sources, plus a second panel with 2–3 more channels. Manual
+  acceptance imports the full 1000-file corpus; the automated browser slice
+  uses the first two `mc1000` files to keep the baked artifact bounded.
+- **Bake.** `./scripts/test.sh bench e2e` selects the first two
+  `build/bench/corpus/mc1000/run_*.csv` files and runs a visible-range,
+  preview-fidelity bake to `build/bench/mc1000.html`. Bake wall time is
+  reported without a latency threshold (export path, not open path), and the
+  artifact remains subject to the existing 256 MiB size limit.
 - **Playwright `bench` project.** A new project in `playwright.config.ts`,
   excluded from `./scripts/test.sh e2e`. It loads the snapshot and measures
   via in-page `performance.now()`/rAF instrumentation:
@@ -99,8 +100,9 @@ throughput floor) remain unchanged.
     box zoom, and fit on the ensemble panel: frame-interval p95 floor 33 ms,
     longest stall floor 250 ms;
   - PerformanceObserver long-task counts, reported without a floor.
-- **Smoke.** The same spec parameterized to Tier S runs in the regular e2e
-  suite.
+- **Smoke.** `bake_bench_smoke_artifact` exports the checked-in eight-run
+  `examples/monte_carlo` corpus, and `bench-smoke.spec.ts` runs against that
+  artifact in the regular e2e suite.
 
 ## Reporting and wiring
 
@@ -113,7 +115,8 @@ core` preserves today's fast path; `bench corpus` only generates the
   tiers, for manual native sessions.
 - A new `./scripts/ci.sh bench` gate and a `bench.yml` workflow
   (`workflow_dispatch` plus weekly schedule) run the suite off the PR path
-  and upload `report.json` as an artifact. PR CI is unchanged.
+  and upload `report.json` plus the per-scenario report directory as an
+  artifact. PR CI is unchanged.
 - ADR 0035 records the harness architecture, the floors-plus-report policy,
   and the composed 33 ms interaction budget. The roadmap Phase 5 section is
   updated when the work lands.

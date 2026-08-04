@@ -1,5 +1,5 @@
 use std::{
-    io::{BufWriter, Write as _},
+    io::{self, BufWriter, Write as _},
     ops::Range,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -53,7 +53,7 @@ pub fn bench_root() -> PathBuf {
 /// xorshift64*: deterministic, dependency-free.
 struct Rng(u64);
 
-const GENERATOR_VERSION: u32 = 2;
+const GENERATOR_VERSION: u32 = 3;
 
 impl Rng {
     fn new(seed: u64) -> Self {
@@ -65,7 +65,7 @@ impl Rng {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
-        (self.0 >> 11) as f64 / (1_u64 << 53) as f64
+        (self.0 >> 11) as f64 / (1_u64 << 53) as f64 / 2.0
     }
 }
 
@@ -82,6 +82,18 @@ fn sample(file: u32, channel: usize, time: f64, noise: f64) -> f64 {
 }
 
 pub fn generate(spec: &TierSpec, dir: &Path) -> std::io::Result<()> {
+    if !spec.hz.is_finite() || spec.hz <= 0.0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "hz must be finite and positive",
+        ));
+    }
+    if !(f64::from(spec.rows) / spec.hz).is_finite() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "hz is too small for finite generated times",
+        ));
+    }
     std::fs::create_dir_all(dir)?;
     for file in 1..=spec.files {
         let path = dir.join(format!("run_{file:04}.csv"));
@@ -165,7 +177,19 @@ mod tests {
         let mut rng = Rng::new(7);
         for _ in 0..10_000 {
             let value = rng.next_f64();
-            assert!((0.0..1.0).contains(&value), "noise={value}");
+            assert!((0.0..0.5).contains(&value), "noise={value}");
+        }
+    }
+
+    #[test]
+    fn invalid_hz_is_rejected_before_writing() {
+        for hz in [0.0, -1.0, f64::NAN, f64::INFINITY, 1e-320] {
+            let mut spec = tiny();
+            spec.hz = hz;
+            let dir = tempfile::tempdir().unwrap();
+            let error = generate(&spec, dir.path()).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert_eq!(dir.path().read_dir().unwrap().count(), 0, "hz={hz}");
         }
     }
 

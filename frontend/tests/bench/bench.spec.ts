@@ -43,9 +43,11 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
         longest_task_ms: stats.longestTaskMs,
         floor_first_plot_ms: 10_000,
         floor_frame_p95_ms: 33,
+        floor_frames: 100,
         floor_stall_ms: 250,
         pass:
           firstPlotMs <= 10_000 &&
+          stats.frames > 100 &&
           stats.p95Ms <= 33 &&
           Math.max(stats.maxMs, stats.longestTaskMs) <= 250,
       },

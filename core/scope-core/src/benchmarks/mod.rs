@@ -368,6 +368,20 @@ fn bench_tile_latency() {
     let corpus = corpus::ensure(&corpus::mc1000());
     let cache_dir = corpus::bench_root().join("cache/mc1000");
     std::fs::create_dir_all(&cache_dir).unwrap();
+
+    let warmup = StoreSink::new();
+    let jobs = BatchJobs::new(batch_options(Some(cache_dir.clone())));
+    let id = jobs.submit(
+        corpus_paths(&corpus),
+        Arc::clone(&warmup) as Arc<dyn CommitSink>,
+    );
+    assert_eq!(
+        jobs.join(id).unwrap().state,
+        BatchState::Done,
+        "batch status after warmup"
+    );
+    drop(warmup);
+
     let sink = StoreSink::new();
     let jobs = BatchJobs::new(batch_options(Some(cache_dir)));
     let id = jobs.submit(
@@ -380,6 +394,12 @@ fn bench_tile_latency() {
         "batch status: {:?}",
         jobs.status(id)
     );
+
+    let store = sink.store.lock().unwrap();
+    let paged = store.signals().filter(|signal| signal.is_paged()).count();
+    let total = store.signals().count();
+    assert_eq!(paged, total, "tile latency reopened decoded signals");
+    drop(store);
 
     let pyramids = sink.pyramids.lock().unwrap();
     let ensemble: Vec<&Pyramid> = pyramids
