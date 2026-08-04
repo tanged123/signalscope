@@ -1,13 +1,5 @@
 import { PROTOCOL_VERSION } from "../generated/protocol";
-import {
-  HAS_FIRST,
-  HAS_GAP,
-  HAS_LAST,
-  HAS_MAX,
-  HAS_MIN,
-  type BinColumns,
-  type ColumnarTileResponse,
-} from "./bin-columns";
+import type { BinColumns, ColumnarTileResponse } from "./bin-columns";
 
 if (new Uint8Array(new Uint32Array([1]).buffer)[0] !== 1) {
   throw new Error("big-endian host unsupported");
@@ -123,5 +115,3 @@ function need(view: DataView, offset: number, length: number): void {
     throw new Error("truncated tile binary payload");
   }
 }
-
-export { HAS_FIRST, HAS_GAP, HAS_LAST, HAS_MAX, HAS_MIN };
