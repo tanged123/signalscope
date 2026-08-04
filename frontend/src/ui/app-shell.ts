@@ -47,7 +47,7 @@ import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
 import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
-import { resolvePanel } from "../app/resolution";
+import { resolvePanel, type ResolvedSeries } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
 import { WorkspaceModel } from "../app/workspace";
@@ -169,6 +169,11 @@ export class AppShell {
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
+  private catalogRevision = 0;
+  private readonly resolutionCache = new Map<
+    string,
+    { key: string; resolved: ResolvedSeries[] }
+  >();
   private signalsByPath = new Map<string, SignalSummary>();
   private workspaceView: WorkspaceView | null = null;
   private workspaceTabs: WorkspaceTabsView | null = null;
@@ -308,9 +313,7 @@ export class AppShell {
           if (panel?.ghost_mode === "ghost") {
             this.focusFirstSeries(
               id,
-              resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
-                (series) => series.ref,
-              ),
+              this.resolvedFor(panel).map((series) => series.ref),
             );
           }
           this.commitHistory();
@@ -346,8 +349,7 @@ export class AppShell {
         pathForRef: (ref) => this.catalog.get(ref)?.path ?? null,
         catalog: () => this.catalog,
         namedSets: () => this.workspace.namedSets(),
-        resolveSeries: (state) =>
-          resolvePanel(this.catalog, state, this.workspace.namedSets()),
+        resolveSeries: (state) => this.resolvedFor(state),
         onSetXSignal: (id, path) => {
           this.workspace.setMode(id, "xy");
           const ref = this.catalog.refFromPath(path);
@@ -1827,9 +1829,7 @@ export class AppShell {
   private fitWindowToPlotted(): void {
     const extent = this.timeExtent(
       [...this.workspace.panels()].flatMap((panel) =>
-        resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
-          (series) => series.path,
-        ),
+        this.resolvedFor(panel).map((series) => series.path),
       ),
     );
     if (extent === null) return;
@@ -2550,6 +2550,7 @@ export class AppShell {
   private async reloadSignals(): Promise<void> {
     this.signals = await this.plane.listSignals();
     this.catalog = Catalog.build(this.signals);
+    this.catalogRevision += 1;
     this.tileWindowCache.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
@@ -2691,11 +2692,7 @@ export class AppShell {
     ids: string[];
     missing: string[];
   } {
-    const resolved = resolvePanel(
-      this.catalog,
-      panel,
-      this.workspace.namedSets(),
-    );
+    const resolved = this.resolvedFor(panel);
     const paths = resolved.map((series) => series.path);
     if (panel.mode === "xy") {
       const x = panel.x_ref === null ? null : this.catalog.get(panel.x_ref);
@@ -2732,6 +2729,19 @@ export class AppShell {
     return { ids, missing };
   }
 
+  private resolvedFor(panel: PanelState): ResolvedSeries[] {
+    const key = `${String(this.catalogRevision)}:${String(this.workspace.resolutionRevision())}`;
+    const cached = this.resolutionCache.get(panel.id);
+    if (cached?.key === key) return cached.resolved;
+    const resolved = resolvePanel(
+      this.catalog,
+      panel,
+      this.workspace.namedSets(),
+    );
+    this.resolutionCache.set(panel.id, { key, resolved });
+    return resolved;
+  }
+
   private isDerivedPath(path: string): boolean {
     return this.workspace.derived().some((entry) => entry.path === path);
   }
@@ -2759,6 +2769,7 @@ export class AppShell {
             : this.effectiveWindow(panel);
         },
         (panelId) => this.missingByPanel.get(panelId) ?? [],
+        this.workspace.revision(),
       ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
@@ -2809,11 +2820,7 @@ export class AppShell {
    */
   private sampleWindow(panel: PanelState): { t0: number; t1: number } {
     if (panel.mode !== "xy") return this.effectiveWindow(panel);
-    const paths = resolvePanel(
-      this.catalog,
-      panel,
-      this.workspace.namedSets(),
-    ).map((series) => series.path);
+    const paths = this.resolvedFor(panel).map((series) => series.path);
     if (panel.x_ref !== null) {
       const x = this.catalog.get(panel.x_ref);
       if (x !== undefined) paths.push(x.path);
@@ -2845,9 +2852,7 @@ export class AppShell {
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
     const extent = this.timeExtent(
-      resolvePanel(this.catalog, panel, this.workspace.namedSets()).map(
-        (series) => series.path,
-      ),
+      this.resolvedFor(panel).map((series) => series.path),
     );
     if (extent === null) {
       this.commitHistory();
@@ -2958,11 +2963,7 @@ export class AppShell {
       tip.hidden = true;
       return;
     }
-    const resolved = resolvePanel(
-      this.catalog,
-      panel,
-      this.workspace.namedSets(),
-    );
+    const resolved = this.resolvedFor(panel);
     const ghostChannels = new Map(
       resolved
         .filter((series) => series.display === "ghost")

@@ -562,6 +562,8 @@ export class PanelView {
   private lastTiles: ColumnarTileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
+  private lastRevision = -1;
+  private lastMissingEmpty = true;
   private preparedPlot: PreparedPlot | null = null;
   private hitAdapter: SeriesHitAdapter | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
@@ -936,13 +938,29 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
+    revision = 0,
   ): number {
+    if (
+      state === this.lastInputState &&
+      tiles === this.lastTiles &&
+      samples === this.lastSamples &&
+      revision === this.lastRevision &&
+      this.lastWindow !== null &&
+      window.t0 === this.lastWindow.t0 &&
+      window.t1 === this.lastWindow.t1 &&
+      missing.length === 0 &&
+      this.lastMissingEmpty
+    ) {
+      return 0;
+    }
     const rendered = renderState(state, this.callbacks);
     this.lastInputState = state;
     this.lastState = rendered;
     this.lastTiles = tiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
+    this.lastRevision = revision;
+    this.lastMissingEmpty = missing.length === 0;
     this.preparedPlot = null;
     this.hitAdapter = null;
     this.domainSeries = [];

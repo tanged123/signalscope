@@ -63,6 +63,8 @@ export class WorkspaceModel {
   private session: Session;
   private nextPanelNumber: number;
   private nextTabNumber: number;
+  private revisionValue = 0;
+  private resolutionRevisionValue = 0;
 
   constructor(session: Session = emptySession()) {
     this.session = session;
@@ -82,10 +84,24 @@ export class WorkspaceModel {
     return this.session;
   }
 
+  revision(): number {
+    return this.revisionValue;
+  }
+
+  resolutionRevision(): number {
+    return this.resolutionRevisionValue;
+  }
+
+  private touch(resolution = false): void {
+    this.revisionValue += 1;
+    if (resolution) this.resolutionRevisionValue += 1;
+  }
+
   /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
   replace(session: Session): void {
     this.session = session;
     clearFacetSplits(this.session);
+    this.touch(true);
   }
 
   theme(): Session["theme"] {
@@ -94,6 +110,7 @@ export class WorkspaceModel {
 
   setTheme(theme: Session["theme"]): void {
     this.session.theme = theme;
+    this.touch();
   }
 
   linkedTime(): Readonly<LinkedTime> {
@@ -102,6 +119,7 @@ export class WorkspaceModel {
 
   setLinked(linked: boolean): void {
     this.session.linked_time.linked = linked;
+    this.touch();
   }
 
   setLinkedWindow(t0: number, t1: number): void {
@@ -110,11 +128,13 @@ export class WorkspaceModel {
     }
     this.session.linked_time.t0 = t0;
     this.session.linked_time.t1 = t1;
+    this.touch();
   }
 
   setCursorT(cursorT: number | null): void {
     this.session.linked_time.cursorT =
       cursorT !== null && Number.isFinite(cursorT) ? cursorT : null;
+    this.touch();
   }
 
   panels(): readonly PanelState[] {
@@ -159,6 +179,7 @@ export class WorkspaceModel {
     if (tab === undefined) return false;
     this.session.active_tab_id = id;
     tab.maximized_panel_id = null;
+    this.touch();
     return true;
   }
 
@@ -172,6 +193,7 @@ export class WorkspaceModel {
     if (this.session.tabs.some((tab) => tab.id === state.activeTabId)) {
       this.session.active_tab_id = state.activeTabId;
     }
+    this.touch();
   }
 
   addTab(): WorkspaceTab {
@@ -184,6 +206,7 @@ export class WorkspaceModel {
     this.nextTabNumber += 1;
     this.session.tabs.push(tab);
     this.session.active_tab_id = tab.id;
+    this.touch(true);
     return tab;
   }
 
@@ -191,6 +214,7 @@ export class WorkspaceModel {
     if (!this.session.tabs.some((tab) => tab.id === id)) return false;
     this.session.active_tab_id = id;
     this.activeTab().maximized_panel_id = null;
+    this.touch();
     return true;
   }
 
@@ -207,6 +231,7 @@ export class WorkspaceModel {
       }
       this.activeTab().maximized_panel_id = null;
     }
+    this.touch();
   }
 
   derived(): readonly DerivedSignal[] {
@@ -227,6 +252,7 @@ export class WorkspaceModel {
     } else {
       this.session.derived[existing] = { path, expr };
     }
+    this.touch(true);
   }
 
   addDerivedBundle(name: string, expr: string): void {
@@ -237,6 +263,7 @@ export class WorkspaceModel {
     const definition = { name: normalized, expr };
     if (existing === -1) this.session.derived_bundles.push(definition);
     else this.session.derived_bundles[existing] = definition;
+    this.touch(true);
   }
 
   removeDerivedBundle(name: string): void {
@@ -244,6 +271,7 @@ export class WorkspaceModel {
     this.session.derived_bundles = this.session.derived_bundles.filter(
       (entry) => entry.name !== normalized,
     );
+    this.touch(true);
   }
 
   removeSignalRef(ref: SeriesRef, path?: string): void {
@@ -261,6 +289,7 @@ export class WorkspaceModel {
         this.removeSeriesRef(panel.id, ref, path);
       }
     }
+    this.touch(true);
   }
 
   sources(): readonly SourceRecord[] {
@@ -273,12 +302,14 @@ export class WorkspaceModel {
     );
     if (index === -1) this.session.sources.push(record);
     else this.session.sources[index] = record;
+    this.touch();
   }
 
   removeSource(key: string): void {
     this.session.sources = this.session.sources.filter(
       (source) => source.key !== key,
     );
+    this.touch();
   }
 
   cursorMode(): WorkspaceTab["cursor_mode"] {
@@ -287,6 +318,7 @@ export class WorkspaceModel {
 
   setCursorMode(mode: WorkspaceTab["cursor_mode"]): void {
     this.activeTab().cursor_mode = mode;
+    this.touch();
   }
 
   focusedPanelId(): string | null {
@@ -314,6 +346,7 @@ export class WorkspaceModel {
     const panel = this.createPanel();
     this.appendRow(panel.id);
     this.activeTab().focused_panel_id = panel.id;
+    this.touch(true);
     return panel;
   }
 
@@ -333,6 +366,7 @@ export class WorkspaceModel {
       width,
     });
     this.activeTab().focused_panel_id = panel.id;
+    this.touch(true);
     return panel;
   }
 
@@ -351,6 +385,7 @@ export class WorkspaceModel {
       panels: [{ panel_id: panel.id, width: 1 }],
     });
     this.activeTab().focused_panel_id = panel.id;
+    this.touch(true);
     return panel;
   }
 
@@ -364,10 +399,14 @@ export class WorkspaceModel {
     if (tab.focused_panel_id === id) {
       tab.focused_panel_id = tab.panels[0]?.id ?? null;
     }
+    this.touch(true);
   }
 
   focusPanel(id: string): void {
-    if (this.panel(id) !== undefined) this.activeTab().focused_panel_id = id;
+    if (this.panel(id) !== undefined) {
+      this.activeTab().focused_panel_id = id;
+      this.touch();
+    }
   }
 
   toggleMaximize(id: string): void {
@@ -376,21 +415,27 @@ export class WorkspaceModel {
     } else {
       this.maximizePanel(id);
     }
+    this.touch();
   }
 
   maximizePanel(id: string): void {
     if (this.panel(id) === undefined) return;
     this.activeTab().maximized_panel_id = id;
     this.activeTab().focused_panel_id = id;
+    this.touch();
   }
 
   restoreGrid(): void {
     this.activeTab().maximized_panel_id = null;
+    this.touch();
   }
 
   setMode(id: string, mode: PanelMode): void {
     const panel = this.panel(id);
-    if (panel !== undefined) panel.mode = mode;
+    if (panel !== undefined) {
+      panel.mode = mode;
+      this.touch(true);
+    }
   }
 
   /** Enters XY mode, adopting the first plotted series as the x axis. */
@@ -406,6 +451,7 @@ export class WorkspaceModel {
     if (panel === undefined) return;
     panel.color_ref = null;
     panel.color_axis = "time";
+    this.touch(true);
   }
 
   toggleSeriesVisible(panelId: string, ref: SeriesRef): void {
@@ -413,6 +459,7 @@ export class WorkspaceModel {
     if (panel === undefined) return;
     const override = this.ensureSeriesOverride(panel, ref);
     override.visible = !(override.visible ?? true);
+    this.touch(true);
   }
 
   addSeriesRef(panelId: string, ref: SeriesRef): boolean {
@@ -423,6 +470,7 @@ export class WorkspaceModel {
       this.createPickBinding(panel);
     if (binding.refs.some((entry) => sameRef(entry, ref))) return false;
     binding.refs.push({ ...ref });
+    this.touch(true);
     return true;
   }
 
@@ -464,6 +512,7 @@ export class WorkspaceModel {
         (annotation) => annotation.series_path !== path,
       );
     }
+    this.touch(true);
   }
 
   setSeriesOverride(
@@ -477,6 +526,7 @@ export class WorkspaceModel {
     override.color_slot = style.color_slot;
     override.dash = style.dash;
     override.width = style.width;
+    this.touch(true);
   }
 
   setSeriesVisible(panelId: string, ref: SeriesRef, visible: boolean): void {
@@ -484,22 +534,30 @@ export class WorkspaceModel {
     if (panel === undefined) return;
     const override = this.ensureSeriesOverride(panel, ref);
     override.visible = visible;
+    this.touch(true);
   }
 
   setColorBy(panelId: string, dimension: StyleDimension): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.color_by = dimension;
+    if (panel !== undefined) {
+      panel.color_by = dimension;
+      this.touch(true);
+    }
   }
 
   setGhostMode(panelId: string, mode: GhostMode): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.ghost_mode = mode;
+    if (panel !== undefined) {
+      panel.ghost_mode = mode;
+      this.touch(true);
+    }
   }
 
   toggleGhostMode(panelId: string): void {
     const panel = this.panel(panelId);
     if (panel !== undefined) {
       panel.ghost_mode = panel.ghost_mode === "ghost" ? "all" : "ghost";
+      this.touch(true);
     }
   }
 
@@ -524,6 +582,7 @@ export class WorkspaceModel {
       opacity: style.opacity ?? null,
       visible: style.visible ?? null,
     });
+    this.touch(true);
   }
 
   removeOverride(panelId: string, index: number): void {
@@ -532,11 +591,15 @@ export class WorkspaceModel {
       return;
     }
     panel.overrides.splice(index, 1);
+    this.touch(true);
   }
 
   clearOverrides(panelId: string): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.overrides = [];
+    if (panel !== undefined) {
+      panel.overrides = [];
+      this.touch(true);
+    }
   }
 
   toggleFocus(panelId: string, entry: FocusEntry): void {
@@ -545,11 +608,15 @@ export class WorkspaceModel {
     const index = panel.focus.findIndex((current) => sameFocus(current, entry));
     if (index === -1) panel.focus.push(structuredClone(entry));
     else panel.focus.splice(index, 1);
+    this.touch(true);
   }
 
   clearFocus(panelId: string): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.focus = [];
+    if (panel !== undefined) {
+      panel.focus = [];
+      this.touch(true);
+    }
   }
 
   focusEntries(panelId: string): readonly FocusEntry[] {
@@ -583,6 +650,7 @@ export class WorkspaceModel {
     panel.x_range = null;
     panel.y_range = null;
     panel.annotations = [];
+    this.touch(true);
   }
 
   setColorRef(panelId: string, ref: SeriesRef | null): void {
@@ -590,6 +658,7 @@ export class WorkspaceModel {
     if (panel === undefined) return;
     panel.color_ref = ref === null ? null : { ...ref };
     panel.color_axis = ref === null ? "none" : "signal";
+    this.touch(true);
   }
 
   namedSets(): readonly NamedSet[] {
@@ -602,6 +671,7 @@ export class WorkspaceModel {
     );
     if (index === -1) this.session.named_sets.push(structuredClone(set));
     else this.session.named_sets[index] = structuredClone(set);
+    this.touch(true);
   }
 
   addQueryBinding(panelId: string, selector: string): boolean {
@@ -620,6 +690,7 @@ export class WorkspaceModel {
       refs: [],
       set_id: null,
     });
+    this.touch(true);
     return true;
   }
 
@@ -639,6 +710,7 @@ export class WorkspaceModel {
       refs: [],
       set_id: setId,
     });
+    this.touch(true);
     return true;
   }
 
@@ -648,6 +720,7 @@ export class WorkspaceModel {
       return;
     }
     panel.bindings.splice(index, 1);
+    this.touch(true);
   }
 
   nextSetId(): string {
@@ -670,6 +743,7 @@ export class WorkspaceModel {
         );
       }
     }
+    this.touch(true);
   }
 
   private createPickBinding(panel: PanelState): Binding {
@@ -713,27 +787,42 @@ export class WorkspaceModel {
 
   setPanelYRange(panelId: string, range: [number, number]): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.y_range = range;
+    if (panel !== undefined) {
+      panel.y_range = range;
+      this.touch();
+    }
   }
 
   clearPanelYRange(panelId: string): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.y_range = null;
+    if (panel !== undefined) {
+      panel.y_range = null;
+      this.touch();
+    }
   }
 
   setPanelXRange(panelId: string, range: readonly [number, number]): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.x_range = [range[0], range[1]];
+    if (panel !== undefined) {
+      panel.x_range = [range[0], range[1]];
+      this.touch();
+    }
   }
 
   clearPanelXRange(panelId: string): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) panel.x_range = null;
+    if (panel !== undefined) {
+      panel.x_range = null;
+      this.touch();
+    }
   }
 
   renamePanel(id: string, title: string): void {
     const panel = this.panel(id);
-    if (panel !== undefined) panel.title = title;
+    if (panel !== undefined) {
+      panel.title = title;
+      this.touch();
+    }
   }
 
   setAxisLabel(id: string, axis: "x" | "y" | "c", label: string | null): void {
@@ -742,6 +831,7 @@ export class WorkspaceModel {
     if (axis === "x") panel.x_label = label;
     else if (axis === "y") panel.y_label = label;
     else panel.c_label = label;
+    this.touch();
   }
 
   setPanelTimeWindow(
@@ -751,10 +841,15 @@ export class WorkspaceModel {
     const panel = this.panel(id);
     if (panel === undefined) return;
     panel.time_window = window === null ? null : [window[0], window[1]];
+    this.touch();
   }
 
   addAnnotation(panelId: string, annotation: Annotation): void {
-    this.panel(panelId)?.annotations.push({ ...annotation });
+    const panel = this.panel(panelId);
+    if (panel !== undefined) {
+      panel.annotations.push({ ...annotation });
+      this.touch();
+    }
   }
 
   removeAnnotation(panelId: string, annotationId: string): void {
@@ -763,6 +858,7 @@ export class WorkspaceModel {
     panel.annotations = panel.annotations.filter(
       (annotation) => annotation.id !== annotationId,
     );
+    this.touch();
   }
 
   setAnnotationLabel(
@@ -773,18 +869,25 @@ export class WorkspaceModel {
     const annotation = this.panel(panelId)?.annotations.find(
       (entry) => entry.id === annotationId,
     );
-    if (annotation !== undefined) annotation.label = label;
+    if (annotation !== undefined) {
+      annotation.label = label;
+      this.touch();
+    }
   }
 
   toggleStats(id: string): void {
     const panel = this.panel(id);
-    if (panel !== undefined) panel.show_stats = !panel.show_stats;
+    if (panel !== undefined) {
+      panel.show_stats = !panel.show_stats;
+      this.touch();
+    }
   }
 
   toggleAxisStyle(id: string): void {
     const panel = this.panel(id);
     if (panel !== undefined) {
       panel.axis_style = panel.axis_style === "gutter" ? "inline" : "gutter";
+      this.touch();
     }
   }
 
@@ -795,6 +898,7 @@ export class WorkspaceModel {
     const shift = clampShift(above.height, below.height, delta);
     above.height += shift;
     below.height -= shift;
+    this.touch();
   }
 
   resizeColumns(rowIndex: number, seamIndex: number, delta: number): void {
@@ -805,6 +909,7 @@ export class WorkspaceModel {
     const shift = clampShift(left.width, right.width, delta);
     left.width += shift;
     right.width -= shift;
+    this.touch();
   }
 
   movePanel(id: string, targetRowIndex: number, targetCellIndex: number): void {
@@ -826,6 +931,7 @@ export class WorkspaceModel {
       });
     }
     this.activeTab().focused_panel_id = id;
+    this.touch();
   }
 
   /** Removes a cell; returns true when its row was removed too. */
