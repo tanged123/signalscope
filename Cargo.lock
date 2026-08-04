@@ -3255,7 +3255,7 @@ dependencies = [
 
 [[package]]
 name = "scope-core"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "arrow-array",
  "arrow-cast",
@@ -3277,7 +3277,7 @@ dependencies = [
 
 [[package]]
 name = "scope-protocol"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -3508,7 +3508,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "signalscope-shell"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "base64 0.22.1",
  "scope-core",
