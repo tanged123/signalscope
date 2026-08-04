@@ -42,4 +42,53 @@ describe("queryPyramid", () => {
 
     expect(result.bins.map((bin) => bin.t0)).toEqual([1, 2, 3]);
   });
+
+  it("honors a per-series bin budget", () => {
+    const levels = [
+      Array.from(
+        { length: 100 },
+        (_, time) =>
+          ({
+            t0: time,
+            t1: time,
+            first: time,
+            last: time,
+            min: time,
+            max: time,
+            has_gap: false,
+          }) as EnvelopeBin,
+      ),
+      Array.from(
+        { length: 25 },
+        (_, time) =>
+          ({
+            t0: time * 4,
+            t1: time * 4 + 3,
+            first: time,
+            last: time,
+            min: time,
+            max: time,
+            has_gap: false,
+          }) as EnvelopeBin,
+      ),
+      Array.from(
+        { length: 5 },
+        (_, time) =>
+          ({
+            t0: time * 20,
+            t1: time * 20 + 19,
+            first: time,
+            last: time,
+            min: time,
+            max: time,
+            has_gap: false,
+          }) as EnvelopeBin,
+      ),
+    ];
+
+    const result = queryPyramid(levels, 0, 99, 100, 10);
+
+    expect(result.level).toBe(2);
+    expect(result.bins.length).toBe(5);
+  });
 });

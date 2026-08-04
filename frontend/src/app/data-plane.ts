@@ -550,11 +550,22 @@ export class BakedPlane implements DataPlane {
       series: this.payload.signals
         .filter((signal) => requested.has(signal.summary.signal_id))
         .map((signal) => {
+          const perSeries =
+            request.max_total_bins === null
+              ? undefined
+              : Math.max(
+                  64,
+                  Math.floor(
+                    request.max_total_bins /
+                      Math.max(1, request.signal_ids.length),
+                  ),
+                );
           const query = queryPyramid(
             signal.levels,
             request.window.t0,
             request.window.t1,
             request.pixel_width,
+            perSeries,
           );
           return {
             signalId: signal.summary.signal_id,

@@ -17,6 +17,7 @@ export function queryPyramid(
   t0: number,
   t1: number,
   pixelWidth: number,
+  maxBins?: number,
 ): PyramidQueryResult {
   const raw = levels[0] ?? [];
   if (
@@ -26,7 +27,10 @@ export function queryPyramid(
   ) {
     return { level: 0, bins: [] };
   }
-  const target = Math.max(1, Math.floor(pixelWidth)) * 2;
+  const target = Math.min(
+    Math.max(1, Math.floor(pixelWidth)) * 2,
+    maxBins === undefined ? Number.POSITIVE_INFINITY : Math.max(1, maxBins),
+  );
   for (let index = 0; index < levels.length; index += 1) {
     const level = levels[index] ?? [];
     const start = firstOverlapping(level, t0);
