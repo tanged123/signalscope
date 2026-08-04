@@ -302,6 +302,7 @@ impl PageCache {
     ///
     /// Returns an error for invalid ranges, short reads, IO failures, or when
     /// outstanding leases hold the available capacity.
+    #[allow(clippy::too_many_lines)]
     pub fn read(&self, handle: &PageHandle, range: Range<usize>) -> Result<Lease, PageError> {
         if range.start > range.end || handle.len.is_some_and(|len| range.end > len) {
             return Err(PageError::InvalidRange);
@@ -309,16 +310,15 @@ impl PageCache {
         if handle.memory.is_some() {
             return Err(PageError::MemoryHandle);
         }
-        let len = match handle.len {
-            Some(len) => len,
-            None => {
-                let file_len = std::fs::metadata(&handle.path)?.len();
-                let region_len = file_len
-                    .checked_sub(handle.offset)
-                    .and_then(|len| usize::try_from(len).ok())
-                    .unwrap_or_default();
-                region_len.max(range.end)
-            }
+        let len = if let Some(len) = handle.len {
+            len
+        } else {
+            let file_len = std::fs::metadata(&handle.path)?.len();
+            let region_len = file_len
+                .checked_sub(handle.offset)
+                .and_then(|len| usize::try_from(len).ok())
+                .unwrap_or_default();
+            region_len.max(range.end)
         };
         let (page_size, first, last) = {
             let state = lock(&self.inner);
@@ -597,7 +597,9 @@ mod tests {
     fn repeated_probes_hit_one_page() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("column");
-        let values: Vec<u8> = (0..PAGE_BYTES_TEST * 2).map(|i| (i % 251) as u8).collect();
+        let values: Vec<u8> = (0..PAGE_BYTES_TEST * 2)
+            .map(|i| u8::try_from(i % 251).expect("modulo fits in u8"))
+            .collect();
         std::fs::write(&path, &values).unwrap();
         let cache = PageCache::with_page_bytes(directory.path(), 1024 * 1024, PAGE_BYTES_TEST);
         let handle = PageHandle::cached(cache.clone(), &path, 0, values.len());
@@ -617,7 +619,9 @@ mod tests {
     fn cross_page_reads_assemble_correct_bytes() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("column");
-        let values: Vec<u8> = (0..PAGE_BYTES_TEST * 3).map(|i| (i % 251) as u8).collect();
+        let values: Vec<u8> = (0..PAGE_BYTES_TEST * 3)
+            .map(|i| u8::try_from(i % 251).expect("modulo fits in u8"))
+            .collect();
         std::fs::write(&path, &values).unwrap();
         let cache = PageCache::with_page_bytes(directory.path(), 1024 * 1024, PAGE_BYTES_TEST);
         let handle = PageHandle::cached(cache.clone(), &path, 0, values.len());

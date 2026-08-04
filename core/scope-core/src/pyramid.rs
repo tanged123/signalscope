@@ -764,6 +764,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_precision_loss)]
     fn iterative_synthesis_is_bit_identical_to_reference() {
         let mut state = 0x2545_F491_4F6C_DD1D_u64;
         let mut next = move || {
@@ -796,6 +797,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_precision_loss)]
     fn direct_level_selection_matches_probe_walk() {
         for len in [5_usize, 100, 1000, 10_001, 100_000] {
             let time: Vec<f64> = (0..len).map(|i| i as f64).collect();
@@ -839,6 +841,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn windowed_levels_materialize_only_the_window_and_neighbors() {
         let time = (0..100_000).map(f64::from).collect::<Vec<_>>();
         let pyramid = Pyramid::from_samples(&time, &time);
