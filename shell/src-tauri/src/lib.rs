@@ -912,8 +912,7 @@ fn query_samples(
             .store
             .signal(SignalId(raw_id))
             .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
-        let time = signal.time();
-        let values = signal.values();
+        let (time, values) = windowed_slice(signal, request.window.t0, request.window.t1)?;
         let slice = compute::sample_window(
             &time,
             &values,
@@ -935,6 +934,37 @@ fn query_samples(
         request_id: request.request_id,
         series,
     }))
+}
+
+fn windowed_slice(
+    signal: &Signal,
+    t0: f64,
+    t1: f64,
+) -> Result<
+    (
+        scope_core::columns::ColumnGuard,
+        scope_core::columns::ColumnGuard,
+    ),
+    String,
+> {
+    let time_column = signal.time_column();
+    let start = time_column
+        .partition_point(|time| time < t0)
+        .map_err(|error| error.to_string())?
+        .saturating_sub(1);
+    let end = time_column
+        .partition_point(|time| time <= t1)
+        .map_err(|error| error.to_string())?
+        .saturating_add(1)
+        .min(time_column.len());
+    let time = time_column
+        .range(start..end)
+        .map_err(|error| error.to_string())?;
+    let values = signal
+        .values_column()
+        .range(start..end)
+        .map_err(|error| error.to_string())?;
+    Ok((time, values))
 }
 
 const DERIVED_PREFIX: &str = "derived/";
@@ -1956,6 +1986,26 @@ t0 = 0.0
 
         let leave = drag_forward(DragDropKind::Leave, &[]).open().unwrap();
         assert!(leave.paths.is_empty());
+    }
+
+    #[test]
+    fn sample_slice_reads_only_the_window() {
+        let times: Arc<[f64]> = (0..=1000).map(f64::from).collect();
+        let values: Arc<[f64]> = (0..=1000).map(f64::from).collect();
+        let signal = Signal::new(
+            SignalId(1),
+            SourceId(1),
+            "signal",
+            "signal",
+            None,
+            times,
+            values,
+        )
+        .unwrap();
+        let (time, values) = windowed_slice(&signal, 10.0, 20.0).unwrap();
+        assert!(time.first().is_some_and(|time| *time >= 9.0));
+        assert!(time.last().is_some_and(|time| *time <= 21.0));
+        assert_eq!(time.len(), values.len());
     }
 
     #[test]

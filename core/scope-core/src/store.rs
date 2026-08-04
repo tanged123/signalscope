@@ -151,11 +151,13 @@ impl Signal {
         self.timebase_id
     }
 
-    pub(crate) fn time_column(&self) -> &Column {
+    #[must_use]
+    pub fn time_column(&self) -> &Column {
         &self.time
     }
 
-    pub(crate) fn values_column(&self) -> &Column {
+    #[must_use]
+    pub fn values_column(&self) -> &Column {
         &self.values
     }
 }
