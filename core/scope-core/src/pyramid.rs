@@ -453,6 +453,63 @@ impl Pyramid {
             };
         }
 
+        let mut level_index = self.level_count().saturating_sub(1);
+        for index in 1..self.level_count() {
+            let width = 1 << index;
+            let count = if index < self.first_stored_level {
+                raw_end.div_ceil(width).saturating_sub(raw_start / width)
+            } else {
+                let start = (raw_start >> index).saturating_sub(1);
+                let end = raw_end
+                    .div_ceil(width)
+                    .saturating_add(1)
+                    .min(level_len(self.sample_count, index));
+                end.saturating_sub(start)
+            };
+            if count <= target {
+                level_index = index;
+                break;
+            }
+        }
+        PyramidQuery {
+            level: u32::try_from(level_index).unwrap_or(u32::MAX),
+            bins: self
+                .level_window(level_index, Some((t0, t1)))
+                .unwrap_or_default(),
+        }
+    }
+
+    #[cfg(test)]
+    fn query_reference(&self, t0: f64, t1: f64, pixel_width: u32) -> PyramidQuery {
+        let Some((time, _)) = self.columns() else {
+            return PyramidQuery {
+                level: 0,
+                bins: BinLevel::default(),
+            };
+        };
+        if time.value(0).ok().is_none_or(|first| t1 < first)
+            || time
+                .value(time.len().saturating_sub(1))
+                .ok()
+                .is_none_or(|last| t0 > last)
+        {
+            return PyramidQuery {
+                level: 0,
+                bins: BinLevel::default(),
+            };
+        }
+        let target = usize::try_from(pixel_width.max(1))
+            .unwrap_or(usize::MAX)
+            .saturating_mul(2);
+        let raw_start = time.partition_point(|time| time < t0).unwrap_or(0);
+        let raw_end = time.partition_point(|time| time <= t1).unwrap_or(0);
+        if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
+            return PyramidQuery {
+                level: 0,
+                bins: self.level_window(0, Some((t0, t1))).unwrap_or_default(),
+            };
+        }
+
         let level_index = (1..self.level_count())
             .find(|index| self.overlap_count(*index, t0, t1) <= target)
             .unwrap_or_else(|| self.level_count().saturating_sub(1));
@@ -487,12 +544,13 @@ impl Pyramid {
             if start >= time.len() {
                 break;
             }
-            let merged = synthesize_bin(&time, &values, index, start);
+            let merged = fold_bin(&time, &values, start, width);
             level.push(&merged);
         }
         level
     }
 
+    #[cfg(test)]
     fn overlap_count(&self, index: usize, t0: f64, t1: f64) -> usize {
         if index < self.first_stored_level {
             let Some((time, _)) = self.columns() else {
@@ -536,17 +594,28 @@ pub struct PyramidQuery {
     pub bins: BinLevel,
 }
 
-fn synthesize_bin(time: &[f64], values: &[f64], index: usize, start: usize) -> EnvelopeBin {
-    if index == 0 {
-        return sample_bin(time[start], values[start]);
+fn fold_bin(time: &[f64], values: &[f64], start: usize, width: usize) -> EnvelopeBin {
+    let end = (start + width).min(time.len());
+    let mut stack: Vec<(u32, EnvelopeBin)> =
+        Vec::with_capacity(width.trailing_zeros() as usize + 2);
+    for index in start..end {
+        let mut rank = 0_u32;
+        let mut bin = sample_bin(time[index], values[index]);
+        while stack
+            .last()
+            .is_some_and(|(stored_rank, _)| *stored_rank == rank)
+        {
+            let (_, left) = stack.pop().expect("checked");
+            bin = merge_bins(&left, &bin);
+            rank += 1;
+        }
+        stack.push((rank, bin));
     }
-    let left = synthesize_bin(time, values, index - 1, start);
-    let right_start = start + (1 << (index - 1));
-    if right_start < time.len() {
-        merge_bins(&left, &synthesize_bin(time, values, index - 1, right_start))
-    } else {
-        left
+    let (_, mut bin) = stack.pop().expect("non-empty bin");
+    while let Some((_, left)) = stack.pop() {
+        bin = merge_bins(&left, &bin);
     }
+    bin
 }
 
 fn merge_level(previous: &BinLevel) -> BinLevel {
@@ -686,6 +755,63 @@ mod tests {
         let query = pyramid.query(0.0, 9_999.0, 200);
         assert!(query.bins.len() <= 402);
         assert_eq!(query.bins.to_wire_vec().len(), query.bins.len());
+    }
+
+    #[test]
+    fn iterative_synthesis_is_bit_identical_to_reference() {
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        for len in [1_usize, 2, 3, 7, 8, 1000, 10_001] {
+            let time: Vec<f64> = (0..len).map(|i| i as f64).collect();
+            let values: Vec<f64> = (0..len)
+                .map(|i| {
+                    if i % 97 == 0 {
+                        f64::NAN
+                    } else {
+                        next() * 100.0 - 50.0
+                    }
+                })
+                .collect();
+            let pyramid = Pyramid::from_samples(&time, &values);
+            let reference = Pyramid::from_samples_storing_every_level(&time, &values);
+            for index in 0..pyramid.level_count() {
+                assert_eq!(
+                    pyramid.level(index),
+                    reference.level(index),
+                    "level {index} len {len}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn direct_level_selection_matches_probe_walk() {
+        for len in [5_usize, 100, 1000, 10_001, 100_000] {
+            let time: Vec<f64> = (0..len).map(|i| i as f64).collect();
+            let values = time.clone();
+            let pyramid = Pyramid::from_samples(&time, &values);
+            for &(t0, t1) in &[
+                (0.0, len as f64),
+                (0.3 * len as f64, 0.31 * len as f64),
+                (0.0, 1.0),
+                (len as f64 * 0.9, len as f64 * 2.0),
+            ] {
+                for width in [64_u32, 200, 800, 1920] {
+                    let expected = pyramid.query_reference(t0, t1, width);
+                    let actual = pyramid.query(t0, t1, width);
+                    assert_eq!(
+                        expected.level, actual.level,
+                        "len {len} w {width} [{t0},{t1}]"
+                    );
+                    assert_eq!(expected.bins, actual.bins);
+                }
+            }
+        }
     }
 
     #[test]
