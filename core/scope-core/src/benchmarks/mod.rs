@@ -492,6 +492,11 @@ fn bench_warm_tile_latency() {
         })
         .collect();
     refresh_ms.sort_by(f64::total_cmp);
+    let (p50, p95, p99) = (
+        report::percentile(&refresh_ms, 0.50),
+        report::percentile(&refresh_ms, 0.95),
+        report::percentile(&refresh_ms, 0.99),
+    );
     report::write_report(
         "warm_tile_latency",
         serde_json::json!({
@@ -499,14 +504,17 @@ fn bench_warm_tile_latency() {
             "refreshes": refresh_ms.len(),
             "series_per_refresh": 1000,
             "paged_levels": paged_levels,
-            "p50_ms": report::percentile(&refresh_ms, 0.50),
-            "p95_ms": report::percentile(&refresh_ms, 0.95),
-            "p99_ms": report::percentile(&refresh_ms, 0.99),
+            "p50_ms": p50,
+            "p95_ms": p95,
+            "p99_ms": p99,
             "target_p95_ms": 10.0,
-            "floor_p95_ms": null,
-            "pass": true,
+            "floor_p95_ms": 20.0,
+            "floor_p99_ms": 50.0,
+            "pass": p95 <= 20.0 && p99 <= 50.0,
         }),
     );
+    assert!(p95 <= 20.0, "refresh p95 {p95:.2}ms (floor 20ms)");
+    assert!(p99 <= 50.0, "refresh p99 {p99:.2}ms (floor 50ms)");
 }
 
 #[test]
