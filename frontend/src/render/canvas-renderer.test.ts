@@ -600,6 +600,30 @@ describe("render", () => {
     expect(calls).toContainEqual({ op: "=lineWidth", args: [1.6] });
   });
 
+  it("merges dense bins into pixel columns", () => {
+    const calls = renderOnce([
+      tile(
+        "dense",
+        Array.from({ length: 700 }, (_, index) => ({
+          t0: index / 70,
+          t1: (index + 1) / 70,
+          v: Math.sin(index / 10),
+        })),
+      ),
+    ]);
+    const seriesStart = calls.findIndex(
+      (call) =>
+        call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.series[0],
+    );
+    const seriesEnd = calls.findIndex(
+      (call, index) => index > seriesStart && call.op === "stroke",
+    );
+    const vertices = calls
+      .slice(seriesStart, seriesEnd)
+      .filter((call) => call.op === "moveTo" || call.op === "lineTo");
+    expect(vertices.length).toBeLessThan(700);
+  });
+
   it("multiplies a dimmed path's configured alpha", () => {
     const { context, calls } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));

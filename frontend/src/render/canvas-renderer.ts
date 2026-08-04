@@ -703,24 +703,70 @@ export class CanvasRenderer {
       }
       penDown = !gap;
     };
-    for (let index = 0; index < count; index += 1) {
-      const binFlags = flags[index] as number;
-      if (
-        (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
-        (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
-      ) {
-        penDown = false;
-        continue;
+    if (count > 2 * plot.width) {
+      let colX = Number.NaN;
+      let cFirst = 0;
+      let cLast = 0;
+      let cMin = 0;
+      let cMax = 0;
+      let colGap = false;
+      const flushColumn = (): void => {
+        if (Number.isNaN(colX)) return;
+        emitColumn(colX, toY(cFirst), toY(cMin), toY(cMax), toY(cLast), colGap);
+      };
+      for (let index = 0; index < count; index += 1) {
+        const binFlags = flags[index] as number;
+        if (
+          (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
+          (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
+        ) {
+          flushColumn();
+          colX = Number.NaN;
+          penDown = false;
+          continue;
+        }
+        const x =
+          plot.x +
+          Math.floor(
+            toX(((t0[index] as number) + (t1[index] as number)) * 0.5) - plot.x,
+          ) +
+          0.5;
+        if (x !== colX) {
+          flushColumn();
+          colX = x;
+          cFirst = first[index] as number;
+          cLast = last[index] as number;
+          cMin = min[index] as number;
+          cMax = max[index] as number;
+          colGap = (binFlags & HAS_GAP) !== 0;
+        } else {
+          cLast = last[index] as number;
+          if ((min[index] as number) < cMin) cMin = min[index] as number;
+          if ((max[index] as number) > cMax) cMax = max[index] as number;
+          colGap ||= (binFlags & HAS_GAP) !== 0;
+        }
       }
-      const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
-      emitColumn(
-        x,
-        toY(first[index] as number),
-        toY(min[index] as number),
-        toY(max[index] as number),
-        toY(last[index] as number),
-        (binFlags & HAS_GAP) !== 0,
-      );
+      flushColumn();
+    } else {
+      for (let index = 0; index < count; index += 1) {
+        const binFlags = flags[index] as number;
+        if (
+          (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
+          (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
+        ) {
+          penDown = false;
+          continue;
+        }
+        const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
+        emitColumn(
+          x,
+          toY(first[index] as number),
+          toY(min[index] as number),
+          toY(max[index] as number),
+          toY(last[index] as number),
+          (binFlags & HAS_GAP) !== 0,
+        );
+      }
     }
     context.stroke();
   }
