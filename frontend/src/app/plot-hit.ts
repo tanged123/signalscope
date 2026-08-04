@@ -6,7 +6,7 @@ import {
   HAS_MIN,
   type BinColumns,
 } from "./bin-columns";
-import { projectX, projectY, type PlotLayout } from "./plot-math";
+import { invertX, projectX, projectY, type PlotLayout } from "./plot-math";
 
 export interface HitSeries {
   path: string;
@@ -37,27 +37,33 @@ export function nearestLine(
 ): LineHit | null {
   let best: LineHit | null = null;
   let bestSquared = threshold * threshold;
+  const minTime = Math.min(
+    invertX(layout, px - threshold),
+    invertX(layout, px + threshold),
+  );
+  const maxTime = Math.max(
+    invertX(layout, px - threshold),
+    invertX(layout, px + threshold),
+  );
   for (const entry of series) {
+    const start = firstCenterAtOrAfter(entry.bins, minTime);
+    const end = firstCenterAfter(entry.bins, maxTime);
+    const firstIndex = Math.max(0, start - 1);
+    const lastIndex = Math.min(entry.bins.count, end + 1);
     let previous: { x: number; y: number; time: number; value: number } | null =
       null;
-    for (let index = 0; index < entry.bins.count; index += 1) {
+    for (let index = firstIndex; index < lastIndex; index += 1) {
       const flags = entry.bins.flags[index] as number;
       const time =
         ((entry.bins.t0[index] as number) + (entry.bins.t1[index] as number)) *
         0.5;
-      const points = [
-        flags & HAS_FIRST ? (entry.bins.first[index] as number) : null,
-        flags & HAS_MIN ? (entry.bins.min[index] as number) : null,
-        flags & HAS_MAX ? (entry.bins.max[index] as number) : null,
-        flags & HAS_LAST ? (entry.bins.last[index] as number) : null,
-      ];
       let first: { x: number; y: number; time: number; value: number } | null =
         null;
-      for (const value of points) {
+      const consider = (value: number | null): void => {
         if (value === null || !Number.isFinite(value)) {
           first = null;
           previous = null;
-          continue;
+          return;
         }
         const current = {
           x: projectX(layout, time),
@@ -82,11 +88,41 @@ export function nearestLine(
           }
         }
         previous = current;
-      }
+      };
+      consider(flags & HAS_FIRST ? (entry.bins.first[index] as number) : null);
+      consider(flags & HAS_MIN ? (entry.bins.min[index] as number) : null);
+      consider(flags & HAS_MAX ? (entry.bins.max[index] as number) : null);
+      consider(flags & HAS_LAST ? (entry.bins.last[index] as number) : null);
       if (flags & HAS_GAP) previous = null;
     }
   }
   return best;
+}
+
+function firstCenterAtOrAfter(bins: BinColumns, time: number): number {
+  let low = 0;
+  let high = bins.count;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    const center =
+      ((bins.t0[middle] as number) + (bins.t1[middle] as number)) * 0.5;
+    if (center < time) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+function firstCenterAfter(bins: BinColumns, time: number): number {
+  let low = 0;
+  let high = bins.count;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    const center =
+      ((bins.t0[middle] as number) + (bins.t1[middle] as number)) * 0.5;
+    if (center <= time) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 export function segmentHit(

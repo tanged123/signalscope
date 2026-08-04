@@ -1,9 +1,9 @@
 //! Multi-resolution min/max envelopes for bounded-cost viewport queries.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::{
-    bins::BinLevel,
+    bins::{BinLevel, HAS_FIRST, HAS_GAP, HAS_LAST, HAS_MAX, HAS_MIN},
     columns::{Column, WeakColumn},
     paging::PageHandle,
     store::Signal,
@@ -51,6 +51,8 @@ pub struct Pyramid {
     sample_count: usize,
     first_stored_level: usize,
     merged: Vec<CachedBinLevel>,
+    raw_columns: Arc<OnceLock<Option<(Arc<[f64]>, Arc<[f64]>)>>>,
+    synthesized_level: Arc<OnceLock<Option<BinLevel>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -83,22 +85,9 @@ impl PagedBinLevel {
         Some(f64::from_le_bytes(bytes.as_ref().try_into().ok()?))
     }
 
-    fn partition_point(
-        &self,
-        field: usize,
-        mut predicate: impl FnMut(f64) -> bool,
-    ) -> Option<usize> {
-        let mut left = 0;
-        let mut right = self.len;
-        while left < right {
-            let middle = left + (right - left) / 2;
-            if predicate(self.value(field, middle)?) {
-                left = middle + 1;
-            } else {
-                right = middle;
-            }
-        }
-        Some(left)
+    fn partition_point(&self, field: usize, predicate: impl FnMut(f64) -> bool) -> Option<usize> {
+        let base = 8_usize.checked_add(field.checked_mul(self.len)?.checked_mul(8)?)?;
+        self.handle.partition_point(base, self.len, predicate).ok()
     }
 
     fn range(&self, range: std::ops::Range<usize>) -> Option<BinLevel> {
@@ -262,6 +251,8 @@ impl Pyramid {
             sample_count: time.len(),
             first_stored_level,
             merged,
+            raw_columns: Arc::new(OnceLock::new()),
+            synthesized_level: Arc::new(OnceLock::new()),
         }
     }
 
@@ -292,6 +283,8 @@ impl Pyramid {
             sample_count,
             first_stored_level: FINEST_STORED_LEVEL,
             merged: merged.into_iter().map(CachedBinLevel::Resident).collect(),
+            raw_columns: Arc::new(OnceLock::new()),
+            synthesized_level: Arc::new(OnceLock::new()),
         }
     }
 
@@ -304,6 +297,8 @@ impl Pyramid {
             sample_count: signal.len(),
             first_stored_level: FINEST_STORED_LEVEL,
             merged,
+            raw_columns: Arc::new(OnceLock::new()),
+            synthesized_level: Arc::new(OnceLock::new()),
         }
     }
 
@@ -400,20 +395,16 @@ impl Pyramid {
             return Some(0..0);
         }
         if index < self.first_stored_level {
-            let (time, _) = self.columns()?;
-            if time.value(0).ok().is_none_or(|first| t1 < first)
-                || time
-                    .value(time.len().saturating_sub(1))
-                    .ok()
-                    .is_none_or(|last| t0 > last)
+            let (time, _) = self.cached_columns()?;
+            if time.first().is_none_or(|first| t1 < *first)
+                || time.last().is_none_or(|last| t0 > *last)
             {
                 return Some(0..0);
             }
             let width = 1 << index;
-            let start = (time.partition_point(|time| time < t0).ok()? / width).saturating_sub(1);
+            let start = (time.partition_point(|time| *time < t0) / width).saturating_sub(1);
             let end = time
-                .partition_point(|time| time <= t1)
-                .ok()?
+                .partition_point(|time| *time <= t1)
                 .div_ceil(width)
                 .saturating_add(1)
                 .min(len);
@@ -435,17 +426,13 @@ impl Pyramid {
         pixel_width: u32,
         max_bins: Option<u32>,
     ) -> PyramidQuery {
-        let Some((time, _)) = self.columns() else {
+        let Some((time, _)) = self.cached_columns() else {
             return PyramidQuery {
                 level: 0,
                 bins: BinLevel::default(),
             };
         };
-        if time.value(0).ok().is_none_or(|first| t1 < first)
-            || time
-                .value(time.len().saturating_sub(1))
-                .ok()
-                .is_none_or(|last| t0 > last)
+        if time.first().is_none_or(|first| t1 < *first) || time.last().is_none_or(|last| t0 > *last)
         {
             return PyramidQuery {
                 level: 0,
@@ -460,8 +447,8 @@ impl Pyramid {
                     .and_then(|max_bins| usize::try_from(max_bins).ok())
                     .unwrap_or(usize::MAX),
             );
-        let raw_start = time.partition_point(|time| time < t0).unwrap_or(0);
-        let raw_end = time.partition_point(|time| time <= t1).unwrap_or(0);
+        let raw_start = time.partition_point(|time| *time < t0);
+        let raw_end = time.partition_point(|time| *time <= t1);
         if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
             return PyramidQuery {
                 level: 0,
@@ -542,6 +529,15 @@ impl Pyramid {
     ///
     /// Panics when `index` cannot be represented as a sample stride.
     pub fn synthesize_level(&self, index: usize, range: std::ops::Range<usize>) -> BinLevel {
+        let full_len = level_len(self.sample_count, index);
+        if index.saturating_add(1) == self.first_stored_level
+            && range.start == 0
+            && range.end >= full_len
+        {
+            if let Some(level) = self.cached_synthesized_level(index) {
+                return level.slice(0..range.end.min(level.len()));
+            }
+        }
         let Some((time, values)) = self.columns() else {
             return BinLevel::default();
         };
@@ -554,17 +550,7 @@ impl Pyramid {
         let Ok(values) = values.range(sample_start..sample_end) else {
             return BinLevel::default();
         };
-        let mut stack = Vec::with_capacity(index + 2);
-        let mut level = BinLevel::with_capacity(range.len());
-        for bin in 0..range.len() {
-            let start = bin.saturating_mul(width);
-            if start >= time.len() {
-                break;
-            }
-            let merged = fold_bin(&time, &values, start, width, &mut stack);
-            level.push(&merged);
-        }
-        level
+        synthesize_level_from_columns(&time, &values, index, 0..range.len())
     }
 
     #[cfg(test)]
@@ -603,12 +589,86 @@ impl Pyramid {
             }
         }
     }
+
+    fn cached_columns(&self) -> Option<&(Arc<[f64]>, Arc<[f64]>)> {
+        self.raw_columns
+            .get_or_init(|| {
+                self.columns()
+                    .map(|(time, values)| (time.as_slice().shared(), values.as_slice().shared()))
+            })
+            .as_ref()
+    }
+
+    fn cached_synthesized_level(&self, index: usize) -> Option<&BinLevel> {
+        let full_range = 0..level_len(self.sample_count, index);
+        self.synthesized_level
+            .get_or_init(|| {
+                self.cached_columns().map(|(time, values)| {
+                    synthesize_level_from_columns(time, values, index, full_range).into_shared()
+                })
+            })
+            .as_ref()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct PyramidQuery {
     pub level: u32,
     pub bins: BinLevel,
+}
+
+fn synthesize_level_from_columns(
+    time: &[f64],
+    values: &[f64],
+    index: usize,
+    range: std::ops::Range<usize>,
+) -> BinLevel {
+    let width = 1 << index;
+    let mut level = BinLevel::with_capacity(range.len());
+    if index == 0 {
+        let start = range.start.min(time.len());
+        let end = range.end.min(time.len()).min(values.len());
+        let time = &time[start..end];
+        let values = &values[start..end];
+        level.t0.extend_from_slice(time);
+        level.t1.extend_from_slice(time);
+        level.first.extend_from_slice(values);
+        level.last.extend_from_slice(values);
+        level.min.extend_from_slice(values);
+        level.max.extend_from_slice(values);
+        level.sum.extend(
+            values
+                .iter()
+                .map(|value| value.is_finite().then_some(*value).unwrap_or(0.0)),
+        );
+        level.sum_sq.extend(
+            values
+                .iter()
+                .map(|value| value.is_finite().then_some(*value * *value).unwrap_or(0.0)),
+        );
+        level.sample_count.resize(values.len(), 1);
+        level
+            .finite_count
+            .extend(values.iter().map(|value| u32::from(value.is_finite())));
+        level.flags.extend(values.iter().map(|value| {
+            if value.is_finite() {
+                HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX
+            } else {
+                HAS_GAP
+            }
+        }));
+        return level;
+    }
+    let mut stack = Vec::with_capacity(index + 2);
+    for bin in 0..range.len() {
+        let start = bin.saturating_mul(width);
+        if start >= time.len() {
+            break;
+        }
+        let merged = fold_bin(time, values, start, width, &mut stack);
+        level.push(&merged);
+    }
+    level
 }
 
 fn fold_bin(

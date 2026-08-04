@@ -5,6 +5,12 @@ export interface PyramidQueryResult {
   bins: EnvelopeBin[];
 }
 
+export interface PyramidQueryRange {
+  level: number;
+  start: number;
+  end: number;
+}
+
 /**
  * Level selection identical to `scope_core::pyramid::Pyramid::query`: the
  * finest level whose overlapping bin count fits twice the pixel budget,
@@ -19,13 +25,27 @@ export function queryPyramid(
   pixelWidth: number,
   maxBins?: number,
 ): PyramidQueryResult {
+  const range = queryPyramidRange(levels, t0, t1, pixelWidth, maxBins);
+  return {
+    level: range.level,
+    bins: (levels[range.level] ?? []).slice(range.start, range.end),
+  };
+}
+
+export function queryPyramidRange(
+  levels: readonly EnvelopeBin[][],
+  t0: number,
+  t1: number,
+  pixelWidth: number,
+  maxBins?: number,
+): PyramidQueryRange {
   const raw = levels[0] ?? [];
   if (
     raw.length === 0 ||
     t1 < (raw[0] as EnvelopeBin).t0 ||
     t0 > (raw[raw.length - 1] as EnvelopeBin).t1
   ) {
-    return { level: 0, bins: [] };
+    return { level: 0, start: 0, end: 0 };
   }
   const target = Math.min(
     Math.max(1, Math.floor(pixelWidth)) * 2,
@@ -38,14 +58,12 @@ export function queryPyramid(
     if (end - start <= target || index === levels.length - 1) {
       return {
         level: index,
-        bins: level.slice(
-          Math.max(0, start - 1),
-          Math.min(level.length, end + 1),
-        ),
+        start: Math.max(0, start - 1),
+        end: Math.min(level.length, end + 1),
       };
     }
   }
-  return { level: 0, bins: [] };
+  return { level: 0, start: 0, end: 0 };
 }
 
 /** First index whose bin ends at or after `t0` (partition point of t1 < t0). */

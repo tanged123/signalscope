@@ -157,6 +157,86 @@ impl PageHandle {
             .ok_or(PageError::InvalidRange)
     }
 
+    /// Finds a partition point without re-reading or copying one value at a
+    /// time from the page cache.
+    pub(crate) fn partition_point(
+        &self,
+        byte_offset: usize,
+        value_count: usize,
+        mut predicate: impl FnMut(f64) -> bool,
+    ) -> Result<usize, PageError> {
+        let byte_len = value_count
+            .checked_mul(size_of::<f64>())
+            .and_then(|len| byte_offset.checked_add(len))
+            .ok_or(PageError::InvalidRange)?;
+        if byte_len > self.byte_len() || !byte_offset.is_multiple_of(size_of::<f64>()) {
+            return Err(PageError::InvalidRange);
+        }
+        if let Some(values) = &self.memory {
+            let start = byte_offset / size_of::<f64>();
+            let end = start
+                .checked_add(value_count)
+                .ok_or(PageError::InvalidRange)?;
+            let values = values.get(start..end).ok_or(PageError::InvalidRange)?;
+            let mut left = 0;
+            let mut right = values.len();
+            while left < right {
+                let middle = left + (right - left) / 2;
+                if predicate(values[middle]) {
+                    left = middle + 1;
+                } else {
+                    right = middle;
+                }
+            }
+            return Ok(left);
+        }
+
+        let cache = self.cache.clone().unwrap_or_else(|| {
+            PageCache::new(
+                self.path.parent().unwrap_or_else(|| Path::new(".")),
+                self.byte_len(),
+            )
+        });
+        let page_size = cache.page_size();
+        let mut pages: HashMap<usize, (usize, Arc<[u8]>)> = HashMap::new();
+        let value_at = |index: usize,
+                        pages: &mut HashMap<usize, (usize, Arc<[u8]>)>|
+         -> Result<f64, PageError> {
+            let offset = byte_offset
+                .checked_add(
+                    index
+                        .checked_mul(size_of::<f64>())
+                        .ok_or(PageError::InvalidRange)?,
+                )
+                .ok_or(PageError::InvalidRange)?;
+            let page = offset / page_size;
+            if !pages.contains_key(&page) {
+                pages.insert(page, cache.read_page(self, page)?);
+            }
+            let (page_start, bytes) = pages.get(&page).ok_or(PageError::InvalidRange)?;
+            let local = offset
+                .checked_sub(*page_start)
+                .ok_or(PageError::InvalidRange)?;
+            let value = bytes
+                .get(local..local + size_of::<f64>())
+                .ok_or(PageError::InvalidRange)?;
+            Ok(f64::from_le_bytes(
+                value.try_into().map_err(|_| PageError::InvalidRange)?,
+            ))
+        };
+        let mut left = 0;
+        let mut right = value_count;
+        while left < right {
+            let middle = left + (right - left) / 2;
+            if predicate(value_at(middle, &mut pages)?) {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+        Ok(left)
+    }
+
     /// Loads the complete byte region.
     ///
     /// # Errors
@@ -298,6 +378,24 @@ impl PageCache {
         }
     }
 
+    fn page_size(&self) -> usize {
+        lock(&self.inner).page_bytes
+    }
+
+    fn read_page(&self, handle: &PageHandle, page: usize) -> Result<(usize, Arc<[u8]>), PageError> {
+        let page_size = self.page_size();
+        let start = page.checked_mul(page_size).ok_or(PageError::InvalidRange)?;
+        let end = start
+            .checked_add(page_size)
+            .unwrap_or(usize::MAX)
+            .min(handle.byte_len());
+        if start >= end {
+            return Err(PageError::InvalidRange);
+        }
+        let lease = self.read(handle, start..end)?;
+        Ok((start, lease.shared()))
+    }
+
     /// # Errors
     ///
     /// Returns an error for invalid ranges, short reads, IO failures, or when
@@ -420,7 +518,14 @@ impl PageCache {
         }
         drop(state);
 
-        let bytes: Arc<[u8]> = bytes.into();
+        let bytes = if pages.len() == 1
+            && range.start == first.saturating_mul(page_size)
+            && range.end == range.start.saturating_add(pages[0].len())
+        {
+            Arc::clone(&pages[0])
+        } else {
+            bytes.into()
+        };
         Ok(Lease {
             cache: Arc::clone(&self.inner),
             keys,
@@ -613,6 +718,27 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(cache.resident_bytes(), resident * 2);
+    }
+
+    #[test]
+    fn partition_point_reuses_loaded_pages() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("column");
+        let values: Vec<f64> = (0..32).map(f64::from).collect();
+        let bytes: Vec<u8> = values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        std::fs::write(&path, bytes).unwrap();
+        let cache = PageCache::with_page_bytes(directory.path(), 1024 * 1024, PAGE_BYTES_TEST);
+        let handle = PageHandle::cached(cache.clone(), &path, 0, values.len() * size_of::<f64>());
+        assert_eq!(
+            handle
+                .partition_point(0, values.len(), |value| value < 19.5)
+                .unwrap(),
+            20
+        );
+        assert_eq!(cache.resident_bytes(), PAGE_BYTES_TEST * 2);
     }
 
     #[test]

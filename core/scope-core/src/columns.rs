@@ -77,6 +77,9 @@ impl Column {
         &self,
         mut predicate: impl FnMut(f64) -> bool,
     ) -> Result<usize, PageError> {
+        if let Self::Paged(handle) = self {
+            return handle.partition_point(0, self.len(), predicate);
+        }
         let mut left = 0;
         let mut right = self.len();
         while left < right {

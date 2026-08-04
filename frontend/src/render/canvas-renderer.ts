@@ -104,6 +104,7 @@ export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
 const SOLID: number[] = [];
+const MAX_BATCHED_SERIES = 4;
 
 function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
@@ -164,6 +165,18 @@ interface FrameSpec {
   xScale?: AxisScale;
   /** Pixels reserved on the right for a decoration such as the colorbar. */
   rightGutter?: number;
+}
+
+interface ResolvedStroke {
+  color: string;
+  dash: DashStyle;
+  width: number;
+  alpha: number;
+}
+
+interface PathSink {
+  moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void;
 }
 
 export class CanvasRenderer {
@@ -244,7 +257,7 @@ export class CanvasRenderer {
     ]
       .map(String)
       .join(",");
-    response.series.forEach((series, index) => {
+    const styleFor = (index: number): ResolvedStroke => {
       const stroke = options.styles?.[index] ?? {
         hue: (index % COLOR_SLOTS) + 1,
         dash: "solid" as const,
@@ -267,18 +280,53 @@ export class CanvasRenderer {
         : hasEmphasis && !ghost
           ? 0.25
           : stroke.alpha;
-      this.drawSeries(
-        context,
-        plot,
-        project,
-        series,
+      return {
         color,
-        stroke.dash,
-        stroke.width + (emphasized ? 0.4 : 0),
+        dash: stroke.dash,
+        width: stroke.width + (emphasized ? 0.4 : 0),
         alpha,
-        pathKey,
-      );
-    });
+      };
+    };
+    const hasEmphasis =
+      options.emphasisIndex !== undefined ||
+      (options.emphasisIndices?.length ?? 0) > 0;
+    const canBatch =
+      response.series.length > 128 &&
+      !hasEmphasis &&
+      response.series.every((_, index) => {
+        const style = styleFor(index);
+        return style.alpha === 1 && style.dash === "solid";
+      });
+    if (canBatch) {
+      const groups = new Map<
+        string,
+        { style: ResolvedStroke; path: Path2D; count: number }[]
+      >();
+      response.series.forEach((series, index) => {
+        const style = styleFor(index);
+        const key = `${style.color}\u0000${String(style.width)}`;
+        const styledGroups = groups.get(key) ?? [];
+        let group = styledGroups.at(-1);
+        if (group === undefined || group.count === MAX_BATCHED_SERIES) {
+          group = { style, path: new Path2D(), count: 0 };
+          styledGroups.push(group);
+          groups.set(key, styledGroups);
+        }
+        this.appendSeriesPath(group.path, plot, project, series.bins);
+        group.count += 1;
+      });
+      for (const styledGroups of groups.values()) {
+        for (const group of styledGroups) {
+          this.setStroke(context, group.style);
+          context.stroke(group.path);
+        }
+      }
+    } else {
+      response.series.forEach((series, index) => {
+        const style = styleFor(index);
+        this.drawSeries(context, plot, project, series, style, pathKey);
+      });
+    }
     context.restore();
     finishAxes();
     return performance.now() - started;
@@ -672,38 +720,59 @@ export class CanvasRenderer {
     plot: PlotRect,
     project: Projection,
     series: ColumnarTile,
-    color: string,
-    dash: DashStyle,
-    width: number,
-    alpha: number,
+    style: ResolvedStroke,
     pathKey: string,
   ): void {
-    const { toX, toY } = project;
+    this.setStroke(context, style);
+    context.stroke(this.seriesPath(plot, project, series, pathKey));
+  }
 
-    if (this.lastStroke !== color) {
-      context.strokeStyle = color;
-      this.lastStroke = color;
+  private setStroke(
+    context: CanvasRenderingContext2D,
+    style: ResolvedStroke,
+  ): void {
+    if (this.lastStroke !== style.color) {
+      context.strokeStyle = style.color;
+      this.lastStroke = style.color;
     }
-    if (this.lastWidth !== width) {
-      context.lineWidth = width;
-      this.lastWidth = width;
+    if (this.lastWidth !== style.width) {
+      context.lineWidth = style.width;
+      this.lastWidth = style.width;
     }
-    if (this.lastAlpha !== alpha) {
-      context.globalAlpha = alpha;
-      this.lastAlpha = alpha;
+    if (this.lastAlpha !== style.alpha) {
+      context.globalAlpha = style.alpha;
+      this.lastAlpha = style.alpha;
     }
-    const dashPatternValue = dash === "solid" ? SOLID : dashPattern(dash);
+    const dashPatternValue =
+      style.dash === "solid" ? SOLID : dashPattern(style.dash);
     if (this.lastDash !== dashPatternValue) {
       context.setLineDash(dashPatternValue);
       this.lastDash = dashPatternValue;
     }
+  }
+
+  private seriesPath(
+    plot: PlotRect,
+    project: Projection,
+    series: ColumnarTile,
+    pathKey: string,
+  ): Path2D {
     const bins = series.bins;
     const cached = this.pathCache.get(bins);
-    if (cached?.key === pathKey) {
-      context.stroke(cached.path);
-      return;
-    }
+    if (cached?.key === pathKey) return cached.path;
     const path = new Path2D();
+    this.appendSeriesPath(path, plot, project, bins);
+    this.pathCache.set(bins, { key: pathKey, path });
+    return path;
+  }
+
+  private appendSeriesPath(
+    path: PathSink,
+    plot: PlotRect,
+    project: Projection,
+    bins: BinColumns,
+  ): void {
+    const { toX, toY } = project;
     let penDown = false;
     const { t0, t1, first, last, min, max, flags, count } = bins;
     const emitColumn = (
@@ -793,8 +862,6 @@ export class CanvasRenderer {
         );
       }
     }
-    this.pathCache.set(bins, { key: pathKey, path });
-    context.stroke(path);
   }
 
   private drawInlineFurniture(

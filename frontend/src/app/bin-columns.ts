@@ -114,10 +114,18 @@ export function sliceColumns(
 
 export function columnsYExtent(
   bins: BinColumns,
+  window?: { t0: number; t1: number },
 ): { min: number; max: number } | null {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   for (let index = 0; index < bins.count; index += 1) {
+    if (
+      window !== undefined &&
+      ((bins.t1[index] as number) < window.t0 ||
+        (bins.t0[index] as number) > window.t1)
+    ) {
+      continue;
+    }
     const flags = bins.flags[index] as number;
     if (flags & HAS_MIN) min = Math.min(min, bins.min[index] as number);
     if (flags & HAS_MAX) max = Math.max(max, bins.max[index] as number);

@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::sync::Arc;
 
 use scope_protocol::EnvelopeBin;
 
@@ -10,7 +11,7 @@ pub const HAS_MIN: u8 = 1 << 2;
 pub const HAS_MAX: u8 = 1 << 3;
 pub const HAS_GAP: u8 = 1 << 4;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct BinLevel {
     pub(crate) t0: Vec<f64>,
     pub(crate) t1: Vec<f64>,
@@ -23,6 +24,59 @@ pub struct BinLevel {
     pub(crate) sample_count: Vec<u32>,
     pub(crate) finite_count: Vec<u32>,
     pub(crate) flags: Vec<u8>,
+    shared: Option<Arc<SharedBinLevel>>,
+    range: Range<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SharedBinLevel {
+    t0: Arc<[f64]>,
+    t1: Arc<[f64]>,
+    first: Arc<[f64]>,
+    last: Arc<[f64]>,
+    min: Arc<[f64]>,
+    max: Arc<[f64]>,
+    sum: Arc<[f64]>,
+    sum_sq: Arc<[f64]>,
+    sample_count: Arc<[u32]>,
+    finite_count: Arc<[u32]>,
+    flags: Arc<[u8]>,
+}
+
+impl Default for BinLevel {
+    fn default() -> Self {
+        Self {
+            t0: Vec::new(),
+            t1: Vec::new(),
+            first: Vec::new(),
+            last: Vec::new(),
+            min: Vec::new(),
+            max: Vec::new(),
+            sum: Vec::new(),
+            sum_sq: Vec::new(),
+            sample_count: Vec::new(),
+            finite_count: Vec::new(),
+            flags: Vec::new(),
+            shared: None,
+            range: 0..0,
+        }
+    }
+}
+
+impl PartialEq for BinLevel {
+    fn eq(&self, other: &Self) -> bool {
+        self.t0_column() == other.t0_column()
+            && self.t1_column() == other.t1_column()
+            && self.first_column() == other.first_column()
+            && self.last_column() == other.last_column()
+            && self.min_column() == other.min_column()
+            && self.max_column() == other.max_column()
+            && self.sum_column() == other.sum_column()
+            && self.sum_sq_column() == other.sum_sq_column()
+            && self.sample_count_column() == other.sample_count_column()
+            && self.finite_count_column() == other.finite_count_column()
+            && self.flags_column() == other.flags_column()
+    }
 }
 
 impl BinLevel {
@@ -41,6 +95,8 @@ impl BinLevel {
             sample_count: Vec::with_capacity(capacity),
             finite_count: Vec::with_capacity(capacity),
             flags: Vec::with_capacity(capacity),
+            shared: None,
+            range: 0..0,
         }
     }
 
@@ -71,11 +127,13 @@ impl BinLevel {
     }
 
     pub fn len(&self) -> usize {
-        self.t0.len()
+        self.shared
+            .as_ref()
+            .map_or(self.t0.len(), |_| self.range.len())
     }
 
     pub fn is_empty(&self) -> bool {
-        self.t0.is_empty()
+        self.len() == 0
     }
 
     pub fn get(&self, index: usize) -> Option<BinRef<'_>> {
@@ -95,61 +153,103 @@ impl BinLevel {
 
     #[must_use]
     pub fn t0_column(&self) -> &[f64] {
-        &self.t0
+        self.shared
+            .as_ref()
+            .map_or(&self.t0, |shared| &shared.t0[self.range.clone()])
     }
 
     #[must_use]
     pub fn t1_column(&self) -> &[f64] {
-        &self.t1
+        self.shared
+            .as_ref()
+            .map_or(&self.t1, |shared| &shared.t1[self.range.clone()])
     }
 
     #[must_use]
     pub fn first_column(&self) -> &[f64] {
-        &self.first
+        self.shared
+            .as_ref()
+            .map_or(&self.first, |shared| &shared.first[self.range.clone()])
     }
 
     #[must_use]
     pub fn last_column(&self) -> &[f64] {
-        &self.last
+        self.shared
+            .as_ref()
+            .map_or(&self.last, |shared| &shared.last[self.range.clone()])
     }
 
     #[must_use]
     pub fn min_column(&self) -> &[f64] {
-        &self.min
+        self.shared
+            .as_ref()
+            .map_or(&self.min, |shared| &shared.min[self.range.clone()])
     }
 
     #[must_use]
     pub fn max_column(&self) -> &[f64] {
-        &self.max
+        self.shared
+            .as_ref()
+            .map_or(&self.max, |shared| &shared.max[self.range.clone()])
     }
 
     #[must_use]
     pub fn sum_column(&self) -> &[f64] {
-        &self.sum
+        self.shared
+            .as_ref()
+            .map_or(&self.sum, |shared| &shared.sum[self.range.clone()])
     }
 
     #[must_use]
     pub fn sum_sq_column(&self) -> &[f64] {
-        &self.sum_sq
+        self.shared
+            .as_ref()
+            .map_or(&self.sum_sq, |shared| &shared.sum_sq[self.range.clone()])
     }
 
     #[must_use]
     pub fn sample_count_column(&self) -> &[u32] {
-        &self.sample_count
+        self.shared.as_ref().map_or(&self.sample_count, |shared| {
+            &shared.sample_count[self.range.clone()]
+        })
     }
 
     #[must_use]
     pub fn finite_count_column(&self) -> &[u32] {
-        &self.finite_count
+        self.shared.as_ref().map_or(&self.finite_count, |shared| {
+            &shared.finite_count[self.range.clone()]
+        })
     }
 
     #[must_use]
     pub fn flags_column(&self) -> &[u8] {
-        &self.flags
+        self.shared
+            .as_ref()
+            .map_or(&self.flags, |shared| &shared.flags[self.range.clone()])
     }
 
     #[must_use]
     pub fn slice(&self, range: Range<usize>) -> Self {
+        if let Some(shared) = &self.shared {
+            let start = self.range.start + range.start;
+            let end = self.range.start + range.end;
+            let _ = &shared.t0[start..end];
+            return Self {
+                t0: Vec::new(),
+                t1: Vec::new(),
+                first: Vec::new(),
+                last: Vec::new(),
+                min: Vec::new(),
+                max: Vec::new(),
+                sum: Vec::new(),
+                sum_sq: Vec::new(),
+                sample_count: Vec::new(),
+                finite_count: Vec::new(),
+                flags: Vec::new(),
+                shared: Some(Arc::clone(shared)),
+                range: start..end,
+            };
+        }
         Self {
             t0: self.t0[range.clone()].to_vec(),
             t1: self.t1[range.clone()].to_vec(),
@@ -162,6 +262,42 @@ impl BinLevel {
             sample_count: self.sample_count[range.clone()].to_vec(),
             finite_count: self.finite_count[range.clone()].to_vec(),
             flags: self.flags[range].to_vec(),
+            shared: None,
+            range: 0..0,
+        }
+    }
+
+    pub(crate) fn into_shared(self) -> Self {
+        if self.shared.is_some() {
+            return self;
+        }
+        let len = self.t0.len();
+        Self {
+            t0: Vec::new(),
+            t1: Vec::new(),
+            first: Vec::new(),
+            last: Vec::new(),
+            min: Vec::new(),
+            max: Vec::new(),
+            sum: Vec::new(),
+            sum_sq: Vec::new(),
+            sample_count: Vec::new(),
+            finite_count: Vec::new(),
+            flags: Vec::new(),
+            shared: Some(Arc::new(SharedBinLevel {
+                t0: self.t0.into(),
+                t1: self.t1.into(),
+                first: self.first.into(),
+                last: self.last.into(),
+                min: self.min.into(),
+                max: self.max.into(),
+                sum: self.sum.into(),
+                sum_sq: self.sum_sq.into(),
+                sample_count: self.sample_count.into(),
+                finite_count: self.finite_count.into(),
+                flags: self.flags.into(),
+            })),
+            range: 0..len,
         }
     }
 
@@ -184,6 +320,8 @@ impl BinLevel {
             sample_count: decode_u32s(bytes, &mut at, count)?,
             finite_count: decode_u32s(bytes, &mut at, count)?,
             flags: bytes.get(at..at.checked_add(count)?)?.to_vec(),
+            shared: None,
+            range: 0..count,
         })
     }
 
@@ -254,15 +392,17 @@ impl BinLevel {
             sample_count,
             finite_count,
             flags,
+            shared: None,
+            range: 0..range.len(),
         })
     }
 
     pub(crate) fn t0s(&self) -> &[f64] {
-        &self.t0
+        self.t0_column()
     }
 
     pub(crate) fn t1s(&self) -> &[f64] {
-        &self.t1
+        self.t1_column()
     }
 }
 
@@ -322,18 +462,18 @@ pub struct BinRef<'a> {
 
 impl BinRef<'_> {
     pub fn to_wire(self) -> EnvelopeBin {
-        let flags = self.level.flags[self.index];
+        let flags = self.level.flags_column()[self.index];
         EnvelopeBin {
-            t0: self.level.t0[self.index],
-            t1: self.level.t1[self.index],
-            first: optional(self.level.first[self.index], flags, HAS_FIRST),
-            last: optional(self.level.last[self.index], flags, HAS_LAST),
-            min: optional(self.level.min[self.index], flags, HAS_MIN),
-            max: optional(self.level.max[self.index], flags, HAS_MAX),
-            sample_count: u64::from(self.level.sample_count[self.index]),
-            finite_count: u64::from(self.level.finite_count[self.index]),
-            sum: self.level.sum[self.index],
-            sum_sq: self.level.sum_sq[self.index],
+            t0: self.level.t0_column()[self.index],
+            t1: self.level.t1_column()[self.index],
+            first: optional(self.level.first_column()[self.index], flags, HAS_FIRST),
+            last: optional(self.level.last_column()[self.index], flags, HAS_LAST),
+            min: optional(self.level.min_column()[self.index], flags, HAS_MIN),
+            max: optional(self.level.max_column()[self.index], flags, HAS_MAX),
+            sample_count: u64::from(self.level.sample_count_column()[self.index]),
+            finite_count: u64::from(self.level.finite_count_column()[self.index]),
+            sum: self.level.sum_column()[self.index],
+            sum_sq: self.level.sum_sq_column()[self.index],
             has_gap: flags & HAS_GAP != 0,
         }
     }
@@ -400,6 +540,14 @@ mod tests {
         let level = BinLevel::from_wire(&[bin(), bin(), bin()]);
         let sliced = level.slice(1..3);
         assert_eq!(sliced.len(), 2);
+        assert_eq!(sliced.to_wire(0), level.to_wire(1));
+    }
+
+    #[test]
+    fn shared_slice_reuses_column_storage() {
+        let level = BinLevel::from_wire(&[bin(), bin(), bin()]).into_shared();
+        let sliced = level.slice(1..3);
+        assert_eq!(sliced.t0_column().as_ptr(), level.t0_column()[1..].as_ptr());
         assert_eq!(sliced.to_wire(0), level.to_wire(1));
     }
 }

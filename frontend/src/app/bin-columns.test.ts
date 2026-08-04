@@ -39,6 +39,11 @@ test("columnsYExtent ignores absent extrema", () => {
   expect(columnsYExtent(binColumnsFromWire([bin(0, 1, [Number.NaN])]))).toBe(
     null,
   );
+  expect(columnsYExtent(columns, { t0: 0, t1: 1.5 })).toEqual({
+    min: 2,
+    max: 5,
+  });
+  expect(columnsYExtent(columns, { t0: 3.1, t1: 4 })).toBe(null);
 });
 
 test("columnsStats aggregates overlapping finite bins", () => {

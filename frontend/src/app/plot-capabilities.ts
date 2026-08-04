@@ -208,7 +208,9 @@ export function policyFor(mode: PanelMode): PlotInteractionPolicy {
 }
 
 export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
-  const extents = input.series.map((series) => columnsYExtent(series.bins));
+  const extents = input.series.map((series) =>
+    columnsYExtent(series.bins, input.window),
+  );
   const resolve = (annotation: Annotation): ResolvedAnnotation | null => {
     if (annotation.domain !== "time") return null;
     const series = input.series.find(

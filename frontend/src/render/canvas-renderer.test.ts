@@ -576,6 +576,17 @@ describe("render", () => {
     expect(strokes).toContain("#edb120");
   });
 
+  it("batches solid high-cardinality strokes into bounded paths", () => {
+    const calls = renderOnce(
+      Array.from({ length: 129 }, (_, index) =>
+        tile(String(index), [{ t0: 0, t1: 1, v: index }]),
+      ),
+    );
+    expect(calls.filter((call) => call.op === "stroke").length).toBeLessThan(
+      50,
+    );
+  });
+
   it("draws a ghost with the fixed neutral stroke", () => {
     const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
       styles: [{ hue: null, dash: "solid", width: 1.3, alpha: 0.5 }],

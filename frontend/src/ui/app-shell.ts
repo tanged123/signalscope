@@ -397,7 +397,7 @@ export class AppShell {
         },
         onYRange: (id, range) => {
           this.workspace.setPanelYRange(id, [range[0], range[1]]);
-          this.commitHistory(`range:${id}`);
+          this.markHistoryDirty(`range:${id}`);
           this.scheduleRender();
         },
         onXRange: (id, range) => {
