@@ -94,6 +94,61 @@ impl BinLevel {
     }
 
     #[must_use]
+    pub fn t0_column(&self) -> &[f64] {
+        &self.t0
+    }
+
+    #[must_use]
+    pub fn t1_column(&self) -> &[f64] {
+        &self.t1
+    }
+
+    #[must_use]
+    pub fn first_column(&self) -> &[f64] {
+        &self.first
+    }
+
+    #[must_use]
+    pub fn last_column(&self) -> &[f64] {
+        &self.last
+    }
+
+    #[must_use]
+    pub fn min_column(&self) -> &[f64] {
+        &self.min
+    }
+
+    #[must_use]
+    pub fn max_column(&self) -> &[f64] {
+        &self.max
+    }
+
+    #[must_use]
+    pub fn sum_column(&self) -> &[f64] {
+        &self.sum
+    }
+
+    #[must_use]
+    pub fn sum_sq_column(&self) -> &[f64] {
+        &self.sum_sq
+    }
+
+    #[must_use]
+    pub fn sample_count_column(&self) -> &[u32] {
+        &self.sample_count
+    }
+
+    #[must_use]
+    pub fn finite_count_column(&self) -> &[u32] {
+        &self.finite_count
+    }
+
+    #[must_use]
+    pub fn flags_column(&self) -> &[u8] {
+        &self.flags
+    }
+
+    #[must_use]
     pub fn slice(&self, range: Range<usize>) -> Self {
         Self {
             t0: self.t0[range.clone()].to_vec(),

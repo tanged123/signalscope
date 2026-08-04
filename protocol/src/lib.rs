@@ -2,9 +2,14 @@
 
 mod envelope;
 mod generated;
+pub mod tile_binary;
 
 pub use envelope::{Envelope, VersionError};
 pub use generated::*;
+pub use tile_binary::{
+    BinaryTileSeries, OwnedBinarySeries, TileBinaryError, decode_tile_response,
+    encode_tile_response,
+};
 
 #[cfg(test)]
 mod tests {
