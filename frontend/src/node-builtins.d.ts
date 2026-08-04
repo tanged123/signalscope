@@ -4,6 +4,7 @@ declare module "node:fs" {
     path: string | URL,
     options?: { recursive?: boolean },
   ): string | undefined;
+  export function readFileSync(path: URL): Uint8Array;
   export function readFileSync(path: URL, encoding: "utf8"): string;
   export function writeFileSync(path: string | URL, data: string): void;
 }
