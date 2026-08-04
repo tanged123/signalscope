@@ -871,6 +871,9 @@ fn query_tiles(
 ) -> Result<Envelope<TileResponse>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let data = state.lock().map_err(|error| error.to_string())?;
+    let per_series = request.max_total_bins.map(|budget| {
+        (budget / u32::try_from(request.signal_ids.len().max(1)).unwrap_or(u32::MAX)).max(64)
+    });
     let mut series = Vec::new();
     for raw_id in request.signal_ids {
         let signal_id = SignalId(raw_id);
@@ -882,7 +885,12 @@ fn query_tiles(
             .pyramids
             .get(&signal_id)
             .ok_or_else(|| format!("pyramid is unavailable for signal id: {raw_id}"))?;
-        let query = pyramid.query(request.window.t0, request.window.t1, request.pixel_width);
+        let query = pyramid.query_with_target(
+            request.window.t0,
+            request.window.t1,
+            request.pixel_width,
+            per_series,
+        );
         series.push(SignalTile {
             signal_id: raw_id,
             signal_path: signal.path.clone(),

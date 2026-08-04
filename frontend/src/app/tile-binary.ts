@@ -15,7 +15,6 @@ if (new Uint8Array(new Uint32Array([1]).buffer)[0] !== 1) {
 
 const MAGIC = 0x42545353;
 const FIXED_SERIES_BYTES = 24;
-const F64_COLUMNS = 8;
 
 export function decodeTileResponse(
   buffer: ArrayBuffer,
@@ -31,7 +30,7 @@ export function decodeTileResponse(
   const version = view.getUint32(4, true);
   if (version !== PROTOCOL_VERSION) {
     throw new Error(
-      `unsupported tile binary version ${version}; expected ${PROTOCOL_VERSION}`,
+      `unsupported tile binary version ${String(version)}; expected ${String(PROTOCOL_VERSION)}`,
     );
   }
   const seriesCount = view.getUint32(8, true);

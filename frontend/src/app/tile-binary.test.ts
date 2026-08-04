@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { EnvelopeBin, TileResponse } from "../generated/protocol";
+import type { TileResponse } from "../generated/protocol";
 import fixtureJson from "../../../protocol/testdata/tile-binary-conformance.json";
 import { decodeTileResponse } from "./tile-binary";
 import { wireBinFromColumns } from "./bin-columns";
@@ -12,10 +12,8 @@ const fixtureBytes = readFileSync(
     import.meta.url,
   ),
 );
-const fixtureBuffer = fixtureBytes.buffer.slice(
-  fixtureBytes.byteOffset,
-  fixtureBytes.byteOffset + fixtureBytes.byteLength,
-);
+const fixtureBuffer = new ArrayBuffer(fixtureBytes.byteLength);
+new Uint8Array(fixtureBuffer).set(fixtureBytes);
 
 describe("decodeTileResponse", () => {
   it("matches the Rust binary conformance fixture", () => {
@@ -35,7 +33,7 @@ describe("decodeTileResponse", () => {
         Array.from({ length: actual.bins.count }, (_, binIndex) =>
           wireBinFromColumns(actual.bins, binIndex),
         ),
-      ).toEqual(expected.bins as EnvelopeBin[]);
+      ).toEqual(expected.bins);
     }
   });
 

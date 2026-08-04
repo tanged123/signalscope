@@ -424,6 +424,17 @@ impl Pyramid {
 
     #[must_use]
     pub fn query(&self, t0: f64, t1: f64, pixel_width: u32) -> PyramidQuery {
+        self.query_with_target(t0, t1, pixel_width, None)
+    }
+
+    #[must_use]
+    pub fn query_with_target(
+        &self,
+        t0: f64,
+        t1: f64,
+        pixel_width: u32,
+        max_bins: Option<u32>,
+    ) -> PyramidQuery {
         let Some((time, _)) = self.columns() else {
             return PyramidQuery {
                 level: 0,
@@ -443,7 +454,12 @@ impl Pyramid {
         }
         let target = usize::try_from(pixel_width.max(1))
             .unwrap_or(usize::MAX)
-            .saturating_mul(2);
+            .saturating_mul(2)
+            .min(
+                max_bins
+                    .and_then(|max_bins| usize::try_from(max_bins).ok())
+                    .unwrap_or(usize::MAX),
+            );
         let raw_start = time.partition_point(|time| time < t0).unwrap_or(0);
         let raw_end = time.partition_point(|time| time <= t1).unwrap_or(0);
         if raw_end.saturating_sub(raw_start) <= target || self.merged.is_empty() {
@@ -820,6 +836,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn bin_budget_selects_a_coarser_level() {
+        let time = (0..100_000).map(f64::from).collect::<Vec<_>>();
+        let pyramid = Pyramid::from_samples(&time, &time);
+        let unbudgeted = pyramid.query(0.0, 99_999.0, 1920);
+        let budgeted = pyramid.query_with_target(0.0, 99_999.0, 1920, Some(256));
+        assert!(budgeted.level > unbudgeted.level);
+        assert!(budgeted.bins.len() <= 258);
     }
 
     #[test]

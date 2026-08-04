@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -243,6 +243,8 @@ pub struct TileRequest {
     pub signal_ids: Vec<u64>,
     pub window: TimeWindow,
     pub pixel_width: u32,
+    #[serde(default)]
+    pub max_total_bins: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

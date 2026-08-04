@@ -100,6 +100,7 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
 /** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
 const SAMPLE_CAP = 8192;
+const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
@@ -2565,6 +2566,7 @@ export class AppShell {
                 signal_ids: ids,
                 window,
                 pixel_width: panelWidth > 0 ? Math.round(panelWidth) : width,
+                max_total_bins: TILE_BIN_BUDGET,
               }),
             );
           } else {
