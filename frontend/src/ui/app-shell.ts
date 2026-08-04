@@ -203,6 +203,7 @@ export class AppShell {
   private supportedFormatHint = "—";
   private restoringHistory = false;
   private historyGestureKey: string | null = null;
+  private historyDirty: string | null = null;
   private historyCoalesceTimer: number | null = null;
 
   constructor(
@@ -1859,8 +1860,30 @@ export class AppShell {
     }, 250);
   }
 
+  private markHistoryDirty(coalesceKey: string): void {
+    if (this.restoringHistory) return;
+    this.historyDirty = coalesceKey;
+    this.clearHistoryCoalesceTimer();
+    this.historyCoalesceTimer = window.setTimeout(() => {
+      this.historyCoalesceTimer = null;
+      const key = this.historyDirty;
+      this.historyDirty = null;
+      if (key !== null) {
+        this.history.commit(historySnapshot(this.workspace.snapshot()), key);
+      }
+      this.history.commit(historySnapshot(this.workspace.snapshot()));
+    }, 250);
+  }
+
   private closeHistoryCoalescing(): void {
     this.clearHistoryCoalesceTimer();
+    const key = this.historyDirty;
+    this.historyDirty = null;
+    if (key !== null) {
+      this.history.commit(historySnapshot(this.workspace.snapshot()), key);
+      this.history.commit(historySnapshot(this.workspace.snapshot()));
+      return;
+    }
     this.history.commit(historySnapshot(this.workspace.snapshot()));
   }
 
@@ -2750,8 +2773,8 @@ export class AppShell {
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
     }
-    this.commitHistory(`range:${panelId}`);
-    this.renderTiles();
+    this.markHistoryDirty(`range:${panelId}`);
+    this.scheduleRender();
     this.scheduleRefresh();
   }
 
@@ -2764,8 +2787,8 @@ export class AppShell {
       return;
     }
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
-    this.commitHistory(`range:${panelId}`);
-    this.renderTiles();
+    this.markHistoryDirty(`range:${panelId}`);
+    this.scheduleRender();
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
