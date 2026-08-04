@@ -907,6 +907,58 @@ fn query_tiles(
 }
 
 #[tauri::command]
+async fn query_tiles_bin(
+    request: Envelope<TileRequest>,
+    state: State<'_, Arc<Mutex<DataState>>>,
+) -> Result<tauri::ipc::Response, String> {
+    let request = request.open().map_err(|error| error.to_string())?;
+    let state = state.inner().clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let data = state.lock().map_err(|error| error.to_string())?;
+        let per_series = request.max_total_bins.map(|budget| {
+            (budget / u32::try_from(request.signal_ids.len().max(1)).unwrap_or(u32::MAX)).max(64)
+        });
+        let mut owned: Vec<(u64, String, Option<String>, u32, scope_core::bins::BinLevel)> =
+            Vec::with_capacity(request.signal_ids.len());
+        for raw_id in &request.signal_ids {
+            let signal_id = SignalId(*raw_id);
+            let signal = data
+                .store
+                .signal(signal_id)
+                .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
+            let pyramid = data
+                .pyramids
+                .get(&signal_id)
+                .ok_or_else(|| format!("pyramid is unavailable for signal id: {raw_id}"))?;
+            let query = pyramid.query_with_target(
+                request.window.t0,
+                request.window.t1,
+                request.pixel_width,
+                per_series,
+            );
+            owned.push((
+                *raw_id,
+                signal.path.clone(),
+                signal.unit.clone(),
+                query.level,
+                query.bins,
+            ));
+        }
+        drop(data);
+        let series: Vec<_> = owned
+            .iter()
+            .map(|(id, path, unit, level, bins)| {
+                scope_core::tile_wire::binary_series(*id, path, unit.as_deref(), *level, bins)
+            })
+            .collect();
+        Ok::<_, String>(scope_protocol::tile_binary::encode_tile_response(&series))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn query_samples(
     request: Envelope<SampleRequest>,
@@ -1900,6 +1952,7 @@ pub fn run() {
             list_sources,
             list_signals,
             query_tiles,
+            query_tiles_bin,
             query_samples,
             create_derived,
             create_derived_bundle,

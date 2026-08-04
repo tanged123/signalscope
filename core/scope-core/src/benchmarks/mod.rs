@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+    bins::BinLevel,
     ingest::{
         self, CancelToken, DecodeContext, DecodedSource, IngestError, IngestSummary,
         admission::{BudgetConfig, MemoryBudget},
@@ -531,19 +532,25 @@ fn bench_tile_wire_cost() {
     assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
 
     let pyramids = sink.pyramids.lock().unwrap();
-    let series: Vec<scope_protocol::SignalTile> = pyramids
+    let per_series = (250_000_u32 / 1000).max(64);
+    let queried: Vec<(String, u32, BinLevel)> = pyramids
         .iter()
         .filter(|((_, local_path), _)| local_path == "response")
         .enumerate()
         .map(|(index, (_, pyramid))| {
-            let query = pyramid.query(0.0, 1000.0, 1920);
-            scope_protocol::SignalTile {
-                signal_id: index as u64,
-                signal_path: format!("run_{index:04}/response"),
-                unit: None,
-                level: query.level,
-                bins: query.bins.to_wire_vec(),
-            }
+            let query = pyramid.query_with_target(0.0, 1000.0, 1920, Some(per_series));
+            (format!("run_{index:04}/response"), query.level, query.bins)
+        })
+        .collect();
+    let series: Vec<scope_protocol::SignalTile> = queried
+        .iter()
+        .enumerate()
+        .map(|(index, (path, level, bins))| scope_protocol::SignalTile {
+            signal_id: index as u64,
+            signal_path: path.clone(),
+            unit: None,
+            level: *level,
+            bins: bins.to_wire_vec(),
         })
         .collect();
     assert_eq!(series.len(), 1000);
@@ -555,6 +562,19 @@ fn bench_tile_wire_cost() {
     let started = Instant::now();
     let json = serde_json::to_string(&response).unwrap();
     let json_encode_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let binary_series: Vec<_> = queried
+        .iter()
+        .enumerate()
+        .map(|(index, (path, level, bins))| {
+            crate::tile_wire::binary_series(index as u64, path, None, *level, bins)
+        })
+        .collect();
+    let started = Instant::now();
+    let binary = scope_protocol::tile_binary::encode_tile_response(&binary_series);
+    let binary_encode_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let binary_bytes = binary.len();
+    let json_to_binary_ratio = json.len() as f64 / binary_bytes as f64;
+    let pass = binary_encode_ms <= 100.0 && binary_bytes <= 64 * 1024 * 1024;
     report::write_report(
         "tile_wire_cost",
         serde_json::json!({
@@ -563,10 +583,22 @@ fn bench_tile_wire_cost() {
             "bins": response.series.iter().map(|s| s.bins.len()).sum::<usize>(),
             "json_bytes": json.len(),
             "json_encode_ms": json_encode_ms,
-            "pass": true,
+            "binary_bytes": binary_bytes,
+            "binary_encode_ms": binary_encode_ms,
+            "json_to_binary_ratio": json_to_binary_ratio,
+            "pass": pass,
         }),
     );
+    assert!(
+        binary_encode_ms <= 100.0,
+        "binary encode {binary_encode_ms:.2}ms (floor 100ms)"
+    );
+    assert!(
+        binary_bytes <= 64 * 1024 * 1024,
+        "binary payload {binary_bytes} bytes (floor 64MiB)"
+    );
     std::hint::black_box(json.len());
+    std::hint::black_box(binary);
 }
 
 #[test]
