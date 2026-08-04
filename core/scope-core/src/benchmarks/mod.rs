@@ -687,9 +687,9 @@ fn latency_ladder_covers_each_zoom_span() {
     let windows = latency_windows(12_500.0, &spans);
     assert_eq!(windows.len(), spans.len() * 28);
     for (span_windows, &span) in windows.chunks(28).zip(spans.iter()) {
-        assert_eq!(span_windows.first().unwrap().0, 0.0);
-        assert_eq!(span_windows.first().unwrap().1, span);
-        assert_eq!(span_windows.last().unwrap().1, 12_500.0);
+        assert!(span_windows.first().unwrap().0.abs() < f64::EPSILON);
+        assert!((span_windows.first().unwrap().1 - span).abs() < f64::EPSILON);
+        assert!((span_windows.last().unwrap().1 - 12_500.0).abs() < f64::EPSILON);
     }
 }
 
