@@ -40,7 +40,7 @@ test_frontend() {
 
 bench_e2e() {
   local corpus_dir="$signalscope_root/build/bench/corpus/mc1000"
-  if [ ! -f "$corpus_dir/manifest.txt" ]; then
+  if [ ! -f "$corpus_dir/manifest.json" ]; then
     cargo test --release -p scope-core -- --ignored --test-threads=1 bench_corpus_mc1000
   fi
   local -a data_args=()

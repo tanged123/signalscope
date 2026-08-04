@@ -110,8 +110,8 @@ static GENERATION: Mutex<()> = Mutex::new(());
 pub fn ensure(spec: &TierSpec) -> PathBuf {
     let _guard = GENERATION.lock().unwrap();
     let dir = bench_root().join("corpus").join(spec.name);
-    let manifest = dir.join("manifest.txt");
-    let stamp = format!("{spec:?}");
+    let manifest = dir.join("manifest.json");
+    let stamp = serde_json::to_string(&format!("{spec:?}")).unwrap();
     if std::fs::read_to_string(&manifest).is_ok_and(|existing| existing == stamp) {
         return dir;
     }
@@ -180,6 +180,30 @@ mod tests {
             .collect();
         assert_eq!(gap_lines.first(), Some(&41));
         assert_eq!(gap_lines.last(), Some(&50));
+    }
+
+    #[test]
+    fn manifest_does_not_match_a_provider_extension() {
+        // Folder imports admit every provider extension (.txt included); the
+        // manifest must never be picked up as a source alongside the runs.
+        let dir = ensure(&tiny());
+        assert!(dir.join("manifest.json").exists());
+        let extensions: Vec<String> = crate::ingest::registry::ProviderRegistry::builtin()
+            .descriptors()
+            .iter()
+            .flat_map(|descriptor| descriptor.extensions.clone())
+            .collect();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let extension = path.extension().unwrap().to_str().unwrap().to_lowercase();
+            if extension != "csv" {
+                assert!(
+                    !extensions.contains(&extension),
+                    "{} would be ingested by a folder scan",
+                    path.display()
+                );
+            }
+        }
     }
 
     #[test]
