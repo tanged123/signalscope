@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
 import {
   binColumnsFromWire,
+  binColumnsFromWireRange,
   columnsStats,
   columnsValueAtTime,
   columnsYExtent,
@@ -44,6 +45,17 @@ test("columnsYExtent ignores absent extrema", () => {
     max: 5,
   });
   expect(columnsYExtent(columns, { t0: 3.1, t1: 4 })).toBe(null);
+});
+
+test("bin columns can decode only a wire window", () => {
+  const columns = binColumnsFromWireRange(
+    [bin(0, 1, [1]), bin(1, 2, [2]), bin(2, 3, [3])],
+    1,
+    3,
+  );
+  expect(columns.count).toBe(2);
+  expect([...columns.t0]).toEqual([1, 2]);
+  expect([...columns.last]).toEqual([2, 3]);
 });
 
 test("columnsStats aggregates overlapping finite bins", () => {

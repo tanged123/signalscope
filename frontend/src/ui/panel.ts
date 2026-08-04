@@ -559,10 +559,10 @@ export class PanelView {
   private readonly yAxis = new YAxisPolicy();
   private lastState: RenderPanelState | null = null;
   private lastInputState: PanelState | null = null;
+  private lastStateKey: string | null = null;
   private lastTiles: ColumnarTileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
-  private lastRevision = -1;
   private lastMissingEmpty = true;
   private preparedPlot: PreparedPlot | null = null;
   private hitAdapter: SeriesHitAdapter | null = null;
@@ -938,13 +938,13 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
-    revision = 0,
+    _revision = 0,
   ): number {
+    const stateKey = JSON.stringify(state);
     if (
-      state === this.lastInputState &&
+      stateKey === this.lastStateKey &&
       tiles === this.lastTiles &&
       samples === this.lastSamples &&
-      revision === this.lastRevision &&
       this.lastWindow !== null &&
       window.t0 === this.lastWindow.t0 &&
       window.t1 === this.lastWindow.t1 &&
@@ -955,11 +955,11 @@ export class PanelView {
     }
     const rendered = renderState(state, this.callbacks);
     this.lastInputState = state;
+    this.lastStateKey = stateKey;
     this.lastState = rendered;
     this.lastTiles = tiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
-    this.lastRevision = revision;
     this.lastMissingEmpty = missing.length === 0;
     this.preparedPlot = null;
     this.hitAdapter = null;

@@ -46,6 +46,7 @@ import {
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import {
   binColumnsFromWire,
+  binColumnsFromWireRange,
   sliceColumns,
   type BinColumns,
   type ColumnarTileResponse,
@@ -574,13 +575,18 @@ export class BakedPlane implements DataPlane {
             request.pixel_width,
             perSeries,
           );
-          const bins = this.columnsFor(signal, range.level);
+          const bins = this.columnsFor(
+            signal,
+            range.level,
+            range.start,
+            range.end,
+          );
           return {
             signalId: signal.summary.signal_id,
             signalPath: signal.summary.path,
             unit: signal.summary.unit,
             level: range.level,
-            bins: sliceColumns(bins, range.start, range.end),
+            bins,
           };
         }),
     });
@@ -589,6 +595,8 @@ export class BakedPlane implements DataPlane {
   private columnsFor(
     signal: BakedManifest["payload"]["signals"][number],
     level: number,
+    start: number,
+    end: number,
   ): BinColumns {
     let levels = this.levelColumns.get(signal.summary.signal_id);
     if (levels === undefined) {
@@ -597,10 +605,15 @@ export class BakedPlane implements DataPlane {
     }
     let columns = levels.get(level);
     if (columns === undefined) {
-      columns = binColumnsFromWire(signal.levels[level] ?? []);
-      levels.set(level, columns);
+      const wire = signal.levels[level] ?? [];
+      if (start <= 0 && end >= wire.length) {
+        columns = binColumnsFromWire(wire);
+        levels.set(level, columns);
+        return columns;
+      }
+      return binColumnsFromWireRange(wire, start, end);
     }
-    return columns;
+    return sliceColumns(columns, start, end);
   }
 
   querySamples(request: SampleRequest): Promise<SampleResponse> {

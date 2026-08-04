@@ -36,6 +36,8 @@ The core page cache stores fixed-size pages and updates residency counters
 incrementally. The frontend requests aligned, padded time windows, slices
 cached typed arrays with zero-copy subarray views, and invalidates the cache
 when the signal catalog changes or its request identity no longer matches.
+The baked plane decodes only a requested wire range until a complete level is
+reused, keeping windowed snapshot queries bounded as well.
 
 Canvas2D time strokes use one plot clip per frame, bevel joins, diffed stroke
 state, and per-column vertex skipping: an envelope emits entry, only extrema
@@ -44,6 +46,8 @@ columns while retaining first, last, min, max, and gap state. Geometry is
 cached in `Path2D` by typed-column identity and projection key so style-only
 redraws restroke existing paths. `has_gap` lifts the pen; gaps are not
 represented by uPlot-style inverse clip paths.
+High-cardinality solid traces use bounded style-homogeneous path batches;
+paths with emphasis, opacity, or dashes retain per-series state.
 
 ## Consequences
 
