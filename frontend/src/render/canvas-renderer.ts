@@ -5,6 +5,7 @@ import {
   HAS_LAST,
   HAS_MAX,
   HAS_MIN,
+  type BinColumns,
   type ColumnarTile,
   type ColumnarTileResponse,
 } from "../app/bin-columns";
@@ -176,6 +177,10 @@ export class CanvasRenderer {
   private lastWidth = Number.NaN;
   private lastAlpha = Number.NaN;
   private lastDash: number[] | null = null;
+  private readonly pathCache = new WeakMap<
+    BinColumns,
+    { key: string; path: Path2D }
+  >();
 
   constructor(canvas: HTMLCanvasElement) {
     this.surface = new CanvasSurface(canvas);
@@ -227,6 +232,18 @@ export class CanvasRenderer {
     context.clip();
     context.lineJoin = "bevel";
     context.lineCap = "butt";
+    const pathKey = [
+      xRange.min,
+      xRange.max,
+      options.yRange[0],
+      options.yRange[1],
+      plot.x,
+      plot.y,
+      plot.width,
+      plot.height,
+    ]
+      .map(String)
+      .join(",");
     response.series.forEach((series, index) => {
       const stroke = options.styles?.[index] ?? {
         hue: (index % COLOR_SLOTS) + 1,
@@ -259,6 +276,7 @@ export class CanvasRenderer {
         stroke.dash,
         stroke.width + (emphasized ? 0.4 : 0),
         alpha,
+        pathKey,
       );
     });
     context.restore();
@@ -658,6 +676,7 @@ export class CanvasRenderer {
     dash: DashStyle,
     width: number,
     alpha: number,
+    pathKey: string,
   ): void {
     const { toX, toY } = project;
 
@@ -678,9 +697,15 @@ export class CanvasRenderer {
       context.setLineDash(dashPatternValue);
       this.lastDash = dashPatternValue;
     }
-    context.beginPath();
+    const bins = series.bins;
+    const cached = this.pathCache.get(bins);
+    if (cached?.key === pathKey) {
+      context.stroke(cached.path);
+      return;
+    }
+    const path = new Path2D();
     let penDown = false;
-    const { t0, t1, first, last, min, max, flags, count } = series.bins;
+    const { t0, t1, first, last, min, max, flags, count } = bins;
     const emitColumn = (
       x: number,
       yFirst: number,
@@ -690,16 +715,16 @@ export class CanvasRenderer {
       gap: boolean,
     ): void => {
       if (!penDown || gap) {
-        context.moveTo(x, yFirst);
+        path.moveTo(x, yFirst);
       } else {
-        context.lineTo(x, yFirst);
+        path.lineTo(x, yFirst);
       }
       if (yMin !== yMax) {
-        if (yMin !== yFirst && yMin !== yLast) context.lineTo(x, yMin);
-        if (yMax !== yFirst && yMax !== yLast) context.lineTo(x, yMax);
-        context.lineTo(x, yLast);
+        if (yMin !== yFirst && yMin !== yLast) path.lineTo(x, yMin);
+        if (yMax !== yFirst && yMax !== yLast) path.lineTo(x, yMax);
+        path.lineTo(x, yLast);
       } else if (yLast !== yFirst) {
-        context.lineTo(x, yLast);
+        path.lineTo(x, yLast);
       }
       penDown = !gap;
     };
@@ -768,7 +793,8 @@ export class CanvasRenderer {
         );
       }
     }
-    context.stroke();
+    this.pathCache.set(bins, { key: pathKey, path });
+    context.stroke(path);
   }
 
   private drawInlineFurniture(

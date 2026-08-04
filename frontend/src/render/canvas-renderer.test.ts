@@ -207,25 +207,44 @@ function renderOnce(
   options: Partial<RenderOptions> = {},
 ): DrawCall[] {
   const { calls, context } = recordingContext();
+  const globalWithPath = globalThis as unknown as {
+    Path2D?: typeof Path2D;
+  };
+  const previousPath2D = globalWithPath.Path2D;
+  class RecordingPath2D {
+    moveTo(x: number, y: number): void {
+      calls.push({ op: "moveTo", args: [x, y] });
+    }
+
+    lineTo(x: number, y: number): void {
+      calls.push({ op: "lineTo", args: [x, y] });
+    }
+  }
+  globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
   const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
   renderer.setPalette(TEST_PALETTE);
   const response: ColumnarTileResponse = { requestId: "test", series };
-  renderer.render(
-    response,
-    { min: 0, max: 10 },
-    {
-      xLabel: "time (s)",
-      yLabel: "value",
-      styles: series.map<SeriesStroke>((_, index) => ({
-        hue: index + 1,
-        dash: "solid",
-        width: 1.4,
-        alpha: 1,
-      })),
-      yRange: [-1, 5],
-      ...options,
-    },
-  );
+  try {
+    renderer.render(
+      response,
+      { min: 0, max: 10 },
+      {
+        xLabel: "time (s)",
+        yLabel: "value",
+        styles: series.map<SeriesStroke>((_, index) => ({
+          hue: index + 1,
+          dash: "solid",
+          width: 1.4,
+          alpha: 1,
+        })),
+        yRange: [-1, 5],
+        ...options,
+      },
+    );
+  } finally {
+    if (previousPath2D === undefined) delete globalWithPath.Path2D;
+    else globalWithPath.Path2D = previousPath2D;
+  }
   return calls;
 }
 
@@ -622,6 +641,57 @@ describe("render", () => {
       .slice(seriesStart, seriesEnd)
       .filter((call) => call.op === "moveTo" || call.op === "lineTo");
     expect(vertices.length).toBeLessThan(700);
+  });
+
+  it("reuses geometry when only series emphasis changes", () => {
+    const { calls, context } = recordingContext();
+    const pathCalls: string[] = [];
+    const globalWithPath = globalThis as unknown as {
+      Path2D?: typeof Path2D;
+    };
+    const previousPath2D = globalWithPath.Path2D;
+    class RecordingPath2D {
+      moveTo(): void {
+        pathCalls.push("moveTo");
+      }
+
+      lineTo(): void {
+        pathCalls.push("lineTo");
+      }
+    }
+    globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
+    try {
+      const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
+      renderer.setPalette(TEST_PALETTE);
+      const response = {
+        requestId: "test",
+        series: [tile("a", [{ t0: 0, t1: 1, v: 1 }])],
+      };
+      const options: RenderOptions = {
+        xLabel: "time (s)",
+        yLabel: "value",
+        yRange: [-1, 5],
+        styles: [{ hue: 1, dash: "solid", width: 1.4, alpha: 1 }],
+      };
+      renderer.render(response, { min: 0, max: 10 }, options);
+      const firstGeometryCount = pathCalls.length;
+      renderer.render(
+        response,
+        { min: 0, max: 10 },
+        {
+          ...options,
+          emphasisIndex: 0,
+        },
+      );
+      expect(firstGeometryCount).toBeGreaterThan(0);
+      expect(pathCalls).toHaveLength(firstGeometryCount);
+      expect(
+        calls.filter((call) => call.op === "stroke").length,
+      ).toBeGreaterThan(1);
+    } finally {
+      if (previousPath2D === undefined) delete globalWithPath.Path2D;
+      else globalWithPath.Path2D = previousPath2D;
+    }
   });
 
   it("multiplies a dimmed path's configured alpha", () => {
