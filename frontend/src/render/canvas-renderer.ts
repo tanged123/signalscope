@@ -102,6 +102,7 @@ export const SERIES_TOKENS = [
 export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
+const SOLID: number[] = [];
 
 function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
@@ -171,6 +172,10 @@ export class CanvasRenderer {
   private colorbarGradient: CanvasGradient | null = null;
   private colorbarBottom = 0;
   private sequentialRamp: ColormapRamp | null = null;
+  private lastStroke: string | null = null;
+  private lastWidth = Number.NaN;
+  private lastAlpha = Number.NaN;
+  private lastDash: number[] | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.surface = new CanvasSurface(canvas);
@@ -216,6 +221,12 @@ export class CanvasRenderer {
         ? {}
         : { axisStyle: options.axisStyle }),
     });
+    context.save();
+    context.beginPath();
+    context.rect(plot.x, plot.y, plot.width, plot.height);
+    context.clip();
+    context.lineJoin = "bevel";
+    context.lineCap = "butt";
     response.series.forEach((series, index) => {
       const stroke = options.styles?.[index] ?? {
         hue: (index % COLOR_SLOTS) + 1,
@@ -250,6 +261,7 @@ export class CanvasRenderer {
         alpha,
       );
     });
+    context.restore();
     finishAxes();
     return performance.now() - started;
   }
@@ -298,6 +310,10 @@ export class CanvasRenderer {
    */
   private beginFrame(spec: FrameSpec): Frame {
     const { context, width, height } = this.surface.prepare();
+    this.lastStroke = null;
+    this.lastWidth = Number.NaN;
+    this.lastAlpha = Number.NaN;
+    this.lastDash = null;
     const colors = this.resolvePalette();
     context.fillStyle = colors.background;
     context.fillRect(0, 0, width, height);
@@ -645,17 +661,48 @@ export class CanvasRenderer {
   ): void {
     const { toX, toY } = project;
 
-    context.save();
-    context.beginPath();
-    context.rect(plot.x, plot.y, plot.width, plot.height);
-    context.clip();
-    context.strokeStyle = color;
-    context.lineWidth = width;
-    context.globalAlpha = alpha;
-    context.setLineDash(dashPattern(dash));
+    if (this.lastStroke !== color) {
+      context.strokeStyle = color;
+      this.lastStroke = color;
+    }
+    if (this.lastWidth !== width) {
+      context.lineWidth = width;
+      this.lastWidth = width;
+    }
+    if (this.lastAlpha !== alpha) {
+      context.globalAlpha = alpha;
+      this.lastAlpha = alpha;
+    }
+    const dashPatternValue = dash === "solid" ? SOLID : dashPattern(dash);
+    if (this.lastDash !== dashPatternValue) {
+      context.setLineDash(dashPatternValue);
+      this.lastDash = dashPatternValue;
+    }
     context.beginPath();
     let penDown = false;
     const { t0, t1, first, last, min, max, flags, count } = series.bins;
+    const emitColumn = (
+      x: number,
+      yFirst: number,
+      yMin: number,
+      yMax: number,
+      yLast: number,
+      gap: boolean,
+    ): void => {
+      if (!penDown || gap) {
+        context.moveTo(x, yFirst);
+      } else {
+        context.lineTo(x, yFirst);
+      }
+      if (yMin !== yMax) {
+        if (yMin !== yFirst && yMin !== yLast) context.lineTo(x, yMin);
+        if (yMax !== yFirst && yMax !== yLast) context.lineTo(x, yMax);
+        context.lineTo(x, yLast);
+      } else if (yLast !== yFirst) {
+        context.lineTo(x, yLast);
+      }
+      penDown = !gap;
+    };
     for (let index = 0; index < count; index += 1) {
       const binFlags = flags[index] as number;
       if (
@@ -666,21 +713,16 @@ export class CanvasRenderer {
         continue;
       }
       const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
-      const firstY = toY(first[index] as number);
-      if (!penDown || (binFlags & HAS_GAP) !== 0) {
-        context.moveTo(x, firstY);
-      } else {
-        context.lineTo(x, firstY);
-      }
-      context.lineTo(x, toY(min[index] as number));
-      context.lineTo(x, toY(max[index] as number));
-      context.lineTo(x, toY(last[index] as number));
-      penDown = (binFlags & HAS_GAP) === 0;
+      emitColumn(
+        x,
+        toY(first[index] as number),
+        toY(min[index] as number),
+        toY(max[index] as number),
+        toY(last[index] as number),
+        (binFlags & HAS_GAP) !== 0,
+      );
     }
     context.stroke();
-    context.globalAlpha = 1;
-    context.setLineDash([]);
-    context.restore();
   }
 
   private drawInlineFurniture(

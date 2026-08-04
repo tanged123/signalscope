@@ -639,7 +639,7 @@ describe("render", () => {
       .filter((call) => call.op === "setLineDash")
       .map((call) => JSON.stringify(call.args[0]));
     expect(patterns).toContain(JSON.stringify([6, 4]));
-    expect(patterns.at(-1)).toBe(JSON.stringify([]));
+    expect(patterns.at(-1)).toBe(JSON.stringify([6, 4]));
   });
 
   it("clips series strokes to the plot rectangle", () => {
