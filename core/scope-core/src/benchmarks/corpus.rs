@@ -53,6 +53,8 @@ pub fn bench_root() -> PathBuf {
 /// xorshift64*: deterministic, dependency-free.
 struct Rng(u64);
 
+const GENERATOR_VERSION: u32 = 2;
+
 impl Rng {
     fn new(seed: u64) -> Self {
         Self(seed.wrapping_mul(2_685_821_657_736_338_717).max(1))
@@ -63,7 +65,7 @@ impl Rng {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
-        (self.0 >> 11) as f64 / f64::from(1u32 << 21) / f64::from(1u32 << 21) / 2.0
+        (self.0 >> 11) as f64 / (1_u64 << 53) as f64
     }
 }
 
@@ -111,7 +113,11 @@ pub fn ensure(spec: &TierSpec) -> PathBuf {
     let _guard = GENERATION.lock().unwrap();
     let dir = bench_root().join("corpus").join(spec.name);
     let manifest = dir.join("manifest.json");
-    let stamp = serde_json::to_string(&format!("{spec:?}")).unwrap();
+    let stamp = serde_json::json!({
+        "generator": GENERATOR_VERSION,
+        "spec": format!("{spec:?}"),
+    })
+    .to_string();
     if std::fs::read_to_string(&manifest).is_ok_and(|existing| existing == stamp) {
         return dir;
     }
@@ -151,6 +157,15 @@ mod tests {
                 std::fs::read(b.path().join(&name)).unwrap(),
                 "{name} differs between runs"
             );
+        }
+    }
+
+    #[test]
+    fn rng_values_are_normalized() {
+        let mut rng = Rng::new(7);
+        for _ in 0..10_000 {
+            let value = rng.next_f64();
+            assert!((0.0..1.0).contains(&value), "noise={value}");
         }
     }
 

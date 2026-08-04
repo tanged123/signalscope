@@ -350,6 +350,18 @@ fn bench_huge_cold_build() {
     );
 }
 
+fn latency_windows(end: f64, spans: &[f64]) -> Vec<(f64, f64)> {
+    let mut windows = Vec::new();
+    for &span in spans {
+        let max_start = (end - span).max(0.0);
+        for index in 0..28 {
+            let t0 = max_start * f64::from(index) / 27.0;
+            windows.push((t0, t0 + span));
+        }
+    }
+    windows
+}
+
 #[test]
 #[ignore = "release benchmark"]
 fn bench_tile_latency() {
@@ -376,14 +388,7 @@ fn bench_tile_latency() {
         .collect();
     assert_eq!(ensemble.len(), 1000);
 
-    let mut windows = Vec::new();
-    for span in [1000.0, 300.0, 100.0, 30.0, 10.0, 3.0, 1.0] {
-        let mut t0 = 0.0;
-        while t0 + span <= 1000.0 && windows.len() < 200 {
-            windows.push((t0, t0 + span));
-            t0 += span * 0.25;
-        }
-    }
+    let windows = latency_windows(1000.0, &[1000.0, 300.0, 100.0, 30.0, 10.0, 3.0, 1.0]);
 
     let mut refresh_ms: Vec<f64> = windows
         .iter()
@@ -420,6 +425,80 @@ fn bench_tile_latency() {
     );
     assert!(p95 <= 20.0, "refresh p95 {p95:.2}ms (floor 20ms)");
     assert!(p99 <= 50.0, "refresh p99 {p99:.2}ms (floor 50ms)");
+}
+
+#[test]
+#[ignore = "release benchmark"]
+#[allow(clippy::cast_precision_loss)]
+fn bench_wide_tile_latency() {
+    let dir = corpus::ensure(&corpus::wide100m());
+    let path = dir.join("run_0001.csv");
+    let mut store = SignalStore::new();
+    let registry = ProviderRegistry::builtin();
+    let cancel = CancelToken::default();
+    let mut progress = |_| {};
+    let mut context = DecodeContext {
+        progress: &mut progress,
+        cancel: &cancel,
+    };
+    let summary = ingest::ingest_path(
+        &registry,
+        &path,
+        &mut store,
+        SourceKey(uuid::Uuid::from_bytes([8; 16])),
+        "wide100m",
+        &mut context,
+    )
+    .unwrap();
+    let pyramids: Vec<Pyramid> = summary
+        .signals
+        .iter()
+        .map(|id| Pyramid::from_signal(store.signal(*id).unwrap()))
+        .collect();
+    assert_eq!(pyramids.len(), 8);
+
+    let windows = latency_windows(
+        12_500.0,
+        &[
+            12_500.0, 3_000.0, 1_000.0, 300.0, 100.0, 30.0, 10.0, 3.0, 1.0,
+        ],
+    );
+    let mut refresh_ms: Vec<f64> = windows
+        .iter()
+        .map(|&(t0, t1)| {
+            let started = Instant::now();
+            for pyramid in &pyramids {
+                let query = pyramid.query(t0, t1, 1920);
+                std::hint::black_box(query.bins.len());
+            }
+            started.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    refresh_ms.sort_by(f64::total_cmp);
+    let (p50, p95, p99) = (
+        report::percentile(&refresh_ms, 0.50),
+        report::percentile(&refresh_ms, 0.95),
+        report::percentile(&refresh_ms, 0.99),
+    );
+
+    report::write_report(
+        "wide_tile_latency",
+        serde_json::json!({
+            "bench": "wide_tile_latency",
+            "refreshes": refresh_ms.len(),
+            "series_per_refresh": pyramids.len(),
+            "sample_count": summary.row_count,
+            "p50_ms": p50,
+            "p95_ms": p95,
+            "p99_ms": p99,
+            "target_p95_ms": 10.0,
+            "floor_p95_ms": 20.0,
+            "floor_p99_ms": 50.0,
+            "pass": p95 <= 20.0 && p99 <= 50.0,
+        }),
+    );
+    assert!(p95 <= 20.0, "wide refresh p95 {p95:.2}ms (floor 20ms)");
+    assert!(p99 <= 50.0, "wide refresh p99 {p99:.2}ms (floor 50ms)");
 }
 
 #[test]
@@ -464,6 +543,20 @@ fn bench_nan_gap_scale() {
         "nan_gap_scale",
         serde_json::json!({ "bench": "nan_gap_scale", "pass": true }),
     );
+}
+
+#[test]
+fn latency_ladder_covers_each_zoom_span() {
+    let spans = [
+        12_500.0, 3_000.0, 1_000.0, 300.0, 100.0, 30.0, 10.0, 3.0, 1.0,
+    ];
+    let windows = latency_windows(12_500.0, &spans);
+    assert_eq!(windows.len(), spans.len() * 28);
+    for (span_windows, &span) in windows.chunks(28).zip(spans.iter()) {
+        assert_eq!(span_windows.first().unwrap().0, 0.0);
+        assert_eq!(span_windows.first().unwrap().1, span);
+        assert_eq!(span_windows.last().unwrap().1, 12_500.0);
+    }
 }
 
 #[test]

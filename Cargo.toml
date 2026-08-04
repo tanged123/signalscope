@@ -3,7 +3,7 @@ resolver = "2"
 members = ["core/scope-core", "protocol", "shell/src-tauri"]
 
 [workspace.package]
-version = "0.19.2"
+version = "0.19.3"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/tanged123/signalscope"
@@ -26,8 +26,8 @@ parquet = { version = "56", default-features = false, features = [
   "zstd",
 ] }
 toml = "0.9"
-scope-core = { path = "core/scope-core", version = "0.19.2" }
-scope-protocol = { path = "protocol", version = "0.19.2" }
+scope-core = { path = "core/scope-core", version = "0.19.3" }
+scope-protocol = { path = "protocol", version = "0.19.3" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

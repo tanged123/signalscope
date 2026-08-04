@@ -23,7 +23,9 @@ snapshot baker's retained pyramids and serialized HTML within ordinary
 developer and CI memory budgets while still exercising a two-series ensemble.
 The checked-in `examples/monte_carlo` corpus is the smoke tier used by
 pull-request e2e tests. A scheduled, non-blocking `bench.yml` workflow runs the
-full suite and uploads `build/bench/report.json`. The manual native workflow
+full suite and uploads both `build/bench/report.json` and the per-scenario
+files under `build/bench/report/`; report aggregation also runs during failure
+cleanup so a failed floor remains diagnosable. The manual native workflow
 remains the acceptance authority; its checklist is recorded in the Phase 5
 benchmark specification.
 

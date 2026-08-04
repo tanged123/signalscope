@@ -19,7 +19,7 @@ fn write_report_at(dir: &Path, name: &str, value: &serde_json::Value) {
 )]
 pub fn percentile(sorted_ms: &[f64], fraction: f64) -> f64 {
     assert!(!sorted_ms.is_empty());
-    let rank = ((sorted_ms.len() as f64 * fraction).ceil() as usize + 1).clamp(1, sorted_ms.len());
+    let rank = ((sorted_ms.len() as f64 * fraction).ceil() as usize).clamp(1, sorted_ms.len());
     sorted_ms[rank - 1]
 }
 
@@ -38,8 +38,11 @@ mod tests {
     #[test]
     fn percentile_picks_expected_ranks() {
         let sorted = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        assert!((percentile(&sorted, 0.5) - 6.0).abs() < f64::EPSILON);
+        assert!((percentile(&sorted, 0.5) - 5.0).abs() < f64::EPSILON);
         assert!((percentile(&sorted, 0.95) - 10.0).abs() < f64::EPSILON);
         assert!((percentile(&[42.0], 0.99) - 42.0).abs() < f64::EPSILON);
+
+        let hundred = (1..=100).map(f64::from).collect::<Vec<_>>();
+        assert!((percentile(&hundred, 0.95) - 95.0).abs() < f64::EPSILON);
     }
 }

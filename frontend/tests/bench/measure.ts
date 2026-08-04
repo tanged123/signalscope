@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { percentile } from "../../src/app/percentile";
 
 interface BenchWindow {
   __benchFrames: number[];
@@ -41,19 +42,23 @@ export async function startFrameProbe(page: Page): Promise<void> {
 }
 
 export async function stopFrameProbe(page: Page): Promise<FrameStats> {
-  return page.evaluate(() => {
+  const measured = await page.evaluate(() => {
     const bench = window as unknown as BenchWindow;
     bench.__benchStop?.();
-    const frames = [...bench.__benchFrames].sort((a, b) => a - b);
-    const rank = Math.min(frames.length - 1, Math.ceil(frames.length * 0.95));
     return {
-      p95Ms: frames[rank] ?? 0,
-      maxMs: frames.at(-1) ?? 0,
-      frames: frames.length,
+      frames: [...bench.__benchFrames],
       longTasks: bench.__benchLongTasks.length,
       longestTaskMs: Math.max(0, ...bench.__benchLongTasks),
     };
   });
+  const frames = measured.frames.sort((a, b) => a - b);
+  return {
+    p95Ms: percentile(frames, 0.95),
+    maxMs: frames.at(-1) ?? 0,
+    frames: frames.length,
+    longTasks: measured.longTasks,
+    longestTaskMs: measured.longestTaskMs,
+  };
 }
 
 export async function interact(page: Page): Promise<void> {

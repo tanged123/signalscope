@@ -23,6 +23,7 @@
 ## File Map
 
 - Convert: `core/scope-core/src/benchmarks.rs` → `core/scope-core/src/benchmarks/mod.rs` (+ `corpus.rs`, `report.rs`)
+- Create: `frontend/src/app/percentile.ts`, `frontend/src/app/percentile.test.ts`
 - Create: `examples/bench/mc1000.workspace.json`, `examples/bench/smoke.workspace.json`
 - Create: `frontend/tests/bench/measure.ts`, `frontend/tests/bench/bench.spec.ts`, `frontend/tests/e2e/bench-smoke.spec.ts`
 - Create: `scripts/collect-bench-report.mjs`, `.github/workflows/bench.yml`, `docs/adr/0035-benchmark-harness-and-performance-floors.md`
@@ -200,16 +201,19 @@ pub fn bench_root() -> PathBuf {
 /// xorshift64*: deterministic, dependency-free.
 struct Rng(u64);
 
+const GENERATOR_VERSION: u32 = 2;
+
 impl Rng {
     fn new(seed: u64) -> Self {
         Self(seed.wrapping_mul(2_685_821_657_736_338_717).max(1))
     }
 
+    #[allow(clippy::cast_precision_loss)]
     fn next_f64(&mut self) -> f64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
-        (self.0 >> 11) as f64 / f64::from(1u32 << 21) / f64::from(1u32 << 21) / 2.0
+        (self.0 >> 11) as f64 / (1_u64 << 53) as f64
     }
 }
 
@@ -255,8 +259,12 @@ static GENERATION: Mutex<()> = Mutex::new(());
 pub fn ensure(spec: &TierSpec) -> PathBuf {
     let _guard = GENERATION.lock().unwrap();
     let dir = bench_root().join("corpus").join(spec.name);
-    let manifest = dir.join("manifest.txt");
-    let stamp = format!("{spec:?}");
+    let manifest = dir.join("manifest.json");
+    let stamp = serde_json::json!({
+        "generator": GENERATOR_VERSION,
+        "spec": format!("{spec:?}"),
+    })
+    .to_string();
     if std::fs::read_to_string(&manifest).is_ok_and(|existing| existing == stamp) {
         return dir;
     }
@@ -346,9 +354,12 @@ mod tests {
     #[test]
     fn percentile_picks_expected_ranks() {
         let sorted = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        assert!((percentile(&sorted, 0.5) - 6.0).abs() < f64::EPSILON);
+        assert!((percentile(&sorted, 0.5) - 5.0).abs() < f64::EPSILON);
         assert!((percentile(&sorted, 0.95) - 10.0).abs() < f64::EPSILON);
         assert!((percentile(&[42.0], 0.99) - 42.0).abs() < f64::EPSILON);
+
+        let hundred = (1..=100).map(f64::from).collect::<Vec<_>>();
+        assert!((percentile(&hundred, 0.95) - 95.0).abs() < f64::EPSILON);
     }
 }
 ```
@@ -644,6 +655,12 @@ fn bench_huge_cold_build() {
 
 **Interfaces:** Consumes `StoreSink` (Task 3), `Pyramid::query`, `report::percentile`.
 
+The 1000-run scenario uses a shared `latency_windows` helper to generate a
+196-refresh zoom/pan ladder. A separate `bench_wide_tile_latency` scenario
+uses the same ladder shape across all eight `wide100m` pyramids, so the
+100M-point tier exercises constrained viewport queries and level transitions
+rather than only paying the pyramid-build cost.
+
 - [ ] **Step 1: Write `bench_tile_latency`** — panel-refresh percentiles. One "refresh" = the tile queries a 1000-source ensemble panel issues for one viewport change.
 
 ```rust
@@ -665,15 +682,8 @@ fn bench_tile_latency() {
         .collect();
     assert_eq!(ensemble.len(), 1000);
 
-    // Zoom ladder with 25% pans at each span: the scripted pan/zoom access pattern.
-    let mut windows = Vec::new();
-    for span in [1000.0, 300.0, 100.0, 30.0, 10.0, 3.0, 1.0] {
-        let mut t0 = 0.0;
-        while t0 + span <= 1000.0 && windows.len() < 200 {
-            windows.push((t0, t0 + span));
-            t0 += span * 0.25;
-        }
-    }
+    // Zoom ladder with distributed pans at each span: the scripted pan/zoom access pattern.
+    let windows = latency_windows(1000.0, &[1000.0, 300.0, 100.0, 30.0, 10.0, 3.0, 1.0]);
 
     let mut refresh_ms: Vec<f64> = windows
         .iter()
@@ -750,8 +760,11 @@ fn bench_nan_gap_scale() {
 }
 ```
 
-- [ ] **Step 3: Run both**: `cargo test --release -p scope-core -- --ignored --test-threads=1 --show-output bench_tile_latency bench_nan_gap_scale` (libtest runs every test matching either filter).
-      Expected: PASS, report files written.
+- [ ] **Step 3: Run all three**: `./scripts/test.sh bench core` (runs the
+      1000-run tile ladder, the wide-tier tile ladder, and NaN-gap checks).
+      Expected: PASS, report files written. `bench_wide_tile_latency` repeats the
+      ladder over all eight wide100m pyramids so the 100M-point tier exercises
+      constrained paging and level transitions too.
 
 - [ ] **Step 4: Format and commit**: `./scripts/format.sh && git add core/scope-core && git commit -m "feat(bench): tile-latency percentiles and nan-gap invariants at scale"`
 
@@ -912,9 +925,7 @@ bench)
     bench_e2e
     ;;
   all)
-    cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_
-    bench_e2e
-    node "$signalscope_scripts_dir/collect-bench-report.mjs"
+    bench_all
     ;;
   *)
     echo "unknown bench mode: $bench_mode" >&2
@@ -929,7 +940,7 @@ with `bench_e2e` defined above the dispatch:
 ```bash
 bench_e2e() {
   local corpus_dir="$signalscope_root/build/bench/corpus/mc1000"
-  if [ ! -f "$corpus_dir/manifest.txt" ]; then
+  if [ ! -f "$corpus_dir/manifest.json" ]; then
     cargo test --release -p scope-core -- --ignored --test-threads=1 bench_corpus_mc1000
   fi
   local -a data_args=()
@@ -963,7 +974,27 @@ bench_e2e() {
     "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake.json"
   SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend bench
 }
+
+bench_all_exit() {
+  local bench_status=$?
+  local collect_status=0
+  node "$signalscope_scripts_dir/collect-bench-report.mjs" || collect_status=$?
+  trap - EXIT
+  if [ "$bench_status" -ne 0 ]; then
+    exit "$bench_status"
+  fi
+  exit "$collect_status"
+}
+
+bench_all() {
+  trap bench_all_exit EXIT
+  cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_
+  bench_e2e
+}
 ```
+
+The EXIT cleanup aggregates reports even when the core or Playwright command
+fails under `set -e`, preserving the original benchmark status for CI.
 
 Note `export.sh` runs `build.sh web` on each call; pass the second attempt through unchanged (correct, just slower) — do not add `--no-build` juggling unless the double build proves painful.
 
@@ -1352,7 +1383,9 @@ jobs:
         if: always()
         with:
           name: bench-report
-          path: build/bench/report.json
+          path: |
+            build/bench/report.json
+            build/bench/report/
           if-no-files-found: warn
 ```
 
@@ -1374,7 +1407,7 @@ This is a separate workflow, so the `ci-ok` needs-list in `ci.yml` is untouched 
 
 - [ ] **Step 1: Write the ADR.** Record the decision, not the deliberation; match the tone/length of ADR 0026 or 0033. Required content:
   - Context: Phase 5 needs repeatable performance evidence for the 1000-run monte-carlo workflow, multi-GB single files, and cache reuse; CI machines vary too much for tight thresholds.
-  - Decision: two automated layers over one deterministic generated corpus (`build/bench/`, never committed); `#[ignore = "release benchmark"]` tests with generous hard floors that only catch order-of-magnitude regressions, each emitting one JSON report file; a Playwright bench project measuring first-plot and frame timing on a baked snapshot; the checked-in `examples/monte_carlo` corpus as the PR-CI smoke tier; a weekly non-blocking `bench.yml` uploading `build/bench/report.json`; the manual native workflow remains the acceptance authority (checklist in the Phase 5 spec).
+  - Decision: two automated layers over one deterministic generated corpus (`build/bench/`, never committed); `#[ignore = "release benchmark"]` tests with generous hard floors that only catch order-of-magnitude regressions, each emitting one JSON report file; a Playwright bench project measuring first-plot and frame timing on a baked snapshot; the checked-in `examples/monte_carlo` corpus as the PR-CI smoke tier; a weekly non-blocking `bench.yml` uploading the aggregate and per-scenario reports; failure cleanup always aggregates reports before preserving the original status; the manual native workflow remains the acceptance authority (checklist in the Phase 5 spec).
   - The composed interaction budget: core tile-refresh p95 (floor 20 ms) plus browser frame p95 (floor 33 ms) inside a 30 fps budget; stalls over 250 ms fail.
   - Consequences: floors are deliberately loose — trend-watching happens on the reports, not the assertions; corpus generation costs ~3.5 GB of `build/`; the e2e layer measures the baked plane, so native IPC latency is only represented by the core tile scenario.
 - [ ] **Step 2: Roadmap.** Under the Phase 5 heading in `docs/implementation-roadmap.md`, add a short paragraph: benchmark track landed (ADR 0035) — corpus tiers, core floors, Playwright bench project, weekly bench workflow, `./scripts/test.sh bench` entry point.
@@ -1385,7 +1418,7 @@ This is a separate workflow, so the `ci-ok` needs-list in `ci.yml` is untouched 
 ### Task 13: Full gates, version bump, handoff
 
 - [ ] **Step 1: Full local gate**: `./scripts/ci.sh all` (includes format check, quality, rust, frontend, artifacts, e2e-with-smoke). Fix anything it finds.
-- [ ] **Step 2: One full bench run for the record**: `./scripts/test.sh bench all` — paste the `build/bench/report.json` numbers into the handoff summary.
+- [ ] **Step 2: One full bench run for the record**: `./scripts/test.sh bench all` — paste the `build/bench/report.json` numbers into the handoff summary and retain `build/bench/report/` for per-scenario diagnostics if a floor fails.
 - [ ] **Step 3: Version bump** (final change): benchmarks/tooling/tests → patch. `./scripts/version.sh bump patch && ./scripts/version.sh check`, commit the manifest changes: `git add -A && git commit -m "chore: release v<new-version>"` (match the repo's existing bump-commit subject style — check `git log --oneline` for the last bump).
 - [ ] **Step 4: Handoff notes** must include: report numbers from Step 2, any floor that needed discussion, and the reminder that the **manual native acceptance checklist** in the spec (`docs/superpowers/specs/2026-08-04-phase5-benchmarks-design.md`) is the user's final gate: `./scripts/test.sh bench corpus`, then `./scripts/run.sh native`, import `build/bench/corpus/mc1000/`, and work through the six checklist items.
 

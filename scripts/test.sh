@@ -75,6 +75,23 @@ bench_e2e() {
   SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend bench
 }
 
+bench_all_exit() {
+  local bench_status=$?
+  local collect_status=0
+  node "$signalscope_scripts_dir/collect-bench-report.mjs" || collect_status=$?
+  trap - EXIT
+  if [ "$bench_status" -ne 0 ]; then
+    exit "$bench_status"
+  fi
+  exit "$collect_status"
+}
+
+bench_all() {
+  trap bench_all_exit EXIT
+  cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_
+  bench_e2e
+}
+
 mode="${1:-quick}"
 case "$mode" in
 quick)
@@ -115,9 +132,7 @@ bench)
     bench_e2e
     ;;
   all)
-    cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_
-    bench_e2e
-    node "$signalscope_scripts_dir/collect-bench-report.mjs"
+    bench_all
     ;;
   *)
     echo "unknown bench mode: $bench_mode" >&2

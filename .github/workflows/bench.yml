@@ -25,5 +25,7 @@ jobs:
         if: always()
         with:
           name: bench-report
-          path: build/bench/report.json
+          path: |
+            build/bench/report.json
+            build/bench/report/
           if-no-files-found: warn
