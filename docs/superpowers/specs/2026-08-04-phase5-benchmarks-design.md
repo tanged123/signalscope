@@ -17,7 +17,8 @@ must fit inside a 33 ms (30 fps) interaction budget, with no stall over
 
 ## Architecture
 
-Two layers share one deterministic corpus and one report format.
+Two automated layers and a manual acceptance layer share one deterministic
+corpus; the automated layers share one report format.
 
 - **Core layer (gates).** `core/scope-core/src/benchmarks/` becomes a module
   with one `#[ignore = "release benchmark"]` test per scenario, discovered by
@@ -29,11 +30,21 @@ Two layers share one deterministic corpus and one report format.
 - **E2E layer (proof).** A Playwright `bench` project drives a `scope-bake`d
   snapshot of the monte-carlo corpus in Chromium and measures time-to-first-
   plot and pan/zoom frame timing. Loose floors, rich report.
+- **Manual layer (acceptance).** The definitive acceptance run is the real
+  workflow: `./scripts/run.sh native`, import the generated `mc1000` corpus
+  through the ordinary file dialogs, and pan/zoom multiple signals per
+  panel. The corpus is generatable standalone (`./scripts/test.sh bench
+corpus`) so this run needs nothing but the app. A short checklist in this
+  spec mirrors the automated thresholds; the automated layers exist because
+  manual runs are not repeatable evidence, but the manual run has the final
+  word on "seamless".
 - **Corpus generator.** A test-only Rust module in `scope-core` writes
   seeded, byte-stable CSVs into `build/bench/corpus/<tier>/`, keyed by a
   params-hash manifest: repeat runs reuse the corpus, parameter changes
-  regenerate it. Generation time is reported but excluded from scenario
-  timings. Corpus files are never checked in.
+  regenerate it. Standalone generation runs through the same ignored-test
+  filter (`bench_corpus_`) so no new binary is needed. Generation time is
+  reported but excluded from scenario timings. Corpus files are never
+  checked in.
 
 No stored baselines. Floors catch catastrophic regressions; humans track the
 reported numbers over time.
@@ -96,15 +107,37 @@ throughput floor) remain unchanged.
 - Benches write per-scenario JSON files into `build/bench/report/`;
   `test.sh bench` assembles `build/bench/report.json` with a small `.mjs`
   collector.
-- `./scripts/test.sh bench [core|e2e|all]`, default `all`: corpus generation
-  → core benches → bake → Playwright bench → report. `bench core` preserves
-  today's fast path.
+- `./scripts/test.sh bench [corpus|core|e2e|all]`, default `all`: corpus
+  generation → core benches → bake → Playwright bench → report. `bench
+core` preserves today's fast path; `bench corpus` only generates the
+  tiers, for manual native sessions.
 - A new `./scripts/ci.sh bench` gate and a `bench.yml` workflow
   (`workflow_dispatch` plus weekly schedule) run the suite off the PR path
   and upload `report.json` as an artifact. PR CI is unchanged.
 - ADR 0035 records the harness architecture, the floors-plus-report policy,
   and the composed 33 ms interaction budget. The roadmap Phase 5 section is
   updated when the work lands.
+
+## Manual native acceptance checklist
+
+Run after the automated suite passes, on the machine the workflow actually
+targets:
+
+1. `./scripts/test.sh bench corpus` (reuses the cached corpus when present).
+2. `./scripts/run.sh native`; import `build/bench/corpus/mc1000/` through
+   the ordinary import path (folder scan or multi-select dialog).
+3. First plot of a shared channel across all 1000 sources appears within
+   ~30 s of starting the import, with visible progress throughout.
+4. Reopen the same corpus in a fresh session: first plot within ~5 s.
+5. With one ensemble panel (one shared channel, 1000 sources) and a second
+   panel holding 2–3 more channels: wheel zoom, drag pan, box zoom, and fit
+   feel continuous — no visible hitching, no stroke dropouts, cursor
+   readouts stay live.
+6. Zoom into a NaN dropout window: strokes break at the gap and rejoin;
+   extrema at coarse zoom match what fine zoom reveals.
+
+Any failure here is a finding the automated suite missed; file it and add a
+covering scenario before fixing.
 
 ## Error handling and testing
 
