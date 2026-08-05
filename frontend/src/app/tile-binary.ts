@@ -54,6 +54,7 @@ export function decodeTileResponse(
     offset += unitLength === 0xffff ? 0 : unitLength;
     offset = align8(offset);
 
+    need(view, offset, count * 73);
     const columns: Omit<BinColumns, "count"> = {
       t0: floatColumn(buffer, view, offset, count),
       t1: floatColumn(buffer, view, offset + count * 8, count),
@@ -71,7 +72,6 @@ export function decodeTileResponse(
       ),
       flags: new Uint8Array(buffer, offset + count * 64 + count * 8, count),
     };
-    need(view, offset, count * 73);
     offset = align8(offset + count * 73);
     series.push({
       signalId,
