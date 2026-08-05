@@ -4,6 +4,7 @@ PNGs = "PNGs"
 [files]
 extend-exclude = [
   "docs/Signal Scope UI Design Pass/**",
+  "refs/**",
   "Cargo.lock",
   "pnpm-lock.yaml",
   "flake.lock",

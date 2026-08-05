@@ -18,4 +18,5 @@
 /shell/src-tauri/gen/**/*.png
 /Screenshot*.png
 .worktrees/
+/refs/
 *.html
