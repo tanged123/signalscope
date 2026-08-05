@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 20;
+pub const SESSION_SCHEMA_VERSION: u32 = 21;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -230,6 +230,7 @@ pub struct PanelState {
     pub time_window: Option<[f64; 2]>,
     pub annotations: Vec<Annotation>,
     pub show_stats: bool,
+    pub axis_equal: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

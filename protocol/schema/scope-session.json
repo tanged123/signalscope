@@ -1,5 +1,5 @@
 {
-  "schema_version": 20,
+  "schema_version": 21,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -141,7 +141,8 @@
         "c_label": "string?",
         "time_window": "f64[2]?",
         "annotations": "Annotation[]",
-        "show_stats": "bool"
+        "show_stats": "bool",
+        "axis_equal": "bool"
       }
     },
     "LayoutCell": {

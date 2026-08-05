@@ -232,6 +232,30 @@ fn migrate(version: u32, mut value: serde_json::Value) -> Result<Session, Sessio
             value["schema_version"] = serde_json::json!(20);
             migrate(20, value)
         }
+        20 => {
+            if let Some(tabs) = value
+                .get_mut("tabs")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for tab in tabs {
+                    let Some(panels) = tab
+                        .get_mut("panels")
+                        .and_then(serde_json::Value::as_array_mut)
+                    else {
+                        continue;
+                    };
+                    for panel in panels {
+                        if let Some(object) = panel.as_object_mut() {
+                            object
+                                .entry("axis_equal")
+                                .or_insert(serde_json::Value::Bool(false));
+                        }
+                    }
+                }
+            }
+            value["schema_version"] = serde_json::json!(21);
+            migrate(21, value)
+        }
         SESSION_SCHEMA_VERSION => Ok(serde_json::from_value(value)?),
         version => Err(SessionError::UnsupportedVersion(version)),
     }
@@ -937,7 +961,7 @@ mod tests {
 
         let session = from_json(&value.to_string()).expect("v17 migrates");
         let panel = &session.tabs[0].panels[0];
-        assert_eq!(session.schema_version, 20);
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
         assert_eq!(session.named_sets[0].refs[0].channel, "temperature");
         assert_eq!(session.named_sets[0].refs[1].channel, "pressure");
         assert_eq!(session.named_sets[0].selector.as_deref(), Some("temp"));
@@ -982,7 +1006,7 @@ mod tests {
 
         let session = from_json(&value.to_string()).expect("migrates");
 
-        assert_eq!(session.schema_version, 20);
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
         let serialized = serde_json::to_value(session).expect("serializes");
         let source = &serialized["sources"][0];
         assert!(source.get("time_domain").is_none());
@@ -1125,6 +1149,7 @@ mod tests {
                     time_window: None,
                     annotations: Vec::new(),
                     show_stats: false,
+                    axis_equal: false,
                 }],
                 layout: vec![LayoutRow {
                     height: 1.0,
@@ -1544,5 +1569,25 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         let session = migrate(SESSION_SCHEMA_VERSION, value).unwrap();
         assert_eq!(session, Session::default());
+    }
+
+    #[test]
+    fn v20_panels_gain_axis_equal_disabled() {
+        let mut value = serde_json::to_value(Session::default()).unwrap();
+        value["schema_version"] = serde_json::json!(20);
+        for tab in value["tabs"].as_array_mut().unwrap() {
+            for panel in tab["panels"].as_array_mut().unwrap() {
+                panel.as_object_mut().unwrap().remove("axis_equal");
+            }
+        }
+        let restored = from_json(&value.to_string()).expect("migrates from v20");
+        assert_eq!(restored.schema_version, SESSION_SCHEMA_VERSION);
+        assert!(
+            restored
+                .tabs
+                .iter()
+                .flat_map(|tab| &tab.panels)
+                .all(|panel| !panel.axis_equal)
+        );
     }
 }

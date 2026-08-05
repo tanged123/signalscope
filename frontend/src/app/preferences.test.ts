@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -14,7 +16,8 @@ import {
 describe("preferences", () => {
   it("defaults match the spec", () => {
     const prefs = defaultPreferences();
-    expect(prefs.schema_version).toBe(3);
+    expect(prefs.schema_version).toBe(4);
+    expect(prefs.theme).toBe("dark");
     expect(prefs.ui_font_family).toBe("inter");
     expect(prefs.plot_font_family).toBe("jetbrains");
     expect(prefs.ui_font_size).toBe(13);
@@ -79,6 +82,7 @@ describe("preferences", () => {
         setProperty: (name: string, value: string) => set.set(name, value),
         fontSize: "",
       },
+      dataset: {} as DOMStringMap,
     };
     applyPreferences(
       { ...defaultPreferences(), plot_font_family: "dejavu" },
@@ -88,5 +92,15 @@ describe("preferences", () => {
     expect(set.get("--font-plot")).toBe(fontStack("dejavu"));
     expect(set.get("--plot-font-size")).toBe("9");
     expect(target.style.fontSize).toBe("13px");
+  });
+
+  it("defaults the theme to dark", () => {
+    expect(defaultPreferences().theme).toBe("dark");
+  });
+
+  it("applies the stored theme to the document root", () => {
+    const root = document.createElement("html");
+    applyPreferences({ ...defaultPreferences(), theme: "light" }, root);
+    expect(root.dataset.theme).toBe("light");
   });
 });

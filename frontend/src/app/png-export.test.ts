@@ -26,6 +26,7 @@ function panel(id: string, title: string): PanelState {
     time_window: null,
     annotations: [],
     show_stats: false,
+    axis_equal: false,
   };
 }
 

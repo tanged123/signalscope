@@ -18,7 +18,7 @@ import {
   type PlotRect,
   type Range,
 } from "../app/plot-math";
-import { ColormapRamp, SEQ_TOKENS } from "../app/colormap";
+import { ColormapRamp, RAMP_STEPS, SEQ_TOKENS } from "../app/colormap";
 import { CanvasSurface } from "./surface";
 
 interface Projection {
@@ -76,6 +76,8 @@ export interface PathRenderOptions {
   yLabel: string;
   xRange: readonly [number, number];
   yRange: readonly [number, number];
+  /** Pads the axis with the smaller pixel-per-unit scale so both match. */
+  equalAspect?: boolean;
   axisStyle?: AxisStyle;
   xScale?: AxisScale;
   /** Domain and axis name of the `c:` channel; reserves the right gutter. */
@@ -108,6 +110,42 @@ const MAX_BATCHED_SERIES = 4;
 
 function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
+}
+
+/**
+ * Pads the axis with the coarser pixel-per-unit scale until both axes agree,
+ * so one data unit is the same number of pixels horizontally and vertically
+ * (MATLAB's `axis equal`). Only ever widens: narrowing would hide data that
+ * the stored range says is in view.
+ */
+function equalisedRanges(
+  xRange: Range,
+  yRange: Range,
+  plot: PlotRect,
+): { xRange: Range; yRange: Range } {
+  const xSpan = xRange.max - xRange.min;
+  const ySpan = yRange.max - yRange.min;
+  if (!(xSpan > 0) || !(ySpan > 0) || !(plot.width > 0) || !(plot.height > 0)) {
+    return { xRange, yRange };
+  }
+  const xScale = plot.width / xSpan;
+  const yScale = plot.height / ySpan;
+  if (xScale === yScale) return { xRange, yRange };
+  if (xScale > yScale) {
+    // x is drawn finer: widen x until its scale drops to y's.
+    const target = plot.width / yScale;
+    const pad = (target - xSpan) / 2;
+    return {
+      xRange: { min: xRange.min - pad, max: xRange.max + pad },
+      yRange,
+    };
+  }
+  const target = plot.height / xScale;
+  const pad = (target - ySpan) / 2;
+  return {
+    xRange,
+    yRange: { min: yRange.min - pad, max: yRange.max + pad },
+  };
 }
 
 function plotFontSize(styles: CSSStyleDeclaration): number {
@@ -165,6 +203,8 @@ interface FrameSpec {
   xScale?: AxisScale;
   /** Pixels reserved on the right for a decoration such as the colorbar. */
   rightGutter?: number;
+  /** Pads the axis with the smaller pixel-per-unit scale so both match. */
+  equalAspect?: boolean;
 }
 
 interface ResolvedStroke {
@@ -349,6 +389,9 @@ export class CanvasRenderer {
           ? {}
           : { axisStyle: options.axisStyle }),
         ...(options.xScale === undefined ? {} : { xScale: options.xScale }),
+        ...(options.equalAspect === undefined
+          ? {}
+          : { equalAspect: options.equalAspect }),
         ...(options.colorbar === undefined
           ? {}
           : { rightGutter: COLORBAR_GUTTER }),
@@ -398,11 +441,15 @@ export class CanvasRenderer {
           width: Math.max(1, width - gutter - 12 - rightGutter),
           height: Math.max(1, height - 42),
         };
+    const ranges =
+      spec.equalAspect === true
+        ? equalisedRanges(spec.xRange, spec.yRange, plot)
+        : { xRange: spec.xRange, yRange: spec.yRange };
     const scale: AxisScale = spec.xScale ?? "linear";
     const layout: PlotLayout = {
       plot,
-      xRange: { ...spec.xRange },
-      yRange: { ...spec.yRange },
+      xRange: { ...ranges.xRange },
+      yRange: { ...ranges.yRange },
       xScale: scale,
     };
     this.layout = layout;
@@ -412,14 +459,14 @@ export class CanvasRenderer {
     };
     const xTicks =
       scale === "log"
-        ? logTicks(spec.xRange.min, spec.xRange.max)
-        : ticks(spec.xRange.min, spec.xRange.max, 7);
+        ? logTicks(ranges.xRange.min, ranges.xRange.max)
+        : ticks(ranges.xRange.min, ranges.xRange.max, 7);
     const axes = { context, plot, project, colors, xTicks } as const;
     const labels = { xLabel: spec.xLabel, yLabel: spec.yLabel };
-    this.drawGrid(axes, spec.yRange);
+    this.drawGrid(axes, ranges.yRange);
     const finishAxes = (): void => {
-      if (inline) this.drawInlineFurniture(axes, spec.yRange, labels);
-      else this.drawAxisFurniture(axes, spec.yRange, labels);
+      if (inline) this.drawInlineFurniture(axes, ranges.yRange, labels);
+      else this.drawAxisFurniture(axes, ranges.yRange, labels);
     };
     return { context, colors, plot, project, width, height, finishAxes };
   }
@@ -431,6 +478,7 @@ export class CanvasRenderer {
     path: PlotPath,
     colors: Palette,
   ): void {
+    const { toX, toY } = project;
     const vertices = path.points.length >> 1;
     if (vertices === 0) return;
     context.save();
@@ -464,8 +512,8 @@ export class CanvasRenderer {
         penDown = false;
         continue;
       }
-      const px = project.toX(x);
-      const py = project.toY(y);
+      const px = toX(x);
+      const py = toY(y);
       if (penDown) context.lineTo(px, py);
       else context.moveTo(px, py);
       penDown = true;
@@ -479,8 +527,8 @@ export class CanvasRenderer {
         const x = path.points[index * 2] ?? Number.NaN;
         const y = path.points[index * 2 + 1] ?? Number.NaN;
         if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        const px = project.toX(x);
-        const py = project.toY(y);
+        const px = toX(x);
+        const py = toY(y);
         context.moveTo(px + 2.4, py);
         context.arc(px, py, 2.4, 0, Math.PI * 2);
       }
@@ -491,7 +539,12 @@ export class CanvasRenderer {
     context.restore();
   }
 
-  /** Strokes one segment per vertex pair so each carries its own `c:` colour. */
+  /**
+   * Strokes a `c:` path in one pass per ramp bucket. The ramp is quantised to
+   * `RAMP_STEPS`, so a path of any length carries at most `RAMP_STEPS + 1`
+   * distinct colours; bucketing turns thousands of per-segment strokes into
+   * that many.
+   */
   private drawColorMappedPath(
     context: CanvasRenderingContext2D,
     project: Projection,
@@ -500,30 +553,43 @@ export class CanvasRenderer {
   ): void {
     const values = path.colorValues ?? [];
     const vertices = path.points.length >> 1;
+    if (vertices < 2) return;
+    // Destructured once, as `appendSeriesPath` already does: this loop would
+    // otherwise re-read both properties off `project` per vertex.
+    const { toX, toY } = project;
     const ramp = this.ramp(colors);
+    const buckets: (Path2D | undefined)[] = new Array<Path2D | undefined>(
+      RAMP_STEPS + 1,
+    );
+    let previousX = Number.NaN;
+    let previousY = Number.NaN;
+    let previousFinite = false;
+    for (let index = 0; index < vertices; index += 1) {
+      const x = path.points[index * 2] ?? Number.NaN;
+      const y = path.points[index * 2 + 1] ?? Number.NaN;
+      const finite = Number.isFinite(x) && Number.isFinite(y);
+      const px = finite ? toX(x) : Number.NaN;
+      const py = finite ? toY(y) : Number.NaN;
+      if (finite && previousFinite) {
+        // Midpoint of the segment's two scalars keeps the ramp continuous.
+        const scalar = ((values[index - 1] ?? 0) + (values[index] ?? 0)) * 0.5;
+        const step = ramp.stepAt(scalar);
+        const bucket = (buckets[step] ??= new Path2D());
+        bucket.moveTo(previousX, previousY);
+        bucket.lineTo(px, py);
+      }
+      previousX = px;
+      previousY = py;
+      previousFinite = finite;
+    }
     context.lineWidth = path.width;
     context.setLineDash(dashPattern(path.dash));
     context.lineCap = "round";
-    for (let index = 1; index < vertices; index += 1) {
-      const x0 = path.points[(index - 1) * 2] ?? Number.NaN;
-      const y0 = path.points[(index - 1) * 2 + 1] ?? Number.NaN;
-      const x1 = path.points[index * 2] ?? Number.NaN;
-      const y1 = path.points[index * 2 + 1] ?? Number.NaN;
-      if (
-        !Number.isFinite(x0) ||
-        !Number.isFinite(y0) ||
-        !Number.isFinite(x1) ||
-        !Number.isFinite(y1)
-      ) {
-        continue;
-      }
-      // Midpoint of the segment's two scalars keeps the ramp continuous.
-      const scalar = ((values[index - 1] ?? 0) + (values[index] ?? 0)) * 0.5;
-      context.strokeStyle = ramp.at(scalar);
-      context.beginPath();
-      context.moveTo(project.toX(x0), project.toY(y0));
-      context.lineTo(project.toX(x1), project.toY(y1));
-      context.stroke();
+    for (let step = 0; step <= RAMP_STEPS; step += 1) {
+      const bucket = buckets[step];
+      if (bucket === undefined) continue;
+      context.strokeStyle = ramp.atStep(step);
+      context.stroke(bucket);
     }
     context.lineCap = "butt";
     context.setLineDash([]);

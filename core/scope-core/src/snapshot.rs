@@ -733,6 +733,7 @@ mod tests {
             time_window: None,
             annotations: Vec::new(),
             show_stats: false,
+            axis_equal: false,
         }
     }
 

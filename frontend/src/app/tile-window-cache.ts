@@ -18,6 +18,30 @@ export class TileWindowCache {
     return { t0: start, t1: start + 2 * grid };
   }
 
+  /**
+   * The `pixel_width` a padded request must ask for so the visible slice
+   * still carries the density the panel asked for. `padWindow` widens the
+   * request 2x-4x; without this correction the sliced response renders at a
+   * quarter to a half of pixel resolution and the trace reads as a staircase.
+   */
+  static requestPixelWidth(
+    panelWidth: number,
+    visible: { t0: number; t1: number },
+    padded: { t0: number; t1: number },
+  ): number {
+    const visibleSpan = visible.t1 - visible.t0;
+    const paddedSpan = padded.t1 - padded.t0;
+    if (
+      !Number.isFinite(visibleSpan) ||
+      !Number.isFinite(paddedSpan) ||
+      visibleSpan <= 0 ||
+      paddedSpan <= visibleSpan
+    ) {
+      return panelWidth;
+    }
+    return Math.ceil(panelWidth * (paddedSpan / visibleSpan));
+  }
+
   get(panelId: string): CachedPanelTiles | null {
     return this.entries.get(panelId) ?? null;
   }

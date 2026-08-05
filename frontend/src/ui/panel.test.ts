@@ -111,6 +111,7 @@ function xyState(xSignal: string, series: RenderSeries[]): RenderPanelState {
     time_window: null,
     annotations: [],
     show_stats: false,
+    axis_equal: false,
   };
 }
 
@@ -157,6 +158,7 @@ function sessionXyState(
     time_window: null,
     annotations: [],
     show_stats: false,
+    axis_equal: false,
   };
 }
 

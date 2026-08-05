@@ -38,5 +38,6 @@ Accepted decisions:
 34. [Declarative container recipes](0034-declarative-container-recipes.md)
 35. [Benchmark harness and performance floors](0035-benchmark-harness-and-performance-floors.md)
 36. [Binary tile transport and render path](0036-binary-tile-transport-and-render-path.md)
+37. [Per-mode sample budgets](0037-per-mode-sample-budgets.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

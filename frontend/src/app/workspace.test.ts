@@ -756,6 +756,16 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.axis_style).toBe("inline");
   });
 
+  it("toggles axis_equal per panel", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    expect(panel.axis_equal).toBe(false);
+    model.toggleAxisEqual(panel.id);
+    expect(model.panel(panel.id)?.axis_equal).toBe(true);
+    model.toggleAxisEqual(panel.id);
+    expect(model.panel(panel.id)?.axis_equal).toBe(false);
+  });
+
   it("updates series style and prunes annotations when removing it", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -983,6 +993,7 @@ describe("WorkspaceModel", () => {
       time_window: null,
       annotations: [],
       show_stats: false,
+      axis_equal: false,
     });
     tab.layout.push({
       height: 1,

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: u32 = 3;
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 4;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -59,9 +59,18 @@ pub enum FontFamily {
     Jetbrains,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Preferences {
     pub schema_version: u32,
+    pub theme: Theme,
     pub ui_font_family: FontFamily,
     pub plot_font_family: FontFamily,
     pub ui_font_size: f64,

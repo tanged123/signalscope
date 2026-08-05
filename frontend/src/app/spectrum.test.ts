@@ -53,10 +53,23 @@ describe("spectrum", () => {
     expect(spectrum(series, 0, 0.1)).toBeNull();
   });
 
-  it("caps large transforms at 4096 samples", () => {
+  it("uses the available power-of-two samples below the transform cap", () => {
     const series = sampled(8192, 1, 16);
     const result = spectrum(series, 0, 8191 / 8192);
     expect(result).not.toBeNull();
-    expect(result?.size ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(4096);
+    expect(result?.size).toBe(8192);
+  });
+
+  it("uses a transform larger than the legacy 4096 cap when samples allow", () => {
+    const count = 40_000;
+    const time = Array.from({ length: count }, (_, index) => index / 1000);
+    const values = time.map((t) => Math.sin(2 * Math.PI * 50 * t));
+    const result = spectrum(
+      { signal_id: "1", signal_path: "a", unit: null, time, values, stride: 1 },
+      time[0] ?? 0,
+      time[count - 1] ?? 0,
+    );
+    expect(result).not.toBeNull();
+    expect(result?.size).toBe(16_384);
   });
 });

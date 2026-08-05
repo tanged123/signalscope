@@ -891,6 +891,14 @@ export class WorkspaceModel {
     }
   }
 
+  toggleAxisEqual(id: string): void {
+    const panel = this.panel(id);
+    if (panel !== undefined) {
+      panel.axis_equal = !panel.axis_equal;
+      this.touch();
+    }
+  }
+
   resizeRows(seamIndex: number, delta: number): void {
     const above = this.activeTab().layout[seamIndex];
     const below = this.activeTab().layout[seamIndex + 1];
@@ -998,6 +1006,7 @@ export class WorkspaceModel {
       time_window: null,
       annotations: [],
       show_stats: false,
+      axis_equal: false,
     };
     this.nextPanelNumber += 1;
     this.activeTab().panels.push(panel);

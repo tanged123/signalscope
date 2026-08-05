@@ -250,6 +250,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onFitView: () => {},
       onToggleStats: () => {},
       onToggleAxisStyle: () => {},
+      onToggleAxisEqual: () => {},
       onRenameTitle: () => {},
       onEditAxisLabel: () => {},
       onSetSeriesStyle: () => {},
@@ -292,6 +293,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         time_window: null,
         annotations: [],
         show_stats: false,
+        axis_equal: false,
       },
       false,
     );
