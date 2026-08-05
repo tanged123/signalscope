@@ -1125,16 +1125,18 @@ git commit -m "perf(frontend): precomputed autoscale extents and lazy stats"
 
 ## Phase 5 — Canvas2D geometry
 
+Reference implementation: uPlot (`refs/uPlot`), which sustains ~100k pts/ms in Canvas2D with exactly our data shape (columnar arrays, per-pixel-column first/min/max/last accumulation). Mechanisms adopted below: its per-column vertex-skip rules (`refs/uPlot/src/paths/linear.js:4-15`, accumulator loop `:68-113` — 1–4 vertices per column, extremes skipped when they coincide with the column's entry/exit values), canvas-context state diffing (`refs/uPlot/src/uPlot.js:1332-1354`), and cached `Path2D` objects rebuilt only when inputs change (`refs/uPlot/src/uPlot.js:1608-1615`). Deliberately **not** adopted: uPlot's gap handling (it strokes one unbroken polyline and cuts gaps with inverse clip rects, `refs/uPlot/src/paths/utils.js:153-185`) — our `has_gap` pen-break invariant produces the same pixels, our gaps are rare, and clip-path assembly per series would cost more than it saves.
+
 ### Task 19: Envelope-correct minimal stroke
 
 **Files:**
 
 - Modify: `frontend/src/render/canvas-renderer.ts` (`drawSeries`, `render`)
 
-The current loop emits 4 same-x vertices per bin with miter joins. Replace with: bevel joins, one clip for the whole frame, degenerate-bin collapse, and skip of `setLineDash` when solid.
+The current loop emits 4 same-x vertices per bin with miter joins and re-sets full context state per series. Replace with: bevel joins, one clip for the whole frame, uPlot's vertex-skip rules, and diffed context state so solid series never touch `setLineDash`.
 
-- [ ] **Step 1: Hoist per-series state.** In `render()`, set the clip once around the series loop (save/clip before `response.series.forEach`, restore after) instead of per `drawSeries`; set `context.lineJoin = "bevel"; context.lineCap = "butt";` once.
-- [ ] **Step 2: Collapse degenerate bins.** In the columnar `drawSeries` loop (Task 13's port), when a bin is a single sample or flat (`min === max`), emit one vertex instead of four; otherwise emit exactly three (first, the far extreme, last) when `first`/`last` already coincide with the extremes — concretely:
+- [ ] **Step 1: Hoist and diff per-series state.** In `render()`, set the clip once around the series loop (save/clip before `response.series.forEach`, restore after) instead of per `drawSeries`; set `context.lineJoin = "bevel"; context.lineCap = "butt";` once. (All of a bin's vertices share one x, so its verticals are collinear and generate no joins; bevel just caps the remaining inter-column case.) Then diff context state uPlot-style (`refs/uPlot/src/uPlot.js:1332-1354`): keep `lastStroke`/`lastWidth`/`lastAlpha`/`lastDash` fields on the renderer, assign `strokeStyle`/`lineWidth`/`globalAlpha`/`setLineDash` only when the value changed, and use one shared `const SOLID: number[] = [];` so solid series compare by identity and never re-issue `setLineDash`. Reset the diff fields in `beginFrame`.
+- [ ] **Step 2: uPlot vertex-skip rules.** In the columnar `drawSeries` loop (Task 13's port), emit the column entry (`first`), then each extreme **only when it differs from both the entry and exit values**, then the exit (`last`) — the `_drawAcc` rule at `refs/uPlot/src/paths/linear.js:4-15`. A flat bin costs one vertex; the common case is 2–3, worst case 4:
 
 ```ts
 const yFirst = toY(first[i] as number);
@@ -1144,18 +1146,16 @@ const yLast = toY(last[i] as number);
 if (!penDown || gap) context.moveTo(x, yFirst);
 else context.lineTo(x, yFirst);
 if (yMin !== yMax) {
-  // order the excursion to end nearest yLast, halving reversals
-  const firstExtreme =
-    Math.abs(yFirst - yMin) > Math.abs(yFirst - yMax) ? yMin : yMax;
-  const secondExtreme = firstExtreme === yMin ? yMax : yMin;
-  if (firstExtreme !== yFirst) context.lineTo(x, firstExtreme);
-  context.lineTo(x, secondExtreme);
+  if (yMin !== yFirst && yMin !== yLast) context.lineTo(x, yMin);
+  if (yMax !== yFirst && yMax !== yLast) context.lineTo(x, yMax);
+  context.lineTo(x, yLast);
+} else if (yLast !== yFirst) {
+  context.lineTo(x, yLast);
 }
-if (yLast !== yMax && yLast !== yMin) context.lineTo(x, yLast);
 penDown = !gap;
 ```
 
-This preserves the envelope invariant (min and max are both always stroked; gaps still break the pen) while cutting vertices ~2× and eliminating guaranteed 180° double-backs.
+This preserves the envelope invariant — every bin's min and max pixel is stroked, either as an explicit vertex or because the entry/exit vertex coincides with it; gaps still break the pen — while cutting vertices roughly 2× on real data.
 
 - [ ] **Step 3: Verify determinism.** `./scripts/test.sh frontend` (renderer unit tests where practical) and — critically — the **visual pass**: `./scripts/run.sh native`, compare a busy signal at several zoom levels against `main` side-by-side (screenshot both). The stroke silhouette must be identical; only join artifacts may differ (bevel vs miter spikes — spec-compatible, the Final Spec mandates no glows/decoration, not join style). Any silhouette difference is a bug.
 - [ ] **Step 4: Measure.** The `.render-ms` readout on a single mc1000 signal at full window: record before/after (was ~100 ms).
@@ -1167,46 +1167,63 @@ git add frontend/src/render/canvas-renderer.ts
 git commit -m "perf(render): minimal envelope stroke with bevel joins"
 ```
 
-### Task 20: Dense-region column strips
+### Task 20: Dense-region pixel-column accumulator
 
-When bins-per-pixel ≥ 2 (zoomed out), per-bin vertices are invisible; draw per-pixel-column vertical strips through one path.
+When bins-per-pixel ≥ 2 (zoomed out), per-bin vertices are invisible. Merge bins into pixel columns with uPlot's accumulator shape (`refs/uPlot/src/paths/linear.js:68-113`): per column keep first-in, last-out, min, max, then emit with Task 19's skip rules. Unlike disconnected vertical strips, this keeps the entry/exit connectors, so inter-column continuity and the stroke silhouette are preserved exactly.
 
 **Files:**
 
 - Modify: `frontend/src/render/canvas-renderer.ts` (`drawSeries`)
 
-- [ ] **Step 1: Implement the fast path** inside `drawSeries`, chosen per series when `series.bins.count > 2 * plot.width`:
+- [ ] **Step 1: Implement the fast path** inside `drawSeries`, chosen per series when `series.bins.count > 2 * plot.width`. Factor Task 19's emission into a local `emitColumn(x, yFirst, yMin, yMax, yLast, gap)` closure shared by both paths:
 
 ```ts
-// Accumulate exact per-column envelope, then stroke column verticals plus
-// connectors; identical extrema, ~width vertices instead of 4×bins.
-const columns = Math.max(1, Math.ceil(plot.width));
-const colMin = new Float64Array(columns).fill(Number.POSITIVE_INFINITY);
-const colMax = new Float64Array(columns).fill(Number.NEGATIVE_INFINITY);
-const colGap = new Uint8Array(columns);
+// Merge bins into pixel columns: first-in/last-out plus exact extremes,
+// 1–4 vertices per column, one polyline. Column key is the integer pixel.
+let colX = Number.NaN;
+let cFirst = 0;
+let cLast = 0;
+let cMin = 0;
+let cMax = 0;
+let colGap = false;
+const flushColumn = (): void => {
+  if (Number.isNaN(colX)) return;
+  emitColumn(colX, toY(cFirst), toY(cMin), toY(cMax), toY(cLast), colGap);
+};
 for (let i = 0; i < count; i += 1) {
   const f = flags[i] as number;
-  if ((f & (HAS_MIN | HAS_MAX)) !== (HAS_MIN | HAS_MAX)) continue;
-  const c = Math.min(
-    columns - 1,
-    Math.max(
-      0,
-      Math.floor(toX(((t0[i] as number) + (t1[i] as number)) * 0.5) - plot.x),
-    ),
-  );
-  if ((min[i] as number) < (colMin[c] as number)) colMin[c] = min[i] as number;
-  if ((max[i] as number) > (colMax[c] as number)) colMax[c] = max[i] as number;
-  if ((f & HAS_GAP) !== 0) colGap[c] = 1;
+  if (
+    (f & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
+    (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
+  ) {
+    flushColumn();
+    colX = Number.NaN;
+    penDown = false;
+    continue;
+  }
+  const x =
+    plot.x +
+    Math.floor(toX(((t0[i] as number) + (t1[i] as number)) * 0.5) - plot.x) +
+    0.5;
+  if (x !== colX) {
+    flushColumn();
+    colX = x;
+    cFirst = first[i] as number;
+    cLast = last[i] as number;
+    cMin = min[i] as number;
+    cMax = max[i] as number;
+    colGap = (f & HAS_GAP) !== 0;
+  } else {
+    cLast = last[i] as number;
+    if ((min[i] as number) < cMin) cMin = min[i] as number;
+    if ((max[i] as number) > cMax) cMax = max[i] as number;
+    colGap ||= (f & HAS_GAP) !== 0;
+  }
 }
-for (let c = 0; c < columns; c += 1) {
-  if (!Number.isFinite(colMin[c] as number)) continue;
-  const x = plot.x + c + 0.5;
-  context.moveTo(x, toY(colMax[c] as number));
-  context.lineTo(x, toY(colMin[c] as number));
-}
+flushColumn();
 ```
 
-Gap columns simply don't connect (there are no connectors in this path; adjacent columns overlap visually at ≥1 px stroke width, which is exactly how the envelope reads today at this density). All-gap columns stay empty.
+`emitColumn` is exactly Task 19's vertex block (entry via `moveTo` when `!penDown || gap`, skip-rule extremes, exit, then `penDown = !gap`). Merging bins is envelope-safe: column min/max are the true min/max of the merged bins, `first`/`last` keep stroke continuity, and a gap in any merged bin breaks the pen after that column — same semantics the pyramid's own parent-bin merge guarantees.
 
 - [ ] **Step 2: Visual pass** as in Task 19 — zoomed-out spaghetti and single-series full-history views compared against the previous commit. Envelope silhouette must match; NaN windows must still show gaps.
 - [ ] **Step 3: Measure `.render-ms`** on (a) 1 series full window, (b) a 100-series panel. Record both.
@@ -1215,7 +1232,26 @@ Gap columns simply don't connect (there are no connectors in this path; adjacent
 ```bash
 ./scripts/format.sh
 git add frontend/src/render/canvas-renderer.ts
-git commit -m "perf(render): per-column envelope strips for dense tiles"
+git commit -m "perf(render): pixel-column envelope accumulator for dense tiles"
+```
+
+### Task 21: Path2D caching for style-only redraws
+
+uPlot builds each series' geometry into a `Path2D` and rebuilds only when the series' scale range changed (`refs/uPlot/src/uPlot.js:1608-1615`, invalidation at `:1561`, `:2125`). For us the win is hover emphasis: emphasizing one series re-renders the panel with identical geometry and different alpha/width — today that rebuilds every path. Cache the `Path2D`, re-stroke on style-only changes.
+
+**Files:**
+
+- Modify: `frontend/src/render/canvas-renderer.ts` (`drawSeries`, `render`)
+
+- [ ] **Step 1: Build into `Path2D`.** `drawSeries` writes its vertices into a `new Path2D()` instead of the context path, then `context.stroke(path)`. Stroke style, width, alpha, and dash are context state, not path state, so emphasis needs no rebuild.
+- [ ] **Step 2: Cache per series.** Add to the renderer: `private pathCache = new WeakMap<BinColumns, { key: string; path: Path2D }>();` keyed by the series' `bins` object identity (typed-array views are stable per response/slice), with `key = `${window.t0},${window.t1},${yMin},${yMax},${plot.x},${plot.y},${plot.width},${plot.height}``. On `drawSeries`: cache hit with equal key → `context.stroke(cached.path)`; miss → build, store, stroke. No explicit invalidation needed — new tile responses and cache slices produce new `BinColumns`objects, and the`WeakMap` lets old ones collect; any projection change flips the key.
+- [ ] **Step 3: Verify.** Manual: hover across a many-series panel — `.render-ms` on emphasis changes should drop to near stroke-only cost; pan/zoom still redraws correctly (key changes force rebuild). Run `./scripts/test.sh frontend`.
+- [ ] **Step 4: Format and commit.**
+
+```bash
+./scripts/format.sh
+git add frontend/src/render/canvas-renderer.ts
+git commit -m "perf(render): cache series Path2D for style-only redraws"
 ```
 
 - [ ] **Step 5: Phase 5 handoff.** `./scripts/test.sh frontend`, `./scripts/test.sh bench e2e` (frame floors should now pass at 1000 sources — if not, profile before closing), bump patch, commit manifests.
@@ -1224,14 +1260,14 @@ git commit -m "perf(render): per-column envelope strips for dense tiles"
 
 ## Phase 6 — Closeout
 
-### Task 21: ADR and docs
+### Task 22: ADR and docs
 
 **Files:**
 
 - Create: `docs/adr/0036-binary-tile-transport-and-render-path.md` (check `docs/adr/README.md` for the actual next number and register it there)
 - Modify: `docs/implementation-roadmap.md`
 
-- [ ] **Step 1: Write the ADR** recording: binary tile framing (the exact layout table from Phase 2), why the JSON tile path was removed for native, the bin-budget semantics, the padded-window client cache and its coherence rule, page-granular paging, and the deferral list (GPU renderer, density textures, binary snapshots). Decision + consequences, not deliberation (AGENTS brevity rule).
+- [ ] **Step 1: Write the ADR** recording: binary tile framing (the exact layout table from Phase 2), why the JSON tile path was removed for native, the bin-budget semantics, the padded-window client cache and its coherence rule, page-granular paging, the uPlot-derived stroke rules (per-column vertex skipping, pixel-column merging, `Path2D` caching, pen-break gaps kept over clip-path gaps), and the deferral list (GPU renderer, density textures, binary snapshots). Decision + consequences, not deliberation (AGENTS brevity rule).
 - [ ] **Step 2: Roadmap note** — one line linking the phase 5 bench floors to this plan's results.
 - [ ] **Step 3: Format and commit.**
 
@@ -1241,7 +1277,7 @@ git add docs/adr docs/implementation-roadmap.md
 git commit -m "docs(adr): binary tile transport and render path decisions"
 ```
 
-### Task 22: Full verification
+### Task 23: Full verification
 
 - [ ] **Step 1:** `./scripts/ci.sh all` — the complete local gate.
 - [ ] **Step 2:** `./scripts/test.sh bench` — full bench suite. Paste the before/after table (from the numbers recorded in each phase's commits) into the PR description: `tile_latency`, `warm_tile_latency`, `tile_wire_cost` (json vs binary), `e2e_mc1000` first-plot / frame p95 / input_files, single-series `.render-ms`.
