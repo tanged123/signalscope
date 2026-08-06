@@ -2835,6 +2835,7 @@ export class AppShell {
             : this.effectiveWindow(panel);
         },
         (panelId) => this.missingByPanel.get(panelId) ?? [],
+        this.workspace.revision(),
       ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }

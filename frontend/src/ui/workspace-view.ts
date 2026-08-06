@@ -117,6 +117,7 @@ export class WorkspaceView {
     samplesByPanel: ReadonlyMap<string, SampleResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
+    revision: number | null = null,
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -131,6 +132,7 @@ export class WorkspaceView {
             samplesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
+            revision,
           ) ?? 0;
     }
     return total;

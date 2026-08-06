@@ -79,6 +79,34 @@ export const MAXIMIZE_GLYPH = "↗";
 
 export type PanelCursor = PlotCursor;
 
+/** Inputs whose identity decides whether `renderData` can be skipped. */
+export interface RenderInputs {
+  revision: number | null;
+  tiles: ColumnarTileResponse | null;
+  samples: SampleResponse | null;
+  window: { t0: number; t1: number } | null;
+  missingEmpty: boolean;
+}
+
+/** Return true when a render can safely reuse the previous panel output. */
+export function sameRenderInputs(
+  last: RenderInputs,
+  next: RenderInputs,
+): boolean {
+  return (
+    next.revision !== null &&
+    next.revision === last.revision &&
+    next.tiles === last.tiles &&
+    next.samples === last.samples &&
+    last.window !== null &&
+    next.window !== null &&
+    next.window.t0 === last.window.t0 &&
+    next.window.t1 === last.window.t1 &&
+    next.missingEmpty &&
+    last.missingEmpty
+  );
+}
+
 interface ResolvedAnnotations {
   resolved: readonly ResolvedAnnotation[];
   delta: PlotDelta | null;
@@ -560,7 +588,7 @@ export class PanelView {
   private readonly yAxis = new YAxisPolicy();
   private lastState: RenderPanelState | null = null;
   private lastInputState: PanelState | null = null;
-  private lastStateKey: string | null = null;
+  private lastRevision: number | null = null;
   private lastTiles: ColumnarTileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
@@ -951,23 +979,31 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
+    revision: number | null = null,
   ): number {
-    const stateKey = JSON.stringify(state);
     if (
-      stateKey === this.lastStateKey &&
-      tiles === this.lastTiles &&
-      samples === this.lastSamples &&
-      this.lastWindow !== null &&
-      window.t0 === this.lastWindow.t0 &&
-      window.t1 === this.lastWindow.t1 &&
-      missing.length === 0 &&
-      this.lastMissingEmpty
+      sameRenderInputs(
+        {
+          revision: this.lastRevision,
+          tiles: this.lastTiles,
+          samples: this.lastSamples,
+          window: this.lastWindow,
+          missingEmpty: this.lastMissingEmpty,
+        },
+        {
+          revision,
+          tiles,
+          samples,
+          window,
+          missingEmpty: missing.length === 0,
+        },
+      )
     ) {
       return 0;
     }
     const rendered = renderState(state, this.callbacks);
     this.lastInputState = state;
-    this.lastStateKey = stateKey;
+    this.lastRevision = revision;
     this.lastState = rendered;
     this.lastTiles = tiles;
     this.lastSamples = samples;

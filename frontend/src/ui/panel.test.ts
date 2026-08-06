@@ -9,6 +9,7 @@ import type {
 import type { FocusEntry, PanelState } from "../generated/session";
 import type { PathRenderOptions, PlotPath } from "../render/canvas-renderer";
 import { Catalog } from "../app/catalog";
+import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
 import type { ResolvedSeries } from "../app/resolution";
@@ -25,11 +26,62 @@ import {
   parseSetPayload,
   parseSignalPayload,
   parseSignalRefsPayload,
+  sameRenderInputs,
   type RenderPanelState,
   type RenderSeries,
   xChipLabel,
 } from "./panel";
 import type { PanelCallbacks } from "./panel";
+
+describe("sameRenderInputs", () => {
+  const tiles = { requestId: "r", series: [] } as ColumnarTileResponse;
+  const window = { t0: 0, t1: 1 };
+  const base = {
+    revision: 3,
+    tiles,
+    samples: null,
+    window,
+    missingEmpty: true,
+  };
+
+  it("skips only when every identity and the revision match", () => {
+    expect(sameRenderInputs(base, { ...base })).toBe(true);
+    expect(sameRenderInputs(base, { ...base, window: { t0: 0, t1: 1 } })).toBe(
+      true,
+    );
+  });
+
+  it("re-renders on any changed input", () => {
+    expect(sameRenderInputs(base, { ...base, revision: 4 })).toBe(false);
+    expect(
+      sameRenderInputs(base, {
+        ...base,
+        tiles: { requestId: "s", series: [] } as ColumnarTileResponse,
+      }),
+    ).toBe(false);
+    expect(sameRenderInputs(base, { ...base, window: { t0: 0, t1: 2 } })).toBe(
+      false,
+    );
+    expect(sameRenderInputs(base, { ...base, missingEmpty: false })).toBe(
+      false,
+    );
+  });
+
+  it("always re-renders when no revision was provided", () => {
+    expect(
+      sameRenderInputs(
+        { ...base, revision: null },
+        { ...base, revision: null },
+      ),
+    ).toBe(false);
+  });
+
+  it("never skips before the first render", () => {
+    expect(sameRenderInputs({ ...base, window: null }, { ...base })).toBe(
+      false,
+    );
+  });
+});
 
 function sample(
   path: string,
