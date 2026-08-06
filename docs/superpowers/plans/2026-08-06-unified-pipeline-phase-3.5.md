@@ -4,7 +4,7 @@
 
 **Goal:** Make the phase-3 density tier actually legible, per the spec amendment `docs/superpowers/specs/2026-08-06-unified-renderer-design.md` §"Amendment (2026-08-06…)": replace the saturating physical alpha law with a log-normalized tone map, give stroked series in raster regime their own full-resolution tile request (kills the remaining comb on focused/hued/hovered lines), and cut the raster accumulation from ~229 ms to low single digits with difference-mark accumulation.
 
-**Architecture:** Three independent corrections. (1) `density-raster.ts` accumulates `+1/−1` span marks and a new `resolveCoverage` prefix-sum resolves them once per frame; `coverageToImage` maps coverage through `alpha(k) = 0.1 + 0.8·ln(1+k)/ln(1+kRef)` with `kRef = 2^ceil(log2(kMax))`. (2) `CanvasRenderer.drawDensity` calls the resolve and drops the point-alpha argument. (3) `app-shell.ts` issues a second tile query for the stroked set (focused + hued + hover-emphasized, ≤ 32 series) when `densityMode` says raster, merging by signal id; a new optional `onEmphasize` panel callback feeds the hover set, debounced through `scheduleRefresh(100)`.
+**Architecture:** Four corrections that together eliminate every banding surface. (1) `density-raster.ts` accumulates `+1/−1` span marks and a new `resolveCoverage` prefix-sum resolves them once per frame; `coverageToImage` maps coverage through `alpha(k) = 0.1 + 0.8·ln(1+k)/ln(1+kRef)` with `kRef = 2^ceil(log2(kMax))`. (2) `CanvasRenderer.drawDensity` calls the resolve and drops the point-alpha argument. (2b) **The banding endgame:** any stroked series whose delivered tiles are aggregated (`level > 0`) and sparser than one bin per two device pixels draws as a filled min/max ribbon with a stroked mean centerline instead of per-bin vertical excursions — the renderer can no longer emit comb geometry for ANY series, in any mode, cap-overflow, or transient state. (3) `app-shell.ts` issues a second tile query for the stroked set (focused + hued + hover-emphasized, ≤ 32 series) when `densityMode` says raster, merging by signal id, so those lines are true full-resolution lines rather than ribbons; a new optional `onEmphasize` panel callback feeds the hover set, debounced through `scheduleRefresh(100)`.
 
 **Tech Stack:** TypeScript (strict), vitest (jsdom), no new dependencies, no protocol changes.
 
@@ -289,6 +289,267 @@ Expected: PASS with no test edits (the density describe asserts putImageData/dra
 ./scripts/format.sh
 git add frontend/src/render/canvas-renderer.ts
 git commit -m "feat(render): resolve coverage marks and tone-map the density blit"
+```
+
+---
+
+### Task 2b: Banded-stroke fallback — no stroked series may ever comb
+
+The raster covers ghost crowds and Task 3 gives small stroked sets real
+resolution, but four surfaces still stroke from starved bins and comb:
+"all" mode at scale (nothing is ghost-styled, the raster never engages),
+hover-emphasized ghosts during the ~100 ms before the debounced hi-res
+lands, stroked sets over the 32-series cap, and pyramid level rounding
+delivering as little as half the requested bins. One renderer rule closes
+all of them: a series whose DELIVERED tiles are aggregated (`level > 0`)
+and sparser than one bin per two device pixels draws as a filled min/max
+ribbon with a stroked mean centerline — the single-series form of the
+density tier's trapezoids. Level-0 tiles are raw samples: sparse is the
+data itself, the excursion path degenerates to a plain polyline, and they
+keep the normal stroke.
+
+**Files:**
+
+- Modify: `frontend/src/render/canvas-renderer.ts`
+- Test: `frontend/src/render/canvas-renderer.test.ts`
+
+**Interfaces:**
+
+- Module-level: `const BAND_FILL_ALPHA = 0.35;` and `function starvedEnvelope(series: ColumnarTile, plotWidthDevice: number): boolean`
+- `private drawSeriesBand(context, plot, project, series, style, pathKey): void` and `private appendBandPaths(band: Path2D, mean: Path2D, project: Projection, bins: BinColumns): void`
+- `private readonly bandCache` — mirror the existing `pathCache` declaration (same container type, keyed by `BinColumns`), holding `{ key: string; band: Path2D; mean: Path2D }`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `frontend/src/render/canvas-renderer.test.ts`. First check two fixtures: the recording context must record `fill` calls as `{op: "fill"}` (mirror how `stroke` is recorded; add it if absent), and the `tile(...)` helper must accept a `level` (add an optional trailing parameter defaulting to the current value — do not change existing call sites).
+
+```ts
+describe("banded stroke fallback", () => {
+  // 2600 CSS px at DPR 1 -> 2600 device px; 40 bins < 1300 -> starved
+  // whenever the tile is aggregated (level > 0).
+  function starvedResponse(level: number) {
+    const bins = Array.from({ length: 40 }, (_, index) => ({
+      t0: index,
+      t1: index + 1,
+      v: (index % 5) + 1,
+    }));
+    return { requestId: "r", series: [tile("run_1/a", bins, level)] };
+  }
+  const options = {
+    xLabel: "t",
+    yLabel: "v",
+    yRange: [0, 8] as [number, number],
+    axisStyle: "inline" as const,
+    styles: [{ hue: 1, dash: "solid" as const, width: 1.4, alpha: 1 }],
+  };
+
+  it("draws a starved aggregated series as a filled band with a mean line", () => {
+    const { calls, context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.render(starvedResponse(3), { min: 0, max: 40 }, options);
+    const clipIndex = calls.findIndex((call) => call.op === "clip");
+    const restoreIndex = calls.findIndex(
+      (call, index) => index > clipIndex && call.op === "restore",
+    );
+    const slice = calls.slice(clipIndex, restoreIndex);
+    expect(slice.filter((call) => call.op === "fill")).toHaveLength(1);
+    expect(slice.filter((call) => call.op === "stroke")).toHaveLength(1);
+  });
+
+  it("keeps the plain stroke for level-0 tiles and dense tiles", () => {
+    const sparse = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, sparse.context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.render(starvedResponse(0), { min: 0, max: 40 }, options);
+    expect(sparse.calls.some((call) => call.op === "fill")).toBe(false);
+
+    const narrow = recordingContext();
+    // 60 CSS px -> threshold 30; 40 bins >= 30 -> dense enough to stroke.
+    const dense = new CanvasRenderer(fakeCanvas(60, 400, narrow.context));
+    dense.setPalette(TEST_PALETTE);
+    dense.render(starvedResponse(3), { min: 0, max: 40 }, options);
+    expect(narrow.calls.some((call) => call.op === "fill")).toBe(false);
+  });
+});
+```
+
+The dense-case width arithmetic depends on the fake canvas's plot rect (labels and gutters shrink `plot.width` below the canvas width) — before finalizing, log `plot.width` or pick the narrow width so `bins.count >= plot.width * ratio / 2` clearly holds; adjust the number, not the rule.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `./scripts/test.sh unit -- src/render/canvas-renderer.test.ts`
+Expected: the new describe FAILS (no `fill` calls are emitted today).
+
+- [ ] **Step 3: Implement in `frontend/src/render/canvas-renderer.ts`**
+
+1. Module-level, near the other module constants:
+
+```ts
+const BAND_FILL_ALPHA = 0.35;
+
+/**
+ * True when the tile's delivered resolution cannot be stroked faithfully:
+ * aggregated bins (level > 0) sparser than one bin per two device pixels
+ * read as a comb of vertical excursions no matter how they are connected
+ * (field captures 2026-08-04 and 2026-08-06). Level 0 is raw samples —
+ * sparse there is the data itself, and the excursion path degenerates to
+ * a plain polyline.
+ */
+function starvedEnvelope(
+  series: ColumnarTile,
+  plotWidthDevice: number,
+): boolean {
+  return series.level > 0 && series.bins.count < plotWidthDevice / 2;
+}
+```
+
+2. The `bandCache` field next to `pathCache`, same container type, holding `{ key: string; band: Path2D; mean: Path2D }`.
+
+3. Route `drawSeries` through the fallback (the method currently sets stroke and strokes `seriesPath`; add the guard first):
+
+```ts
+if (starvedEnvelope(series, plot.width * this.pixelRatio)) {
+  this.drawSeriesBand(context, plot, project, series, style, pathKey);
+  return;
+}
+```
+
+4. In the BATCHED `forEach` in `render()` (the `canBatch` branch), immediately after the `if (rasterSet.has(index)) return;` line, add:
+
+```ts
+if (starvedEnvelope(series, plot.width * this.pixelRatio)) {
+  this.drawSeriesBand(context, plot, project, series, styleFor(index), pathKey);
+  return;
+}
+```
+
+(Bands drawn during the grouping pass land under the batched strokes — field under lines, same z-order rule as the raster.)
+
+5. The two new methods, after `drawSeries`:
+
+```ts
+  /**
+   * The faithful shape of a starved envelope: a filled min/max ribbon
+   * under a stroked mean centerline — the single-series form of the
+   * density tier's trapezoids. Gap bins and missing extrema break both
+   * paths exactly where the excursion path lifted its pen.
+   */
+  private drawSeriesBand(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    project: Projection,
+    series: ColumnarTile,
+    style: ResolvedStroke,
+    pathKey: string,
+  ): void {
+    const bins = series.bins;
+    const cached = this.bandCache.get(bins);
+    let paths = cached?.key === pathKey ? cached : null;
+    if (paths === null) {
+      const band = new Path2D();
+      const mean = new Path2D();
+      this.appendBandPaths(band, mean, project, bins);
+      paths = { key: pathKey, band, mean };
+      this.bandCache.set(bins, paths);
+    }
+    context.fillStyle = style.color;
+    context.globalAlpha = style.alpha * BAND_FILL_ALPHA;
+    context.fill(paths.band);
+    // The fill changed globalAlpha behind setStroke's memo.
+    this.lastAlpha = Number.NaN;
+    this.setStroke(context, style);
+    context.stroke(paths.mean);
+  }
+
+  private appendBandPaths(
+    band: Path2D,
+    mean: Path2D,
+    project: Projection,
+    bins: BinColumns,
+  ): void {
+    const { toX, toY } = project;
+    const { t0, t1, min, max, sum, finiteCount, flags, count } = bins;
+    const required = HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX;
+    const soloWidth = 1 / this.pixelRatio;
+    const xs: number[] = [];
+    const los: number[] = [];
+    const his: number[] = [];
+    const flush = (): void => {
+      if (xs.length === 1) {
+        // An isolated bin still shows its span, one device pixel wide —
+        // a zero-width polygon would vanish under fill.
+        const x = xs[0] as number;
+        const hi = his[0] as number;
+        const lo = los[0] as number;
+        band.rect(
+          x - soloWidth / 2,
+          Math.min(hi, lo),
+          soloWidth,
+          Math.max(soloWidth, Math.abs(lo - hi)),
+        );
+      } else if (xs.length > 1) {
+        band.moveTo(xs[0] as number, his[0] as number);
+        for (let i = 1; i < xs.length; i += 1) {
+          band.lineTo(xs[i] as number, his[i] as number);
+        }
+        for (let i = xs.length - 1; i >= 0; i -= 1) {
+          band.lineTo(xs[i] as number, los[i] as number);
+        }
+        band.closePath();
+      }
+      xs.length = 0;
+      los.length = 0;
+      his.length = 0;
+    };
+    let meanPen = false;
+    for (let index = 0; index < count; index += 1) {
+      const binFlags = flags[index] as number;
+      if ((binFlags & required) !== required) {
+        flush();
+        meanPen = false;
+        continue;
+      }
+      const gap = (binFlags & HAS_GAP) !== 0;
+      if (gap) {
+        flush();
+        meanPen = false;
+      }
+      const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
+      xs.push(x);
+      los.push(toY(min[index] as number));
+      his.push(toY(max[index] as number));
+      const finite = finiteCount[index] as number;
+      if (finite > 0) {
+        const yMean = toY((sum[index] as number) / finite);
+        if (meanPen) mean.lineTo(x, yMean);
+        else mean.moveTo(x, yMean);
+        meanPen = true;
+      } else {
+        meanPen = false;
+      }
+      if (gap) {
+        flush();
+        meanPen = false;
+      }
+    }
+    flush();
+  }
+```
+
+The gap semantics mirror `accumulateEnvelope`: a gap bin is an isolated run — it connects to neither neighbor. Diff this against that function's `previous = gap ? null : ...` handling before committing.
+
+- [ ] **Step 4: Run the full renderer suite**
+
+Run: `./scripts/test.sh unit -- src/render/canvas-renderer.test.ts src/render`
+Expected: PASS, including every pre-existing test (all existing fixtures are level 0 or dense, so nothing else changes representation). Any pre-existing failure means a fixture has `level > 0` with sparse bins — inspect it: if it was asserting comb geometry on starved data, the fixture, not the rule, is what changes.
+
+- [ ] **Step 5: Format and commit**
+
+```bash
+./scripts/format.sh
+git add frontend/src/render/canvas-renderer.ts frontend/src/render/canvas-renderer.test.ts
+git commit -m "feat(render): starved stroked envelopes draw as ribbons, never combs"
 ```
 
 ---
@@ -661,7 +922,11 @@ Canvas2D surface is blitted below the remaining focused, hued, or
 emphasized strokes. In raster regime the shell additionally fetches the
 stroked set (focused + hued + hover-emphasized, capped at 32 series) at
 full pixel width in a second tile query merged by signal id, so the lines
-that remain lines do not inherit the crowd's starved bin allocation.
+that remain lines do not inherit the crowd's starved bin allocation. Any
+stroked series whose delivered tiles are still aggregated and sparser
+than one bin per two device pixels draws as a filled min/max ribbon with
+a mean centerline — the renderer never emits per-bin vertical excursions
+at comb pitch, in any mode, cap overflow, or transient state.
 ```
 
 2. Append to the Rejected section:
@@ -703,9 +968,11 @@ Reproduce the `Screenshot 2026-08-06 000245.png` panel (mc1000 corpus, `temperat
 
 - The grey band now shows **gradation**: dark core where runs concentrate, fading toward the envelope edges; no flat slab.
 - The focused blue line is a **continuous crisp trace** — no ~9 px vertical comb.
-- Hovering a ghost emphasizes it as a line that sharpens to full resolution after ~100 ms (one-time pop-in per dwell is expected and accepted).
+- Hovering a ghost shows a **smooth ribbon immediately** (never a comb), then sharpens to a full-resolution line after ~100 ms.
+- Flip the panel's ghost toggle to **"all"**: 1000 overlapping ribbons — muddy is expected, banding is not. No vertical teeth anywhere.
 - The status-bar render time on this panel drops from ~229 ms to low double digits.
-- A panel below the raster threshold renders identically to phase 3.
+- A panel below the raster threshold with dense tiles renders identically to phase 3.
+- Zoom out on a single-series panel until the pyramid delivers sparse aggregated bins: the trace becomes a ribbon + mean line, never teeth; zoom back in and it returns to a plain line.
 
 Screenshot the result for the PR next to the 2026-08-06 capture.
 
@@ -717,7 +984,8 @@ Handoff notes: bench delta table, before/after screenshots, observed render-ms, 
 
 ## Self-review notes (already applied)
 
-- Spec coverage: amendment items 1 (tone map — Task 1/2), 2 (hi-res strokes — Task 3), 3 (difference marks — Task 1). ADR amendment required by the spec's ADR rule — Task 4.
+- Spec coverage: amendment items 1 (tone map — Task 1/2), 2 (hi-res strokes — Task 3), 3 (difference marks — Task 1), 4 (banded-stroke fallback — Task 2b). ADR amendment required by the spec's ADR rule — Task 4.
+- The banding inventory this plan must close, exhaustively: ghost crowds (raster, phase 3), focused/hued in raster regime (Task 3 data), "all"-mode crowds / hover interim / cap overflow / pyramid level rounding (Task 2b representation). Task 2b's predicate measures DELIVERED bins, so every starvation cause funnels into the same rule; `level > 0` exempts raw samples, whose excursion path is already a polyline.
 - The Task 3 merge is identity-memoized specifically for the phase-1 `sameRenderInputs` tile guard and the phase-2 prepare cache: same crowd + hi objects → same merged object, so hover-clear returns to the pre-hover merged identity via the pseudo-id tile cache.
 - `onEmphasize` is optional on `PanelCallbacks` so the existing partial mocks in panel tests stay valid; the shell registers it unconditionally.
 - Failure isolation: a failed hi-res query degrades to the crowd response (`withHiRes` catch), never to a blank panel.

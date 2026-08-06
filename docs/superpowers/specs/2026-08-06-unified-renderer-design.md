@@ -383,3 +383,16 @@ they are phase 3.5 (`docs/superpowers/plans/2026-08-06-unified-pipeline-phase-3.
    `−1` below band bottom, one prefix-sum resolve per frame) — the direct
    per-column fill measured 229 ms per render on the mc1000 panel, which
    also gated hover emphasis re-rasters.
+4. **No stroked series may ever comb** (added on Edward's "fix ALL
+   banding" requirement). All banding shares one mechanism — a starved
+   aggregated envelope drawn as per-bin vertical excursions — and items
+   1–3 leave four surfaces uncovered: "all" mode at scale (nothing
+   ghost-styled, the raster never engages), hover-emphasized ghosts during
+   the debounce, stroked sets over the 32 cap, and pyramid level rounding
+   delivering as little as half the requested bins. The renderer therefore
+   gains a representation floor: a series whose delivered tiles are
+   aggregated (`level > 0`) and sparser than one bin per two device pixels
+   draws as a filled min/max ribbon with a stroked mean centerline — the
+   single-series form of the density trapezoids. Level-0 tiles are raw
+   samples and keep the plain stroke. The predicate measures delivered
+   bins, so every starvation cause funnels into the same rule.
