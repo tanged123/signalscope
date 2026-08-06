@@ -89,6 +89,41 @@ test("time capabilities link cursors and expose raw visible statistics", () => {
   ]);
 });
 
+test("prepareTimePlot scans bins for extents only when autoRanges is called", () => {
+  const bins = binColumnsFromWire([
+    {
+      t0: 0,
+      t1: 1,
+      first: 1,
+      last: 2,
+      min: 1,
+      max: 2,
+      sum: 3,
+      sum_sq: 5,
+      finite_count: "2",
+      sample_count: "2",
+      has_gap: false,
+    },
+  ]);
+  let minReads = 0;
+  const counted = new Proxy(bins, {
+    get(target, property, receiver) {
+      if (property === "min") minReads += 1;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const plot = prepareTimePlot({
+    series: [{ path: "run_0001/response", colorIndex: 0, bins: counted }],
+    window: { t0: 0, t1: 1 },
+  });
+  expect(minReads).toBe(0);
+  plot.autoRanges();
+  const afterFirst = minReads;
+  expect(afterFirst).toBeGreaterThan(0);
+  plot.autoRanges();
+  expect(minReads).toBe(afterFirst);
+});
+
 test("XY capabilities share time anchors and report X, Y and C statistics", () => {
   const plot = prepareXyPlot({
     x: { path: "demo/x", values: [1, 3, 5] },
