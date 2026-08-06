@@ -1089,3 +1089,22 @@ describe("recipe directory settings entries", () => {
     });
   });
 });
+
+it("isDerivedPath scans the derived list once per workspace revision", () => {
+  const shell = Object.create(AppShell.prototype) as {
+    workspace: { revision: () => number; derived: () => { path: string }[] };
+    isDerivedPath: (path: string) => boolean;
+  };
+  let scans = 0;
+  shell.workspace = {
+    revision: () => 7,
+    derived: () => {
+      scans += 1;
+      return [{ path: "derived/mean" }];
+    },
+  };
+  expect(shell.isDerivedPath("derived/mean")).toBe(true);
+  expect(shell.isDerivedPath("run_0001/response")).toBe(false);
+  expect(shell.isDerivedPath("derived/mean")).toBe(true);
+  expect(scans).toBe(1);
+});

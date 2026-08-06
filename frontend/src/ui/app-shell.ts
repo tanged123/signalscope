@@ -194,6 +194,8 @@ export class AppShell {
   private readonly selection = new SelectionModel();
   private readonly tileWindowCache = new TileWindowCache();
   private readonly sampleWindowCache = new SampleWindowCache();
+  private derivedPathsCache: { revision: number; paths: Set<string> } | null =
+    null;
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
@@ -2809,7 +2811,14 @@ export class AppShell {
   }
 
   private isDerivedPath(path: string): boolean {
-    return this.workspace.derived().some((entry) => entry.path === path);
+    const revision = this.workspace.revision();
+    if (this.derivedPathsCache?.revision !== revision) {
+      this.derivedPathsCache = {
+        revision,
+        paths: new Set(this.workspace.derived().map((entry) => entry.path)),
+      };
+    }
+    return this.derivedPathsCache.paths.has(path);
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
