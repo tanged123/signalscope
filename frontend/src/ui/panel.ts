@@ -1045,6 +1045,8 @@ export class PanelView {
     const input: PrepareInput = {
       state,
       tiles,
+      // Task 4 wires the real context tiles.
+      contextTiles: null,
       samples,
       callbacks: this.callbacks,
     };

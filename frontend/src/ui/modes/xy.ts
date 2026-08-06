@@ -80,7 +80,7 @@ const EMPTY: XyGeometry = {
 
 export const xyModule: PlotModeModule<XyGeometry> = {
   mode: "xy",
-  data: { reduction: "samples", windows: ["context", "visible"] },
+  data: { reduction: "envelope", windows: ["context", "visible"] },
   // Styles must be part of the key: prepare bakes them into `entries`, so a
   // style-only change (an override, say) has to invalidate the framework's
   // geometry cache even though tiles and samples keep identity.

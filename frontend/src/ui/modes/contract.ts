@@ -14,8 +14,10 @@ import type { RenderPanelState } from "../panel";
 /**
  * What a mode needs fetched — the spec's stage 1 declaration. The shell owns
  * padding, budgets, caching, and request plumbing; a mode only states its
- * reduction semantics and which sample windows it consumes. Envelope modes
- * ride the tile pipeline and declare no sample windows.
+ * reduction semantics and which windows it consumes. For envelope modes,
+ * windows names tile queries; "visible" is implicit for time mode's empty
+ * list and "context" adds a coarse full-extent query. For sample modes,
+ * windows names sample requests.
  */
 export interface ModeDataSpec {
   reduction: "envelope" | "samples";
@@ -24,7 +26,7 @@ export interface ModeDataSpec {
 
 export const MODE_DATA: Record<PanelMode, ModeDataSpec> = {
   time: { reduction: "envelope", windows: [] },
-  xy: { reduction: "samples", windows: ["context", "visible"] },
+  xy: { reduction: "envelope", windows: ["context", "visible"] },
   fft: { reduction: "samples", windows: ["visible"] },
   histogram: { reduction: "samples", windows: ["visible"] },
 };
@@ -32,11 +34,14 @@ export const MODE_DATA: Record<PanelMode, ModeDataSpec> = {
 /**
  * Stage-2 input: everything that changes only when data or panel
  * configuration lands. Deliberately excludes the visible window — prepare
- * output must be reusable across every pan/zoom frame.
+ * output must be reusable across every pan/zoom frame. Envelope modes may
+ * also receive a coarse full-extent context tile response.
  */
 export interface PrepareInput {
   state: RenderPanelState;
   tiles: ColumnarTileResponse | null;
+  /** Coarse full-extent tiles for modes declaring a "context" window. */
+  contextTiles: ColumnarTileResponse | null;
   samples: SampleResponse | null;
   callbacks: SeriesPathCallbacks;
 }
@@ -97,6 +102,8 @@ export interface ProjectResult {
   hasColorbar?: boolean;
   /** Drives the panel's mode empty-state message (fft and histogram). */
   emptyState?: { empty: boolean; note: string };
+  /** Requests a sample refetch when envelope pairing cannot be verified. */
+  needsSampleFallback?: boolean;
 }
 
 /**

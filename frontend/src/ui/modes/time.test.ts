@@ -101,6 +101,7 @@ describe("timeModule", () => {
         ],
       } as PrepareInput["state"],
       tiles: tiles(["run_0001/a", "run_0001/b"]),
+      contextTiles: null,
       samples: null,
       callbacks,
     };
@@ -114,6 +115,7 @@ describe("timeModule", () => {
     const input: PrepareInput = {
       state: state(["run_0001/a", "run_0001/b"]),
       tiles: tiles(["run_0001/a", "run_0001/b"]),
+      contextTiles: null,
       samples: null,
       callbacks,
     };
@@ -150,6 +152,7 @@ describe("timeModule", () => {
     const input: PrepareInput = {
       state: state(["run_0001/a"]),
       tiles: null,
+      contextTiles: null,
       samples: null,
       callbacks,
     };

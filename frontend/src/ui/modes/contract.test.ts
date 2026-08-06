@@ -5,7 +5,7 @@ describe("MODE_DATA", () => {
   it("declares the two-pipeline split from the spec", () => {
     expect(MODE_DATA.time).toEqual({ reduction: "envelope", windows: [] });
     expect(MODE_DATA.xy).toEqual({
-      reduction: "samples",
+      reduction: "envelope",
       windows: ["context", "visible"],
     });
     expect(MODE_DATA.fft).toEqual({

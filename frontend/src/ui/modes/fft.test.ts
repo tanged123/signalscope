@@ -74,6 +74,7 @@ describe("fftModule", () => {
     const input: PrepareInput = {
       state: state(["run_0001/a"]),
       tiles: null,
+      contextTiles: null,
       samples,
       callbacks,
     };
@@ -114,6 +115,7 @@ describe("fftModule", () => {
     const input: PrepareInput = {
       state: state(["run_0001/a"]),
       tiles: null,
+      contextTiles: null,
       samples,
       callbacks,
     };

@@ -89,6 +89,7 @@ describe("xyModule", () => {
     return {
       state: xyState("run_0001/command", ["run_0001/response"]),
       tiles: null,
+      contextTiles: null,
       samples,
       callbacks,
     };
