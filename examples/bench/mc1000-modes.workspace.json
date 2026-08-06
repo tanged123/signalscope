@@ -1,0 +1,165 @@
+{
+  "app": "signalscope",
+  "schema_version": 20,
+  "theme": "dark",
+  "linked_time": {
+    "t0": 0,
+    "t1": 1000,
+    "linked": true,
+    "paused": false,
+    "cursorT": null,
+    "mode": "fixed"
+  },
+  "active_tab_id": "workspace-1",
+  "tabs": [
+    {
+      "id": "workspace-1",
+      "title": "Monte Carlo modes",
+      "cursor_mode": "none",
+      "focused_panel_id": null,
+      "maximized_panel_id": null,
+      "panels": [
+        {
+          "id": "panel-time",
+          "title": "response ensemble",
+          "mode": "time",
+          "axis_style": "gutter",
+          "x_ref": null,
+          "color_axis": "none",
+          "color_ref": null,
+          "bindings": [
+            {
+              "kind": "query",
+              "selector": "response @*",
+              "refs": [],
+              "set_id": null
+            }
+          ],
+          "color_by": "source",
+          "overrides": [],
+          "focus": [],
+          "ghost_mode": "all",
+          "split_by": "none",
+          "y_range": null,
+          "x_range": null,
+          "x_label": null,
+          "y_label": null,
+          "c_label": null,
+          "time_window": null,
+          "annotations": [],
+          "show_stats": false
+        },
+        {
+          "id": "panel-xy",
+          "title": "response vs command",
+          "mode": "xy",
+          "axis_style": "gutter",
+          "x_ref": { "source_key": "run_0001", "channel": "command" },
+          "color_axis": "none",
+          "color_ref": null,
+          "bindings": [
+            {
+              "kind": "query",
+              "selector": "response @*",
+              "refs": [],
+              "set_id": null
+            }
+          ],
+          "color_by": "source",
+          "overrides": [],
+          "focus": [],
+          "ghost_mode": "all",
+          "split_by": "none",
+          "y_range": null,
+          "x_range": null,
+          "x_label": null,
+          "y_label": null,
+          "c_label": null,
+          "time_window": null,
+          "annotations": [],
+          "show_stats": false
+        },
+        {
+          "id": "panel-fft",
+          "title": "vibration spectrum",
+          "mode": "fft",
+          "axis_style": "gutter",
+          "x_ref": null,
+          "color_axis": "none",
+          "color_ref": null,
+          "bindings": [
+            {
+              "kind": "query",
+              "selector": "vibration @*",
+              "refs": [],
+              "set_id": null
+            }
+          ],
+          "color_by": "source",
+          "overrides": [],
+          "focus": [],
+          "ghost_mode": "all",
+          "split_by": "none",
+          "y_range": null,
+          "x_range": null,
+          "x_label": null,
+          "y_label": null,
+          "c_label": null,
+          "time_window": null,
+          "annotations": [],
+          "show_stats": false
+        },
+        {
+          "id": "panel-hist",
+          "title": "temperature distribution",
+          "mode": "histogram",
+          "axis_style": "gutter",
+          "x_ref": null,
+          "color_axis": "none",
+          "color_ref": null,
+          "bindings": [
+            {
+              "kind": "query",
+              "selector": "temperature @*",
+              "refs": [],
+              "set_id": null
+            }
+          ],
+          "color_by": "source",
+          "overrides": [],
+          "focus": [],
+          "ghost_mode": "all",
+          "split_by": "none",
+          "y_range": null,
+          "x_range": null,
+          "x_label": null,
+          "y_label": null,
+          "c_label": null,
+          "time_window": null,
+          "annotations": [],
+          "show_stats": false
+        }
+      ],
+      "layout": [
+        {
+          "height": 0.5,
+          "panels": [
+            { "panel_id": "panel-time", "width": 0.5 },
+            { "panel_id": "panel-xy", "width": 0.5 }
+          ]
+        },
+        {
+          "height": 0.5,
+          "panels": [
+            { "panel_id": "panel-fft", "width": 0.5 },
+            { "panel_id": "panel-hist", "width": 0.5 }
+          ]
+        }
+      ]
+    }
+  ],
+  "named_sets": [],
+  "derived": [],
+  "derived_bundles": [],
+  "sources": []
+}

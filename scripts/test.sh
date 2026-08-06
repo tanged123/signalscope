@@ -72,6 +72,27 @@ bench_e2e() {
   mkdir -p "$signalscope_root/build/bench/report"
   printf '{ "bench": "bake", "seconds": %d, "bytes": %d, "fidelity": "%s", "input_files": %d }\n' \
     "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake.json"
+  # Sample-mode panels force level-0 baking, so use a bounded corpus slice.
+  local -a modes_args=()
+  local modes_files="${SIGNALSCOPE_BENCH_MODES_FILES:-100}"
+  selected=0
+  for file in "$corpus_dir"/run_*.csv; do
+    if [ "$selected" -eq "$modes_files" ]; then
+      break
+    fi
+    modes_args+=(--data "$file")
+    selected=$((selected + 1))
+  done
+  [ "$selected" -eq "$modes_files" ]
+  local modes_out="$signalscope_root/build/bench/mc1000-modes.html"
+  started=$SECONDS
+  "$signalscope_scripts_dir/export.sh" "${modes_args[@]}" \
+    --workspace "$signalscope_root/examples/bench/mc1000-modes.workspace.json" \
+    --range visible --fidelity "$fidelity" --out "$modes_out"
+  elapsed=$((SECONDS - started))
+  bytes=$(stat -c %s "$modes_out")
+  printf '{ "bench": "bake_modes", "seconds": %d, "bytes": %d, "fidelity": "%s", "input_files": %d }\n' \
+    "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake_modes.json"
   SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend bench
 }
 
