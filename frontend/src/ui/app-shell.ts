@@ -94,6 +94,7 @@ import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
+import { MODE_DATA } from "./modes/contract";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -111,8 +112,8 @@ export function sampleCapFor(mode: PanelMode): number {
  * The per-series cap once a panel's series count is taken into account.
  *
  * `SAMPLE_POINT_BUDGET` bounds the panel's *merged* response, so the share is
- * divided by the number of requests that merge into it — XY issues two
- * (context plus detail) and `mergeSampleResponses` concatenates them. There is
+ * divided by the number of requests that merge into it — a mode issues one
+ * request per declared window and merged responses share the budget. There is
  * no floor: a floor would let a 1000-series panel request 8.2M points against
  * a 500k budget, which is the budget not existing.
  */
@@ -120,7 +121,7 @@ export function sampleCapForPanel(
   mode: PanelMode,
   seriesCount: number,
 ): number {
-  const requests = mode === "xy" ? 2 : 1;
+  const requests = Math.max(1, MODE_DATA[mode].windows.length);
   const share = Math.floor(
     SAMPLE_POINT_BUDGET / (Math.max(1, seriesCount) * requests),
   );
@@ -2657,7 +2658,8 @@ export class AppShell {
         if (ids.length === 0) return;
         const window = this.effectiveWindow(panel);
         try {
-          if (panel.mode === "time") {
+          const spec = MODE_DATA[panel.mode];
+          if (spec.reduction === "envelope") {
             const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
             const dpr = globalThis.devicePixelRatio || 1;
             const pixelWidth = Math.max(
@@ -2708,12 +2710,15 @@ export class AppShell {
               ) ?? response,
             );
           } else {
-            const contextWindow = this.sampleWindow(panel);
+            const wantsContext = spec.windows.includes("context");
+            const contextWindow = wantsContext
+              ? this.sampleWindow(panel)
+              : this.effectiveWindow(panel);
             const cap = sampleCapForPanel(panel.mode, ids.length);
             const cacheKey = SampleWindowCache.key({
               ids,
               mode: panel.mode,
-              window: panel.mode === "xy" ? window : contextWindow,
+              window: wantsContext ? window : contextWindow,
               cap,
             });
             const cached = this.sampleWindowCache.get(panel.id, cacheKey);
@@ -2722,7 +2727,7 @@ export class AppShell {
               return;
             }
             let merged: SampleResponse;
-            if (panel.mode === "xy") {
+            if (wantsContext) {
               merged = await fetchXySamples({
                 plane: this.plane,
                 panelId: panel.id,

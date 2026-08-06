@@ -42,6 +42,16 @@ describe("sampleCapFor", () => {
 });
 
 describe("sampleCapForPanel", () => {
+  it("derives the request count from the mode's declared windows", () => {
+    // xy declares context+visible (2 requests); fft/histogram declare 1.
+    expect(sampleCapForPanel("xy", 1000)).toBe(
+      Math.floor(500_000 / (1000 * 2)),
+    );
+    expect(sampleCapForPanel("fft", 1000)).toBe(Math.floor(500_000 / 1000));
+    expect(sampleCapForPanel("histogram", 4)).toBe(32_768);
+    expect(sampleCapForPanel("time", 4)).toBe(8192);
+  });
+
   it("gives a few series the full per-mode cap", () => {
     expect(sampleCapForPanel("xy", 1)).toBe(32_768);
     expect(sampleCapForPanel("histogram", 15)).toBe(32_768);
