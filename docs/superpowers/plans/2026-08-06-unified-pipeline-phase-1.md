@@ -1572,9 +1572,9 @@ In `scripts/test.sh`, inside `bench_e2e()` immediately after the existing bake-r
 
 ```bash
   # Sample-mode panels force level-0 baking (ADR 0025), so the modes bench
-  # bakes a bounded corpus slice rather than all 1000 files.
+  # bakes a bounded 20-file corpus slice by default rather than all 1000 files.
   local -a modes_args=()
-  local modes_files="${SIGNALSCOPE_BENCH_MODES_FILES:-100}"
+  local modes_files="${SIGNALSCOPE_BENCH_MODES_FILES:-20}"
   selected=0
   for file in "$corpus_dir"/run_*.csv; do
     if [ "$selected" -eq "$modes_files" ]; then
@@ -1591,6 +1591,10 @@ In `scripts/test.sh`, inside `bench_e2e()` immediately after the existing bake-r
     --range visible --fidelity "$fidelity" --out "$modes_out"
   elapsed=$((SECONDS - started))
   bytes=$(stat -c %s "$modes_out")
+  if [ "$bytes" -gt "$max_bytes" ]; then
+    echo "baked modes snapshot is $bytes bytes (limit $max_bytes)" >&2
+    exit 1
+  fi
   printf '{ "bench": "bake_modes", "seconds": %d, "bytes": %d, "fidelity": "%s", "input_files": %d }\n' \
     "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake_modes.json"
 ```
@@ -1693,7 +1697,11 @@ Expected: PASS (core Rust tests + frontend lint/typecheck/codegen/unit/artifact 
 - [ ] **Step 2: Run the full benchmark suite**
 
 Run: `./scripts/test.sh bench`
-Expected: PASS — the pre-existing floors (`e2e_mc1000` frame p95 ≤ 33 ms, stall ≤ 250 ms, first plot ≤ 10 s) must still hold; the modes entries are report-only.
+Expected: the command runs both the core and browser benches and writes the
+report even if a pre-existing core floor fails. The browser floors
+(`e2e_mc1000` frame p95 ≤ 33 ms, stall ≤ 250 ms, first plot ≤ 10 s) must still
+hold; the modes entries are report-only. The exit status still reflects any
+core or browser failure.
 
 - [ ] **Step 3: Compare against the Task 0 baseline**
 

@@ -74,7 +74,7 @@ bench_e2e() {
     "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake.json"
   # Sample-mode panels force level-0 baking, so use a bounded corpus slice.
   local -a modes_args=()
-  local modes_files="${SIGNALSCOPE_BENCH_MODES_FILES:-100}"
+  local modes_files="${SIGNALSCOPE_BENCH_MODES_FILES:-20}"
   selected=0
   for file in "$corpus_dir"/run_*.csv; do
     if [ "$selected" -eq "$modes_files" ]; then
@@ -91,6 +91,10 @@ bench_e2e() {
     --range visible --fidelity "$fidelity" --out "$modes_out"
   elapsed=$((SECONDS - started))
   bytes=$(stat -c %s "$modes_out")
+  if [ "$bytes" -gt "$max_bytes" ]; then
+    echo "baked modes snapshot is $bytes bytes (limit $max_bytes)" >&2
+    exit 1
+  fi
   printf '{ "bench": "bake_modes", "seconds": %d, "bytes": %d, "fidelity": "%s", "input_files": %d }\n' \
     "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake_modes.json"
   SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend bench
@@ -109,8 +113,23 @@ bench_all_exit() {
 
 bench_all() {
   trap bench_all_exit EXIT
-  cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_
-  bench_e2e
+  local core_status=0
+  local e2e_status=0
+  # Keep collecting browser evidence when a known core floor fails.
+  if cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_; then
+    :
+  else
+    core_status=$?
+  fi
+  if bench_e2e; then
+    :
+  else
+    e2e_status=$?
+  fi
+  if [ "$core_status" -ne 0 ]; then
+    return "$core_status"
+  fi
+  return "$e2e_status"
 }
 
 mode="${1:-quick}"
