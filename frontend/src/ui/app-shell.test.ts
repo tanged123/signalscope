@@ -6,6 +6,10 @@ import { WorkspaceModel } from "../app/workspace";
 import { SelectionModel } from "../app/selection";
 import { Catalog } from "../app/catalog";
 import { defaultPreferences } from "../app/preferences";
+import {
+  binColumnsFromWire,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import type { CommandRegistry } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import type { SignalSummary } from "../generated/protocol";
@@ -19,6 +23,7 @@ import {
   clearIngestProgress,
   exportSourceOptions,
   groupCursorRows,
+  mergeTileResponses,
   renderBatchProgress,
   renderDockFooter,
   SAMPLE_CAP,
@@ -28,6 +33,46 @@ import {
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
+
+describe("mergeTileResponses", () => {
+  function tileOf(signalId: string, level: number) {
+    return {
+      signalId,
+      signalPath: `p/${signalId}`,
+      unit: null,
+      level,
+      bins: binColumnsFromWire([]),
+    };
+  }
+
+  it("replaces crowd series with their hi-res twins by signal id", () => {
+    const crowd = {
+      requestId: "c",
+      series: [tileOf("1", 8), tileOf("2", 8)],
+    } as unknown as ColumnarTileResponse;
+    const hi = {
+      requestId: "h",
+      series: [tileOf("2", 2)],
+    } as unknown as ColumnarTileResponse;
+    const merged = mergeTileResponses(crowd, hi);
+    expect(merged.series).toHaveLength(2);
+    expect(merged.series[0]).toBe(crowd.series[0]);
+    expect(merged.series[1]).toBe(hi.series[0]);
+    expect(merged.requestId).toBe("c");
+  });
+
+  it("ignores hi-res series absent from the crowd", () => {
+    const crowd = {
+      requestId: "c",
+      series: [tileOf("1", 8)],
+    } as unknown as ColumnarTileResponse;
+    const hi = {
+      requestId: "h",
+      series: [tileOf("9", 2)],
+    } as unknown as ColumnarTileResponse;
+    expect(mergeTileResponses(crowd, hi).series[0]).toBe(crowd.series[0]);
+  });
+});
 
 describe("sampleCapFor", () => {
   it("gives sample-mode panels more headroom than the legacy cap", () => {

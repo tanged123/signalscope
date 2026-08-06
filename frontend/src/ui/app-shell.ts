@@ -96,6 +96,7 @@ import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import { MODE_DATA } from "./modes/contract";
+import { densityMode } from "../render/density-policy";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -129,6 +130,28 @@ export function sampleCapForPanel(
   return Math.max(1, Math.min(sampleCapFor(mode), share));
 }
 const DERIVED_PREFIX = "derived/";
+/**
+ * Cap on the second, full-resolution tile request in raster regime. Above
+ * this the panel is stroking a crowd and hi-res for a subset would be
+ * arbitrary — the whole set stays at crowd resolution.
+ */
+const HI_RES_SERIES_CAP = 32;
+
+/**
+ * The crowd response with any series present in `hiRes` replaced by its
+ * high-resolution twin. Membership and order follow the crowd response, so
+ * downstream identity and style mapping are unchanged.
+ */
+export function mergeTileResponses(
+  crowd: ColumnarTileResponse,
+  hiRes: ColumnarTileResponse,
+): ColumnarTileResponse {
+  const byId = new Map(hiRes.series.map((tile) => [tile.signalId, tile]));
+  return {
+    ...crowd,
+    series: crowd.series.map((tile) => byId.get(tile.signalId) ?? tile),
+  };
+}
 
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
   if (count <= 0) return "none";
@@ -220,6 +243,15 @@ export class AppShell {
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
+  private readonly panelEmphasis = new Map<string, readonly string[]>();
+  private readonly mergedTiles = new Map<
+    string,
+    {
+      crowd: ColumnarTileResponse;
+      hi: ColumnarTileResponse;
+      merged: ColumnarTileResponse;
+    }
+  >();
   private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
@@ -420,6 +452,17 @@ export class AppShell {
             this.historyGestureKey = `range:${id}`;
             this.clearHistoryCoalesceTimer();
           }
+        },
+        onEmphasize: (id, paths) => {
+          const previous = this.panelEmphasis.get(id) ?? [];
+          const next = [...paths].sort();
+          if (next.join("\u0000") === previous.join("\u0000")) return;
+          if (next.length === 0) this.panelEmphasis.delete(id);
+          else this.panelEmphasis.set(id, next);
+          const panel = this.workspace.panel(id);
+          if (panel === undefined) return;
+          if (MODE_DATA[panel.mode].reduction !== "envelope") return;
+          this.scheduleRefresh(100);
         },
         onCursor: (id, cursor, client) => {
           this.setCursor(id, cursor, client);
@@ -2642,6 +2685,115 @@ export class AppShell {
     return this.refreshQueued;
   }
 
+  /**
+   * Signal ids that stay stroked in raster regime: visible focused/hued
+   * series plus the transient hover-emphasis set. Null when the panel is
+   * not in raster regime, nothing is stroked, or the stroked set is
+   * crowd-sized (cap) — callers then skip the hi-res request entirely.
+   */
+  private strokedSignalIds(
+    panel: PanelState,
+    seriesCount: number,
+    pixelWidth: number,
+  ): string[] | null {
+    if (densityMode(seriesCount, pixelWidth) !== "raster") return null;
+    const emphasized = new Set(this.panelEmphasis.get(panel.id) ?? []);
+    const paths = new Set<string>();
+    for (const series of this.resolvedFor(panel)) {
+      if (!series.visible) continue;
+      if (series.display !== "ghost" || emphasized.has(series.path)) {
+        paths.add(series.path);
+      }
+    }
+    const ids: string[] = [];
+    for (const path of paths) {
+      const id = this.signalsByPath.get(path)?.signal_id;
+      if (id !== undefined) ids.push(id);
+    }
+    if (ids.length === 0 || ids.length > HI_RES_SERIES_CAP) return null;
+    if (ids.length >= seriesCount) return null;
+    return ids;
+  }
+
+  /** The crowd fetch, replayed for the small stroked set at full width. */
+  private async hiResTiles(
+    panel: PanelState,
+    ids: string[],
+    window: { t0: number; t1: number },
+    pixelWidth: number,
+  ): Promise<ColumnarTileResponse> {
+    const cacheId = `${panel.id}\u0000hires`;
+    const idsKey = [...ids].sort().join("\u0000");
+    const cached = this.tileWindowCache.slice(
+      cacheId,
+      idsKey,
+      pixelWidth,
+      window.t0,
+      window.t1,
+    );
+    if (cached !== null) return cached;
+    const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+    const response = await this.plane.queryTiles({
+      request_id: crypto.randomUUID(),
+      signal_ids: ids,
+      window: paddedWindow,
+      pixel_width: TileWindowCache.requestPixelWidth(
+        pixelWidth,
+        window,
+        paddedWindow,
+      ),
+      max_total_bins: TILE_BIN_BUDGET,
+    });
+    this.tileWindowCache.store(cacheId, {
+      response,
+      window: paddedWindow,
+      pixelWidth,
+      idsKey,
+    });
+    return (
+      this.tileWindowCache.slice(
+        cacheId,
+        idsKey,
+        pixelWidth,
+        window.t0,
+        window.t1,
+      ) ?? response
+    );
+  }
+
+  /** Identity-memoized merge for the panel's tile identity guard. */
+  private mergedTilesFor(
+    panelId: string,
+    crowd: ColumnarTileResponse,
+    hi: ColumnarTileResponse,
+  ): ColumnarTileResponse {
+    const memo = this.mergedTiles.get(panelId);
+    if (memo !== undefined && memo.crowd === crowd && memo.hi === hi) {
+      return memo.merged;
+    }
+    const merged = mergeTileResponses(crowd, hi);
+    this.mergedTiles.set(panelId, { crowd, hi, merged });
+    return merged;
+  }
+
+  /** The crowd response, upgraded with full-resolution stroked series. */
+  private async withHiRes(
+    panel: PanelState,
+    crowd: ColumnarTileResponse,
+    ids: string[],
+    window: { t0: number; t1: number },
+    pixelWidth: number,
+  ): Promise<ColumnarTileResponse> {
+    const strokedIds = this.strokedSignalIds(panel, ids.length, pixelWidth);
+    if (strokedIds === null) return crowd;
+    try {
+      const hi = await this.hiResTiles(panel, strokedIds, window, pixelWidth);
+      return this.mergedTilesFor(panel.id, crowd, hi);
+    } catch {
+      return crowd;
+    }
+  }
+
   private async refreshTilesPass(): Promise<void> {
     const refreshToken = ++this.refreshToken;
     const width = Math.max(
@@ -2675,7 +2827,10 @@ export class AppShell {
               window.t1,
             );
             if (cached !== null) {
-              nextTiles.set(panel.id, cached);
+              nextTiles.set(
+                panel.id,
+                await this.withHiRes(panel, cached, ids, window, pixelWidth),
+              );
               return;
             }
             const paddedWindow = TileWindowCache.padWindow(
@@ -2699,15 +2854,17 @@ export class AppShell {
               pixelWidth,
               idsKey,
             });
-            nextTiles.set(
-              panel.id,
+            const crowd =
               this.tileWindowCache.slice(
                 panel.id,
                 idsKey,
                 pixelWidth,
                 window.t0,
                 window.t1,
-              ) ?? response,
+              ) ?? response;
+            nextTiles.set(
+              panel.id,
+              await this.withHiRes(panel, crowd, ids, window, pixelWidth),
             );
           } else {
             const wantsContext = spec.windows.includes("context");

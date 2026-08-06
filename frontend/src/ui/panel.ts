@@ -145,6 +145,11 @@ export interface PanelCallbacks {
   onToggleSeries(id: string, ref: SeriesRef): void;
   onResized(id: string): void;
   onGesture(id: string, hint: string | null): void;
+  /**
+   * Fires whenever the hover/legend emphasis set changes. The shell uses it
+   * to fetch full-resolution tiles for emphasized ghosts in raster regime.
+   */
+  onEmphasize?(id: string, paths: readonly string[]): void;
   onCursor(
     id: string,
     cursor: PanelCursor | null,
@@ -1864,6 +1869,7 @@ export class PanelView {
       );
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
+    this.callbacks.onEmphasize?.(this.id, next === null ? [] : [...next]);
   }
 
   private openRoster(

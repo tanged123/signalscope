@@ -84,6 +84,32 @@ describe("sameRenderInputs", () => {
   });
 });
 
+describe("hover emphasis notification", () => {
+  it("setEmphasis notifies the shell with the panel id and paths", () => {
+    const onEmphasize = vi.fn();
+    const view = Object.create(PanelView.prototype) as unknown as {
+      id: string;
+      callbacks: unknown;
+      emphasizePaths: ReadonlySet<string> | null;
+      lastState: null;
+      lastWindow: null;
+      setEmphasis(paths: readonly string[] | string | null): void;
+    };
+    view.id = "panel-1";
+    view.callbacks = { onEmphasize };
+    view.emphasizePaths = null;
+    view.lastState = null;
+    view.lastWindow = null;
+    view.setEmphasis("run_01/temp");
+    expect(onEmphasize).toHaveBeenCalledWith("panel-1", ["run_01/temp"]);
+    view.setEmphasis(null);
+    expect(onEmphasize).toHaveBeenCalledWith("panel-1", []);
+    onEmphasize.mockClear();
+    view.setEmphasis(null); // unchanged set: no notification
+    expect(onEmphasize).not.toHaveBeenCalled();
+  });
+});
+
 function sample(
   path: string,
   values: number[],
