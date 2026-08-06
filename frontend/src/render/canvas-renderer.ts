@@ -916,7 +916,7 @@ export class CanvasRenderer {
    */
   private drawSeriesBand(
     context: CanvasRenderingContext2D,
-    plot: PlotRect,
+    _plot: PlotRect,
     project: Projection,
     series: ColumnarTile,
     style: ResolvedStroke,
