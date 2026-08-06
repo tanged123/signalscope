@@ -427,24 +427,44 @@ export class CanvasRenderer {
     context.fillStyle = colors.background;
     context.fillRect(0, 0, width, height);
     context.font = tickFont(colors);
-    const gutter = gutterWidth(
-      formatTicks(ticks(spec.yRange.min, spec.yRange.max, 6)),
-      context.measureText("0").width,
-    );
     const inline = spec.axisStyle === "inline";
     const rightGutter = spec.rightGutter ?? 0;
-    const plot: PlotRect = inline
-      ? { x: 0, y: 0, width: Math.max(1, width - rightGutter), height }
-      : {
-          x: gutter,
-          y: 8,
-          width: Math.max(1, width - gutter - 12 - rightGutter),
-          height: Math.max(1, height - 42),
-        };
-    const ranges =
+    const charWidth = context.measureText("0").width;
+    const plotFor = (yRange: Range): PlotRect => {
+      if (inline) {
+        return { x: 0, y: 0, width: Math.max(1, width - rightGutter), height };
+      }
+      const gutter = gutterWidth(
+        formatTicks(ticks(yRange.min, yRange.max, 6)),
+        charWidth,
+      );
+      return {
+        x: gutter,
+        y: 8,
+        width: Math.max(1, width - gutter - 12 - rightGutter),
+        height: Math.max(1, height - 42),
+      };
+    };
+    let plot = plotFor(spec.yRange);
+    let ranges =
       spec.equalAspect === true
         ? equalisedRanges(spec.xRange, spec.yRange, plot)
         : { xRange: spec.xRange, yRange: spec.yRange };
+    // The gutter is sized from the y tick labels, but equalising can widen the
+    // y range and lengthen them, which shrinks plot.width and so widens the
+    // range again. Re-solve until the gutter settles, or the axes get labelled
+    // from a range the gutter was never sized for and the labels clip.
+    // Always re-equalise from the requested ranges so widening never compounds.
+    for (
+      let pass = 0;
+      spec.equalAspect === true && !inline && pass < 4;
+      pass++
+    ) {
+      const next = plotFor(ranges.yRange);
+      if (next.x === plot.x) break;
+      plot = next;
+      ranges = equalisedRanges(spec.xRange, spec.yRange, plot);
+    }
     const scale: AxisScale = spec.xScale ?? "linear";
     const layout: PlotLayout = {
       plot,

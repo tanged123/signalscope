@@ -593,6 +593,51 @@ describe("render", () => {
     expect(yRange.max - yRange.min).toBeGreaterThanOrEqual(10);
   });
 
+  it("sizes the gutter from the equalised y range, not the requested one", () => {
+    const { context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+
+    // A very wide, very short trajectory: equalising widens y from a span of
+    // 1 to tens of thousands, so its tick labels grow from "0.25" to "-20000".
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 100_000, 1],
+          hue: 1,
+          dash: "solid",
+          width: 1,
+          alpha: 1,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 100_000],
+        yRange: [0, 1],
+        equalAspect: true,
+      },
+    );
+
+    const layout = renderer.lastLayout();
+    expect(layout).not.toBeNull();
+    const { plot, xRange, yRange } = layout as NonNullable<
+      ReturnType<CanvasRenderer["lastLayout"]>
+    >;
+    // The y span really did grow enough to lengthen its labels.
+    expect(yRange.max - yRange.min).toBeGreaterThan(1_000);
+    // The gutter must fit the labels actually drawn, which come from the
+    // equalised range. Sizing it from the requested range clips them.
+    expect(plot.x).toBe(
+      gutterWidth(formatTicks(ticks(yRange.min, yRange.max, 6)), 6),
+    );
+    // Re-solving the gutter must leave the axes equal, not just wider.
+    expect(plot.width / (xRange.max - xRange.min)).toBeCloseTo(
+      plot.height / (yRange.max - yRange.min),
+      6,
+    );
+  });
+
   it("leaves ranges untouched when equalAspect is absent", () => {
     const { context } = recordingContext();
     const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
