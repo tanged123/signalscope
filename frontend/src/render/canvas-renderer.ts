@@ -19,6 +19,12 @@ import {
   type Range,
 } from "../app/plot-math";
 import { ColormapRamp, RAMP_STEPS, SEQ_TOKENS } from "../app/colormap";
+import { densityMode } from "./density-policy";
+import {
+  accumulateEnvelope,
+  coverageToImage,
+  type DensityGrid,
+} from "./density-raster";
 import { CanvasSurface } from "./surface";
 
 interface Projection {
@@ -223,6 +229,17 @@ export class CanvasRenderer {
   private palette: Palette | null = null;
   private readonly surface: CanvasSurface;
   private pixelRatio = 1;
+  private densityCanvas: HTMLCanvasElement | null = null;
+  private canvasFactory: (
+    width: number,
+    height: number,
+  ) => HTMLCanvasElement | null = (width, height) => {
+    if (typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+  };
   private layout: PlotLayout | null = null;
   private colorbarGradient: CanvasGradient | null = null;
   private colorbarBottom = 0;
@@ -259,6 +276,14 @@ export class CanvasRenderer {
     this.palette = palette;
     this.colorbarGradient = null;
     this.sequentialRamp = null;
+  }
+
+  /** Test seam for the offscreen density surface. */
+  setCanvasFactory(
+    factory: (width: number, height: number) => HTMLCanvasElement | null,
+  ): void {
+    this.canvasFactory = factory;
+    this.densityCanvas = null;
   }
 
   lastLayout(): PlotLayout | null {
@@ -332,13 +357,46 @@ export class CanvasRenderer {
     const hasEmphasis =
       options.emphasisIndex !== undefined ||
       (options.emphasisIndices?.length ?? 0) > 0;
-    const canBatch = response.series.length > 128 && !hasEmphasis;
+    const emphasizedIndex = (index: number): boolean =>
+      options.emphasisIndex === index ||
+      (options.emphasisIndices?.includes(index) ?? false);
+    const rasterSet = new Set<number>();
+    if (
+      densityMode(response.series.length, plot.width * this.pixelRatio) ===
+      "raster"
+    ) {
+      response.series.forEach((_, index) => {
+        const stroke = options.styles?.[index];
+        if (stroke?.hue === null && !emphasizedIndex(index)) {
+          rasterSet.add(index);
+        }
+      });
+      if (rasterSet.size > 1) {
+        const ghostStyle = styleFor([...rasterSet][0] as number);
+        const drawn = this.drawDensity(
+          context,
+          plot,
+          project,
+          [...rasterSet].map(
+            (index) => (response.series[index] as ColumnarTile).bins,
+          ),
+          ghostStyle.color,
+          ghostStyle.alpha,
+        );
+        if (!drawn) rasterSet.clear();
+      } else {
+        rasterSet.clear();
+      }
+    }
+    const canBatch =
+      response.series.length - rasterSet.size > 128 && !hasEmphasis;
     if (canBatch) {
       const groups = new Map<
         string,
         { style: ResolvedStroke; path: Path2D; count: number }[]
       >();
       response.series.forEach((series, index) => {
+        if (rasterSet.has(index)) return;
         const style = styleFor(index);
         const key = [
           style.color,
@@ -364,6 +422,7 @@ export class CanvasRenderer {
       }
     } else {
       response.series.forEach((series, index) => {
+        if (rasterSet.has(index)) return;
         const style = styleFor(index);
         this.drawSeries(context, plot, project, series, style, pathKey);
       });
@@ -813,6 +872,56 @@ export class CanvasRenderer {
   ): void {
     this.setStroke(context, style);
     context.stroke(this.seriesPath(plot, project, series, pathKey));
+  }
+
+  /**
+   * Accumulates the given series into a device-pixel coverage grid and
+   * composites it into the plot rect. Returns false when no offscreen
+   * canvas is available (headless tests) — the caller then strokes those
+   * series instead, which is the pre-density behavior.
+   */
+  private drawDensity(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    project: Projection,
+    seriesBins: readonly BinColumns[],
+    color: string,
+    pointAlpha: number,
+  ): boolean {
+    const ratio = this.pixelRatio;
+    const width = Math.max(1, Math.round(plot.width * ratio));
+    const height = Math.max(1, Math.round(plot.height * ratio));
+    if (
+      this.densityCanvas === null ||
+      this.densityCanvas.width !== width ||
+      this.densityCanvas.height !== height
+    ) {
+      this.densityCanvas = this.canvasFactory(width, height);
+    }
+    const offscreen = this.densityCanvas;
+    const offContext = offscreen?.getContext("2d") ?? null;
+    if (offscreen === null || offContext === null) return false;
+    const grid: DensityGrid = {
+      coverage: new Float32Array(width * height),
+      width,
+      height,
+    };
+    const toColumn = (t: number): number => (project.toX(t) - plot.x) * ratio;
+    const toRow = (value: number): number =>
+      (project.toY(value) - plot.y) * ratio;
+    for (const bins of seriesBins) {
+      accumulateEnvelope(grid, bins, toColumn, toRow);
+    }
+    offContext.putImageData(
+      new ImageData(coverageToImage(grid, color, pointAlpha), width, height),
+      0,
+      0,
+    );
+    context.save();
+    context.imageSmoothingEnabled = false;
+    context.drawImage(offscreen, plot.x, plot.y, plot.width, plot.height);
+    context.restore();
+    return true;
   }
 
   private setStroke(

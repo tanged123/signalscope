@@ -37,6 +37,7 @@ function recordingContext(charWidth = 6): {
     font: "",
     textAlign: "start",
     textBaseline: "alphabetic",
+    imageSmoothingEnabled: true,
     get lineWidth(): number {
       return lineWidth;
     },
@@ -79,6 +80,9 @@ function recordingContext(charWidth = 6): {
     },
     fillRect(x: number, y: number, width: number, height: number): void {
       push("fillRect", x, y, width, height);
+    },
+    drawImage(...args: unknown[]): void {
+      push("drawImage", ...args);
     },
     strokeRect(x: number, y: number, width: number, height: number): void {
       push("strokeRect", x, y, width, height);
@@ -157,6 +161,38 @@ class TestPath2D {
   lineTo(): void {}
 }
 globalThis.Path2D = TestPath2D as unknown as typeof Path2D;
+
+if (typeof globalThis.ImageData === "undefined") {
+  class TestImageData {
+    readonly data: Uint8ClampedArray;
+    readonly width: number;
+    readonly height: number;
+    constructor(data: Uint8ClampedArray, width: number, height: number) {
+      this.data = data;
+      this.width = width;
+      this.height = height;
+    }
+  }
+  (globalThis as { ImageData?: unknown }).ImageData = TestImageData;
+}
+
+function fakeOffscreen(): {
+  putCalls: unknown[][];
+  factory: (width: number, height: number) => HTMLCanvasElement;
+} {
+  const putCalls: unknown[][] = [];
+  const factory = (width: number, height: number): HTMLCanvasElement =>
+    ({
+      width,
+      height,
+      getContext: () => ({
+        putImageData: (...args: unknown[]) => {
+          putCalls.push(args);
+        },
+      }),
+    }) as unknown as HTMLCanvasElement;
+  return { putCalls, factory };
+}
 
 const TEST_PALETTE: Palette = {
   background: "#0e1116",
@@ -1021,5 +1057,135 @@ describe("render", () => {
         true,
       );
     });
+  });
+});
+
+describe("density raster tier", () => {
+  function ghostResponse(seriesCount: number) {
+    const series = Array.from({ length: seriesCount }, (_, index) =>
+      tile(`run_${String(index)}/response`, [
+        { t0: 0, t1: 1, v: (index % 5) + 1 },
+        { t0: 1, t1: 2, v: (index % 5) + 2 },
+      ]),
+    );
+    const styles: SeriesStroke[] = series.map(() => ({
+      hue: null,
+      dash: "solid",
+      width: 1,
+      alpha: 0.5,
+    }));
+    return { response: { requestId: "r", series }, styles };
+  }
+
+  it("rasters ghost series when the budget starves resolution", () => {
+    const { calls, context } = recordingContext();
+    // 2600 CSS px at DPR 1: N=200 -> allocation 1250 < 1300 -> raster.
+    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
+    renderer.setPalette(TEST_PALETTE);
+    const { putCalls, factory } = fakeOffscreen();
+    renderer.setCanvasFactory(factory);
+    const { response, styles } = ghostResponse(200);
+    renderer.render(
+      response,
+      { min: 0, max: 2 },
+      {
+        xLabel: "t",
+        yLabel: "v",
+        yRange: [0, 8],
+        axisStyle: "inline",
+        styles,
+      },
+    );
+    expect(putCalls.length).toBe(1);
+    const drawImages = calls.filter((call) => call.op === "drawImage");
+    expect(drawImages.length).toBe(1);
+    const clipIndex = calls.findIndex((call) => call.op === "clip");
+    const restoreIndex = calls.findIndex(
+      (call, index) => index > clipIndex && call.op === "restore",
+    );
+    const dataStrokes = calls
+      .slice(clipIndex, restoreIndex)
+      .filter((call) => call.op === "stroke").length;
+    expect(dataStrokes).toBe(0);
+  });
+
+  it("emphasized and hued series stroke on top of the raster", () => {
+    const { calls, context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
+    renderer.setPalette(TEST_PALETTE);
+    const { factory } = fakeOffscreen();
+    renderer.setCanvasFactory(factory);
+    const { response, styles } = ghostResponse(200);
+    styles[0] = { hue: 1, dash: "solid", width: 1.4, alpha: 1 };
+    renderer.render(
+      response,
+      { min: 0, max: 2 },
+      {
+        xLabel: "t",
+        yLabel: "v",
+        yRange: [0, 8],
+        axisStyle: "inline",
+        styles,
+        emphasisIndices: [5],
+      },
+    );
+    const clipIndex = calls.findIndex((call) => call.op === "clip");
+    const restores = calls.reduce<number[]>((indices, call, index) => {
+      if (index > clipIndex && call.op === "restore") indices.push(index);
+      return indices;
+    }, []);
+    const restoreIndex = restores[1] ?? -1;
+    const slice = calls.slice(clipIndex, restoreIndex);
+    const dataStrokes = slice.filter((call) => call.op === "stroke").length;
+    expect(dataStrokes).toBe(2); // the hued series and the emphasized ghost
+    // The raster tile lands before any stroke: field under lines.
+    const drawIndex = slice.findIndex((call) => call.op === "drawImage");
+    const firstStroke = slice.findIndex((call) => call.op === "stroke");
+    expect(drawIndex).toBeGreaterThan(-1);
+    expect(drawIndex).toBeLessThan(firstStroke);
+  });
+
+  it("keeps stroking below the threshold and without a canvas factory", () => {
+    const belowThreshold = recordingContext();
+    const renderer = new CanvasRenderer(
+      fakeCanvas(2600, 400, belowThreshold.context),
+    );
+    renderer.setPalette(TEST_PALETTE);
+    const below = ghostResponse(100); // allocation 2500 >= 1300 -> strokes
+    renderer.render(
+      below.response,
+      { min: 0, max: 2 },
+      {
+        xLabel: "t",
+        yLabel: "v",
+        yRange: [0, 8],
+        axisStyle: "inline",
+        styles: below.styles,
+      },
+    );
+    expect(belowThreshold.calls.some((call) => call.op === "drawImage")).toBe(
+      false,
+    );
+
+    // Above threshold but no factory (default in jsdom): graceful fallback.
+    const noFactory = recordingContext();
+    const fallback = new CanvasRenderer(
+      fakeCanvas(2600, 400, noFactory.context),
+    );
+    fallback.setPalette(TEST_PALETTE);
+    const above = ghostResponse(200);
+    fallback.render(
+      above.response,
+      { min: 0, max: 2 },
+      {
+        xLabel: "t",
+        yLabel: "v",
+        yRange: [0, 8],
+        axisStyle: "inline",
+        styles: above.styles,
+      },
+    );
+    const strokes = noFactory.calls.filter((call) => call.op === "stroke");
+    expect(strokes.length).toBeGreaterThan(0);
   });
 });
