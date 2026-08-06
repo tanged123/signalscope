@@ -54,23 +54,34 @@ impl SourceRegistry {
         Self::default()
     }
 
-    /// Canonicalizes local aliases before minting identity.
+    /// Canonicalizes `path` and admits it.
     ///
     /// # Errors
     ///
-    /// Returns an IO error or [`SourceError::PrefixExhausted`].
+    /// Returns an I/O error when the path cannot be canonicalized, or
+    /// [`SourceError::PrefixExhausted`] when no prefix is available.
     pub fn admit(&mut self, path: &Path) -> Result<Admission, SourceError> {
         let canonical = path.canonicalize()?;
-        if let Some(key) = self.by_path.get(&canonical) {
+        self.admit_canonical(&canonical)
+    }
+
+    /// Admits an already-canonicalized path. Batch admission resolves paths
+    /// off-lock in parallel and then calls this in input order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError::PrefixExhausted`] when no prefix is available.
+    pub fn admit_canonical(&mut self, canonical: &Path) -> Result<Admission, SourceError> {
+        if let Some(key) = self.by_path.get(canonical) {
             return Ok(Admission::Existing(*key));
         }
 
         let key = SourceKey(Uuid::new_v4());
-        let prefix = naming::allocate_prefix(&self.prefixes, &canonical, key.0)
+        let prefix = naming::allocate_prefix(&self.prefixes, canonical, key.0)
             .ok_or_else(|| SourceError::PrefixExhausted(canonical.display().to_string()))?;
         let record = SourceRecord {
             key,
-            path: canonical.clone(),
+            path: canonical.to_path_buf(),
             prefix: prefix.clone(),
             provider_id: None,
             decode_provenance: None,
@@ -79,7 +90,7 @@ impl SourceRegistry {
             reconcile_legacy: false,
         };
         self.prefixes.insert(prefix);
-        self.by_path.insert(canonical, key);
+        self.by_path.insert(canonical.to_path_buf(), key);
         self.by_key.insert(key, record.clone());
         Ok(Admission::New(record))
     }

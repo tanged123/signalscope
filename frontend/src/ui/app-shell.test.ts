@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkspaceModel } from "../app/workspace";
 import { SelectionModel } from "../app/selection";
 import { Catalog } from "../app/catalog";
+import { defaultPreferences } from "../app/preferences";
 import type { CommandRegistry } from "../app/commands";
 import type { DataPlane } from "../app/data-plane";
 import type { SignalSummary } from "../generated/protocol";
@@ -15,14 +16,64 @@ import {
   AppShell,
   arrivalModeFor,
   bundleCompletionEntries,
+  clearIngestProgress,
   exportSourceOptions,
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
+  SAMPLE_CAP,
+  sampleCapFor,
+  sampleCapForPanel,
   formatHint,
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
+
+describe("sampleCapFor", () => {
+  it("gives sample-mode panels more headroom than the legacy cap", () => {
+    expect(sampleCapFor("xy")).toBe(32_768);
+    expect(sampleCapFor("fft")).toBe(32_768);
+    expect(sampleCapFor("histogram")).toBe(32_768);
+  });
+
+  it("leaves time panels on the tile path", () => {
+    expect(sampleCapFor("time")).toBe(SAMPLE_CAP);
+  });
+});
+
+describe("sampleCapForPanel", () => {
+  it("gives a few series the full per-mode cap", () => {
+    expect(sampleCapForPanel("xy", 1)).toBe(32_768);
+    expect(sampleCapForPanel("histogram", 15)).toBe(32_768);
+  });
+
+  it("shares a fixed point budget once a panel carries many series", () => {
+    expect(sampleCapForPanel("histogram", 40)).toBe(12_500);
+    expect(sampleCapForPanel("histogram", 1_000)).toBe(500);
+  });
+
+  it("halves an XY panel's share because it merges two requests", () => {
+    // XY issues context + detail; both land in one merged response.
+    expect(sampleCapForPanel("xy", 40)).toBe(6_250);
+    expect(sampleCapForPanel("xy", 1_000)).toBe(250);
+  });
+
+  it("holds the budget instead of flooring at the legacy cap", () => {
+    // 1000 series x 8192 would be 8.2M points against a 500k budget.
+    expect(sampleCapForPanel("fft", 1_000)).toBe(500);
+    expect(sampleCapForPanel("fft", 100_000) * 100_000).toBeLessThanOrEqual(
+      500_000,
+    );
+  });
+
+  it("never returns zero, however many series a panel holds", () => {
+    expect(sampleCapForPanel("fft", 10_000_000)).toBe(1);
+  });
+
+  it("treats a zero series count as one rather than dividing by zero", () => {
+    expect(sampleCapForPanel("xy", 0)).toBe(32_768);
+  });
+});
 
 it("arrival mode focuses small additions and ghosts large additions", () => {
   expect(arrivalModeFor(0)).toBe("none");
@@ -827,6 +878,134 @@ describe("renderBatchProgress", () => {
     );
     expect(progress.querySelector(".ingest-bar")).toBeNull();
     expect(progress.querySelector(".ingest-cancel")).toBeNull();
+  });
+
+  it("renders a dismiss control alongside failures", () => {
+    const progress = document.createElement("div");
+    renderBatchProgress(
+      progress,
+      {
+        state: "done",
+        fraction: 0.5,
+        done: "1",
+        total: "2",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/a/broken.csv",
+            error: "no data rows",
+            recipe_required: false,
+          },
+        ],
+      },
+      () => {},
+    );
+    const dismiss =
+      progress.querySelector<HTMLButtonElement>(".ingest-dismiss");
+    expect(dismiss).not.toBeNull();
+    dismiss?.click();
+    expect(progress.hidden).toBe(true);
+    expect(progress.childElementCount).toBe(0);
+  });
+
+  it("renders no dismiss control while a batch is running", () => {
+    const progress = document.createElement("div");
+    renderBatchProgress(
+      progress,
+      {
+        state: "running",
+        fraction: 0.25,
+        done: "1",
+        total: "4",
+        failed: "0",
+        current_paths: ["/a/one.csv"],
+        recent_failures: [],
+      },
+      () => {},
+    );
+    expect(progress.querySelector(".ingest-dismiss")).toBeNull();
+  });
+
+  it("clearIngestProgress hides and empties the banner", () => {
+    const root = document.createElement("div");
+    const progress = document.createElement("div");
+    progress.className = "ingest-progress";
+    progress.hidden = false;
+    progress.append(document.createElement("span"));
+    root.append(progress);
+    clearIngestProgress(root);
+    expect(progress.hidden).toBe(true);
+    expect(progress.childElementCount).toBe(0);
+  });
+});
+
+describe("workspace theme persistence", () => {
+  it("keeps the user's theme across a new workspace", async () => {
+    const workspace = new WorkspaceModel();
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      plane: { session: { reset: ReturnType<typeof vi.fn> } };
+      workspace: WorkspaceModel;
+      prefs: ReturnType<typeof defaultPreferences> & { theme: "light" };
+      selection: { clear: ReturnType<typeof vi.fn> };
+      history: { reset: ReturnType<typeof vi.fn> };
+      autosaveTimer: number | null;
+      workspacePath: string | null;
+      tilesByPanel: Map<string, unknown>;
+      samplesByPanel: Map<string, unknown>;
+      missingByPanel: Map<string, unknown>;
+      workspaceView: null;
+      reloadSignals: ReturnType<typeof vi.fn>;
+      afterLayoutChange: ReturnType<typeof vi.fn>;
+      renderWorkspaceName: ReturnType<typeof vi.fn>;
+      newWorkspace(): Promise<void>;
+    };
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<div class="ingest-progress"></div>';
+    shell.workspace = workspace;
+    shell.prefs = { ...defaultPreferences(), theme: "light" };
+    shell.selection = { clear: vi.fn() };
+    shell.history = { reset: vi.fn() };
+    shell.autosaveTimer = null;
+    shell.workspacePath = null;
+    shell.tilesByPanel = new Map();
+    shell.samplesByPanel = new Map();
+    shell.missingByPanel = new Map();
+    shell.workspaceView = null;
+    shell.reloadSignals = vi.fn(() => Promise.resolve());
+    shell.afterLayoutChange = vi.fn();
+    shell.renderWorkspaceName = vi.fn();
+    shell.plane = {
+      session: {
+        reset: vi.fn(() =>
+          Promise.resolve({
+            session_json: JSON.stringify(workspace.snapshot()),
+          }),
+        ),
+      },
+    };
+
+    await shell.newWorkspace();
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  it("uses the serialized theme for a baked plane without preferences", () => {
+    const shell = Object.create(AppShell.prototype) as {
+      plane: { preferences: null };
+      workspace: { theme(): "light"; setTheme: ReturnType<typeof vi.fn> };
+      prefs: ReturnType<typeof defaultPreferences>;
+      restoreTheme(): void;
+    };
+    shell.plane = { preferences: null };
+    shell.workspace = { theme: () => "light", setTheme: vi.fn() };
+    shell.prefs = defaultPreferences();
+
+    shell.restoreTheme();
+
+    expect(shell.prefs.theme).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(shell.workspace.setTheme).not.toHaveBeenCalled();
   });
 });
 

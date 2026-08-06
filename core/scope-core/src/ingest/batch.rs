@@ -374,18 +374,55 @@ impl BatchJobs {
         let id = JobId(self.next_id.fetch_add(1, Ordering::Relaxed));
         let progress = Arc::new(BatchProgress::new(paths.clone()));
         let cancel = Arc::new(CancelToken::default());
+        let worker_count = self.options.worker_count.max(1);
+        // `canonicalize` is a blocking syscall per path and `admit` needs the
+        // registry lock, so resolve paths in parallel before admission.
+        let resolved: Vec<Result<PathBuf, String>> = std::thread::scope(|scope| {
+            let chunk = paths.len().div_ceil(worker_count).max(1);
+            let handles: Vec<_> = paths
+                .chunks(chunk)
+                .map(|slice| {
+                    (
+                        slice.len(),
+                        scope.spawn(move || {
+                            slice
+                                .iter()
+                                .map(|path| path.canonicalize().map_err(|error| error.to_string()))
+                                .collect::<Vec<_>>()
+                        }),
+                    )
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|(len, handle)| {
+                    // A panicked worker must still yield one result per path:
+                    // dropping its chunk would shift every later index and
+                    // report failures against the wrong paths.
+                    handle.join().unwrap_or_else(|_| {
+                        vec![Err("path resolution worker panicked".to_owned()); len]
+                    })
+                })
+                .collect()
+        });
+
         let mut work = VecDeque::new();
         {
             let mut registry = lock(&self.registry);
-            for (index, path) in paths.iter().enumerate() {
-                match registry.admit(path) {
-                    Ok(Admission::New(record)) => work.push_back(WorkItem { index, record }),
-                    Ok(Admission::Existing(key)) => {
-                        if let Some(record) = registry.record(key).cloned() {
+            for (index, resolved) in resolved.into_iter().enumerate() {
+                match resolved {
+                    Err(error) => progress.failed(index, error),
+                    Ok(canonical) => match registry.admit_canonical(&canonical) {
+                        Ok(Admission::New(record)) => {
                             work.push_back(WorkItem { index, record });
                         }
-                    }
-                    Err(error) => progress.failed(index, error.to_string()),
+                        Ok(Admission::Existing(key)) => {
+                            if let Some(record) = registry.record(key).cloned() {
+                                work.push_back(WorkItem { index, record });
+                            }
+                        }
+                        Err(error) => progress.failed(index, error.to_string()),
+                    },
                 }
             }
         }
@@ -401,7 +438,7 @@ impl BatchJobs {
             },
         );
 
-        let worker_count = self.options.worker_count.max(1).min(lock(&queue).len());
+        let worker_count = worker_count.min(lock(&queue).len());
         let mut handles = Vec::with_capacity(worker_count);
         for _ in 0..worker_count {
             let worker = Worker {
@@ -931,6 +968,28 @@ mod tests {
         assert_eq!(status.state, BatchState::Partial);
         assert_eq!((status.done, status.failed), (8, 1));
         assert_eq!(sink.store.lock().unwrap().sources().count(), 8);
+    }
+
+    #[test]
+    fn admission_preserves_input_order_and_reports_every_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = Vec::new();
+        for index in 0..64 {
+            let path = dir.path().join(format!("run_{index}.csv"));
+            std::fs::write(&path, "t,v\n0,1\n1,2\n").unwrap();
+            paths.push(path);
+        }
+        let missing = dir.path().join("missing.csv");
+        paths.insert(32, missing.clone());
+
+        let sink = Arc::new(RecordingSink::default());
+        let jobs = BatchJobs::new(BatchOptions::for_tests());
+        let job = jobs.submit(paths.clone(), sink);
+        let status = jobs.wait_for_tests(job);
+
+        assert_eq!(status.total, u64::try_from(paths.len()).unwrap());
+        assert_eq!(status.recent_failures.len(), 1);
+        assert_eq!(status.recent_failures[0].path, missing);
     }
 
     #[test]

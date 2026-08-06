@@ -46,6 +46,7 @@ function state(): PanelState {
     time_window: null,
     annotations: [],
     show_stats: false,
+    axis_equal: false,
   };
 }
 
@@ -87,6 +88,7 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onFitView: vi.fn(),
     onToggleStats: vi.fn(),
     onToggleAxisStyle: vi.fn(),
+    onToggleAxisEqual: vi.fn(),
     onRenameTitle: vi.fn(),
     onEditAxisLabel: vi.fn(),
     onSetColorBy: vi.fn(),

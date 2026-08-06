@@ -57,7 +57,7 @@ export function sampleColormap(stops: readonly string[], t: number): string {
 }
 
 /** Ramp steps a `ColormapRamp` quantises to; finer than the eye resolves. */
-const RAMP_STEPS = 64;
+export const RAMP_STEPS = 64;
 
 /**
  * A ramp pre-sampled into fixed steps.
@@ -75,9 +75,17 @@ export class ColormapRamp {
     );
   }
 
+  /** The step index `t` falls in; clamped outside [0,1] and on NaN. */
+  stepAt(t: number): number {
+    if (!Number.isFinite(t)) return 0;
+    return Math.round(clamp(t, 0, 1) * RAMP_STEPS);
+  }
+
+  atStep(step: number): string {
+    return this.steps[step] ?? this.steps[0] ?? "#000000";
+  }
+
   at(t: number): string {
-    if (!Number.isFinite(t)) return this.steps[0] ?? "#000000";
-    const index = Math.round(clamp(t, 0, 1) * RAMP_STEPS);
-    return this.steps[index] ?? this.steps[0] ?? "#000000";
+    return this.atStep(this.stepAt(t));
   }
 }

@@ -50,6 +50,7 @@ export function fontStack(family: FontFamily): string {
 export function defaultPreferences(): Preferences {
   return {
     schema_version: PREFERENCES_SCHEMA_VERSION,
+    theme: "dark",
     ui_font_family: "inter",
     plot_font_family: "jetbrains",
     ui_font_size: UI_FONT_SIZE.default,
@@ -95,7 +96,8 @@ export function parsePreferences(json: string): Preferences | null {
   if (
     value.schema_version !== 1 &&
     value.schema_version !== 2 &&
-    value.schema_version !== 3
+    value.schema_version !== 3 &&
+    value.schema_version !== 4
   )
     return null;
   const defaults = defaultPreferences();
@@ -113,6 +115,7 @@ export function parsePreferences(json: string): Preferences | null {
       : fallback;
   return {
     schema_version: PREFERENCES_SCHEMA_VERSION,
+    theme: value.theme === "light" ? "light" : defaults.theme,
     ui_font_family: family(value.ui_font_family, defaults.ui_font_family),
     plot_font_family: family(value.plot_font_family, defaults.plot_font_family),
     ui_font_size: clampUiFontSize(
@@ -144,6 +147,7 @@ export interface PreferencesTarget {
     setProperty(name: string, value: string): void;
     fontSize: string;
   };
+  dataset: DOMStringMap;
 }
 
 /**
@@ -155,6 +159,7 @@ export function applyPreferences(
   prefs: Preferences,
   target: PreferencesTarget,
 ): void {
+  target.dataset.theme = prefs.theme;
   target.style.setProperty("--font-ui", fontStack(prefs.ui_font_family));
   target.style.setProperty("--font-plot", fontStack(prefs.plot_font_family));
   target.style.setProperty("--plot-font-size", String(prefs.plot_font_size));

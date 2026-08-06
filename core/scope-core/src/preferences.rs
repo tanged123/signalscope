@@ -21,6 +21,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            theme: Theme::Dark,
             ui_font_family: FontFamily::Inter,
             plot_font_family: FontFamily::Jetbrains,
             ui_font_size: 13.0,
@@ -127,7 +128,7 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION | 1 | 2 => Ok(repair_current(value)),
+        PREFERENCES_SCHEMA_VERSION | 1 | 2 | 3 => Ok(repair_current(value)),
         version => Err(PreferencesError::UnsupportedVersion(version)),
     }
 }
@@ -156,6 +157,10 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
     };
     Preferences {
         schema_version: PREFERENCES_SCHEMA_VERSION,
+        theme: match value.get("theme").and_then(serde_json::Value::as_str) {
+            Some("light") => Theme::Light,
+            _ => defaults.theme,
+        },
         ui_font_family: family("ui_font_family", defaults.ui_font_family),
         plot_font_family: family("plot_font_family", defaults.plot_font_family),
         ui_font_size: size("ui_font_size", defaults.ui_font_size, 10.0, 20.0, false),
@@ -285,6 +290,38 @@ mod tests {
     fn truncated_preferences_fail_instead_of_partially_restoring() {
         let error = from_json("{\"schema_ver").unwrap_err();
         assert!(matches!(error, PreferencesError::Json(_)));
+    }
+
+    #[test]
+    fn v3_preferences_gain_the_default_theme() {
+        let stored = serde_json::json!({
+            "schema_version": 3,
+            "ui_font_family": "inter",
+            "plot_font_family": "jetbrains",
+            "ui_font_size": 13.0,
+            "plot_font_size": 9.0,
+            "cache_max_bytes": 1_024_u64,
+        });
+        let restored = from_json(&stored.to_string()).expect("migrates from v3");
+        assert_eq!(restored.schema_version, PREFERENCES_SCHEMA_VERSION);
+        assert_eq!(restored.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn a_stored_theme_survives_a_round_trip() {
+        let stored = serde_json::json!({
+            "schema_version": 4,
+            "theme": "light",
+            "ui_font_family": "inter",
+            "plot_font_family": "jetbrains",
+            "ui_font_size": 13.0,
+            "plot_font_size": 9.0,
+            "cache_max_bytes": 1_024_u64,
+        });
+        assert_eq!(
+            from_json(&stored.to_string()).expect("parses v4").theme,
+            Theme::Light
+        );
     }
 
     #[test]

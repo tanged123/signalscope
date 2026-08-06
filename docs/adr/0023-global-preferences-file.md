@@ -53,3 +53,11 @@ MATLAB v7.3, and Parquet recipes. Resolution checks a source sidecar before
 this directory; files are parsed as data and never executed. Missing or
 malformed recipes do not change appearance or cache preferences, but a
 malformed candidate is reported to the caller rather than silently skipped.
+
+## 2026-08-05 amendment: theme
+
+Schema 4 moves the theme to preferences, closing the follow-up this ADR left
+open. The session keeps its `theme` field: `BakedPlane` has no preferences
+port, so a snapshot must carry the theme it was exported with. Preferences are
+authoritative for the running application; a theme change writes both, and
+loading or resetting a workspace no longer changes the user's theme.

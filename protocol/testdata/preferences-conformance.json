@@ -1,5 +1,6 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
+  "theme": "dark",
   "ui_font_family": "inter",
   "plot_font_family": "jetbrains",
   "ui_font_size": 13.0,

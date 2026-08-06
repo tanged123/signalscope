@@ -2130,7 +2130,8 @@ button {
   white-space: nowrap;
 }
 
-.ingest-cancel {
+.ingest-cancel,
+.ingest-dismiss {
   padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 2px;

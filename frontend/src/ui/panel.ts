@@ -141,6 +141,7 @@ export interface PanelCallbacks {
   onFitView(id: string): void;
   onToggleStats(id: string): void;
   onToggleAxisStyle(id: string): void;
+  onToggleAxisEqual(id: string): void;
   onRenameTitle(id: string, title: string): void;
   onEditAxisLabel(
     id: string,
@@ -688,6 +689,12 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
+    required(this.element, ".panel-aspect-toggle").addEventListener(
+      "click",
+      () => {
+        this.callbacks.onToggleAxisEqual(this.id);
+      },
+    );
     required(this.element, ".panel-ghost-toggle").addEventListener(
       "click",
       () => {
@@ -906,6 +913,12 @@ export class PanelView {
     );
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
+    const aspectToggle = required<HTMLButtonElement>(
+      this.element,
+      ".panel-aspect-toggle",
+    );
+    aspectToggle.hidden = rendered.mode !== "xy";
+    aspectToggle.setAttribute("aria-pressed", String(rendered.axis_equal));
     this.updateBindings(rendered);
     this.updateGhostToggle(rendered);
     this.updateLegend(rendered);
@@ -1202,6 +1215,7 @@ export class PanelView {
       xRange: [ranges.x.min, ranges.x.max],
       yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
+      ...(state.axis_equal ? { equalAspect: true } : {}),
       ...(hasColor
         ? {
             colorbar: {
@@ -2852,6 +2866,15 @@ function panelMarkup(): string {
       <button class="panel-ghost-toggle" type="button" aria-pressed="false">all</button>
       <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
+      <button
+        class="panel-action panel-aspect-toggle"
+        type="button"
+        aria-pressed="false"
+        hidden
+        title="Equal axis scaling (XY only)"
+      >
+        1:1
+      </button>
       <span class="panel-mode-note" hidden></span>
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>

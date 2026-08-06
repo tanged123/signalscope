@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fmt::Write as _,
     path::{Path, PathBuf},
     sync::Arc,
     sync::Mutex,
@@ -9,7 +10,8 @@ use std::{
 use crate::{
     bins::BinLevel,
     ingest::{
-        self, CancelToken, DecodeContext, DecodedSource, IngestError, IngestSummary,
+        self, CancelToken, CsvDecoder, DecodeContext, DecodedSource, Decoder, IngestError,
+        IngestSummary,
         admission::{BudgetConfig, MemoryBudget},
         batch::{BatchJobs, BatchOptions, BatchState, CommitSink},
         registry::ProviderRegistry,
@@ -165,6 +167,45 @@ fn bench_batch_ingests_one_thousand_synthetic_runs() {
     println!("bench_batch runs_per_second={runs_per_second:.1}");
     assert_eq!(status.state, BatchState::Done);
     assert!(runs_per_second >= 10.0);
+}
+
+#[test]
+#[ignore = "release benchmark"]
+#[allow(clippy::cast_precision_loss)]
+fn bench_csv_parse_throughput() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wide.csv");
+    let mut text = String::from("t,a,b,c,d,e,f,g,h\n");
+    for row in 0..200_000 {
+        let value = f64::from(row) * 0.001;
+        let _ = writeln!(
+            text,
+            "{value},{value},{value},{value},{value},{value},{value},{value},{value}"
+        );
+    }
+    std::fs::write(&path, &text).unwrap();
+
+    let cancel = CancelToken::default();
+    let mut progress = |_: f64| {};
+    let mut context = DecodeContext {
+        progress: &mut progress,
+        cancel: &cancel,
+    };
+
+    let started = Instant::now();
+    let decoded = CsvDecoder.decode(&path, &mut context).expect("decodes");
+    let elapsed = started.elapsed();
+
+    report::write_report(
+        "csv_parse_throughput",
+        serde_json::json!({
+            "rows": decoded.row_count,
+            "signals": decoded.signals.len(),
+            "bytes": text.len(),
+            "elapsed_ms": elapsed.as_secs_f64() * 1000.0,
+            "mb_per_s": (text.len() as f64 / 1_048_576.0) / elapsed.as_secs_f64(),
+        }),
+    );
 }
 
 #[test]

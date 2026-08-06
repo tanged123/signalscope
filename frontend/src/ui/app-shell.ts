@@ -45,6 +45,7 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { mergeSampleResponses } from "../app/samples";
+import { SampleWindowCache } from "../app/sample-window-cache";
 import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
 import { resolvePanel, type ResolvedSeries } from "../app/resolution";
@@ -97,8 +98,34 @@ import { AppMenu } from "./app-menu";
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
-/** Point cap for non-time panels: enough for a 4096-bin FFT plus edges. */
-const SAMPLE_CAP = 8192;
+/** Point cap for time panels, which use the tile path instead. */
+export const SAMPLE_CAP = 8192;
+const SAMPLE_MODE_CAP = 32_768;
+const SAMPLE_POINT_BUDGET = 500_000;
+
+export function sampleCapFor(mode: PanelMode): number {
+  return mode === "time" ? SAMPLE_CAP : SAMPLE_MODE_CAP;
+}
+
+/**
+ * The per-series cap once a panel's series count is taken into account.
+ *
+ * `SAMPLE_POINT_BUDGET` bounds the panel's *merged* response, so the share is
+ * divided by the number of requests that merge into it — XY issues two
+ * (context plus detail) and `mergeSampleResponses` concatenates them. There is
+ * no floor: a floor would let a 1000-series panel request 8.2M points against
+ * a 500k budget, which is the budget not existing.
+ */
+export function sampleCapForPanel(
+  mode: PanelMode,
+  seriesCount: number,
+): number {
+  const requests = mode === "xy" ? 2 : 1;
+  const share = Math.floor(
+    SAMPLE_POINT_BUDGET / (Math.max(1, seriesCount) * requests),
+  );
+  return Math.max(1, Math.min(sampleCapFor(mode), share));
+}
 const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
@@ -166,6 +193,7 @@ export class AppShell {
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
   private readonly tileWindowCache = new TileWindowCache();
+  private readonly sampleWindowCache = new SampleWindowCache();
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
@@ -436,6 +464,12 @@ export class AppShell {
         },
         onToggleAxisStyle: (id) => {
           this.workspace.toggleAxisStyle(id);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onToggleAxisEqual: (id) => {
+          this.workspace.toggleAxisEqual(id);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -823,6 +857,13 @@ export class AppShell {
         this.workspace.toggleAxisStyle(id);
       },
     );
+    this.registerFocusedPanelCommand(
+      "panel.toggle-axis-equal",
+      "Toggle equal axis scaling",
+      (id) => {
+        this.workspace.toggleAxisEqual(id);
+      },
+    );
     for (const [axis, title] of [
       ["x", "Panel: edit X axis label"],
       ["y", "Panel: edit Y axis label"],
@@ -989,7 +1030,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.20.1");
+        this.showModeHelp("SignalScope 0.21.0");
       },
     });
     this.commands.register({
@@ -1189,7 +1230,7 @@ export class AppShell {
     return [
       {
         title: "Theme",
-        hint: this.workspace.theme(),
+        hint: this.prefs.theme,
         keepOpen: true,
         run: () => {
           this.toggleTheme();
@@ -1900,7 +1941,8 @@ export class AppShell {
       this.workspace.replace(
         restoreTransientSessionState(session, this.workspace.snapshot()),
       );
-      document.documentElement.dataset.theme = this.workspace.theme();
+      this.workspace.setTheme(this.prefs.theme);
+      applyPreferences(this.prefs, document.documentElement);
       this.workspaceView?.invalidateTheme();
       this.renderWindowReadout();
       this.afterLayoutChange();
@@ -2310,7 +2352,9 @@ export class AppShell {
       this.tilesByPanel.clear();
       this.samplesByPanel.clear();
       this.missingByPanel.clear();
-      document.documentElement.dataset.theme = this.workspace.theme();
+      clearIngestProgress(this.root);
+      this.workspace.setTheme(this.prefs.theme);
+      applyPreferences(this.prefs, document.documentElement);
       this.workspaceView?.invalidateTheme();
       await this.reloadSignals();
       this.afterLayoutChange();
@@ -2382,7 +2426,9 @@ export class AppShell {
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = loaded.path;
       this.dirty = false;
-      document.documentElement.dataset.theme = this.workspace.theme();
+      clearIngestProgress(this.root);
+      this.workspace.setTheme(this.prefs.theme);
+      applyPreferences(this.prefs, document.documentElement);
       this.workspaceView?.invalidateTheme();
 
       await this.reloadSignals();
@@ -2552,6 +2598,7 @@ export class AppShell {
     this.catalog = Catalog.build(this.signals);
     this.catalogRevision += 1;
     this.tileWindowCache.invalidate();
+    this.sampleWindowCache.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2629,7 +2676,11 @@ export class AppShell {
               request_id: crypto.randomUUID(),
               signal_ids: ids,
               window: paddedWindow,
-              pixel_width: pixelWidth,
+              pixel_width: TileWindowCache.requestPixelWidth(
+                pixelWidth,
+                window,
+                paddedWindow,
+              ),
               max_total_bins: TILE_BIN_BUDGET,
             });
             this.tileWindowCache.store(panel.id, {
@@ -2649,30 +2700,43 @@ export class AppShell {
               ) ?? response,
             );
           } else {
+            const contextWindow = this.sampleWindow(panel);
+            const cap = sampleCapForPanel(panel.mode, ids.length);
+            const cacheKey = SampleWindowCache.key({
+              ids,
+              mode: panel.mode,
+              window: panel.mode === "xy" ? window : contextWindow,
+              cap,
+            });
+            const cached = this.sampleWindowCache.get(panel.id, cacheKey);
+            if (cached !== null) {
+              nextSamples.set(panel.id, cached);
+              return;
+            }
             const contextRequest = {
               request_id: crypto.randomUUID(),
               signal_ids: ids,
-              window: this.sampleWindow(panel),
-              max_points: SAMPLE_CAP,
+              window: contextWindow,
+              max_points: cap,
             };
+            let merged: SampleResponse;
             if (panel.mode === "xy") {
               const detailRequest = {
                 request_id: crypto.randomUUID(),
                 signal_ids: ids,
                 window,
-                max_points: SAMPLE_CAP,
+                max_points: cap,
               };
               const [context, detail] = await Promise.all([
                 this.plane.querySamples(contextRequest),
                 this.plane.querySamples(detailRequest),
               ]);
-              nextSamples.set(panel.id, mergeSampleResponses(context, detail));
+              merged = mergeSampleResponses(context, detail);
             } else {
-              nextSamples.set(
-                panel.id,
-                await this.plane.querySamples(contextRequest),
-              );
+              merged = await this.plane.querySamples(contextRequest);
             }
+            this.sampleWindowCache.store(panel.id, cacheKey, merged);
+            nextSamples.set(panel.id, merged);
           }
         } catch (error: unknown) {
           this.reportError(error);
@@ -3133,19 +3197,24 @@ export class AppShell {
   }
 
   private toggleTheme(): void {
-    const documentRoot = document.documentElement;
-    const theme = documentRoot.dataset.theme === "light" ? "dark" : "light";
-    documentRoot.dataset.theme = theme;
+    const theme = this.prefs.theme === "light" ? "dark" : "light";
+    // Preferences are authoritative for the running app; the session keeps a
+    // copy so an exported snapshot bakes the theme it was exported with. That
+    // copy has to reach disk too, or a session saved after a theme change and
+    // reopened elsewhere carries the old one.
     this.workspace.setTheme(theme);
-    this.commitHistory();
     this.scheduleAutosave();
-    this.workspaceView?.invalidateTheme();
-    this.renderTiles();
+    this.updatePreferences({ theme });
   }
 
-  /** Applies the session's theme. The session is the only durable store. */
+  /** Applies the user's global theme to the current session and document. */
   private restoreTheme(): void {
-    document.documentElement.dataset.theme = this.workspace.theme();
+    if (this.plane.preferences === null) {
+      this.prefs = { ...this.prefs, theme: this.workspace.theme() };
+    } else {
+      this.workspace.setTheme(this.prefs.theme);
+    }
+    applyPreferences(this.prefs, document.documentElement);
   }
 
   private toggleSignalTree(): void {
@@ -3270,6 +3339,16 @@ export class AppShell {
   }
 }
 
+/** Hides and empties the ingest banner. Workspace reset and load both need
+ * this: the banner is deliberately kept visible while failures are recent,
+ * and nothing else ever takes it down. */
+export function clearIngestProgress(root: HTMLElement): void {
+  const progress = root.querySelector<HTMLElement>(".ingest-progress");
+  if (progress === null) return;
+  progress.hidden = true;
+  progress.replaceChildren();
+}
+
 export function renderBatchProgress(
   progress: HTMLElement,
   status: BatchStatus,
@@ -3320,6 +3399,18 @@ export function renderBatchProgress(
       failures.append(row);
     }
     children.push(failures);
+    if (status.state !== "running") {
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "ingest-dismiss";
+      dismiss.textContent = "Dismiss";
+      dismiss.title = "Dismiss ingest failures";
+      dismiss.addEventListener("click", () => {
+        progress.hidden = true;
+        progress.replaceChildren();
+      });
+      children.push(dismiss);
+    }
   }
   progress.replaceChildren(...children);
 }

@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
 import { binColumnsFromWire, sliceColumns } from "./bin-columns";
 import { TileWindowCache, type CachedPanelTiles } from "./tile-window-cache";
@@ -48,6 +48,32 @@ test("padWindow aligns equal-span adjacent viewports", () => {
   expect(first).toEqual({ t0: 0, t1: 2 });
   expect(second).toEqual(first);
   expect(TileWindowCache.padWindow(0.25, 1.25)).toEqual(first);
+});
+
+describe("requestPixelWidth", () => {
+  test("scales the request by the padding ratio so the visible slice keeps its density", () => {
+    const visible = { t0: 0, t1: 100 };
+    const padded = TileWindowCache.padWindow(visible.t0, visible.t1);
+    const paddedSpan = padded.t1 - padded.t0;
+    expect(paddedSpan).toBeGreaterThanOrEqual(2 * 100);
+
+    const requested = TileWindowCache.requestPixelWidth(800, visible, padded);
+    expect(requested).toBe(Math.ceil(800 * (paddedSpan / 100)));
+  });
+
+  test("never returns less than the panel width", () => {
+    const visible = { t0: 0, t1: 100 };
+    expect(
+      TileWindowCache.requestPixelWidth(800, visible, { t0: 0, t1: 100 }),
+    ).toBe(800);
+  });
+
+  test("falls back to the panel width on a degenerate span", () => {
+    const visible = { t0: 5, t1: 5 };
+    expect(
+      TileWindowCache.requestPixelWidth(800, visible, { t0: 0, t1: 16 }),
+    ).toBe(800);
+  });
 });
 
 test("slice returns a zero-copy padded-window view", () => {

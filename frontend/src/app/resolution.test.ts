@@ -52,6 +52,7 @@ function panel(): PanelState {
     time_window: null,
     annotations: [],
     show_stats: false,
+    axis_equal: false,
   };
 }
 

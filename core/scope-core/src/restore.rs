@@ -464,6 +464,7 @@ mod tests {
                 label: "x".into(),
             }],
             show_stats: false,
+            axis_equal: false,
         });
         session
     }

@@ -250,6 +250,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onFitView: () => {},
       onToggleStats: () => {},
       onToggleAxisStyle: () => {},
+      onToggleAxisEqual: () => {},
       onRenameTitle: () => {},
       onEditAxisLabel: () => {},
       onSetSeriesStyle: () => {},
@@ -292,6 +293,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         time_window: null,
         annotations: [],
         show_stats: false,
+        axis_equal: false,
       },
       false,
     );
@@ -320,6 +322,218 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
     "channel",
   );
   await page.keyboard.press("Escape");
+});
+
+test("dismissing a failed ingest banner clears it", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/src/ui/app-shell.ts";
+    const { renderBatchProgress } = (await import(
+      /* @vite-ignore */ modulePath
+    )) as {
+      renderBatchProgress: (
+        element: HTMLElement,
+        status: unknown,
+        cancel: () => void,
+      ) => void;
+    };
+    const host = document.createElement("div");
+    host.id = "ingest-probe";
+    const progress = document.createElement("div");
+    progress.className = "ingest-progress";
+    host.append(progress);
+    document.body.replaceChildren(host);
+    renderBatchProgress(
+      progress,
+      {
+        state: "done",
+        fraction: 1,
+        total: "2",
+        done: "1",
+        failed: "1",
+        current_paths: [],
+        recent_failures: [
+          {
+            path: "/runs/broken.csv",
+            error: "no data rows",
+            recipe_required: false,
+          },
+        ],
+      },
+      () => {},
+    );
+    progress.hidden = false;
+  });
+
+  const progress = page.locator("#ingest-probe .ingest-progress");
+  await expect(progress).toBeVisible();
+  await expect(progress.locator(".ingest-failures")).toContainText(
+    "broken.csv",
+  );
+
+  await progress.locator(".ingest-dismiss").click();
+  await expect(progress).toBeHidden();
+  await expect(progress.locator(".ingest-failures")).toHaveCount(0);
+});
+
+test("xy panels expose an equal-aspect toggle that other modes hide", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const modulePath = "/src/ui/panel.ts";
+    const { PanelView } = (await import(/* @vite-ignore */ modulePath)) as {
+      PanelView: typeof PanelViewClass;
+    };
+    const catalogModulePath = "/src/app/catalog.ts";
+    const catalogModule: unknown = await import(
+      /* @vite-ignore */ catalogModulePath
+    );
+    const { Catalog } = catalogModule as { Catalog: typeof CatalogClass };
+    const host = document.createElement("div");
+    host.id = "aspect-probe";
+    host.style.width = "900px";
+    host.style.height = "320px";
+    host.style.display = "flex";
+    document.body.replaceChildren(host);
+    const summaries = ["command", "response"].map((channel) => ({
+      signal_id: `id:run_01/${channel}`,
+      source_id: "source:run_01",
+      source_key: "run_01",
+      local_path: channel,
+      path: `run_01/${channel}`,
+      unit: null,
+      point_count: "2",
+      t_min: 0,
+      t_max: 1,
+      last_value: null,
+    }));
+    const catalog = Catalog.build(summaries);
+    const state = (mode: "xy" | "time", axisEqual: boolean) => ({
+      id: "aspect-probe-panel",
+      title: "trajectory",
+      mode,
+      axis_style: "gutter" as const,
+      x_ref: { source_key: "run_01", channel: "command" },
+      color_axis: "none" as const,
+      color_ref: null,
+      bindings: [
+        {
+          kind: "pick" as const,
+          selector: null,
+          refs: [{ source_key: "run_01", channel: "response" }],
+          set_id: null,
+        },
+      ],
+      color_by: "source" as const,
+      overrides: [],
+      focus: [],
+      ghost_mode: "all" as const,
+      split_by: "none" as const,
+      y_range: null,
+      x_range: null,
+      x_label: null,
+      y_label: null,
+      c_label: null,
+      time_window: null,
+      annotations: [],
+      show_stats: false,
+      axis_equal: axisEqual,
+    });
+    const view = new PanelView("aspect-probe-panel", {
+      onFocus: () => {},
+      onClose: () => {},
+      onSplitRight: () => {},
+      onSplitDown: () => {},
+      onMaximize: () => {},
+      onSelectMode: () => {},
+      onDropSignals: () => {},
+      onDropSet: () => {},
+      onFocusToggle: () => {},
+      onClearFocus: () => {},
+      onMuteSelector: () => {},
+      onMuteSeries: () => {},
+      onRemoveBinding: () => {},
+      onToggleGhostMode: () => {},
+      onSetColorBy: () => {},
+      onRemoveOverride: () => {},
+      onClearOverrides: () => {},
+      localPathFor: () => null,
+      sourceKeyFor: () => null,
+      pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
+      catalog: () => catalog,
+      namedSets: () => [],
+      resolveSeries: (panelState) =>
+        panelState.bindings
+          .flatMap((binding) => binding.refs)
+          .map((ref) => ({
+            ref,
+            path: `${ref.source_key}/${ref.channel}`,
+            display: "focus" as const,
+            hue: 1,
+            dash: "solid" as const,
+            width: 1.4,
+            opacity: 1,
+            visible: true,
+            focused: true,
+            overridden: false,
+          })),
+      onSetXSignal: () => {},
+      onSetColorSignal: () => {},
+      onClearXSignal: () => {},
+      onToggleSeries: () => {},
+      onResized: () => {},
+      onGesture: () => {},
+      onCursor: () => {},
+      onTimeWindow: () => {},
+      onYRange: () => {},
+      onXRange: () => {},
+      onPinAnnotation: () => {},
+      onRemoveAnnotation: () => {},
+      onEditAnnotationLabel: () => {},
+      onFitView: () => {},
+      onToggleStats: () => {},
+      onToggleAxisStyle: () => {},
+      // The shell flips the model and re-renders; mirror that here so the
+      // pressed state reflects a real round trip rather than a local toggle.
+      onToggleAxisEqual: (id) => {
+        host.dataset.axisEqualToggled = id;
+        view.update(state("xy", true), false);
+      },
+      onRenameTitle: () => {},
+      onEditAxisLabel: () => {},
+      onSetSeriesStyle: () => {},
+      onRemoveSeries: () => {},
+      onQuickTransform: () => {},
+    });
+    host.appendChild(view.element);
+    Object.assign(globalThis, {
+      __aspectProbe: (mode: "xy" | "time") => {
+        view.update(state(mode, false), false);
+      },
+    });
+    view.update(state("xy", false), false);
+  });
+
+  const panel = page.locator("#aspect-probe .panel");
+  const toggle = panel.locator(".panel-aspect-toggle");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+  await toggle.click();
+  await expect(page.locator("#aspect-probe")).toHaveAttribute(
+    "data-axis-equal-toggled",
+    "aspect-probe-panel",
+  );
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+  // Equal aspect is meaningless off the xy plane, so the control goes away.
+  await page.evaluate(() => {
+    (
+      globalThis as unknown as { __aspectProbe: (mode: string) => void }
+    ).__aspectProbe("time");
+  });
+  await expect(toggle).toBeHidden();
 });
 
 test("formula component creates and recalls accepted formulas", async ({

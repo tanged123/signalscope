@@ -151,6 +151,13 @@ function fakeCanvas(
   } as unknown as HTMLCanvasElement;
 }
 
+class TestPath2D {
+  moveTo(): void {}
+
+  lineTo(): void {}
+}
+globalThis.Path2D = TestPath2D as unknown as typeof Path2D;
+
 const TEST_PALETTE: Palette = {
   background: "#0e1116",
   border: "#2e3340",
@@ -513,6 +520,135 @@ describe("render", () => {
       op: "=strokeStyle",
       args: ["#bfbfbf"],
     });
+  });
+
+  it("strokes a colour-mapped path once per ramp bucket, not once per segment", () => {
+    const { context, calls } = recordingContext();
+    const path2D = globalThis as unknown as { Path2D?: typeof Path2D };
+    const previousPath2D = path2D.Path2D;
+    class RecordingPath2D {
+      moveTo(): void {}
+
+      lineTo(): void {}
+    }
+    path2D.Path2D = RecordingPath2D as unknown as typeof Path2D;
+    try {
+      const renderer = new CanvasRenderer(fakeCanvas(600, 400, context));
+      renderer.setPalette(TEST_PALETTE);
+
+      const vertices = 5000;
+      const points: number[] = [];
+      const colorValues: number[] = [];
+      for (let index = 0; index < vertices; index += 1) {
+        points.push(index, Math.sin(index / 50));
+        colorValues.push(index / (vertices - 1));
+      }
+
+      renderer.renderPaths(
+        [{ points, colorValues, hue: 1, dash: "solid", width: 1.2, alpha: 1 }],
+        {
+          xLabel: "x",
+          yLabel: "y",
+          xRange: [0, vertices],
+          yRange: [-1, 1],
+        },
+      );
+
+      // 64 ramp steps -> at most 65 buckets, plus the axis furniture's strokes.
+      expect(
+        calls.filter((call) => call.op === "stroke").length,
+      ).toBeLessThanOrEqual(80);
+    } finally {
+      if (previousPath2D === undefined) delete path2D.Path2D;
+      else path2D.Path2D = previousPath2D;
+    }
+  });
+
+  it("equalises the pixel scale of both axes when equalAspect is set", () => {
+    const { context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+
+    renderer.renderPaths(
+      [{ points: [0, 0, 10, 10], hue: 1, dash: "solid", width: 1, alpha: 1 }],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 10],
+        yRange: [0, 10],
+        equalAspect: true,
+      },
+    );
+
+    const layout = renderer.lastLayout();
+    expect(layout).not.toBeNull();
+    const { plot, xRange, yRange } = layout as NonNullable<
+      ReturnType<CanvasRenderer["lastLayout"]>
+    >;
+    const xScale = plot.width / (xRange.max - xRange.min);
+    const yScale = plot.height / (yRange.max - yRange.min);
+    expect(xScale).toBeCloseTo(yScale, 6);
+    // The wider axis is padded, never narrowed.
+    expect(xRange.max - xRange.min).toBeGreaterThanOrEqual(10);
+    expect(yRange.max - yRange.min).toBeGreaterThanOrEqual(10);
+  });
+
+  it("sizes the gutter from the equalised y range, not the requested one", () => {
+    const { context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+
+    // A very wide, very short trajectory: equalising widens y from a span of
+    // 1 to tens of thousands, so its tick labels grow from "0.25" to "-20000".
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 100_000, 1],
+          hue: 1,
+          dash: "solid",
+          width: 1,
+          alpha: 1,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 100_000],
+        yRange: [0, 1],
+        equalAspect: true,
+      },
+    );
+
+    const layout = renderer.lastLayout();
+    expect(layout).not.toBeNull();
+    const { plot, xRange, yRange } = layout as NonNullable<
+      ReturnType<CanvasRenderer["lastLayout"]>
+    >;
+    // The y span really did grow enough to lengthen its labels.
+    expect(yRange.max - yRange.min).toBeGreaterThan(1_000);
+    // The gutter must fit the labels actually drawn, which come from the
+    // equalised range. Sizing it from the requested range clips them.
+    expect(plot.x).toBe(
+      gutterWidth(formatTicks(ticks(yRange.min, yRange.max, 6)), 6),
+    );
+    // Re-solving the gutter must leave the axes equal, not just wider.
+    expect(plot.width / (xRange.max - xRange.min)).toBeCloseTo(
+      plot.height / (yRange.max - yRange.min),
+      6,
+    );
+  });
+
+  it("leaves ranges untouched when equalAspect is absent", () => {
+    const { context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.renderPaths(
+      [{ points: [0, 0, 10, 10], hue: 1, dash: "solid", width: 1, alpha: 1 }],
+      { xLabel: "x", yLabel: "y", xRange: [0, 10], yRange: [0, 10] },
+    );
+    const layout = renderer.lastLayout();
+    expect(layout?.xRange).toEqual({ min: 0, max: 10 });
+    expect(layout?.yRange).toEqual({ min: 0, max: 10 });
   });
 
   it("records the plot layout and supports inline axes", () => {
