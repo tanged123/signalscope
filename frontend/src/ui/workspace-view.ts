@@ -118,6 +118,8 @@ export class WorkspaceView {
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
     revision: number | null = null,
+    contextTilesFor: (panelId: string) => ColumnarTileResponse | null = () =>
+      null,
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -133,6 +135,7 @@ export class WorkspaceView {
             windowFor(panel.id),
             missingFor(panel.id),
             revision,
+            contextTilesFor(panel.id),
           ) ?? 0;
     }
     return total;

@@ -130,6 +130,7 @@ export function sampleCapForPanel(
   return Math.max(1, Math.min(sampleCapFor(mode), share));
 }
 const DERIVED_PREFIX = "derived/";
+const CONTEXT_PIXEL_WIDTH = 512;
 /**
  * Cap on the second, full-resolution tile request in raster regime. Above
  * this the panel is stroking a crowd and hi-res for a subset would be
@@ -217,6 +218,7 @@ export class AppShell {
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
   private readonly tileWindowCache = new TileWindowCache();
+  private readonly contextTileCache = new TileWindowCache();
   private readonly sampleWindowCache = new SampleWindowCache();
   private readonly xyContextCache = new SampleWindowCache();
   private derivedPathsCache: { revision: number; paths: Set<string> } | null =
@@ -243,6 +245,8 @@ export class AppShell {
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
+  private contextTilesByPanel = new Map<string, ColumnarTileResponse>();
+  private readonly xySampleFallback = new Map<string, string>();
   private readonly panelEmphasis = new Map<string, readonly string[]>();
   private readonly mergedTiles = new Map<
     string,
@@ -463,6 +467,9 @@ export class AppShell {
           if (panel === undefined) return;
           if (MODE_DATA[panel.mode].reduction !== "envelope") return;
           this.scheduleRefresh(100);
+        },
+        onSampleFallback: (id) => {
+          this.markSampleFallback(id);
         },
         onCursor: (id, cursor, client) => {
           this.setCursor(id, cursor, client);
@@ -2645,6 +2652,7 @@ export class AppShell {
     this.catalog = Catalog.build(this.signals);
     this.catalogRevision += 1;
     this.tileWindowCache.invalidate();
+    this.contextTileCache.invalidate();
     this.sampleWindowCache.invalidate();
     this.xyContextCache.invalidate();
     this.reconcileSelection();
@@ -2679,6 +2687,16 @@ export class AppShell {
       }
     })();
     return this.refreshPromise;
+  }
+
+  private markSampleFallback(id: string): void {
+    const panel = this.workspace.panel(id);
+    if (panel === undefined) return;
+    const { ids } = this.panelSignalIds(panel);
+    const idsKey = [...ids].sort().join("\u0000");
+    if (this.xySampleFallback.get(id) === idsKey) return;
+    this.xySampleFallback.set(id, idsKey);
+    this.scheduleRefresh(0);
   }
 
   private hasQueuedRefresh(): boolean {
@@ -2801,6 +2819,7 @@ export class AppShell {
       Math.round(required(this.root, ".workspace").clientWidth),
     );
     const nextTiles = new Map<string, ColumnarTileResponse>();
+    const nextContextTiles = new Map<string, ColumnarTileResponse>();
     const nextSamples = new Map<string, SampleResponse>();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
@@ -2811,14 +2830,47 @@ export class AppShell {
         const window = this.effectiveWindow(panel);
         try {
           const spec = MODE_DATA[panel.mode];
-          if (spec.reduction === "envelope") {
+          const idsKey = [...ids].sort().join("\u0000");
+          const fallback =
+            spec.reduction === "envelope" &&
+            spec.windows.includes("context") &&
+            this.xySampleFallback.get(panel.id) === idsKey;
+          if (spec.reduction === "envelope" && !fallback) {
             const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
             const dpr = globalThis.devicePixelRatio || 1;
             const pixelWidth = Math.max(
               1,
               Math.round((panelWidth > 0 ? panelWidth : width) * dpr),
             );
-            const idsKey = [...ids].sort().join("\u0000");
+            const loadContext = async (): Promise<void> => {
+              if (!spec.windows.includes("context")) return;
+              const extent = this.sampleWindow(panel);
+              const cachedContext = this.contextTileCache.slice(
+                panel.id,
+                idsKey,
+                CONTEXT_PIXEL_WIDTH,
+                extent.t0,
+                extent.t1,
+              );
+              if (cachedContext !== null) {
+                nextContextTiles.set(panel.id, cachedContext);
+                return;
+              }
+              const contextResponse = await this.plane.queryTiles({
+                request_id: crypto.randomUUID(),
+                signal_ids: ids,
+                window: extent,
+                pixel_width: CONTEXT_PIXEL_WIDTH,
+                max_total_bins: TILE_BIN_BUDGET,
+              });
+              this.contextTileCache.store(panel.id, {
+                response: contextResponse,
+                window: extent,
+                pixelWidth: CONTEXT_PIXEL_WIDTH,
+                idsKey,
+              });
+              nextContextTiles.set(panel.id, contextResponse);
+            };
             const cached = this.tileWindowCache.slice(
               panel.id,
               idsKey,
@@ -2831,6 +2883,7 @@ export class AppShell {
                 panel.id,
                 await this.withHiRes(panel, cached, ids, window, pixelWidth),
               );
+              await loadContext();
               return;
             }
             const paddedWindow = TileWindowCache.padWindow(
@@ -2866,6 +2919,7 @@ export class AppShell {
               panel.id,
               await this.withHiRes(panel, crowd, ids, window, pixelWidth),
             );
+            await loadContext();
           } else {
             const wantsContext = spec.windows.includes("context");
             const contextWindow = wantsContext
@@ -2912,6 +2966,7 @@ export class AppShell {
     );
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
+    this.contextTilesByPanel = nextContextTiles;
     this.samplesByPanel = nextSamples;
     this.missingByPanel = nextMissing;
     this.renderTiles();
@@ -3010,6 +3065,7 @@ export class AppShell {
         },
         (panelId) => this.missingByPanel.get(panelId) ?? [],
         this.workspace.revision(),
+        (panelId) => this.contextTilesByPanel.get(panelId) ?? null,
       ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
@@ -3059,7 +3115,9 @@ export class AppShell {
    * than clipping it; FFT and histogram compute over the visible window.
    */
   private sampleWindow(panel: PanelState): { t0: number; t1: number } {
-    if (panel.mode !== "xy") return this.effectiveWindow(panel);
+    if (!MODE_DATA[panel.mode].windows.includes("context")) {
+      return this.effectiveWindow(panel);
+    }
     const paths = this.resolvedFor(panel).map((series) => series.path);
     if (panel.x_ref !== null) {
       const x = this.catalog.get(panel.x_ref);

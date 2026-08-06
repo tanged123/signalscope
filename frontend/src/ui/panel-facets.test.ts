@@ -78,6 +78,7 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onToggleSeries: vi.fn(),
     onResized: vi.fn(),
     onGesture: vi.fn(),
+    onSampleFallback: vi.fn(),
     onCursor: vi.fn(),
     onTimeWindow: vi.fn(),
     onYRange: vi.fn(),

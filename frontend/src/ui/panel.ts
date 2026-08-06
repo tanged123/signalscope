@@ -78,6 +78,7 @@ export type PanelCursor = PlotCursor;
 export interface RenderInputs {
   revision: number | null;
   tiles: ColumnarTileResponse | null;
+  contextTiles: ColumnarTileResponse | null;
   samples: SampleResponse | null;
   window: { t0: number; t1: number } | null;
   missingEmpty: boolean;
@@ -92,6 +93,7 @@ export function sameRenderInputs(
     next.revision !== null &&
     next.revision === last.revision &&
     next.tiles === last.tiles &&
+    next.contextTiles === last.contextTiles &&
     next.samples === last.samples &&
     last.window !== null &&
     next.window !== null &&
@@ -150,6 +152,7 @@ export interface PanelCallbacks {
    * to fetch full-resolution tiles for emphasized ghosts in raster regime.
    */
   onEmphasize?(id: string, paths: readonly string[]): void;
+  onSampleFallback(id: string): void;
   onCursor(
     id: string,
     cursor: PanelCursor | null,
@@ -555,12 +558,14 @@ export class PanelView {
   private lastInputState: PanelState | null = null;
   private lastRevision: number | null = null;
   private lastTiles: ColumnarTileResponse | null = null;
+  private lastContextTiles: ColumnarTileResponse | null = null;
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private lastMissingEmpty = true;
   private prepCache: {
     key: string;
     tiles: ColumnarTileResponse | null;
+    contextTiles: ColumnarTileResponse | null;
     samples: SampleResponse | null;
     geometry: unknown;
   } | null = null;
@@ -951,12 +956,14 @@ export class PanelView {
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
     revision: number | null = null,
+    contextTiles: ColumnarTileResponse | null = null,
   ): number {
     if (
       sameRenderInputs(
         {
           revision: this.lastRevision,
           tiles: this.lastTiles,
+          contextTiles: this.lastContextTiles,
           samples: this.lastSamples,
           window: this.lastWindow,
           missingEmpty: this.lastMissingEmpty,
@@ -964,6 +971,7 @@ export class PanelView {
         {
           revision,
           tiles,
+          contextTiles,
           samples,
           window,
           missingEmpty: missing.length === 0,
@@ -977,6 +985,7 @@ export class PanelView {
     this.lastRevision = revision;
     this.lastState = rendered;
     this.lastTiles = tiles;
+    this.lastContextTiles = contextTiles;
     this.lastSamples = samples;
     this.lastWindow = { ...window };
     this.lastMissingEmpty = missing.length === 0;
@@ -985,7 +994,13 @@ export class PanelView {
     this.domainSeries = [];
     this.xyTraces = [];
     this.hasColorbar = false;
-    const elapsed = this.renderForMode(rendered, tiles, samples, window);
+    const elapsed = this.renderForMode(
+      rendered,
+      tiles,
+      samples,
+      window,
+      contextTiles,
+    );
     this.hitAdapter =
       (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
     this.interactions.setPolicy(
@@ -1006,6 +1021,7 @@ export class PanelView {
     tiles: ColumnarTileResponse | null,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
+    contextTiles: ColumnarTileResponse | null,
   ): number {
     return this.renderViaModule(
       plotModeModule(state.mode),
@@ -1013,6 +1029,7 @@ export class PanelView {
       tiles,
       samples,
       window,
+      contextTiles,
     );
   }
 
@@ -1023,11 +1040,13 @@ export class PanelView {
       this.prepCache === null ||
       this.prepCache.key !== key ||
       this.prepCache.tiles !== input.tiles ||
+      this.prepCache.contextTiles !== input.contextTiles ||
       this.prepCache.samples !== input.samples
     ) {
       this.prepCache = {
         key,
         tiles: input.tiles,
+        contextTiles: input.contextTiles,
         samples: input.samples,
         geometry: module.prepare(input),
       };
@@ -1041,12 +1060,12 @@ export class PanelView {
     tiles: ColumnarTileResponse | null,
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
+    contextTiles: ColumnarTileResponse | null,
   ): number {
     const input: PrepareInput = {
       state,
       tiles,
-      // Task 4 wires the real context tiles.
-      contextTiles: null,
+      contextTiles,
       samples,
       callbacks: this.callbacks,
     };
@@ -1058,6 +1077,9 @@ export class PanelView {
         this.resolvePlotRanges(state, prepared, window, seriesKey),
     };
     const result = module.project(geometry, input, frame);
+    if (result.needsSampleFallback === true) {
+      this.callbacks.onSampleFallback(this.id);
+    }
     this.preparedPlot = result.prepared;
     if (result.xyTraces !== undefined) this.xyTraces = result.xyTraces;
     if (result.domainSeries !== undefined) {
@@ -1868,6 +1890,7 @@ export class PanelView {
         this.lastTiles,
         this.lastSamples,
         this.lastWindow,
+        this.lastContextTiles,
       );
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }

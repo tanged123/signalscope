@@ -1163,3 +1163,29 @@ it("isDerivedPath scans the derived list once per workspace revision", () => {
   expect(shell.isDerivedPath("derived/mean")).toBe(true);
   expect(scans).toBe(1);
 });
+
+it("the xy sample fallback is sticky per series set and refreshes once", () => {
+  const shell = Object.create(AppShell.prototype) as {
+    workspace: { panel: (id: string) => unknown };
+    panelSignalIds: (panel: unknown) => { ids: string[]; missing: string[] };
+    xySampleFallback: Map<string, string>;
+    scheduled: number;
+    scheduleRefresh: (delay?: number) => void;
+  };
+  shell.xySampleFallback = new Map();
+  shell.scheduled = 0;
+  shell.scheduleRefresh = () => {
+    shell.scheduled += 1;
+  };
+  shell.workspace = { panel: () => ({ id: "p" }) };
+  shell.panelSignalIds = () => ({ ids: ["b", "a"], missing: [] });
+  const mark = (
+    AppShell.prototype as unknown as {
+      markSampleFallback: (id: string) => void;
+    }
+  ).markSampleFallback;
+  mark.call(shell, "p");
+  mark.call(shell, "p");
+  expect(shell.scheduled).toBe(1);
+  expect(shell.xySampleFallback.get("p")).toBe("a\u0000b");
+});

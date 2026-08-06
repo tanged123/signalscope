@@ -40,6 +40,7 @@ describe("sameRenderInputs", () => {
   const base = {
     revision: 3,
     tiles,
+    contextTiles: null,
     samples: null,
     window,
     missingEmpty: true,
@@ -66,6 +67,22 @@ describe("sameRenderInputs", () => {
     expect(sameRenderInputs(base, { ...base, missingEmpty: false })).toBe(
       false,
     );
+  });
+
+  it("re-renders when the context tiles change", () => {
+    const other = { requestId: "c", series: [] } as ColumnarTileResponse;
+    expect(
+      sameRenderInputs(
+        { ...base, contextTiles: null },
+        { ...base, contextTiles: other },
+      ),
+    ).toBe(false);
+    expect(
+      sameRenderInputs(
+        { ...base, contextTiles: other },
+        { ...base, contextTiles: other },
+      ),
+    ).toBe(true);
   });
 
   it("always re-renders when no revision was provided", () => {
@@ -283,6 +300,7 @@ function panelProbe(): PanelProbe {
     const input = {
       state,
       tiles: null,
+      contextTiles: null,
       samples,
       callbacks: xyCallbacks,
     };
