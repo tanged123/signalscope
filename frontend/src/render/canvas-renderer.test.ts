@@ -78,6 +78,9 @@ function recordingContext(charWidth = 6): {
     stroke(): void {
       push("stroke");
     },
+    fill(): void {
+      push("fill");
+    },
     fillRect(x: number, y: number, width: number, height: number): void {
       push("fillRect", x, y, width, height);
     },
@@ -159,6 +162,10 @@ class TestPath2D {
   moveTo(): void {}
 
   lineTo(): void {}
+
+  rect(): void {}
+
+  closePath(): void {}
 }
 globalThis.Path2D = TestPath2D as unknown as typeof Path2D;
 
@@ -219,12 +226,13 @@ const TEST_PALETTE: Palette = {
 function tile(
   path: string,
   bins: readonly { t0: number; t1: number; v: number; gap?: boolean }[],
+  level = 0,
 ): ColumnarTile {
   return {
     signalId: "1",
     signalPath: path,
     unit: null,
-    level: 0,
+    level,
     bins: binColumnsFromWire(
       bins.map(
         (bin): EnvelopeBin => ({
@@ -1187,5 +1195,54 @@ describe("density raster tier", () => {
     );
     const strokes = noFactory.calls.filter((call) => call.op === "stroke");
     expect(strokes.length).toBeGreaterThan(0);
+  });
+});
+
+describe("banded stroke fallback", () => {
+  // 2600 CSS px at DPR 1 -> 2600 device px; 40 bins < 1300 -> starved
+  // whenever the tile is aggregated (level > 0).
+  function starvedResponse(level: number) {
+    const bins = Array.from({ length: 40 }, (_, index) => ({
+      t0: index,
+      t1: index + 1,
+      v: (index % 5) + 1,
+    }));
+    return { requestId: "r", series: [tile("run_1/a", bins, level)] };
+  }
+  const options = {
+    xLabel: "t",
+    yLabel: "v",
+    yRange: [0, 8] as [number, number],
+    axisStyle: "inline" as const,
+    styles: [{ hue: 1, dash: "solid" as const, width: 1.4, alpha: 1 }],
+  };
+
+  it("draws a starved aggregated series as a filled band with a mean line", () => {
+    const { calls, context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.render(starvedResponse(3), { min: 0, max: 40 }, options);
+    const clipIndex = calls.findIndex((call) => call.op === "clip");
+    const restoreIndex = calls.findIndex(
+      (call, index) => index > clipIndex && call.op === "restore",
+    );
+    const slice = calls.slice(clipIndex, restoreIndex);
+    expect(slice.filter((call) => call.op === "fill")).toHaveLength(1);
+    expect(slice.filter((call) => call.op === "stroke")).toHaveLength(1);
+  });
+
+  it("keeps the plain stroke for level-0 tiles and dense tiles", () => {
+    const sparse = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, sparse.context));
+    renderer.setPalette(TEST_PALETTE);
+    renderer.render(starvedResponse(0), { min: 0, max: 40 }, options);
+    expect(sparse.calls.some((call) => call.op === "fill")).toBe(false);
+
+    const narrow = recordingContext();
+    // 60 CSS px -> threshold 30; 40 bins >= 30 -> dense enough to stroke.
+    const dense = new CanvasRenderer(fakeCanvas(60, 400, narrow.context));
+    dense.setPalette(TEST_PALETTE);
+    dense.render(starvedResponse(3), { min: 0, max: 40 }, options);
+    expect(narrow.calls.some((call) => call.op === "fill")).toBe(false);
   });
 });

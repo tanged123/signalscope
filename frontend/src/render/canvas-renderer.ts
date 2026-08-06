@@ -114,6 +114,21 @@ export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
 const SOLID: number[] = [];
 const MAX_BATCHED_SERIES = 4;
+const BAND_FILL_ALPHA = 0.35;
+
+/**
+ * True when the tile's delivered resolution cannot be stroked faithfully:
+ * aggregated bins (level > 0) sparser than one bin per two device pixels
+ * read as a comb of vertical excursions no matter how they are connected.
+ * Level 0 is raw samples — sparse there is the data itself, and the excursion
+ * path degenerates to a plain polyline.
+ */
+function starvedEnvelope(
+  series: ColumnarTile,
+  plotWidthDevice: number,
+): boolean {
+  return series.level > 0 && series.bins.count < plotWidthDevice / 2;
+}
 
 function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
@@ -252,6 +267,10 @@ export class CanvasRenderer {
   private readonly pathCache = new WeakMap<
     BinColumns,
     { key: string; path: Path2D }
+  >();
+  private readonly bandCache = new WeakMap<
+    BinColumns,
+    { key: string; band: Path2D; mean: Path2D }
   >();
 
   constructor(canvas: HTMLCanvasElement) {
@@ -397,6 +416,17 @@ export class CanvasRenderer {
       >();
       response.series.forEach((series, index) => {
         if (rasterSet.has(index)) return;
+        if (starvedEnvelope(series, plot.width * this.pixelRatio)) {
+          this.drawSeriesBand(
+            context,
+            plot,
+            project,
+            series,
+            styleFor(index),
+            pathKey,
+          );
+          return;
+        }
         const style = styleFor(index);
         const key = [
           style.color,
@@ -870,8 +900,119 @@ export class CanvasRenderer {
     style: ResolvedStroke,
     pathKey: string,
   ): void {
+    if (starvedEnvelope(series, plot.width * this.pixelRatio)) {
+      this.drawSeriesBand(context, plot, project, series, style, pathKey);
+      return;
+    }
     this.setStroke(context, style);
     context.stroke(this.seriesPath(plot, project, series, pathKey));
+  }
+
+  /**
+   * The faithful shape of a starved envelope: a filled min/max ribbon
+   * under a stroked mean centerline — the single-series form of the
+   * density tier's trapezoids. Gap bins and missing extrema break both
+   * paths exactly where the excursion path lifted its pen.
+   */
+  private drawSeriesBand(
+    context: CanvasRenderingContext2D,
+    plot: PlotRect,
+    project: Projection,
+    series: ColumnarTile,
+    style: ResolvedStroke,
+    pathKey: string,
+  ): void {
+    const bins = series.bins;
+    const cached = this.bandCache.get(bins);
+    let paths = cached?.key === pathKey ? cached : null;
+    if (paths === null) {
+      const band = new Path2D();
+      const mean = new Path2D();
+      this.appendBandPaths(band, mean, project, bins);
+      paths = { key: pathKey, band, mean };
+      this.bandCache.set(bins, paths);
+    }
+    context.fillStyle = style.color;
+    context.globalAlpha = style.alpha * BAND_FILL_ALPHA;
+    context.fill(paths.band);
+    // The fill changed globalAlpha behind setStroke's memo.
+    this.lastAlpha = Number.NaN;
+    this.setStroke(context, style);
+    context.stroke(paths.mean);
+  }
+
+  private appendBandPaths(
+    band: Path2D,
+    mean: Path2D,
+    project: Projection,
+    bins: BinColumns,
+  ): void {
+    const { toX, toY } = project;
+    const { t0, t1, min, max, sum, finiteCount, flags, count } = bins;
+    const required = HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX;
+    const soloWidth = 1 / this.pixelRatio;
+    const xs: number[] = [];
+    const los: number[] = [];
+    const his: number[] = [];
+    const flush = (): void => {
+      if (xs.length === 1) {
+        // An isolated bin still shows its span, one device pixel wide —
+        // a zero-width polygon would vanish under fill.
+        const x = xs[0] as number;
+        const hi = his[0] as number;
+        const lo = los[0] as number;
+        band.rect(
+          x - soloWidth / 2,
+          Math.min(hi, lo),
+          soloWidth,
+          Math.max(soloWidth, Math.abs(lo - hi)),
+        );
+      } else if (xs.length > 1) {
+        band.moveTo(xs[0] as number, his[0] as number);
+        for (let i = 1; i < xs.length; i += 1) {
+          band.lineTo(xs[i] as number, his[i] as number);
+        }
+        for (let i = xs.length - 1; i >= 0; i -= 1) {
+          band.lineTo(xs[i] as number, los[i] as number);
+        }
+        band.closePath();
+      }
+      xs.length = 0;
+      los.length = 0;
+      his.length = 0;
+    };
+    let meanPen = false;
+    for (let index = 0; index < count; index += 1) {
+      const binFlags = flags[index] as number;
+      if ((binFlags & required) !== required) {
+        flush();
+        meanPen = false;
+        continue;
+      }
+      const gap = (binFlags & HAS_GAP) !== 0;
+      if (gap) {
+        flush();
+        meanPen = false;
+      }
+      const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
+      xs.push(x);
+      los.push(toY(min[index] as number));
+      his.push(toY(max[index] as number));
+      const finite = finiteCount[index] as number;
+      if (finite > 0) {
+        const yMean = toY((sum[index] as number) / finite);
+        if (meanPen) mean.lineTo(x, yMean);
+        else mean.moveTo(x, yMean);
+        meanPen = true;
+      } else {
+        meanPen = false;
+      }
+      if (gap) {
+        flush();
+        meanPen = false;
+      }
+    }
+    flush();
   }
 
   /**
