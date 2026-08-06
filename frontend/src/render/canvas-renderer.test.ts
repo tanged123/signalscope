@@ -723,6 +723,40 @@ describe("render", () => {
     );
   });
 
+  it("batches translucent ghost series into grouped strokes", () => {
+    const { calls, context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(800, 400, context));
+    renderer.setPalette(TEST_PALETTE);
+    const series = Array.from({ length: 130 }, (_, index) =>
+      tile(`run_${String(index)}/response`, [
+        { t0: 0, t1: 1, v: index },
+        { t0: 1, t1: 2, v: index + 1 },
+      ]),
+    );
+    const styles: SeriesStroke[] = series.map(() => ({
+      hue: null,
+      dash: "solid",
+      width: 1,
+      alpha: 0.5,
+    }));
+    renderer.render(
+      { requestId: "r", series },
+      { min: 0, max: 2 },
+      { xLabel: "t", yLabel: "v", yRange: [0, 131], styles },
+    );
+    const clipIndex = calls.findIndex((call) => call.op === "clip");
+    const restoreIndex = calls.findIndex(
+      (call, index) => index > clipIndex && call.op === "restore",
+    );
+    const dataStrokes = calls
+      .slice(clipIndex, restoreIndex)
+      .filter((call) => call.op === "stroke").length;
+    expect(dataStrokes).toBe(Math.ceil(130 / 4));
+    expect(
+      calls.some((call) => call.op === "=globalAlpha" && call.args[0] === 0.5),
+    ).toBe(true);
+  });
+
   it("draws a ghost with the fixed neutral stroke", () => {
     const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
       styles: [{ hue: null, dash: "solid", width: 1.3, alpha: 0.5 }],

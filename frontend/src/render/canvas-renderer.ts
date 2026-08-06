@@ -330,13 +330,7 @@ export class CanvasRenderer {
     const hasEmphasis =
       options.emphasisIndex !== undefined ||
       (options.emphasisIndices?.length ?? 0) > 0;
-    const canBatch =
-      response.series.length > 128 &&
-      !hasEmphasis &&
-      response.series.every((_, index) => {
-        const style = styleFor(index);
-        return style.alpha === 1 && style.dash === "solid";
-      });
+    const canBatch = response.series.length > 128 && !hasEmphasis;
     if (canBatch) {
       const groups = new Map<
         string,
@@ -344,7 +338,12 @@ export class CanvasRenderer {
       >();
       response.series.forEach((series, index) => {
         const style = styleFor(index);
-        const key = `${style.color}\u0000${String(style.width)}`;
+        const key = [
+          style.color,
+          String(style.width),
+          String(style.alpha),
+          style.dash,
+        ].join("\u0000");
         const styledGroups = groups.get(key) ?? [];
         let group = styledGroups.at(-1);
         if (group === undefined || group.count === MAX_BATCHED_SERIES) {
