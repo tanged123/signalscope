@@ -912,8 +912,9 @@ export class CanvasRenderer {
     for (const bins of seriesBins) {
       accumulateEnvelope(grid, bins, toColumn, toRow);
     }
+    const pixels = coverageToImage(grid, color, pointAlpha);
     offContext.putImageData(
-      new ImageData(coverageToImage(grid, color, pointAlpha), width, height),
+      new ImageData(new Uint8ClampedArray(pixels), width, height),
       0,
       0,
     );

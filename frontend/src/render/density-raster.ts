@@ -39,7 +39,8 @@ export function accumulateEnvelope(
     const top = Math.max(0, Math.floor(Math.min(rowA, rowB)));
     const bottom = Math.min(height - 1, Math.ceil(Math.max(rowA, rowB)));
     for (let row = top; row <= bottom; row += 1) {
-      coverage[row * width + column] += 1;
+      const offset = row * width + column;
+      coverage[offset] = (coverage[offset] ?? 0) + 1;
     }
   };
   let previous: { x: number; lo: number; hi: number } | null = null;
