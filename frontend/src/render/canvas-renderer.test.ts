@@ -255,6 +255,29 @@ function renderOnce(
   return calls;
 }
 
+function withRecordingPath2D(calls: DrawCall[], draw: () => void): void {
+  const globalWithPath = globalThis as unknown as {
+    Path2D?: typeof Path2D;
+  };
+  const previousPath2D = globalWithPath.Path2D;
+  class RecordingPath2D {
+    moveTo(x: number, y: number): void {
+      calls.push({ op: "moveTo", args: [x, y] });
+    }
+
+    lineTo(x: number, y: number): void {
+      calls.push({ op: "lineTo", args: [x, y] });
+    }
+  }
+  globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
+  try {
+    draw();
+  } finally {
+    if (previousPath2D === undefined) delete globalWithPath.Path2D;
+    else globalWithPath.Path2D = previousPath2D;
+  }
+}
+
 describe("ticks", () => {
   it("produces round steps covering the range", () => {
     expect(ticks(0, 60, 7)).toEqual([0, 10, 20, 30, 40, 50, 60]);
@@ -800,7 +823,7 @@ describe("render", () => {
     expect(calls).toContainEqual({ op: "=lineWidth", args: [1.6] });
   });
 
-  it("merges dense bins into pixel columns", () => {
+  it("keeps paths below four bins per device pixel direct", () => {
     const calls = renderOnce([
       tile(
         "dense",
@@ -821,7 +844,7 @@ describe("render", () => {
     const vertices = calls
       .slice(seriesStart, seriesEnd)
       .filter((call) => call.op === "moveTo" || call.op === "lineTo");
-    expect(vertices.length).toBeLessThan(700);
+    expect(vertices.length).toBe(700);
   });
 
   it("reuses geometry when only series emphasis changes", () => {
@@ -921,5 +944,82 @@ describe("render", () => {
     const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])]);
     expect(calls.some((call) => call.op === "rect")).toBe(true);
     expect(calls.some((call) => call.op === "clip")).toBe(true);
+  });
+
+  describe("device-pixel columns", () => {
+    it("snaps aggregated columns to device pixels at 2x DPR", () => {
+      const saved = globalThis.devicePixelRatio;
+      (globalThis as { devicePixelRatio?: number }).devicePixelRatio = 2;
+      try {
+        const { calls, context } = recordingContext();
+        const renderer = new CanvasRenderer(fakeCanvas(40, 40, context));
+        renderer.setPalette(TEST_PALETTE);
+        const bins = Array.from({ length: 400 }, (_, index) => ({
+          t0: index,
+          t1: index + 1,
+          v: index % 7,
+        }));
+        withRecordingPath2D(calls, () => {
+          renderer.render(
+            { requestId: "r", series: [tile("run_0001/a", bins)] },
+            { min: 0, max: 400 },
+            {
+              xLabel: "t",
+              yLabel: "v",
+              yRange: [0, 7],
+              axisStyle: "inline",
+            },
+          );
+        });
+        const clipIndex = calls.findIndex((call) => call.op === "clip");
+        const restoreIndex = calls.findIndex(
+          (call, index) => index > clipIndex && call.op === "restore",
+        );
+        const xs = calls
+          .slice(clipIndex, restoreIndex)
+          .filter((call) => call.op === "moveTo" || call.op === "lineTo")
+          .map((call) => call.args[0] as number);
+        expect(xs.length).toBeGreaterThan(0);
+        for (const x of xs) {
+          expect(x * 2 - Math.floor(x * 2)).toBeCloseTo(0.5, 10);
+        }
+      } finally {
+        (globalThis as { devicePixelRatio?: number }).devicePixelRatio = saved;
+      }
+    });
+
+    it("keeps the direct branch below four bins per device pixel", () => {
+      const { calls, context } = recordingContext();
+      const renderer = new CanvasRenderer(fakeCanvas(40, 40, context));
+      renderer.setPalette(TEST_PALETTE);
+      const bins = Array.from({ length: 100 }, (_, index) => ({
+        t0: index,
+        t1: index + 1,
+        v: index % 7,
+      }));
+      withRecordingPath2D(calls, () => {
+        renderer.render(
+          { requestId: "r", series: [tile("run_0001/a", bins)] },
+          { min: 0, max: 100 },
+          {
+            xLabel: "t",
+            yLabel: "v",
+            yRange: [0, 7],
+            axisStyle: "inline",
+          },
+        );
+      });
+      const clipIndex = calls.findIndex((call) => call.op === "clip");
+      const restoreIndex = calls.findIndex(
+        (call, index) => index > clipIndex && call.op === "restore",
+      );
+      const xs = calls
+        .slice(clipIndex, restoreIndex)
+        .filter((call) => call.op === "moveTo" || call.op === "lineTo")
+        .map((call) => call.args[0] as number);
+      expect(xs.some((x) => Math.abs(x * 2 - Math.round(x * 2)) > 1e-6)).toBe(
+        true,
+      );
+    });
   });
 });

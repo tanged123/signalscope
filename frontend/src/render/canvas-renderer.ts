@@ -222,6 +222,7 @@ interface PathSink {
 export class CanvasRenderer {
   private palette: Palette | null = null;
   private readonly surface: CanvasSurface;
+  private pixelRatio = 1;
   private layout: PlotLayout | null = null;
   private colorbarGradient: CanvasGradient | null = null;
   private colorbarBottom = 0;
@@ -294,6 +295,7 @@ export class CanvasRenderer {
       plot.y,
       plot.width,
       plot.height,
+      this.pixelRatio,
     ]
       .map(String)
       .join(",");
@@ -417,7 +419,8 @@ export class CanvasRenderer {
    * plot insets and tick policy live in exactly one place.
    */
   private beginFrame(spec: FrameSpec): Frame {
-    const { context, width, height } = this.surface.prepare();
+    const { context, width, height, ratio } = this.surface.prepare();
+    this.pixelRatio = ratio;
     this.lastStroke = null;
     this.lastWidth = Number.NaN;
     this.lastAlpha = Number.NaN;
@@ -882,7 +885,8 @@ export class CanvasRenderer {
       }
       penDown = !gap;
     };
-    if (count > 2 * plot.width) {
+    const ratio = this.pixelRatio;
+    if (count > 4 * plot.width * ratio) {
       let colX = Number.NaN;
       let cFirst = 0;
       let cLast = 0;
@@ -907,9 +911,12 @@ export class CanvasRenderer {
         const x =
           plot.x +
           Math.floor(
-            toX(((t0[index] as number) + (t1[index] as number)) * 0.5) - plot.x,
-          ) +
-          0.5;
+            (toX(((t0[index] as number) + (t1[index] as number)) * 0.5) -
+              plot.x) *
+              ratio,
+          ) /
+            ratio +
+          0.5 / ratio;
         if (x !== colX) {
           flushColumn();
           colX = x;

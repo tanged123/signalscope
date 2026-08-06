@@ -2659,7 +2659,11 @@ export class AppShell {
         try {
           if (panel.mode === "time") {
             const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-            const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
+            const dpr = globalThis.devicePixelRatio || 1;
+            const pixelWidth = Math.max(
+              1,
+              Math.round((panelWidth > 0 ? panelWidth : width) * dpr),
+            );
             const idsKey = [...ids].sort().join("\u0000");
             const cached = this.tileWindowCache.slice(
               panel.id,

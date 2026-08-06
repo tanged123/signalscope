@@ -15,6 +15,7 @@ export class CanvasSurface {
     context: CanvasRenderingContext2D;
     width: number;
     height: number;
+    ratio: number;
   } {
     const ratio = globalThis.devicePixelRatio || 1;
     const width = Math.max(1, this.canvas.clientWidth);
@@ -35,6 +36,6 @@ export class CanvasSurface {
       throw new Error("Canvas 2D context is unavailable");
     }
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    return { context, width, height };
+    return { context, width, height, ratio };
   }
 }
