@@ -355,3 +355,31 @@ seam is shaped, not filled. No band/ribbon primitive (ADR 0028).
 - `docs/adr/0019`, `0025`, `0028`, `0029`, `0036`, `0037`
 - `docs/superpowers/plans/2026-08-04-plotting-performance-overhaul.md`,
   `2026-08-05-post-phase-5-fixes.md`
+
+## Amendment (2026-08-06, post-phase-3 field capture): density tone map and hi-res strokes
+
+Phase 3 shipped to spec and the field capture showed the spec was wrong in
+two places. Edward reviewed the capture and chose the corrections below;
+they are phase 3.5 (`docs/superpowers/plans/2026-08-06-unified-pipeline-phase-3.5.md`).
+
+1. **The physical compositing law is replaced by a log-normalized tone
+   map.** Ghost strokes carry opacity 0.5, so `1 − (1 − 0.5)^k` reaches 99%
+   alpha at k = 7 overlapping runs; a 1000-run ensemble renders as one flat
+   saturated slab with all quantile structure crushed into the top 1% of
+   the alpha range. The display law becomes
+   `alpha(k) = 0.1 + 0.8 · ln(1 + k) / ln(1 + kRef)` with `kRef` the frame's
+   maximum coverage rounded up to a power of two (exposure stays fixed
+   while the densest cell drifts within 2x, so pan does not flicker). This
+   is window-relative shading — the trade the earlier draft rejected — and
+   the field capture showed the alternative is a binary mask at this scale.
+2. **Stroked series in raster regime get their own high-resolution tile
+   request.** The comb survives on focused/hued lines because they stroke
+   from the same starved `TILE_BIN_BUDGET / N` allocation. When the density
+   policy says raster, the shell issues a second small tile query — the
+   focused + hued set plus the transient hover-emphasis set, debounced,
+   capped at 32 series — at full pixel width, and merges those series into
+   the panel response by signal id. Crowd request and budgets unchanged.
+3. **Coverage accumulation moves to difference marks** (`+1` at band top,
+   `−1` below band bottom, one prefix-sum resolve per frame) — the direct
+   per-column fill measured 229 ms per render on the mc1000 panel, which
+   also gated hover emphasis re-rasters.
