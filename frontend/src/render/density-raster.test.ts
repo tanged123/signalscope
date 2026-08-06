@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
 import { binColumnsFromWire } from "../app/bin-columns";
 import {
+  DENSITY_ALPHA_FLOOR,
+  DENSITY_ALPHA_MAX,
   accumulateEnvelope,
   coverageToImage,
   parseHexColor,
@@ -145,7 +147,10 @@ describe("coverageToImage", () => {
     g.coverage[2] = 0;
     const pixels = coverageToImage(g, "#ffffff");
     // kMax 4 -> kRef 4; alpha(k) = 0.1 + 0.8 * ln(1 + k) / ln(5).
-    const alpha = (k: number) => 0.1 + (0.8 * Math.log(1 + k)) / Math.log(5);
+    const alpha = (k: number) =>
+      DENSITY_ALPHA_FLOOR +
+      ((DENSITY_ALPHA_MAX - DENSITY_ALPHA_FLOOR) * Math.log(1 + k)) /
+        Math.log(5);
     expect(pixels[3]).toBe(Math.round(alpha(1) * 255));
     expect(pixels[7]).toBe(Math.round(alpha(4) * 255));
     expect(pixels[11]).toBe(0);
@@ -155,7 +160,9 @@ describe("coverageToImage", () => {
   it("caps the densest cell at the exposure maximum", () => {
     const g = grid(1, 1);
     g.coverage[0] = 8; // kRef 8: this cell is the reference.
-    expect(coverageToImage(g, "#fff")[3]).toBe(Math.round(0.9 * 255));
+    expect(coverageToImage(g, "#fff")[3]).toBe(
+      Math.round(DENSITY_ALPHA_MAX * 255),
+    );
   });
 
   it("keeps lone outliers visible under a dense core", () => {
