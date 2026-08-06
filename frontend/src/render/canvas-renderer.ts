@@ -23,6 +23,7 @@ import { densityMode } from "./density-policy";
 import {
   accumulateEnvelope,
   coverageToImage,
+  resolveCoverage,
   type DensityGrid,
 } from "./density-raster";
 import { CanvasSurface } from "./surface";
@@ -381,7 +382,6 @@ export class CanvasRenderer {
             (index) => (response.series[index] as ColumnarTile).bins,
           ),
           ghostStyle.color,
-          ghostStyle.alpha,
         );
         if (!drawn) rasterSet.clear();
       } else {
@@ -886,7 +886,6 @@ export class CanvasRenderer {
     project: Projection,
     seriesBins: readonly BinColumns[],
     color: string,
-    pointAlpha: number,
   ): boolean {
     const ratio = this.pixelRatio;
     const width = Math.max(1, Math.round(plot.width * ratio));
@@ -912,7 +911,8 @@ export class CanvasRenderer {
     for (const bins of seriesBins) {
       accumulateEnvelope(grid, bins, toColumn, toRow);
     }
-    const pixels = coverageToImage(grid, color, pointAlpha);
+    resolveCoverage(grid);
+    const pixels = coverageToImage(grid, color);
     offContext.putImageData(new ImageData(pixels, width, height), 0, 0);
     context.save();
     context.imageSmoothingEnabled = false;
