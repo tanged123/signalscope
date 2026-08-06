@@ -37,7 +37,6 @@ import {
 import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
-  prepareTimePlot,
   prepareXyPlot,
   type AnnotationAnchor,
   type PlotDelta,
@@ -58,7 +57,6 @@ import {
   COLOR_SLOTS,
   type PathRenderOptions,
   type PlotPath,
-  type RenderOptions,
 } from "../render/canvas-renderer";
 import {
   marker,
@@ -74,6 +72,7 @@ import {
 } from "./plot-interactions";
 import { fftModule } from "./modes/fft";
 import { histogramModule } from "./modes/histogram";
+import { timeModule } from "./modes/time";
 import type {
   FrameInput,
   PlotModeModule,
@@ -135,11 +134,6 @@ const MODES: readonly { mode: PanelMode; label: string }[] = [
 ];
 
 const XY_HOVER_RADIUS = 40;
-
-function colorIndexForHue(hue: number | null): number {
-  if (hue === null) return 0;
-  return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
-}
 
 export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
 
@@ -1054,56 +1048,7 @@ export class PanelView {
         window,
       );
     }
-    if (tiles === null || state.series.length === 0) return 0;
-    const bySeries = new Map(
-      state.series.map((series) => [series.path, series]),
-    );
-    const shown = tiles.series.filter(
-      (tile) => bySeries.get(tile.signalPath)?.visible ?? true,
-    );
-    const response = { requestId: tiles.requestId, series: shown };
-    this.preparedPlot = prepareTimePlot({
-      series: shown.map((tile) => {
-        const series = bySeries.get(tile.signalPath);
-        return {
-          path: tile.signalPath,
-          colorIndex: colorIndexForHue(series?.hue ?? 1),
-          bins: tile.bins,
-        };
-      }),
-      window,
-    });
-    const seriesKey = state.series.map((series) => series.path).join("\u0000");
-    const ranges = this.resolvePlotRanges(
-      state,
-      this.preparedPlot,
-      window,
-      seriesKey,
-    );
-    if (ranges === null) return 0;
-    const options: RenderOptions = {
-      xLabel: state.x_label ?? "time (s)",
-      yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
-      yRange: [ranges.y.min, ranges.y.max],
-      axisStyle: state.axis_style,
-      styles: shown.map((tile) => {
-        const series = bySeries.get(tile.signalPath);
-        return {
-          hue: series?.hue ?? null,
-          dash: series?.dash ?? "solid",
-          width: series?.width ?? 1.4,
-          alpha: series?.opacity ?? 1,
-        };
-      }),
-      ...(this.emphasizePaths !== null
-        ? {
-            emphasisIndices: shown.flatMap((tile, index) =>
-              this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
-            ),
-          }
-        : {}),
-    };
-    return this.renderer.render(response, ranges.x, options);
+    return this.renderViaModule(timeModule, state, tiles, samples, window);
   }
 
   /** Stage-2 cache: prepare re-runs only when data or config identity moves. */
