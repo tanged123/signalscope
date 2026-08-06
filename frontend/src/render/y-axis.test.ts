@@ -69,4 +69,19 @@ describe("YAxisPolicy", () => {
     ).toEqual([-100, 300]);
     expect(calls).toBe(0);
   });
+
+  it("stops evaluating the automatic thunk once the latch is set", () => {
+    const policy = new YAxisPolicy();
+    let calls = 0;
+    const automatic = (): readonly [number, number] | null => {
+      calls += 1;
+      return [0, 10];
+    };
+    expect(policy.resolve("a", automatic, null)).toEqual([0, 10]);
+    expect(policy.resolve("a", automatic, null)).toEqual([0, 10]);
+    expect(calls).toBe(1);
+    // A series-set change resets the latch and re-evaluates.
+    expect(policy.resolve("b", automatic, null)).toEqual([0, 10]);
+    expect(calls).toBe(2);
+  });
 });

@@ -26,8 +26,10 @@ export class YAxisPolicy {
       this.key = seriesKey;
       this.sticky = null;
     }
-    const next = automatic();
-    if (isUsableYRange(next)) this.sticky ??= [next[0], next[1]];
+    if (this.sticky === null) {
+      const next = automatic();
+      if (isUsableYRange(next)) this.sticky = [next[0], next[1]];
+    }
     return this.sticky;
   }
 
