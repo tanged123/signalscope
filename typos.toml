@@ -1,6 +1,10 @@
 [default.extend-identifiers]
 PNGs = "PNGs"
 
+[default.extend-words]
+# Level-of-detail, as in rendering LOD ladders — not a typo of LOAD.
+LOD = "LOD"
+
 [files]
 extend-exclude = [
   "docs/Signal Scope UI Design Pass/**",
