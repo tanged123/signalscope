@@ -50,7 +50,13 @@ import {
   type SeriesHitAdapter,
 } from "../app/plot-capabilities";
 import { spectrum } from "../app/spectrum";
-import { lerpSample, pairSamples, type XyTrace } from "../app/xy";
+import {
+  lerpSample,
+  pairSamples,
+  seriesIndexKey,
+  type XyTrace,
+  XyPrepCache,
+} from "../app/xy";
 import {
   CanvasRenderer,
   COLOR_SLOTS,
@@ -476,7 +482,7 @@ function renderState(
 }
 
 function resolveXSeries(
-  samples: SampleResponse,
+  index: ReadonlyMap<string, SampleSeries>,
   xSeries: SampleSeries,
   xSignal: string,
   yPath: string,
@@ -486,11 +492,7 @@ function resolveXSeries(
   if (xLocal === null) return xSeries;
   const sourceKey = callbacks.sourceKeyFor(yPath);
   if (sourceKey === null) return xSeries;
-  return samples.series.find(
-    (candidate) =>
-      callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
-      callbacks.localPathFor(candidate.signal_path) === xLocal,
-  );
+  return index.get(seriesIndexKey(sourceKey, xLocal));
 }
 
 export function xChipLabel(
@@ -605,6 +607,7 @@ export class PanelView {
     opacity: number;
     trace: XyTrace;
   }[] = [];
+  private readonly xyPrep = new XyPrepCache();
   private domainSeries: {
     path: string;
     colorIndex: number;
@@ -1105,12 +1108,20 @@ export class PanelView {
     const xSeries = byPath.get(state.x_signal);
     if (xSeries === undefined) return 0;
     const xLocal = this.callbacks.localPathFor(state.x_signal);
+    const prepKey = [
+      state.x_signal,
+      state.color_by_time ? "\u0001time" : (state.color_signal ?? ""),
+      ...state.series
+        .filter((series) => series.visible)
+        .map((series) => series.path),
+    ].join("\u0000");
+    const index = this.xyPrep.sync(samples, prepKey, this.callbacks);
     for (const series of state.series) {
       if (!series.visible) continue;
       const ySeries = byPath.get(series.path);
       if (ySeries === undefined) continue;
       const resolved = resolveXSeries(
-        samples,
+        index,
         xSeries,
         state.x_signal,
         series.path,
@@ -1124,7 +1135,9 @@ export class PanelView {
         dash: series.dash,
         width: series.width,
         opacity: series.opacity,
-        trace: pairSamples(resolved, ySeries),
+        trace: this.xyPrep.trace(series.path, () =>
+          pairSamples(resolved, ySeries),
+        ),
       });
     }
     if (this.xyTraces.length === 0) return 0;
@@ -1145,13 +1158,7 @@ export class PanelView {
       if (cLocal === null) return colorSeries;
       const sourceKey = this.callbacks.sourceKeyFor(yPath);
       if (sourceKey === null) return colorSeries;
-      return (
-        samples.series.find(
-          (candidate) =>
-            this.callbacks.sourceKeyFor(candidate.signal_path) === sourceKey &&
-            this.callbacks.localPathFor(candidate.signal_path) === cLocal,
-        ) ?? null
-      );
+      return index.get(seriesIndexKey(sourceKey, cLocal)) ?? null;
     };
     const colorFor = (yPath: string, trace: XyTrace): number[] | null => {
       if (colorSeries === null) return null;
@@ -1163,7 +1170,9 @@ export class PanelView {
       );
     };
     const colorColumns = this.xyTraces.map((entry) =>
-      colorFor(entry.path, entry.trace),
+      this.xyPrep.colorColumn(entry.path, () =>
+        colorFor(entry.path, entry.trace),
+      ),
     );
     let colorMin = Number.POSITIVE_INFINITY;
     let colorMax = Number.NEGATIVE_INFINITY;
@@ -1206,7 +1215,9 @@ export class PanelView {
     for (const entry of this.xyTraces) {
       // Whole trajectory dimmed underneath, the windowed part lit on top.
       paths.push({
-        points: flattenTrace(entry.trace, null),
+        points: this.xyPrep.dimmedPoints(entry.path, entry.trace, (trace) =>
+          flattenTrace(trace, null),
+        ),
         hue: entry.hue,
         dash: "solid",
         width: 1.2,
