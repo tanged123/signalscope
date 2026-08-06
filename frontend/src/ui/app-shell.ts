@@ -1034,7 +1034,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.21.1");
+        this.showModeHelp("SignalScope 0.21.2");
       },
     });
     this.commands.register({
