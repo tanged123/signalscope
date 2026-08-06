@@ -58,15 +58,12 @@ import {
   PlotInteractionController,
   type InteractionBox,
 } from "./plot-interactions";
-import { fftModule } from "./modes/fft";
-import { histogramModule } from "./modes/histogram";
-import { timeModule } from "./modes/time";
-import { xyModule } from "./modes/xy";
 import type {
   FrameInput,
   PlotModeModule,
   PrepareInput,
 } from "./modes/contract";
+import { plotModeModule } from "./modes";
 import { colorIndexForHue, visibleSources } from "./modes/shared";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
@@ -1005,22 +1002,13 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
-    if (state.mode === "xy") {
-      return this.renderViaModule(xyModule, state, tiles, samples, window);
-    }
-    if (state.mode === "fft") {
-      return this.renderViaModule(fftModule, state, tiles, samples, window);
-    }
-    if (state.mode === "histogram") {
-      return this.renderViaModule(
-        histogramModule,
-        state,
-        tiles,
-        samples,
-        window,
-      );
-    }
-    return this.renderViaModule(timeModule, state, tiles, samples, window);
+    return this.renderViaModule(
+      plotModeModule(state.mode),
+      state,
+      tiles,
+      samples,
+      window,
+    );
   }
 
   /** Stage-2 cache: prepare re-runs only when data or config identity moves. */
