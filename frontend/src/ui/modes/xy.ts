@@ -291,7 +291,7 @@ function prepareFromTiles(input: PrepareInput): XyGeometry | null {
       time: [],
       values: entries[0]?.trace.x ?? [],
       stride: 1,
-    } as SampleSeries,
+    } as unknown as SampleSeries,
     entries,
     dimmed,
     colorColumns,
