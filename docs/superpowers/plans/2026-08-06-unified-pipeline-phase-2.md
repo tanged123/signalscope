@@ -1918,6 +1918,20 @@ Note in the handoff: `panel.ts` line count before/after (`git show <pre-phase-2-
 
 ---
 
+## Post-execution review note (2026-08-06)
+
+Executed as commits `da929e0..2395a41`. Review found one defect **in this
+plan**, fixed in `ca62960`: Tasks 5-6 baked per-series styles (hue, dash,
+width, opacity) into prepare-time geometry while their `configKey`s ignored
+them, so a style-only change — which reaches `renderData` with
+identity-stable tiles/samples via the app-shell caches — rendered stale
+styles in time and xy modes. Both `configKey`s now include the style fields;
+`frontend/src/ui/panel-prep-cache.test.ts` pins the repro. Any future mode
+that reads mutable panel state during `prepare` must mirror every such input
+in its `configKey`. Also noted: `colorIndexForHue`'s old `panel.ts` body was
+deleted in Task 5's commit instead of Task 2's, so commits `e86dcfe..09ad08c`
+fail `tsc --noEmit` (TS2440) — mind that during any `git bisect`.
+
 ## Self-review notes (already applied)
 
 - Spec coverage: this plan implements §"Architecture: the unified mode pipeline" stages 1-3 structure (Tasks 1-8) with stage-4 renderer untouched, per the spec's phasing. The density tier (phase 3) and pyramid XY (phase 4) are intentionally absent. The spec's promise that "prepare never runs during pan/zoom" is delivered by `geometryFor`; FFT/histogram keep window-dependent math in `project` this phase because moving it changes transient visuals — that is the phase-4 sample-pipeline change, and the spec's zero-visual-change rule for this phase wins.
