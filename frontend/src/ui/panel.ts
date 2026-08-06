@@ -12,7 +12,7 @@ import {
 } from "../app/resolution";
 import { virtualSlice } from "../app/outline-model";
 import { evaluateSelector } from "../app/selector";
-import type { SampleResponse, SampleSeries } from "../generated/protocol";
+import type { SampleResponse } from "../generated/protocol";
 import type {
   AxisStyle,
   Binding,
@@ -37,7 +37,6 @@ import {
 import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
-  prepareXyPlot,
   type AnnotationAnchor,
   type PlotDelta,
   type PlotCursor,
@@ -45,19 +44,8 @@ import {
   type ResolvedAnnotation,
   type SeriesHitAdapter,
 } from "../app/plot-capabilities";
-import {
-  lerpSample,
-  pairSamples,
-  seriesIndexKey,
-  type XyTrace,
-  XyPrepCache,
-} from "../app/xy";
-import {
-  CanvasRenderer,
-  COLOR_SLOTS,
-  type PathRenderOptions,
-  type PlotPath,
-} from "../render/canvas-renderer";
+import { lerpSample, type XyTrace } from "../app/xy";
+import { CanvasRenderer, COLOR_SLOTS } from "../render/canvas-renderer";
 import {
   marker,
   OverlayRenderer,
@@ -73,17 +61,13 @@ import {
 import { fftModule } from "./modes/fft";
 import { histogramModule } from "./modes/histogram";
 import { timeModule } from "./modes/time";
+import { xyModule } from "./modes/xy";
 import type {
   FrameInput,
   PlotModeModule,
   PrepareInput,
 } from "./modes/contract";
-import {
-  axisName,
-  colorIndexForHue,
-  visibleSources,
-  yLabel,
-} from "./modes/shared";
+import { colorIndexForHue, visibleSources } from "./modes/shared";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const SET_DRAG_TYPE = "application/x-signalscope-set";
@@ -484,20 +468,6 @@ function renderState(
   };
 }
 
-function resolveXSeries(
-  index: ReadonlyMap<string, SampleSeries>,
-  xSeries: SampleSeries,
-  xSignal: string,
-  yPath: string,
-  callbacks: XyPairingCallbacks,
-): SampleSeries | undefined {
-  const xLocal = callbacks.localPathFor(xSignal);
-  if (xLocal === null) return xSeries;
-  const sourceKey = callbacks.sourceKeyFor(yPath);
-  if (sourceKey === null) return xSeries;
-  return index.get(seriesIndexKey(sourceKey, xLocal));
-}
-
 export function xChipLabel(
   xSignal: string,
   series: readonly RenderSeries[],
@@ -604,7 +574,6 @@ export class PanelView {
     opacity: number;
     trace: XyTrace;
   }[] = [];
-  private readonly xyPrep = new XyPrepCache();
   private domainSeries: {
     path: string;
     colorIndex: number;
@@ -1012,6 +981,7 @@ export class PanelView {
     this.preparedPlot = null;
     this.hitAdapter = null;
     this.domainSeries = [];
+    this.xyTraces = [];
     this.hasColorbar = false;
     const elapsed = this.renderForMode(rendered, tiles, samples, window);
     this.hitAdapter =
@@ -1035,7 +1005,9 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
-    if (state.mode === "xy") return this.renderXy(state, samples, window);
+    if (state.mode === "xy") {
+      return this.renderViaModule(xyModule, state, tiles, samples, window);
+    }
     if (state.mode === "fft") {
       return this.renderViaModule(fftModule, state, tiles, samples, window);
     }
@@ -1106,196 +1078,6 @@ export class PanelView {
       return this.renderer.render(plot.response, plot.xRange, plot.options);
     }
     return this.renderer.renderPaths(plot.paths, plot.options);
-  }
-
-  private renderXy(
-    state: RenderPanelState,
-    samples: SampleResponse | null,
-    window: { t0: number; t1: number },
-  ): number {
-    this.xyTraces = [];
-    if (samples === null || state.x_signal === null) return 0;
-    const byPath = new Map(
-      samples.series.map((series) => [series.signal_path, series]),
-    );
-    const xSeries = byPath.get(state.x_signal);
-    if (xSeries === undefined) return 0;
-    const xLocal = this.callbacks.localPathFor(state.x_signal);
-    const prepKey = [
-      state.x_signal,
-      state.color_by_time ? "\u0001time" : (state.color_signal ?? ""),
-      ...state.series
-        .filter((series) => series.visible)
-        .map((series) => series.path),
-    ].join("\u0000");
-    const index = this.xyPrep.sync(samples, prepKey, this.callbacks);
-    for (const series of state.series) {
-      if (!series.visible) continue;
-      const ySeries = byPath.get(series.path);
-      if (ySeries === undefined) continue;
-      const resolved = resolveXSeries(
-        index,
-        xSeries,
-        state.x_signal,
-        series.path,
-        this.callbacks,
-      );
-      if (resolved === undefined) continue;
-      this.xyTraces.push({
-        path: series.path,
-        colorIndex: colorIndexForHue(series.hue),
-        hue: series.hue,
-        dash: series.dash,
-        width: series.width,
-        opacity: series.opacity,
-        trace: this.xyPrep.trace(series.path, () =>
-          pairSamples(resolved, ySeries),
-        ),
-      });
-    }
-    if (this.xyTraces.length === 0) return 0;
-    const colorSeries: "time" | SampleResponse["series"][number] | null =
-      state.color_by_time
-        ? "time"
-        : state.color_signal === null
-          ? null
-          : (byPath.get(state.color_signal) ?? null);
-    const cLocal =
-      state.color_signal === null
-        ? null
-        : this.callbacks.localPathFor(state.color_signal);
-    const resolveColor = (
-      yPath: string,
-    ): SampleResponse["series"][number] | null => {
-      if (colorSeries === null || colorSeries === "time") return null;
-      if (cLocal === null) return colorSeries;
-      const sourceKey = this.callbacks.sourceKeyFor(yPath);
-      if (sourceKey === null) return colorSeries;
-      return index.get(seriesIndexKey(sourceKey, cLocal)) ?? null;
-    };
-    const colorFor = (yPath: string, trace: XyTrace): number[] | null => {
-      if (colorSeries === null) return null;
-      if (colorSeries === "time") return [...trace.time];
-      const resolved = resolveColor(yPath);
-      if (resolved === null) return null;
-      return trace.time.map((time) =>
-        lerpSample(resolved.time, resolved.values, time),
-      );
-    };
-    const colorColumns = this.xyTraces.map((entry) =>
-      this.xyPrep.colorColumn(entry.path, () =>
-        colorFor(entry.path, entry.trace),
-      ),
-    );
-    let colorMin = Number.POSITIVE_INFINITY;
-    let colorMax = Number.NEGATIVE_INFINITY;
-    for (const column of colorColumns) {
-      for (const value of column ?? []) {
-        if (!Number.isFinite(value)) continue;
-        colorMin = Math.min(colorMin, value);
-        colorMax = Math.max(colorMax, value);
-      }
-    }
-    const hasColor =
-      colorSeries !== null &&
-      Number.isFinite(colorMin) &&
-      Number.isFinite(colorMax);
-    this.hasColorbar = hasColor;
-    const colorPadding =
-      hasColor && colorMin === colorMax
-        ? Math.max(1, Math.abs(colorMin) * 0.05)
-        : 0;
-    const colorDomainMin = colorMin - colorPadding;
-    const colorDomainMax = colorMax + colorPadding;
-    const colorSpan = colorDomainMax - colorDomainMin;
-    this.preparedPlot = prepareXyPlot({
-      x: { path: state.x_signal, values: xSeries.values },
-      series: this.xyTraces.map((entry, index) => ({
-        ...entry,
-        colorValues: colorColumns[index] ?? null,
-      })),
-      color:
-        colorSeries === null
-          ? null
-          : {
-              path: state.color_by_time ? "time" : (state.color_signal ?? ""),
-            },
-      window,
-    });
-    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
-    if (ranges === null) return 0;
-    const paths: PlotPath[] = [];
-    for (const entry of this.xyTraces) {
-      // Whole trajectory dimmed underneath, the windowed part lit on top.
-      paths.push({
-        points: this.xyPrep.dimmedPoints(entry.path, entry.trace, (trace) =>
-          flattenTrace(trace, null),
-        ),
-        hue: entry.hue,
-        dash: "solid",
-        width: 1.2,
-        alpha: entry.opacity,
-        dimmed: true,
-      });
-    }
-    this.xyTraces.forEach((entry, index) => {
-      const colorValues = colorColumns[index];
-      paths.push({
-        points: flattenTrace(entry.trace, window),
-        hue: entry.hue,
-        dash: entry.dash,
-        width: entry.width + 0.4,
-        alpha: entry.opacity,
-        markers: true,
-        ...(hasColor && colorValues !== null && colorValues !== undefined
-          ? {
-              colorValues: colorValues.map(
-                (value) => (value - colorDomainMin) / colorSpan,
-              ),
-            }
-          : {}),
-      });
-    });
-    const sources = visibleSources(state.series, this.callbacks);
-    const localLabels = sources.size > 1;
-    const options: PathRenderOptions = {
-      xLabel:
-        state.x_label ??
-        axisName(
-          localLabels && xLocal !== null ? xLocal : state.x_signal,
-          xSeries.unit,
-        ),
-      yLabel:
-        state.y_label ??
-        yLabel(
-          state.series
-            .filter((series) => series.visible)
-            .map((series) => byPath.get(series.path)?.unit ?? null),
-        ),
-      xRange: [ranges.x.min, ranges.x.max],
-      yRange: [ranges.y.min, ranges.y.max],
-      axisStyle: state.axis_style,
-      ...(state.axis_equal ? { equalAspect: true } : {}),
-      ...(hasColor
-        ? {
-            colorbar: {
-              min: colorDomainMin,
-              max: colorDomainMax,
-              label:
-                state.c_label ??
-                (colorSeries === "time"
-                  ? "t (s)"
-                  : axisName(
-                      localLabels && cLocal !== null
-                        ? cLocal
-                        : (state.color_signal ?? ""),
-                      colorSeries.unit,
-                    )),
-            },
-          }
-        : {}),
-    };
-    return this.renderer.renderPaths(paths, options);
   }
 
   private resolvePlotRanges(
@@ -2680,27 +2462,6 @@ function chipPrefix(text: string): HTMLElement {
   prefix.className = "axis-chip-prefix";
   prefix.textContent = text;
   return prefix;
-}
-
-/**
- * Flattens a trace to renderer vertices. A `window` restricts output to that
- * time span; vertices outside become NaN so the pen lifts rather than
- * bridging the gap.
- */
-function flattenTrace(
-  trace: XyTrace,
-  window: { t0: number; t1: number } | null,
-): number[] {
-  const points: number[] = [];
-  for (let index = 0; index < trace.time.length; index += 1) {
-    const time = trace.time[index] ?? Number.NaN;
-    const inside = window === null || (time >= window.t0 && time <= window.t1);
-    points.push(
-      inside ? (trace.x[index] ?? Number.NaN) : Number.NaN,
-      inside ? (trace.y[index] ?? Number.NaN) : Number.NaN,
-    );
-  }
-  return points;
 }
 
 /** The trajectory point at a cursor time, or null outside its coverage. */

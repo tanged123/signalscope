@@ -13,7 +13,7 @@ import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
 import type { ResolvedSeries } from "../app/resolution";
-import { XyPrepCache } from "../app/xy";
+import { xyModule } from "./modes/xy";
 
 import { AppShell } from "./app-shell";
 import {
@@ -226,7 +226,6 @@ interface PanelProbe {
     path: string;
     trace: { time: number[]; x: number[]; y: number[] };
   }>;
-  xyPrep: XyPrepCache;
   resolvePlotRanges(): {
     x: { min: number; max: number };
     y: { min: number; max: number };
@@ -241,7 +240,6 @@ interface PanelProbe {
 function panelProbe(): PanelProbe {
   const view = Object.create(PanelView.prototype) as PanelProbe;
   view.callbacks = xyCallbacks;
-  view.xyPrep = new XyPrepCache();
   view.renderedPaths = [];
   view.renderedOptions = null;
   view.renderer = {
@@ -255,6 +253,26 @@ function panelProbe(): PanelProbe {
     x: { min: 0, max: 1 },
     y: { min: 0, max: 1 },
   });
+  view.renderXy = (state, samples, window) => {
+    const input = {
+      state,
+      tiles: null,
+      samples,
+      callbacks: xyCallbacks,
+    };
+    const result = xyModule.project(xyModule.prepare(input), input, {
+      window,
+      emphasizePaths: null,
+      resolveRanges: () => view.resolvePlotRanges(),
+    });
+    view.xyTraces = result.xyTraces ?? [];
+    if (result.plot.kind !== "paths") {
+      view.renderedPaths = [];
+      view.renderedOptions = null;
+      return 0;
+    }
+    return view.renderer.renderPaths(result.plot.paths, result.plot.options);
+  };
   return view;
 }
 

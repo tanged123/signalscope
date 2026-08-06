@@ -4,16 +4,6 @@ import { spectrum } from "../../app/spectrum";
 import type { FrameInput, PrepareInput } from "./contract";
 import { fftModule } from "./fft";
 
-function series(path: string, time: number[], values: number[]): SampleSeries {
-  return {
-    signal_path: path,
-    unit: null,
-    time,
-    values,
-    stride: 1,
-  } as SampleSeries;
-}
-
 const callbacks = {
   sourceKeyFor: (path: string) => path.split("/")[0] ?? null,
   localPathFor: (path: string) => path.split("/").slice(1).join("/") || null,

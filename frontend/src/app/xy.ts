@@ -1,4 +1,4 @@
-import type { SampleResponse, SampleSeries } from "../generated/protocol";
+import type { SampleSeries } from "../generated/protocol";
 import { paddedExtent } from "./plot-math";
 
 /** One y signal paired onto an x signal's timebase. */
@@ -119,60 +119,4 @@ export function buildSeriesIndex(
     if (!index.has(key)) index.set(key, entry);
   }
   return index;
-}
-
-/** Cache XY preparation that is independent of the visible time window. */
-export class XyPrepCache {
-  private samples: SampleResponse | null = null;
-  private key = "";
-  private index: Map<string, SampleSeries> | null = null;
-  private readonly traces = new Map<string, XyTrace>();
-  private readonly dimmed = new Map<string, number[]>();
-  private readonly colors = new Map<string, number[] | null>();
-
-  sync(
-    samples: SampleResponse,
-    key: string,
-    callbacks: SeriesPathCallbacks,
-  ): ReadonlyMap<string, SampleSeries> {
-    if (this.samples !== samples || this.key !== key) {
-      this.samples = samples;
-      this.key = key;
-      this.index = null;
-      this.traces.clear();
-      this.dimmed.clear();
-      this.colors.clear();
-    }
-    this.index ??= buildSeriesIndex(samples.series, callbacks);
-    return this.index;
-  }
-
-  trace(path: string, pair: () => XyTrace): XyTrace {
-    let entry = this.traces.get(path);
-    if (entry === undefined) {
-      entry = pair();
-      this.traces.set(path, entry);
-    }
-    return entry;
-  }
-
-  dimmedPoints(
-    path: string,
-    trace: XyTrace,
-    flatten: (trace: XyTrace) => number[],
-  ): number[] {
-    let entry = this.dimmed.get(path);
-    if (entry === undefined) {
-      entry = flatten(trace);
-      this.dimmed.set(path, entry);
-    }
-    return entry;
-  }
-
-  colorColumn(path: string, compute: () => number[] | null): number[] | null {
-    if (this.colors.has(path)) return this.colors.get(path) ?? null;
-    const value = compute();
-    this.colors.set(path, value);
-    return value;
-  }
 }

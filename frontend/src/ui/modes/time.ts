@@ -15,7 +15,7 @@ export const timeModule: PlotModeModule<TimeGeometry> = {
   data: { reduction: "envelope", windows: [] },
   configKey: (state) =>
     state.series
-      .map((series) => `${series.path}:${series.visible ? 1 : 0}`)
+      .map((series) => `${series.path}:${String(series.visible ? 1 : 0)}`)
       .join("\u0000"),
   prepare({ state, tiles }) {
     const bySeries = new Map(
