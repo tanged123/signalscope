@@ -1,4 +1,5 @@
 import type { SampleSeries } from "../generated/protocol";
+import { HAS_FIRST, HAS_GAP, HAS_LAST, type ColumnarTile } from "./bin-columns";
 import { paddedExtent } from "./plot-math";
 
 /** One y signal paired onto an x signal's timebase. */
@@ -117,6 +118,112 @@ export function buildSeriesIndex(
     if (sourceKey === null || localPath === null) continue;
     const key = seriesIndexKey(sourceKey, localPath);
     if (!index.has(key)) index.set(key, entry);
+  }
+  return index;
+}
+
+const PAIR_FLAGS = HAS_FIRST | HAS_LAST;
+
+/**
+ * True when two tiles' buckets share one index space. On a shared time
+ * array, equal level, count, and boundary timestamps identify corresponding
+ * buckets without inspecting raw samples.
+ */
+export function tilesAligned(a: ColumnarTile, b: ColumnarTile): boolean {
+  if (a.level !== b.level) return false;
+  const ab = a.bins;
+  const bb = b.bins;
+  if (ab.count !== bb.count) return false;
+  if (ab.count === 0) return true;
+  const last = ab.count - 1;
+  const middle = ab.count >> 1;
+  return (
+    ab.t0[0] === bb.t0[0] &&
+    ab.t1[last] === bb.t1[last] &&
+    ab.t0[middle] === bb.t0[middle]
+  );
+}
+
+/**
+ * Converts aligned envelope buckets into the existing XY trace shape.
+ * First/last preserve sample correspondence; marginal extrema are not paired.
+ * A gap or missing pair flags lifts the pen before the next valid point.
+ */
+export function pairTileTrace(
+  x: ColumnarTile,
+  y: ColumnarTile,
+  color: ColumnarTile | null,
+): { trace: XyTrace; colors: number[] | null } | null {
+  if (!tilesAligned(x, y)) return null;
+  if (color !== null && !tilesAligned(x, color)) return null;
+  const time: number[] = [];
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const colors: number[] | null = color === null ? null : [];
+  const count = x.bins.count;
+  let penDown = false;
+  const push = (t: number, xv: number, yv: number, cv: number): void => {
+    time.push(t);
+    xs.push(xv);
+    ys.push(yv);
+    colors?.push(cv);
+  };
+  for (let index = 0; index < count; index += 1) {
+    const xFlags = x.bins.flags[index] as number;
+    const yFlags = y.bins.flags[index] as number;
+    if (
+      (xFlags & PAIR_FLAGS) !== PAIR_FLAGS ||
+      (yFlags & PAIR_FLAGS) !== PAIR_FLAGS
+    ) {
+      if (penDown) push(Number.NaN, Number.NaN, Number.NaN, Number.NaN);
+      penDown = false;
+      continue;
+    }
+    const gap = ((xFlags | yFlags) & HAS_GAP) !== 0;
+    if (gap && penDown) {
+      push(Number.NaN, Number.NaN, Number.NaN, Number.NaN);
+    }
+    const t0 = x.bins.t0[index] as number;
+    const t1 = x.bins.t1[index] as number;
+    const cFirst =
+      color === null ? Number.NaN : (color.bins.first[index] as number);
+    const cLast =
+      color === null ? Number.NaN : (color.bins.last[index] as number);
+    push(
+      t0,
+      x.bins.first[index] as number,
+      y.bins.first[index] as number,
+      cFirst,
+    );
+    const degenerate =
+      t0 === t1 &&
+      x.bins.first[index] === x.bins.last[index] &&
+      y.bins.first[index] === y.bins.last[index];
+    if (!degenerate) {
+      push(
+        t1,
+        x.bins.last[index] as number,
+        y.bins.last[index] as number,
+        cLast,
+      );
+    }
+    penDown = true;
+  }
+  return { trace: { time, x: xs, y: ys }, colors };
+}
+
+/** Tile analogue of buildSeriesIndex; first match wins. */
+export function buildTileIndex(
+  tiles: readonly ColumnarTile[],
+  callbacks: SeriesPathCallbacks,
+): Map<string, ColumnarTile> {
+  const index = new Map<string, ColumnarTile>();
+  for (const tile of tiles) {
+    const sourceKey = callbacks.sourceKeyFor(tile.signalPath);
+    const localPath = callbacks.localPathFor(tile.signalPath);
+    if (sourceKey === null || localPath === null) continue;
+    const key = seriesIndexKey(sourceKey, localPath);
+    if (!index.has(key)) index.set(key, tile);
   }
   return index;
 }
