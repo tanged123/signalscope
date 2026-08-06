@@ -34,12 +34,10 @@ import {
   type PlotLayout,
   type Range,
 } from "../app/plot-math";
-import { histogram } from "../app/histogram";
 import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
   prepareFftPlot,
-  prepareHistogramPlot,
   prepareTimePlot,
   prepareXyPlot,
   type AnnotationAnchor,
@@ -76,6 +74,12 @@ import {
   PlotInteractionController,
   type InteractionBox,
 } from "./plot-interactions";
+import { histogramModule } from "./modes/histogram";
+import type {
+  FrameInput,
+  PlotModeModule,
+  PrepareInput,
+} from "./modes/contract";
 import {
   axisName,
   colorIndexForHue,
@@ -589,6 +593,12 @@ export class PanelView {
   private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private lastMissingEmpty = true;
+  private prepCache: {
+    key: string;
+    tiles: ColumnarTileResponse | null;
+    samples: SampleResponse | null;
+    geometry: unknown;
+  } | null = null;
   private preparedPlot: PreparedPlot | null = null;
   private hitAdapter: SeriesHitAdapter | null = null;
   /** Traces from the last XY render, reused by hit-testing and overlays. */
@@ -1035,7 +1045,13 @@ export class PanelView {
     if (state.mode === "xy") return this.renderXy(state, samples, window);
     if (state.mode === "fft") return this.renderSpectra(state, samples, window);
     if (state.mode === "histogram") {
-      return this.renderHistogram(state, samples, window);
+      return this.renderViaModule(
+        histogramModule,
+        state,
+        tiles,
+        samples,
+        window,
+      );
     }
     if (tiles === null || state.series.length === 0) return 0;
     const bySeries = new Map(
@@ -1087,6 +1103,63 @@ export class PanelView {
         : {}),
     };
     return this.renderer.render(response, ranges.x, options);
+  }
+
+  /** Stage-2 cache: prepare re-runs only when data or config identity moves. */
+  private geometryFor<G>(module: PlotModeModule<G>, input: PrepareInput): G {
+    const key = `${module.mode}\u0000${module.configKey(input.state)}`;
+    if (
+      this.prepCache === null ||
+      this.prepCache.key !== key ||
+      this.prepCache.tiles !== input.tiles ||
+      this.prepCache.samples !== input.samples
+    ) {
+      this.prepCache = {
+        key,
+        tiles: input.tiles,
+        samples: input.samples,
+        geometry: module.prepare(input),
+      };
+    }
+    return this.prepCache.geometry as G;
+  }
+
+  private renderViaModule<G>(
+    module: PlotModeModule<G>,
+    state: RenderPanelState,
+    tiles: ColumnarTileResponse | null,
+    samples: SampleResponse | null,
+    window: { t0: number; t1: number },
+  ): number {
+    const input: PrepareInput = {
+      state,
+      tiles,
+      samples,
+      callbacks: this.callbacks,
+    };
+    const geometry = this.geometryFor(module, input);
+    const frame: FrameInput = {
+      window,
+      emphasizePaths: this.emphasizePaths,
+      resolveRanges: (prepared, seriesKey) =>
+        this.resolvePlotRanges(state, prepared, window, seriesKey),
+    };
+    const result = module.project(geometry, input, frame);
+    this.preparedPlot = result.prepared;
+    if (result.xyTraces !== undefined) this.xyTraces = result.xyTraces;
+    if (result.domainSeries !== undefined) {
+      this.domainSeries = result.domainSeries;
+    }
+    if (result.hasColorbar !== undefined) this.hasColorbar = result.hasColorbar;
+    if (result.emptyState !== undefined) {
+      this.setModeEmpty(result.emptyState.empty, result.emptyState.note);
+    }
+    const plot = result.plot;
+    if (plot.kind === "empty") return 0;
+    if (plot.kind === "bins") {
+      return this.renderer.render(plot.response, plot.xRange, plot.options);
+    }
+    return this.renderer.renderPaths(plot.paths, plot.options);
   }
 
   private renderXy(
@@ -1334,81 +1407,6 @@ export class PanelView {
       yRange: [ranges.y.min, ranges.y.max],
       axisStyle: state.axis_style,
       xScale: "log",
-    });
-  }
-
-  private renderHistogram(
-    state: RenderPanelState,
-    samples: SampleResponse | null,
-    window: { t0: number; t1: number },
-  ): number {
-    if (samples === null) return 0;
-    const byPath = new Map(
-      samples.series.map((series) => [series.signal_path, series]),
-    );
-    const visible = state.series.filter((series) => series.visible);
-    const columns = visible.map((series) => {
-      const source = byPath.get(series.path);
-      if (source === undefined) return [];
-      const values: number[] = [];
-      source.time.forEach((time, index) => {
-        if (time < window.t0 || time > window.t1) return;
-        values.push(source.values[index] ?? Number.NaN);
-      });
-      return values;
-    });
-    const binned = histogram(columns);
-    this.setModeEmpty(binned === null, "No values in view.");
-    if (binned === null) return 0;
-    const edges = binned.edges;
-    const histogramSeries: {
-      path: string;
-      colorIndex: number;
-      counts: number[];
-      sourceValues: number[];
-    }[] = [];
-    const paths: PlotPath[] = binned.counts.map((counts, index) => {
-      const points: number[] = [];
-      // A staircase outline: rise at each edge, run across each bin, and
-      // close down to zero at both ends so the shape reads as a
-      // distribution rather than a line chart.
-      points.push(edges[0] ?? 0, 0);
-      counts.forEach((count, bin) => {
-        points.push(edges[bin] ?? 0, count, edges[bin + 1] ?? 0, count);
-      });
-      points.push(edges[edges.length - 1] ?? 0, 0);
-      const series = visible[index];
-      if (series !== undefined) {
-        histogramSeries.push({
-          path: series.path,
-          colorIndex: colorIndexForHue(series.hue),
-          counts,
-          sourceValues: columns[index] ?? [],
-        });
-      }
-      return {
-        points,
-        hue: series?.hue ?? null,
-        dash: series?.dash ?? "solid",
-        width: series?.width ?? 1.4,
-        alpha: series?.opacity ?? 1,
-      };
-    });
-    this.preparedPlot = prepareHistogramPlot({
-      edges,
-      series: histogramSeries,
-    });
-    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
-    if (ranges === null) return 0;
-    const units = visible.map(
-      (series) => byPath.get(series.path)?.unit ?? null,
-    );
-    return this.renderer.renderPaths(paths, {
-      xLabel: state.x_label ?? yLabel(units),
-      yLabel: state.y_label ?? "sample count",
-      xRange: [ranges.x.min, ranges.x.max],
-      yRange: [ranges.y.min, ranges.y.max],
-      axisStyle: state.axis_style,
     });
   }
 
