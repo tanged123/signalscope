@@ -76,6 +76,12 @@ import {
   PlotInteractionController,
   type InteractionBox,
 } from "./plot-interactions";
+import {
+  axisName,
+  colorIndexForHue,
+  visibleSources,
+  yLabel,
+} from "./modes/shared";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const SET_DRAG_TYPE = "application/x-signalscope-set";
@@ -503,18 +509,6 @@ export function xChipLabel(
   const xLocal = callbacks.localPathFor(xSignal);
   const sources = visibleSources(series, callbacks);
   return xLocal !== null && sources.size > 1 ? xLocal : signalLabel(xSignal);
-}
-
-function visibleSources(
-  series: readonly RenderSeries[],
-  callbacks: XyPairingCallbacks,
-): Set<string> {
-  return new Set(
-    series
-      .filter((entry) => entry.visible)
-      .map((entry) => callbacks.sourceKeyFor(entry.path))
-      .filter((key): key is string => key !== null),
-  );
 }
 
 export function parseSignalPayload(data: string): string[] {
@@ -2793,22 +2787,6 @@ function overrideFields(override: SeriesOverride): string {
   ]
     .filter((field): field is string => field !== null)
     .join(" · ");
-}
-
-function yLabel(units: readonly (string | null)[]): string {
-  const distinct = new Set(
-    units.filter((unit): unit is string => unit !== null),
-  );
-  const [only] = distinct;
-  return distinct.size === 1 && only !== undefined
-    ? `value (${only})`
-    : "value";
-}
-
-/** `path/leaf (unit)` for an axis name, matching the spec's XY gutters. */
-function axisName(path: string, unit: string | null): string {
-  const leaf = signalLabel(path);
-  return unit === null ? leaf : `${leaf} (${unit})`;
 }
 
 function chipPrefix(text: string): HTMLElement {
