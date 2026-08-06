@@ -37,7 +37,6 @@ import {
 import { resolveRanges } from "../app/plot-gestures";
 import {
   policyFor,
-  prepareFftPlot,
   prepareTimePlot,
   prepareXyPlot,
   type AnnotationAnchor,
@@ -47,7 +46,6 @@ import {
   type ResolvedAnnotation,
   type SeriesHitAdapter,
 } from "../app/plot-capabilities";
-import { spectrum } from "../app/spectrum";
 import {
   lerpSample,
   pairSamples,
@@ -74,6 +72,7 @@ import {
   PlotInteractionController,
   type InteractionBox,
 } from "./plot-interactions";
+import { fftModule } from "./modes/fft";
 import { histogramModule } from "./modes/histogram";
 import type {
   FrameInput,
@@ -1043,7 +1042,9 @@ export class PanelView {
     window: { t0: number; t1: number },
   ): number {
     if (state.mode === "xy") return this.renderXy(state, samples, window);
-    if (state.mode === "fft") return this.renderSpectra(state, samples, window);
+    if (state.mode === "fft") {
+      return this.renderViaModule(fftModule, state, tiles, samples, window);
+    }
     if (state.mode === "histogram") {
       return this.renderViaModule(
         histogramModule,
@@ -1350,64 +1351,6 @@ export class PanelView {
         : {}),
     };
     return this.renderer.renderPaths(paths, options);
-  }
-
-  private renderSpectra(
-    state: RenderPanelState,
-    samples: SampleResponse | null,
-    window: { t0: number; t1: number },
-  ): number {
-    if (samples === null) return 0;
-    const byPath = new Map(
-      samples.series.map((series) => [series.signal_path, series]),
-    );
-    const paths: PlotPath[] = [];
-    for (const series of state.series) {
-      if (!series.visible) continue;
-      const source = byPath.get(series.path);
-      if (source === undefined) continue;
-      const result = spectrum(source, window.t0, window.t1);
-      if (result === null) continue;
-      const points: number[] = [];
-      result.frequency.forEach((frequency, index) => {
-        points.push(frequency, result.amplitudeDb[index] ?? -120);
-      });
-      this.domainSeries.push({
-        path: series.path,
-        colorIndex: colorIndexForHue(series.hue),
-        hue: series.hue,
-        opacity: series.opacity,
-        x: result.frequency,
-        y: result.amplitudeDb,
-      });
-      paths.push({
-        points,
-        hue: series.hue,
-        dash: series.dash,
-        width: series.width,
-        alpha: series.opacity,
-      });
-    }
-    this.setModeEmpty(paths.length === 0, "Not enough samples in view.");
-    this.preparedPlot = prepareFftPlot({
-      series: this.domainSeries.map((series) => ({
-        path: series.path,
-        colorIndex: series.colorIndex,
-        frequency: series.x,
-        amplitudeDb: series.y,
-      })),
-    });
-    if (paths.length === 0) return 0;
-    const ranges = this.resolvePlotRanges(state, this.preparedPlot, window);
-    if (ranges === null) return 0;
-    return this.renderer.renderPaths(paths, {
-      xLabel: state.x_label ?? "frequency (Hz), log",
-      yLabel: state.y_label ?? "amplitude (dB)",
-      xRange: [ranges.x.min, ranges.x.max],
-      yRange: [ranges.y.min, ranges.y.max],
-      axisStyle: state.axis_style,
-      xScale: "log",
-    });
   }
 
   private resolvePlotRanges(
