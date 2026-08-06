@@ -35,11 +35,20 @@ max(64, floor(TILE_BIN_BUDGET / N)) < deviceWidth / 2
 
 The renderer accumulates ghost-styled, non-emphasized series as connected
 envelope trapezoids in a device-pixel coverage grid. Gaps interrupt the
-connection. Coverage maps to straight-alpha pixels using
-`1 - (1 - a_pt)^k`; an offscreen Canvas2D surface is blitted below the
-remaining focused, hued, or emphasized strokes. The raster is deterministic
-from the response, viewport, and palette, and uses the same document canvas
-factory as snapshot export, so it is snapshot-safe.
+connection. Coverage maps to straight-alpha pixels through a log-normalized
+tone map, `alpha(k) = 0.1 + 0.8 * ln(1 + k) / ln(1 + kRef)`, where `kRef` is
+the frame's maximum coverage rounded up to a power of two; an offscreen
+Canvas2D surface is blitted below the remaining focused, hued, or emphasized
+strokes. In raster regime the shell additionally fetches the stroked set
+(focused + hued + hover-emphasized, capped at 32 series) at full pixel width
+in a second tile query merged by signal id, so the lines that remain lines do
+not inherit the crowd's starved bin allocation. Any stroked series whose
+delivered tiles are still aggregated and sparser than one bin per two device
+pixels draws as a filled min/max ribbon with a mean centerline — the renderer
+never emits per-bin vertical excursions at comb pitch, in any mode, cap
+overflow, or transient state. The raster is deterministic from the response,
+viewport, and palette, and uses the same document canvas factory as snapshot
+export, so it is snapshot-safe.
 
 ## Consequences
 
@@ -60,3 +69,9 @@ Scaling the tile budget with `N` grows wire and stroke cost linearly and leaves
 the crowd visually muddy. Marginal bounding-box rendering for starved XY
 envelopes draws area the trajectory never visited, for the same reason that
 ADR 0037 rejects per-signal min/max reduction for trajectory semantics.
+
+Fixed physical compositing (`1 - (1 - a)^k`) was shipped first and rejected
+after field capture: at ghost alpha 0.5 it saturates by k = 7, rendering a
+1000-run ensemble as a structureless slab. Exposure-normalizing the physical
+law was rejected because it drives lone outlier runs below visibility without
+a floor, and flooring it converges on the log curve.
