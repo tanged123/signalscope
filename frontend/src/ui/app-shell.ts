@@ -7,6 +7,7 @@ import {
   type Command,
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
+import { TILE_BIN_BUDGET } from "../app/budgets";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import {
   classifyDrop,
@@ -127,7 +128,6 @@ export function sampleCapForPanel(
   );
   return Math.max(1, Math.min(sampleCapFor(mode), share));
 }
-const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
