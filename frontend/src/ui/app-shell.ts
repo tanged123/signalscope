@@ -44,9 +44,9 @@ import {
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
-import { mergeSampleResponses } from "../app/samples";
 import { SampleWindowCache } from "../app/sample-window-cache";
 import { TileWindowCache } from "../app/tile-window-cache";
+import { fetchXySamples } from "../app/xy-samples";
 import { Catalog } from "../app/catalog";
 import { resolvePanel, type ResolvedSeries } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
@@ -194,6 +194,7 @@ export class AppShell {
   private readonly selection = new SelectionModel();
   private readonly tileWindowCache = new TileWindowCache();
   private readonly sampleWindowCache = new SampleWindowCache();
+  private readonly xyContextCache = new SampleWindowCache();
   private derivedPathsCache: { revision: number; paths: Set<string> } | null =
     null;
   private selectionWorkspaceId: string | null = null;
@@ -2601,6 +2602,7 @@ export class AppShell {
     this.catalogRevision += 1;
     this.tileWindowCache.invalidate();
     this.sampleWindowCache.invalidate();
+    this.xyContextCache.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2715,27 +2717,24 @@ export class AppShell {
               nextSamples.set(panel.id, cached);
               return;
             }
-            const contextRequest = {
-              request_id: crypto.randomUUID(),
-              signal_ids: ids,
-              window: contextWindow,
-              max_points: cap,
-            };
             let merged: SampleResponse;
             if (panel.mode === "xy") {
-              const detailRequest = {
+              merged = await fetchXySamples({
+                plane: this.plane,
+                panelId: panel.id,
+                ids,
+                cap,
+                contextWindow,
+                window,
+                contextCache: this.xyContextCache,
+              });
+            } else {
+              merged = await this.plane.querySamples({
                 request_id: crypto.randomUUID(),
                 signal_ids: ids,
-                window,
+                window: contextWindow,
                 max_points: cap,
-              };
-              const [context, detail] = await Promise.all([
-                this.plane.querySamples(contextRequest),
-                this.plane.querySamples(detailRequest),
-              ]);
-              merged = mergeSampleResponses(context, detail);
-            } else {
-              merged = await this.plane.querySamples(contextRequest);
+              });
             }
             this.sampleWindowCache.store(panel.id, cacheKey, merged);
             nextSamples.set(panel.id, merged);
