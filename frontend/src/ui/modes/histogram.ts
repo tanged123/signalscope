@@ -1,7 +1,7 @@
 import { histogram } from "../../app/histogram";
 import { prepareHistogramPlot } from "../../app/plot-capabilities";
 import type { SampleResponse } from "../../generated/protocol";
-import type { PlotModeModule } from "./contract";
+import type { PlotModeModule, ProjectResult } from "./contract";
 import { colorIndexForHue, yLabel } from "./shared";
 
 export interface HistogramGeometry {
@@ -13,7 +13,7 @@ export const histogramModule: PlotModeModule<HistogramGeometry> = {
   data: { reduction: "samples", windows: ["visible"] },
   configKey: () => "",
   prepare: ({ samples }) => ({ samples }),
-  project(geometry, { state }, frame) {
+  project(geometry, { state }, frame): ProjectResult {
     const samples = geometry.samples;
     if (samples === null) return { plot: { kind: "empty" }, prepared: null };
     const window = frame.window;

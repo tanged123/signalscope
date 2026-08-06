@@ -2,7 +2,11 @@ import { prepareFftPlot } from "../../app/plot-capabilities";
 import { spectrum } from "../../app/spectrum";
 import type { SampleResponse } from "../../generated/protocol";
 import type { PlotPath } from "../../render/canvas-renderer";
-import type { DomainSeriesEntry, PlotModeModule } from "./contract";
+import type {
+  DomainSeriesEntry,
+  PlotModeModule,
+  ProjectResult,
+} from "./contract";
 import { colorIndexForHue } from "./shared";
 
 export interface FftGeometry {
@@ -14,7 +18,7 @@ export const fftModule: PlotModeModule<FftGeometry> = {
   data: { reduction: "samples", windows: ["visible"] },
   configKey: () => "",
   prepare: ({ samples }) => ({ samples }),
-  project(geometry, { state }, frame) {
+  project(geometry, { state }, frame): ProjectResult {
     const samples = geometry.samples;
     if (samples === null) return { plot: { kind: "empty" }, prepared: null };
     const window = frame.window;

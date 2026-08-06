@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODE_DATA } from "./contract";
+import { MODE_DATA, type ProjectedPlot } from "./contract";
 
 describe("MODE_DATA", () => {
   it("declares the two-pipeline split from the spec", () => {
@@ -25,5 +25,10 @@ describe("MODE_DATA", () => {
       "time",
       "xy",
     ]);
+  });
+
+  it("describes each renderer projection", () => {
+    const kinds: ProjectedPlot["kind"][] = ["empty", "bins", "paths"];
+    expect(kinds).toEqual(["empty", "bins", "paths"]);
   });
 });

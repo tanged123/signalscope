@@ -9,7 +9,7 @@ import {
 } from "../../app/xy";
 import { prepareXyPlot } from "../../app/plot-capabilities";
 import type { PathRenderOptions, PlotPath } from "../../render/canvas-renderer";
-import type { PlotModeModule, XyTraceEntry } from "./contract";
+import type { PlotModeModule, ProjectResult, XyTraceEntry } from "./contract";
 import { axisName, colorIndexForHue, visibleSources, yLabel } from "./shared";
 
 export interface XyGeometry {
@@ -184,7 +184,7 @@ export const xyModule: PlotModeModule<XyGeometry> = {
         .map((series) => byPath.get(series.path)?.unit ?? null),
     };
   },
-  project(geometry, { state, callbacks }, frame) {
+  project(geometry, { state, callbacks }, frame): ProjectResult {
     if (geometry.entries.length === 0 || geometry.xSeries === null) {
       return { plot: { kind: "empty" }, prepared: null, xyTraces: [] };
     }

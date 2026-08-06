@@ -2,7 +2,7 @@ import type { ColumnarTileResponse } from "../../app/bin-columns";
 import { prepareTimePlot } from "../../app/plot-capabilities";
 import type { RenderOptions } from "../../render/canvas-renderer";
 import type { RenderSeries } from "../panel";
-import type { PlotModeModule } from "./contract";
+import type { PlotModeModule, ProjectResult } from "./contract";
 import { colorIndexForHue, yLabel } from "./shared";
 
 export interface TimeGeometry {
@@ -29,7 +29,7 @@ export const timeModule: PlotModeModule<TimeGeometry> = {
     );
     return { shown: { requestId: tiles.requestId, series: shown }, bySeries };
   },
-  project(geometry, { state }, frame) {
+  project(geometry, { state }, frame): ProjectResult {
     if (geometry.shown === null) {
       return { plot: { kind: "empty" }, prepared: null };
     }
