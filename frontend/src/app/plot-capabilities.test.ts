@@ -107,9 +107,9 @@ test("prepareTimePlot scans bins for extents only when autoRanges is called", ()
   ]);
   let minReads = 0;
   const counted = new Proxy(bins, {
-    get(target, property, receiver) {
+    get(target, property) {
       if (property === "min") minReads += 1;
-      return Reflect.get(target, property, receiver);
+      return (target as unknown as Record<PropertyKey, unknown>)[property];
     },
   });
   const plot = prepareTimePlot({
