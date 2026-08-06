@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { SampleResponse, SampleSeries } from "../../generated/protocol";
+import type {
+  EnvelopeBin,
+  SampleResponse,
+  SampleSeries,
+} from "../../generated/protocol";
+import {
+  binColumnsFromWire,
+  type ColumnarTile,
+  type ColumnarTileResponse,
+} from "../../app/bin-columns";
 import type { FrameInput, PrepareInput } from "./contract";
 import { flattenTrace, xyModule } from "./xy";
 
@@ -68,6 +77,46 @@ function series(path: string, time: number[], values: number[]): SampleSeries {
     values,
     stride: 1,
   } as SampleSeries;
+}
+
+function envelopeBin(
+  t0: number,
+  t1: number,
+  first: number,
+  last: number,
+  hasGap = false,
+): EnvelopeBin {
+  return {
+    t0,
+    t1,
+    first,
+    last,
+    min: Math.min(first, last),
+    max: Math.max(first, last),
+    sum: first + last,
+    sum_sq: first * first + last * last,
+    finite_count: "2",
+    sample_count: "2",
+    has_gap: hasGap,
+  };
+}
+
+function columnarTile(
+  path: string,
+  level: number,
+  bins: EnvelopeBin[],
+): ColumnarTile {
+  return {
+    signalId: path,
+    signalPath: path,
+    unit: "V",
+    level,
+    bins: binColumnsFromWire(bins),
+  };
+}
+
+function tileResponse(tiles: ColumnarTile[]): ColumnarTileResponse {
+  return { requestId: "t", series: tiles };
 }
 
 const frame: FrameInput = {
@@ -154,5 +203,103 @@ describe("xyModule", () => {
     const result = xyModule.project(xyModule.prepare(noX), noX, frame);
     expect(result.plot.kind).toBe("empty");
     expect(result.xyTraces).toEqual([]);
+  });
+});
+
+describe("xyModule envelope path", () => {
+  const xTile = columnarTile("run_0001/command", 2, [
+    envelopeBin(0, 1, 10, 11),
+    envelopeBin(1, 2, 11, 12),
+  ]);
+  const yTile = columnarTile("run_0001/response", 2, [
+    envelopeBin(0, 1, 20, 21),
+    envelopeBin(1, 2, 21, 22),
+  ]);
+  const contextX = columnarTile("run_0001/command", 5, [
+    envelopeBin(0, 2, 10, 12),
+  ]);
+  const contextY = columnarTile("run_0001/response", 5, [
+    envelopeBin(0, 2, 20, 22),
+  ]);
+
+  function envelopeInput(): PrepareInput {
+    return {
+      state: xyState("run_0001/command", ["run_0001/response"]),
+      tiles: tileResponse([xTile, yTile]),
+      contextTiles: tileResponse([contextX, contextY]),
+      samples: null,
+      callbacks,
+    };
+  }
+
+  it("builds lit and dimmed paths from aligned bucket pairs", () => {
+    const input = envelopeInput();
+    const geometry = xyModule.prepare(input);
+    const result = xyModule.project(geometry, input, frame);
+    expect(result.needsSampleFallback).toBeUndefined();
+    expect(result.plot.kind).toBe("paths");
+    if (result.plot.kind !== "paths") return;
+    const [dimmed, lit] = result.plot.paths;
+    expect(dimmed?.dimmed).toBe(true);
+    expect(dimmed?.points).toEqual([10, 20, 12, 22]);
+    expect(lit?.points).toEqual([
+      10,
+      20,
+      11,
+      21,
+      11,
+      21,
+      Number.NaN,
+      Number.NaN,
+    ]);
+    expect(result.xyTraces?.[0]?.trace.x).toEqual([10, 11, 11, 12]);
+  });
+
+  it("falls back to the sample path when a pair misaligns and samples exist", () => {
+    const misaligned = columnarTile("run_0001/response", 3, [
+      envelopeBin(0, 2, 20, 22),
+    ]);
+    const input: PrepareInput = {
+      ...envelopeInput(),
+      tiles: tileResponse([xTile, misaligned]),
+      samples: {
+        request_id: "r",
+        series: [
+          series("run_0001/command", [0, 1, 2], [1, 2, 3]),
+          series("run_0001/response", [0, 1, 2], [2, 3, 4]),
+        ],
+      } as SampleResponse,
+    };
+    const result = xyModule.project(xyModule.prepare(input), input, frame);
+    expect(result.needsSampleFallback).toBeUndefined();
+    expect(result.plot.kind).toBe("paths");
+    expect(result.xyTraces?.[0]?.trace.time).toEqual([0, 1, 2]);
+  });
+
+  it("requests the sample fallback when misaligned with no samples", () => {
+    const misaligned = columnarTile("run_0001/response", 3, [
+      envelopeBin(0, 2, 20, 22),
+    ]);
+    const input: PrepareInput = {
+      ...envelopeInput(),
+      tiles: tileResponse([xTile, misaligned]),
+    };
+    const result = xyModule.project(xyModule.prepare(input), input, frame);
+    expect(result.plot.kind).toBe("empty");
+    expect(result.needsSampleFallback).toBe(true);
+  });
+
+  it("keeps path identity across frames on the envelope path", () => {
+    const input = envelopeInput();
+    const geometry = xyModule.prepare(input);
+    const first = xyModule.project(geometry, input, frame);
+    const second = xyModule.project(geometry, input, {
+      ...frame,
+      window: { t0: 1, t1: 2 },
+    });
+    if (first.plot.kind !== "paths" || second.plot.kind !== "paths") {
+      throw new Error("expected paths");
+    }
+    expect(second.plot.paths[0]?.points).toBe(first.plot.paths[0]?.points);
   });
 });
