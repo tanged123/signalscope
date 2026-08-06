@@ -106,7 +106,7 @@ export function coverageToImage(
   grid: DensityGrid,
   color: string,
   pointAlpha: number,
-): Uint8ClampedArray {
+): Uint8ClampedArray<ArrayBuffer> {
   const { coverage, width, height } = grid;
   const { r, g, b } = parseHexColor(color);
   const keep = 1 - pointAlpha;

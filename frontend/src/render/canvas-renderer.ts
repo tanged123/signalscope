@@ -913,11 +913,7 @@ export class CanvasRenderer {
       accumulateEnvelope(grid, bins, toColumn, toRow);
     }
     const pixels = coverageToImage(grid, color, pointAlpha);
-    offContext.putImageData(
-      new ImageData(new Uint8ClampedArray(pixels), width, height),
-      0,
-      0,
-    );
+    offContext.putImageData(new ImageData(pixels, width, height), 0, 0);
     context.save();
     context.imageSmoothingEnabled = false;
     context.drawImage(offscreen, plot.x, plot.y, plot.width, plot.height);
