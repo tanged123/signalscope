@@ -134,6 +134,15 @@ function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
 }
 
+function styleKey(style: ResolvedStroke): string {
+  return [
+    style.color,
+    String(style.width),
+    String(style.alpha),
+    style.dash,
+  ].join("\u0000");
+}
+
 /**
  * Pads the axis with the coarser pixel-per-unit scale until both axes agree,
  * so one data unit is the same number of pixels horizontally and vertically
@@ -236,6 +245,18 @@ interface ResolvedStroke {
   alpha: number;
 }
 
+interface CachedBandPaths {
+  key: string;
+  band: Path2D;
+  mean: Path2D;
+}
+
+interface BandGroup {
+  style: ResolvedStroke;
+  band: Path2D;
+  mean: Path2D;
+}
+
 interface PathSink {
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
@@ -268,10 +289,7 @@ export class CanvasRenderer {
     BinColumns,
     { key: string; path: Path2D }
   >();
-  private readonly bandCache = new WeakMap<
-    BinColumns,
-    { key: string; band: Path2D; mean: Path2D }
-  >();
+  private readonly bandCache = new WeakMap<BinColumns, CachedBandPaths>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.surface = new CanvasSurface(canvas);
@@ -414,26 +432,30 @@ export class CanvasRenderer {
         string,
         { style: ResolvedStroke; path: Path2D; count: number }[]
       >();
+      const bandGroups = new Map<string, BandGroup>();
       response.series.forEach((series, index) => {
         if (rasterSet.has(index)) return;
         if (starvedEnvelope(series, plot.width * this.pixelRatio)) {
-          this.drawSeriesBand(
-            context,
-            plot,
-            project,
-            series,
-            styleFor(index),
-            pathKey,
-          );
+          const style = styleFor(index);
+          const key = styleKey(style);
+          const group =
+            bandGroups.get(key) ??
+            (() => {
+              const created = {
+                style,
+                band: new Path2D(),
+                mean: new Path2D(),
+              };
+              bandGroups.set(key, created);
+              return created;
+            })();
+          const paths = this.seriesBandPaths(project, series, pathKey);
+          group.band.addPath(paths.band);
+          group.mean.addPath(paths.mean);
           return;
         }
         const style = styleFor(index);
-        const key = [
-          style.color,
-          String(style.width),
-          String(style.alpha),
-          style.dash,
-        ].join("\u0000");
+        const key = styleKey(style);
         const styledGroups = groups.get(key) ?? [];
         let group = styledGroups.at(-1);
         if (group === undefined || group.count === MAX_BATCHED_SERIES) {
@@ -444,6 +466,9 @@ export class CanvasRenderer {
         this.appendSeriesPath(group.path, plot, project, series.bins);
         group.count += 1;
       });
+      for (const group of bandGroups.values()) {
+        this.drawBandGroup(context, group);
+      }
       for (const styledGroups of groups.values()) {
         for (const group of styledGroups) {
           this.setStroke(context, group.style);
@@ -922,23 +947,40 @@ export class CanvasRenderer {
     style: ResolvedStroke,
     pathKey: string,
   ): void {
+    const paths = this.seriesBandPaths(project, series, pathKey);
+    this.drawBandGroup(context, { style, ...paths });
+  }
+
+  private seriesBandPaths(
+    project: Projection,
+    series: ColumnarTile,
+    pathKey: string,
+  ): CachedBandPaths {
     const bins = series.bins;
     const cached = this.bandCache.get(bins);
-    let paths = cached?.key === pathKey ? cached : null;
-    if (paths === null) {
-      const band = new Path2D();
-      const mean = new Path2D();
-      this.appendBandPaths(band, mean, project, bins);
-      paths = { key: pathKey, band, mean };
-      this.bandCache.set(bins, paths);
-    }
+    if (cached?.key === pathKey) return cached;
+    const paths = {
+      key: pathKey,
+      band: new Path2D(),
+      mean: new Path2D(),
+    };
+    this.appendBandPaths(paths.band, paths.mean, project, bins);
+    this.bandCache.set(bins, paths);
+    return paths;
+  }
+
+  private drawBandGroup(
+    context: CanvasRenderingContext2D,
+    group: BandGroup,
+  ): void {
+    const { style, band, mean } = group;
     context.fillStyle = style.color;
     context.globalAlpha = style.alpha * BAND_FILL_ALPHA;
-    context.fill(paths.band);
+    context.fill(band);
     // The fill changed globalAlpha behind setStroke's memo.
     this.lastAlpha = Number.NaN;
     this.setStroke(context, style);
-    context.stroke(paths.mean);
+    context.stroke(mean);
   }
 
   private appendBandPaths(

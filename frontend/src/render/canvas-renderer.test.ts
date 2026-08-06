@@ -163,6 +163,8 @@ class TestPath2D {
 
   lineTo(): void {}
 
+  addPath(): void {}
+
   rect(): void {}
 
   closePath(): void {}
@@ -270,6 +272,10 @@ function renderOnce(
     lineTo(x: number, y: number): void {
       calls.push({ op: "lineTo", args: [x, y] });
     }
+
+    addPath(path: Path2D): void {
+      calls.push({ op: "addPath", args: [path] });
+    }
   }
   globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
   const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
@@ -311,6 +317,10 @@ function withRecordingPath2D(calls: DrawCall[], draw: () => void): void {
 
     lineTo(x: number, y: number): void {
       calls.push({ op: "lineTo", args: [x, y] });
+    }
+
+    addPath(path: Path2D): void {
+      calls.push({ op: "addPath", args: [path] });
     }
   }
   globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
@@ -1229,6 +1239,41 @@ describe("banded stroke fallback", () => {
     const slice = calls.slice(clipIndex, restoreIndex);
     expect(slice.filter((call) => call.op === "fill")).toHaveLength(1);
     expect(slice.filter((call) => call.op === "stroke")).toHaveLength(1);
+  });
+
+  it("groups high-cardinality bands by their resolved stroke", () => {
+    const { calls, context } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
+    renderer.setPalette(TEST_PALETTE);
+    const series = Array.from({ length: 130 }, (_, index) =>
+      tile(
+        `run_${String(index)}/response`,
+        Array.from({ length: 40 }, (_, bin) => ({
+          t0: bin,
+          t1: bin + 1,
+          v: (bin % 5) + index,
+        })),
+        3,
+      ),
+    );
+    const styles = series.map<SeriesStroke>((_, index) => ({
+      hue: index + 1,
+      dash: "solid",
+      width: 1.4,
+      alpha: 1,
+    }));
+    renderer.render(
+      { requestId: "r", series },
+      { min: 0, max: 40 },
+      { ...options, styles },
+    );
+    const clipIndex = calls.findIndex((call) => call.op === "clip");
+    const restoreIndex = calls.findIndex(
+      (call, index) => index > clipIndex && call.op === "restore",
+    );
+    const slice = calls.slice(clipIndex, restoreIndex);
+    expect(slice.filter((call) => call.op === "fill")).toHaveLength(7);
+    expect(slice.filter((call) => call.op === "stroke")).toHaveLength(7);
   });
 
   it("keeps the plain stroke for level-0 tiles and dense tiles", () => {
