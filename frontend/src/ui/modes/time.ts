@@ -13,9 +13,21 @@ export interface TimeGeometry {
 export const timeModule: PlotModeModule<TimeGeometry> = {
   mode: "time",
   data: { reduction: "envelope", windows: [] },
+  // Styles must be part of the key: prepare bakes them into `bySeries`, so a
+  // style-only change (an override, say) has to invalidate the framework's
+  // geometry cache even though tiles and samples keep identity.
   configKey: (state) =>
     state.series
-      .map((series) => `${series.path}:${String(series.visible ? 1 : 0)}`)
+      .map((series) =>
+        [
+          series.path,
+          series.visible ? 1 : 0,
+          series.hue,
+          series.dash,
+          series.width,
+          series.opacity,
+        ].join(":"),
+      )
       .join("\u0000"),
   prepare({ state, tiles }) {
     const bySeries = new Map(

@@ -132,6 +132,15 @@ describe("xyModule", () => {
     expect(second.xyTraces?.[0]?.trace).toBe(first.xyTraces?.[0]?.trace);
   });
 
+  it("configKey moves when only a series style changes", () => {
+    const base = xyState("run_0001/command", ["run_0001/response"]);
+    const restyled = {
+      ...base,
+      series: [{ ...renderSeries("run_0001/response"), width: 3 }],
+    } as typeof base;
+    expect(xyModule.configKey(restyled)).not.toBe(xyModule.configKey(base));
+  });
+
   it("returns empty without an x signal or samples", () => {
     const noSamples: PrepareInput = { ...input(), samples: null };
     expect(

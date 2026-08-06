@@ -137,6 +137,15 @@ describe("timeModule", () => {
     expect(result.prepared).not.toBeNull();
   });
 
+  it("configKey moves when only a series style changes", () => {
+    const base = state(["run_0001/a"]);
+    const restyled = {
+      ...base,
+      series: [{ ...renderSeries("run_0001/a"), hue: 4 }],
+    } as typeof base;
+    expect(timeModule.configKey(restyled)).not.toBe(timeModule.configKey(base));
+  });
+
   it("returns empty with no tiles", () => {
     const input: PrepareInput = {
       state: state(["run_0001/a"]),

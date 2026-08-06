@@ -81,13 +81,24 @@ const EMPTY: XyGeometry = {
 export const xyModule: PlotModeModule<XyGeometry> = {
   mode: "xy",
   data: { reduction: "samples", windows: ["context", "visible"] },
+  // Styles must be part of the key: prepare bakes them into `entries`, so a
+  // style-only change (an override, say) has to invalidate the framework's
+  // geometry cache even though tiles and samples keep identity.
   configKey: (state) =>
     [
       state.x_signal ?? "",
       state.color_by_time ? "time" : (state.color_signal ?? ""),
       ...state.series
         .filter((series) => series.visible)
-        .map((series) => series.path),
+        .map((series) =>
+          [
+            series.path,
+            series.hue,
+            series.dash,
+            series.width,
+            series.opacity,
+          ].join(":"),
+        ),
     ].join("\u0000"),
   prepare({ state, samples, callbacks }) {
     if (samples === null || state.x_signal === null) return EMPTY;
