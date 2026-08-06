@@ -1,6 +1,6 @@
 # ADR 0037: Per-mode sample budgets
 
-- Status: Accepted
+- Status: Accepted (amended 2026-08-06)
 - Date: 2026-08-05
 
 ## Context
@@ -33,6 +33,20 @@ assumption.
 
 Extrema-preserving reduction for XY requires a 2D, panel-level reduction over
 one shared index set across the panel's x and y signals. It is deferred.
+
+## Amendment (2026-08-06, pyramid-backed XY)
+
+The deferral above is superseded for shared-timebase pairs. `query_with_target`
+derives each signal's level and bin window from the shared time column and the
+target, so existing per-signal pyramid tiles are index-aligned without a 2D
+reduction, bin-layout change, or new endpoint. XY now requests visible and
+coarse context tiles, pairs each bucket's first/last values in index order,
+and lifts the stroke on either signal's gap bit.
+
+Alignment is verified from level, count, and boundary timestamps. A pair that
+does not verify falls back to the existing sample pipeline; cross-timebase
+pairs therefore retain interpolation. The wire format, 500k sample budget,
+and sample caps remain unchanged.
 
 ## Consequences
 
