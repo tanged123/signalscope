@@ -27,11 +27,11 @@ that time has a complete pipeline and XY has almost none:
 Unifying `render()` and `renderPaths()` without fixing the four stages above
 would move code around and change nothing a user can feel.
 
-### 2. XY can be pyramid-backed — the shared index set already exists
+### 2. XY may be pyramid-backed — shared bucket indices exist, correspondence does not
 
 The first draft said trajectory reduction "requires a 2D, panel-level
-reduction over one shared index set," and ADR 0037 deferred it as hard. That
-under-read the pyramid.
+reduction over one shared index set," and ADR 0037 deferred it as hard. The
+pyramid already supplies part of that — but only part.
 
 The pyramid does not reduce over x. It reduces over **time**, into
 index-aligned power-of-two buckets: bucket `i` at level `L` covers samples
@@ -42,20 +42,35 @@ index-to-time mapping, and the same level chosen by
 `Pyramid::query_with_target` for a given window. Therefore bucket `i` of the
 x signal and bucket `i` of the y signal cover exactly the same samples.
 
-Querying the pyramid for both signals yields, per bucket,
-`(x_min, x_max, x_first, x_last)` and `(y_min, y_max, y_first, y_last)` on a
-shared index set. That is a 2D trajectory envelope, and it delivers for free:
+Querying the pyramid for both signals yields, per bucket, `(x_min, x_max,
+x_first, x_last)` and `(y_min, y_max, y_first, y_last)` **on the same bucket
+index**. What that does and does not give you:
 
-- the exact shared timebase `pairSamples` needs, with no `lerpSample`
-- 2D extrema preservation — the thing ADR 0037 called deferred
-- out-of-core behaviour, already solved
-- binary columnar transport, already built
+- **Does give:** a shared bucket index across the pair, so the two signals are
+  aligned without `lerpSample`; each signal's own extrema preserved within the
+  bucket; out-of-core behaviour, already solved; binary columnar transport,
+  already built.
+- **Does not give:** the x-to-y correspondence _inside_ a bucket. The
+  summaries are marginal — `x_min` and `y_min` need not occur at the same
+  sample. Per bucket you therefore have a **bounding box**, not a trajectory
+  envelope, and rendering the box would draw area the trajectory never
+  visited.
 
-**This needs attacking before anything is built on it.** Open sub-questions:
+This is a **hypothesis, not a solved design.** An earlier draft of this brief
+claimed the pair delivers "the exact shared timebase `pairSamples` needs" and
+"2D extrema preservation"; that overstated it, and marginal summaries do not
+support either claim.
+
+To become a design it needs a per-bucket representation that preserves
+correspondence — for example the sample index at which each extremum occurred,
+or a small fixed set of representative `(x, y)` samples per bucket. Whether
+that fits the existing bin layout and its invariants is the first thing to
+settle. Alignment holds only for signals sharing one time array, so
 cross-source pairing still needs interpolation (mc1000 pairs channels within
-one run, which is the designed-for case, but sources with different time bases
-are not); `has_gap` semantics for a 2D envelope are undefined; and whether a
-bucket draws as a box, a segment, or a hull is an unmade visual decision.
+one run, the designed-for case). `has_gap` semantics for a 2D envelope are
+undefined, and whether a bucket draws as a box, a segment, or a hull is an
+unmade visual decision that depends entirely on what correspondence data the
+bucket carries.
 
 ### 3. The shape is two pipelines, not one
 
@@ -97,10 +112,13 @@ Caching the pairing stage on `SampleResponse` identity, and replacing
 `resolveXSeries`'s `.find()` with a Map built once per response, removes both
 the O(n²) term and most per-frame allocation without touching the renderer.
 
-Note the sample budget is **not** implicated: `panelSignalIds` expands a
-1000-series XY panel to ~2001-3001 ids, so `sampleCapForPanel` divides the
-500k budget down to ~249 and floors it back to `SAMPLE_CAP` (8192) — exactly
-the pre-2026-08-05 value. The 32768 cap only applies to panels under ~60 ids.
+The sample budget was originally **not** implicated: `sampleCapForPanel`
+floored back to `SAMPLE_CAP` (8192) at high series counts, exactly the
+pre-2026-08-05 value. That floor was removed on 2026-08-06 because it defeated
+the 500k budget it was supposed to enforce, so a 1000-series XY panel now
+requests ~250 points per series per request instead of 8192. That cuts wire
+and per-frame volume by roughly 32x and should be re-measured before any of
+the caching work above is scoped — it may have already moved the symptom.
 
 ## Bench coverage gap
 
@@ -145,10 +163,13 @@ considered and rejected.
 
 Ordered by how much they constrain everything else.
 
-1. **Does the pyramid-backed XY envelope hold up?** See correction 2. This is
-   now the first question, and it subsumes what the first draft listed second.
-   If it holds, XY joins the time pipeline and most of the rest follows. If it
-   does not, the spec needs to say why.
+1. **Can a pyramid bucket carry x-to-y correspondence?** See correction 2.
+   Shared bucket indices come free; the paired `(x, y)` relationship inside a
+   bucket does not, and marginal min/max gives only a bounding box. The spec
+   must either define a per-bucket representation that preserves it — extremum
+   sample indices, or representative `(x, y)` samples — and show it fits the
+   bin layout and its invariants, or say why XY stays on `query_samples`.
+   Everything else here depends on the answer.
 
 2. **Density policy above ~138 series.** `TILE_BIN_BUDGET = 250_000` split
    across series with a 64-bin floor (`ui/app-shell.ts:102`,
@@ -213,8 +234,8 @@ Ordered by how much they constrain everything else.
 
 Keep the four plot modes. Do not revive the client-side full-array scan. Do not
 reopen per-signal min/max reduction on `query_samples` (ADR 0037) — the
-pyramid-backed route in correction 2 is a different mechanism and is not
-covered by that rejection. WebGL2/GPU rendering, binary snapshot manifests, and
+pyramid-backed route in correction 2 is a different mechanism, unproven, and
+not covered by that rejection. WebGL2/GPU rendering, binary snapshot manifests, and
 an HTTP/WebSocket data plane were deferred by the 2026-08-04 performance plan
 and stay deferred unless the spec argues otherwise.
 
@@ -223,7 +244,7 @@ and stay deferred unless the spec argues otherwise.
 - `docs/superpowers/plans/2026-08-05-post-phase-5-fixes.md` §"Scope
   boundaries" — the deferral list this brief expands
 - `docs/adr/0037-per-mode-sample-budgets.md` — why per-signal min/max on
-  `query_samples` is wrong; see correction 2 for what it over-deferred
+  `query_samples` is wrong; correction 2 revisits how hard the 2D case is
 - `docs/superpowers/plans/2026-08-04-plotting-performance-overhaul.md` — the
   prior perf pass; its root-cause list and deferrals still apply
 - `docs/adr/0036-binary-tile-transport-and-render-path.md`,

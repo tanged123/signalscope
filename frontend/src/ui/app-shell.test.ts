@@ -44,17 +44,30 @@ describe("sampleCapFor", () => {
 describe("sampleCapForPanel", () => {
   it("gives a few series the full per-mode cap", () => {
     expect(sampleCapForPanel("xy", 1)).toBe(32_768);
-    expect(sampleCapForPanel("xy", 15)).toBe(32_768);
+    expect(sampleCapForPanel("histogram", 15)).toBe(32_768);
   });
 
   it("shares a fixed point budget once a panel carries many series", () => {
-    // 500_000 / 40 = 12_500, below the per-mode cap but above the floor.
-    expect(sampleCapForPanel("xy", 40)).toBe(12_500);
+    expect(sampleCapForPanel("histogram", 40)).toBe(12_500);
+    expect(sampleCapForPanel("histogram", 1_000)).toBe(500);
   });
 
-  it("never drops below the legacy cap however many series a panel holds", () => {
-    expect(sampleCapForPanel("histogram", 1_000)).toBe(SAMPLE_CAP);
-    expect(sampleCapForPanel("fft", 100_000)).toBe(SAMPLE_CAP);
+  it("halves an XY panel's share because it merges two requests", () => {
+    // XY issues context + detail; both land in one merged response.
+    expect(sampleCapForPanel("xy", 40)).toBe(6_250);
+    expect(sampleCapForPanel("xy", 1_000)).toBe(250);
+  });
+
+  it("holds the budget instead of flooring at the legacy cap", () => {
+    // 1000 series x 8192 would be 8.2M points against a 500k budget.
+    expect(sampleCapForPanel("fft", 1_000)).toBe(500);
+    expect(sampleCapForPanel("fft", 100_000) * 100_000).toBeLessThanOrEqual(
+      500_000,
+    );
+  });
+
+  it("never returns zero, however many series a panel holds", () => {
+    expect(sampleCapForPanel("fft", 10_000_000)).toBe(1);
   });
 
   it("treats a zero series count as one rather than dividing by zero", () => {

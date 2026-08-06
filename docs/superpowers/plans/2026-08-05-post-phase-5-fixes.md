@@ -696,11 +696,9 @@ Render — in the XY `options` object (~line 1202, beside `axisStyle`), add:
       ...(state.axis_equal ? { equalAspect: true } : {}),
 ```
 
-Add `axis_equal: boolean` to `RenderPanelState` and set it from the panel state wherever that interface is populated.
-
 Add `onToggleAxisEqual(id: string): void` to the panel callbacks interface.
 
-`RenderPanelState` is `Omit<PanelState, "x_ref" | "color_ref"> & {...}` (`panel.ts:187`), so it inherits `axis_equal` from the regenerated `PanelState` with no edit.
+`RenderPanelState` is `Omit<PanelState, "x_ref" | "color_ref"> & {...}` (`panel.ts:187`), so it inherits `axis_equal` from the regenerated `PanelState` with no edit. Populate it only at actual `RenderPanelState` construction sites.
 
 - [ ] **Step 15: Wire the shell**
 
@@ -865,7 +863,7 @@ export class SampleWindowCache {
       parts.cap,
     ]
       .map(String)
-      .join(" ");
+      .join("\u0000");
   }
 
   get(panelId: string, key: string): SampleResponse | null {

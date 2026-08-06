@@ -107,14 +107,24 @@ export function sampleCapFor(mode: PanelMode): number {
   return mode === "time" ? SAMPLE_CAP : SAMPLE_MODE_CAP;
 }
 
-/** The per-series cap once a panel's series count is taken into account. */
+/**
+ * The per-series cap once a panel's series count is taken into account.
+ *
+ * `SAMPLE_POINT_BUDGET` bounds the panel's *merged* response, so the share is
+ * divided by the number of requests that merge into it — XY issues two
+ * (context plus detail) and `mergeSampleResponses` concatenates them. There is
+ * no floor: a floor would let a 1000-series panel request 8.2M points against
+ * a 500k budget, which is the budget not existing.
+ */
 export function sampleCapForPanel(
   mode: PanelMode,
   seriesCount: number,
 ): number {
-  const cap = sampleCapFor(mode);
-  const share = Math.floor(SAMPLE_POINT_BUDGET / Math.max(1, seriesCount));
-  return Math.max(SAMPLE_CAP, Math.min(cap, share));
+  const requests = mode === "xy" ? 2 : 1;
+  const share = Math.floor(
+    SAMPLE_POINT_BUDGET / (Math.max(1, seriesCount) * requests),
+  );
+  return Math.max(1, Math.min(sampleCapFor(mode), share));
 }
 const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
@@ -3189,8 +3199,11 @@ export class AppShell {
   private toggleTheme(): void {
     const theme = this.prefs.theme === "light" ? "dark" : "light";
     // Preferences are authoritative for the running app; the session keeps a
-    // copy so an exported snapshot bakes the theme it was exported with.
+    // copy so an exported snapshot bakes the theme it was exported with. That
+    // copy has to reach disk too, or a session saved after a theme change and
+    // reopened elsewhere carries the old one.
     this.workspace.setTheme(theme);
+    this.scheduleAutosave();
     this.updatePreferences({ theme });
   }
 

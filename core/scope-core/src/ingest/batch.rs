@@ -382,17 +382,27 @@ impl BatchJobs {
             let handles: Vec<_> = paths
                 .chunks(chunk)
                 .map(|slice| {
-                    scope.spawn(move || {
-                        slice
-                            .iter()
-                            .map(|path| path.canonicalize().map_err(|error| error.to_string()))
-                            .collect::<Vec<_>>()
-                    })
+                    (
+                        slice.len(),
+                        scope.spawn(move || {
+                            slice
+                                .iter()
+                                .map(|path| path.canonicalize().map_err(|error| error.to_string()))
+                                .collect::<Vec<_>>()
+                        }),
+                    )
                 })
                 .collect();
             handles
                 .into_iter()
-                .flat_map(|handle| handle.join().unwrap_or_default())
+                .flat_map(|(len, handle)| {
+                    // A panicked worker must still yield one result per path:
+                    // dropping its chunk would shift every later index and
+                    // report failures against the wrong paths.
+                    handle.join().unwrap_or_else(|_| {
+                        vec![Err("path resolution worker panicked".to_owned()); len]
+                    })
+                })
                 .collect()
         });
 

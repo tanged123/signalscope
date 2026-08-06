@@ -34,8 +34,9 @@ failure surface without changing the recorded batch result.
 ## 6. Ctrl+N resets settings and theme — landed
 
 Theme moved to preferences schema v4 and is authoritative for the running
-application. New or loaded workspaces inherit it, and theme changes persist
-through both the global preference and the session copy needed by snapshots.
+application. New or loaded workspaces inherit it. A theme change writes the
+global preference and schedules session autosave, so the session copy that
+snapshot export bakes also reaches disk and survives close and reopen.
 
 ## 7. CSV batch ingest headroom (26k files ≈ minutes) — partially landed
 
@@ -50,12 +51,18 @@ measurable improvement. The CSV parse candidate is recorded separately below.
 
 ## 8. Visible decimation on very large signals (~50M+ points) — partially landed
 
-XY, FFT, and histogram sample requests now use a 32768-point cap under a 500k
-per-panel series budget. The FFT transform cap is 16384. Plain stride
-reduction remains in place: per-signal min/max is wrong because it destroys
-the shared XY timebase and also biases histograms and violates FFT uniform
-sampling. A trajectory-preserving 2D reduction over one shared index set is
-the correct fix and is deferred to the renderer architecture spec.
+XY, FFT, and histogram sample requests now use a 32768-point per-series cap.
+A 500k-point budget bounds the panel's final merged response, so the cap is
+the budget divided by the series count and by the number of requests that
+merge into it — two for XY, which concatenates context and detail. There is
+no lower floor, so a 1000-series panel resolves 500 points per series (250 for
+XY) rather than the 8192 it used to request. The FFT transform cap is 16384.
+
+Plain stride reduction remains in place: per-signal min/max is wrong because
+it destroys the shared XY timebase and also biases histograms and violates FFT
+uniform sampling. A trajectory-preserving 2D reduction is the correct fix and
+is deferred; see `docs/issues/unified-renderer-brief.md`, which records why
+paired pyramid summaries do not supply it for free.
 
 ## 9. CSV float-parse path — measured, no optimization
 
