@@ -103,7 +103,9 @@ time panels can facet by source or channel with linked-y small multiples and a
 follow-ups because annotations stay attached to the unsplit plot in this
 phase.
 
-The plotting performance overhaul ([implementation plan](superpowers/plans/2026-08-04-plotting-performance-overhaul.md)) now reports a 6.0 s mc1000 first plot for 1,000 inputs; core tile p95 is 14.2 ms cold and 14.6 ms warm. Browser frame p95 remains 66.5 ms and the longest stall 2.1 s on the benchmark runner, so both still exceed their 33 ms and 250 ms budgets.
+The four-phase WebGPU renderer sequence is: reset the product to one
+time-series path, order pyramid tiles for rendering, replace Canvas2D line
+strokes with WebGPU, then prove interaction and host capability behavior.
 
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18
@@ -133,15 +135,9 @@ The categorical series order now uses MATLAB's canonical seven defaults, with
 the eighth slot rolling over to dashed blue; amber remains reserved by token
 and semantic role rather than by banning MATLAB yellow.
 
-Phase 2B closed the phase: XY panels with the amber drop strip, dashed `x:`
-and `c:` axis chips, window-dimmed trajectories, a trajectory cursor ring and
-datatips; a `batlow` sequential colormap with a labelled colorbar
-([ADR 0016](adr/0016-sequential-colormap.md)); FFT panels over the visible
-window ([ADR 0017](adr/0017-spectrum-semantics.md)); histogram panels
-([ADR 0018](adr/0018-histogram-semantics.md)); and the full touch gesture
-set. All three modes are presentation-plane computations over a bounded
-window slice served by one new protocol request
-([ADR 0015](adr/0015-window-sample-requests.md)).
+XY, FFT, and histogram plotting were removed by
+[ADR 0039](adr/0039-time-series-webgpu-renderer.md) while the time-series
+Canvas2D oracle remains in place for the WebGPU renderer phases.
 
 Two design gaps were closed by decision rather than extraction and should be
 reviewed against any future design pass: histogram mode has no specification

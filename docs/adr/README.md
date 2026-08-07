@@ -39,5 +39,7 @@ Accepted decisions:
 35. [Benchmark harness and performance floors](0035-benchmark-harness-and-performance-floors.md)
 36. [Binary tile transport and render path](0036-binary-tile-transport-and-render-path.md)
 37. [Per-mode sample budgets](0037-per-mode-sample-budgets.md)
+38. [Unified mode pipeline and density tier](0038-unified-mode-pipeline-and-density-tier.md)
+39. [Time-series-only identity-preserving WebGPU renderer](0039-time-series-webgpu-renderer.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.
