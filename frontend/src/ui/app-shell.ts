@@ -182,7 +182,6 @@ export class AppShell {
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
-  private readonly panelEmphasis = new Map<string, readonly string[]>();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -342,16 +341,6 @@ export class AppShell {
             this.historyGestureKey = `range:${id}`;
             this.clearHistoryCoalesceTimer();
           }
-        },
-        onEmphasize: (id, paths) => {
-          const previous = this.panelEmphasis.get(id) ?? [];
-          const next = [...paths].sort();
-          if (next.join("\u0000") === previous.join("\u0000")) return;
-          if (next.length === 0) this.panelEmphasis.delete(id);
-          else this.panelEmphasis.set(id, next);
-          const panel = this.workspace.panel(id);
-          if (panel === undefined) return;
-          this.scheduleRefresh(100);
         },
         onCursor: (id, cursor, client) => {
           this.setCursor(id, cursor, client);

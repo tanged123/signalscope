@@ -61,7 +61,7 @@ export function dragIntent(
   const pan = panAxes(policy);
   if (panBinding && (pan.x || pan.y)) return "pan";
   if (button !== 0) return "none";
-  const box = boxZoomAxes(policy, "xy");
+  const box = boxZoomAxes(policy, "both");
   return box.x || box.y ? "box" : "click";
 }
 

@@ -4,15 +4,12 @@ import {
   formatValue,
   invertX,
   invertY,
-  logTicks,
-  panScaledRange,
   panRange,
   projectX,
   valueAtTime,
   wheelZoomFactor,
   zoomDragMode,
   zoomRange,
-  zoomScaledRange,
   type PlotLayout,
 } from "./plot-math";
 
@@ -59,41 +56,11 @@ test("projection inversion, zoom and pan preserve plot ranges", () => {
   expect(wheelZoomFactor(240)).toBeGreaterThan(1);
 });
 
-test("zooms log axes in decade space", () => {
-  const zoomed = zoomScaledRange({ min: 1, max: 1000 }, 0.5, 10, "log");
-  expect(zoomed.min).toBeCloseTo(Math.sqrt(10));
-  expect(zoomed.max).toBeCloseTo(100);
-});
-
-test("pans log axes in decade space", () => {
-  const panned = panScaledRange({ min: 1, max: 100 }, 0.5, "log");
-  expect(panned.min).toBeCloseTo(10);
-  expect(panned.max).toBeCloseTo(1000);
-});
-
-test("projects and inverts a log x axis", () => {
-  const logLayout: PlotLayout = {
-    plot: { x: 0, y: 0, width: 300, height: 100 },
-    xRange: { min: 1, max: 1000 },
-    yRange: { min: 0, max: 1 },
-    xScale: "log",
-  };
-  expect(projectX(logLayout, 1)).toBeCloseTo(0, 6);
-  expect(projectX(logLayout, 10)).toBeCloseTo(100, 6);
-  expect(projectX(logLayout, 1000)).toBeCloseTo(300, 6);
-  expect(invertX(logLayout, 200)).toBeCloseTo(100, 6);
-});
-
-test("emits decade ticks for a log range", () => {
-  expect(logTicks(0.5, 1200)).toEqual([1, 10, 100, 1000]);
-  expect(logTicks(0, -1)).toEqual([]);
-});
-
 test("zoom drags snap only strongly directional rectangles to one axis", () => {
   expect(zoomDragMode(200, 5)).toBe("x");
   expect(zoomDragMode(5, 200)).toBe("y");
-  expect(zoomDragMode(200, 80)).toBe("xy");
-  expect(zoomDragMode(80, 200)).toBe("xy");
+  expect(zoomDragMode(200, 80)).toBe("both");
+  expect(zoomDragMode(80, 200)).toBe("both");
 });
 
 test("valueAtTime interpolates drawn vertices and respects gaps", () => {

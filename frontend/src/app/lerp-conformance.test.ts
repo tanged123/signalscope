@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import fixtureJson from "../../../protocol/testdata/lerp-conformance.json";
-import { lerpSample } from "./xy";
+import { lerpSample } from "./csv-export";
 
 interface LerpFixture {
   time: number[];
@@ -12,7 +12,7 @@ interface LerpFixture {
 
 const fixture = fixtureJson as LerpFixture;
 
-describe("lerp conformance", () => {
+describe("CSV interpolation conformance", () => {
   it("matches the Rust lerp_at fixture", () => {
     for (const [index, query] of fixture.queries.entries()) {
       expect(lerpSample(fixture.time, fixture.values, query)).toBeCloseTo(

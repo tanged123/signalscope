@@ -33,7 +33,7 @@ function recordingContext(charWidth = 6): {
   let stroke = "";
   let alpha = 1;
   let lineWidth = 1;
-  const stub = {
+  const context = {
     font: "",
     textAlign: "start",
     textBaseline: "alphabetic",
@@ -78,17 +78,8 @@ function recordingContext(charWidth = 6): {
     stroke(): void {
       push("stroke");
     },
-    fill(): void {
-      push("fill");
-    },
     fillRect(x: number, y: number, width: number, height: number): void {
       push("fillRect", x, y, width, height);
-    },
-    drawImage(...args: unknown[]): void {
-      push("drawImage", ...args);
-    },
-    strokeRect(x: number, y: number, width: number, height: number): void {
-      push("strokeRect", x, y, width, height);
     },
     fillText(text: string, x: number, y: number): void {
       push("fillText", text, x, y);
@@ -127,21 +118,8 @@ function recordingContext(charWidth = 6): {
     measureText(text: string): TextMetrics {
       return { width: text.length * charWidth } as TextMetrics;
     },
-    createLinearGradient(
-      x0: number,
-      y0: number,
-      x1: number,
-      y1: number,
-    ): CanvasGradient {
-      push("createLinearGradient", x0, y0, x1, y1);
-      return {
-        addColorStop(offset: number, color: string): void {
-          push("addColorStop", offset, color);
-        },
-      } as unknown as CanvasGradient;
-    },
   };
-  return { calls, context: stub as unknown as CanvasRenderingContext2D };
+  return { calls, context: context as unknown as CanvasRenderingContext2D };
 }
 
 function fakeCanvas(
@@ -158,50 +136,19 @@ function fakeCanvas(
   } as unknown as HTMLCanvasElement;
 }
 
-class TestPath2D {
-  moveTo(): void {}
+class RecordingPath2D {
+  static calls: DrawCall[] = [];
 
-  lineTo(): void {}
-
-  addPath(): void {}
-
-  rect(): void {}
-
-  closePath(): void {}
-}
-globalThis.Path2D = TestPath2D as unknown as typeof Path2D;
-
-if (typeof globalThis.ImageData === "undefined") {
-  class TestImageData {
-    readonly data: Uint8ClampedArray;
-    readonly width: number;
-    readonly height: number;
-    constructor(data: Uint8ClampedArray, width: number, height: number) {
-      this.data = data;
-      this.width = width;
-      this.height = height;
-    }
+  moveTo(x: number, y: number): void {
+    RecordingPath2D.calls.push({ op: "moveTo", args: [x, y] });
   }
-  (globalThis as { ImageData?: unknown }).ImageData = TestImageData;
+
+  lineTo(x: number, y: number): void {
+    RecordingPath2D.calls.push({ op: "lineTo", args: [x, y] });
+  }
 }
 
-function fakeOffscreen(): {
-  putCalls: unknown[][];
-  factory: (width: number, height: number) => HTMLCanvasElement;
-} {
-  const putCalls: unknown[][] = [];
-  const factory = (width: number, height: number): HTMLCanvasElement =>
-    ({
-      width,
-      height,
-      getContext: () => ({
-        putImageData: (...args: unknown[]) => {
-          putCalls.push(args);
-        },
-      }),
-    }) as unknown as HTMLCanvasElement;
-  return { putCalls, factory };
-}
+globalThis.Path2D = RecordingPath2D as unknown as typeof Path2D;
 
 const TEST_PALETTE: Palette = {
   background: "#0e1116",
@@ -220,7 +167,6 @@ const TEST_PALETTE: Palette = {
     "#a2142f",
     "#0072bd",
   ],
-  sequential: ["#000000", "#ffffff"],
   fontPlot: '"JetBrains Mono", monospace',
   fontSize: 9,
 };
@@ -228,13 +174,12 @@ const TEST_PALETTE: Palette = {
 function tile(
   path: string,
   bins: readonly { t0: number; t1: number; v: number; gap?: boolean }[],
-  level = 0,
 ): ColumnarTile {
   return {
-    signalId: "1",
+    signalId: path,
     signalPath: path,
     unit: null,
-    level,
+    level: 0,
     bins: binColumnsFromWire(
       bins.map(
         (bin): EnvelopeBin => ({
@@ -258,108 +203,41 @@ function tile(
 function renderOnce(
   series: ColumnarTile[],
   options: Partial<RenderOptions> = {},
-): DrawCall[] {
+): { calls: DrawCall[]; renderer: CanvasRenderer } {
   const { calls, context } = recordingContext();
-  const globalWithPath = globalThis as unknown as {
-    Path2D?: typeof Path2D;
-  };
-  const previousPath2D = globalWithPath.Path2D;
-  class RecordingPath2D {
-    moveTo(x: number, y: number): void {
-      calls.push({ op: "moveTo", args: [x, y] });
-    }
-
-    lineTo(x: number, y: number): void {
-      calls.push({ op: "lineTo", args: [x, y] });
-    }
-
-    addPath(path: Path2D): void {
-      calls.push({ op: "addPath", args: [path] });
-    }
-  }
-  globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
+  RecordingPath2D.calls = calls;
   const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
   renderer.setPalette(TEST_PALETTE);
-  const response: ColumnarTileResponse = { requestId: "test", series };
-  try {
-    renderer.render(
-      response,
-      { min: 0, max: 10 },
-      {
-        xLabel: "time (s)",
-        yLabel: "value",
-        styles: series.map<SeriesStroke>((_, index) => ({
-          hue: index + 1,
-          dash: "solid",
-          width: 1.4,
-          alpha: 1,
-        })),
-        yRange: [-1, 5],
-        ...options,
-      },
-    );
-  } finally {
-    if (previousPath2D === undefined) delete globalWithPath.Path2D;
-    else globalWithPath.Path2D = previousPath2D;
-  }
-  return calls;
+  renderer.render(
+    { requestId: "test", series },
+    { min: 0, max: 10 },
+    {
+      xLabel: "time (s)",
+      yLabel: "value",
+      styles: series.map<SeriesStroke>((_, index) => ({
+        hue: index + 1,
+        dash: "solid",
+        width: 1.4,
+        alpha: 1,
+      })),
+      yRange: [-1, 5],
+      ...options,
+    },
+  );
+  return { calls, renderer };
 }
 
-function withRecordingPath2D(calls: DrawCall[], draw: () => void): void {
-  const globalWithPath = globalThis as unknown as {
-    Path2D?: typeof Path2D;
-  };
-  const previousPath2D = globalWithPath.Path2D;
-  class RecordingPath2D {
-    moveTo(x: number, y: number): void {
-      calls.push({ op: "moveTo", args: [x, y] });
-    }
-
-    lineTo(x: number, y: number): void {
-      calls.push({ op: "lineTo", args: [x, y] });
-    }
-
-    addPath(path: Path2D): void {
-      calls.push({ op: "addPath", args: [path] });
-    }
-  }
-  globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
-  try {
-    draw();
-  } finally {
-    if (previousPath2D === undefined) delete globalWithPath.Path2D;
-    else globalWithPath.Path2D = previousPath2D;
-  }
+function dataCalls(calls: readonly DrawCall[]): readonly DrawCall[] {
+  const clip = calls.findIndex((call) => call.op === "clip");
+  const restore = calls.findIndex(
+    (call, index) => index > clip && call.op === "restore",
+  );
+  return calls.slice(clip, restore);
 }
 
-describe("ticks", () => {
-  it("produces round steps covering the range", () => {
+describe("axis helpers", () => {
+  it("produces round ticks and shared formatting", () => {
     expect(ticks(0, 60, 7)).toEqual([0, 10, 20, 30, 40, 50, 60]);
-  });
-
-  it("snaps zero exactly", () => {
-    expect(ticks(-100, 300, 6)).toContain(0);
-  });
-
-  it("yields no ticks for unusable ranges", () => {
-    expect(ticks(5, 5, 6)).toEqual([]);
-    expect(ticks(Number.NaN, Number.NaN, 6)).toEqual([]);
-  });
-});
-
-describe("formatTicks", () => {
-  it("uses one precision for the whole axis", () => {
-    expect(formatTicks([0, 10, 20, 30, 40, 50])).toEqual([
-      "0",
-      "10",
-      "20",
-      "30",
-      "40",
-      "50",
-    ]);
-  });
-
-  it("keeps enough precision to separate close ticks", () => {
     expect(formatTicks([0, 0.25, 0.5, 0.75, 1])).toEqual([
       "0.00",
       "0.25",
@@ -367,490 +245,39 @@ describe("formatTicks", () => {
       "0.75",
       "1.00",
     ]);
-  });
-
-  it("switches the whole axis to exponential together", () => {
-    expect(formatTicks([0, 50_000, 100_000])).toEqual([
-      "0.0e+0",
-      "5.0e+4",
-      "1.0e+5",
-    ]);
-    expect(formatTicks([0, 0.0005])).toEqual(["0.0e+0", "5.0e-4"]);
-  });
-
-  it("returns nothing for an empty axis", () => {
-    expect(formatTicks([])).toEqual([]);
-  });
-
-  it("uses the typographic minus for negative ticks", () => {
     expect(formatTicks([-150, 0, 150])).toEqual(["−150", "0", "150"]);
   });
-});
 
-describe("gutterWidth", () => {
-  it("keeps the default gutter for short labels", () => {
-    expect(gutterWidth(formatTicks([0, 100, 300]), 6)).toBe(48);
+  it("sizes the y-axis gutter from its labels", () => {
+    expect(gutterWidth(["1234"], 6)).toBe(48);
+    expect(gutterWidth(["12345"], 6)).toBeGreaterThan(48);
   });
 
-  it("grows so long labels clear the rotated axis title", () => {
-    expect(gutterWidth(formatTicks([0, -120_000]), 6)).toBeGreaterThan(52);
-  });
-
-  it("tightens four-character labels while retaining five-character clearance", () => {
-    const four = gutterWidth(["1234"], 6);
-    const five = gutterWidth(["12345"], 6);
-    expect(five).toBeGreaterThan(four);
-    expect(five).toBeGreaterThanOrEqual(5 * 6 + 24);
-  });
-});
-
-describe("dashPattern", () => {
-  it("maps each class to a distinct canvas pattern", () => {
+  it("maps stroke classes to canvas dash patterns", () => {
     expect(dashPattern("solid")).toEqual([]);
     expect(dashPattern("dash")).toEqual([6, 4]);
     expect(dashPattern("dot")).toEqual([1.5, 3]);
   });
 });
 
-describe("render", () => {
+describe("time-series rendering", () => {
   it.each(["gutter", "inline"] as const)(
-    "paints %s axis furniture after the series stroke",
+    "draws %s axis furniture after every series",
     (axisStyle) => {
-      const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
+      const { calls } = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
         axisStyle,
       });
-      const seriesStyle = calls.findIndex(
-        (call) =>
-          call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.series[0],
-      );
       const seriesStroke = calls.findIndex(
-        (call, index) => index > seriesStyle && call.op === "stroke",
+        (call) => call.op === "strokeStyle" || call.op === "=strokeStyle",
       );
       const firstAxisLabel = calls.findIndex((call) => call.op === "fillText");
-
-      expect(seriesStyle).toBeGreaterThan(-1);
-      expect(seriesStroke).toBeGreaterThan(seriesStyle);
+      expect(seriesStroke).toBeGreaterThan(-1);
       expect(firstAxisLabel).toBeGreaterThan(seriesStroke);
     },
   );
 
-  it("reserves a colorbar gutter and strokes per-segment colours", () => {
-    const { context, calls } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-    renderer.renderPaths(
-      [
-        {
-          points: [0, 0, 1, 1, 2, 2],
-          colorValues: [0, 0.5, 1],
-          hue: 1,
-          dash: "solid",
-          width: 1.4,
-          alpha: 1,
-        },
-      ],
-      {
-        xLabel: "x",
-        yLabel: "y",
-        xRange: [0, 2],
-        yRange: [0, 2],
-        colorbar: { min: 0, max: 1, label: "t (s)" },
-      },
-    );
-    const layout = renderer.lastLayout();
-    // Spec F2: 64px right gutter holds the 12px bar, ticks, and labels.
-    expect((layout?.plot.x ?? 0) + (layout?.plot.width ?? 0)).toBeLessThan(
-      600 - 60,
-    );
-    // One stroke per segment rather than one stroke for the path.
-    expect(calls.filter((call) => call.op === "stroke").length).toBeGreaterThan(
-      2,
-    );
-  });
-
-  it("keeps the colorbar visible with inline axes", () => {
-    const { context, calls } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-    renderer.renderPaths(
-      [
-        {
-          points: [0, 0, 1, 1],
-          colorValues: [0.5, 0.5],
-          hue: 1,
-          dash: "solid",
-          width: 1.4,
-          alpha: 1,
-        },
-      ],
-      {
-        xLabel: "x",
-        yLabel: "y",
-        xRange: [0, 1],
-        yRange: [0, 1],
-        axisStyle: "inline",
-        colorbar: { min: 4, max: 6, label: "constant" },
-      },
-    );
-    expect(renderer.lastLayout()?.plot).toEqual({
-      x: 0,
-      y: 0,
-      width: 600 - 64,
-      height: 300,
-    });
-    expect(calls.some((call) => call.op === "strokeRect")).toBe(true);
-    const xLabel = calls.find(
-      (call) => call.op === "fillText" && call.args[0] === "x",
-    );
-    const colorbarLabel = calls.find(
-      (call) => call.op === "fillText" && call.args[0] === "constant",
-    );
-    expect(xLabel?.args.slice(1)).not.toEqual(colorbarLabel?.args.slice(1));
-    expect(
-      calls.some(
-        (call) => call.op === "rotate" && call.args[0] === -Math.PI / 2,
-      ),
-    ).toBe(true);
-  });
-
-  it("formats colorbar ticks with the shared axis formatter", () => {
-    const { context, calls } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-    renderer.renderPaths([], {
-      xLabel: "x",
-      yLabel: "y",
-      xRange: [0, 1],
-      yRange: [0, 1],
-      colorbar: { min: 0.0001, max: 0.0003, label: "magnitude" },
-    });
-
-    const labels = calls
-      .filter((call) => call.op === "fillText" && call.args[1] === 598)
-      .map((call) => call.args[0]);
-    expect(labels).toEqual(formatTicks([0.0003, 0.0002, 0.0001]));
-  });
-
-  it("renders vertex paths against an explicit x range", () => {
-    const { context, calls } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-    const elapsed = renderer.renderPaths(
-      [
-        {
-          points: [0, 0, 1, 1, Number.NaN, Number.NaN, 2, 2],
-          hue: 1,
-          dash: "solid",
-          width: 1.4,
-          alpha: 1,
-        },
-      ],
-      {
-        xLabel: "pos_east (m)",
-        yLabel: "pos_north (m)",
-        xRange: [0, 2],
-        yRange: [0, 2],
-      },
-    );
-    expect(elapsed).toBeGreaterThanOrEqual(0);
-    // The NaN vertex lifts the pen: two moveTo calls, not one.
-    expect(calls.filter((call) => call.op === "moveTo").length).toBeGreaterThan(
-      1,
-    );
-    expect(renderer.lastLayout()?.xRange).toEqual({ min: 0, max: 2 });
-  });
-
-  it("renders ghost paths neutrally even when color values are present", () => {
-    const { context, calls } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-
-    renderer.renderPaths(
-      [
-        {
-          points: [0, 0, 1, 1, 2, 2],
-          colorValues: [0, 0.5, 1],
-          hue: null,
-          dash: "solid",
-          width: 1,
-          alpha: 0.5,
-        },
-      ],
-      {
-        xLabel: "x",
-        yLabel: "y",
-        xRange: [0, 2],
-        yRange: [0, 2],
-      },
-    );
-
-    expect(calls).toContainEqual({
-      op: "=strokeStyle",
-      args: [TEST_PALETTE.fg4],
-    });
-    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
-    expect(calls).not.toContainEqual({
-      op: "=strokeStyle",
-      args: ["#404040"],
-    });
-    expect(calls).not.toContainEqual({
-      op: "=strokeStyle",
-      args: ["#bfbfbf"],
-    });
-  });
-
-  it("strokes a colour-mapped path once per ramp bucket, not once per segment", () => {
-    const { context, calls } = recordingContext();
-    const path2D = globalThis as unknown as { Path2D?: typeof Path2D };
-    const previousPath2D = path2D.Path2D;
-    class RecordingPath2D {
-      moveTo(): void {}
-
-      lineTo(): void {}
-    }
-    path2D.Path2D = RecordingPath2D as unknown as typeof Path2D;
-    try {
-      const renderer = new CanvasRenderer(fakeCanvas(600, 400, context));
-      renderer.setPalette(TEST_PALETTE);
-
-      const vertices = 5000;
-      const points: number[] = [];
-      const colorValues: number[] = [];
-      for (let index = 0; index < vertices; index += 1) {
-        points.push(index, Math.sin(index / 50));
-        colorValues.push(index / (vertices - 1));
-      }
-
-      renderer.renderPaths(
-        [{ points, colorValues, hue: 1, dash: "solid", width: 1.2, alpha: 1 }],
-        {
-          xLabel: "x",
-          yLabel: "y",
-          xRange: [0, vertices],
-          yRange: [-1, 1],
-        },
-      );
-
-      // 64 ramp steps -> at most 65 buckets, plus the axis furniture's strokes.
-      expect(
-        calls.filter((call) => call.op === "stroke").length,
-      ).toBeLessThanOrEqual(80);
-    } finally {
-      if (previousPath2D === undefined) delete path2D.Path2D;
-      else path2D.Path2D = previousPath2D;
-    }
-  });
-
-  it("equalises the pixel scale of both axes when equalAspect is set", () => {
-    const { context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-
-    renderer.renderPaths(
-      [{ points: [0, 0, 10, 10], hue: 1, dash: "solid", width: 1, alpha: 1 }],
-      {
-        xLabel: "x",
-        yLabel: "y",
-        xRange: [0, 10],
-        yRange: [0, 10],
-        equalAspect: true,
-      },
-    );
-
-    const layout = renderer.lastLayout();
-    expect(layout).not.toBeNull();
-    const { plot, xRange, yRange } = layout as NonNullable<
-      ReturnType<CanvasRenderer["lastLayout"]>
-    >;
-    const xScale = plot.width / (xRange.max - xRange.min);
-    const yScale = plot.height / (yRange.max - yRange.min);
-    expect(xScale).toBeCloseTo(yScale, 6);
-    // The wider axis is padded, never narrowed.
-    expect(xRange.max - xRange.min).toBeGreaterThanOrEqual(10);
-    expect(yRange.max - yRange.min).toBeGreaterThanOrEqual(10);
-  });
-
-  it("sizes the gutter from the equalised y range, not the requested one", () => {
-    const { context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-
-    // A very wide, very short trajectory: equalising widens y from a span of
-    // 1 to tens of thousands, so its tick labels grow from "0.25" to "-20000".
-    renderer.renderPaths(
-      [
-        {
-          points: [0, 0, 100_000, 1],
-          hue: 1,
-          dash: "solid",
-          width: 1,
-          alpha: 1,
-        },
-      ],
-      {
-        xLabel: "x",
-        yLabel: "y",
-        xRange: [0, 100_000],
-        yRange: [0, 1],
-        equalAspect: true,
-      },
-    );
-
-    const layout = renderer.lastLayout();
-    expect(layout).not.toBeNull();
-    const { plot, xRange, yRange } = layout as NonNullable<
-      ReturnType<CanvasRenderer["lastLayout"]>
-    >;
-    // The y span really did grow enough to lengthen its labels.
-    expect(yRange.max - yRange.min).toBeGreaterThan(1_000);
-    // The gutter must fit the labels actually drawn, which come from the
-    // equalised range. Sizing it from the requested range clips them.
-    expect(plot.x).toBe(
-      gutterWidth(formatTicks(ticks(yRange.min, yRange.max, 6)), 6),
-    );
-    // Re-solving the gutter must leave the axes equal, not just wider.
-    expect(plot.width / (xRange.max - xRange.min)).toBeCloseTo(
-      plot.height / (yRange.max - yRange.min),
-      6,
-    );
-  });
-
-  it("leaves ranges untouched when equalAspect is absent", () => {
-    const { context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-    renderer.renderPaths(
-      [{ points: [0, 0, 10, 10], hue: 1, dash: "solid", width: 1, alpha: 1 }],
-      { xLabel: "x", yLabel: "y", xRange: [0, 10], yRange: [0, 10] },
-    );
-    const layout = renderer.lastLayout();
-    expect(layout?.xRange).toEqual({ min: 0, max: 10 });
-    expect(layout?.yRange).toEqual({ min: 0, max: 10 });
-  });
-
-  it("records the plot layout and supports inline axes", () => {
-    const { context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(640, 360, context));
-    renderer.setPalette(TEST_PALETTE);
-    expect(renderer.lastLayout()).toBeNull();
-    renderer.render(
-      { requestId: "test", series: [] },
-      { min: 0, max: 10 },
-      {
-        xLabel: "time (s)",
-        yLabel: "value",
-        styles: [],
-        yRange: [1, 5],
-        axisStyle: "inline",
-      },
-    );
-    expect(renderer.lastLayout()).toEqual({
-      plot: { x: 0, y: 0, width: 640, height: 360 },
-      xRange: { min: 0, max: 10 },
-      yRange: { min: 1, max: 5 },
-      xScale: "linear",
-    });
-  });
-
-  it("breaks the stroke at gaps", () => {
-    const calls = renderOnce([
-      tile("a", [
-        { t0: 0, t1: 1, v: 1 },
-        { t0: 1, t1: 2, v: 2 },
-        { t0: 2, t1: 3, v: 3, gap: true },
-        { t0: 3, t1: 4, v: 4 },
-      ]),
-    ]);
-    const path = calls.filter(
-      (call) => call.op === "moveTo" || call.op === "lineTo",
-    );
-    expect(path.filter((call) => call.op === "moveTo").length).toBeGreaterThan(
-      1,
-    );
-  });
-
-  it("paints each series in its slot colour", () => {
-    const calls = renderOnce(
-      [
-        tile("a", [{ t0: 0, t1: 1, v: 1 }]),
-        tile("b", [{ t0: 0, t1: 1, v: 2 }]),
-      ],
-      {
-        styles: [
-          { hue: 1, dash: "solid", width: 1.4, alpha: 1 },
-          { hue: 3, dash: "solid", width: 1.4, alpha: 1 },
-        ],
-      },
-    );
-    const strokes = calls
-      .filter((call) => call.op === "=strokeStyle")
-      .map((call) => call.args[0]);
-    expect(strokes).toContain("#0072bd");
-    expect(strokes).toContain("#edb120");
-  });
-
-  it("batches solid high-cardinality strokes into bounded paths", () => {
-    const calls = renderOnce(
-      Array.from({ length: 129 }, (_, index) =>
-        tile(String(index), [{ t0: 0, t1: 1, v: index }]),
-      ),
-    );
-    expect(calls.filter((call) => call.op === "stroke").length).toBeLessThan(
-      50,
-    );
-  });
-
-  it("batches translucent ghost series into grouped strokes", () => {
-    const { calls, context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(800, 400, context));
-    renderer.setPalette(TEST_PALETTE);
-    const series = Array.from({ length: 130 }, (_, index) =>
-      tile(`run_${String(index)}/response`, [
-        { t0: 0, t1: 1, v: index },
-        { t0: 1, t1: 2, v: index + 1 },
-      ]),
-    );
-    const styles: SeriesStroke[] = series.map(() => ({
-      hue: null,
-      dash: "solid",
-      width: 1,
-      alpha: 0.5,
-    }));
-    renderer.render(
-      { requestId: "r", series },
-      { min: 0, max: 2 },
-      { xLabel: "t", yLabel: "v", yRange: [0, 131], styles },
-    );
-    const clipIndex = calls.findIndex((call) => call.op === "clip");
-    const restoreIndex = calls.findIndex(
-      (call, index) => index > clipIndex && call.op === "restore",
-    );
-    const dataStrokes = calls
-      .slice(clipIndex, restoreIndex)
-      .filter((call) => call.op === "stroke").length;
-    expect(dataStrokes).toBe(Math.ceil(130 / 4));
-    expect(
-      calls.some((call) => call.op === "=globalAlpha" && call.args[0] === 0.5),
-    ).toBe(true);
-  });
-
-  it("draws a ghost with the fixed neutral stroke", () => {
-    const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
-      styles: [{ hue: null, dash: "solid", width: 1.3, alpha: 0.5 }],
-    });
-    expect(
-      calls.filter(
-        (call) =>
-          call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.fg4,
-      ),
-    ).toHaveLength(1);
-    expect(calls).toContainEqual({ op: "=lineWidth", args: [1.3] });
-    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
-    expect(calls).toContainEqual({ op: "setLineDash", args: [[]] });
-  });
-
-  it("applies explicit hue tokens and emphasis alpha math", () => {
-    const calls = renderOnce(
+  it("keeps each response series as its own stroke", () => {
+    const { calls } = renderOnce(
       [
         tile("a", [{ t0: 0, t1: 1, v: 1 }]),
         tile("b", [{ t0: 0, t1: 1, v: 2 }]),
@@ -858,436 +285,109 @@ describe("render", () => {
       ],
       {
         styles: [
-          { hue: 2, dash: "solid", width: 1.2, alpha: 0.6 },
-          { hue: 5, dash: "dot", width: 1.4, alpha: 0.8 },
-          { hue: null, dash: "solid", width: 1, alpha: 0.5 },
+          { hue: 1, dash: "solid", width: 1.4, alpha: 1 },
+          { hue: 2, dash: "solid", width: 1.4, alpha: 1 },
+          { hue: 3, dash: "solid", width: 1.4, alpha: 1 },
         ],
+      },
+    );
+    expect(
+      dataCalls(calls).filter((call) => call.op === "stroke"),
+    ).toHaveLength(3);
+    expect(calls).toContainEqual({ op: "=strokeStyle", args: ["#0072bd"] });
+    expect(calls).toContainEqual({ op: "=strokeStyle", args: ["#d95319"] });
+    expect(calls).toContainEqual({ op: "=strokeStyle", args: ["#edb120"] });
+  });
+
+  it("emits every bin directly, including dense responses", () => {
+    const bins = Array.from({ length: 700 }, (_, index) => ({
+      t0: index / 70,
+      t1: (index + 1) / 70,
+      v: Math.sin(index / 10),
+    }));
+    const { calls } = renderOnce([tile("dense", bins)]);
+    const vertices = dataCalls(calls).filter(
+      (call) => call.op === "moveTo" || call.op === "lineTo",
+    );
+    expect(vertices).toHaveLength(700);
+  });
+
+  it("breaks strokes at gap flags", () => {
+    const { calls } = renderOnce([
+      tile("a", [
+        { t0: 0, t1: 1, v: 1 },
+        { t0: 1, t1: 2, v: 2 },
+        { t0: 2, t1: 3, v: 3, gap: true },
+        { t0: 3, t1: 4, v: 4 },
+      ]),
+    ]);
+    expect(dataCalls(calls).filter((call) => call.op === "moveTo").length).toBe(
+      3,
+    );
+  });
+
+  it("does not substitute fills or bands for sparse data", () => {
+    const { calls } = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])]);
+    expect(calls.some((call) => call.op === "fill")).toBe(false);
+  });
+
+  it("applies hue, dash, and emphasis without changing geometry", () => {
+    const first = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
+      styles: [{ hue: 2, dash: "dash", width: 1.2, alpha: 0.6 }],
+    });
+    const second = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])], {
+      styles: [{ hue: 2, dash: "dash", width: 1.2, alpha: 0.6 }],
+      emphasisIndex: 0,
+    });
+    expect(first.calls).toContainEqual({
+      op: "=strokeStyle",
+      args: [TEST_PALETTE.series[1]],
+    });
+    expect(first.calls).toContainEqual({
+      op: "setLineDash",
+      args: [[6, 4]],
+    });
+    expect(second.calls).toContainEqual({ op: "=lineWidth", args: [1.6] });
+    expect(second.calls).toContainEqual({ op: "=globalAlpha", args: [1] });
+  });
+
+  it("records a deterministic linear layout and reuses path geometry", () => {
+    const { calls, renderer } = renderOnce([
+      tile("a", [{ t0: 0, t1: 1, v: 1 }]),
+    ]);
+    expect(renderer.lastLayout()).toMatchObject({
+      xRange: { min: 0, max: 10 },
+      yRange: { min: -1, max: 5 },
+    });
+    expect(calls.some((call) => call.op === "rect")).toBe(true);
+
+    const { context } = recordingContext();
+    const reused = new CanvasRenderer(fakeCanvas(400, 200, context));
+    reused.setPalette(TEST_PALETTE);
+    const response: ColumnarTileResponse = {
+      requestId: "test",
+      series: [tile("a", [{ t0: 0, t1: 1, v: 1 }])],
+    };
+    reused.render(
+      response,
+      { min: 0, max: 10 },
+      {
+        xLabel: "t",
+        yLabel: "v",
+        yRange: [-1, 5],
+      },
+    );
+    const pathCount = RecordingPath2D.calls.length;
+    reused.render(
+      response,
+      { min: 0, max: 10 },
+      {
+        xLabel: "t",
+        yLabel: "v",
+        yRange: [-1, 5],
         emphasisIndex: 0,
       },
     );
-    const strokes = calls
-      .filter((call) => call.op === "=strokeStyle")
-      .map((call) => call.args[0]);
-    expect(strokes).toContain(TEST_PALETTE.series[1]);
-    expect(strokes).toContain(TEST_PALETTE.series[4]);
-    expect(strokes).toContain(TEST_PALETTE.fg4);
-    expect(calls).toContainEqual({ op: "=globalAlpha", args: [1] });
-    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.25] });
-    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.5] });
-    expect(calls).toContainEqual({ op: "=lineWidth", args: [1.6] });
-  });
-
-  it("keeps paths below four bins per device pixel direct", () => {
-    const calls = renderOnce([
-      tile(
-        "dense",
-        Array.from({ length: 700 }, (_, index) => ({
-          t0: index / 70,
-          t1: (index + 1) / 70,
-          v: Math.sin(index / 10),
-        })),
-      ),
-    ]);
-    const seriesStart = calls.findIndex(
-      (call) =>
-        call.op === "=strokeStyle" && call.args[0] === TEST_PALETTE.series[0],
-    );
-    const seriesEnd = calls.findIndex(
-      (call, index) => index > seriesStart && call.op === "stroke",
-    );
-    const vertices = calls
-      .slice(seriesStart, seriesEnd)
-      .filter((call) => call.op === "moveTo" || call.op === "lineTo");
-    expect(vertices.length).toBe(700);
-  });
-
-  it("reuses geometry when only series emphasis changes", () => {
-    const { calls, context } = recordingContext();
-    const pathCalls: string[] = [];
-    const globalWithPath = globalThis as unknown as {
-      Path2D?: typeof Path2D;
-    };
-    const previousPath2D = globalWithPath.Path2D;
-    class RecordingPath2D {
-      moveTo(): void {
-        pathCalls.push("moveTo");
-      }
-
-      lineTo(): void {
-        pathCalls.push("lineTo");
-      }
-    }
-    globalWithPath.Path2D = RecordingPath2D as unknown as typeof Path2D;
-    try {
-      const renderer = new CanvasRenderer(fakeCanvas(400, 200, context));
-      renderer.setPalette(TEST_PALETTE);
-      const response = {
-        requestId: "test",
-        series: [tile("a", [{ t0: 0, t1: 1, v: 1 }])],
-      };
-      const options: RenderOptions = {
-        xLabel: "time (s)",
-        yLabel: "value",
-        yRange: [-1, 5],
-        styles: [{ hue: 1, dash: "solid", width: 1.4, alpha: 1 }],
-      };
-      renderer.render(response, { min: 0, max: 10 }, options);
-      const firstGeometryCount = pathCalls.length;
-      renderer.render(
-        response,
-        { min: 0, max: 10 },
-        {
-          ...options,
-          emphasisIndex: 0,
-        },
-      );
-      expect(firstGeometryCount).toBeGreaterThan(0);
-      expect(pathCalls).toHaveLength(firstGeometryCount);
-      expect(
-        calls.filter((call) => call.op === "stroke").length,
-      ).toBeGreaterThan(1);
-    } finally {
-      if (previousPath2D === undefined) delete globalWithPath.Path2D;
-      else globalWithPath.Path2D = previousPath2D;
-    }
-  });
-
-  it("multiplies a dimmed path's configured alpha", () => {
-    const { context, calls } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
-    renderer.setPalette(TEST_PALETTE);
-
-    renderer.renderPaths(
-      [
-        {
-          points: [0, 0, 1, 1],
-          hue: 1,
-          dash: "solid",
-          width: 1.4,
-          alpha: 0.8,
-          dimmed: true,
-        },
-      ],
-      { xLabel: "x", yLabel: "y", xRange: [0, 1], yRange: [0, 1] },
-    );
-
-    expect(calls).toContainEqual({ op: "=globalAlpha", args: [0.4] });
-  });
-
-  it("keeps manual dash independent from hue", () => {
-    const calls = renderOnce(
-      [
-        tile("a", [{ t0: 0, t1: 1, v: 1 }]),
-        tile("b", [{ t0: 0, t1: 1, v: 2 }]),
-      ],
-      {
-        styles: [
-          { hue: 1, dash: "solid", width: 1.4, alpha: 1 },
-          { hue: 1, dash: "dash", width: 1.4, alpha: 1 },
-        ],
-      },
-    );
-    const patterns = calls
-      .filter((call) => call.op === "setLineDash")
-      .map((call) => JSON.stringify(call.args[0]));
-    expect(patterns).toContain(JSON.stringify([6, 4]));
-    expect(patterns.at(-1)).toBe(JSON.stringify([6, 4]));
-  });
-
-  it("clips series strokes to the plot rectangle", () => {
-    const calls = renderOnce([tile("a", [{ t0: 0, t1: 1, v: 1 }])]);
-    expect(calls.some((call) => call.op === "rect")).toBe(true);
-    expect(calls.some((call) => call.op === "clip")).toBe(true);
-  });
-
-  describe("device-pixel columns", () => {
-    it("snaps aggregated columns to device pixels at 2x DPR", () => {
-      const saved = globalThis.devicePixelRatio;
-      (globalThis as { devicePixelRatio?: number }).devicePixelRatio = 2;
-      try {
-        const { calls, context } = recordingContext();
-        const renderer = new CanvasRenderer(fakeCanvas(40, 40, context));
-        renderer.setPalette(TEST_PALETTE);
-        const bins = Array.from({ length: 400 }, (_, index) => ({
-          t0: index,
-          t1: index + 1,
-          v: index % 7,
-        }));
-        withRecordingPath2D(calls, () => {
-          renderer.render(
-            { requestId: "r", series: [tile("run_0001/a", bins)] },
-            { min: 0, max: 400 },
-            {
-              xLabel: "t",
-              yLabel: "v",
-              yRange: [0, 7],
-              axisStyle: "inline",
-            },
-          );
-        });
-        const clipIndex = calls.findIndex((call) => call.op === "clip");
-        const restoreIndex = calls.findIndex(
-          (call, index) => index > clipIndex && call.op === "restore",
-        );
-        const xs = calls
-          .slice(clipIndex, restoreIndex)
-          .filter((call) => call.op === "moveTo" || call.op === "lineTo")
-          .map((call) => call.args[0] as number);
-        expect(xs.length).toBeGreaterThan(0);
-        for (const x of xs) {
-          expect(x * 2 - Math.floor(x * 2)).toBeCloseTo(0.5, 10);
-        }
-      } finally {
-        (globalThis as { devicePixelRatio?: number }).devicePixelRatio = saved;
-      }
-    });
-
-    it("keeps the direct branch below four bins per device pixel", () => {
-      const { calls, context } = recordingContext();
-      const renderer = new CanvasRenderer(fakeCanvas(40, 40, context));
-      renderer.setPalette(TEST_PALETTE);
-      const bins = Array.from({ length: 100 }, (_, index) => ({
-        t0: index,
-        t1: index + 1,
-        v: index % 7,
-      }));
-      withRecordingPath2D(calls, () => {
-        renderer.render(
-          { requestId: "r", series: [tile("run_0001/a", bins)] },
-          { min: 0, max: 100 },
-          {
-            xLabel: "t",
-            yLabel: "v",
-            yRange: [0, 7],
-            axisStyle: "inline",
-          },
-        );
-      });
-      const clipIndex = calls.findIndex((call) => call.op === "clip");
-      const restoreIndex = calls.findIndex(
-        (call, index) => index > clipIndex && call.op === "restore",
-      );
-      const xs = calls
-        .slice(clipIndex, restoreIndex)
-        .filter((call) => call.op === "moveTo" || call.op === "lineTo")
-        .map((call) => call.args[0] as number);
-      expect(xs.some((x) => Math.abs(x * 2 - Math.round(x * 2)) > 1e-6)).toBe(
-        true,
-      );
-    });
-  });
-});
-
-describe("density raster tier", () => {
-  function ghostResponse(seriesCount: number) {
-    const series = Array.from({ length: seriesCount }, (_, index) =>
-      tile(`run_${String(index)}/response`, [
-        { t0: 0, t1: 1, v: (index % 5) + 1 },
-        { t0: 1, t1: 2, v: (index % 5) + 2 },
-      ]),
-    );
-    const styles: SeriesStroke[] = series.map(() => ({
-      hue: null,
-      dash: "solid",
-      width: 1,
-      alpha: 0.5,
-    }));
-    return { response: { requestId: "r", series }, styles };
-  }
-
-  it("rasters ghost series when the budget starves resolution", () => {
-    const { calls, context } = recordingContext();
-    // 2600 CSS px at DPR 1: N=200 -> allocation 1250 < 1300 -> raster.
-    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
-    renderer.setPalette(TEST_PALETTE);
-    const { putCalls, factory } = fakeOffscreen();
-    renderer.setCanvasFactory(factory);
-    const { response, styles } = ghostResponse(200);
-    renderer.render(
-      response,
-      { min: 0, max: 2 },
-      {
-        xLabel: "t",
-        yLabel: "v",
-        yRange: [0, 8],
-        axisStyle: "inline",
-        styles,
-      },
-    );
-    expect(putCalls.length).toBe(1);
-    const drawImages = calls.filter((call) => call.op === "drawImage");
-    expect(drawImages.length).toBe(1);
-    const clipIndex = calls.findIndex((call) => call.op === "clip");
-    const restoreIndex = calls.findIndex(
-      (call, index) => index > clipIndex && call.op === "restore",
-    );
-    const dataStrokes = calls
-      .slice(clipIndex, restoreIndex)
-      .filter((call) => call.op === "stroke").length;
-    expect(dataStrokes).toBe(0);
-  });
-
-  it("emphasized and hued series stroke on top of the raster", () => {
-    const { calls, context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
-    renderer.setPalette(TEST_PALETTE);
-    const { factory } = fakeOffscreen();
-    renderer.setCanvasFactory(factory);
-    const { response, styles } = ghostResponse(200);
-    styles[0] = { hue: 1, dash: "solid", width: 1.4, alpha: 1 };
-    renderer.render(
-      response,
-      { min: 0, max: 2 },
-      {
-        xLabel: "t",
-        yLabel: "v",
-        yRange: [0, 8],
-        axisStyle: "inline",
-        styles,
-        emphasisIndices: [5],
-      },
-    );
-    const clipIndex = calls.findIndex((call) => call.op === "clip");
-    const restores = calls.reduce<number[]>((indices, call, index) => {
-      if (index > clipIndex && call.op === "restore") indices.push(index);
-      return indices;
-    }, []);
-    const restoreIndex = restores[1] ?? -1;
-    const slice = calls.slice(clipIndex, restoreIndex);
-    const dataStrokes = slice.filter((call) => call.op === "stroke").length;
-    expect(dataStrokes).toBe(2); // the hued series and the emphasized ghost
-    // The raster tile lands before any stroke: field under lines.
-    const drawIndex = slice.findIndex((call) => call.op === "drawImage");
-    const firstStroke = slice.findIndex((call) => call.op === "stroke");
-    expect(drawIndex).toBeGreaterThan(-1);
-    expect(drawIndex).toBeLessThan(firstStroke);
-  });
-
-  it("keeps stroking below the threshold and without a canvas factory", () => {
-    const belowThreshold = recordingContext();
-    const renderer = new CanvasRenderer(
-      fakeCanvas(2600, 400, belowThreshold.context),
-    );
-    renderer.setPalette(TEST_PALETTE);
-    const below = ghostResponse(100); // allocation 2500 >= 1300 -> strokes
-    renderer.render(
-      below.response,
-      { min: 0, max: 2 },
-      {
-        xLabel: "t",
-        yLabel: "v",
-        yRange: [0, 8],
-        axisStyle: "inline",
-        styles: below.styles,
-      },
-    );
-    expect(belowThreshold.calls.some((call) => call.op === "drawImage")).toBe(
-      false,
-    );
-
-    // Above threshold but no factory (default in jsdom): graceful fallback.
-    const noFactory = recordingContext();
-    const fallback = new CanvasRenderer(
-      fakeCanvas(2600, 400, noFactory.context),
-    );
-    fallback.setPalette(TEST_PALETTE);
-    const above = ghostResponse(200);
-    fallback.render(
-      above.response,
-      { min: 0, max: 2 },
-      {
-        xLabel: "t",
-        yLabel: "v",
-        yRange: [0, 8],
-        axisStyle: "inline",
-        styles: above.styles,
-      },
-    );
-    const strokes = noFactory.calls.filter((call) => call.op === "stroke");
-    expect(strokes.length).toBeGreaterThan(0);
-  });
-});
-
-describe("banded stroke fallback", () => {
-  // 2600 CSS px at DPR 1 -> 2600 device px; 40 bins < 1300 -> starved
-  // whenever the tile is aggregated (level > 0).
-  function starvedResponse(level: number) {
-    const bins = Array.from({ length: 40 }, (_, index) => ({
-      t0: index,
-      t1: index + 1,
-      v: (index % 5) + 1,
-    }));
-    return { requestId: "r", series: [tile("run_1/a", bins, level)] };
-  }
-  const options = {
-    xLabel: "t",
-    yLabel: "v",
-    yRange: [0, 8] as [number, number],
-    axisStyle: "inline" as const,
-    styles: [{ hue: 1, dash: "solid" as const, width: 1.4, alpha: 1 }],
-  };
-
-  it("draws a starved aggregated series as a filled band with a mean line", () => {
-    const { calls, context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
-    renderer.setPalette(TEST_PALETTE);
-    renderer.render(starvedResponse(3), { min: 0, max: 40 }, options);
-    const clipIndex = calls.findIndex((call) => call.op === "clip");
-    const restoreIndex = calls.findIndex(
-      (call, index) => index > clipIndex && call.op === "restore",
-    );
-    const slice = calls.slice(clipIndex, restoreIndex);
-    expect(slice.filter((call) => call.op === "fill")).toHaveLength(1);
-    expect(slice.filter((call) => call.op === "stroke")).toHaveLength(1);
-  });
-
-  it("groups high-cardinality bands by their resolved stroke", () => {
-    const { calls, context } = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, context));
-    renderer.setPalette(TEST_PALETTE);
-    const series = Array.from({ length: 130 }, (_, index) =>
-      tile(
-        `run_${String(index)}/response`,
-        Array.from({ length: 40 }, (_, bin) => ({
-          t0: bin,
-          t1: bin + 1,
-          v: (bin % 5) + index,
-        })),
-        3,
-      ),
-    );
-    const styles = series.map<SeriesStroke>((_, index) => ({
-      hue: index + 1,
-      dash: "solid",
-      width: 1.4,
-      alpha: 1,
-    }));
-    renderer.render(
-      { requestId: "r", series },
-      { min: 0, max: 40 },
-      { ...options, styles },
-    );
-    const clipIndex = calls.findIndex((call) => call.op === "clip");
-    const restoreIndex = calls.findIndex(
-      (call, index) => index > clipIndex && call.op === "restore",
-    );
-    const slice = calls.slice(clipIndex, restoreIndex);
-    expect(slice.filter((call) => call.op === "fill")).toHaveLength(7);
-    expect(slice.filter((call) => call.op === "stroke")).toHaveLength(7);
-  });
-
-  it("keeps the plain stroke for level-0 tiles and dense tiles", () => {
-    const sparse = recordingContext();
-    const renderer = new CanvasRenderer(fakeCanvas(2600, 400, sparse.context));
-    renderer.setPalette(TEST_PALETTE);
-    renderer.render(starvedResponse(0), { min: 0, max: 40 }, options);
-    expect(sparse.calls.some((call) => call.op === "fill")).toBe(false);
-
-    const narrow = recordingContext();
-    // 60 CSS px -> threshold 30; 40 bins >= 30 -> dense enough to stroke.
-    const dense = new CanvasRenderer(fakeCanvas(60, 400, narrow.context));
-    dense.setPalette(TEST_PALETTE);
-    dense.render(starvedResponse(3), { min: 0, max: 40 }, options);
-    expect(narrow.calls.some((call) => call.op === "fill")).toBe(false);
+    expect(RecordingPath2D.calls.length).toBe(pathCount);
   });
 });

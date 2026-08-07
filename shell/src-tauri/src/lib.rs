@@ -887,7 +887,7 @@ async fn query_tiles_bin(
             let query = pyramid.query_with_target(
                 request.window.t0,
                 request.window.t1,
-                request.pixel_width,
+                per_series_target(request.pixel_width),
                 None,
             );
             owned.push((
@@ -910,6 +910,10 @@ async fn query_tiles_bin(
     .await
     .map_err(|error| error.to_string())??;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+fn per_series_target(pixel_width: u32) -> u32 {
+    pixel_width.max(1)
 }
 
 #[tauri::command]
@@ -1956,6 +1960,12 @@ kind = "index"
 dt = 1.0
 t0 = 0.0
 "#;
+
+    #[test]
+    fn tile_target_does_not_shrink_with_series_count() {
+        assert_eq!(per_series_target(1_920), 1_920);
+        assert_eq!(per_series_target(0), 1);
+    }
 
     #[cfg(unix)]
     #[test]

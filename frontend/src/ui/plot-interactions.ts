@@ -12,11 +12,9 @@ import {
   invertX,
   invertY,
   panRange,
-  panScaledRange,
   wheelZoomFactor,
   zoomDragMode,
   zoomRange,
-  zoomScaledRange,
   type PlotLayout,
   type Range,
 } from "../app/plot-math";
@@ -99,12 +97,7 @@ export class PlotInteractionController {
               layout.plot.x + layout.plot.width,
             ),
           );
-          const nextX = zoomScaledRange(
-            layout.xRange,
-            factor,
-            pivotX,
-            layout.xScale,
-          );
+          const nextX = zoomRange(layout.xRange, factor, pivotX);
           this.host.applyXRange(nextX.min, nextX.max);
         }
       },
@@ -151,10 +144,9 @@ export class PlotInteractionController {
   ): void {
     const axes = panAxes(policy);
     if (axes.x) {
-      const nextX = panScaledRange(
+      const nextX = panRange(
         ranges.x,
-        (from.x - to.x) / layout.plot.width,
-        layout.xScale,
+        ((from.x - to.x) / layout.plot.width) * (ranges.x.max - ranges.x.min),
       );
       this.host.applyXRange(nextX.min, nextX.max);
     }

@@ -12,21 +12,10 @@ export interface PlotRect {
   height: number;
 }
 
-export type AxisScale = "linear" | "log";
-
 export interface PlotLayout {
   plot: PlotRect;
   xRange: Range;
   yRange: Range;
-  /** Absent means linear. Log axes clamp non-positive values to the floor. */
-  xScale?: AxisScale;
-}
-
-/** Positive floor used so a log axis can survive a zero or negative bound. */
-const LOG_FLOOR = 1e-12;
-
-function logSpace(value: number): number {
-  return Math.log10(Math.max(LOG_FLOOR, value));
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -53,11 +42,6 @@ export function paddedExtent(
 
 export function projectX(layout: PlotLayout, value: number): number {
   const { plot, xRange } = layout;
-  if (layout.xScale === "log") {
-    const min = logSpace(xRange.min);
-    const max = logSpace(xRange.max);
-    return plot.x + ((logSpace(value) - min) / (max - min)) * plot.width;
-  }
   return (
     plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width
   );
@@ -74,25 +58,7 @@ export function projectY(layout: PlotLayout, value: number): number {
 
 export function invertX(layout: PlotLayout, px: number): number {
   const { plot, xRange } = layout;
-  if (layout.xScale === "log") {
-    const min = logSpace(xRange.min);
-    const max = logSpace(xRange.max);
-    return 10 ** (min + ((px - plot.x) / plot.width) * (max - min));
-  }
   return xRange.min + ((px - plot.x) / plot.width) * (xRange.max - xRange.min);
-}
-
-/** Decade ticks covering `[min, max]`, empty when the range is unusable. */
-export function logTicks(min: number, max: number): number[] {
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= 0) return [];
-  const low = Math.floor(Math.log10(Math.max(LOG_FLOOR, min)));
-  const high = Math.ceil(Math.log10(max));
-  const values: number[] = [];
-  for (let exponent = low; exponent <= high; exponent += 1) {
-    const value = 10 ** exponent;
-    if (value >= min * 0.999 && value <= max * 1.001) values.push(value);
-  }
-  return values;
 }
 
 export function invertY(layout: PlotLayout, py: number): number {
@@ -135,38 +101,7 @@ export function panRange(range: Range, delta: number): Range {
   return { min: range.min + delta, max: range.max + delta };
 }
 
-/** Zooms an axis in its authored coordinate system (linear or log10). */
-export function zoomScaledRange(
-  range: Range,
-  factor: number,
-  pivot: number,
-  scale: AxisScale = "linear",
-): Range {
-  if (scale !== "log") return zoomRange(range, factor, pivot);
-  const next = zoomRange(
-    { min: logSpace(range.min), max: logSpace(range.max) },
-    factor,
-    logSpace(pivot),
-  );
-  return { min: 10 ** next.min, max: 10 ** next.max };
-}
-
-/** Pans by a fraction of the displayed span, preserving log positivity. */
-export function panScaledRange(
-  range: Range,
-  fraction: number,
-  scale: AxisScale = "linear",
-): Range {
-  if (scale !== "log") {
-    return panRange(range, fraction * (range.max - range.min));
-  }
-  const logarithmic = { min: logSpace(range.min), max: logSpace(range.max) };
-  const delta = fraction * (logarithmic.max - logarithmic.min);
-  const next = panRange(logarithmic, delta);
-  return { min: 10 ** next.min, max: 10 ** next.max };
-}
-
-export type ZoomDragMode = "x" | "y" | "xy";
+export type ZoomDragMode = "x" | "y" | "both";
 
 /** Axis-only for thin/extreme drags; ordinary rectangles retain box zoom. */
 export function zoomDragMode(deltaX: number, deltaY: number): ZoomDragMode {
@@ -176,7 +111,7 @@ export function zoomDragMode(deltaX: number, deltaY: number): ZoomDragMode {
   if (height <= 8 && width > 8) return "x";
   if (width >= height * 3) return "x";
   if (height >= width * 3) return "y";
-  return "xy";
+  return "both";
 }
 
 export function valueAtTime(

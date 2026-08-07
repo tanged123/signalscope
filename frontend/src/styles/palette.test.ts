@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { SEQ_TOKENS } from "../app/colormap";
 import { COLOR_SLOTS, SERIES_TOKENS } from "../render/canvas-renderer";
 
 const TOKENS = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
@@ -172,40 +171,4 @@ it("keeps a bundled fallback for mono control glyphs", () => {
   expect(TOKENS).toMatch(
     /--font-mono:\s*JetBrains Mono,\s*"DejaVu Sans",\s*ui-monospace/,
   );
-});
-
-describe("sequential colormap", () => {
-  const stops = SEQ_TOKENS.map((name) => token(":root", name));
-
-  it("declares every stop exactly once, in the default theme only", () => {
-    expect(stops).toHaveLength(16);
-    for (const stop of stops) expect(stop).toMatch(/^#[0-9a-f]{6}$/);
-    // Theme-invariant per ADR 0016: no light-mode override exists.
-    const light = TOKENS.slice(TOKENS.indexOf('[data-theme="light"]'));
-    expect(light).not.toContain("--seq-");
-  });
-
-  it("rises monotonically in lightness", () => {
-    const lightness = stops.map((stop) => toOklab(toLinear(stop))[0]);
-    for (let index = 1; index < lightness.length; index += 1) {
-      expect(lightness[index] ?? 0).toBeGreaterThan(lightness[index - 1] ?? 0);
-    }
-  });
-
-  it("stays monotone under protan and deutan simulation", () => {
-    for (const kind of ["protan", "deutan"] as const) {
-      const lightness = stops.map((stop) => toOklab(simulate(stop, kind))[0]);
-      for (let index = 1; index < lightness.length; index += 1) {
-        expect(lightness[index] ?? 0).toBeGreaterThan(
-          lightness[index - 1] ?? 0,
-        );
-      }
-    }
-  });
-
-  it("spans enough lightness to survive greyscale printing", () => {
-    const lightness = stops.map((stop) => toOklab(toLinear(stop))[0]);
-    const span = (lightness[15] ?? 0) - (lightness[0] ?? 0);
-    expect(span).toBeGreaterThan(0.5);
-  });
 });

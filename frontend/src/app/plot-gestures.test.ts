@@ -78,11 +78,13 @@ describe("gesture policy", () => {
       x: false,
       y: true,
     });
-    expect(boxZoomAxes(policy({ zoom: new Set(["box", "y"]) }), "xy")).toEqual({
+    expect(
+      boxZoomAxes(policy({ zoom: new Set(["box", "y"]) }), "both"),
+    ).toEqual({
       x: false,
       y: true,
     });
-    expect(boxZoomAxes(policy({ zoom: new Set(["x", "y"]) }), "xy")).toEqual({
+    expect(boxZoomAxes(policy({ zoom: new Set(["x", "y"]) }), "both")).toEqual({
       x: false,
       y: false,
     });

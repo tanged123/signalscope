@@ -61,7 +61,6 @@ test("draws the cursor and rubber band with interaction amber", () => {
     cursorT: 30,
     cursorMode: "measure",
     cursorPoints: [],
-    xyMarkers: [],
     box: { x0: 100, y0: 50, x1: 200, y1: 150 },
     annotations: [],
     delta: null,
@@ -75,7 +74,6 @@ test("draws the cursor and rubber band with interaction amber", () => {
     cursorT: 30,
     cursorMode: "track",
     cursorPoints: [{ value: 25, colorIndex: 0, alpha: 1 }],
-    xyMarkers: [],
     box: null,
     annotations: [],
     delta: null,
@@ -88,62 +86,12 @@ test("draws the cursor and rubber band with interaction amber", () => {
     cursorT: 30,
     cursorMode: "track",
     cursorPoints: [{ value: 25, colorIndex: null, alpha: 0.5 }],
-    xyMarkers: [],
     box: null,
     annotations: [],
     delta: null,
   });
   expect(calls).toContain(`strokeStyle:${palette.fg4}`);
   expect(calls).toContain("globalAlpha:0.5");
-});
-
-test("draws XY cursor markers as hollow amber rings", () => {
-  const calls: string[] = [];
-  const context = new Proxy(
-    {
-      measureText: (text: string) => ({ width: text.length * 6 }),
-    },
-    {
-      get(target, property) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-        if (property in target) return Reflect.get(target, property);
-        return (...args: unknown[]) => {
-          void args;
-          calls.push(String(property));
-        };
-      },
-      set(_target, property, value) {
-        calls.push(`${String(property)}:${String(value)}`);
-        return true;
-      },
-    },
-  ) as unknown as CanvasRenderingContext2D;
-  const canvas = {
-    clientWidth: 640,
-    clientHeight: 360,
-    width: 0,
-    height: 0,
-    getContext: () => context,
-  } as unknown as HTMLCanvasElement;
-  const layout: PlotLayout = {
-    plot: { x: 52, y: 8, width: 500, height: 300 },
-    xRange: { min: 0, max: 60 },
-    yRange: { min: -200, max: 200 },
-  };
-  const renderer = new OverlayRenderer(canvas);
-  renderer.setPalette(palette);
-  renderer.draw(layout, {
-    cursorT: null,
-    cursorMode: "track",
-    cursorPoints: [],
-    xyMarkers: [{ x: 30, y: 0 }],
-    box: null,
-    annotations: [],
-    delta: null,
-  });
-  expect(calls).toContain("arc");
-  expect(calls).toContain("lineTo");
-  expect(calls).toContain("strokeStyle:#ffa226");
 });
 
 test("places annotations at supplied plot points when given them", () => {
@@ -184,7 +132,6 @@ test("places annotations at supplied plot points when given them", () => {
     cursorT: null,
     cursorMode: "none",
     cursorPoints: [],
-    xyMarkers: [],
     box: null,
     annotations: [
       {
@@ -207,15 +154,14 @@ test("places annotations at supplied plot points when given them", () => {
       },
     ],
     delta: {
-      label: "Δx 30.0000 · Δy 50.0000 · Δc 4.0000",
+      label: "Δt 30.0000 · Δy 50.0000",
       first: { x: 10, y: 100 },
       second: { x: 40, y: 150 },
     },
   };
   renderer.draw(layout, state);
   expect(calls.filter((call) => call.startsWith("arc:"))).toHaveLength(2);
-  expect(calls.join(" ")).toContain("Δx");
-  expect(calls.join(" ")).toContain("Δc 4.0000");
+  expect(calls.join(" ")).toContain("Δt");
 });
 
 test("clips overlay furniture and keeps edge labels inside the plot", () => {
@@ -258,7 +204,6 @@ test("clips overlay furniture and keeps edge labels inside the plot", () => {
     cursorT: null,
     cursorMode: "none",
     cursorPoints: [],
-    xyMarkers: [],
     box: { x0: 20, y0: -10, x1: 700, y1: 400 },
     annotations: [
       {
@@ -336,7 +281,6 @@ test("truncates badge text that cannot fit the plot and keeps plates inside", ()
     cursorT: null,
     cursorMode: "none",
     cursorPoints: [],
-    xyMarkers: [],
     box: null,
     annotations: [
       {
@@ -347,7 +291,7 @@ test("truncates badge text that cannot fit the plot and keeps plates inside", ()
       },
     ],
     delta: {
-      label: "Δx 30.0000 · Δy 50.0000 · Δc 4.0000",
+      label: "Δt 30.0000 · Δy 50.0000",
       first: { x: 10, y: 100 },
       second: { x: 40, y: 150 },
     },

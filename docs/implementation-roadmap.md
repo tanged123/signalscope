@@ -6,7 +6,9 @@ Complete native file dialogs, persisted pyramid sidecars, progress reporting, MC
 
 ## Phase 2 — scientific interaction
 
-Finish linked desktop and touch gestures, gutter/inline axes, editable labels, split legend inspector, visible statistics, annotations and delta readouts, XY drop strip, color channel and colorbar, FFT, and histogram modes.
+Finish linked desktop gestures, gutter/inline axes, editable labels, split
+legend inspector, visible statistics, annotations, delta readouts, and
+time-series styling.
 
 ## Phase 3 — transforms and durable sessions
 
@@ -139,7 +141,6 @@ XY, FFT, and histogram plotting were removed by
 [ADR 0039](adr/0039-time-series-webgpu-renderer.md) while the time-series
 Canvas2D oracle remains in place for the WebGPU renderer phases.
 
-Two design gaps were closed by decision rather than extraction and should be
-reviewed against any future design pass: histogram mode has no specification
-at all, and the FFT panel has only a pixel reference. The prototype's `1:1`
-equal-axis control was dropped for want of a home in the final chrome.
+Non-time plotting and the density-tier renderer were removed by
+[ADR 0039](adr/0039-time-series-webgpu-renderer.md); the four-phase WebGPU
+sequence above is now the renderer roadmap.

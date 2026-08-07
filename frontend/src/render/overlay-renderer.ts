@@ -37,16 +37,14 @@ interface OverlayAnnotation {
 
 export interface OverlayDelta {
   label: string;
-  first: XyMarker;
-  second: XyMarker;
+  first: PlotMarker;
+  second: PlotMarker;
 }
 
 export interface OverlayState {
   cursorT: number | null;
   cursorMode: CursorMode;
   cursorPoints: readonly CursorPoint[];
-  /** Data-space trajectory points marked by the global cursor (XY mode). */
-  xyMarkers: readonly XyMarker[];
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   /** Mode-resolved plot coordinates and readouts. */
   annotations: readonly OverlayAnnotation[];
@@ -61,10 +59,9 @@ export interface CursorPoint {
   alpha: number;
 }
 
-export interface XyMarker {
+export interface PlotMarker {
   x: number;
   y: number;
-  ghost?: boolean;
 }
 
 export class OverlayRenderer {
@@ -97,47 +94,16 @@ export class OverlayRenderer {
       layout.plot.height,
     );
     context.clip();
-    const cursorX =
-      state.cursorT ??
-      (state.cursorMode !== "none" ? (state.xyMarkers[0]?.x ?? null) : null);
     this.drawCursor(
       context,
       layout,
-      cursorX,
+      state.cursorT,
       state.cursorMode,
       state.cursorPoints,
       palette,
     );
-    this.drawXyMarkers(context, layout, state.xyMarkers, palette);
     this.drawAnnotations(context, layout, state, palette);
     if (state.box !== null) this.drawBox(context, layout, state.box, palette);
-    context.restore();
-  }
-
-  private drawXyMarkers(
-    context: CanvasRenderingContext2D,
-    layout: PlotLayout,
-    markers: readonly XyMarker[],
-    palette: OverlayPalette,
-  ): void {
-    if (markers.length === 0) return;
-    context.save();
-    // Spec F2: r=4, surface fill, 1.6px amber stroke. Amber because the
-    // marker is the cursor, not a series.
-    context.lineWidth = 1.6;
-    context.setLineDash([]);
-    context.fillStyle = palette.surface0;
-    for (const marker of markers) {
-      const x = projectX(layout, marker.x);
-      const y = projectY(layout, marker.y);
-      if (!insidePlot(layout, x, y)) continue;
-      context.globalAlpha = marker.ghost === true ? 0.5 : 1;
-      context.strokeStyle = marker.ghost === true ? palette.fg4 : palette.amber;
-      context.beginPath();
-      context.arc(x, y, 4, 0, Math.PI * 2);
-      context.fill();
-      context.stroke();
-    }
     context.restore();
   }
 

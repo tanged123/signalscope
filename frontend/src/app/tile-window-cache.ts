@@ -20,7 +20,7 @@ export class TileWindowCache {
 
   /**
    * The `pixel_width` a padded request must ask for so the visible slice
-   * still carries the density the panel asked for. `padWindow` widens the
+   * still carries the resolution the panel asked for. `padWindow` widens the
    * request 2x-4x; without this correction the sliced response renders at a
    * quarter to a half of pixel resolution and the trace reads as a staircase.
    */

@@ -573,13 +573,12 @@ fn bench_tile_wire_cost() {
     assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
 
     let pyramids = sink.pyramids.lock().unwrap();
-    let per_series = 250_000_u32 / 1000;
     let queried: Vec<(String, u32, BinLevel)> = pyramids
         .iter()
         .filter(|((_, local_path), _)| local_path == "response")
         .enumerate()
         .map(|(index, (_, pyramid))| {
-            let query = pyramid.query_with_target(0.0, 1000.0, 1920, Some(per_series));
+            let query = pyramid.query_with_target(0.0, 1000.0, 1920, None);
             (format!("run_{index:04}/response"), query.level, query.bins)
         })
         .collect();

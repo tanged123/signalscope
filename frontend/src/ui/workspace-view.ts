@@ -143,10 +143,6 @@ export class WorkspaceView {
     for (const view of this.views.values()) view.setCursor(cursorT);
   }
 
-  setLocalCursor(id: string, cursorValue: number | null): void {
-    this.views.get(id)?.setLocalCursor(cursorValue);
-  }
-
   clearCursors(): void {
     for (const view of this.views.values()) view.clearCursor();
   }

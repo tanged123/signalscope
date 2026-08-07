@@ -10,22 +10,12 @@ import {
   type ColumnarTileResponse,
 } from "../app/bin-columns";
 import {
-  logTicks,
   projectX,
   projectY,
-  type AxisScale,
   type PlotLayout,
   type PlotRect,
   type Range,
 } from "../app/plot-math";
-import { ColormapRamp, RAMP_STEPS, SEQ_TOKENS } from "../app/colormap";
-import { densityMode } from "./density-policy";
-import {
-  accumulateEnvelope,
-  coverageToImage,
-  resolveCoverage,
-  type DensityGrid,
-} from "./density-raster";
 import { CanvasSurface } from "./surface";
 
 interface Projection {
@@ -41,7 +31,6 @@ export interface Palette {
   fg4: string;
   grid: string;
   series: string[];
-  sequential: string[];
   fontPlot: string;
   fontSize: number;
 }
@@ -63,39 +52,6 @@ export interface SeriesStroke {
   alpha: number;
 }
 
-export interface PlotPath {
-  /** Flat vertex pairs `[x0, y0, x1, y1, …]`; a NaN vertex lifts the pen. */
-  points: readonly number[];
-  hue: number | null;
-  dash: DashStyle;
-  width: number;
-  alpha: number;
-  /** Drawn in `--fg-4` at low alpha: present but outside the window. */
-  dimmed?: boolean;
-  /** Filled sample dots, for sparse traces. */
-  markers?: boolean;
-  /** Per-vertex scalar driving the sequential ramp; enables `c:` colouring. */
-  colorValues?: readonly number[];
-}
-
-export interface PathRenderOptions {
-  xLabel: string;
-  yLabel: string;
-  xRange: readonly [number, number];
-  yRange: readonly [number, number];
-  /** Pads the axis with the smaller pixel-per-unit scale so both match. */
-  equalAspect?: boolean;
-  axisStyle?: AxisStyle;
-  xScale?: AxisScale;
-  /** Domain and axis name of the `c:` channel; reserves the right gutter. */
-  colorbar?: { min: number; max: number; label: string };
-}
-
-/** Sample dots appear only when vertices are sparser than this pixel gap. */
-const MARKER_PIXEL_GAP = 7;
-/** Spec F2: 64px right gutter — 12px bar, ticks, labels, and slack. */
-const COLORBAR_GUTTER = 64;
-
 export const SERIES_TOKENS = [
   "--series-1",
   "--series-2",
@@ -113,70 +69,9 @@ export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
 const SOLID: number[] = [];
-const MAX_BATCHED_SERIES = 4;
-const BAND_FILL_ALPHA = 0.35;
-
-/**
- * True when the tile's delivered resolution cannot be stroked faithfully:
- * aggregated bins (level > 0) sparser than one bin per two device pixels
- * read as a comb of vertical excursions no matter how they are connected.
- * Level 0 is raw samples — sparse there is the data itself, and the excursion
- * path degenerates to a plain polyline.
- */
-function starvedEnvelope(
-  series: ColumnarTile,
-  plotWidthDevice: number,
-): boolean {
-  return series.level > 0 && series.bins.count < plotWidthDevice / 2;
-}
 
 function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
-}
-
-function styleKey(style: ResolvedStroke): string {
-  return [
-    style.color,
-    String(style.width),
-    String(style.alpha),
-    style.dash,
-  ].join("\u0000");
-}
-
-/**
- * Pads the axis with the coarser pixel-per-unit scale until both axes agree,
- * so one data unit is the same number of pixels horizontally and vertically
- * (MATLAB's `axis equal`). Only ever widens: narrowing would hide data that
- * the stored range says is in view.
- */
-function equalisedRanges(
-  xRange: Range,
-  yRange: Range,
-  plot: PlotRect,
-): { xRange: Range; yRange: Range } {
-  const xSpan = xRange.max - xRange.min;
-  const ySpan = yRange.max - yRange.min;
-  if (!(xSpan > 0) || !(ySpan > 0) || !(plot.width > 0) || !(plot.height > 0)) {
-    return { xRange, yRange };
-  }
-  const xScale = plot.width / xSpan;
-  const yScale = plot.height / ySpan;
-  if (xScale === yScale) return { xRange, yRange };
-  if (xScale > yScale) {
-    // x is drawn finer: widen x until its scale drops to y's.
-    const target = plot.width / yScale;
-    const pad = (target - xSpan) / 2;
-    return {
-      xRange: { min: xRange.min - pad, max: xRange.max + pad },
-      yRange,
-    };
-  }
-  const target = plot.height / xScale;
-  const pad = (target - ySpan) / 2;
-  return {
-    xRange,
-    yRange: { min: yRange.min - pad, max: yRange.max + pad },
-  };
 }
 
 function plotFontSize(styles: CSSStyleDeclaration): number {
@@ -231,11 +126,6 @@ interface FrameSpec {
   xLabel: string;
   yLabel: string;
   axisStyle?: AxisStyle;
-  xScale?: AxisScale;
-  /** Pixels reserved on the right for a decoration such as the colorbar. */
-  rightGutter?: number;
-  /** Pads the axis with the smaller pixel-per-unit scale so both match. */
-  equalAspect?: boolean;
 }
 
 interface ResolvedStroke {
@@ -243,18 +133,6 @@ interface ResolvedStroke {
   dash: DashStyle;
   width: number;
   alpha: number;
-}
-
-interface CachedBandPaths {
-  key: string;
-  band: Path2D;
-  mean: Path2D;
-}
-
-interface BandGroup {
-  style: ResolvedStroke;
-  band: Path2D;
-  mean: Path2D;
 }
 
 interface PathSink {
@@ -266,21 +144,7 @@ export class CanvasRenderer {
   private palette: Palette | null = null;
   private readonly surface: CanvasSurface;
   private pixelRatio = 1;
-  private densityCanvas: HTMLCanvasElement | null = null;
-  private canvasFactory: (
-    width: number,
-    height: number,
-  ) => HTMLCanvasElement | null = (width, height) => {
-    if (typeof document === "undefined") return null;
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    return canvas;
-  };
   private layout: PlotLayout | null = null;
-  private colorbarGradient: CanvasGradient | null = null;
-  private colorbarBottom = 0;
-  private sequentialRamp: ColormapRamp | null = null;
   private lastStroke: string | null = null;
   private lastWidth = Number.NaN;
   private lastAlpha = Number.NaN;
@@ -289,7 +153,6 @@ export class CanvasRenderer {
     BinColumns,
     { key: string; path: Path2D }
   >();
-  private readonly bandCache = new WeakMap<BinColumns, CachedBandPaths>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.surface = new CanvasSurface(canvas);
@@ -297,13 +160,6 @@ export class CanvasRenderer {
 
   invalidateTheme(): void {
     this.palette = null;
-    this.colorbarGradient = null;
-    this.sequentialRamp = null;
-  }
-
-  private ramp(colors: Palette): ColormapRamp {
-    this.sequentialRamp ??= new ColormapRamp(colors.sequential);
-    return this.sequentialRamp;
   }
 
   /**
@@ -312,23 +168,13 @@ export class CanvasRenderer {
    */
   setPalette(palette: Palette): void {
     this.palette = palette;
-    this.colorbarGradient = null;
-    this.sequentialRamp = null;
-  }
-
-  /** Test seam for the offscreen density surface. */
-  setCanvasFactory(
-    factory: (width: number, height: number) => HTMLCanvasElement | null,
-  ): void {
-    this.canvasFactory = factory;
-    this.densityCanvas = null;
   }
 
   lastLayout(): PlotLayout | null {
     return this.layout;
   }
 
-  renderTimePlot(
+  render(
     response: ColumnarTileResponse,
     xRange: Range,
     options: RenderOptions,
@@ -392,146 +238,11 @@ export class CanvasRenderer {
         alpha,
       };
     };
-    const hasEmphasis =
-      options.emphasisIndex !== undefined ||
-      (options.emphasisIndices?.length ?? 0) > 0;
-    const emphasizedIndex = (index: number): boolean =>
-      options.emphasisIndex === index ||
-      (options.emphasisIndices?.includes(index) ?? false);
-    const rasterSet = new Set<number>();
-    if (
-      densityMode(response.series.length, plot.width * this.pixelRatio) ===
-      "raster"
-    ) {
-      response.series.forEach((_, index) => {
-        const stroke = options.styles?.[index];
-        if (stroke?.hue === null && !emphasizedIndex(index)) {
-          rasterSet.add(index);
-        }
-      });
-      if (rasterSet.size > 1) {
-        const ghostStyle = styleFor([...rasterSet][0] as number);
-        const drawn = this.drawDensity(
-          context,
-          plot,
-          project,
-          [...rasterSet].map(
-            (index) => (response.series[index] as ColumnarTile).bins,
-          ),
-          ghostStyle.color,
-        );
-        if (!drawn) rasterSet.clear();
-      } else {
-        rasterSet.clear();
-      }
-    }
-    const canBatch =
-      response.series.length - rasterSet.size > 128 && !hasEmphasis;
-    if (canBatch) {
-      const groups = new Map<
-        string,
-        { style: ResolvedStroke; path: Path2D; count: number }[]
-      >();
-      const bandGroups = new Map<string, BandGroup>();
-      response.series.forEach((series, index) => {
-        if (rasterSet.has(index)) return;
-        if (starvedEnvelope(series, plot.width * this.pixelRatio)) {
-          const style = styleFor(index);
-          const key = styleKey(style);
-          const group =
-            bandGroups.get(key) ??
-            (() => {
-              const created = {
-                style,
-                band: new Path2D(),
-                mean: new Path2D(),
-              };
-              bandGroups.set(key, created);
-              return created;
-            })();
-          const paths = this.seriesBandPaths(project, series, pathKey);
-          group.band.addPath(paths.band);
-          group.mean.addPath(paths.mean);
-          return;
-        }
-        const style = styleFor(index);
-        const key = styleKey(style);
-        const styledGroups = groups.get(key) ?? [];
-        let group = styledGroups.at(-1);
-        if (group === undefined || group.count === MAX_BATCHED_SERIES) {
-          group = { style, path: new Path2D(), count: 0 };
-          styledGroups.push(group);
-          groups.set(key, styledGroups);
-        }
-        this.appendSeriesPath(group.path, plot, project, series.bins);
-        group.count += 1;
-      });
-      for (const group of bandGroups.values()) {
-        this.drawBandGroup(context, group);
-      }
-      for (const styledGroups of groups.values()) {
-        for (const group of styledGroups) {
-          this.setStroke(context, group.style);
-          context.stroke(group.path);
-        }
-      }
-    } else {
-      response.series.forEach((series, index) => {
-        if (rasterSet.has(index)) return;
-        const style = styleFor(index);
-        this.drawSeries(context, plot, project, series, style, pathKey);
-      });
-    }
+    response.series.forEach((series, index) => {
+      this.drawSeries(context, project, series, styleFor(index), pathKey);
+    });
     context.restore();
     finishAxes();
-    return performance.now() - started;
-  }
-
-  render(
-    response: ColumnarTileResponse,
-    xRange: Range,
-    options: RenderOptions,
-  ): number {
-    return this.renderTimePlot(response, xRange, options);
-  }
-
-  /**
-   * Draws vertex paths against arbitrary axes. XY trajectories, spectra, and
-   * histogram outlines are all vertex arrays rather than envelope bins, so
-   * they share this entry point instead of `render()`.
-   */
-  renderPaths(paths: readonly PlotPath[], options: PathRenderOptions): number {
-    const started = performance.now();
-    const { context, colors, plot, project, width, height, finishAxes } =
-      this.beginFrame({
-        xRange: { min: options.xRange[0], max: options.xRange[1] },
-        yRange: { min: options.yRange[0], max: options.yRange[1] },
-        xLabel: options.xLabel,
-        yLabel: options.yLabel,
-        ...(options.axisStyle === undefined
-          ? {}
-          : { axisStyle: options.axisStyle }),
-        ...(options.xScale === undefined ? {} : { xScale: options.xScale }),
-        ...(options.equalAspect === undefined
-          ? {}
-          : { equalAspect: options.equalAspect }),
-        ...(options.colorbar === undefined
-          ? {}
-          : { rightGutter: COLORBAR_GUTTER }),
-      });
-    for (const path of paths) {
-      this.drawPath(context, plot, project, path, colors);
-    }
-    finishAxes();
-    if (options.colorbar !== undefined) {
-      // Inline axes give the plot the full canvas height; the bar keeps the
-      // gutter layout's vertical insets so its ticks stay readable.
-      const colorbarPlot =
-        options.axisStyle === "inline"
-          ? { ...plot, y: 8, height: Math.max(1, height - 42) }
-          : plot;
-      this.drawColorbar(context, colorbarPlot, width, options.colorbar, colors);
-    }
     return performance.now() - started;
   }
 
@@ -552,11 +263,10 @@ export class CanvasRenderer {
     context.fillRect(0, 0, width, height);
     context.font = tickFont(colors);
     const inline = spec.axisStyle === "inline";
-    const rightGutter = spec.rightGutter ?? 0;
     const charWidth = context.measureText("0").width;
     const plotFor = (yRange: Range): PlotRect => {
       if (inline) {
-        return { x: 0, y: 0, width: Math.max(1, width - rightGutter), height };
+        return { x: 0, y: 0, width, height };
       }
       const gutter = gutterWidth(
         formatTicks(ticks(yRange.min, yRange.max, 6)),
@@ -565,46 +275,23 @@ export class CanvasRenderer {
       return {
         x: gutter,
         y: 8,
-        width: Math.max(1, width - gutter - 12 - rightGutter),
+        width: Math.max(1, width - gutter - 12),
         height: Math.max(1, height - 42),
       };
     };
-    let plot = plotFor(spec.yRange);
-    let ranges =
-      spec.equalAspect === true
-        ? equalisedRanges(spec.xRange, spec.yRange, plot)
-        : { xRange: spec.xRange, yRange: spec.yRange };
-    // The gutter is sized from the y tick labels, but equalising can widen the
-    // y range and lengthen them, which shrinks plot.width and so widens the
-    // range again. Re-solve until the gutter settles, or the axes get labelled
-    // from a range the gutter was never sized for and the labels clip.
-    // Always re-equalise from the requested ranges so widening never compounds.
-    for (
-      let pass = 0;
-      spec.equalAspect === true && !inline && pass < 4;
-      pass++
-    ) {
-      const next = plotFor(ranges.yRange);
-      if (next.x === plot.x) break;
-      plot = next;
-      ranges = equalisedRanges(spec.xRange, spec.yRange, plot);
-    }
-    const scale: AxisScale = spec.xScale ?? "linear";
+    const plot = plotFor(spec.yRange);
+    const ranges = { xRange: spec.xRange, yRange: spec.yRange };
     const layout: PlotLayout = {
       plot,
       xRange: { ...ranges.xRange },
       yRange: { ...ranges.yRange },
-      xScale: scale,
     };
     this.layout = layout;
     const project: Projection = {
       toX: (value) => projectX(layout, value),
       toY: (value) => projectY(layout, value),
     };
-    const xTicks =
-      scale === "log"
-        ? logTicks(ranges.xRange.min, ranges.xRange.max)
-        : ticks(ranges.xRange.min, ranges.xRange.max, 7);
+    const xTicks = ticks(ranges.xRange.min, ranges.xRange.max, 7);
     const axes = { context, plot, project, colors, xTicks } as const;
     const labels = { xLabel: spec.xLabel, yLabel: spec.yLabel };
     this.drawGrid(axes, ranges.yRange);
@@ -613,210 +300,6 @@ export class CanvasRenderer {
       else this.drawAxisFurniture(axes, ranges.yRange, labels);
     };
     return { context, colors, plot, project, width, height, finishAxes };
-  }
-
-  private drawPath(
-    context: CanvasRenderingContext2D,
-    plot: PlotRect,
-    project: Projection,
-    path: PlotPath,
-    colors: Palette,
-  ): void {
-    const { toX, toY } = project;
-    const vertices = path.points.length >> 1;
-    if (vertices === 0) return;
-    context.save();
-    context.beginPath();
-    context.rect(plot.x, plot.y, plot.width, plot.height);
-    context.clip();
-    context.globalAlpha = path.dimmed === true ? path.alpha * 0.5 : path.alpha;
-    if (
-      path.colorValues !== undefined &&
-      path.dimmed !== true &&
-      path.hue !== null
-    ) {
-      this.drawColorMappedPath(context, project, path, colors);
-      context.restore();
-      return;
-    }
-    context.strokeStyle =
-      path.dimmed === true
-        ? colors.fg3
-        : path.hue === null
-          ? colors.fg4
-          : (colors.series[hueIndex(path.hue)] ?? colors.fg2);
-    context.lineWidth = path.dimmed === true ? 1.2 : path.width;
-    context.setLineDash(dashPattern(path.dash));
-    context.beginPath();
-    let penDown = false;
-    for (let index = 0; index < vertices; index += 1) {
-      const x = path.points[index * 2] ?? Number.NaN;
-      const y = path.points[index * 2 + 1] ?? Number.NaN;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        penDown = false;
-        continue;
-      }
-      const px = toX(x);
-      const py = toY(y);
-      if (penDown) context.lineTo(px, py);
-      else context.moveTo(px, py);
-      penDown = true;
-    }
-    context.stroke();
-    if (path.markers === true && vertices < plot.width / MARKER_PIXEL_GAP) {
-      context.setLineDash([]);
-      context.fillStyle = context.strokeStyle;
-      context.beginPath();
-      for (let index = 0; index < vertices; index += 1) {
-        const x = path.points[index * 2] ?? Number.NaN;
-        const y = path.points[index * 2 + 1] ?? Number.NaN;
-        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        const px = toX(x);
-        const py = toY(y);
-        context.moveTo(px + 2.4, py);
-        context.arc(px, py, 2.4, 0, Math.PI * 2);
-      }
-      context.fill();
-    }
-    context.globalAlpha = 1;
-    context.setLineDash([]);
-    context.restore();
-  }
-
-  /**
-   * Strokes a `c:` path in one pass per ramp bucket. The ramp is quantised to
-   * `RAMP_STEPS`, so a path of any length carries at most `RAMP_STEPS + 1`
-   * distinct colours; bucketing turns thousands of per-segment strokes into
-   * that many.
-   */
-  private drawColorMappedPath(
-    context: CanvasRenderingContext2D,
-    project: Projection,
-    path: PlotPath,
-    colors: Palette,
-  ): void {
-    const values = path.colorValues ?? [];
-    const vertices = path.points.length >> 1;
-    if (vertices < 2) return;
-    // Destructured once, as `appendSeriesPath` already does: this loop would
-    // otherwise re-read both properties off `project` per vertex.
-    const { toX, toY } = project;
-    const ramp = this.ramp(colors);
-    const buckets: (Path2D | undefined)[] = new Array<Path2D | undefined>(
-      RAMP_STEPS + 1,
-    );
-    let previousX = Number.NaN;
-    let previousY = Number.NaN;
-    let previousFinite = false;
-    for (let index = 0; index < vertices; index += 1) {
-      const x = path.points[index * 2] ?? Number.NaN;
-      const y = path.points[index * 2 + 1] ?? Number.NaN;
-      const finite = Number.isFinite(x) && Number.isFinite(y);
-      const px = finite ? toX(x) : Number.NaN;
-      const py = finite ? toY(y) : Number.NaN;
-      if (finite && previousFinite) {
-        // Midpoint of the segment's two scalars keeps the ramp continuous.
-        const scalar = ((values[index - 1] ?? 0) + (values[index] ?? 0)) * 0.5;
-        const step = ramp.stepAt(scalar);
-        const bucket = (buckets[step] ??= new Path2D());
-        bucket.moveTo(previousX, previousY);
-        bucket.lineTo(px, py);
-      }
-      previousX = px;
-      previousY = py;
-      previousFinite = finite;
-    }
-    context.lineWidth = path.width;
-    context.setLineDash(dashPattern(path.dash));
-    context.lineCap = "round";
-    for (let step = 0; step <= RAMP_STEPS; step += 1) {
-      const bucket = buckets[step];
-      if (bucket === undefined) continue;
-      context.strokeStyle = ramp.atStep(step);
-      context.stroke(bucket);
-    }
-    context.lineCap = "butt";
-    context.setLineDash([]);
-  }
-
-  /**
-   * The `c:` colorbar: an axis with full anatomy — 12px bar flush with the
-   * plot, 3px ticks at both ends and the midpoint, tabular labels, and its
-   * own name in the corner (spec F2).
-   */
-  private drawColorbar(
-    context: CanvasRenderingContext2D,
-    plot: PlotRect,
-    width: number,
-    colorbar: { min: number; max: number; label: string },
-    colors: Palette,
-  ): void {
-    const barX = width - COLORBAR_GUTTER + 24;
-    const barWidth = 12;
-    // Bottom is the low end, matching the spec's bottom-to-top gradient.
-    context.fillStyle = this.colorbarFill(context, plot, colors);
-    context.fillRect(barX, plot.y, barWidth, plot.height);
-    context.strokeStyle = colors.border;
-    context.lineWidth = 1;
-    context.strokeRect(barX + 0.5, plot.y + 0.5, barWidth, plot.height);
-    context.beginPath();
-    for (const fraction of [0, 0.5, 1]) {
-      const y = Math.round(plot.y + plot.height * fraction) + 0.5;
-      context.moveTo(barX + barWidth, y);
-      context.lineTo(barX + barWidth + 3, y);
-    }
-    context.strokeStyle = colors.fg3;
-    context.stroke();
-    context.font = tickFont(colors);
-    context.fillStyle = colors.fg3;
-    context.textAlign = "right";
-    context.textBaseline = "middle";
-    const span = colorbar.max - colorbar.min;
-    const fractions = [0, 0.5, 1];
-    const values = fractions.map((fraction) => colorbar.max - span * fraction);
-    const labels = formatTicks(values);
-    fractions.forEach((fraction, index) => {
-      context.fillText(
-        labels[index] ?? "",
-        width - 2,
-        plot.y + plot.height * fraction,
-      );
-    });
-    context.font = labelFont(colors);
-    context.fillStyle = colors.fg2;
-    context.save();
-    context.translate(barX - 8, plot.y + plot.height / 2);
-    context.rotate(-Math.PI / 2);
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(colorbar.label, 0, 0);
-    context.restore();
-  }
-
-  /**
-   * The sequential ramp as a canvas gradient. Cached because the bar is
-   * otherwise one `fillRect` and one hex interpolation per pixel row, on
-   * every XY frame that carries a `c:` channel.
-   */
-  private colorbarFill(
-    context: CanvasRenderingContext2D,
-    plot: PlotRect,
-    colors: Palette,
-  ): CanvasGradient | string {
-    const stops = colors.sequential;
-    if (stops.length === 0) return "#000000";
-    const bottom = plot.y + plot.height;
-    if (this.colorbarGradient !== null && this.colorbarBottom === bottom) {
-      return this.colorbarGradient;
-    }
-    const gradient = context.createLinearGradient(0, bottom, 0, plot.y);
-    const last = Math.max(1, stops.length - 1);
-    stops.forEach((stop, index) => {
-      gradient.addColorStop(index / last, stop);
-    });
-    this.colorbarGradient = gradient;
-    this.colorbarBottom = bottom;
-    return gradient;
   }
 
   private resolvePalette(): Palette {
@@ -830,9 +313,6 @@ export class CanvasRenderer {
       fg4: styles.getPropertyValue("--fg-4").trim(),
       grid: styles.getPropertyValue("--grid").trim(),
       series: SERIES_TOKENS.map((token) =>
-        styles.getPropertyValue(token).trim(),
-      ),
-      sequential: SEQ_TOKENS.map((token) =>
         styles.getPropertyValue(token).trim(),
       ),
       fontPlot:
@@ -927,189 +407,13 @@ export class CanvasRenderer {
 
   private drawSeries(
     context: CanvasRenderingContext2D,
-    plot: PlotRect,
     project: Projection,
     series: ColumnarTile,
     style: ResolvedStroke,
     pathKey: string,
   ): void {
-    if (starvedEnvelope(series, plot.width * this.pixelRatio)) {
-      this.drawSeriesBand(context, plot, project, series, style, pathKey);
-      return;
-    }
     this.setStroke(context, style);
-    context.stroke(this.seriesPath(plot, project, series, pathKey));
-  }
-
-  /**
-   * The faithful shape of a starved envelope: a filled min/max ribbon
-   * under a stroked mean centerline — the single-series form of the
-   * density tier's trapezoids. Gap bins and missing extrema break both
-   * paths exactly where the excursion path lifted its pen.
-   */
-  private drawSeriesBand(
-    context: CanvasRenderingContext2D,
-    _plot: PlotRect,
-    project: Projection,
-    series: ColumnarTile,
-    style: ResolvedStroke,
-    pathKey: string,
-  ): void {
-    const paths = this.seriesBandPaths(project, series, pathKey);
-    this.drawBandGroup(context, { style, ...paths });
-  }
-
-  private seriesBandPaths(
-    project: Projection,
-    series: ColumnarTile,
-    pathKey: string,
-  ): CachedBandPaths {
-    const bins = series.bins;
-    const cached = this.bandCache.get(bins);
-    if (cached?.key === pathKey) return cached;
-    const paths = {
-      key: pathKey,
-      band: new Path2D(),
-      mean: new Path2D(),
-    };
-    this.appendBandPaths(paths.band, paths.mean, project, bins);
-    this.bandCache.set(bins, paths);
-    return paths;
-  }
-
-  private drawBandGroup(
-    context: CanvasRenderingContext2D,
-    group: BandGroup,
-  ): void {
-    const { style, band, mean } = group;
-    context.fillStyle = style.color;
-    context.globalAlpha = style.alpha * BAND_FILL_ALPHA;
-    context.fill(band);
-    // The fill changed globalAlpha behind setStroke's memo.
-    this.lastAlpha = Number.NaN;
-    this.setStroke(context, style);
-    context.stroke(mean);
-  }
-
-  private appendBandPaths(
-    band: Path2D,
-    mean: Path2D,
-    project: Projection,
-    bins: BinColumns,
-  ): void {
-    const { toX, toY } = project;
-    const { t0, t1, min, max, sum, finiteCount, flags, count } = bins;
-    const required = HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX;
-    const soloWidth = 1 / this.pixelRatio;
-    const xs: number[] = [];
-    const los: number[] = [];
-    const his: number[] = [];
-    const flush = (): void => {
-      if (xs.length === 1) {
-        // An isolated bin still shows its span, one device pixel wide —
-        // a zero-width polygon would vanish under fill.
-        const x = xs[0] as number;
-        const hi = his[0] as number;
-        const lo = los[0] as number;
-        band.rect(
-          x - soloWidth / 2,
-          Math.min(hi, lo),
-          soloWidth,
-          Math.max(soloWidth, Math.abs(lo - hi)),
-        );
-      } else if (xs.length > 1) {
-        band.moveTo(xs[0] as number, his[0] as number);
-        for (let i = 1; i < xs.length; i += 1) {
-          band.lineTo(xs[i] as number, his[i] as number);
-        }
-        for (let i = xs.length - 1; i >= 0; i -= 1) {
-          band.lineTo(xs[i] as number, los[i] as number);
-        }
-        band.closePath();
-      }
-      xs.length = 0;
-      los.length = 0;
-      his.length = 0;
-    };
-    let meanPen = false;
-    for (let index = 0; index < count; index += 1) {
-      const binFlags = flags[index] as number;
-      if ((binFlags & required) !== required) {
-        flush();
-        meanPen = false;
-        continue;
-      }
-      const gap = (binFlags & HAS_GAP) !== 0;
-      if (gap) {
-        flush();
-        meanPen = false;
-      }
-      const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
-      xs.push(x);
-      los.push(toY(min[index] as number));
-      his.push(toY(max[index] as number));
-      const finite = finiteCount[index] as number;
-      if (finite > 0) {
-        const yMean = toY((sum[index] as number) / finite);
-        if (meanPen) mean.lineTo(x, yMean);
-        else mean.moveTo(x, yMean);
-        meanPen = true;
-      } else {
-        meanPen = false;
-      }
-      if (gap) {
-        flush();
-        meanPen = false;
-      }
-    }
-    flush();
-  }
-
-  /**
-   * Accumulates the given series into a device-pixel coverage grid and
-   * composites it into the plot rect. Returns false when no offscreen
-   * canvas is available (headless tests) — the caller then strokes those
-   * series instead, which is the pre-density behavior.
-   */
-  private drawDensity(
-    context: CanvasRenderingContext2D,
-    plot: PlotRect,
-    project: Projection,
-    seriesBins: readonly BinColumns[],
-    color: string,
-  ): boolean {
-    const ratio = this.pixelRatio;
-    const width = Math.max(1, Math.round(plot.width * ratio));
-    const height = Math.max(1, Math.round(plot.height * ratio));
-    if (
-      this.densityCanvas === null ||
-      this.densityCanvas.width !== width ||
-      this.densityCanvas.height !== height
-    ) {
-      this.densityCanvas = this.canvasFactory(width, height);
-    }
-    const offscreen = this.densityCanvas;
-    const offContext = offscreen?.getContext("2d") ?? null;
-    if (offscreen === null || offContext === null) return false;
-    const grid: DensityGrid = {
-      coverage: new Float32Array(width * height),
-      width,
-      height,
-    };
-    const toColumn = (t: number): number => (project.toX(t) - plot.x) * ratio;
-    const toRow = (value: number): number =>
-      (project.toY(value) - plot.y) * ratio;
-    for (const bins of seriesBins) {
-      accumulateEnvelope(grid, bins, toColumn, toRow);
-    }
-    resolveCoverage(grid);
-    const pixels = coverageToImage(grid, color);
-    offContext.putImageData(new ImageData(pixels, width, height), 0, 0);
-    context.save();
-    context.imageSmoothingEnabled = false;
-    context.drawImage(offscreen, plot.x, plot.y, plot.width, plot.height);
-    context.restore();
-    return true;
+    context.stroke(this.seriesPath(project, series, pathKey));
   }
 
   private setStroke(
@@ -1137,7 +441,6 @@ export class CanvasRenderer {
   }
 
   private seriesPath(
-    plot: PlotRect,
     project: Projection,
     series: ColumnarTile,
     pathKey: string,
@@ -1146,14 +449,13 @@ export class CanvasRenderer {
     const cached = this.pathCache.get(bins);
     if (cached?.key === pathKey) return cached.path;
     const path = new Path2D();
-    this.appendSeriesPath(path, plot, project, bins);
+    this.appendSeriesPath(path, project, bins);
     this.pathCache.set(bins, { key: pathKey, path });
     return path;
   }
 
   private appendSeriesPath(
     path: PathSink,
-    plot: PlotRect,
     project: Projection,
     bins: BinColumns,
   ): void {
@@ -1182,74 +484,24 @@ export class CanvasRenderer {
       }
       penDown = !gap;
     };
-    const ratio = this.pixelRatio;
-    if (count > 4 * plot.width * ratio) {
-      let colX = Number.NaN;
-      let cFirst = 0;
-      let cLast = 0;
-      let cMin = 0;
-      let cMax = 0;
-      let colGap = false;
-      const flushColumn = (): void => {
-        if (Number.isNaN(colX)) return;
-        emitColumn(colX, toY(cFirst), toY(cMin), toY(cMax), toY(cLast), colGap);
-      };
-      for (let index = 0; index < count; index += 1) {
-        const binFlags = flags[index] as number;
-        if (
-          (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
-          (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
-        ) {
-          flushColumn();
-          colX = Number.NaN;
-          penDown = false;
-          continue;
-        }
-        const x =
-          plot.x +
-          Math.floor(
-            (toX(((t0[index] as number) + (t1[index] as number)) * 0.5) -
-              plot.x) *
-              ratio,
-          ) /
-            ratio +
-          0.5 / ratio;
-        if (x !== colX) {
-          flushColumn();
-          colX = x;
-          cFirst = first[index] as number;
-          cLast = last[index] as number;
-          cMin = min[index] as number;
-          cMax = max[index] as number;
-          colGap = (binFlags & HAS_GAP) !== 0;
-        } else {
-          cLast = last[index] as number;
-          if ((min[index] as number) < cMin) cMin = min[index] as number;
-          if ((max[index] as number) > cMax) cMax = max[index] as number;
-          colGap ||= (binFlags & HAS_GAP) !== 0;
-        }
+    for (let index = 0; index < count; index += 1) {
+      const binFlags = flags[index] as number;
+      if (
+        (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
+        (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
+      ) {
+        penDown = false;
+        continue;
       }
-      flushColumn();
-    } else {
-      for (let index = 0; index < count; index += 1) {
-        const binFlags = flags[index] as number;
-        if (
-          (binFlags & (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)) !==
-          (HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX)
-        ) {
-          penDown = false;
-          continue;
-        }
-        const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
-        emitColumn(
-          x,
-          toY(first[index] as number),
-          toY(min[index] as number),
-          toY(max[index] as number),
-          toY(last[index] as number),
-          (binFlags & HAS_GAP) !== 0,
-        );
-      }
+      const x = toX(((t0[index] as number) + (t1[index] as number)) * 0.5);
+      emitColumn(
+        x,
+        toY(first[index] as number),
+        toY(min[index] as number),
+        toY(max[index] as number),
+        toY(last[index] as number),
+        (binFlags & HAS_GAP) !== 0,
+      );
     }
   }
 

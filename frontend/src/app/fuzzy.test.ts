@@ -5,7 +5,7 @@ import { fuzzyScore } from "./fuzzy";
 describe("fuzzyScore", () => {
   it("matches subsequences and rejects non-matches", () => {
     expect(fuzzyScore("npr", "new panel row")).not.toBeNull();
-    expect(fuzzyScore("xyz", "new panel row")).toBeNull();
+    expect(fuzzyScore("qrs", "new panel row")).toBeNull();
   });
 
   it("prefers prefix and consecutive matches", () => {

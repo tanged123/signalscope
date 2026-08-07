@@ -111,11 +111,6 @@ export interface PanelCallbacks {
   resolveSeries(state: PanelState): readonly ResolvedSeries[];
   onResized(id: string): void;
   onGesture(id: string, hint: string | null): void;
-  /**
-   * Fires whenever the hover/legend emphasis set changes. The shell uses it
-   * to fetch full-resolution tiles for emphasized ghosts in raster regime.
-   */
-  onEmphasize?(id: string, paths: readonly string[]): void;
   onCursor(
     id: string,
     cursor: PanelCursor | null,
@@ -810,7 +805,7 @@ export class PanelView {
     const elapsed =
       tiles === null || tiles.series.length === 0 || ranges === null
         ? 0
-        : this.renderer.renderTimePlot(tiles, ranges.x, {
+        : this.renderer.render(tiles, ranges.x, {
             xLabel: rendered.x_label ?? "time",
             yLabel: rendered.y_label ?? "value",
             yRange: [ranges.y.min, ranges.y.max],
@@ -858,11 +853,6 @@ export class PanelView {
     this.drawOverlay();
   }
 
-  setLocalCursor(cursorValue: number | null): void {
-    this.cursorT = cursorValue;
-    this.drawOverlay();
-  }
-
   clearCursor(): void {
     this.cursorT = null;
     this.drawOverlay();
@@ -877,7 +867,7 @@ export class PanelView {
     this.yAxis.reset();
   }
 
-  /** The canvas's rendered CSS width, for density-bounded tile queries. */
+  /** The canvas's rendered CSS width. */
   plotWidth(): number {
     return this.canvas.clientWidth;
   }
@@ -1106,7 +1096,6 @@ export class PanelView {
         this.cursorMode === "track" && cursorT !== null
           ? this.cursorPointsAt(cursorT, bySeries)
           : [],
-      xyMarkers: [],
       box: this.box,
       annotations: resolved.map((annotation) => ({
         x: annotation.x,
@@ -1538,7 +1527,6 @@ export class PanelView {
       );
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
-    this.callbacks.onEmphasize?.(this.id, next === null ? [] : [...next]);
   }
 
   private openRoster(
