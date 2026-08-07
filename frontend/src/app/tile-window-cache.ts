@@ -1,4 +1,5 @@
 import { sliceColumns, type ColumnarTileResponse } from "./bin-columns";
+import { slicePointStream } from "./tile-points";
 
 export interface CachedPanelTiles {
   response: ColumnarTileResponse;
@@ -70,9 +71,11 @@ export class TileWindowCache {
       const sliceStart = Math.max(0, start - 1);
       const sliceEnd = Math.min(tile.bins.count, end + 1);
       if (sliceEnd - sliceStart > 4 * pixelWidth + 2) return null;
+      const points = slicePointStream(tile.points, tile.origin, t0, t1);
       series.push({
         ...tile,
         bins: sliceColumns(tile.bins, sliceStart, sliceEnd),
+        points,
       });
     }
     return { ...entry.response, series };

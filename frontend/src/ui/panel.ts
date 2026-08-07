@@ -46,6 +46,7 @@ import {
 } from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
 import { required } from "./dom";
+import { adaptCanvasPoints } from "../app/canvas-point-adapter";
 import {
   PlotInteractionController,
   type InteractionBox,
@@ -805,7 +806,7 @@ export class PanelView {
     const elapsed =
       tiles === null || tiles.series.length === 0 || ranges === null
         ? 0
-        : this.renderer.render(tiles, ranges.x, {
+        : this.renderer.render(adaptCanvasPoints(tiles), ranges.x, {
             xLabel: rendered.x_label ?? "time",
             yLabel: rendered.y_label ?? "value",
             yRange: [ranges.y.min, ranges.y.max],

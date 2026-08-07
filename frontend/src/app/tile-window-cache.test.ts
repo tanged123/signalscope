@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
 import { binColumnsFromWire, sliceColumns } from "./bin-columns";
 import { TileWindowCache, type CachedPanelTiles } from "./tile-window-cache";
+import { POINT_STRIDE, type PackedPointStream } from "./tile-points";
 
 function bin(index: number): EnvelopeBin {
   return {
@@ -23,6 +24,17 @@ function entry(count = 20): CachedPanelTiles {
   const bins = binColumnsFromWire(
     Array.from({ length: count }, (_, index) => bin(index)),
   );
+  const bytes = new Uint8Array(count * POINT_STRIDE);
+  const view = new DataView(bytes.buffer);
+  for (let index = 0; index < count; index += 1) {
+    view.setFloat32(index * POINT_STRIDE, index, true);
+    view.setFloat32(index * POINT_STRIDE + 4, index, true);
+  }
+  const points: PackedPointStream = {
+    count,
+    bytes,
+    forceBreakFirst: false,
+  };
   return {
     response: {
       requestId: "padded",
@@ -32,7 +44,11 @@ function entry(count = 20): CachedPanelTiles {
           signalPath: "run/value",
           unit: "V",
           level: 2,
+          sourceStart: "0",
+          sourceEnd: String(count),
+          origin: 0,
           bins,
+          points,
         },
       ],
     },

@@ -5,6 +5,7 @@ import {
   type ColumnarTile,
   type ColumnarTileResponse,
 } from "../app/bin-columns";
+import type { PackedPointStream } from "../app/tile-points";
 import {
   CanvasRenderer,
   dashPattern,
@@ -175,11 +176,19 @@ function tile(
   path: string,
   bins: readonly { t0: number; t1: number; v: number; gap?: boolean }[],
 ): ColumnarTile {
+  const points: PackedPointStream = {
+    count: 0,
+    bytes: new Uint8Array(),
+    forceBreakFirst: false,
+  };
   return {
     signalId: path,
     signalPath: path,
     unit: null,
     level: 0,
+    sourceStart: "0",
+    sourceEnd: String(bins.length),
+    origin: 0,
     bins: binColumnsFromWire(
       bins.map(
         (bin): EnvelopeBin => ({
@@ -197,6 +206,7 @@ function tile(
         }),
       ),
     ),
+    points,
   };
 }
 

@@ -34,6 +34,7 @@ use thiserror::Error;
 use crate::{
     bins::BinLevel,
     columns::{Column, TimebaseId},
+    gaps::GapRuns,
     ingest::{
         self, DecodeContext, IngestError, IngestSummary,
         provenance::{fingerprint, provenance_digest},
@@ -45,7 +46,7 @@ use crate::{
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
 
-pub const CACHE_VERSION: u32 = 4;
+pub const CACHE_VERSION: u32 = 5;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
 const HEADER_LEN: usize = 52;
 const PAGE_CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -177,6 +178,7 @@ struct CacheSignal {
     time_section: u32,
     value_section: CacheSection,
     levels: Vec<CacheSection>,
+    gap_section: CacheSection,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -476,6 +478,7 @@ pub fn write_at(
                 times.len() - 1
             });
         let value_section = append_section(&mut payload, &encode_column(&signal.values()));
+        let gap_section = append_section(&mut payload, &encode_gaps(pyramid.gap_runs()));
         let mut levels = Vec::new();
         for level in pyramid.merged_levels() {
             levels.push(append_section(&mut payload, &encode_bins(&level)));
@@ -487,6 +490,7 @@ pub fn write_at(
             time_section: u32::try_from(time_section).unwrap_or(u32::MAX),
             value_section,
             levels,
+            gap_section,
         });
         progress(fraction(index + 1, total));
     }
@@ -595,16 +599,17 @@ fn try_load_from_root(
     };
     drop(directory_page);
     let payload_base = directory_end.next_multiple_of(8) as u64;
-    let largest =
-        directory
-            .time_sections
-            .iter()
-            .chain(directory.signals.iter().flat_map(|signal| {
-                std::iter::once(&signal.value_section).chain(signal.levels.iter())
-            }))
-            .filter_map(|section| usize::try_from(section.len).ok())
-            .max()
-            .unwrap_or(1);
+    let largest = directory
+        .time_sections
+        .iter()
+        .chain(directory.signals.iter().flat_map(|signal| {
+            std::iter::once(&signal.value_section)
+                .chain(std::iter::once(&signal.gap_section))
+                .chain(signal.levels.iter())
+        }))
+        .filter_map(|section| usize::try_from(section.len).ok())
+        .max()
+        .unwrap_or(1);
     if largest > PAGE_CACHE_BYTES {
         pages = PageCache::new(root.directory(), largest);
     }
@@ -633,7 +638,10 @@ fn try_load_from_root(
                 entry.values,
             )?;
             let signal = store.signal(id).expect("inserted signal exists");
-            pyramids.push((id, Pyramid::from_signal_cached_parts(signal, entry.merged)));
+            pyramids.push((
+                id,
+                Pyramid::from_signal_cached_parts(signal, entry.merged, entry.gap_runs),
+            ));
             signals.push(id);
         }
         Ok::<_, CacheError>(LoadedCache {
@@ -654,6 +662,7 @@ struct DecodedSignal {
     time: Column,
     values: Column,
     merged: Vec<CachedBinLevel>,
+    gap_runs: GapRuns,
 }
 
 fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
@@ -687,6 +696,8 @@ fn decode_paged_signal(
     if !valid_time(&time) {
         return None;
     }
+    let gap_section = section_handle(path, payload_base, pages, entry.gap_section)?;
+    let gap_runs = decode_gaps(&gap_section, point_count)?;
     let mut merged = Vec::new();
     let mut expected_len = point_count.div_ceil(1 << crate::pyramid::FINEST_STORED_LEVEL);
     for section in &entry.levels {
@@ -711,6 +722,7 @@ fn decode_paged_signal(
         time: Column::paged(time),
         values: Column::paged(values),
         merged,
+        gap_runs,
     })
 }
 
@@ -795,6 +807,16 @@ fn encode_bins(bins: &BinLevel) -> Vec<u8> {
             out.extend_from_slice(&value.to_le_bytes());
         }
     }
+    for values in [
+        bins.first_index_column(),
+        bins.last_index_column(),
+        bins.min_index_column(),
+        bins.max_index_column(),
+    ] {
+        for value in values {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+    }
     for values in [bins.sample_count_column(), bins.finite_count_column()] {
         for value in values {
             out.extend_from_slice(&value.to_le_bytes());
@@ -803,6 +825,39 @@ fn encode_bins(bins: &BinLevel) -> Vec<u8> {
     out.extend_from_slice(bins.flags_column());
     pad_to_8(&mut out);
     out
+}
+
+fn encode_gaps(gaps: &GapRuns) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + gaps.as_slice().len() * 16);
+    out.extend_from_slice(&(gaps.as_slice().len() as u64).to_le_bytes());
+    for (start, end) in gaps.as_slice() {
+        out.extend_from_slice(&start.to_le_bytes());
+        out.extend_from_slice(&end.to_le_bytes());
+    }
+    pad_to_8(&mut out);
+    out
+}
+
+fn decode_gaps(handle: &PageHandle, row_count: usize) -> Option<GapRuns> {
+    let bytes = handle.bytes().ok()?;
+    let count = usize::try_from(u64::from_le_bytes(bytes.get(..8)?.try_into().ok()?)).ok()?;
+    let used = 8_usize.checked_add(count.checked_mul(16)?)?;
+    if bytes.len() != used.checked_next_multiple_of(8)? {
+        return None;
+    }
+    let mut ranges = Vec::with_capacity(count);
+    let mut at = 8;
+    for _ in 0..count {
+        let start = u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?);
+        at += 8;
+        let end = u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?);
+        at += 8;
+        if end > u64::try_from(row_count).ok()? {
+            return None;
+        }
+        ranges.push((start, end));
+    }
+    GapRuns::from_ranges(ranges)
 }
 
 #[cfg(test)]
@@ -1035,14 +1090,14 @@ mod tests {
     }
 
     #[test]
-    fn a_v3_sidecar_is_a_miss_not_an_error() {
+    fn a_v4_sidecar_is_a_miss_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let source = csv_source(&dir);
         let (store, summary, pyramids) = build(&source);
         write_sidecar(&source, &store, &summary, &pyramids);
         let path = sidecar_path(&source);
         let mut bytes = fs::read(&path).unwrap();
-        bytes[8..12].copy_from_slice(&3_u32.to_le_bytes());
+        bytes[8..12].copy_from_slice(&4_u32.to_le_bytes());
         fs::write(path, bytes).unwrap();
 
         assert!(
@@ -1118,6 +1173,11 @@ mod tests {
             let actual = cached.query(0.0, 499.0, 100);
             assert_eq!(expected.level, actual.level);
             assert_eq!(expected.bins, actual.bins);
+            assert_eq!(original.gap_runs(), cached.gap_runs());
+            assert_eq!(
+                original.merged_levels()[0].first_index_column(),
+                cached.merged_levels()[0].first_index_column()
+            );
             let signal = fresh.signal(*id).unwrap();
             assert_eq!(signal.len(), 500);
             assert!(signal.is_paged());

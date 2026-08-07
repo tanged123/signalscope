@@ -3,6 +3,7 @@ import {
   type BatchDetailRequest,
   type BatchJob,
   type BatchStatus,
+  type BakedLevel,
   type ContainerOutline,
   type CreateDerivedBundleRequest,
   type DerivedBundleResponse,
@@ -53,8 +54,13 @@ import {
 } from "./bin-columns";
 import { open, seal, type Envelope } from "./envelope";
 import { queryPyramidRange } from "./pyramid-query";
-import { binsToSamples, sampleWindow } from "./samples";
+import { sampleWindow } from "./samples";
 import { decodeTileResponse } from "./tile-binary";
+import {
+  POINT_STRIDE,
+  slicePointStream,
+  type PackedPointStream,
+} from "./tile-points";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
@@ -513,6 +519,11 @@ export class BakedPlane implements DataPlane {
 
   private readonly levelColumns = new Map<string, Map<number, BinColumns>>();
 
+  private readonly levelPoints = new Map<
+    string,
+    Map<number, PackedPointStream>
+  >();
+
   constructor(manifest: BakedManifest) {
     this.payload = open(manifest);
     this.bakedSessionJson = this.payload.session_json;
@@ -570,12 +581,23 @@ export class BakedPlane implements DataPlane {
             range.start,
             range.end,
           );
+          const bakedLevel = this.levelFor(signal, range.level);
+          const points = this.pointsFor(signal, bakedLevel);
           return {
             signalId: signal.summary.signal_id,
             signalPath: signal.summary.path,
             unit: signal.summary.unit,
             level: range.level,
+            sourceStart: bakedLevel?.source_start ?? "0",
+            sourceEnd: bakedLevel?.source_end ?? "0",
+            origin: bakedLevel?.origin ?? 0,
             bins,
+            points: slicePointStream(
+              points,
+              bakedLevel?.origin ?? 0,
+              request.window.t0,
+              request.window.t1,
+            ),
           };
         }),
     });
@@ -594,7 +616,7 @@ export class BakedPlane implements DataPlane {
     }
     let columns = levels.get(level);
     if (columns === undefined) {
-      const wire = signal.levels[level] ?? [];
+      const wire = this.levelFor(signal, level)?.bins ?? [];
       if (start <= 0 && end >= wire.length) {
         columns = binColumnsFromWire(wire);
         levels.set(level, columns);
@@ -603,6 +625,55 @@ export class BakedPlane implements DataPlane {
       return binColumnsFromWireRange(wire, start, end);
     }
     return sliceColumns(columns, start, end);
+  }
+
+  private levelFor(
+    signal: BakedManifest["payload"]["signals"][number],
+    level: number,
+  ): BakedLevel | undefined {
+    return signal.levels.find((candidate) => candidate.level === level);
+  }
+
+  private pointsFor(
+    signal: BakedManifest["payload"]["signals"][number],
+    level: BakedLevel | undefined,
+  ): PackedPointStream {
+    if (level === undefined) {
+      return { count: 0, bytes: new Uint8Array(), forceBreakFirst: false };
+    }
+    let levels = this.levelPoints.get(signal.summary.signal_id);
+    if (levels === undefined) {
+      levels = new Map();
+      this.levelPoints.set(signal.summary.signal_id, levels);
+    }
+    const cached = levels.get(level.level);
+    if (cached !== undefined) return cached;
+    const bytes = new Uint8Array(level.points.length * POINT_STRIDE);
+    const view = new DataView(bytes.buffer);
+    for (let index = 0; index < level.points.length; index += 1) {
+      const point = level.points[index];
+      if (point === undefined) continue;
+      const timeOffset = point.time - level.origin;
+      if (
+        !Number.isFinite(timeOffset) ||
+        !Number.isFinite(point.value) ||
+        !Number.isFinite(Math.fround(timeOffset)) ||
+        !Number.isFinite(Math.fround(point.value))
+      ) {
+        throw new Error("baked point is not representable in packed form");
+      }
+      const offset = index * POINT_STRIDE;
+      view.setFloat32(offset, timeOffset, true);
+      view.setFloat32(offset + 4, point.value, true);
+      view.setUint32(offset + 8, point.break_before ? 1 : 0, true);
+    }
+    const packed = {
+      count: level.points.length,
+      bytes,
+      forceBreakFirst: false,
+    };
+    levels.set(level.level, packed);
+    return packed;
   }
 
   querySamples(request: SampleRequest): Promise<SampleResponse> {
@@ -640,7 +711,11 @@ export class BakedPlane implements DataPlane {
     const id = signal.summary.signal_id;
     let raw = this.rawSamples.get(id);
     if (raw === undefined) {
-      raw = binsToSamples(signal.levels[0] ?? []);
+      const level = signal.levels[0];
+      raw = {
+        time: level?.points.map((point) => point.time) ?? [],
+        values: level?.points.map((point) => point.value) ?? [],
+      };
       this.rawSamples.set(id, raw);
     }
     return raw;
@@ -754,8 +829,8 @@ function createDemoManifest(): BakedManifest {
   });
 }
 
-function buildDemoLevels(levelZero: EnvelopeBin[]): EnvelopeBin[][] {
-  const levels = [levelZero];
+function buildDemoLevels(levelZero: EnvelopeBin[]): BakedLevel[] {
+  const levels: EnvelopeBin[][] = [levelZero];
   let current = levelZero;
   while (current.length > 1) {
     const next: EnvelopeBin[] = [];
@@ -768,7 +843,28 @@ function buildDemoLevels(levelZero: EnvelopeBin[]): EnvelopeBin[][] {
     levels.push(next);
     current = next;
   }
-  return levels;
+  return levels.map((bins, level) => {
+    const points = bins.flatMap((bin, index) =>
+      bin.first === null
+        ? []
+        : [
+            {
+              time: (bin.t0 + bin.t1) * 0.5,
+              value: bin.first,
+              source_index: String(index),
+              break_before: bin.has_gap,
+            },
+          ],
+    );
+    return {
+      level,
+      source_start: "0",
+      source_end: String(levelZero.length),
+      origin: points[0]?.time ?? 0,
+      bins,
+      points,
+    };
+  });
 }
 
 function mergeDemoBins(left: EnvelopeBin, right: EnvelopeBin): EnvelopeBin {

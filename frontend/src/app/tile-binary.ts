@@ -1,12 +1,13 @@
 import { PROTOCOL_VERSION } from "../generated/protocol";
 import type { BinColumns, ColumnarTileResponse } from "./bin-columns";
+import { POINT_STRIDE, validatePointStream } from "./tile-points";
 
 if (new Uint8Array(new Uint32Array([1]).buffer)[0] !== 1) {
   throw new Error("big-endian host unsupported");
 }
 
 const MAGIC = 0x42545353;
-const FIXED_SERIES_BYTES = 24;
+const FIXED_SERIES_BYTES = 48;
 
 export function decodeTileResponse(
   buffer: ArrayBuffer,
@@ -36,11 +37,12 @@ export function decodeTileResponse(
     const signalId = view.getBigUint64(offset, true).toString();
     const level = view.getUint32(offset + 8, true);
     const count = view.getUint32(offset + 12, true);
-    const pathLength = view.getUint16(offset + 16, true);
-    const unitLength = view.getUint16(offset + 18, true);
-    if (view.getUint32(offset + 20, true) !== 0) {
-      throw new Error("nonzero tile binary reserved series field");
-    }
+    const pointCount = view.getUint32(offset + 16, true);
+    const pathLength = view.getUint16(offset + 20, true);
+    const unitLength = view.getUint16(offset + 22, true);
+    const sourceStart = view.getBigUint64(offset + 24, true).toString();
+    const sourceEnd = view.getBigUint64(offset + 32, true).toString();
+    const origin = view.getFloat64(offset + 40, true);
     offset += FIXED_SERIES_BYTES;
     need(view, offset, pathLength + (unitLength === 0xffff ? 0 : unitLength));
     const path = new TextDecoder().decode(
@@ -73,12 +75,22 @@ export function decodeTileResponse(
       flags: new Uint8Array(buffer, offset + count * 64 + count * 8, count),
     };
     offset = align8(offset + count * 73);
+    need(view, offset, pointCount * POINT_STRIDE);
+    const points = validatePointStream(
+      new Uint8Array(buffer, offset, pointCount * POINT_STRIDE),
+      pointCount,
+    );
+    offset = align8(offset + pointCount * POINT_STRIDE);
     series.push({
       signalId,
       signalPath: path,
       unit,
       level,
+      sourceStart,
+      sourceEnd,
+      origin,
       bins: { count, ...columns },
+      points,
     });
   }
   if (offset !== view.byteLength) {

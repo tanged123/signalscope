@@ -1,4 +1,4 @@
-use crate::bins::BinLevel;
+use crate::pyramid::PyramidQuery;
 use scope_protocol::tile_binary::BinaryTileSeries;
 
 #[must_use]
@@ -6,26 +6,29 @@ pub fn binary_series<'a>(
     signal_id: u64,
     path: &'a str,
     unit: Option<&'a str>,
-    level: u32,
-    bins: &'a BinLevel,
+    query: &'a PyramidQuery,
 ) -> BinaryTileSeries<'a> {
     BinaryTileSeries {
         signal_id,
         signal_path: path,
         unit,
-        level,
-        bin_count: bins.len(),
-        t0: bins.t0_column(),
-        t1: bins.t1_column(),
-        first: bins.first_column(),
-        last: bins.last_column(),
-        min: bins.min_column(),
-        max: bins.max_column(),
-        sum: bins.sum_column(),
-        sum_sq: bins.sum_sq_column(),
-        sample_count: bins.sample_count_column(),
-        finite_count: bins.finite_count_column(),
-        flags: bins.flags_column(),
+        level: query.level,
+        source_start: query.source_start,
+        source_end: query.source_end,
+        origin: query.points.first().map_or(0.0, |point| point.time),
+        bin_count: query.bins.len(),
+        t0: query.bins.t0_column(),
+        t1: query.bins.t1_column(),
+        first: query.bins.first_column(),
+        last: query.bins.last_column(),
+        min: query.bins.min_column(),
+        max: query.bins.max_column(),
+        sum: query.bins.sum_column(),
+        sum_sq: query.bins.sum_sq_column(),
+        sample_count: query.bins.sample_count_column(),
+        finite_count: query.bins.finite_count_column(),
+        flags: query.bins.flags_column(),
+        points: &query.points,
     }
 }
 
@@ -37,48 +40,22 @@ mod tests {
 
     #[test]
     fn tile_binary_series_round_trips_bin_level() {
-        let bins = BinLevel::from_wire(&[
-            scope_protocol::EnvelopeBin {
-                t0: 0.0,
-                t1: 1.0,
-                first: Some(2.0),
-                last: None,
-                min: Some(2.0),
-                max: Some(2.0),
-                sum: 2.0,
-                sum_sq: 4.0,
-                finite_count: 1,
-                sample_count: 2,
-                has_gap: true,
-            },
-            scope_protocol::EnvelopeBin {
-                t0: 2.0,
-                t1: 2.0,
-                first: None,
-                last: None,
-                min: None,
-                max: None,
-                sum: 0.0,
-                sum_sq: 0.0,
-                finite_count: 0,
-                sample_count: 1,
-                has_gap: true,
-            },
-        ]);
-        let wire = binary_series(7, "run/response", Some("V"), 3, &bins);
+        let query = crate::pyramid::Pyramid::from_samples(&[1.0, 2.0, 3.0], &[3.0, f64::NAN, 4.0])
+            .query(1.0, 3.0, 100);
+        let wire = binary_series(7, "run/response", Some("V"), &query);
         let decoded = decode_tile_response(&encode_tile_response(&[wire])).expect("decode");
         assert_eq!(decoded[0].signal_id, 7);
         assert_eq!(decoded[0].signal_path, "run/response");
         assert_eq!(decoded[0].unit.as_deref(), Some("V"));
-        assert_eq!(decoded[0].level, 3);
-        assert_eq!(decoded[0].t0, bins.t0_column());
-        assert_eq!(decoded[0].t1, bins.t1_column());
-        assert_eq!(decoded[0].sample_count, bins.sample_count_column());
-        assert_eq!(decoded[0].finite_count, bins.finite_count_column());
-        assert_eq!(decoded[0].flags, bins.flags_column());
-        assert_eq!(decoded[0].t0.len(), bins.len());
-        assert_eq!(decoded[0].first[1].to_bits(), f64::NAN.to_bits());
-        assert_eq!(decoded[0].flags, bins.flags_column());
+        assert_eq!(decoded[0].level, query.level);
+        assert_eq!(decoded[0].source_start, query.source_start);
+        assert_eq!(decoded[0].source_end, query.source_end);
+        assert_eq!(decoded[0].bin_count, query.bins.len());
+        assert_eq!(decoded[0].points.len(), 2);
+        assert_eq!(
+            decoded[0].points[1].flags,
+            scope_protocol::tile_binary::BREAK_BEFORE
+        );
     }
 }
 
@@ -132,8 +109,7 @@ mod fixture_tests {
                     u64::try_from(index + 1).expect("fixture id"),
                     "run/response",
                     Some("V"),
-                    query.level,
-                    &query.bins,
+                    query,
                 )
             })
             .collect();

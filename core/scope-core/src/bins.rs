@@ -10,6 +10,7 @@ pub const HAS_LAST: u8 = 1 << 1;
 pub const HAS_MIN: u8 = 1 << 2;
 pub const HAS_MAX: u8 = 1 << 3;
 pub const HAS_GAP: u8 = 1 << 4;
+pub const MISSING_INDEX: u64 = u64::MAX;
 
 #[derive(Clone, Debug)]
 pub struct BinLevel {
@@ -21,6 +22,10 @@ pub struct BinLevel {
     pub(crate) max: Vec<f64>,
     pub(crate) sum: Vec<f64>,
     pub(crate) sum_sq: Vec<f64>,
+    pub(crate) first_index: Vec<u64>,
+    pub(crate) last_index: Vec<u64>,
+    pub(crate) min_index: Vec<u64>,
+    pub(crate) max_index: Vec<u64>,
     pub(crate) sample_count: Vec<u32>,
     pub(crate) finite_count: Vec<u32>,
     pub(crate) flags: Vec<u8>,
@@ -38,6 +43,10 @@ struct SharedBinLevel {
     max: Arc<[f64]>,
     sum: Arc<[f64]>,
     sum_sq: Arc<[f64]>,
+    first_index: Arc<[u64]>,
+    last_index: Arc<[u64]>,
+    min_index: Arc<[u64]>,
+    max_index: Arc<[u64]>,
     sample_count: Arc<[u32]>,
     finite_count: Arc<[u32]>,
     flags: Arc<[u8]>,
@@ -54,6 +63,10 @@ impl Default for BinLevel {
             max: Vec::new(),
             sum: Vec::new(),
             sum_sq: Vec::new(),
+            first_index: Vec::new(),
+            last_index: Vec::new(),
+            min_index: Vec::new(),
+            max_index: Vec::new(),
             sample_count: Vec::new(),
             finite_count: Vec::new(),
             flags: Vec::new(),
@@ -73,6 +86,10 @@ impl PartialEq for BinLevel {
             && self.max_column() == other.max_column()
             && self.sum_column() == other.sum_column()
             && self.sum_sq_column() == other.sum_sq_column()
+            && self.first_index_column() == other.first_index_column()
+            && self.last_index_column() == other.last_index_column()
+            && self.min_index_column() == other.min_index_column()
+            && self.max_index_column() == other.max_index_column()
             && self.sample_count_column() == other.sample_count_column()
             && self.finite_count_column() == other.finite_count_column()
             && self.flags_column() == other.flags_column()
@@ -80,7 +97,8 @@ impl PartialEq for BinLevel {
 }
 
 impl BinLevel {
-    pub const BYTES_PER_BIN: usize = 8 * size_of::<f64>() + 2 * size_of::<u32>() + size_of::<u8>();
+    pub const BYTES_PER_BIN: usize =
+        8 * size_of::<f64>() + 4 * size_of::<u64>() + 2 * size_of::<u32>() + size_of::<u8>();
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -92,6 +110,10 @@ impl BinLevel {
             max: Vec::with_capacity(capacity),
             sum: Vec::with_capacity(capacity),
             sum_sq: Vec::with_capacity(capacity),
+            first_index: Vec::with_capacity(capacity),
+            last_index: Vec::with_capacity(capacity),
+            min_index: Vec::with_capacity(capacity),
+            max_index: Vec::with_capacity(capacity),
             sample_count: Vec::with_capacity(capacity),
             finite_count: Vec::with_capacity(capacity),
             flags: Vec::with_capacity(capacity),
@@ -109,6 +131,23 @@ impl BinLevel {
     }
 
     pub fn push(&mut self, bin: &EnvelopeBin) {
+        self.push_indexed(
+            bin,
+            MISSING_INDEX,
+            MISSING_INDEX,
+            MISSING_INDEX,
+            MISSING_INDEX,
+        );
+    }
+
+    pub(crate) fn push_indexed(
+        &mut self,
+        bin: &EnvelopeBin,
+        first_index: u64,
+        last_index: u64,
+        min_index: u64,
+        max_index: u64,
+    ) {
         let mut flags = 0;
         self.t0.push(bin.t0);
         self.t1.push(bin.t1);
@@ -118,6 +157,11 @@ impl BinLevel {
         push_optional(&mut self.max, &mut flags, HAS_MAX, bin.max);
         self.sum.push(bin.sum);
         self.sum_sq.push(bin.sum_sq);
+        self.first_index
+            .push(index_or_missing(first_index, bin.first));
+        self.last_index.push(index_or_missing(last_index, bin.last));
+        self.min_index.push(index_or_missing(min_index, bin.min));
+        self.max_index.push(index_or_missing(max_index, bin.max));
         self.sample_count.push(saturating_u32(bin.sample_count));
         self.finite_count.push(saturating_u32(bin.finite_count));
         if bin.has_gap {
@@ -208,6 +252,34 @@ impl BinLevel {
     }
 
     #[must_use]
+    pub fn first_index_column(&self) -> &[u64] {
+        self.shared.as_ref().map_or(&self.first_index, |shared| {
+            &shared.first_index[self.range.clone()]
+        })
+    }
+
+    #[must_use]
+    pub fn last_index_column(&self) -> &[u64] {
+        self.shared.as_ref().map_or(&self.last_index, |shared| {
+            &shared.last_index[self.range.clone()]
+        })
+    }
+
+    #[must_use]
+    pub fn min_index_column(&self) -> &[u64] {
+        self.shared.as_ref().map_or(&self.min_index, |shared| {
+            &shared.min_index[self.range.clone()]
+        })
+    }
+
+    #[must_use]
+    pub fn max_index_column(&self) -> &[u64] {
+        self.shared.as_ref().map_or(&self.max_index, |shared| {
+            &shared.max_index[self.range.clone()]
+        })
+    }
+
+    #[must_use]
     pub fn sample_count_column(&self) -> &[u32] {
         self.shared.as_ref().map_or(&self.sample_count, |shared| {
             &shared.sample_count[self.range.clone()]
@@ -243,6 +315,10 @@ impl BinLevel {
                 max: Vec::new(),
                 sum: Vec::new(),
                 sum_sq: Vec::new(),
+                first_index: Vec::new(),
+                last_index: Vec::new(),
+                min_index: Vec::new(),
+                max_index: Vec::new(),
                 sample_count: Vec::new(),
                 finite_count: Vec::new(),
                 flags: Vec::new(),
@@ -259,6 +335,10 @@ impl BinLevel {
             max: self.max[range.clone()].to_vec(),
             sum: self.sum[range.clone()].to_vec(),
             sum_sq: self.sum_sq[range.clone()].to_vec(),
+            first_index: self.first_index[range.clone()].to_vec(),
+            last_index: self.last_index[range.clone()].to_vec(),
+            min_index: self.min_index[range.clone()].to_vec(),
+            max_index: self.max_index[range.clone()].to_vec(),
             sample_count: self.sample_count[range.clone()].to_vec(),
             finite_count: self.finite_count[range.clone()].to_vec(),
             flags: self.flags[range].to_vec(),
@@ -281,6 +361,10 @@ impl BinLevel {
             max: Vec::new(),
             sum: Vec::new(),
             sum_sq: Vec::new(),
+            first_index: Vec::new(),
+            last_index: Vec::new(),
+            min_index: Vec::new(),
+            max_index: Vec::new(),
             sample_count: Vec::new(),
             finite_count: Vec::new(),
             flags: Vec::new(),
@@ -293,6 +377,10 @@ impl BinLevel {
                 max: self.max.into(),
                 sum: self.sum.into(),
                 sum_sq: self.sum_sq.into(),
+                first_index: self.first_index.into(),
+                last_index: self.last_index.into(),
+                min_index: self.min_index.into(),
+                max_index: self.max_index.into(),
                 sample_count: self.sample_count.into(),
                 finite_count: self.finite_count.into(),
                 flags: self.flags.into(),
@@ -317,6 +405,10 @@ impl BinLevel {
             max: decode_f64s(bytes, &mut at, count)?,
             sum: decode_f64s(bytes, &mut at, count)?,
             sum_sq: decode_f64s(bytes, &mut at, count)?,
+            first_index: decode_u64s(bytes, &mut at, count)?,
+            last_index: decode_u64s(bytes, &mut at, count)?,
+            min_index: decode_u64s(bytes, &mut at, count)?,
+            max_index: decode_u64s(bytes, &mut at, count)?,
             sample_count: decode_u32s(bytes, &mut at, count)?,
             finite_count: decode_u32s(bytes, &mut at, count)?,
             flags: bytes.get(at..at.checked_add(count)?)?.to_vec(),
@@ -356,7 +448,20 @@ impl BinLevel {
                     .ok()?,
             )?);
         }
-        let counts = 8_usize.checked_add(8 * count * size_of::<f64>())?;
+        let index_base = 8_usize.checked_add(8 * count * size_of::<f64>())?;
+        let mut indexes = Vec::with_capacity(4);
+        for field in 0..4 {
+            let base = index_base.checked_add(field * count * size_of::<u64>())?;
+            indexes.push(decode_u64_bytes(
+                &handle
+                    .bytes_range(
+                        base.checked_add(range.start * size_of::<u64>())?
+                            ..base.checked_add(range.end * size_of::<u64>())?,
+                    )
+                    .ok()?,
+            )?);
+        }
+        let counts = index_base.checked_add(4 * count * size_of::<u64>())?;
         let sample_count = decode_u32_bytes(
             &handle
                 .bytes_range(
@@ -389,6 +494,10 @@ impl BinLevel {
             max: fields.next()?,
             sum: fields.next()?,
             sum_sq: fields.next()?,
+            first_index: indexes.first()?.clone(),
+            last_index: indexes.get(1)?.clone(),
+            min_index: indexes.get(2)?.clone(),
+            max_index: indexes.get(3)?.clone(),
             sample_count,
             finite_count,
             flags,
@@ -424,6 +533,15 @@ fn decode_u32_bytes(bytes: &[u8]) -> Option<Vec<u32>> {
     })
 }
 
+fn decode_u64_bytes(bytes: &[u8]) -> Option<Vec<u64>> {
+    (bytes.len() % size_of::<u64>() == 0).then(|| {
+        bytes
+            .chunks_exact(size_of::<u64>())
+            .map(|chunk| u64::from_le_bytes(chunk.try_into().expect("exact chunk")))
+            .collect()
+    })
+}
+
 fn decode_f64s(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<f64>> {
     let end = at.checked_add(count.checked_mul(size_of::<f64>())?)?;
     let values = bytes
@@ -454,6 +572,17 @@ fn decode_u32s(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<u32>> {
     Some(values)
 }
 
+fn decode_u64s(bytes: &[u8], at: &mut usize, count: usize) -> Option<Vec<u64>> {
+    let end = at.checked_add(count.checked_mul(size_of::<u64>())?)?;
+    let values = bytes
+        .get(*at..end)?
+        .chunks_exact(size_of::<u64>())
+        .map(|chunk| u64::from_le_bytes(chunk.try_into().expect("exact chunk")))
+        .collect();
+    *at = end;
+    Some(values)
+}
+
 #[derive(Clone, Copy)]
 pub struct BinRef<'a> {
     level: &'a BinLevel,
@@ -461,6 +590,28 @@ pub struct BinRef<'a> {
 }
 
 impl BinRef<'_> {
+    pub fn first_index(self) -> Option<u64> {
+        self.index_for(HAS_FIRST, self.level.first_index_column())
+    }
+
+    pub fn last_index(self) -> Option<u64> {
+        self.index_for(HAS_LAST, self.level.last_index_column())
+    }
+
+    pub fn min_index(self) -> Option<u64> {
+        self.index_for(HAS_MIN, self.level.min_index_column())
+    }
+
+    pub fn max_index(self) -> Option<u64> {
+        self.index_for(HAS_MAX, self.level.max_index_column())
+    }
+
+    fn index_for(self, bit: u8, column: &[u64]) -> Option<u64> {
+        (self.level.flags_column()[self.index] & bit != 0)
+            .then_some(column[self.index])
+            .filter(|index| *index != MISSING_INDEX)
+    }
+
     pub fn to_wire(self) -> EnvelopeBin {
         let flags = self.level.flags_column()[self.index];
         EnvelopeBin {
@@ -486,6 +637,10 @@ fn push_optional(values: &mut Vec<f64>, flags: &mut u8, bit: u8, value: Option<f
     } else {
         values.push(f64::NAN);
     }
+}
+
+fn index_or_missing(index: u64, value: Option<f64>) -> u64 {
+    value.map_or(MISSING_INDEX, |_| index)
 }
 
 fn optional(value: f64, flags: u8, bit: u8) -> Option<f64> {
@@ -518,7 +673,7 @@ mod tests {
 
     #[test]
     fn compact_storage_stays_within_budget() {
-        assert!(std::hint::black_box(BinLevel::BYTES_PER_BIN) <= 80);
+        assert!(std::hint::black_box(BinLevel::BYTES_PER_BIN) <= 112);
     }
 
     #[test]

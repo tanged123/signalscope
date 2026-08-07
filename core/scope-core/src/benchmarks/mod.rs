@@ -8,7 +8,6 @@ use std::{
 };
 
 use crate::{
-    bins::BinLevel,
     ingest::{
         self, CancelToken, CsvDecoder, DecodeContext, DecodedSource, Decoder, IngestError,
         IngestSummary,
@@ -573,24 +572,24 @@ fn bench_tile_wire_cost() {
     assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
 
     let pyramids = sink.pyramids.lock().unwrap();
-    let queried: Vec<(String, u32, BinLevel)> = pyramids
+    let queried: Vec<(String, crate::pyramid::PyramidQuery)> = pyramids
         .iter()
         .filter(|((_, local_path), _)| local_path == "response")
         .enumerate()
         .map(|(index, (_, pyramid))| {
             let query = pyramid.query_with_target(0.0, 1000.0, 1920, None);
-            (format!("run_{index:04}/response"), query.level, query.bins)
+            (format!("run_{index:04}/response"), query)
         })
         .collect();
     let series: Vec<scope_protocol::SignalTile> = queried
         .iter()
         .enumerate()
-        .map(|(index, (path, level, bins))| scope_protocol::SignalTile {
+        .map(|(index, (path, query))| scope_protocol::SignalTile {
             signal_id: index as u64,
             signal_path: path.clone(),
             unit: None,
-            level: *level,
-            bins: bins.to_wire_vec(),
+            level: query.level,
+            bins: query.bins.to_wire_vec(),
         })
         .collect();
     assert_eq!(series.len(), 1000);
@@ -605,8 +604,8 @@ fn bench_tile_wire_cost() {
     let binary_series: Vec<_> = queried
         .iter()
         .enumerate()
-        .map(|(index, (path, level, bins))| {
-            crate::tile_wire::binary_series(index as u64, path, None, *level, bins)
+        .map(|(index, (path, query))| {
+            crate::tile_wire::binary_series(index as u64, path, None, query)
         })
         .collect();
     let started = Instant::now();

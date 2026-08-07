@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -508,9 +508,30 @@ pub struct SaveExportFileToDirectoryRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TilePoint {
+    pub time: f64,
+    pub value: f64,
+    #[serde(with = "u64_string")]
+    pub source_index: u64,
+    pub break_before: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BakedLevel {
+    pub level: u32,
+    #[serde(with = "u64_string")]
+    pub source_start: u64,
+    #[serde(with = "u64_string")]
+    pub source_end: u64,
+    pub origin: f64,
+    pub bins: Vec<EnvelopeBin>,
+    pub points: Vec<TilePoint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct BakedSignal {
     pub summary: SignalSummary,
-    pub levels: Vec<Vec<EnvelopeBin>>,
+    pub levels: Vec<BakedLevel>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

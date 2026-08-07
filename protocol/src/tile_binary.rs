@@ -6,6 +6,7 @@ pub const HAS_LAST: u8 = 1 << 1;
 pub const HAS_MIN: u8 = 1 << 2;
 pub const HAS_MAX: u8 = 1 << 3;
 pub const HAS_GAP: u8 = 1 << 4;
+pub const BREAK_BEFORE: u32 = 1;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum TileBinaryError {
@@ -24,6 +25,9 @@ pub struct BinaryTileSeries<'a> {
     pub signal_path: &'a str,
     pub unit: Option<&'a str>,
     pub level: u32,
+    pub source_start: u64,
+    pub source_end: u64,
+    pub origin: f64,
     pub bin_count: usize,
     pub t0: &'a [f64],
     pub t1: &'a [f64],
@@ -36,6 +40,14 @@ pub struct BinaryTileSeries<'a> {
     pub sample_count: &'a [u32],
     pub finite_count: &'a [u32],
     pub flags: &'a [u8],
+    pub points: &'a [crate::TilePoint],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OwnedBinaryPoint {
+    pub time_offset: f32,
+    pub value: f32,
+    pub flags: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +56,9 @@ pub struct OwnedBinarySeries {
     pub signal_path: String,
     pub unit: Option<String>,
     pub level: u32,
+    pub source_start: u64,
+    pub source_end: u64,
+    pub origin: f64,
     pub bin_count: usize,
     pub t0: Vec<f64>,
     pub t1: Vec<f64>,
@@ -56,6 +71,7 @@ pub struct OwnedBinarySeries {
     pub sample_count: Vec<u32>,
     pub finite_count: Vec<u32>,
     pub flags: Vec<u8>,
+    pub points: Vec<OwnedBinaryPoint>,
 }
 
 #[must_use]
@@ -84,6 +100,10 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
             &mut bytes,
             u32::try_from(item.bin_count).expect("bin count fits in u32"),
         );
+        put_u32(
+            &mut bytes,
+            u32::try_from(item.points.len()).expect("point count fits in u32"),
+        );
         put_u16(
             &mut bytes,
             u16::try_from(item.signal_path.len()).expect("signal path fits in u16"),
@@ -94,7 +114,9 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
                 u16::try_from(unit.len()).expect("unit fits in u16")
             }),
         );
-        put_u32(&mut bytes, 0);
+        put_u64(&mut bytes, item.source_start);
+        put_u64(&mut bytes, item.source_end);
+        put_f64(&mut bytes, item.origin);
         bytes.extend_from_slice(item.signal_path.as_bytes());
         if let Some(unit) = item.unit {
             bytes.extend_from_slice(unit.as_bytes());
@@ -116,6 +138,25 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
             put_u32(&mut bytes, *value);
         }
         bytes.extend_from_slice(item.flags);
+        bytes.resize(align8(bytes.len()), 0);
+        for point in item.points {
+            let offset = (point.time - item.origin) as f32;
+            let value = point.value as f32;
+            assert!(
+                point.time.is_finite()
+                    && point.value.is_finite()
+                    && offset.is_finite()
+                    && value.is_finite(),
+                "tile point is not representable as finite f32"
+            );
+            bytes.extend_from_slice(&offset.to_le_bytes());
+            bytes.extend_from_slice(&value.to_le_bytes());
+            put_u32(
+                &mut bytes,
+                if point.break_before { BREAK_BEFORE } else { 0 },
+            );
+            put_u32(&mut bytes, 0);
+        }
         bytes.resize(align8(bytes.len()), 0);
     }
     debug_assert_eq!(bytes.len(), capacity);
@@ -146,7 +187,7 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
     }
     let series_count = usize::try_from(read_u32(bytes, &mut at)?)
         .map_err(|_| TileBinaryError::Malformed("series count overflow"))?;
-    if series_count > (bytes.len() - 16) / 24 {
+    if series_count > (bytes.len() - 16) / 48 {
         return Err(TileBinaryError::Malformed("series count exceeds payload"));
     }
     if read_u32(bytes, &mut at)? != 0 {
@@ -159,12 +200,15 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
         let level = read_u32(bytes, &mut at)?;
         let bin_count = usize::try_from(read_u32(bytes, &mut at)?)
             .map_err(|_| TileBinaryError::Malformed("bin count overflow"))?;
+        let point_count = usize::try_from(read_u32(bytes, &mut at)?)
+            .map_err(|_| TileBinaryError::Malformed("point count overflow"))?;
         let path_len = usize::from(read_u16(bytes, &mut at)?);
         let unit_len = read_u16(bytes, &mut at)?;
-        if read_u32(bytes, &mut at)? != 0 {
-            return Err(TileBinaryError::Malformed(
-                "reserved series field is nonzero",
-            ));
+        let source_start = read_u64(bytes, &mut at)?;
+        let source_end = read_u64(bytes, &mut at)?;
+        let origin = read_f64(bytes, &mut at)?;
+        if source_start > source_end || !origin.is_finite() {
+            return Err(TileBinaryError::Malformed("invalid tile source range"));
         }
         let path = String::from_utf8(take(bytes, &mut at, path_len)?.to_vec())
             .map_err(|_| TileBinaryError::Malformed("signal path is not utf8"))?;
@@ -196,11 +240,36 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
             return Err(TileBinaryError::Malformed("unknown bin flags"));
         }
         at = align8(at);
+        let points = (0..point_count)
+            .map(|_| {
+                let time_offset = read_f32(bytes, &mut at)?;
+                let value = read_f32(bytes, &mut at)?;
+                if !time_offset.is_finite() || !value.is_finite() {
+                    return Err(TileBinaryError::Malformed("non-finite tile point data"));
+                }
+                let flags = read_u32(bytes, &mut at)?;
+                if flags & !BREAK_BEFORE != 0 {
+                    return Err(TileBinaryError::Malformed("unknown point flags"));
+                }
+                if read_u32(bytes, &mut at)? != 0 {
+                    return Err(TileBinaryError::Malformed("nonzero point reserved word"));
+                }
+                Ok(OwnedBinaryPoint {
+                    time_offset,
+                    value,
+                    flags,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        at = align8(at);
         decoded.push(OwnedBinarySeries {
             signal_id,
             signal_path: path,
             unit,
             level,
+            source_start,
+            source_end,
+            origin,
             bin_count,
             t0,
             t1,
@@ -213,6 +282,7 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
             sample_count,
             finite_count,
             flags,
+            points,
         });
     }
     if at != bytes.len() {
@@ -223,8 +293,9 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
 
 fn series_bytes(series: &BinaryTileSeries<'_>) -> usize {
     validate_series(series);
-    24 + align8(series.signal_path.len() + series.unit.map_or(0, str::len))
+    48 + align8(series.signal_path.len() + series.unit.map_or(0, str::len))
         + align8(series.bin_count * 73)
+        + align8(series.points.len() * 16)
 }
 
 fn validate_series(series: &BinaryTileSeries<'_>) {
@@ -245,6 +316,9 @@ fn validate_series(series: &BinaryTileSeries<'_>) {
     assert_eq!(series.bin_count, series.sample_count.len());
     assert_eq!(series.bin_count, series.finite_count.len());
     assert_eq!(series.bin_count, series.flags.len());
+    assert!(series.source_start <= series.source_end);
+    assert!(series.origin.is_finite());
+    assert_eq!(series.bin_count, series.t0.len());
 }
 
 fn append_f64_column(bytes: &mut Vec<u8>, values: &[f64], optional: Option<(&[u8], u8)>) {
@@ -261,6 +335,10 @@ fn put_u16(bytes: &mut Vec<u8>, value: u16) {
 }
 
 fn put_u32(bytes: &mut Vec<u8>, value: u32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn put_f64(bytes: &mut Vec<u8>, value: f64) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
@@ -295,6 +373,18 @@ fn read_u32(bytes: &[u8], at: &mut usize) -> Result<u32, TileBinaryError> {
 
 fn read_u64(bytes: &[u8], at: &mut usize) -> Result<u64, TileBinaryError> {
     Ok(u64::from_le_bytes(
+        take(bytes, at, 8)?.try_into().expect("length checked"),
+    ))
+}
+
+fn read_f32(bytes: &[u8], at: &mut usize) -> Result<f32, TileBinaryError> {
+    Ok(f32::from_le_bytes(
+        take(bytes, at, 4)?.try_into().expect("length checked"),
+    ))
+}
+
+fn read_f64(bytes: &[u8], at: &mut usize) -> Result<f64, TileBinaryError> {
+    Ok(f64::from_le_bytes(
         take(bytes, at, 8)?.try_into().expect("length checked"),
     ))
 }
@@ -344,6 +434,9 @@ mod tests {
                 signal_path: "run/response",
                 unit: None,
                 level: 3,
+                source_start: 0,
+                source_end: 3,
+                origin: 0.0,
                 bin_count: 3,
                 t0: &[0.0, 1.0, 2.0],
                 t1: &[0.5, 1.5, 2.5],
@@ -356,12 +449,16 @@ mod tests {
                 sample_count: &[1, 2, 1],
                 finite_count: &[1, 0, 1],
                 flags: &[HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX, HAS_GAP, HAS_FIRST],
+                points: &[],
             },
             BinaryTileSeries {
                 signal_id: 4,
                 signal_path: "temperature",
                 unit: Some("degC"),
                 level: 0,
+                source_start: 4,
+                source_end: 5,
+                origin: 4.0,
                 bin_count: 1,
                 t0: &[4.0],
                 t1: &[4.0],
@@ -374,6 +471,7 @@ mod tests {
                 sample_count: &[1],
                 finite_count: &[1],
                 flags: &[HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX],
+                points: &[],
             },
         ]
     }
@@ -389,6 +487,10 @@ mod tests {
             assert_eq!(actual.signal_path, expected.signal_path);
             assert_eq!(actual.unit.as_deref(), expected.unit);
             assert_eq!(actual.level, expected.level);
+            assert_eq!(actual.source_start, expected.source_start);
+            assert_eq!(actual.source_end, expected.source_end);
+            assert_eq!(actual.origin, expected.origin);
+            assert!(actual.points.is_empty());
             assert_f64s(&actual.t0, expected.t0);
             assert_f64s(&actual.t1, expected.t1);
             assert_f64s(&actual.first, expected.first);
@@ -404,13 +506,15 @@ mod tests {
 
         let mut at = 16;
         for expected in &series {
-            at += 24;
+            at += 48;
             at = align8(at + expected.signal_path.len() + expected.unit.map_or(0, str::len));
             for _ in 0..8 {
                 assert_eq!(at % 8, 0);
                 at += expected.bin_count * 8;
             }
             at += expected.bin_count * 4 * 2 + expected.bin_count;
+            at = align8(at);
+            at += expected.points.len() * 16;
             at = align8(at);
         }
         assert_eq!(at, bytes.len());

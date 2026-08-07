@@ -1,4 +1,5 @@
 import type { EnvelopeBin } from "../generated/protocol";
+import type { PackedPointStream } from "./tile-points";
 
 export const HAS_FIRST = 1;
 export const HAS_LAST = 2;
@@ -26,7 +27,11 @@ export interface ColumnarTile {
   signalPath: string;
   unit: string | null;
   level: number;
+  sourceStart: string;
+  sourceEnd: string;
+  origin: number;
   bins: BinColumns;
+  points: PackedPointStream;
 }
 
 export interface ColumnarTileResponse {

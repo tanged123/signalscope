@@ -872,8 +872,12 @@ async fn query_tiles_bin(
     let state = state.inner().clone();
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let data = state.lock().map_err(|error| error.to_string())?;
-        let mut owned: Vec<(u64, String, Option<String>, u32, scope_core::bins::BinLevel)> =
-            Vec::with_capacity(request.signal_ids.len());
+        let mut owned: Vec<(
+            u64,
+            String,
+            Option<String>,
+            scope_core::pyramid::PyramidQuery,
+        )> = Vec::with_capacity(request.signal_ids.len());
         for raw_id in &request.signal_ids {
             let signal_id = SignalId(*raw_id);
             let signal = data
@@ -890,19 +894,13 @@ async fn query_tiles_bin(
                 per_series_target(request.pixel_width),
                 None,
             );
-            owned.push((
-                *raw_id,
-                signal.path.clone(),
-                signal.unit.clone(),
-                query.level,
-                query.bins,
-            ));
+            owned.push((*raw_id, signal.path.clone(), signal.unit.clone(), query));
         }
         drop(data);
         let series: Vec<_> = owned
             .iter()
-            .map(|(id, path, unit, level, bins)| {
-                scope_core::tile_wire::binary_series(*id, path, unit.as_deref(), *level, bins)
+            .map(|(id, path, unit, query)| {
+                scope_core::tile_wire::binary_series(*id, path, unit.as_deref(), query)
             })
             .collect();
         Ok::<_, String>(scope_protocol::tile_binary::encode_tile_response(&series))

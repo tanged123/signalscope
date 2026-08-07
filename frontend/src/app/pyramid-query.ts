@@ -1,4 +1,6 @@
-import type { EnvelopeBin } from "../generated/protocol";
+import type { BakedLevel, EnvelopeBin } from "../generated/protocol";
+
+type PyramidLevel = readonly EnvelopeBin[] | BakedLevel;
 
 export interface PyramidQueryResult {
   level: number;
@@ -19,25 +21,30 @@ export interface PyramidQueryRange {
  * implementation generates and both hosts assert against.
  */
 export function queryPyramid(
-  levels: readonly EnvelopeBin[][],
+  levels: readonly PyramidLevel[],
   t0: number,
   t1: number,
   pixelWidth: number,
 ): PyramidQueryResult {
   const range = queryPyramidRange(levels, t0, t1, pixelWidth);
+  const position = levels.findIndex(
+    (level, index) => levelNumber(level, index) === range.level,
+  );
+  const bins =
+    position < 0 ? [] : binsFor(levels[position]).slice(range.start, range.end);
   return {
     level: range.level,
-    bins: (levels[range.level] ?? []).slice(range.start, range.end),
+    bins,
   };
 }
 
 export function queryPyramidRange(
-  levels: readonly EnvelopeBin[][],
+  levels: readonly PyramidLevel[],
   t0: number,
   t1: number,
   pixelWidth: number,
 ): PyramidQueryRange {
-  const raw = levels[0] ?? [];
+  const raw = binsFor(levels[0]);
   if (
     raw.length === 0 ||
     t1 < (raw[0] as EnvelopeBin).t0 ||
@@ -47,18 +54,29 @@ export function queryPyramidRange(
   }
   const target = Math.max(1, Math.floor(pixelWidth)) * 2;
   for (let index = 0; index < levels.length; index += 1) {
-    const level = levels[index] ?? [];
+    const level = binsFor(levels[index]);
     const start = firstOverlapping(level, t0);
     const end = pastLastOverlapping(level, t1);
     if (end - start <= target || index === levels.length - 1) {
       return {
-        level: index,
+        level: levelNumber(levels[index], index),
         start: Math.max(0, start - 1),
         end: Math.min(level.length, end + 1),
       };
     }
   }
   return { level: 0, start: 0, end: 0 };
+}
+
+function binsFor(level: PyramidLevel | undefined): readonly EnvelopeBin[] {
+  if (level === undefined) return [];
+  if (Array.isArray(level)) return level as readonly EnvelopeBin[];
+  return (level as BakedLevel).bins as readonly EnvelopeBin[];
+}
+
+function levelNumber(level: PyramidLevel | undefined, index = 0): number {
+  if (level === undefined || Array.isArray(level)) return index;
+  return (level as BakedLevel).level;
 }
 
 /** First index whose bin ends at or after `t0` (partition point of t1 < t0). */

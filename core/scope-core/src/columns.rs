@@ -70,6 +70,22 @@ impl Column {
         }
     }
 
+    /// Gathers values in request order without materializing a paged column.
+    pub fn gather(&self, indexes: &[u64]) -> Result<Vec<f64>, PageError> {
+        match self {
+            Self::Owned(values) => indexes
+                .iter()
+                .map(|index| {
+                    values
+                        .get(usize::try_from(*index).map_err(|_| PageError::InvalidRange)?)
+                        .copied()
+                        .ok_or(PageError::InvalidRange)
+                })
+                .collect(),
+            Self::Paged(handle) => handle.values_at(indexes),
+        }
+    }
+
     /// # Errors
     ///
     /// Returns an error when a page-backed value cannot be read.
@@ -212,5 +228,16 @@ impl PartialEq for ColumnGuard {
 impl<T: AsRef<[f64]> + ?Sized> PartialEq<&T> for ColumnGuard {
     fn eq(&self, other: &&T) -> bool {
         &**self == other.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gather_preserves_request_order_and_duplicates() {
+        let column = Column::from(vec![10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(column.gather(&[3, 1, 1]).unwrap(), vec![40.0, 20.0, 20.0]);
     }
 }

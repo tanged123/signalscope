@@ -10,7 +10,8 @@ use crate::series_ref::path_from_ref;
 use crate::session::{BindingKind, LinkedTime, NamedSetKind, PanelState, SeriesRef, Session};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{
-    BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
+    BakedLevel, BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary,
+    SnapshotManifest,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -548,10 +549,16 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
             .levels
             .iter()
             .map(|level| {
-                entry
-                    .pyramid
-                    .level_window(level.index, entry.window)
-                    .map(|window| window.to_wire_vec())
+                let query = entry.pyramid.query_at_level(level.index, entry.window);
+                (query.bins.len() == level.bin_count)
+                    .then_some(BakedLevel {
+                        level: u32::try_from(level.index).unwrap_or(u32::MAX),
+                        source_start: query.source_start,
+                        source_end: query.source_end,
+                        origin: query.points.first().map_or(0.0, |point| point.time),
+                        bins: query.bins.to_wire_vec(),
+                        points: query.points,
+                    })
                     .ok_or(SnapshotError::MissingLevel {
                         signal: entry.signal.id,
                         level: level.index,
@@ -621,7 +628,7 @@ pub fn inject(template: &str, manifest: SnapshotManifest) -> Result<String, Snap
     Ok(String::from_utf8(html)?)
 }
 
-const BYTES_PER_BIN: u64 = 200;
+const BYTES_PER_BIN: u64 = 400;
 
 /// Estimates serialized data bytes from planned level metadata.
 #[must_use]
@@ -752,7 +759,17 @@ mod tests {
                     pyramid.last_finite_value(),
                 ),
                 levels: (0..pyramid.level_count())
-                    .map(|level| pyramid.level(level).expect("level"))
+                    .map(|level| {
+                        let query = pyramid.query_at_level(level, None);
+                        BakedLevel {
+                            level: level as u32,
+                            source_start: query.source_start,
+                            source_end: query.source_end,
+                            origin: query.points.first().map_or(0.0, |point| point.time),
+                            bins: query.bins.to_wire_vec(),
+                            points: query.points,
+                        }
+                    })
                     .collect(),
             }],
         };
@@ -1039,7 +1056,25 @@ mod tests {
         );
         assert_eq!(
             manifest.signals[0].levels[0],
-            pyramid.level(finest_level).expect("planned level")
+            BakedLevel {
+                level: finest_level as u32,
+                source_start: pyramid
+                    .query_at_level(finest_level, entry.window)
+                    .source_start,
+                source_end: pyramid
+                    .query_at_level(finest_level, entry.window)
+                    .source_end,
+                origin: pyramid
+                    .query_at_level(finest_level, entry.window)
+                    .points
+                    .first()
+                    .map_or(0.0, |point| point.time),
+                bins: pyramid
+                    .query_at_level(finest_level, entry.window)
+                    .bins
+                    .to_wire_vec(),
+                points: pyramid.query_at_level(finest_level, entry.window).points,
+            }
         );
     }
 
@@ -1059,8 +1094,8 @@ mod tests {
         .expect("plan");
         let manifest = bake(&export, &session).expect("bake");
         let level = &manifest.signals[0].levels[0];
-        assert_eq!(level.first().map(|bin| bin.t0), Some(99.0));
-        assert_eq!(level.last().map(|bin| bin.t1), Some(201.0));
+        assert_eq!(level.bins.first().map(|bin| bin.t0), Some(99.0));
+        assert_eq!(level.bins.last().map(|bin| bin.t1), Some(201.0));
     }
 
     #[test]

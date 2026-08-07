@@ -1,5 +1,5 @@
 {
-  "protocol_version": 19,
+  "protocol_version": 20,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -424,11 +424,31 @@
         "data_base64": "string"
       }
     },
+    "TilePoint": {
+      "kind": "object",
+      "fields": {
+        "time": "f64",
+        "value": "f64",
+        "source_index": "u64",
+        "break_before": "bool"
+      }
+    },
+    "BakedLevel": {
+      "kind": "object",
+      "fields": {
+        "level": "u32",
+        "source_start": "u64",
+        "source_end": "u64",
+        "origin": "f64",
+        "bins": "EnvelopeBin[]",
+        "points": "TilePoint[]"
+      }
+    },
     "BakedSignal": {
       "kind": "object",
       "fields": {
         "summary": "SignalSummary",
-        "levels": "EnvelopeBin[][]"
+        "levels": "BakedLevel[]"
       }
     },
     "SnapshotManifest": {

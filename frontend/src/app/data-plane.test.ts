@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   DragDropForward,
+  BakedLevel,
   EnvelopeBin,
   SignalSummary,
 } from "../generated/protocol";
@@ -24,7 +25,7 @@ function bin(time: number, value: number | null): EnvelopeBin {
 }
 
 describe("BakedPlane.querySamples", () => {
-  it("returns a capped level-zero slice with gaps intact", async () => {
+  it("uses the finest baked ordered points for samples", async () => {
     const summary: SignalSummary = {
       signal_id: "7",
       source_id: "3",
@@ -44,7 +45,45 @@ describe("BakedPlane.querySamples", () => {
           {
             summary,
             levels: [
-              [bin(0, 0), bin(1, 1), bin(2, null), bin(3, 3), bin(4, 4)],
+              {
+                level: 0,
+                source_start: "0",
+                source_end: "5",
+                origin: 0,
+                bins: [
+                  bin(0, 0),
+                  bin(1, 1),
+                  bin(2, null),
+                  bin(3, 3),
+                  bin(4, 4),
+                ],
+                points: [
+                  {
+                    time: 0,
+                    value: 0,
+                    source_index: "0",
+                    break_before: false,
+                  },
+                  {
+                    time: 1,
+                    value: 1,
+                    source_index: "1",
+                    break_before: false,
+                  },
+                  {
+                    time: 3,
+                    value: 3,
+                    source_index: "3",
+                    break_before: true,
+                  },
+                  {
+                    time: 4,
+                    value: 4,
+                    source_index: "4",
+                    break_before: false,
+                  },
+                ],
+              } satisfies BakedLevel,
             ],
           },
         ],
@@ -59,9 +98,9 @@ describe("BakedPlane.querySamples", () => {
     });
 
     expect(response.request_id).toBe("samples-1");
-    expect(response.series[0]?.time).toEqual([0, 2, 4]);
+    expect(response.series[0]?.time).toEqual([0, 3, 4]);
     expect(response.series[0]?.stride).toBe(2);
-    expect(Number.isNaN(response.series[0]?.values[1])).toBe(true);
+    expect(response.series[0]?.values).toEqual([0, 3, 4]);
   });
 
   it("reports finite last values for both generated demo signals", async () => {
