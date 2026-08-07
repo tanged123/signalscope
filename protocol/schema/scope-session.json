@@ -1,5 +1,5 @@
 {
-  "schema_version": 21,
+  "schema_version": 22,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -16,16 +16,8 @@
       "variants": ["none", "track", "measure"],
       "default": "none"
     },
-    "PanelMode": {
-      "kind": "enum",
-      "variants": ["time", "xy", "fft", "histogram"]
-    },
     "AxisStyle": { "kind": "enum", "variants": ["gutter", "inline"] },
     "DashStyle": { "kind": "enum", "variants": ["solid", "dash", "dot"] },
-    "AnnotationDomain": {
-      "kind": "enum",
-      "variants": ["time", "frequency", "distribution"]
-    },
     "LinkedTime": {
       "kind": "object",
       "fields": {
@@ -91,11 +83,6 @@
       "variants": ["none", "source", "channel"],
       "default": "none"
     },
-    "ColorAxis": {
-      "kind": "enum",
-      "variants": ["none", "time", "signal"],
-      "default": "none"
-    },
     "NamedSetKind": { "kind": "enum", "variants": ["query", "pick"] },
     "NamedSet": {
       "kind": "object",
@@ -112,7 +99,6 @@
       "fields": {
         "id": "string",
         "series_path": "string",
-        "domain": "AnnotationDomain",
         "anchor": "f64",
         "pinned_value": "f64",
         "label": "string"
@@ -123,11 +109,7 @@
       "fields": {
         "id": "string",
         "title": "string",
-        "mode": "PanelMode",
         "axis_style": "AxisStyle",
-        "x_ref": "SeriesRef?",
-        "color_axis": "ColorAxis",
-        "color_ref": "SeriesRef?",
         "bindings": "Binding[]",
         "color_by": "StyleDimension",
         "overrides": "SeriesOverride[]",
@@ -135,14 +117,11 @@
         "ghost_mode": "GhostMode",
         "split_by": "SplitDimension",
         "y_range": "f64[2]?",
-        "x_range": "f64[2]?",
         "x_label": "string?",
         "y_label": "string?",
-        "c_label": "string?",
         "time_window": "f64[2]?",
         "annotations": "Annotation[]",
-        "show_stats": "bool",
-        "axis_equal": "bool"
+        "show_stats": "bool"
       }
     },
     "LayoutCell": {

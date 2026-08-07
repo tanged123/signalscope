@@ -23,6 +23,14 @@ describe("parseBakedSession", () => {
     expect(() => parseBakedSession(json)).toThrow(/schema/);
   });
 
+  it("rejects the immediately previous session schema", () => {
+    const json = JSON.stringify({
+      ...emptySession(),
+      schema_version: SESSION_SCHEMA_VERSION - 1,
+    });
+    expect(() => parseBakedSession(json)).toThrow(/schema/);
+  });
+
   it("rejects an invalid current-version session", () => {
     const incomplete: Record<string, unknown> = { ...emptySession() };
     delete incomplete.linked_time;

@@ -1,5 +1,5 @@
 {
-  "protocol_version": 18,
+  "protocol_version": 19,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -181,8 +181,7 @@
         "request_id": "string",
         "signal_ids": "u64[]",
         "window": "TimeWindow",
-        "pixel_width": "u32",
-        "max_total_bins": "u32?"
+        "pixel_width": "u32"
       }
     },
     "EnvelopeBin": {
