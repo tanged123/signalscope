@@ -13,7 +13,7 @@ async function boot(): Promise<void> {
   await app.mount();
 }
 
-void boot().catch((error: unknown) => {
+await boot().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   const root = document.querySelector<HTMLElement>("#app");
   if (root !== null) {

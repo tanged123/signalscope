@@ -7,7 +7,7 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|bench|full]
+Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|gpu|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
@@ -16,6 +16,7 @@ Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|bench|full]
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
   e2e       Run Playwright desktop and mobile-review smoke tests.
+  gpu       Run WebGPU software-adapter fidelity tests.
   bench     Run corpus, core, and Playwright performance benchmarks.
   full      Run quick checks, compile/test the Tauri shell, then run e2e.
 EOF
@@ -38,16 +39,20 @@ test_frontend() {
   artifact_checks
 }
 
-bench_e2e() {
-  local corpus_dir="$signalscope_root/build/bench/corpus/mc1000"
+bench_e2e_tier() {
+  local tier="$1"
+  local corpus_dir="$signalscope_root/build/bench/corpus/$tier"
   if [ ! -f "$corpus_dir/manifest.json" ]; then
-    cargo test --release -p scope-core -- --ignored --test-threads=1 bench_corpus_mc1000
+    cargo test --release -p scope-core -- --ignored --test-threads=1 "bench_corpus_$tier"
   fi
   local -a data_args=()
   local file selected=0
   # Full corpus by default so the browser bench proves 1000 sources; PR smoke
   # jobs pass SIGNALSCOPE_BENCH_FILES=2 to stay bounded.
   local browser_files="${SIGNALSCOPE_BENCH_FILES:-1000}"
+  if [ "$tier" = dense10k ]; then
+    browser_files="${SIGNALSCOPE_BENCH_DENSE10K_FILES:-10000}"
+  fi
   for file in "$corpus_dir"/run_*.csv; do
     if [ "$selected" -eq "$browser_files" ]; then
       break
@@ -56,12 +61,12 @@ bench_e2e() {
     selected=$((selected + 1))
   done
   [ "$selected" -eq "$browser_files" ]
-  local out="$signalscope_root/build/bench/mc1000.html"
+  local out="$signalscope_root/build/bench/$tier.html"
   local max_bytes="${SIGNALSCOPE_BENCH_MAX_BYTES:-1073741824}"
   local fidelity=preview started elapsed bytes
   started=$SECONDS
   "$signalscope_scripts_dir/export.sh" "${data_args[@]}" \
-    --workspace "$signalscope_root/examples/bench/mc1000.workspace.json" \
+    --workspace "$signalscope_root/examples/bench/$tier.workspace.json" \
     --range visible --fidelity "$fidelity" --out "$out"
   elapsed=$((SECONDS - started))
   bytes=$(stat -c %s "$out")
@@ -72,7 +77,17 @@ bench_e2e() {
   mkdir -p "$signalscope_root/build/bench/report"
   printf '{ "bench": "bake", "seconds": %d, "bytes": %d, "fidelity": "%s", "input_files": %d }\n' \
     "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake.json"
-  SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend bench
+  SIGNALSCOPE_BENCH=1 SIGNALSCOPE_BENCH_TIER="$tier" pnpm --filter @signalscope/frontend bench
+}
+
+bench_e2e() {
+  local tier="${SIGNALSCOPE_BENCH_TIER:-mc1000}"
+  if [ "$tier" = all ]; then
+    bench_e2e_tier mc1000
+    bench_e2e_tier dense10k
+  else
+    bench_e2e_tier "$tier"
+  fi
 }
 
 bench_all_exit() {
@@ -132,6 +147,11 @@ e2e)
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
   pnpm e2e
+  ;;
+gpu)
+  shift || true
+  bake_bench_smoke_artifact
+  pnpm --filter @signalscope/frontend exec playwright test --project=gpu "$@"
   ;;
 bench)
   bench_mode="${2:-all}"

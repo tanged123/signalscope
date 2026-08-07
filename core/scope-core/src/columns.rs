@@ -71,6 +71,10 @@ impl Column {
     }
 
     /// Gathers values in request order without materializing a paged column.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an index is outside the column or a page-backed value cannot be read.
     pub fn gather(&self, indexes: &[u64]) -> Result<Vec<f64>, PageError> {
         match self {
             Self::Owned(values) => indexes

@@ -2,10 +2,19 @@ import { defineConfig, devices } from "@playwright/test";
 
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const coverage = process.env.SIGNALSCOPE_COVERAGE === "1";
+const webGpuLaunchOptions = {
+  ...(executablePath === undefined ? {} : { executablePath }),
+  args: ["--enable-unsafe-webgpu", "--use-angle=swiftshader"],
+};
+const softwareWebGpuLaunchOptions = {
+  ...webGpuLaunchOptions,
+  args: webGpuLaunchOptions.args,
+};
 
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
+  workers: 1,
   metadata: {
     coverage,
   },
@@ -24,18 +33,23 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173",
     headless: true,
     trace: "retain-on-failure",
-    ...(executablePath === undefined
-      ? {}
-      : { launchOptions: { executablePath } }),
+    launchOptions: webGpuLaunchOptions,
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "desktop",
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: webGpuLaunchOptions,
+      },
+    },
     {
       name: "demo",
       testDir: "./tests/demo",
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 800 },
+        launchOptions: webGpuLaunchOptions,
         video: { mode: "on", size: { width: 1280, height: 800 } },
       },
       outputDir: "../build/demo/recording",
@@ -46,6 +60,16 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 800 },
+        launchOptions: webGpuLaunchOptions,
+      },
+    },
+    {
+      name: "gpu",
+      testDir: "./tests/gpu",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1000, height: 600 },
+        launchOptions: softwareWebGpuLaunchOptions,
       },
     },
   ],

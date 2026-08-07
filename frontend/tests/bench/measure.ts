@@ -8,6 +8,7 @@ interface BenchWindow {
 }
 
 export interface FrameStats {
+  p50Ms: number;
   p95Ms: number;
   maxMs: number;
   frames: number;
@@ -53,6 +54,7 @@ export async function stopFrameProbe(page: Page): Promise<FrameStats> {
   });
   const frames = measured.frames.sort((a, b) => a - b);
   return {
+    p50Ms: percentile(frames, 0.5),
     p95Ms: percentile(frames, 0.95),
     maxMs: frames.at(-1) ?? 0,
     frames: frames.length,

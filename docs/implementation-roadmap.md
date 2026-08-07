@@ -105,9 +105,11 @@ time panels can facet by source or channel with linked-y small multiples and a
 follow-ups because annotations stay attached to the unsplit plot in this
 phase.
 
-The four-phase WebGPU renderer sequence is: reset the product to one
-time-series path, order pyramid tiles for rendering, replace Canvas2D line
-strokes with WebGPU, then prove interaction and host capability behavior.
+The four-phase WebGPU renderer sequence is complete: the product is one
+time-series path, pyramid tiles arrive in stable render order, Canvas2D line
+strokes are replaced by WebGPU pages, and interaction is proven with
+generation-safe refinement, asynchronous GPU picking, software-adapter image
+coverage, and the `mc1000`/`dense10k` benchmark matrix.
 
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18
@@ -137,10 +139,9 @@ The categorical series order now uses MATLAB's canonical seven defaults, with
 the eighth slot rolling over to dashed blue; amber remains reserved by token
 and semantic role rather than by banning MATLAB yellow.
 
-XY, FFT, and histogram plotting were removed by
-[ADR 0039](adr/0039-time-series-webgpu-renderer.md) while the time-series
-Canvas2D oracle remains in place for the WebGPU renderer phases.
-
 Non-time plotting and the density-tier renderer were removed by
 [ADR 0039](adr/0039-time-series-webgpu-renderer.md); the four-phase WebGPU
-sequence above is now the renderer roadmap.
+sequence above is now shipped. WebGPU owns time-series strokes, tile pages,
+and nearest-series picking; Canvas2D remains responsible for axes and
+annotations. Run `./scripts/test.sh gpu` for the software-adapter proof and
+`./scripts/test.sh bench e2e` for a selected browser benchmark tier.

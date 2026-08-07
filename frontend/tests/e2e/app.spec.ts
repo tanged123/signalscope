@@ -53,6 +53,7 @@ test("shared presentation plane renders the demo workspace", async ({
 
 test("theme is a pure token swap", async ({ page }) => {
   await page.goto("/");
+  await expect(page.getByLabel("Panel 1 panel")).toBeVisible();
   await page.keyboard.press("t");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.reload();

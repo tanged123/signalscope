@@ -40,22 +40,3 @@ export function scanDispatchPlan(length: number): ScanDispatch[] {
   });
   return passes;
 }
-
-export class GpuPrefixScan {
-  constructor(private readonly workgroupSize = 256) {}
-
-  plan(length: number): ScanDispatch[] {
-    void this.workgroupSize;
-    return scanDispatchPlan(length);
-  }
-
-  encode(
-    pass: GPUComputePassEncoder,
-    length: number,
-    workgroupSize = this.workgroupSize,
-  ): void {
-    for (const dispatch of scanDispatchPlan(length)) {
-      pass.dispatchWorkgroups(Math.ceil(dispatch.values / (workgroupSize * 2)));
-    }
-  }
-}

@@ -62,7 +62,9 @@ test.describe("exported snapshot round trip", () => {
     ).length;
     const full = JSON.stringify(bakedManifest(artifacts.full).signals).length;
     expect(preview).toBeLessThan(full / 2);
-    expect(full).toBeLessThan(2_000_000);
+    // Full fidelity now carries ordered representative points for every
+    // baked level so BakedPlane can stream the same tile shape as native.
+    expect(full).toBeLessThan(3_000_000);
   });
 
   test("rejects an unsupported session instead of partially restoring", async ({

@@ -762,7 +762,7 @@ mod tests {
                     .map(|level| {
                         let query = pyramid.query_at_level(level, None);
                         BakedLevel {
-                            level: level as u32,
+                            level: u32::try_from(level).expect("pyramid levels fit protocol"),
                             source_start: query.source_start,
                             source_end: query.source_end,
                             origin: query.points.first().map_or(0.0, |point| point.time),
@@ -1057,7 +1057,7 @@ mod tests {
         assert_eq!(
             manifest.signals[0].levels[0],
             BakedLevel {
-                level: finest_level as u32,
+                level: u32::try_from(finest_level).expect("pyramid levels fit protocol"),
                 source_start: pyramid
                     .query_at_level(finest_level, entry.window)
                     .source_start,

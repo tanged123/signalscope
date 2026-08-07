@@ -18,9 +18,19 @@ storage and ordered extrema-preserving LOD. ChartGPU is an MIT-licensed
 reference for device lifetime, packed coordinates, GPU-resident buffers, and
 line shaders; it is not a runtime dependency or chart backend.
 
+Visible tiles arrive in two generation-safe passes: a coarse request for every
+visible series, followed by chunked fine requests. Fine residency is swapped
+atomically; a budget failure keeps the complete coarse generation. Pan within a
+padded resident window changes only the viewport. GPU line pages and descriptor
+directories are shared by plot rendering and asynchronous nearest-series
+picking, while axes and annotations remain Canvas2D overlays. Hover never
+scans vertices or waits for a mapped buffer.
+
 ## Consequences
 
 Sessions older than the new schema are rejected. Hosts without the required
 WebGPU capabilities show an unsupported-host screen. Exact sample queries
 remain available for CSV export, while ordinary plotting consumes bounded
-pyramid tiles.
+pyramid tiles. The software-adapter proof runs through `./scripts/test.sh gpu`;
+the `mc1000` and `dense10k` benchmark tiers report coarse-first plot,
+refinement, upload, residency, frame, pick, and recovery floors.

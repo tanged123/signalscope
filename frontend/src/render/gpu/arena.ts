@@ -44,13 +44,23 @@ export function arenaPageBytes(limits: ArenaLimits): number {
 export class GpuArena {
   readonly pageBytes: number;
   private readonly pages: Page[] = [];
+  private device: GPUDevice;
+  private queue: GPUQueue;
 
-  constructor(
-    private readonly device: GPUDevice,
-    private readonly queue: GPUQueue,
-    limits: ArenaLimits,
-  ) {
+  get pageCount(): number {
+    return this.pages.length;
+  }
+
+  constructor(device: GPUDevice, queue: GPUQueue, limits: ArenaLimits) {
+    this.device = device;
+    this.queue = queue;
     this.pageBytes = arenaPageBytes(limits);
+  }
+
+  restore(device: GPUDevice, queue: GPUQueue): void {
+    this.destroy();
+    this.device = device;
+    this.queue = queue;
   }
 
   allocate(size: number): ArenaSlice {

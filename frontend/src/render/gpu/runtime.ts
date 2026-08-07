@@ -1,5 +1,6 @@
 import { requestGpuDevice, type GpuDeviceResult } from "./capabilities";
 import { GpuFrameLoop, type GpuPanelEncoder } from "./frame-loop";
+import { GpuMetrics } from "./metrics";
 
 export type GpuRuntimeError =
   | { kind: "lost"; message: string }
@@ -18,6 +19,7 @@ export class GpuRuntime {
   format: GPUTextureFormat;
   limits: GPUSupportedLimits;
   frameLoop: GpuFrameLoop;
+  readonly metrics = new GpuMetrics();
 
   private readonly panels = new Set<GpuPanelEncoder>();
   private readonly shaders = new Map<string, GPUShaderModule>();
@@ -27,6 +29,7 @@ export class GpuRuntime {
   private readonly restoreListeners = new Set<() => void>();
   private readonly gpu: GPU;
   private recovery: Promise<void> | null = null;
+  private lossStartedAt: number | null = null;
 
   private static frameScheduler(): [
     (callback: FrameRequestCallback) => number,
@@ -75,6 +78,10 @@ export class GpuRuntime {
     this.frameLoop.request(panel);
   }
 
+  destroyDeviceForTest(): void {
+    this.device.destroy();
+  }
+
   shader(label: string, code: string): GPUShaderModule {
     const cached = this.shaders.get(label);
     if (cached !== undefined) return cached;
@@ -118,6 +125,7 @@ export class GpuRuntime {
   private handleLoss(info: GPUDeviceLostInfo): void {
     if (this.recovery !== null) return;
     this.frameLoop.stop();
+    this.lossStartedAt = performance.now();
     this.shaders.clear();
     this.renderPipelines.clear();
     this.computePipelines.clear();
@@ -147,6 +155,10 @@ export class GpuRuntime {
       this.frameLoop.register(panel);
     });
     this.restoreListeners.forEach((listener) => listener());
+    if (this.lossStartedAt !== null) {
+      this.metrics.recordRecovery(performance.now() - this.lossStartedAt);
+      this.lossStartedAt = null;
+    }
     this.publish({ kind: "restored" });
   }
 
@@ -160,6 +172,7 @@ export class GpuRuntime {
       requestFrame,
       cancelFrame,
       (panelId, error) => this.publish({ kind: "panel", panelId, error }),
+      (durationMs) => this.metrics.recordFrame(durationMs),
     );
   }
 

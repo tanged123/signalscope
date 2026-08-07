@@ -26,6 +26,7 @@ export class GpuFrameLoop {
       panelId: string,
       error: unknown,
     ) => void = () => undefined,
+    private readonly onFrame: (durationMs: number) => void = () => undefined,
   ) {}
 
   register(panel: GpuPanelEncoder): () => void {
@@ -61,8 +62,12 @@ export class GpuFrameLoop {
   }
 
   private flush(): void {
+    const started = performance.now();
     this.rafHandle = null;
-    if (this.stopped || this.dirty.size === 0) return;
+    if (this.stopped || this.dirty.size === 0) {
+      this.onFrame(performance.now() - started);
+      return;
+    }
     const pending = [...this.dirty];
     this.dirty.clear();
     const encoder = this.device.createCommandEncoder({
@@ -79,8 +84,10 @@ export class GpuFrameLoop {
         this.reportError(panel.id, error);
       }
     }
-    if (encoded.length === 0) return;
-    this.queue.submit([encoder.finish()]);
-    encoded.forEach((panel) => panel.afterSubmit?.());
+    if (encoded.length > 0) {
+      this.queue.submit([encoder.finish()]);
+      encoded.forEach((panel) => panel.afterSubmit?.());
+    }
+    this.onFrame(performance.now() - started);
   }
 }

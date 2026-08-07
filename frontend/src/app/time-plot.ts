@@ -5,7 +5,6 @@ import {
   columnsYExtent,
   type BinColumns,
 } from "./bin-columns";
-import { nearestLine, nearestVertex } from "./plot-hit";
 import {
   formatValue,
   invertX,
@@ -61,11 +60,6 @@ export interface PlotDelta {
   second: { x: number; y: number };
 }
 
-export interface SeriesHit {
-  path: string;
-  distance: number;
-}
-
 export interface PreparedTimePlot {
   readonly interaction: PlotInteractionPolicy;
   autoRange(): {
@@ -76,20 +70,9 @@ export interface PreparedTimePlot {
     layout: PlotLayout,
     point: { x: number; y: number },
   ): PlotCursor | null;
-  annotationAt(
-    layout: PlotLayout,
-    point: { x: number; y: number },
-    radius: number,
-  ): AnnotationAnchor | null;
   resolveAnnotation(annotation: Annotation): ResolvedAnnotation | null;
   stats(): readonly PlotStatGroup[];
   delta(resolved: readonly ResolvedAnnotation[]): PlotDelta | null;
-  seriesAt(
-    layout: PlotLayout,
-    x: number,
-    y: number,
-    threshold: number,
-  ): SeriesHit | null;
 }
 
 export const TIME_PLOT_INTERACTION: PlotInteractionPolicy = {
@@ -192,21 +175,6 @@ export function prepareTimePlot(input: TimePlotInput): PreparedTimePlot {
         link: "time",
       };
     },
-    annotationAt(layout, point, radius) {
-      const hit = nearestVertex(
-        input.series.map((series) => ({
-          path: series.path,
-          bins: series.bins,
-        })),
-        layout,
-        point.x,
-        point.y,
-        radius,
-      );
-      return hit === null
-        ? null
-        : { path: hit.path, anchor: hit.time, pinnedValue: hit.value };
-    },
     resolveAnnotation: resolve,
     stats() {
       return input.series.map((series) => {
@@ -243,18 +211,6 @@ export function prepareTimePlot(input: TimePlotInput): PreparedTimePlot {
         first: { x: first.x, y: first.y },
         second: { x: second.x, y: second.y },
       };
-    },
-    seriesAt(layout, x, y, threshold) {
-      const hit = nearestLine(
-        input.series
-          .filter((series) => series.visible !== false)
-          .map((series) => ({ path: series.path, bins: series.bins })),
-        layout,
-        x,
-        y,
-        threshold,
-      );
-      return hit === null ? null : { path: hit.path, distance: hit.distance };
     },
   };
 }

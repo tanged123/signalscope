@@ -183,6 +183,10 @@ export class WorkspaceView {
     return this.views.get(id)?.panelRect() ?? null;
   }
 
+  invalidatePanelSize(id: string): void {
+    this.views.get(id)?.invalidateSize();
+  }
+
   private view(id: string): PanelView {
     let view = this.views.get(id);
     if (view === undefined) {

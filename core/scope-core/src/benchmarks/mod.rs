@@ -233,6 +233,18 @@ fn bench_corpus_wide100m() {
 
 #[test]
 #[ignore = "release benchmark"]
+fn bench_corpus_dense10k() {
+    let started = Instant::now();
+    let dir = corpus::ensure(&corpus::dense10k());
+    println!(
+        "bench_corpus_dense10k dir={} seconds={:.1}",
+        dir.display(),
+        started.elapsed().as_secs_f64()
+    );
+}
+
+#[test]
+#[ignore = "release benchmark"]
 #[allow(clippy::cast_precision_loss)]
 fn bench_mc_cold_open() {
     let corpus = corpus::ensure(&corpus::mc1000());

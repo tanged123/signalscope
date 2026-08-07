@@ -56,4 +56,20 @@ describe("GpuResidency", () => {
     expect(store.has(coarse.key)).toBe(true);
     expect(store.has(old.key)).toBe(false);
   });
+
+  it("rejects a fine batch before admitting a partial subset", () => {
+    const store = residency();
+    const coarse = store.uploadBatch([
+      { ...tile("1", "0"), coarse: true },
+      { ...tile("2", "0"), coarse: true },
+    ]);
+    expect(coarse).toHaveLength(2);
+    expect(() =>
+      store.uploadBatch([tile("1", "2", 512), tile("2", "2", 512)]),
+    ).toThrow("GPU residency batch exceeds panel budget");
+    expect(store.visible().map((entry) => entry.key)).toEqual([
+      "1/0/0/1",
+      "2/0/0/1",
+    ]);
+  });
 });

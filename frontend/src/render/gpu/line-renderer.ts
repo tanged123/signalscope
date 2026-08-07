@@ -7,9 +7,16 @@ import {
   prepareSegmentDirectories,
   type SegmentDescriptor,
 } from "./descriptor-builder";
-import type { ResidentTile } from "./residency";
+import { type GpuResidency, type ResidentTile } from "./residency";
 import type { SeriesStyle } from "./series-slots";
 import { splitF64 } from "./precision";
+import {
+  GpuPicker,
+  type PickRequest,
+  type PickResult,
+  type PickViewport,
+} from "./picker";
+import type { GpuMetrics } from "./metrics";
 import quadShader from "./shaders/line-quad.wgsl?raw";
 import hairlineShader from "./shaders/line-hairline.wgsl?raw";
 
@@ -43,6 +50,9 @@ interface PageBuffers {
   metadataCount: number;
   quadArgs: GPUBuffer;
   hairlineArgs: GPUBuffer;
+  pickRanges: GPUBuffer;
+  pickRangeCapacity: number;
+  pickRangeCount: number;
 }
 
 interface TileMetadata {
@@ -56,7 +66,9 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   readonly id: string;
   readonly runtime: GpuRuntime;
   readonly context: GPUCanvasContext | undefined;
+  readonly picker: GpuPicker;
   private readonly arena: GpuArena | undefined;
+  private readonly residency: GpuResidency | undefined;
   private viewport: LineViewport | null = null;
   private tiles: readonly ResidentTile[] = [];
   private styles: readonly SeriesStyle[] = [];
@@ -77,15 +89,19 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     context: GPUCanvasContext | undefined,
     id: string,
     arena?: GpuArena,
+    residency?: GpuResidency,
   ) {
     this.runtime = runtime;
     this.context = context;
     this.id = id;
     this.arena = arena;
+    this.residency = residency;
+    this.picker = new GpuPicker(runtime);
   }
 
   setViewport(viewport: LineViewport): void {
     this.viewport = viewport;
+    this.picker.setViewport(toPickViewport(viewport, this.width, this.height));
     this.transformDirty = true;
   }
 
@@ -104,12 +120,23 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   }
 
   resize(width: number, height: number): void {
-    this.width = Math.max(1, Math.trunc(width));
-    this.height = Math.max(1, Math.trunc(height));
+    const nextWidth = Math.max(1, Math.trunc(width));
+    const nextHeight = Math.max(1, Math.trunc(height));
+    this.width = nextWidth;
+    this.height = nextHeight;
     this.transformDirty = true;
   }
 
   encode(encoder: GPUCommandEncoder): void {
+    this.picker.encode(encoder);
+    if (
+      !this.sceneDirty &&
+      !this.transformDirty &&
+      !this.styleDirty &&
+      !this.residencyDirty
+    ) {
+      return;
+    }
     const pageIds = [...new Set(this.tiles.map((tile) => tile.points.page))];
     const descriptors = this.tiles.reduce(
       (total, tile) => total + Math.max(0, tile.pointCount - 1),
@@ -121,6 +148,8 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       drawCalls: pageIds.length * (dense ? 2 : 1),
       descriptors,
     };
+    this.gpuMetrics()?.recordDraw(this.lastMetrics.drawCalls);
+    this.gpuMetrics()?.recordSegments(descriptors);
 
     if (
       this.context === undefined ||
@@ -185,13 +214,31 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.clearDirty();
   }
 
-  afterSubmit(): void {}
+  afterSubmit(): void {
+    this.picker.afterSubmit();
+  }
+
+  requestPick(request: PickRequest): Promise<PickResult | null> {
+    const result = this.picker.request(request);
+    this.runtime.requestFrame(this);
+    return result;
+  }
+
+  latestPick(): PickResult | null {
+    return this.picker.latest();
+  }
 
   deviceLost(): void {
+    this.arena?.destroy();
+    this.residency?.dropDevice();
+    this.tiles = [];
+    this.picker.setScene([]);
     this.sceneDirty = true;
   }
 
-  deviceRestored(): void {
+  deviceRestored(device: GPUDevice): void {
+    this.arena?.restore(device, this.runtime.queue);
+    this.picker.resetDevice(this.runtime);
     this.uniformBuffer = null;
     this.styleBuffer = null;
     this.styleCapacity = 0;
@@ -308,11 +355,15 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         page,
         descriptors.length,
         metadata.length,
+        pageTiles.length,
       );
       buffers.descriptorCount = descriptors.length;
       buffers.metadataCount = metadata.length;
+      buffers.pickRangeCount = pageTiles.length;
       this.writeDescriptors(buffers.descriptors, descriptors);
       this.writeMetadata(buffers.metadata, metadata);
+      this.writePickRanges(buffers.pickRanges, pageTiles);
+      this.gpuMetrics()?.recordDescriptorRebuild();
       this.writeIndirect(buffers.quadArgs, [6, descriptors.length, 0, 0]);
       this.writeIndirect(buffers.hairlineArgs, [
         descriptors.length * 2,
@@ -321,18 +372,35 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         0,
       ]);
     }
+    this.picker.setScene(
+      pageIds.flatMap((page) => {
+        const buffers = this.pages.get(page);
+        if (buffers === undefined || this.arena === undefined) return [];
+        return [
+          {
+            pointBuffer: this.arena.buffer(page),
+            rangeBuffer: buffers.pickRanges,
+            metadataBuffer: buffers.metadata,
+            styleBuffer: this.styleBuffer as GPUBuffer,
+            seriesCount: buffers.pickRangeCount,
+          },
+        ];
+      }),
+    );
   }
 
   private pageBuffers(
     page: number,
     descriptorCount: number,
     metadataCount: number,
+    pickRangeCount: number,
   ): PageBuffers {
     const existing = this.pages.get(page);
     if (
       existing !== undefined &&
       existing.descriptorCapacity >= descriptorCount &&
-      existing.metadataCapacity >= metadataCount
+      existing.metadataCapacity >= metadataCount &&
+      existing.pickRangeCapacity >= pickRangeCount
     ) {
       return existing;
     }
@@ -340,6 +408,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     existing?.metadata.destroy();
     existing?.quadArgs.destroy();
     existing?.hairlineArgs.destroy();
+    existing?.pickRanges.destroy();
     const next: PageBuffers = {
       descriptors: this.runtime.device.createBuffer({
         label: `${this.id}-page-${String(page)}-descriptors`,
@@ -365,6 +434,13 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         size: 16,
         usage: GPU_BUFFER_STORAGE | GPU_BUFFER_COPY_DST | GPU_BUFFER_INDIRECT,
       }),
+      pickRanges: this.runtime.device.createBuffer({
+        label: `${this.id}-page-${String(page)}-pick-ranges`,
+        size: Math.max(16, nextCapacity(pickRangeCount) * 16),
+        usage: GPU_BUFFER_STORAGE | GPU_BUFFER_COPY_DST,
+      }),
+      pickRangeCapacity: nextCapacity(pickRangeCount),
+      pickRangeCount: 0,
     };
     this.pages.set(page, next);
     return next;
@@ -408,11 +484,36 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     );
   }
 
+  private writePickRanges(
+    buffer: GPUBuffer,
+    tiles: readonly ResidentTile[],
+  ): void {
+    const values = new Uint32Array(Math.max(1, tiles.length) * 4);
+    tiles.forEach((tile, index) => {
+      const offset = index * 4;
+      values[offset] = tile.points.offset / 16;
+      values[offset + 1] = tile.pointCount;
+      values[offset + 2] = tile.seriesSlot;
+      values[offset + 3] = tile.forceBreakFirst ? 1 : 0;
+    });
+    this.runtime.queue.writeBuffer(
+      buffer,
+      0,
+      values as unknown as GPUAllowSharedBufferSource,
+    );
+  }
+
   private writeIndirect(buffer: GPUBuffer, values: readonly number[]): void {
     this.runtime.queue.writeBuffer(
       buffer,
       0,
       new Uint32Array(values) as unknown as GPUAllowSharedBufferSource,
+    );
+  }
+
+  private gpuMetrics(): GpuMetrics | null {
+    return (
+      (this.runtime as unknown as { metrics?: GpuMetrics }).metrics ?? null
     );
   }
 
@@ -472,6 +573,27 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       }),
     );
   }
+}
+
+function toPickViewport(
+  viewport: LineViewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): PickViewport {
+  const origin = splitF64(viewport.xMin);
+  return {
+    viewOriginHigh: origin[0],
+    viewOriginLow: origin[1],
+    timeScale: viewport.plotWidth / (viewport.xMax - viewport.xMin),
+    plotX: viewport.plotX,
+    plotY: viewport.plotY,
+    plotWidth: viewport.plotWidth,
+    plotHeight: viewport.plotHeight,
+    canvasHeight,
+    yMin: viewport.yMin,
+    yScale: viewport.plotHeight / (viewport.yMax - viewport.yMin),
+    canvasWidth,
+  };
 }
 
 function nextCapacity(required: number): number {

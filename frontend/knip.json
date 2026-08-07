@@ -8,5 +8,6 @@
   ],
   "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs", "*.config.ts"],
   "ignore": ["src/generated/**"],
+  "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["ffmpeg"]
 }

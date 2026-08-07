@@ -1,5 +1,4 @@
 import type { ResidentTile } from "./residency";
-import { GpuPrefixScan } from "./prefix-scan";
 
 export interface SegmentDescriptor {
   readonly firstPoint: number;
@@ -45,34 +44,6 @@ export function prepareSegmentDirectories(
     }
     return { ...directory, candidates };
   });
-}
-
-export interface IndirectArguments {
-  readonly quad: readonly [number, number, number, number];
-  readonly hairline: readonly [number, number, number, number];
-}
-
-export class DescriptorBuilder {
-  private readonly scan = new GpuPrefixScan();
-
-  rebuild(
-    pass: GPUComputePassEncoder,
-    page: number,
-    directories: readonly SegmentDirectory[],
-  ): { descriptors: SegmentDescriptor[]; indirect: IndirectArguments } {
-    const selected = prepareSegmentDirectories(
-      directories.filter((entry) => entry.page === page),
-    );
-    const descriptors = selected.flatMap((entry) => entry.candidates);
-    this.scan.encode(pass, descriptors.length);
-    return {
-      descriptors,
-      indirect: {
-        quad: [6, descriptors.length, 0, 0],
-        hairline: [descriptors.length * 2, 1, 0, 0],
-      },
-    };
-  }
 }
 
 export function directoryFromResident(tile: ResidentTile): SegmentDirectory {

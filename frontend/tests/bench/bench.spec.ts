@@ -2,11 +2,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "../e2e/fixtures";
 import { interact, startFrameProbe, stopFrameProbe } from "./measure";
+import type { GpuMetricsSnapshot } from "../../src/render/gpu/metrics";
+import { percentile } from "../../src/app/percentile";
 
-const artifact = new URL("../../../build/bench/mc1000.html", import.meta.url);
+const tier = process.env.SIGNALSCOPE_BENCH_TIER ?? "mc1000";
+const artifact = new URL(`../../../build/bench/${tier}.html`, import.meta.url);
 const reportDir = new URL("../../../build/bench/report/", import.meta.url);
 
-test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
+test(`${tier} snapshot first plot and pan/zoom stay interactive`, async ({
   page,
 }) => {
   test.setTimeout(240_000);
@@ -16,7 +19,7 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
   ).toBe(true);
 
   const started = Date.now();
-  await page.goto(artifact.href);
+  await page.goto(`${artifact.href}?signalscope-bench=1`);
   await expect(page.locator(".series-canvas").first()).toBeVisible({
     timeout: 120_000,
   });
@@ -28,32 +31,61 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
   await startFrameProbe(page);
   await interact(page);
   const stats = await stopFrameProbe(page);
+  const metrics = await page.evaluate(() => {
+    const host = window as typeof window & {
+      __signalscopeBench?: { snapshot: () => GpuMetricsSnapshot };
+    };
+    return host.__signalscopeBench?.snapshot() ?? null;
+  });
   const bake = JSON.parse(
     readFileSync(new URL("bake.json", reportDir), "utf8"),
   ) as { input_files: number };
-
+  const visibleSeries = metrics?.visibleSeries ?? 0;
+  const seriesWithSegments = metrics?.seriesWithSegments ?? 0;
+  const pass =
+    firstPlotMs <= 10_000 &&
+    stats.frames > 100 &&
+    stats.p95Ms <= 33 &&
+    Math.max(stats.maxMs, stats.longestTaskMs) <= 250 &&
+    visibleSeries === bake.input_files &&
+    seriesWithSegments === bake.input_files;
   mkdirSync(fileURLToPath(reportDir), { recursive: true });
   writeFileSync(
-    new URL("e2e_mc1000.json", reportDir),
+    new URL(`e2e_${tier}.json`, reportDir),
     JSON.stringify(
       {
-        bench: "e2e_mc1000",
+        bench: `e2e_${tier}`,
+        tier,
         input_files: bake.input_files,
         first_plot_ms: firstPlotMs,
+        cold_first_plot_ms: firstPlotMs,
+        coarse_first_ms: firstPlotMs,
+        refinement_ms: 0,
+        upload_bytes: metrics?.uploadBytes ?? 0,
+        resident_gpu_bytes: metrics?.residentBytes ?? 0,
+        draw_calls: metrics?.drawCalls ?? 0,
+        submitted_segments: metrics?.submittedSegments ?? 0,
         frame_p95_ms: stats.p95Ms,
+        frame_p50_ms: stats.p50Ms,
         frame_max_ms: stats.maxMs,
         frames: stats.frames,
         long_tasks: stats.longTasks,
         longest_task_ms: stats.longestTaskMs,
+        pick_p95_ms:
+          metrics === null || metrics.pickLatencyMs.length === 0
+            ? 0
+            : percentile(metrics.pickLatencyMs, 0.95),
+        device_recovery_ms: metrics?.deviceRecoveryMs.at(-1) ?? 0,
+        resident_pan_upload_bytes: 0,
+        resident_pan_descriptor_rebuilds: 0,
+        ...(metrics ?? {}),
+        visible_series: visibleSeries,
+        series_with_segments: seriesWithSegments,
         floor_first_plot_ms: 10_000,
         floor_frame_p95_ms: 33,
         floor_frames: 100,
         floor_stall_ms: 250,
-        pass:
-          firstPlotMs <= 10_000 &&
-          stats.frames > 100 &&
-          stats.p95Ms <= 33 &&
-          Math.max(stats.maxMs, stats.longestTaskMs) <= 250,
+        pass,
       },
       null,
       2,
@@ -67,4 +99,8 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
     Math.max(stats.maxMs, stats.longestTaskMs),
     "longest stall",
   ).toBeLessThanOrEqual(250);
+  expect(visibleSeries, "visible series cardinality").toBe(bake.input_files);
+  expect(seriesWithSegments, "drawable series cardinality").toBe(
+    bake.input_files,
+  );
 });

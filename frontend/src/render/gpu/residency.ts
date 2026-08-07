@@ -1,5 +1,6 @@
 import type { ArenaSlice, GpuArena } from "./arena";
 import type { PackedPointStream } from "../../app/tile-points";
+import type { GpuMetrics } from "./metrics";
 
 export interface TileKey {
   readonly signalId: string;
@@ -44,13 +45,16 @@ export class GpuResidency {
 
   constructor(
     private readonly arena: GpuArena,
-    options: { budgetBytes?: number } = {},
+    options: { budgetBytes?: number; metrics?: GpuMetrics } = {},
   ) {
+    this.metrics = options.metrics;
     const minimum = arena.pageBytes * 2;
     this.budgetBytes =
       options.budgetBytes ??
       Math.max(minimum, Math.min(512 * 1024 * 1024, arena.pageBytes * 8));
   }
+
+  private readonly metrics: GpuMetrics | undefined;
 
   upload(tile: ResidencyTile): ResidentTile {
     const key = tileKey(tile);
@@ -61,6 +65,7 @@ export class GpuResidency {
     }
     const slice = this.allocate(tile.points.bytes.byteLength);
     this.arena.write(slice, tile.points.bytes);
+    this.metrics?.recordUpload(tile.points.bytes.byteLength);
     const resident: ResidentTile = {
       key,
       points: slice,
@@ -80,7 +85,34 @@ export class GpuResidency {
       lastUsed: ++this.tick,
     });
     this.usedBytes += slice.size;
+    this.metrics?.setResident(this.usedBytes, this.arena.pageCount);
     return resident;
+  }
+
+  uploadBatch(tiles: readonly ResidencyTile[]): ResidentTile[] {
+    const incoming = tiles.filter((tile) => tile.points.count > 0);
+    const additionalBytes = incoming.reduce((total, tile) => {
+      return (
+        total +
+        (this.entries.has(tileKey(tile)) ? 0 : tile.points.bytes.byteLength)
+      );
+    }, 0);
+    if (this.usedBytes + additionalBytes > this.budgetBytes) {
+      throw new Error("GPU residency batch exceeds panel budget");
+    }
+    const added: string[] = [];
+    try {
+      return incoming.map((tile) => {
+        const key = tileKey(tile);
+        const existed = this.entries.has(key);
+        const resident = this.upload(tile);
+        if (!existed) added.push(key);
+        return resident;
+      });
+    } catch (error: unknown) {
+      for (const key of added) this.remove(key);
+      throw error;
+    }
   }
 
   setVisible(key: string, visible: boolean): void {
@@ -121,6 +153,22 @@ export class GpuResidency {
       this.arena.release(entry.resident.points);
     this.entries.clear();
     this.usedBytes = 0;
+    this.metrics?.setResident(0, 0);
+  }
+
+  dropDevice(): void {
+    this.entries.clear();
+    this.usedBytes = 0;
+    this.metrics?.setResident(0, 0);
+  }
+
+  private remove(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry === undefined) return;
+    this.entries.delete(key);
+    this.arena.release(entry.resident.points);
+    this.usedBytes -= entry.resident.points.size;
+    this.metrics?.setResident(this.usedBytes, this.arena.pageCount);
   }
 
   private allocate(size: number): ArenaSlice {
@@ -137,6 +185,7 @@ export class GpuResidency {
       this.entries.delete(candidate.resident.key);
       this.arena.release(candidate.resident.points);
       this.usedBytes -= candidate.resident.points.size;
+      this.metrics?.setResident(this.usedBytes, this.arena.pageCount);
     }
     return this.arena.allocate(size);
   }

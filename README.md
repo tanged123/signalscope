@@ -10,7 +10,7 @@ SignalScope combines a Rust data plane for logs larger than memory with one Type
 - The native Tauri workbench streams and memory-maps source data.
 - A self-contained HTML snapshot uses the same renderer against embedded, size-budgeted tiles.
 
-The repository currently includes the Phase 1 data plane and workbench fundamentals:
+The repository ships the time-series WebGPU renderer and workbench fundamentals:
 CSV and JSON-channel MCAP ingestion, persistent min/max pyramid caches, native
 progress reporting, multi-panel layouts, a virtualized signal tree, and the
 shared snapshot presentation plane. Workspace tabs retain multiple independent
@@ -36,6 +36,13 @@ Run the lightweight local quality gate:
 
 ```bash
 ./scripts/test.sh
+```
+
+Run the software-adapter renderer proof or a browser benchmark:
+
+```bash
+./scripts/test.sh gpu
+./scripts/test.sh bench e2e
 ```
 
 Run the native shell:
@@ -109,7 +116,7 @@ core/
 protocol/            single schema source plus generated Rust and TypeScript
 frontend/
   src/app/           host-neutral application and DataPlane implementations
-  src/render/        deterministic canvas renderer
+  src/render/        WebGPU line renderer, axes, and overlays
   src/ui/            workbench chrome and design tokens
 shell/src-tauri/     thin native host and IPC commands
 docs/adr/            accepted architecture decisions
@@ -117,7 +124,7 @@ docs/adr/            accepted architecture decisions
 
 ## Architecture
 
-The frontend depends only on the versioned `DataPlane` contract. `TauriPlane` invokes the native Rust plane; `BakedPlane` reads the same response shapes from a snapshot data slot. WebGPU renders series while Canvas2D supplies axes and overlays, with no host-specific branch.
+The frontend depends only on the versioned `DataPlane` contract. `TauriPlane` invokes the native Rust plane; `BakedPlane` reads the same response shapes from a snapshot data slot. WebGPU renders ordered time-series pages and asynchronous nearest picks while Canvas2D supplies axes and overlays, with no host-specific branch.
 
 See [the ADR index](docs/adr/README.md) for the decisions behind the two-host product shape, layer boundaries, tile pyramid, protocol, session schema, linked-time model, and snapshot injection mechanism.
 

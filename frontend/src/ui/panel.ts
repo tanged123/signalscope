@@ -43,6 +43,7 @@ import { GpuLineRenderer } from "../render/gpu/line-renderer";
 import { GpuResidency } from "../render/gpu/residency";
 import type { GpuRuntime } from "../render/gpu/runtime";
 import { GpuSeriesSlots, type SeriesStyle } from "../render/gpu/series-slots";
+import type { PickResult } from "../render/gpu/picker";
 import { SERIES_TOKENS } from "../render/palette";
 import {
   marker,
@@ -505,6 +506,9 @@ export class PanelView {
   private box: InteractionBox | null = null;
   private emphasizePaths: ReadonlySet<string> | null = null;
   private hoverPoint: { x: number; y: number } | null = null;
+  private hoverClient: { x: number; y: number } | null = null;
+  private hoverSequence = 0;
+  private readonly pathsBySlot = new Map<number, string>();
   private hoverTag: HTMLElement | null = null;
   private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
@@ -535,7 +539,9 @@ export class PanelView {
       this.gpuRenderer = null;
     } else {
       this.arena = new GpuArena(runtime.device, runtime.queue, runtime.limits);
-      this.residency = new GpuResidency(this.arena);
+      this.residency = new GpuResidency(this.arena, {
+        metrics: runtime.metrics,
+      });
       const context = this.seriesCanvas.getContext("webgpu");
       if (context !== null) {
         context.configure({
@@ -549,6 +555,7 @@ export class PanelView {
         context ?? undefined,
         id,
         this.arena,
+        this.residency,
       );
       runtime.register(this.gpuRenderer);
     }
@@ -876,11 +883,11 @@ export class PanelView {
     this.seriesCanvas.height = this.canvas.height;
     gpuRenderer.resize(this.seriesCanvas.width, this.seriesCanvas.height);
     const generation = revision ?? 0;
-    const residents = tiles.series.flatMap((tile) => {
+    const residencyTiles = tiles.series.flatMap((tile) => {
       if (tile.points.count === 0) return [];
       const seriesSlot = this.seriesSlots.acquire(tile.signalId, generation);
       return [
-        residency.upload({
+        {
           signalId: tile.signalId,
           level: tile.level,
           sourceStart: tile.sourceStart,
@@ -890,9 +897,18 @@ export class PanelView {
           seriesSlot,
           coarse: tile.level > 0,
           points: tile.points,
-        }),
+        },
       ];
     });
+    let residents;
+    try {
+      residents = residency.uploadBatch(residencyTiles);
+    } catch (error: unknown) {
+      const coarse = residency.visible().filter((tile) => tile.coarse);
+      if (coarse.length === 0) throw error;
+      residents = coarse;
+      this.setEmpty(true, "GPU memory pressure — showing coarse resolution");
+    }
     gpuRenderer.setTiles(residents);
     const layout = this.renderer.lastLayout();
     const dpr = globalThis.devicePixelRatio || 1;
@@ -915,6 +931,7 @@ export class PanelView {
       );
       if (entry === undefined) continue;
       const slot = this.seriesSlots.slotOf(tile.signalId);
+      this.pathsBySlot.set(slot, tile.signalPath);
       const [red, green, blue] = parseHexColor(
         css.getPropertyValue(SERIES_TOKENS[colorIndexForHue(entry.hue)] ?? ""),
       );
@@ -927,6 +944,14 @@ export class PanelView {
       };
     }
     gpuRenderer.setStyles(styles);
+    const visibleSeries = rendered.series.filter((entry) => entry.visible);
+    const seriesWithSegments = new Set(
+      tiles.series
+        .filter((tile) => tile.points.count > 1)
+        .map((tile) => tile.signalId),
+    ).size;
+    const metrics = gpuRenderer.runtime.metrics;
+    metrics.setVisibleSeries(visibleSeries.length, seriesWithSegments);
     gpuRenderer.runtime.requestFrame(gpuRenderer);
     return elapsed;
   }
@@ -984,6 +1009,10 @@ export class PanelView {
     return this.element.getBoundingClientRect();
   }
 
+  invalidateSize(): void {
+    this.lastRevision = null;
+  }
+
   plotClick(
     offsetX: number,
     offsetY: number,
@@ -994,13 +1023,24 @@ export class PanelView {
   ): void {
     if (!modifiers.alt && !modifiers.shift) {
       if (this.removeAt(offsetX, offsetY, 9)) return;
-      if (this.pinAt(offsetX, offsetY, 14)) return;
+      void this.pickAt(offsetX, offsetY, 14).then((hit) => {
+        if (hit === null) return;
+        const path = this.pathsBySlot.get(hit.seriesSlot);
+        if (path === undefined) return;
+        this.callbacks.onPinAnnotation(this.id, {
+          path,
+          anchor: hit.time,
+          pinnedValue: hit.value,
+        });
+      });
       return;
     }
-    const hit = this.seriesHit(offsetX, offsetY, 6);
-    if (hit !== null) {
+    void this.pickAt(offsetX, offsetY, 6).then((hit) => {
+      if (hit === null) return;
+      const path = this.pathsBySlot.get(hit.seriesSlot);
+      if (path === undefined) return;
       const series = this.lastState?.series.find(
-        (entry) => entry.path === hit.path,
+        (entry) => entry.path === path,
       );
       if (series !== undefined) {
         if (modifiers.alt) this.callbacks.onMuteSeries(this.id, series.ref);
@@ -1012,20 +1052,8 @@ export class PanelView {
             channel: series.ref.channel,
           });
         }
-        return;
       }
-    }
-  }
-
-  private seriesHit(
-    offsetX: number,
-    offsetY: number,
-    threshold: number,
-  ): { path: string; distance: number } | null {
-    const layout = this.renderer.lastLayout();
-    return layout === null || this.preparedPlot === null
-      ? null
-      : this.preparedPlot.seriesAt(layout, offsetX, offsetY, threshold);
+    });
   }
 
   private updateHover(
@@ -1034,14 +1062,15 @@ export class PanelView {
     clientX: number,
     clientY: number,
   ): void {
-    const hit = this.seriesHit(offsetX, offsetY, 6);
-    if (hit === null) {
-      this.clearHover();
-      return;
-    }
     this.hoverPoint = { x: offsetX, y: offsetY };
-    this.setEmphasis(hit.path);
-    this.showHoverTag(hit.path, clientX, clientY);
+    this.hoverClient = { x: clientX, y: clientY };
+    const sequence = ++this.hoverSequence;
+    void this.pickAt(offsetX, offsetY, 6, false, sequence).then((result) => {
+      if (result === null || sequence !== this.hoverSequence) return;
+      const path = this.pathsBySlot.get(result.seriesSlot);
+      if (path === undefined || this.hoverClient === null) return;
+      this.showHoverTag(path, this.hoverClient.x, this.hoverClient.y);
+    });
   }
 
   private showHoverTag(path: string, clientX: number, clientY: number): void {
@@ -1072,13 +1101,33 @@ export class PanelView {
   }
 
   private clearHover(): void {
+    this.hoverSequence += 1;
     this.hoverPoint = null;
-    this.setEmphasis(null);
+    this.hoverClient = null;
     if (this.hoverTag !== null) {
       this.hoverTag.hidden = true;
       this.hoverTag.remove();
       this.hoverTag = null;
     }
+  }
+
+  private pickAt(
+    offsetX: number,
+    offsetY: number,
+    radius: number,
+    explicit = true,
+    sequence = ++this.hoverSequence,
+  ): Promise<PickResult | null> {
+    const renderer = this.gpuRenderer;
+    if (renderer === null) return Promise.resolve(null);
+    const dpr = globalThis.devicePixelRatio || 1;
+    return renderer.requestPick({
+      sequence,
+      cursorX: offsetX * dpr,
+      cursorY: offsetY * dpr,
+      radius: radius * dpr,
+      explicit,
+    });
   }
 
   private walkHover(direction: -1 | 1): void {
@@ -1145,22 +1194,6 @@ export class PanelView {
     if (annotation === undefined) return false;
     this.callbacks.onRemoveAnnotation(this.id, annotation.annotation.id);
     return true;
-  }
-
-  /** Pins the nearest plotted vertex under the pixel, when one is in range. */
-  private pinAt(offsetX: number, offsetY: number, radius: number): boolean {
-    const layout = this.renderer.lastLayout();
-    if (layout === null) return false;
-    const hit = this.preparedPlot?.annotationAt(
-      layout,
-      { x: offsetX, y: offsetY },
-      radius,
-    );
-    if (hit !== null && hit !== undefined) {
-      this.callbacks.onPinAnnotation(this.id, hit);
-      return true;
-    }
-    return false;
   }
 
   private cursorAt(

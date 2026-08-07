@@ -46,6 +46,18 @@ pub fn wide100m() -> TierSpec {
     }
 }
 
+pub fn dense10k() -> TierSpec {
+    TierSpec {
+        name: "dense10k",
+        files: 10_000,
+        rows: 10_000,
+        hz: 10.0,
+        channels: &["response"],
+        nan_every: 100,
+        nan_rows: 4_000..4_200,
+    }
+}
+
 pub fn bench_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build/bench")
 }
@@ -53,7 +65,7 @@ pub fn bench_root() -> PathBuf {
 /// xorshift64*: deterministic, dependency-free.
 struct Rng(u64);
 
-const GENERATOR_VERSION: u32 = 3;
+const GENERATOR_VERSION: u32 = 4;
 
 impl Rng {
     fn new(seed: u64) -> Self {
@@ -256,5 +268,17 @@ mod tests {
             std::fs::metadata(&marker).unwrap().modified().unwrap(),
             mtime
         );
+    }
+
+    #[test]
+    fn dense10k_has_the_expected_plotted_shape() {
+        let spec = dense10k();
+        assert_eq!(spec.files, 10_000);
+        assert_eq!(spec.channels, &["response"]);
+        assert_eq!(
+            u64::from(spec.files) * u64::from(spec.rows + 1),
+            100_010_000
+        );
+        assert_eq!(spec.nan_rows, 4_000..4_200);
     }
 }

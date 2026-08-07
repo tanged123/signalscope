@@ -158,6 +158,10 @@ impl PageHandle {
     }
 
     /// Loads selected values while leasing each backing page at most once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an index is outside the column or a page cannot be read.
     pub fn values_at(&self, indexes: &[u64]) -> Result<Vec<f64>, PageError> {
         let indexes = indexes
             .iter()

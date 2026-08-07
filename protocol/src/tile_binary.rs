@@ -81,6 +81,7 @@ pub struct OwnedBinarySeries {
 ///
 /// Panics when a series count, bin count, path, unit, or column length cannot
 /// be represented by the binary framing fields.
+#[allow(clippy::cast_possible_truncation)]
 pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
     let capacity = 16 + series.iter().map(series_bytes).sum::<usize>();
     let mut bytes = Vec::with_capacity(capacity);
@@ -169,6 +170,7 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
 ///
 /// Returns a [`TileBinaryError`] when the header, series metadata, columns, or
 /// padding is malformed or truncated.
+#[allow(clippy::too_many_lines)]
 pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, TileBinaryError> {
     if bytes.len() < 16 {
         return Err(TileBinaryError::Truncated);
@@ -476,6 +478,7 @@ mod tests {
         ]
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn round_trip_preserves_series_and_aligns_float_columns() {
         let series = series();

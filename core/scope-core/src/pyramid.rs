@@ -100,6 +100,7 @@ fn merge_bins(left: &IndexedBin, right: &IndexedBin) -> IndexedBin {
     }
 }
 
+#[allow(clippy::float_cmp)]
 fn choose_extreme(
     left: Option<(f64, u64)>,
     right: Option<(f64, u64)>,

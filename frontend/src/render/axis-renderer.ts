@@ -1,9 +1,9 @@
 import type { AxisStyle } from "../generated/session";
 import type { PlotLayout, Range } from "../app/plot-math";
 import { CanvasSurface } from "./surface";
-import { COLOR_SLOTS, SERIES_TOKENS } from "./palette";
+import { COLOR_SLOTS } from "./palette";
 
-export { COLOR_SLOTS, SERIES_TOKENS };
+export { COLOR_SLOTS };
 
 export interface AxisPalette {
   background: string;

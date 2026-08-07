@@ -45,6 +45,12 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { TileWindowCache } from "../app/tile-window-cache";
+import {
+  COARSE_POINT_TARGET,
+  TileRefinementController,
+  type RefinementRequest,
+  type RefinementSink,
+} from "../app/tile-refinement";
 import { Catalog } from "../app/catalog";
 import { resolvePanel, type ResolvedSeries } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
@@ -91,6 +97,7 @@ import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import { GpuRuntime } from "../render/gpu/runtime";
+import type { GpuMetricsSnapshot } from "../render/gpu/metrics";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -161,6 +168,7 @@ export class AppShell {
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
   private readonly tileWindowCache = new TileWindowCache();
+  private readonly refinements = new Map<string, TileRefinementController>();
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
@@ -204,6 +212,7 @@ export class AppShell {
   private historyGestureKey: string | null = null;
   private historyDirty: string | null = null;
   private historyCoalesceTimer: number | null = null;
+  private gpuRuntime: GpuRuntime | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -211,11 +220,18 @@ export class AppShell {
   ) {}
 
   async mount(): Promise<void> {
+    const baked = this.plane.bakedSessionJson;
+    const bakedSession =
+      baked !== undefined && baked !== ""
+        ? parseBakedSession(baked)
+        : undefined;
     const gpu = await GpuRuntime.create(globalThis.navigator.gpu);
     if (!gpu.supported) {
       this.root.innerHTML = unsupportedHostMarkup(gpu.capability, gpu.reason);
       return;
     }
+    this.gpuRuntime = gpu.runtime;
+    this.exposeBenchApi(gpu.runtime);
     gpu.runtime.onRestored(() => {
       this.tileWindowCache.invalidate();
       void this.refreshTiles();
@@ -223,7 +239,7 @@ export class AppShell {
     this.root.innerHTML = shellMarkup();
     await this.loadFormatHint();
     await this.loadPreferences();
-    await this.restoreSession();
+    await this.restoreSession(bakedSession);
     this.history.reset(historySnapshot(this.workspace.snapshot()));
     this.restoreTheme();
     if (this.plane.derived === null) {
@@ -339,7 +355,8 @@ export class AppShell {
         catalog: () => this.catalog,
         namedSets: () => this.workspace.namedSets(),
         resolveSeries: (state) => this.resolvedFor(state),
-        onResized: () => {
+        onResized: (id) => {
+          this.workspaceView?.invalidatePanelSize(id);
           this.scheduleRender();
         },
         onGesture: (id, hint) => {
@@ -1893,10 +1910,9 @@ export class AppShell {
   }
 
   /** Restores the baked snapshot session or the autosaved session. */
-  private async restoreSession(): Promise<void> {
-    const baked = this.plane.bakedSessionJson;
-    if (baked !== undefined && baked !== "") {
-      this.workspace.replace(parseBakedSession(baked));
+  private async restoreSession(bakedSession?: Session): Promise<void> {
+    if (bakedSession !== undefined) {
+      this.workspace.replace(bakedSession);
       return;
     }
     await this.loadSession(null);
@@ -2489,16 +2505,56 @@ export class AppShell {
             return;
           }
           const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
-          const response = await this.plane.queryTiles({
-            request_id: crypto.randomUUID(),
-            signal_ids: ids,
+          const target = TileWindowCache.requestPixelWidth(
+            pixelWidth,
+            window,
+            paddedWindow,
+          );
+          const request: RefinementRequest = {
+            panelId: panel.id,
+            generation: refreshToken,
+            signalIds: ids,
             window: paddedWindow,
-            pixel_width: TileWindowCache.requestPixelWidth(
-              pixelWidth,
-              window,
-              paddedWindow,
-            ),
-          });
+            target,
+          };
+          let coarseResponse: ColumnarTileResponse = {
+            requestId: "",
+            series: [],
+          };
+          let fineResponse: ColumnarTileResponse = {
+            requestId: "",
+            series: [],
+          };
+          const publishCoarse = (response: ColumnarTileResponse): void => {
+            coarseResponse = mergeTileResponses(coarseResponse, response);
+            if (refreshToken !== this.refreshToken) return;
+            nextTiles.set(panel.id, coarseResponse);
+            this.publishPartialTiles(nextTiles, nextMissing);
+          };
+          const sink: RefinementSink = {
+            acceptCoarse: (_generation, response) => publishCoarse(response),
+            acceptFine: (_generation, response) => {
+              fineResponse = mergeTileResponses(fineResponse, response);
+            },
+            fail: (_generation, signalIds, error) => {
+              if (refreshToken === this.refreshToken) {
+                this.reportError(
+                  new Error(
+                    `tile refinement failed for ${String(signalIds.length)} signals`,
+                    { cause: error },
+                  ),
+                );
+              }
+            },
+          };
+          const controller = this.refinementFor(panel.id);
+          await controller.begin(request, sink);
+          if (refreshToken !== this.refreshToken) return;
+          const response =
+            request.target > COARSE_POINT_TARGET &&
+            hasAllSignals(fineResponse, ids)
+              ? fineResponse
+              : coarseResponse;
           this.tileWindowCache.store(panel.id, {
             response,
             window: paddedWindow,
@@ -2523,6 +2579,32 @@ export class AppShell {
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
     this.missingByPanel = nextMissing;
+    this.renderTiles();
+  }
+
+  private refinementFor(panelId: string): TileRefinementController {
+    const existing = this.refinements.get(panelId);
+    if (existing !== undefined) return existing;
+    const controller = new TileRefinementController(
+      (signalIds, window, target) =>
+        this.plane.queryTiles({
+          request_id: crypto.randomUUID(),
+          signal_ids: [...signalIds],
+          window,
+          pixel_width: target,
+        }),
+    );
+    this.refinements.set(panelId, controller);
+    return controller;
+  }
+
+  private publishPartialTiles(
+    tiles: ReadonlyMap<string, ColumnarTileResponse>,
+    missing: ReadonlyMap<string, string[]>,
+  ): void {
+    if (this.refreshPromise === null) return;
+    this.tilesByPanel = new Map(tiles);
+    this.missingByPanel = new Map(missing);
     this.renderTiles();
   }
 
@@ -2580,7 +2662,35 @@ export class AppShell {
         (panelId) => this.missingByPanel.get(panelId) ?? [],
         this.workspace.revision(),
       ) ?? 0;
-    required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
+    const frame = this.gpuRuntime?.metrics.snapshot().frameCpuMs.at(-1);
+    required(this.root, ".render-ms").textContent =
+      frame === undefined
+        ? `${elapsed.toFixed(1)} ms`
+        : `frame ${frame.toFixed(1)} ms`;
+  }
+
+  private exposeBenchApi(runtime: GpuRuntime): void {
+    const hostLocation = globalThis as unknown as {
+      location?: Location;
+    };
+    const query = new URLSearchParams(hostLocation.location?.search ?? "");
+    if (
+      import.meta.env.MODE !== "test" &&
+      query.get("signalscope-bench") !== "1"
+    )
+      return;
+    const host = globalThis as typeof globalThis & {
+      __signalscopeBench?: {
+        snapshot: () => GpuMetricsSnapshot;
+        reset: () => void;
+        loseDeviceForTest: () => void;
+      };
+    };
+    host.__signalscopeBench = {
+      snapshot: () => runtime.metrics.snapshot(),
+      reset: () => runtime.metrics.reset(),
+      loseDeviceForTest: () => runtime.destroyDeviceForTest(),
+    };
   }
 
   private applyTimeWindow(panelId: string, t0: number, t1: number): void {
@@ -3017,6 +3127,28 @@ function unsupportedHostMarkup(capability: string, reason: string): string {
       '<p class="unsupported-reason"></p>',
       `<p class="unsupported-reason">${escapeText(reason)}</p>`,
     );
+}
+
+function mergeTileResponses(
+  previous: ColumnarTileResponse | null,
+  next: ColumnarTileResponse,
+): ColumnarTileResponse {
+  const bySignal = new Map(
+    (previous?.series ?? []).map((series) => [series.signalId, series]),
+  );
+  next.series.forEach((series) => bySignal.set(series.signalId, series));
+  return {
+    requestId: next.requestId,
+    series: [...bySignal.values()],
+  };
+}
+
+function hasAllSignals(
+  response: ColumnarTileResponse,
+  signalIds: readonly string[],
+): boolean {
+  const present = new Set(response.series.map((series) => series.signalId));
+  return signalIds.every((signalId) => present.has(signalId));
 }
 
 function escapeText(value: string): string {

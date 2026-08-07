@@ -13,6 +13,7 @@ export default defineConfig({
       "tests/e2e/**",
       "tests/demo/**",
       "tests/bench/**",
+      "tests/gpu/**",
       "node_modules/**",
       "dist/**",
     ],
