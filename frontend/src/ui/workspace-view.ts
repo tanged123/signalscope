@@ -14,6 +14,7 @@ import {
   type PanelCallbacks,
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
+import type { GpuRuntime } from "../render/gpu/runtime";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -38,6 +39,7 @@ export class WorkspaceView {
     private readonly root: HTMLElement,
     private readonly model: WorkspaceModel,
     private readonly callbacks: WorkspaceCallbacks,
+    private readonly gpuRuntime: GpuRuntime,
   ) {
     this.bindWorkspaceDrop();
   }
@@ -169,9 +171,11 @@ export class WorkspaceView {
     return this.views.get(id)?.plotWidth() ?? 0;
   }
 
-  panelCanvases(
-    id: string,
-  ): { plot: HTMLCanvasElement; overlay: HTMLCanvasElement } | null {
+  panelCanvases(id: string): {
+    axes: HTMLCanvasElement;
+    plot: HTMLCanvasElement;
+    overlay: HTMLCanvasElement;
+  } | null {
     return this.views.get(id)?.canvases() ?? null;
   }
 
@@ -182,7 +186,7 @@ export class WorkspaceView {
   private view(id: string): PanelView {
     let view = this.views.get(id);
     if (view === undefined) {
-      view = new PanelView(id, this.callbacks);
+      view = new PanelView(id, this.callbacks, this.gpuRuntime);
       view.setCursorMode(this.cursorMode);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);

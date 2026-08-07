@@ -1,7 +1,7 @@
 /**
  * Backing-store sizing for a plot canvas.
  *
- * The plot and overlay canvases are stacked and must agree on device-pixel
+ * The furniture and overlay canvases are stacked and must agree on device-pixel
  * geometry, so the DPR policy lives here once rather than in each renderer.
  */
 export class CanvasSurface {

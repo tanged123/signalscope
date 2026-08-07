@@ -17,7 +17,7 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
 
   const started = Date.now();
   await page.goto(artifact.href);
-  await expect(page.locator(".plot-canvas").first()).toBeVisible({
+  await expect(page.locator(".series-canvas").first()).toBeVisible({
     timeout: 120_000,
   });
   await expect(page.locator(".render-ms")).not.toHaveText("— ms", {

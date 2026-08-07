@@ -90,6 +90,7 @@ import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
+import { GpuRuntime } from "../render/gpu/runtime";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -210,6 +211,15 @@ export class AppShell {
   ) {}
 
   async mount(): Promise<void> {
+    const gpu = await GpuRuntime.create(globalThis.navigator.gpu);
+    if (!gpu.supported) {
+      this.root.innerHTML = unsupportedHostMarkup(gpu.capability, gpu.reason);
+      return;
+    }
+    gpu.runtime.onRestored(() => {
+      this.tileWindowCache.invalidate();
+      void this.refreshTiles();
+    });
     this.root.innerHTML = shellMarkup();
     await this.loadFormatHint();
     await this.loadPreferences();
@@ -445,6 +455,7 @@ export class AppShell {
           this.afterLayoutChange();
         },
       },
+      gpu.runtime,
     );
     this.setsList = new SetsListView(required(this.root, ".tree-sets"), {
       onSetBind: (setId) => this.bindSetToPanel(setId),
@@ -2053,6 +2064,7 @@ export class AppShell {
     const styles = getComputedStyle(document.documentElement);
     const composed = composePanelPng(
       panel.title,
+      canvases.axes,
       canvases.plot,
       canvases.overlay,
       {
@@ -2989,6 +3001,28 @@ export class AppShell {
     required(this.root, ".render-ms").textContent = `error: ${message}`;
     console.error(error);
   }
+}
+
+function unsupportedHostMarkup(capability: string, reason: string): string {
+  return `<section class="unsupported-host" role="alert">
+    <h1>WebGPU required</h1>
+    <p class="unsupported-capability"></p>
+    <p class="unsupported-reason"></p>
+  </section>`
+    .replace(
+      '<p class="unsupported-capability"></p>',
+      `<p class="unsupported-capability">${escapeText(capability)}</p>`,
+    )
+    .replace(
+      '<p class="unsupported-reason"></p>',
+      `<p class="unsupported-reason">${escapeText(reason)}</p>`,
+    );
+}
+
+function escapeText(value: string): string {
+  const element = document.createElement("span");
+  element.textContent = value;
+  return element.innerHTML;
 }
 
 /** Hides and empties the ingest banner. Workspace reset and load both need

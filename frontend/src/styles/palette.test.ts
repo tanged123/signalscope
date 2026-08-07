@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { COLOR_SLOTS, SERIES_TOKENS } from "../render/canvas-renderer";
+import { COLOR_SLOTS, SERIES_TOKENS } from "../render/palette";
 
 const TOKENS = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 

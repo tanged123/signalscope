@@ -37,7 +37,13 @@ import {
   type ResolvedAnnotation,
 } from "../app/time-plot";
 import { prepareTimePlot, type PreparedTimePlot } from "../app/time-plot";
-import { CanvasRenderer, COLOR_SLOTS } from "../render/canvas-renderer";
+import { AxisRenderer, COLOR_SLOTS } from "../render/axis-renderer";
+import { GpuArena } from "../render/gpu/arena";
+import { GpuLineRenderer } from "../render/gpu/line-renderer";
+import { GpuResidency } from "../render/gpu/residency";
+import type { GpuRuntime } from "../render/gpu/runtime";
+import { GpuSeriesSlots, type SeriesStyle } from "../render/gpu/series-slots";
+import { SERIES_TOKENS } from "../render/palette";
 import {
   marker,
   OverlayRenderer,
@@ -46,7 +52,6 @@ import {
 } from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
 import { required } from "./dom";
-import { adaptCanvasPoints } from "../app/canvas-point-adapter";
 import {
   PlotInteractionController,
   type InteractionBox,
@@ -477,8 +482,13 @@ export function parseSetPayload(data: string): string | null {
 
 export class PanelView {
   readonly element: HTMLElement;
-  private readonly renderer: CanvasRenderer;
+  private readonly renderer: AxisRenderer;
+  private readonly gpuRenderer: GpuLineRenderer | null;
+  private readonly residency: GpuResidency | null;
+  private readonly seriesSlots = new GpuSeriesSlots();
+  private readonly arena: GpuArena | null;
   private readonly canvas: HTMLCanvasElement;
+  private readonly seriesCanvas: HTMLCanvasElement;
   private readonly overlay: HTMLCanvasElement;
   private readonly overlayRenderer: OverlayRenderer;
   private readonly interactions: PlotInteractionController;
@@ -505,15 +515,43 @@ export class PanelView {
   constructor(
     private readonly id: string,
     private readonly callbacks: PanelCallbacks,
+    runtime?: GpuRuntime,
   ) {
     this.element = document.createElement("article");
     this.element.className = "panel";
     this.element.dataset.panelId = id;
     this.element.tabIndex = 0;
     this.element.innerHTML = panelMarkup();
-    this.canvas = required<HTMLCanvasElement>(this.element, ".plot-canvas");
+    this.canvas = required<HTMLCanvasElement>(this.element, ".axes-canvas");
+    this.seriesCanvas = required<HTMLCanvasElement>(
+      this.element,
+      ".series-canvas",
+    );
     this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
-    this.renderer = new CanvasRenderer(this.canvas);
+    this.renderer = new AxisRenderer(this.canvas);
+    if (runtime === undefined) {
+      this.arena = null;
+      this.residency = null;
+      this.gpuRenderer = null;
+    } else {
+      this.arena = new GpuArena(runtime.device, runtime.queue, runtime.limits);
+      this.residency = new GpuResidency(this.arena);
+      const context = this.seriesCanvas.getContext("webgpu");
+      if (context !== null) {
+        context.configure({
+          device: runtime.device,
+          format: runtime.format,
+          alphaMode: "premultiplied",
+        });
+      }
+      this.gpuRenderer = new GpuLineRenderer(
+        runtime,
+        context ?? undefined,
+        id,
+        this.arena,
+      );
+      runtime.register(this.gpuRenderer);
+    }
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
     this.interactions = new PlotInteractionController(this.overlay, {
@@ -806,26 +844,7 @@ export class PanelView {
     const elapsed =
       tiles === null || tiles.series.length === 0 || ranges === null
         ? 0
-        : this.renderer.render(adaptCanvasPoints(tiles), ranges.x, {
-            xLabel: rendered.x_label ?? "time",
-            yLabel: rendered.y_label ?? "value",
-            yRange: [ranges.y.min, ranges.y.max],
-            axisStyle: rendered.axis_style,
-            styles: tiles.series.map((tile) => {
-              const entry = rendered.series.find(
-                (candidate) => candidate.path === tile.signalPath,
-              );
-              return {
-                hue: entry?.hue ?? null,
-                dash: entry?.dash ?? "solid",
-                width: entry?.width ?? 1.4,
-                alpha: entry?.opacity ?? 1,
-              };
-            }),
-            emphasisIndices: tiles.series.flatMap((tile, index) =>
-              this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
-            ),
-          });
+        : this.renderGpuPlot(tiles, rendered, ranges.x, ranges.y, revision);
     this.renderStats();
     const annotations = this.resolvedAnnotations(rendered);
     this.renderAnnotationList(rendered, annotations);
@@ -833,6 +852,82 @@ export class PanelView {
     if (missing.length > 0) {
       this.setEmpty(true, `unknown signals: ${missing.join(", ")}`);
     }
+    return elapsed;
+  }
+
+  private renderGpuPlot(
+    tiles: ColumnarTileResponse,
+    rendered: RenderPanelState,
+    xRange: { min: number; max: number },
+    yRange: { min: number; max: number },
+    revision: number | null,
+  ): number {
+    const elapsed = this.renderer.render(
+      xRange,
+      yRange,
+      rendered.x_label ?? "time",
+      rendered.y_label ?? "value",
+      rendered.axis_style,
+    );
+    const gpuRenderer = this.gpuRenderer;
+    const residency = this.residency;
+    if (gpuRenderer === null || residency === null) return elapsed;
+    this.seriesCanvas.width = this.canvas.width;
+    this.seriesCanvas.height = this.canvas.height;
+    gpuRenderer.resize(this.seriesCanvas.width, this.seriesCanvas.height);
+    const generation = revision ?? 0;
+    const residents = tiles.series.flatMap((tile) => {
+      if (tile.points.count === 0) return [];
+      const seriesSlot = this.seriesSlots.acquire(tile.signalId, generation);
+      return [
+        residency.upload({
+          signalId: tile.signalId,
+          level: tile.level,
+          sourceStart: tile.sourceStart,
+          sourceEnd: tile.sourceEnd,
+          generation,
+          origin: tile.origin,
+          seriesSlot,
+          coarse: tile.level > 0,
+          points: tile.points,
+        }),
+      ];
+    });
+    gpuRenderer.setTiles(residents);
+    const layout = this.renderer.lastLayout();
+    const dpr = globalThis.devicePixelRatio || 1;
+    gpuRenderer.setViewport({
+      xMin: xRange.min,
+      xMax: xRange.max,
+      yMin: yRange.min,
+      yMax: yRange.max,
+      plotX: (layout?.plot.x ?? 0) * dpr,
+      plotY: (layout?.plot.y ?? 0) * dpr,
+      plotWidth: (layout?.plot.width ?? 1) * dpr,
+      plotHeight: (layout?.plot.height ?? 1) * dpr,
+      devicePixelRatio: dpr,
+    });
+    const styles: SeriesStyle[] = [];
+    const css = getComputedStyle(document.documentElement);
+    for (const tile of tiles.series) {
+      const entry = rendered.series.find(
+        (candidate) => candidate.path === tile.signalPath,
+      );
+      if (entry === undefined) continue;
+      const slot = this.seriesSlots.slotOf(tile.signalId);
+      const [red, green, blue] = parseHexColor(
+        css.getPropertyValue(SERIES_TOKENS[colorIndexForHue(entry.hue)] ?? ""),
+      );
+      styles[slot] = {
+        rgba: [red, green, blue, 1],
+        widthDevicePx: entry.width * dpr,
+        dash: entry.dash,
+        visible: entry.visible,
+        emphasized: entry.focused,
+      };
+    }
+    gpuRenderer.setStyles(styles);
+    gpuRenderer.runtime.requestFrame(gpuRenderer);
     return elapsed;
   }
 
@@ -873,8 +968,16 @@ export class PanelView {
     return this.canvas.clientWidth;
   }
 
-  canvases(): { plot: HTMLCanvasElement; overlay: HTMLCanvasElement } {
-    return { plot: this.canvas, overlay: this.overlay };
+  canvases(): {
+    axes: HTMLCanvasElement;
+    plot: HTMLCanvasElement;
+    overlay: HTMLCanvasElement;
+  } {
+    return {
+      axes: this.canvas,
+      plot: this.seriesCanvas,
+      overlay: this.overlay,
+    };
   }
 
   panelRect(): DOMRect {
@@ -2107,6 +2210,16 @@ function colorIndexForHue(hue: number | null): number {
     : Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
 }
 
+function parseHexColor(value: string): readonly [number, number, number] {
+  const hex = value.trim().replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return [1, 1, 1];
+  return [
+    Number.parseInt(hex.slice(0, 2), 16) / 255,
+    Number.parseInt(hex.slice(2, 4), 16) / 255,
+    Number.parseInt(hex.slice(4, 6), 16) / 255,
+  ];
+}
+
 function axisEditZone(
   layout: PlotLayout,
   axisStyle: AxisStyle,
@@ -2171,7 +2284,8 @@ function panelMarkup(): string {
       <span class="panel-gesture-hint">color ← source · hover explore · ⇧click focus · ⌥ mute · esc clear</span>
     </div>
     <div class="plot-wrap">
-      <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
+      <canvas class="axes-canvas" aria-label="Time-series axes"></canvas>
+      <canvas class="series-canvas" aria-label="Time-series plot"></canvas>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
       <div class="panel-empty" hidden></div>
     </div>

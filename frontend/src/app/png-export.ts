@@ -42,6 +42,7 @@ export function panelPngTargets(
 
 export function composePanelPng(
   title: string,
+  axes: HTMLCanvasElement,
   plot: HTMLCanvasElement,
   overlay: HTMLCanvasElement,
   colors: { background: string; text: string; font: string },
@@ -59,6 +60,7 @@ export function composePanelPng(
   context.font = `${String(Math.round(12 * dpr))}px ${colors.font}`;
   context.textBaseline = "middle";
   context.fillText(title, Math.round(10 * dpr), header / 2);
+  context.drawImage(axes, 0, header);
   context.drawImage(plot, 0, header);
   context.drawImage(overlay, 0, header);
   return output;

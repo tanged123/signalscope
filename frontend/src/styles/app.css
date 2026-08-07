@@ -1093,11 +1093,21 @@ button {
   white-space: nowrap;
 }
 
-.plot-canvas {
+.axes-canvas,
+.series-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  pointer-events: none;
+}
+
+.axes-canvas {
+  z-index: 0;
+}
+
+.series-canvas {
+  z-index: 1;
 }
 
 .overlay-canvas {
@@ -1105,10 +1115,30 @@ button {
   inset: 0;
   width: 100%;
   height: 100%;
+  z-index: 2;
   cursor: crosshair;
   /* Without this the browser claims every drag for scrolling and no
      gesture ever reaches the handlers. */
   touch-action: none;
+}
+
+.unsupported-host {
+  display: grid;
+  place-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  background: var(--surface-0);
+  color: var(--fg-1);
+}
+
+.unsupported-host h1,
+.unsupported-host p {
+  margin: 0;
+}
+
+.unsupported-host p {
+  margin-top: 0.5rem;
+  color: var(--fg-3);
 }
 
 .panel-axis-toggle {

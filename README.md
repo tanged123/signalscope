@@ -5,7 +5,7 @@
 
 **A native, high-performance time-series analysis workbench with portable interactive HTML snapshots.**
 
-SignalScope combines a Rust data plane for logs larger than memory with one TypeScript/canvas presentation plane that runs in two hosts:
+SignalScope combines a Rust data plane for logs larger than memory with one TypeScript/WebGPU presentation plane that runs in two hosts:
 
 - The native Tauri workbench streams and memory-maps source data.
 - A self-contained HTML snapshot uses the same renderer against embedded, size-budgeted tiles.
@@ -117,7 +117,7 @@ docs/adr/            accepted architecture decisions
 
 ## Architecture
 
-The frontend depends only on the versioned `DataPlane` contract. `TauriPlane` invokes the native Rust plane; `BakedPlane` reads the same response shapes from a snapshot data slot. The renderer therefore has no host-specific branch.
+The frontend depends only on the versioned `DataPlane` contract. `TauriPlane` invokes the native Rust plane; `BakedPlane` reads the same response shapes from a snapshot data slot. WebGPU renders series while Canvas2D supplies axes and overlays, with no host-specific branch.
 
 See [the ADR index](docs/adr/README.md) for the decisions behind the two-host product shape, layer boundaries, tile pyramid, protocol, session schema, linked-time model, and snapshot injection mechanism.
 
@@ -127,6 +127,7 @@ All CI tools are provided by the pinned Nix flake.
 
 ```bash
 ./scripts/setup.sh          # install locked frontend dependencies
+./scripts/setup.sh --update-lock # refresh the lockfile after an intentional manifest edit
 ./scripts/dev.sh            # enter the development shell
 ./scripts/run.sh web        # launch browser frontend
 ./scripts/run.sh native     # launch native Tauri workbench
