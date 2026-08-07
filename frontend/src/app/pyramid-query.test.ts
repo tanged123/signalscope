@@ -43,7 +43,7 @@ describe("queryPyramid", () => {
     expect(result.bins.map((bin) => bin.t0)).toEqual([1, 2, 3]);
   });
 
-  it("honors a per-series bin budget", () => {
+  it("keeps raw bins when they fit the viewport density", () => {
     const levels = [
       Array.from(
         { length: 100 },
@@ -86,9 +86,9 @@ describe("queryPyramid", () => {
       ),
     ];
 
-    const result = queryPyramid(levels, 0, 99, 100, 10);
+    const result = queryPyramid(levels, 0, 99, 100);
 
-    expect(result.level).toBe(2);
-    expect(result.bins.length).toBe(5);
+    expect(result.level).toBe(0);
+    expect(result.bins.length).toBe(100);
   });
 });

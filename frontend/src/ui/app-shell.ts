@@ -7,7 +7,6 @@ import {
   type Command,
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
-import { TILE_BIN_BUDGET } from "../app/budgets";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import {
   classifyDrop,
@@ -45,9 +44,7 @@ import {
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
-import { SampleWindowCache } from "../app/sample-window-cache";
 import { TileWindowCache } from "../app/tile-window-cache";
-import { fetchXySamples } from "../app/xy-samples";
 import { Catalog } from "../app/catalog";
 import { resolvePanel, type ResolvedSeries } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
@@ -62,14 +59,12 @@ import {
   type ExportRange,
   type ExportSelection,
   type FormatDescriptor,
-  type SampleResponse,
   type SampleSeries,
   type SignalSummary,
   type SourceSummary,
 } from "../generated/protocol";
 import type {
   CursorMode,
-  PanelMode,
   PanelState,
   SeriesRef,
   Session,
@@ -89,70 +84,17 @@ import {
   type PngScope,
 } from "./export-dialog";
 import { type QuickTransform } from "./panel";
-import type { PlotCursor } from "../app/plot-capabilities";
+import type { PlotCursor } from "../app/time-plot";
 import { SignalOutlineView } from "./signal-outline";
 import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
-import { MODE_DATA } from "./modes/contract";
-import { densityMode } from "../render/density-policy";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
-/** Point cap for time panels, which use the tile path instead. */
-export const SAMPLE_CAP = 8192;
-const SAMPLE_MODE_CAP = 32_768;
-const SAMPLE_POINT_BUDGET = 500_000;
-
-export function sampleCapFor(mode: PanelMode): number {
-  return mode === "time" ? SAMPLE_CAP : SAMPLE_MODE_CAP;
-}
-
-/**
- * The per-series cap once a panel's series count is taken into account.
- *
- * `SAMPLE_POINT_BUDGET` bounds the panel's *merged* response, so the share is
- * divided by the number of requests that merge into it — a mode issues one
- * request per declared window and merged responses share the budget. There is
- * no floor: a floor would let a 1000-series panel request 8.2M points against
- * a 500k budget, which is the budget not existing.
- */
-export function sampleCapForPanel(
-  mode: PanelMode,
-  seriesCount: number,
-): number {
-  const requests = Math.max(1, MODE_DATA[mode].windows.length);
-  const share = Math.floor(
-    SAMPLE_POINT_BUDGET / (Math.max(1, seriesCount) * requests),
-  );
-  return Math.max(1, Math.min(sampleCapFor(mode), share));
-}
 const DERIVED_PREFIX = "derived/";
-const CONTEXT_PIXEL_WIDTH = 512;
-/**
- * Cap on the second, full-resolution tile request in raster regime. Above
- * this the panel is stroking a crowd and hi-res for a subset would be
- * arbitrary — the whole set stays at crowd resolution.
- */
-const HI_RES_SERIES_CAP = 32;
-
-/**
- * The crowd response with any series present in `hiRes` replaced by its
- * high-resolution twin. Membership and order follow the crowd response, so
- * downstream identity and style mapping are unchanged.
- */
-export function mergeTileResponses(
-  crowd: ColumnarTileResponse,
-  hiRes: ColumnarTileResponse,
-): ColumnarTileResponse {
-  const byId = new Map(hiRes.series.map((tile) => [tile.signalId, tile]));
-  return {
-    ...crowd,
-    series: crowd.series.map((tile) => byId.get(tile.signalId) ?? tile),
-  };
-}
 
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
   if (count <= 0) return "none";
@@ -218,11 +160,6 @@ export class AppShell {
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
   private readonly tileWindowCache = new TileWindowCache();
-  private readonly contextTileCache = new TileWindowCache();
-  private readonly sampleWindowCache = new SampleWindowCache();
-  private readonly xyContextCache = new SampleWindowCache();
-  private derivedPathsCache: { revision: number; paths: Set<string> } | null =
-    null;
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
@@ -245,18 +182,7 @@ export class AppShell {
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
-  private contextTilesByPanel = new Map<string, ColumnarTileResponse>();
-  private readonly xySampleFallback = new Map<string, string>();
   private readonly panelEmphasis = new Map<string, readonly string[]>();
-  private readonly mergedTiles = new Map<
-    string,
-    {
-      crowd: ColumnarTileResponse;
-      hi: ColumnarTileResponse;
-      merged: ColumnarTileResponse;
-    }
-  >();
-  private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -333,12 +259,6 @@ export class AppShell {
           this.workspace.toggleMaximize(id);
           this.afterLayoutChange();
         },
-        onSelectMode: (id, mode) => {
-          this.transitionPanelMode(id, mode);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          void this.refreshTiles();
-        },
         onDropSignals: (id, paths) => {
           this.plotSignals(paths, id);
         },
@@ -406,44 +326,10 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        localPathFor: (path) =>
-          this.isDerivedPath(path)
-            ? path.slice(DERIVED_PREFIX.length)
-            : (this.signalsByPath.get(path)?.local_path ?? null),
-        sourceKeyFor: (path) =>
-          this.isDerivedPath(path)
-            ? "derived"
-            : (this.signalsByPath.get(path)?.source_key ?? null),
         pathForRef: (ref) => this.catalog.get(ref)?.path ?? null,
         catalog: () => this.catalog,
         namedSets: () => this.workspace.namedSets(),
         resolveSeries: (state) => this.resolvedFor(state),
-        onSetXSignal: (id, path) => {
-          this.workspace.setMode(id, "xy");
-          const ref = this.catalog.refFromPath(path);
-          if (ref === undefined) return;
-          this.workspace.setXRef(id, ref);
-          this.workspace.focusPanel(id);
-          this.afterLayoutChange();
-        },
-        onSetColorSignal: (id, path) => {
-          this.workspace.setColorRef(
-            id,
-            path === null ? null : (this.catalog.refFromPath(path) ?? null),
-          );
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          void this.refreshTiles();
-        },
-        onClearXSignal: (id) => {
-          this.clearXSignal(id);
-        },
-        onToggleSeries: (id, ref) => {
-          this.workspace.toggleSeriesVisible(id, ref);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          this.renderTiles();
-        },
         onResized: () => {
           this.scheduleRender();
         },
@@ -465,11 +351,7 @@ export class AppShell {
           else this.panelEmphasis.set(id, next);
           const panel = this.workspace.panel(id);
           if (panel === undefined) return;
-          if (MODE_DATA[panel.mode].reduction !== "envelope") return;
           this.scheduleRefresh(100);
-        },
-        onSampleFallback: (id) => {
-          this.markSampleFallback(id);
         },
         onCursor: (id, cursor, client) => {
           this.setCursor(id, cursor, client);
@@ -482,14 +364,10 @@ export class AppShell {
           this.markHistoryDirty(`range:${id}`);
           this.scheduleRender();
         },
-        onXRange: (id, range) => {
-          this.applyXRange(id, range);
-        },
         onPinAnnotation: (id, hit) => {
           this.workspace.addAnnotation(id, {
             id: crypto.randomUUID(),
             series_path: hit.path,
-            domain: hit.domain,
             anchor: hit.anchor,
             pinned_value: hit.pinnedValue,
             label: "",
@@ -518,12 +396,6 @@ export class AppShell {
         },
         onToggleAxisStyle: (id) => {
           this.workspace.toggleAxisStyle(id);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          this.renderTiles();
-        },
-        onToggleAxisEqual: (id) => {
-          this.workspace.toggleAxisEqual(id);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -802,28 +674,6 @@ export class AppShell {
         this.renderTiles();
       },
     });
-    for (const [mode, text] of [
-      [
-        "XY",
-        "XY: drag box-zoom · wheel zoom · right-drag pan · dbl-click fit · click datatip · drop on the amber strip to set X",
-      ],
-      [
-        "FFT",
-        "FFT: computed over the visible time window · wheel/box zoom the frequency and dB axes · dbl-click fit",
-      ],
-      [
-        "histogram",
-        "Histogram: counts of the visible time window · bins rebin as the window moves · dbl-click fit",
-      ],
-    ] as const) {
-      this.commands.register({
-        id: `help-${mode.toLowerCase()}-gestures`,
-        title: `Help: ${mode} mode gestures`,
-        run: () => {
-          this.showModeHelp(text);
-        },
-      });
-    }
     this.registerFocusedPanelCommand(
       "zoom-in-time",
       "Panel: zoom in (time)",
@@ -852,41 +702,6 @@ export class AppShell {
       },
     );
     this.registerFocusedPanelCommand(
-      "panel-switch-xy",
-      "Panel: switch to XY mode",
-      (id) => {
-        this.transitionPanelMode(id, "xy");
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-clear-x-signal",
-      "Panel: clear X signal",
-      (id) => {
-        this.clearXSignal(id);
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-switch-fft",
-      "Panel: switch to FFT mode",
-      (id) => {
-        this.transitionPanelMode(id, "fft");
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-switch-histogram",
-      "Panel: switch to histogram mode",
-      (id) => {
-        this.transitionPanelMode(id, "histogram");
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-clear-color-signal",
-      "Panel: clear color signal (c:)",
-      (id) => {
-        this.workspace.setColorRef(id, null);
-      },
-    );
-    this.registerFocusedPanelCommand(
       "clear-annotations",
       "Panel: clear annotations",
       (id) => {
@@ -911,17 +726,9 @@ export class AppShell {
         this.workspace.toggleAxisStyle(id);
       },
     );
-    this.registerFocusedPanelCommand(
-      "panel.toggle-axis-equal",
-      "Toggle equal axis scaling",
-      (id) => {
-        this.workspace.toggleAxisEqual(id);
-      },
-    );
     for (const [axis, title] of [
       ["x", "Panel: edit X axis label"],
       ["y", "Panel: edit Y axis label"],
-      ["c", "Panel: edit color axis label"],
     ] as const) {
       this.registerFocusedPanelCommand(
         `edit-${axis}-axis-label`,
@@ -1186,12 +993,6 @@ export class AppShell {
     }
   }
 
-  /** Moves between panel domains without dropping the assigned XY x series. */
-  private transitionPanelMode(panelId: string, mode: PanelMode): void {
-    this.workspace.setMode(panelId, mode);
-    if (mode === "xy") this.workspace.promoteSeriesToX(panelId);
-  }
-
   /** Registers a command that acts on the focused panel and refreshes. */
   private registerFocusedPanelCommand(
     id: string,
@@ -1346,43 +1147,7 @@ export class AppShell {
         this.commands.run(command.id);
       },
     }));
-    const focused = this.workspace.focusedPanelId();
-    const xSignals =
-      focused === null
-        ? []
-        : this.signals.map((summary) => ({
-            title: `Panel: set X signal… ${summary.path}`,
-            hint: "then pick from tree",
-            run: () => {
-              this.workspace.setMode(focused, "xy");
-              const ref = this.catalog.refFromPath(summary.path);
-              if (ref !== undefined) this.workspace.setXRef(focused, ref);
-              this.afterLayoutChange();
-            },
-          }));
-    const colorSignals =
-      focused === null
-        ? []
-        : [
-            {
-              title: "Panel: set color signal (c:)… time",
-              hint: "colour by time",
-              run: () => {
-                this.workspace.setColorByTime(focused);
-                this.afterLayoutChange();
-              },
-            },
-            ...this.signals.map((summary) => ({
-              title: `Panel: set color signal (c:)… ${summary.path}`,
-              hint: "signal",
-              run: () => {
-                const ref = this.catalog.refFromPath(summary.path);
-                if (ref !== undefined) this.workspace.setColorRef(focused, ref);
-                this.afterLayoutChange();
-              },
-            })),
-          ];
-    return [...commands, ...xSignals, ...colorSignals];
+    return commands;
   }
 
   private signalPaletteEntries(query: string, limit: number): PaletteEntry[] {
@@ -2404,7 +2169,6 @@ export class AppShell {
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
       this.tilesByPanel.clear();
-      this.samplesByPanel.clear();
       this.missingByPanel.clear();
       clearIngestProgress(this.root);
       this.workspace.setTheme(this.prefs.theme);
@@ -2652,9 +2416,6 @@ export class AppShell {
     this.catalog = Catalog.build(this.signals);
     this.catalogRevision += 1;
     this.tileWindowCache.invalidate();
-    this.contextTileCache.invalidate();
-    this.sampleWindowCache.invalidate();
-    this.xyContextCache.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2689,127 +2450,8 @@ export class AppShell {
     return this.refreshPromise;
   }
 
-  private markSampleFallback(id: string): void {
-    const panel = this.workspace.panel(id);
-    if (panel === undefined) return;
-    const { ids } = this.panelSignalIds(panel);
-    const idsKey = [...ids].sort().join("\u0000");
-    if (this.xySampleFallback.get(id) === idsKey) return;
-    this.xySampleFallback.set(id, idsKey);
-    this.scheduleRefresh(0);
-  }
-
   private hasQueuedRefresh(): boolean {
     return this.refreshQueued;
-  }
-
-  /**
-   * Signal ids that stay stroked in raster regime: visible focused/hued
-   * series plus the transient hover-emphasis set. Null when the panel is
-   * not in raster regime, nothing is stroked, or the stroked set is
-   * crowd-sized (cap) — callers then skip the hi-res request entirely.
-   */
-  private strokedSignalIds(
-    panel: PanelState,
-    seriesCount: number,
-    pixelWidth: number,
-  ): string[] | null {
-    if (densityMode(seriesCount, pixelWidth) !== "raster") return null;
-    const emphasized = new Set(this.panelEmphasis.get(panel.id) ?? []);
-    const paths = new Set<string>();
-    for (const series of this.resolvedFor(panel)) {
-      if (!series.visible) continue;
-      if (series.display !== "ghost" || emphasized.has(series.path)) {
-        paths.add(series.path);
-      }
-    }
-    const ids: string[] = [];
-    for (const path of paths) {
-      const id = this.signalsByPath.get(path)?.signal_id;
-      if (id !== undefined) ids.push(id);
-    }
-    if (ids.length === 0 || ids.length > HI_RES_SERIES_CAP) return null;
-    if (ids.length >= seriesCount) return null;
-    return ids;
-  }
-
-  /** The crowd fetch, replayed for the small stroked set at full width. */
-  private async hiResTiles(
-    panel: PanelState,
-    ids: string[],
-    window: { t0: number; t1: number },
-    pixelWidth: number,
-  ): Promise<ColumnarTileResponse> {
-    const cacheId = `${panel.id}\u0000hires`;
-    const idsKey = [...ids].sort().join("\u0000");
-    const cached = this.tileWindowCache.slice(
-      cacheId,
-      idsKey,
-      pixelWidth,
-      window.t0,
-      window.t1,
-    );
-    if (cached !== null) return cached;
-    const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
-    const response = await this.plane.queryTiles({
-      request_id: crypto.randomUUID(),
-      signal_ids: ids,
-      window: paddedWindow,
-      pixel_width: TileWindowCache.requestPixelWidth(
-        pixelWidth,
-        window,
-        paddedWindow,
-      ),
-      max_total_bins: TILE_BIN_BUDGET,
-    });
-    this.tileWindowCache.store(cacheId, {
-      response,
-      window: paddedWindow,
-      pixelWidth,
-      idsKey,
-    });
-    return (
-      this.tileWindowCache.slice(
-        cacheId,
-        idsKey,
-        pixelWidth,
-        window.t0,
-        window.t1,
-      ) ?? response
-    );
-  }
-
-  /** Identity-memoized merge for the panel's tile identity guard. */
-  private mergedTilesFor(
-    panelId: string,
-    crowd: ColumnarTileResponse,
-    hi: ColumnarTileResponse,
-  ): ColumnarTileResponse {
-    const memo = this.mergedTiles.get(panelId);
-    if (memo !== undefined && memo.crowd === crowd && memo.hi === hi) {
-      return memo.merged;
-    }
-    const merged = mergeTileResponses(crowd, hi);
-    this.mergedTiles.set(panelId, { crowd, hi, merged });
-    return merged;
-  }
-
-  /** The crowd response, upgraded with full-resolution stroked series. */
-  private async withHiRes(
-    panel: PanelState,
-    crowd: ColumnarTileResponse,
-    ids: string[],
-    window: { t0: number; t1: number },
-    pixelWidth: number,
-  ): Promise<ColumnarTileResponse> {
-    const strokedIds = this.strokedSignalIds(panel, ids.length, pixelWidth);
-    if (strokedIds === null) return crowd;
-    try {
-      const hi = await this.hiResTiles(panel, strokedIds, window, pixelWidth);
-      return this.mergedTilesFor(panel.id, crowd, hi);
-    } catch {
-      return crowd;
-    }
   }
 
   private async refreshTilesPass(): Promise<void> {
@@ -2819,8 +2461,6 @@ export class AppShell {
       Math.round(required(this.root, ".workspace").clientWidth),
     );
     const nextTiles = new Map<string, ColumnarTileResponse>();
-    const nextContextTiles = new Map<string, ColumnarTileResponse>();
-    const nextSamples = new Map<string, SampleResponse>();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
@@ -2829,136 +2469,51 @@ export class AppShell {
         if (ids.length === 0) return;
         const window = this.effectiveWindow(panel);
         try {
-          const spec = MODE_DATA[panel.mode];
           const idsKey = [...ids].sort().join("\u0000");
-          const fallback =
-            spec.reduction === "envelope" &&
-            spec.windows.includes("context") &&
-            this.xySampleFallback.get(panel.id) === idsKey;
-          if (spec.reduction === "envelope" && !fallback) {
-            const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-            const dpr = globalThis.devicePixelRatio || 1;
-            const pixelWidth = Math.max(
-              1,
-              Math.round((panelWidth > 0 ? panelWidth : width) * dpr),
-            );
-            const loadContext = async (): Promise<void> => {
-              if (!spec.windows.includes("context")) return;
-              const extent = this.sampleWindow(panel);
-              const cachedContext = this.contextTileCache.slice(
-                panel.id,
-                idsKey,
-                CONTEXT_PIXEL_WIDTH,
-                extent.t0,
-                extent.t1,
-              );
-              if (cachedContext !== null) {
-                nextContextTiles.set(panel.id, cachedContext);
-                return;
-              }
-              const contextResponse = await this.plane.queryTiles({
-                request_id: crypto.randomUUID(),
-                signal_ids: ids,
-                window: extent,
-                pixel_width: CONTEXT_PIXEL_WIDTH,
-                max_total_bins: TILE_BIN_BUDGET,
-              });
-              this.contextTileCache.store(panel.id, {
-                response: contextResponse,
-                window: extent,
-                pixelWidth: CONTEXT_PIXEL_WIDTH,
-                idsKey,
-              });
-              nextContextTiles.set(panel.id, contextResponse);
-            };
-            const cached = this.tileWindowCache.slice(
-              panel.id,
-              idsKey,
-              pixelWidth,
-              window.t0,
-              window.t1,
-            );
-            if (cached !== null) {
-              nextTiles.set(
-                panel.id,
-                await this.withHiRes(panel, cached, ids, window, pixelWidth),
-              );
-              await loadContext();
-              return;
-            }
-            const paddedWindow = TileWindowCache.padWindow(
-              window.t0,
-              window.t1,
-            );
-            const response = await this.plane.queryTiles({
-              request_id: crypto.randomUUID(),
-              signal_ids: ids,
-              window: paddedWindow,
-              pixel_width: TileWindowCache.requestPixelWidth(
-                pixelWidth,
-                window,
-                paddedWindow,
-              ),
-              max_total_bins: TILE_BIN_BUDGET,
-            });
-            this.tileWindowCache.store(panel.id, {
-              response,
-              window: paddedWindow,
-              pixelWidth,
-              idsKey,
-            });
-            const crowd =
-              this.tileWindowCache.slice(
-                panel.id,
-                idsKey,
-                pixelWidth,
-                window.t0,
-                window.t1,
-              ) ?? response;
-            nextTiles.set(
-              panel.id,
-              await this.withHiRes(panel, crowd, ids, window, pixelWidth),
-            );
-            await loadContext();
-          } else {
-            const wantsContext = spec.windows.includes("context");
-            const contextWindow = wantsContext
-              ? this.sampleWindow(panel)
-              : this.effectiveWindow(panel);
-            const cap = sampleCapForPanel(panel.mode, ids.length);
-            const cacheKey = SampleWindowCache.key({
-              ids,
-              mode: panel.mode,
-              window: wantsContext ? window : contextWindow,
-              cap,
-            });
-            const cached = this.sampleWindowCache.get(panel.id, cacheKey);
-            if (cached !== null) {
-              nextSamples.set(panel.id, cached);
-              return;
-            }
-            let merged: SampleResponse;
-            if (wantsContext) {
-              merged = await fetchXySamples({
-                plane: this.plane,
-                panelId: panel.id,
-                ids,
-                cap,
-                contextWindow,
-                window,
-                contextCache: this.xyContextCache,
-              });
-            } else {
-              merged = await this.plane.querySamples({
-                request_id: crypto.randomUUID(),
-                signal_ids: ids,
-                window: contextWindow,
-                max_points: cap,
-              });
-            }
-            this.sampleWindowCache.store(panel.id, cacheKey, merged);
-            nextSamples.set(panel.id, merged);
+          const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+          const dpr = globalThis.devicePixelRatio || 1;
+          const pixelWidth = Math.max(
+            1,
+            Math.round((panelWidth > 0 ? panelWidth : width) * dpr),
+          );
+          const cached = this.tileWindowCache.slice(
+            panel.id,
+            idsKey,
+            pixelWidth,
+            window.t0,
+            window.t1,
+          );
+          if (cached !== null) {
+            nextTiles.set(panel.id, cached);
+            return;
           }
+          const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+          const response = await this.plane.queryTiles({
+            request_id: crypto.randomUUID(),
+            signal_ids: ids,
+            window: paddedWindow,
+            pixel_width: TileWindowCache.requestPixelWidth(
+              pixelWidth,
+              window,
+              paddedWindow,
+            ),
+          });
+          this.tileWindowCache.store(panel.id, {
+            response,
+            window: paddedWindow,
+            pixelWidth,
+            idsKey,
+          });
+          nextTiles.set(
+            panel.id,
+            this.tileWindowCache.slice(
+              panel.id,
+              idsKey,
+              pixelWidth,
+              window.t0,
+              window.t1,
+            ) ?? response,
+          );
         } catch (error: unknown) {
           this.reportError(error);
         }
@@ -2966,47 +2521,17 @@ export class AppShell {
     );
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
-    this.contextTilesByPanel = nextContextTiles;
-    this.samplesByPanel = nextSamples;
     this.missingByPanel = nextMissing;
     this.renderTiles();
   }
 
-  /**
-   * Signal ids a panel needs: its series, plus the XY x signal and the
-   * colour channel, which are axes rather than plotted series.
-   */
+  /** Signal ids a panel needs for its visible time-series bindings. */
   private panelSignalIds(panel: PanelState): {
     ids: string[];
     missing: string[];
   } {
     const resolved = this.resolvedFor(panel);
     const paths = resolved.map((series) => series.path);
-    if (panel.mode === "xy") {
-      const x = panel.x_ref === null ? null : this.catalog.get(panel.x_ref);
-      if (x !== null && x !== undefined) {
-        paths.unshift(x.path);
-        for (const series of resolved) {
-          const paired = this.catalog.get({
-            source_key: series.ref.source_key,
-            channel: x.channel,
-          });
-          if (paired !== undefined) paths.push(paired.path);
-        }
-      }
-      const color =
-        panel.color_ref === null ? null : this.catalog.get(panel.color_ref);
-      if (color !== null && color !== undefined) {
-        paths.push(color.path);
-        for (const series of resolved) {
-          const paired = this.catalog.get({
-            source_key: series.ref.source_key,
-            channel: color.channel,
-          });
-          if (paired !== undefined) paths.push(paired.path);
-        }
-      }
-    }
     const ids: string[] = [];
     const missing: string[] = [];
     for (const path of new Set(paths)) {
@@ -3030,17 +2555,6 @@ export class AppShell {
     return resolved;
   }
 
-  private isDerivedPath(path: string): boolean {
-    const revision = this.workspace.revision();
-    if (this.derivedPathsCache?.revision !== revision) {
-      this.derivedPathsCache = {
-        revision,
-        paths: new Set(this.workspace.derived().map((entry) => entry.path)),
-      };
-    }
-    return this.derivedPathsCache.paths.has(path);
-  }
-
   /** Coalesces bursts of per-panel resize renders into one frame. */
   private scheduleRender(): void {
     if (this.renderScheduled) return;
@@ -3056,7 +2570,6 @@ export class AppShell {
     const elapsed =
       this.workspaceView?.renderData(
         this.tilesByPanel,
-        this.samplesByPanel,
         (panelId) => {
           const panel = this.workspace.panel(panelId);
           return panel === undefined
@@ -3065,7 +2578,6 @@ export class AppShell {
         },
         (panelId) => this.missingByPanel.get(panelId) ?? [],
         this.workspace.revision(),
-        (panelId) => this.contextTilesByPanel.get(panelId) ?? null,
       ) ?? 0;
     required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
   }
@@ -3074,7 +2586,7 @@ export class AppShell {
     if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return;
-    if (this.workspace.linkedTime().linked && panel.mode === "time") {
+    if (this.workspace.linkedTime().linked) {
       this.workspace.setLinkedWindow(t0, t1);
       this.renderWindowReadout();
     } else {
@@ -3085,45 +2597,15 @@ export class AppShell {
     this.scheduleRefresh();
   }
 
-  private applyXRange(panelId: string, range: readonly [number, number]): void {
-    if (
-      !Number.isFinite(range[0]) ||
-      !Number.isFinite(range[1]) ||
-      range[1] <= range[0]
-    ) {
-      return;
-    }
-    this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
-    this.markHistoryDirty(`range:${panelId}`);
-    this.scheduleRender();
-  }
-
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
     const state = this.workspace.linkedTime();
-    if (state.linked && panel.mode === "time") {
+    if (state.linked) {
       return { t0: state.t0, t1: state.t1 };
     }
     const local = panel.time_window;
     return local === null
       ? { t0: state.t0, t1: state.t1 }
       : { t0: local[0], t1: local[1] };
-  }
-
-  /**
-   * The window a panel's samples are fetched over. XY panels fetch the full
-   * data extent because the spec dims the out-of-window trajectory rather
-   * than clipping it; FFT and histogram compute over the visible window.
-   */
-  private sampleWindow(panel: PanelState): { t0: number; t1: number } {
-    if (!MODE_DATA[panel.mode].windows.includes("context")) {
-      return this.effectiveWindow(panel);
-    }
-    const paths = this.resolvedFor(panel).map((series) => series.path);
-    if (panel.x_ref !== null) {
-      const x = this.catalog.get(panel.x_ref);
-      if (x !== undefined) paths.push(x.path);
-    }
-    return this.timeExtent(paths) ?? this.effectiveWindow(panel);
   }
 
   private scheduleRefresh(delay = 50): void {
@@ -3137,16 +2619,6 @@ export class AppShell {
   private fitPanelView(panelId: string): void {
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return;
-    if (panel.mode !== "time") {
-      // Non-time panels have no time axis to fit: clearing both ranges
-      // returns them to autoscale, which the renderer recomputes.
-      this.workspace.clearPanelXRange(panelId);
-      this.workspace.clearPanelYRange(panelId);
-      this.workspaceView?.resetYAxis(panelId);
-      this.commitHistory();
-      this.renderTiles();
-      return;
-    }
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
     const extent = this.timeExtent(
@@ -3162,33 +2634,6 @@ export class AppShell {
     this.commitHistory();
   }
 
-  /** Removes the assigned X signal while leaving an empty XY axis slot. */
-  private clearXSignal(panelId: string): void {
-    const panel = this.workspace.panel(panelId);
-    const ref = panel?.x_ref;
-    const path =
-      ref === null || ref === undefined ? null : this.catalog.get(ref)?.path;
-    if (
-      panel === undefined ||
-      ref === null ||
-      ref === undefined ||
-      path === undefined ||
-      path === null
-    )
-      return;
-    this.workspace.setXRef(panelId, null);
-    this.workspace.removeSeriesRef(panelId, ref, path);
-    if (
-      panel.color_ref !== null &&
-      panel.color_ref.source_key === ref.source_key &&
-      panel.color_ref.channel === ref.channel
-    ) {
-      this.workspace.setColorRef(panelId, null);
-    }
-    this.workspace.clearPanelXRange(panelId);
-    this.afterLayoutChange();
-  }
-
   private setCursor(
     panelId: string,
     cursor: PlotCursor | null,
@@ -3196,19 +2641,6 @@ export class AppShell {
   ): void {
     const mode = this.workspace.cursorMode();
     if (mode === "none") cursor = null;
-    const panel = this.workspace.panel(panelId);
-    const localDomain = panel?.mode === "fft" || panel?.mode === "histogram";
-    if (cursor?.link === "local" || (cursor === null && localDomain)) {
-      this.workspaceView?.setLocalCursor(panelId, cursor?.x ?? null);
-      if (cursor === null) this.renderCursorTime();
-      else this.renderCursorTime(cursor.heading);
-      this.renderTooltip(
-        panelId,
-        mode === "track" ? cursor : null,
-        mode === "track" ? client : null,
-      );
-      return;
-    }
     const cursorT = cursor?.link === "time" ? cursor.x : null;
     this.workspace.setCursorT(cursorT);
     const state = this.workspace.linkedTime();
@@ -3418,9 +2850,7 @@ export class AppShell {
     const linked = !state.linked;
     if (!linked) {
       for (const panel of this.workspace.panels()) {
-        if (panel.mode === "time") {
-          this.workspace.setPanelTimeWindow(panel.id, [state.t0, state.t1]);
-        }
+        this.workspace.setPanelTimeWindow(panel.id, [state.t0, state.t1]);
       }
     }
     this.workspace.setLinked(linked);

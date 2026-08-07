@@ -7,9 +7,7 @@ use std::{
 
 use crate::pyramid::Pyramid;
 use crate::series_ref::path_from_ref;
-use crate::session::{
-    BindingKind, LinkedTime, NamedSetKind, PanelMode, PanelState, SeriesRef, Session,
-};
+use crate::session::{BindingKind, LinkedTime, NamedSetKind, PanelState, SeriesRef, Session};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{
     BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
@@ -74,7 +72,7 @@ pub enum SnapshotError {
 }
 
 fn effective_window(panel: &PanelState, linked: &LinkedTime) -> (f64, f64) {
-    if linked.linked && panel.mode == PanelMode::Time {
+    if linked.linked {
         return (linked.t0, linked.t1);
     }
     match panel.time_window {
@@ -118,22 +116,6 @@ fn panel_signal_ids(
                     }
                 }
             }
-        }
-    }
-    if panel.mode == PanelMode::Xy {
-        if let Some(signal) = panel
-            .x_ref
-            .as_ref()
-            .and_then(|reference| signal_from_ref(session, store, reference))
-        {
-            ids.insert(signal.id);
-        }
-        if let Some(signal) = panel
-            .color_ref
-            .as_ref()
-            .and_then(|reference| signal_from_ref(session, store, reference))
-        {
-            ids.insert(signal.id);
         }
     }
     ids
@@ -367,15 +349,11 @@ fn signal_plan<'a>(
     source_key: SourceKey,
     pyramid: &'a Pyramid,
     window: Option<(f64, f64)>,
-    needs_raw: bool,
     fidelity: ExportFidelity,
 ) -> SignalPlan<'a> {
-    // Sample-domain panels outrank fidelity because reconstructed envelope bins
-    // are not valid XY, FFT, or histogram inputs. Otherwise the target is only
-    // a ceiling: sparse signals stay raw, while Full explicitly selects level 0.
-    let finest = match (needs_raw, ceiling(fidelity)) {
-        (true, _) | (false, None) => 0,
-        (false, Some(limit)) => (0..pyramid.level_count())
+    let finest = match ceiling(fidelity) {
+        None => 0,
+        Some(limit) => (0..pyramid.level_count())
             .find(|index| {
                 pyramid
                     .level_window_count(*index, window)
@@ -460,15 +438,6 @@ pub fn plan_selected<'a>(
     fidelity: ExportFidelity,
 ) -> Result<ExportPlan<'a>, SnapshotError> {
     let selected_sources = selection.source_keys.iter().collect::<BTreeSet<_>>();
-    let mut needs_raw = BTreeSet::new();
-    for tab in &session.tabs {
-        for panel in &tab.panels {
-            if panel.mode != PanelMode::Time {
-                needs_raw.extend(panel_signal_ids(session, store, panel));
-            }
-        }
-    }
-
     if range == ExportRange::All {
         let plan = export_plan(
             store
@@ -486,7 +455,6 @@ pub fn plan_selected<'a>(
                         source_key(store, signal)?,
                         pyramid,
                         None,
-                        needs_raw.contains(&signal.id),
                         fidelity,
                     ))
                 })
@@ -526,7 +494,6 @@ pub fn plan_selected<'a>(
                     source_key(store, signal)?,
                     pyramid,
                     Some((t0, t1)),
-                    needs_raw.contains(&id),
                     fidelity,
                 ))
             })
@@ -674,8 +641,7 @@ mod tests {
     use super::*;
     use crate::pyramid::Pyramid;
     use crate::session::{
-        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelMode, PanelState, SeriesRef,
-        Session,
+        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SeriesRef, Session,
     };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
@@ -699,15 +665,11 @@ mod tests {
         (store, pyramids)
     }
 
-    fn panel(id: &str, mode: PanelMode, paths: &[&str]) -> PanelState {
+    fn panel(id: &str, paths: &[&str]) -> PanelState {
         PanelState {
             id: id.to_owned(),
             title: "Panel".to_owned(),
-            mode,
             axis_style: AxisStyle::Gutter,
-            x_ref: None,
-            color_axis: crate::session::ColorAxis::None,
-            color_ref: None,
             bindings: vec![Binding {
                 kind: BindingKind::Pick,
                 selector: None,
@@ -726,14 +688,11 @@ mod tests {
             ghost_mode: crate::session::GhostMode::All,
             split_by: crate::session::SplitDimension::None,
             y_range: None,
-            x_range: None,
             x_label: None,
             y_label: None,
-            c_label: None,
             time_window: None,
             annotations: Vec::new(),
             show_stats: false,
-            axis_equal: false,
         }
     }
 
@@ -822,7 +781,7 @@ mod tests {
     #[test]
     fn visible_scope_excludes_signals_on_no_panel() {
         let (store, pyramids) = store_with(&[("a", 10), ("b", 10)]);
-        let session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
+        let session = session_with(vec![panel("panel-1", &["a"])]);
         let export = plan(
             &session,
             &store,
@@ -838,7 +797,7 @@ mod tests {
     #[test]
     fn visible_scope_resolves_query_and_saved_set_bindings() {
         let (store, pyramids) = store_with(&[("alpha", 10), ("beta", 10), ("ignored", 10)]);
-        let mut panel = panel("panel-1", PanelMode::Time, &[]);
+        let mut panel = panel("panel-1", &[]);
         panel.bindings = vec![
             Binding {
                 kind: BindingKind::Query,
@@ -893,7 +852,7 @@ mod tests {
         ];
 
         for (selector, expected) in cases {
-            let mut query_panel = panel("panel-query", PanelMode::Time, &[]);
+            let mut query_panel = panel("panel-query", &[]);
             query_panel.bindings = vec![Binding {
                 kind: BindingKind::Query,
                 selector: Some((*selector).into()),
@@ -920,55 +879,9 @@ mod tests {
     }
 
     #[test]
-    fn sample_mode_resolves_query_sets_before_raw_planning() {
-        let (store, pyramids) =
-            store_with(&[("alpha", 100_000), ("beta", 100_000), ("ignored", 100_000)]);
-        let mut panel = panel("panel-1", PanelMode::Histogram, &[]);
-        panel.bindings = vec![
-            Binding {
-                kind: BindingKind::Query,
-                selector: Some("alpha".into()),
-                refs: Vec::new(),
-                set_id: None,
-            },
-            Binding {
-                kind: BindingKind::Set,
-                selector: None,
-                refs: Vec::new(),
-                set_id: Some("saved-query".into()),
-            },
-        ];
-        let mut session = session_with(vec![panel]);
-        session.named_sets.push(NamedSet {
-            id: "saved-query".into(),
-            name: "Saved query".into(),
-            kind: NamedSetKind::Query,
-            selector: Some("beta".into()),
-            refs: Vec::new(),
-        });
-
-        let export = plan(
-            &session,
-            &store,
-            &pyramids,
-            ExportRange::All,
-            ExportFidelity::Preview,
-        )
-        .expect("plan");
-        let levels = export
-            .signals
-            .iter()
-            .map(|entry| (entry.signal.path.as_str(), entry.finest_level()))
-            .collect::<BTreeMap<_, _>>();
-        assert_eq!(levels["alpha"], 0);
-        assert_eq!(levels["beta"], 0);
-        assert!(levels["ignored"] > 0);
-    }
-
-    #[test]
     fn visible_scope_decimates_dense_time_signals() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", &["a"])]);
         session.linked_time.t1 = 99_999.0;
         let export = plan(
             &session,
@@ -1001,7 +914,7 @@ mod tests {
     #[test]
     fn honesty_rule_bakes_raw_when_sparse_at_every_fidelity() {
         let (store, pyramids) = store_with(&[("a", 500)]);
-        let session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
+        let session = session_with(vec![panel("panel-1", &["a"])]);
         for fidelity in [
             ExportFidelity::Preview,
             ExportFidelity::Standard,
@@ -1016,28 +929,9 @@ mod tests {
     }
 
     #[test]
-    fn sample_mode_panels_force_level_zero_at_preview() {
-        let (store, pyramids) = store_with(&[("a", 100_000)]);
-        for mode in [PanelMode::Xy, PanelMode::Fft] {
-            let session = session_with(vec![panel("panel-1", mode, &["a"])]);
-            let export = plan(
-                &session,
-                &store,
-                &pyramids,
-                ExportRange::Visible,
-                ExportFidelity::Preview,
-            )
-            .expect("plan");
-            assert_eq!(export.signals[0].finest_level(), 0);
-            assert_eq!(export.series_decimated, 0);
-            assert_eq!(export.coarsest_ratio, 1);
-        }
-    }
-
-    #[test]
     fn fidelity_ceiling_is_monotone() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
+        let session = session_with(vec![panel("panel-1", &["a"])]);
         let bins: Vec<usize> = [
             ExportFidelity::Preview,
             ExportFidelity::Standard,
@@ -1059,47 +953,13 @@ mod tests {
     }
 
     #[test]
-    fn xy_panels_pull_x_and_color_signals() {
-        let (store, pyramids) = store_with(&[("x", 10), ("y", 10), ("c", 10), ("ignored", 10)]);
-        let mut xy = panel("panel-xy", PanelMode::Xy, &["y"]);
-        xy.x_ref = Some(SeriesRef {
-            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
-            channel: "x".into(),
-        });
-        xy.color_ref = Some(SeriesRef {
-            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
-            channel: "c".into(),
-        });
-        let mut time = panel("panel-time", PanelMode::Time, &["ignored"]);
-        time.x_ref = Some(SeriesRef {
-            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
-            channel: "x".into(),
-        });
-        let session = session_with(vec![xy, time]);
-        let export = plan(
-            &session,
-            &store,
-            &pyramids,
-            ExportRange::Visible,
-            ExportFidelity::Standard,
-        )
-        .expect("plan");
-        let paths: Vec<&str> = export
-            .signals
-            .iter()
-            .map(|entry| entry.signal.path.as_str())
-            .collect();
-        assert_eq!(paths, ["x", "y", "c", "ignored"]);
-    }
-
-    #[test]
     fn window_is_the_union_of_panel_windows() {
         let (store, pyramids) = store_with(&[("a", 100), ("b", 100)]);
         let mut session = Session::default();
         session.linked_time.t0 = 0.0;
         session.linked_time.t1 = 10.0;
-        let linked = panel("panel-linked", PanelMode::Time, &["a"]);
-        let mut unlinked = panel("panel-unlinked", PanelMode::Time, &["b"]);
+        let linked = panel("panel-linked", &["a"]);
+        let mut unlinked = panel("panel-unlinked", &["b"]);
         unlinked.time_window = Some([20.0, 30.0]);
         session.linked_time.linked = false;
         session.tabs[0].panels = vec![linked, unlinked];
@@ -1158,7 +1018,7 @@ mod tests {
     #[test]
     fn baked_levels_are_positional_from_the_finest_planned_level() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", &["a"])]);
         session.linked_time.t1 = 99_999.0;
         let export = plan(
             &session,
@@ -1186,7 +1046,7 @@ mod tests {
     #[test]
     fn clipping_retains_one_neighbor_bin_each_side() {
         let (store, pyramids) = store_with(&[("a", 1_000)]);
-        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", &["a"])]);
         session.linked_time.t0 = 100.0;
         session.linked_time.t1 = 200.0;
         let export = plan(
@@ -1290,7 +1150,7 @@ mod tests {
     #[test]
     fn estimate_shrinks_with_visible_scope() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
-        let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
+        let mut session = session_with(vec![panel("panel-1", &["a"])]);
         session.linked_time.t0 = 40_000.0;
         session.linked_time.t1 = 40_100.0;
         let visible = plan(

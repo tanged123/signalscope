@@ -1,4 +1,4 @@
-import type { PlotInteractionPolicy } from "./plot-capabilities";
+import type { PlotInteractionPolicy } from "./time-plot";
 import type { Range, ZoomDragMode } from "./plot-math";
 
 type StoredRanges = {

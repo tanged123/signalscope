@@ -553,32 +553,6 @@ button {
   border-color: var(--amber-7);
 }
 
-/* Spec F6·4: 36px, bottom-anchored inside the plot body, amber because it is
-   a drag target — one of amber's sanctioned interaction roles. */
-.xy-drop-strip {
-  position: absolute;
-  z-index: 3;
-  display: flex;
-  height: 36px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--amber-3);
-  border-top: 1px dashed var(--amber-7);
-  color: var(--amber-7);
-  font: 0.8077rem var(--font-mono);
-  inset: auto 0 0;
-  pointer-events: none;
-}
-
-.xy-drop-strip[hidden] {
-  display: none;
-}
-
-.panel.drop-x .xy-drop-strip {
-  background: var(--focus-ring);
-}
-
 .panel-header {
   display: flex;
   min-height: 26px;
@@ -621,53 +595,6 @@ button {
   font: 500 11px var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.mode-pills {
-  display: flex;
-  flex: none;
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-}
-
-.mode-pill {
-  padding: 1px 6px;
-  color: var(--fg-3);
-  font: 0.6923rem var(--font-mono);
-}
-
-.mode-pill.active {
-  background: var(--surface-4);
-  color: var(--fg-1);
-}
-
-/* Dashed chips mark an axis assignment rather than a plotted series. */
-.axis-chip {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  padding: 0 5px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 2px;
-  color: var(--fg-2);
-  font: 0.8077rem var(--font-mono);
-}
-
-.axis-chip[hidden] {
-  display: none;
-}
-
-.axis-chip .axis-chip-prefix {
-  color: var(--fg-4);
-}
-
-.axis-chip.drop-target {
-  border-color: var(--amber-7);
-  color: var(--amber-7);
-  outline: 1px solid var(--focus-ring);
-  outline-offset: -2px;
 }
 
 .panel-bindings {
@@ -1120,16 +1047,6 @@ button {
   display: flex;
   flex: none;
   margin-left: auto;
-}
-
-.panel-mode-note {
-  flex: none;
-  color: var(--fg-4);
-  font: 0.7692rem var(--font-mono);
-}
-
-.panel-mode-note[hidden] {
-  display: none;
 }
 
 .panel-split-actions {

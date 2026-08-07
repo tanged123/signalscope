@@ -1,4 +1,4 @@
-import type { PlotInteractionPolicy } from "../app/plot-capabilities";
+import type { PlotInteractionPolicy } from "../app/time-plot";
 import {
   allowsFit,
   boxZoomAxes,
@@ -40,8 +40,8 @@ export interface PlotInteractionHost {
   ): void;
   setGesture(hint: string | null): void;
   setBox(box: InteractionBox | null): void;
-  axisEditZone(x: number, y: number): "x" | "y" | "c" | null;
-  beginAxisEdit(axis: "x" | "y" | "c"): void;
+  axisEditZone(x: number, y: number): "x" | "y" | null;
+  beginAxisEdit(axis: "x" | "y"): void;
 }
 
 export class PlotInteractionController {

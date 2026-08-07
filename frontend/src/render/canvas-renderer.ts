@@ -328,7 +328,7 @@ export class CanvasRenderer {
     return this.layout;
   }
 
-  render(
+  renderTimePlot(
     response: ColumnarTileResponse,
     xRange: Range,
     options: RenderOptions,
@@ -485,6 +485,14 @@ export class CanvasRenderer {
     context.restore();
     finishAxes();
     return performance.now() - started;
+  }
+
+  render(
+    response: ColumnarTileResponse,
+    xRange: Range,
+    options: RenderOptions,
+  ): number {
+    return this.renderTimePlot(response, xRange, options);
   }
 
   /**

@@ -200,7 +200,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onSplitRight: () => {},
       onSplitDown: () => {},
       onMaximize: () => {},
-      onSelectMode: () => {},
       onDropSignals: () => {},
       onDropSet: () => {},
       onFocusToggle: () => {},
@@ -214,8 +213,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       },
       onRemoveOverride: () => {},
       onClearOverrides: () => {},
-      localPathFor: () => null,
-      sourceKeyFor: () => null,
       pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
       catalog: () => catalog,
       namedSets: () => [],
@@ -234,24 +231,17 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
             focused: true,
             overridden: false,
           })),
-      onSetXSignal: () => {},
-      onSetColorSignal: () => {},
-      onClearXSignal: () => {},
-      onToggleSeries: () => {},
       onResized: () => {},
       onGesture: () => {},
-      onSampleFallback: () => {},
       onCursor: () => {},
       onTimeWindow: () => {},
       onYRange: () => {},
-      onXRange: () => {},
       onPinAnnotation: () => {},
       onRemoveAnnotation: () => {},
       onEditAnnotationLabel: () => {},
       onFitView: () => {},
       onToggleStats: () => {},
       onToggleAxisStyle: () => {},
-      onToggleAxisEqual: () => {},
       onRenameTitle: () => {},
       onEditAxisLabel: () => {},
       onSetSeriesStyle: () => {},
@@ -265,11 +255,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       {
         id: "legend-probe-panel",
         title: "Many series",
-        mode: "time",
         axis_style: "gutter",
-        x_ref: null,
-        color_axis: "none",
-        color_ref: null,
         bindings: [
           {
             kind: "pick" as const,
@@ -287,14 +273,11 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         ghost_mode: "all",
         split_by: "none",
         y_range: null,
-        x_range: null,
         x_label: null,
         y_label: null,
-        c_label: null,
         time_window: null,
         annotations: [],
         show_stats: false,
-        axis_equal: false,
       },
       false,
     );
@@ -377,9 +360,7 @@ test("dismissing a failed ingest banner clears it", async ({ page }) => {
   await expect(progress.locator(".ingest-failures")).toHaveCount(0);
 });
 
-test("xy panels expose an equal-aspect toggle that other modes hide", async ({
-  page,
-}) => {
+test("time panels do not expose mode-specific controls", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(async () => {
     const modulePath = "/src/ui/panel.ts";
@@ -410,14 +391,10 @@ test("xy panels expose an equal-aspect toggle that other modes hide", async ({
       last_value: null,
     }));
     const catalog = Catalog.build(summaries);
-    const state = (mode: "xy" | "time", axisEqual: boolean) => ({
+    const state = () => ({
       id: "aspect-probe-panel",
       title: "trajectory",
-      mode,
       axis_style: "gutter" as const,
-      x_ref: { source_key: "run_01", channel: "command" },
-      color_axis: "none" as const,
-      color_ref: null,
       bindings: [
         {
           kind: "pick" as const,
@@ -432,14 +409,11 @@ test("xy panels expose an equal-aspect toggle that other modes hide", async ({
       ghost_mode: "all" as const,
       split_by: "none" as const,
       y_range: null,
-      x_range: null,
       x_label: null,
       y_label: null,
-      c_label: null,
       time_window: null,
       annotations: [],
       show_stats: false,
-      axis_equal: axisEqual,
     });
     const view = new PanelView("aspect-probe-panel", {
       onFocus: () => {},
@@ -447,7 +421,6 @@ test("xy panels expose an equal-aspect toggle that other modes hide", async ({
       onSplitRight: () => {},
       onSplitDown: () => {},
       onMaximize: () => {},
-      onSelectMode: () => {},
       onDropSignals: () => {},
       onDropSet: () => {},
       onFocusToggle: () => {},
@@ -459,8 +432,6 @@ test("xy panels expose an equal-aspect toggle that other modes hide", async ({
       onSetColorBy: () => {},
       onRemoveOverride: () => {},
       onClearOverrides: () => {},
-      localPathFor: () => null,
-      sourceKeyFor: () => null,
       pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
       catalog: () => catalog,
       namedSets: () => [],
@@ -479,29 +450,17 @@ test("xy panels expose an equal-aspect toggle that other modes hide", async ({
             focused: true,
             overridden: false,
           })),
-      onSetXSignal: () => {},
-      onSetColorSignal: () => {},
-      onClearXSignal: () => {},
-      onToggleSeries: () => {},
       onResized: () => {},
       onGesture: () => {},
-      onSampleFallback: () => {},
       onCursor: () => {},
       onTimeWindow: () => {},
       onYRange: () => {},
-      onXRange: () => {},
       onPinAnnotation: () => {},
       onRemoveAnnotation: () => {},
       onEditAnnotationLabel: () => {},
       onFitView: () => {},
       onToggleStats: () => {},
       onToggleAxisStyle: () => {},
-      // The shell flips the model and re-renders; mirror that here so the
-      // pressed state reflects a real round trip rather than a local toggle.
-      onToggleAxisEqual: (id) => {
-        host.dataset.axisEqualToggled = id;
-        view.update(state("xy", true), false);
-      },
       onRenameTitle: () => {},
       onEditAxisLabel: () => {},
       onSetSeriesStyle: () => {},
@@ -509,33 +468,12 @@ test("xy panels expose an equal-aspect toggle that other modes hide", async ({
       onQuickTransform: () => {},
     });
     host.appendChild(view.element);
-    Object.assign(globalThis, {
-      __aspectProbe: (mode: "xy" | "time") => {
-        view.update(state(mode, false), false);
-      },
-    });
-    view.update(state("xy", false), false);
+    view.update(state(), false);
   });
 
   const panel = page.locator("#aspect-probe .panel");
-  const toggle = panel.locator(".panel-aspect-toggle");
-  await expect(toggle).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-  await toggle.click();
-  await expect(page.locator("#aspect-probe")).toHaveAttribute(
-    "data-axis-equal-toggled",
-    "aspect-probe-panel",
-  );
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-
-  // Equal aspect is meaningless off the xy plane, so the control goes away.
-  await page.evaluate(() => {
-    (
-      globalThis as unknown as { __aspectProbe: (mode: string) => void }
-    ).__aspectProbe("time");
-  });
-  await expect(toggle).toBeHidden();
+  await expect(panel.locator(".panel-aspect-toggle")).toHaveCount(0);
+  await expect(panel.locator(".panel-mode-note")).toHaveCount(0);
 });
 
 test("formula component creates and recalls accepted formulas", async ({

@@ -54,18 +54,6 @@ function legacySeries(panel: PanelState | undefined): TestSeries[] {
     });
 }
 
-function xPath(panel: PanelState | undefined): string | null {
-  return panel?.x_ref === null || panel?.x_ref === undefined
-    ? null
-    : pathForRef(panel.x_ref);
-}
-
-function colorPath(panel: PanelState | undefined): string | null {
-  return panel?.color_ref === null || panel?.color_ref === undefined
-    ? null
-    : pathForRef(panel.color_ref);
-}
-
 function focusPaths(
   panel: PanelState | undefined,
 ): { local_path: string; path: string }[] {
@@ -169,14 +157,11 @@ describe("derived definitions", () => {
     model.addAnnotation(first.id, {
       id: "ann-1",
       series_path: path,
-      domain: "time",
       anchor: 0,
       pinned_value: 1,
       label: "",
     });
-    const axes = model.addPanelRow();
-    model.setXRef(axes.id, refForPath(path));
-    model.setColorRef(axes.id, refForPath(path));
+    model.addPanelRow();
     model.addNamedSet({
       id: "set-1",
       name: path,
@@ -192,7 +177,6 @@ describe("derived definitions", () => {
     model.addAnnotation(second.id, {
       id: "ann-2",
       series_path: path,
-      domain: "time",
       anchor: 1,
       pinned_value: 2,
       label: "",
@@ -212,8 +196,6 @@ describe("derived definitions", () => {
             (annotation) => annotation.series_path === path,
           ),
         ).toBe(false);
-        expect(xPath(panel)).not.toBe(path);
-        expect(colorPath(panel)).not.toBe(path);
       }
     }
   });
@@ -355,6 +337,18 @@ describe("WorkspaceModel", () => {
     ]);
     expect(heights(model)).toEqual([0.5, 0.5]);
     expect(model.focusedPanelId()).toBe(second.id);
+    expect(model.addPanelRow()).toMatchObject({
+      axis_style: "gutter",
+      bindings: [],
+      y_range: null,
+      x_label: null,
+      y_label: null,
+      time_window: null,
+      annotations: [],
+      show_stats: false,
+    });
+    const firstPanel = model.panels()[0];
+    expect(firstPanel === undefined ? false : "mode" in firstPanel).toBe(false);
   });
 
   it("keeps panel routing idempotent when the current panel is reused", () => {
@@ -517,17 +511,6 @@ describe("WorkspaceModel", () => {
     expect(model.focusEntries(panel.id)).toEqual([]);
   });
 
-  it("colour-by-time replaces the colour signal", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    model.setColorRef(panel.id, refForPath("demo/speed"));
-    model.setColorByTime(panel.id);
-    expect(model.panel(panel.id)?.color_axis).toBe("time");
-    expect(colorPath(model.panel(panel.id))).toBeNull();
-    model.setColorRef(panel.id, null);
-    expect(model.panel(panel.id)?.color_axis).toBe("none");
-  });
-
   it("normalizes legacy facet split state when restoring a session", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -626,57 +609,6 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.overrides).toEqual([]);
   });
 
-  it("promotes a plotted series to the XY x axis", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    model.addSeriesRef(panel.id, refForPath("position/east"));
-    model.addSeriesRef(panel.id, refForPath("position/north"));
-    model.promoteSeriesToX(panel.id);
-    expect(xPath(model.panel(panel.id))).toBe("position/east");
-    expect(
-      legacySeries(model.panel(panel.id)).map((series) => series.path),
-    ).toEqual(["position/north"]);
-  });
-
-  it("returns an outgoing x signal to the plotted series", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    model.addSeriesRef(panel.id, refForPath("position/east"));
-    model.addSeriesRef(panel.id, refForPath("position/north"));
-    model.setXRef(panel.id, refForPath("position/east"));
-    model.setXRef(panel.id, refForPath("position/north"));
-    expect(xPath(model.panel(panel.id))).toBe("position/north");
-    expect(
-      legacySeries(model.panel(panel.id)).map((series) => series.path),
-    ).toEqual(["position/east"]);
-  });
-
-  it("keeps state when setting the current x ref and preserves promoted metadata", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    const east = refForPath("position/east");
-    model.addSeriesRef(panel.id, east);
-    model.setSeriesOverride(panel.id, east, {
-      color_slot: 1,
-      dash: "solid",
-      width: 3,
-    });
-    model.toggleFocus(panel.id, {
-      kind: "series",
-      ref: east,
-      source_key: null,
-      channel: east.channel,
-    });
-    model.setXRef(panel.id, east);
-    model.setPanelXRange(panel.id, [1, 2]);
-
-    model.setXRef(panel.id, east);
-
-    expect(model.panel(panel.id)?.x_range).toEqual([1, 2]);
-    expect(model.panel(panel.id)?.overrides).toHaveLength(1);
-    expect(model.panel(panel.id)?.focus).toHaveLength(1);
-  });
-
   it("stores and clears a panel y range", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -687,64 +619,20 @@ describe("WorkspaceModel", () => {
     expect(model.panels()[0]?.y_range).toBeNull();
   });
 
-  it("stores and clears a panel-local x range", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    expect(model.panel(panel.id)?.x_range).toBeNull();
-    model.setPanelXRange(panel.id, [-4, 9]);
-    expect(model.panel(panel.id)?.x_range).toEqual([-4, 9]);
-    model.clearPanelXRange(panel.id);
-    expect(model.panel(panel.id)?.x_range).toBeNull();
-  });
-
   it("writes title, axis labels and local time windows", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
     model.renamePanel(panel.id, "Body velocity");
     model.setAxisLabel(panel.id, "y", "velocity (m/s)");
-    model.setAxisLabel(panel.id, "c", "flight phase");
     model.setPanelTimeWindow(panel.id, [2, 8]);
     expect(model.panel(panel.id)).toMatchObject({
       title: "Body velocity",
       x_label: null,
       y_label: "velocity (m/s)",
-      c_label: "flight phase",
       time_window: [2, 8],
     });
-    model.setAxisLabel(panel.id, "c", null);
-    expect(model.panel(panel.id)?.c_label).toBeNull();
     model.setPanelTimeWindow(panel.id, null);
     expect(model.panel(panel.id)?.time_window).toBeNull();
-  });
-
-  it("retains separate annotation domains across mode changes", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    model.addAnnotation(panel.id, {
-      id: "ann-1",
-      series_path: "a/b",
-      domain: "time",
-      anchor: 2,
-      pinned_value: 5,
-      label: "",
-    });
-    model.addAnnotation(panel.id, {
-      id: "ann-2",
-      series_path: "a/b",
-      domain: "frequency",
-      anchor: 20,
-      pinned_value: -3,
-      label: "",
-    });
-    model.setMode(panel.id, "fft");
-    model.setMode(panel.id, "time");
-    model.setAnnotationLabel(panel.id, "ann-1", "peak");
-    expect(model.panel(panel.id)?.annotations[0]?.label).toBe("peak");
-    expect(
-      model.panel(panel.id)?.annotations.map((item) => item.domain),
-    ).toEqual(["time", "frequency"]);
-    model.removeAnnotation(panel.id, "ann-1");
-    expect(model.panel(panel.id)?.annotations).toHaveLength(1);
   });
 
   it("toggles statistics and axis style", () => {
@@ -754,16 +642,6 @@ describe("WorkspaceModel", () => {
     model.toggleAxisStyle(panel.id);
     expect(model.panel(panel.id)?.show_stats).toBe(true);
     expect(model.panel(panel.id)?.axis_style).toBe("inline");
-  });
-
-  it("toggles axis_equal per panel", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    expect(panel.axis_equal).toBe(false);
-    model.toggleAxisEqual(panel.id);
-    expect(model.panel(panel.id)?.axis_equal).toBe(true);
-    model.toggleAxisEqual(panel.id);
-    expect(model.panel(panel.id)?.axis_equal).toBe(false);
   });
 
   it("updates series style and prunes annotations when removing it", () => {
@@ -779,7 +657,6 @@ describe("WorkspaceModel", () => {
     model.addAnnotation(panel.id, {
       id: "ann-1",
       series_path: "a/b",
-      domain: "time",
       anchor: 0,
       pinned_value: 0,
       label: "",
@@ -974,11 +851,7 @@ describe("WorkspaceModel", () => {
     tab.panels.push({
       id: "panel-1",
       title: "Panel 1",
-      mode: "time",
       axis_style: "gutter",
-      x_ref: null,
-      color_axis: "none",
-      color_ref: null,
       bindings: [],
       color_by: "source",
       overrides: [],
@@ -986,14 +859,11 @@ describe("WorkspaceModel", () => {
       ghost_mode: "all",
       split_by: "none",
       y_range: null,
-      x_range: null,
       x_label: null,
       y_label: null,
-      c_label: null,
       time_window: null,
       annotations: [],
       show_stats: false,
-      axis_equal: false,
     });
     tab.layout.push({
       height: 1,

@@ -33,11 +33,7 @@ function panel(): PanelState {
   return {
     id: "panel-1",
     title: "Panel 1",
-    mode: "time",
     axis_style: "gutter",
-    x_ref: null,
-    color_axis: "none",
-    color_ref: null,
     bindings: [],
     color_by: "source",
     overrides: [],
@@ -45,14 +41,11 @@ function panel(): PanelState {
     ghost_mode: "all",
     split_by: "none",
     y_range: null,
-    x_range: null,
     x_label: null,
     y_label: null,
-    c_label: null,
     time_window: null,
     annotations: [],
     show_stats: false,
-    axis_equal: false,
   };
 }
 

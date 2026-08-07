@@ -1,4 +1,3 @@
-import { formatCombo } from "../app/commands";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
@@ -12,14 +11,12 @@ import {
 } from "../app/resolution";
 import { virtualSlice } from "../app/outline-model";
 import { evaluateSelector } from "../app/selector";
-import type { SampleResponse } from "../generated/protocol";
 import type {
   AxisStyle,
   Binding,
   DashStyle,
   FocusEntry,
   NamedSet,
-  PanelMode,
   PanelState,
   SeriesRef,
   SeriesOverride,
@@ -29,22 +26,17 @@ import {
   clamp,
   formatValue,
   insidePlot,
-  projectX,
   projectY,
   type PlotLayout,
-  type Range,
 } from "../app/plot-math";
 import { resolveRanges } from "../app/plot-gestures";
 import {
-  policyFor,
   type AnnotationAnchor,
   type PlotDelta,
   type PlotCursor,
-  type PreparedPlot,
   type ResolvedAnnotation,
-  type SeriesHitAdapter,
-} from "../app/plot-capabilities";
-import { lerpSample, type XyTrace } from "../app/xy";
+} from "../app/time-plot";
+import { prepareTimePlot, type PreparedTimePlot } from "../app/time-plot";
 import { CanvasRenderer, COLOR_SLOTS } from "../render/canvas-renderer";
 import {
   marker,
@@ -53,23 +45,15 @@ import {
   type CursorPoint,
 } from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
-import { required, signalLabel } from "./dom";
+import { required } from "./dom";
 import {
   PlotInteractionController,
   type InteractionBox,
 } from "./plot-interactions";
-import type {
-  FrameInput,
-  PlotModeModule,
-  PrepareInput,
-} from "./modes/contract";
-import { plotModeModule } from "./modes";
-import { colorIndexForHue, visibleSources } from "./modes/shared";
 
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const SET_DRAG_TYPE = "application/x-signalscope-set";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
-export const MAX_SERIES_PER_PANEL = 64;
 export const MAXIMIZE_GLYPH = "↗";
 
 export type PanelCursor = PlotCursor;
@@ -78,8 +62,6 @@ export type PanelCursor = PlotCursor;
 export interface RenderInputs {
   revision: number | null;
   tiles: ColumnarTileResponse | null;
-  contextTiles: ColumnarTileResponse | null;
-  samples: SampleResponse | null;
   window: { t0: number; t1: number } | null;
   missingEmpty: boolean;
 }
@@ -93,8 +75,6 @@ export function sameRenderInputs(
     next.revision !== null &&
     next.revision === last.revision &&
     next.tiles === last.tiles &&
-    next.contextTiles === last.contextTiles &&
-    next.samples === last.samples &&
     last.window !== null &&
     next.window !== null &&
     next.window.t0 === last.window.t0 &&
@@ -109,15 +89,6 @@ interface ResolvedAnnotations {
   delta: PlotDelta | null;
 }
 
-const MODES: readonly { mode: PanelMode; label: string }[] = [
-  { mode: "time", label: "T" },
-  { mode: "xy", label: "XY" },
-  { mode: "fft", label: "FFT" },
-  { mode: "histogram", label: "H" },
-];
-
-const XY_HOVER_RADIUS = 40;
-
 export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
 
 export interface PanelCallbacks {
@@ -126,7 +97,6 @@ export interface PanelCallbacks {
   onSplitRight(id: string): void;
   onSplitDown(id: string): void;
   onMaximize(id: string): void;
-  onSelectMode(id: string, mode: PanelMode): void;
   onDropSignals(id: string, paths: string[]): void;
   onDropSet(id: string, setId: string): void;
   onFocusToggle(id: string, entry: FocusEntry): void;
@@ -135,16 +105,10 @@ export interface PanelCallbacks {
   onMuteSeries(id: string, ref: SeriesRef): void;
   onRemoveBinding(id: string, index: number): void;
   onToggleGhostMode(id: string): void;
-  localPathFor(path: string): string | null;
-  sourceKeyFor(path: string): string | null;
   pathForRef(ref: { source_key: string; channel: string }): string | null;
   catalog(): Catalog;
   namedSets(): readonly NamedSet[];
   resolveSeries(state: PanelState): readonly ResolvedSeries[];
-  onSetXSignal(id: string, path: string): void;
-  onSetColorSignal(id: string, path: string | null): void;
-  onClearXSignal(id: string): void;
-  onToggleSeries(id: string, ref: SeriesRef): void;
   onResized(id: string): void;
   onGesture(id: string, hint: string | null): void;
   /**
@@ -152,7 +116,6 @@ export interface PanelCallbacks {
    * to fetch full-resolution tiles for emphasized ghosts in raster regime.
    */
   onEmphasize?(id: string, paths: readonly string[]): void;
-  onSampleFallback(id: string): void;
   onCursor(
     id: string,
     cursor: PanelCursor | null,
@@ -160,20 +123,14 @@ export interface PanelCallbacks {
   ): void;
   onTimeWindow(id: string, t0: number, t1: number): void;
   onYRange(id: string, range: readonly [number, number]): void;
-  onXRange(id: string, range: readonly [number, number]): void;
   onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
   onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
   onFitView(id: string): void;
   onToggleStats(id: string): void;
   onToggleAxisStyle(id: string): void;
-  onToggleAxisEqual(id: string): void;
   onRenameTitle(id: string, title: string): void;
-  onEditAxisLabel(
-    id: string,
-    axis: "x" | "y" | "c",
-    label: string | null,
-  ): void;
+  onEditAxisLabel(id: string, axis: "x" | "y", label: string | null): void;
   onSetColorBy(id: string, dimension: StyleDimension): void;
   onRemoveOverride(id: string, index: number): void;
   onClearOverrides(id: string): void;
@@ -196,8 +153,6 @@ export function dragData(event: DragEvent, type: string): string | null {
   return value !== undefined && value !== "" ? value : null;
 }
 
-type XyPairingCallbacks = Pick<PanelCallbacks, "localPathFor" | "sourceKeyFor">;
-
 export interface RenderSeries {
   ref: SeriesRef;
   path: string;
@@ -211,10 +166,7 @@ export interface RenderSeries {
   overridden: boolean;
 }
 
-export type RenderPanelState = Omit<PanelState, "x_ref" | "color_ref"> & {
-  x_signal: string | null;
-  color_signal: string | null;
-  color_by_time: boolean;
+export type RenderPanelState = PanelState & {
   series: RenderSeries[];
 };
 
@@ -444,20 +396,11 @@ function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
 
 function renderState(
   state: PanelState,
-  callbacks: Pick<
-    PanelCallbacks,
-    "resolveSeries" | "pathForRef" | "localPathFor"
-  >,
+  callbacks: Pick<PanelCallbacks, "resolveSeries">,
 ): RenderPanelState {
   const resolved = callbacks.resolveSeries(state);
-  const pathForRef = (
-    ref: { source_key: string; channel: string } | null,
-  ): string | null => (ref === null ? null : callbacks.pathForRef(ref));
   return {
     ...state,
-    x_signal: pathForRef(state.x_ref),
-    color_signal: pathForRef(state.color_ref),
-    color_by_time: state.color_axis === "time",
     series: resolved.map((entry) => ({
       ref: entry.ref,
       path: entry.path,
@@ -471,16 +414,6 @@ function renderState(
       overridden: entry.overridden,
     })),
   };
-}
-
-export function xChipLabel(
-  xSignal: string,
-  series: readonly RenderSeries[],
-  callbacks: XyPairingCallbacks,
-): string {
-  const xLocal = callbacks.localPathFor(xSignal);
-  const sources = visibleSources(series, callbacks);
-  return xLocal !== null && sources.size > 1 ? xLocal : signalLabel(xSignal);
 }
 
 export function parseSignalPayload(data: string): string[] {
@@ -558,37 +491,9 @@ export class PanelView {
   private lastInputState: PanelState | null = null;
   private lastRevision: number | null = null;
   private lastTiles: ColumnarTileResponse | null = null;
-  private lastContextTiles: ColumnarTileResponse | null = null;
-  private lastSamples: SampleResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private lastMissingEmpty = true;
-  private prepCache: {
-    key: string;
-    tiles: ColumnarTileResponse | null;
-    contextTiles: ColumnarTileResponse | null;
-    samples: SampleResponse | null;
-    geometry: unknown;
-  } | null = null;
-  private preparedPlot: PreparedPlot | null = null;
-  private hitAdapter: SeriesHitAdapter | null = null;
-  /** Traces from the last XY render, reused by hit-testing and overlays. */
-  private xyTraces: {
-    path: string;
-    colorIndex: number;
-    hue: number | null;
-    dash: DashStyle;
-    width: number;
-    opacity: number;
-    trace: XyTrace;
-  }[] = [];
-  private domainSeries: {
-    path: string;
-    colorIndex: number;
-    hue: number | null;
-    opacity: number;
-    x: number[];
-    y: number[];
-  }[] = [];
+  private preparedPlot: PreparedTimePlot | null = null;
   private cursorT: number | null = null;
   private cursorMode: CursorMode = "none";
   private box: InteractionBox | null = null;
@@ -600,7 +505,6 @@ export class PanelView {
   private rosterCleanup: (() => void) | null = null;
   private bindingCleanup: (() => void) | null = null;
   private rulesCleanup: (() => void) | null = null;
-  private hasColorbar = false;
 
   constructor(
     private readonly id: string,
@@ -642,13 +546,7 @@ export class PanelView {
         const state = this.lastState;
         return layout === null || state === null
           ? null
-          : axisEditZone(
-              layout,
-              state.axis_style,
-              x,
-              y,
-              state.mode === "xy" && this.hasColorbar,
-            );
+          : axisEditZone(layout, state.axis_style, x, y);
       },
       beginAxisEdit: (axis) => {
         this.beginAxisEdit(axis);
@@ -693,12 +591,6 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
-    required(this.element, ".panel-aspect-toggle").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onToggleAxisEqual(this.id);
-      },
-    );
     required(this.element, ".panel-ghost-toggle").addEventListener(
       "click",
       () => {
@@ -738,39 +630,6 @@ export class PanelView {
         }
       }
     });
-    for (const button of this.element.querySelectorAll<HTMLButtonElement>(
-      ".mode-pill",
-    )) {
-      button.addEventListener("click", () => {
-        this.callbacks.onSelectMode(this.id, button.dataset.mode as PanelMode);
-      });
-    }
-    required(this.element, ".x-chip").addEventListener("click", () => {
-      this.callbacks.onClearXSignal(this.id);
-    });
-    const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
-    cChip.addEventListener("click", () => {
-      this.callbacks.onSetColorSignal(this.id, null);
-    });
-    cChip.addEventListener("dragover", (event) => {
-      if (!hasDragType(event, SIGNAL_DRAG_TYPE)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      cChip.classList.add("drop-target");
-    });
-    cChip.addEventListener("dragleave", (event) => {
-      event.stopPropagation();
-      cChip.classList.remove("drop-target");
-    });
-    cChip.addEventListener("drop", (event) => {
-      cChip.classList.remove("drop-target");
-      const path = dragData(event, SIGNAL_DRAG_TYPE);
-      if (path === null) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const first = parseSignalPayload(path)[0];
-      if (first !== undefined) this.callbacks.onSetColorSignal(this.id, first);
-    });
     const header = required<HTMLElement>(this.element, ".panel-header");
     required<HTMLElement>(this.element, ".panel-title").addEventListener(
       "dblclick",
@@ -788,20 +647,12 @@ export class PanelView {
       if (!signalDrag && !setDrag) return;
       event.preventDefault();
       this.element.classList.add("drop-target");
-      this.setDropStripVisible(signalDrag);
-      this.element.classList.toggle(
-        "drop-x",
-        signalDrag && this.overStrip(event),
-      );
     });
     this.element.addEventListener("dragleave", () => {
-      this.element.classList.remove("drop-target", "drop-x");
-      this.setDropStripVisible(false);
+      this.element.classList.remove("drop-target");
     });
     this.element.addEventListener("drop", (event) => {
-      const asX = this.overStrip(event);
-      this.element.classList.remove("drop-target", "drop-x");
-      this.setDropStripVisible(false);
+      this.element.classList.remove("drop-target");
       const setPayload = dragData(event, SET_DRAG_TYPE);
       if (setPayload !== null) {
         event.preventDefault();
@@ -816,8 +667,7 @@ export class PanelView {
       event.stopPropagation();
       const paths = parseSignalPayload(path);
       if (paths.length === 0) return;
-      if (asX) this.callbacks.onSetXSignal(this.id, paths[0] as string);
-      else this.callbacks.onDropSignals(this.id, paths);
+      this.callbacks.onDropSignals(this.id, paths);
     });
     this.overlay.addEventListener("pointermove", (event) => {
       if (this.interactions.isDragging()) return;
@@ -826,7 +676,7 @@ export class PanelView {
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
       const cursor =
         layout !== null && inside
-          ? this.cursorAt(layout, event.offsetX, event.offsetY, XY_HOVER_RADIUS)
+          ? this.cursorAt(layout, event.offsetX, event.offsetY)
           : null;
       if (layout !== null && inside) {
         this.updateHover(
@@ -862,49 +712,6 @@ export class PanelView {
     this.element.classList.toggle("maximized", maximized);
     this.element.setAttribute("aria-label", `${rendered.title} panel`);
     required(this.element, ".panel-title").textContent = rendered.title;
-    for (const button of this.element.querySelectorAll<HTMLButtonElement>(
-      ".mode-pill",
-    )) {
-      button.classList.toggle("active", button.dataset.mode === rendered.mode);
-    }
-    const xChip = required<HTMLButtonElement>(this.element, ".x-chip");
-    xChip.hidden = !(rendered.mode === "xy" && rendered.x_signal !== null);
-    if (!xChip.hidden && rendered.x_signal !== null) {
-      xChip.replaceChildren(
-        chipPrefix("x:"),
-        document.createTextNode(
-          xChipLabel(rendered.x_signal, rendered.series, this.callbacks),
-        ),
-      );
-      xChip.title = `X axis: ${rendered.x_signal} — click to remove`;
-    }
-    const cChip = required<HTMLButtonElement>(this.element, ".c-chip");
-    cChip.hidden = rendered.mode !== "xy";
-    if (!cChip.hidden) {
-      cChip.replaceChildren(
-        chipPrefix("c:"),
-        document.createTextNode(
-          rendered.color_by_time
-            ? "time"
-            : rendered.color_signal === null
-              ? "none"
-              : xChipLabel(
-                  rendered.color_signal,
-                  rendered.series,
-                  this.callbacks,
-                ),
-        ),
-      );
-      cChip.title = rendered.color_by_time
-        ? "Colour channel: time — click to clear"
-        : rendered.color_signal === null
-          ? `Drop a signal here to assign colour, or use ${formatCombo("mod+shift+p")} → set color signal`
-          : `Colour channel: ${rendered.color_signal} — click to clear`;
-    }
-    const note = required<HTMLElement>(this.element, ".panel-mode-note");
-    const windowNote = policyFor(rendered.mode).windowNote;
-    note.hidden = windowNote === null;
-    if (windowNote !== null) note.textContent = windowNote;
     required<HTMLButtonElement>(this.element, ".panel-maximize").title =
       maximized ? "Restore panel" : "Maximize panel";
     required<HTMLButtonElement>(
@@ -917,12 +724,6 @@ export class PanelView {
     );
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
-    const aspectToggle = required<HTMLButtonElement>(
-      this.element,
-      ".panel-aspect-toggle",
-    );
-    aspectToggle.hidden = rendered.mode !== "xy";
-    aspectToggle.setAttribute("aria-pressed", String(rendered.axis_equal));
     this.updateBindings(rendered);
     this.updateGhostToggle(rendered);
     this.updateLegend(rendered);
@@ -940,39 +741,27 @@ export class PanelView {
     if (rendered.series.length === 0) {
       empty.hidden = false;
       empty.textContent = "Empty panel — drag a signal here.";
-    } else if (rendered.mode === "xy" && rendered.x_signal === null) {
-      empty.hidden = false;
-      empty.textContent = "Drop a signal on the strip below to set the X axis.";
-    } else {
-      // In fft/histogram, renderSpectra/renderHistogram own the empty state.
-      empty.hidden = true;
-    }
+    } else empty.hidden = true;
   }
 
   renderData(
     state: PanelState,
     tiles: ColumnarTileResponse | null,
-    samples: SampleResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
     revision: number | null = null,
-    contextTiles: ColumnarTileResponse | null = null,
   ): number {
     if (
       sameRenderInputs(
         {
           revision: this.lastRevision,
           tiles: this.lastTiles,
-          contextTiles: this.lastContextTiles,
-          samples: this.lastSamples,
           window: this.lastWindow,
           missingEmpty: this.lastMissingEmpty,
         },
         {
           revision,
           tiles,
-          contextTiles,
-          samples,
           window,
           missingEmpty: missing.length === 0,
         },
@@ -985,165 +774,77 @@ export class PanelView {
     this.lastRevision = revision;
     this.lastState = rendered;
     this.lastTiles = tiles;
-    this.lastContextTiles = contextTiles;
-    this.lastSamples = samples;
     this.lastWindow = { ...window };
     this.lastMissingEmpty = missing.length === 0;
     this.preparedPlot = null;
-    this.hitAdapter = null;
-    this.domainSeries = [];
-    this.xyTraces = [];
-    this.hasColorbar = false;
-    const elapsed = this.renderForMode(
-      rendered,
-      tiles,
-      samples,
-      window,
-      contextTiles,
-    );
-    this.hitAdapter =
-      (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
-    this.interactions.setPolicy(
-      (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
-    );
+    const series = (tiles?.series ?? []).map((tile) => {
+      const entry = rendered.series.find(
+        (candidate) => candidate.path === tile.signalPath,
+      );
+      return {
+        path: tile.signalPath,
+        colorIndex:
+          entry?.hue === null || entry?.hue === undefined
+            ? COLOR_SLOTS
+            : colorIndexForHue(entry.hue),
+        bins: tile.bins,
+        visible: entry?.visible ?? true,
+      };
+    });
+    this.preparedPlot = prepareTimePlot({ series, window });
+    this.interactions.setPolicy(this.preparedPlot.interaction);
+    const automatic = this.preparedPlot.autoRange();
+    const yRange =
+      automatic === null
+        ? null
+        : this.yAxis.resolve(this.id, () => automatic.y, rendered.y_range);
+    const ranges =
+      automatic === null || yRange === null
+        ? null
+        : resolveRanges(
+            this.preparedPlot.interaction,
+            { x: null, y: rendered.y_range },
+            { x: automatic.x, y: yRange },
+            window,
+          );
+    const elapsed =
+      tiles === null || tiles.series.length === 0 || ranges === null
+        ? 0
+        : this.renderer.renderTimePlot(tiles, ranges.x, {
+            xLabel: rendered.x_label ?? "time",
+            yLabel: rendered.y_label ?? "value",
+            yRange: [ranges.y.min, ranges.y.max],
+            axisStyle: rendered.axis_style,
+            styles: tiles.series.map((tile) => {
+              const entry = rendered.series.find(
+                (candidate) => candidate.path === tile.signalPath,
+              );
+              return {
+                hue: entry?.hue ?? null,
+                dash: entry?.dash ?? "solid",
+                width: entry?.width ?? 1.4,
+                alpha: entry?.opacity ?? 1,
+              };
+            }),
+            emphasisIndices: tiles.series.flatMap((tile, index) =>
+              this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
+            ),
+          });
     this.renderStats();
     const annotations = this.resolvedAnnotations(rendered);
     this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (missing.length > 0) {
-      this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
+      this.setEmpty(true, `unknown signals: ${missing.join(", ")}`);
     }
     return elapsed;
   }
 
-  private renderForMode(
-    state: RenderPanelState,
-    tiles: ColumnarTileResponse | null,
-    samples: SampleResponse | null,
-    window: { t0: number; t1: number },
-    contextTiles: ColumnarTileResponse | null,
-  ): number {
-    return this.renderViaModule(
-      plotModeModule(state.mode),
-      state,
-      tiles,
-      samples,
-      window,
-      contextTiles,
-    );
-  }
-
-  /** Stage-2 cache: prepare re-runs only when data or config identity moves. */
-  private geometryFor<G>(module: PlotModeModule<G>, input: PrepareInput): G {
-    const key = `${module.mode}\u0000${module.configKey(input.state)}`;
-    if (
-      this.prepCache === null ||
-      this.prepCache.key !== key ||
-      this.prepCache.tiles !== input.tiles ||
-      this.prepCache.contextTiles !== input.contextTiles ||
-      this.prepCache.samples !== input.samples
-    ) {
-      this.prepCache = {
-        key,
-        tiles: input.tiles,
-        contextTiles: input.contextTiles,
-        samples: input.samples,
-        geometry: module.prepare(input),
-      };
-    }
-    return this.prepCache.geometry as G;
-  }
-
-  private renderViaModule<G>(
-    module: PlotModeModule<G>,
-    state: RenderPanelState,
-    tiles: ColumnarTileResponse | null,
-    samples: SampleResponse | null,
-    window: { t0: number; t1: number },
-    contextTiles: ColumnarTileResponse | null,
-  ): number {
-    const input: PrepareInput = {
-      state,
-      tiles,
-      contextTiles,
-      samples,
-      callbacks: this.callbacks,
-    };
-    const geometry = this.geometryFor(module, input);
-    const frame: FrameInput = {
-      window,
-      emphasizePaths: this.emphasizePaths,
-      resolveRanges: (prepared, seriesKey) =>
-        this.resolvePlotRanges(state, prepared, window, seriesKey),
-    };
-    const result = module.project(geometry, input, frame);
-    if (result.needsSampleFallback === true) {
-      this.callbacks.onSampleFallback(this.id);
-    }
-    this.preparedPlot = result.prepared;
-    if (result.xyTraces !== undefined) this.xyTraces = result.xyTraces;
-    if (result.domainSeries !== undefined) {
-      this.domainSeries = result.domainSeries;
-    }
-    if (result.hasColorbar !== undefined) this.hasColorbar = result.hasColorbar;
-    if (result.emptyState !== undefined) {
-      this.setModeEmpty(result.emptyState.empty, result.emptyState.note);
-    }
-    const plot = result.plot;
-    if (plot.kind === "empty") return 0;
-    if (plot.kind === "bins") {
-      return this.renderer.render(plot.response, plot.xRange, plot.options);
-    }
-    return this.renderer.renderPaths(plot.paths, plot.options);
-  }
-
-  private resolvePlotRanges(
-    state: RenderPanelState,
-    plot: PreparedPlot,
-    window: { t0: number; t1: number },
-    seriesKey = "",
-  ): { x: Range; y: Range } | null {
-    const automatic = plot.autoRanges();
-    const stickyY = plot.interaction.stickyAutoY
-      ? this.yAxis.resolve(seriesKey, () => automatic.y, state.y_range)
-      : automatic.y;
-    return resolveRanges(
-      plot.interaction,
-      {
-        x: state.x_range,
-        y: plot.interaction.stickyAutoY ? null : state.y_range,
-      },
-      { x: automatic.x, y: stickyY },
-      window,
-    );
-  }
-
-  /**
-   * Shows or clears a mode-specific empty message. Always assigns `hidden`,
-   * so a panel that starts empty and then gets data does not keep a stale
-   * message over its plot.
-   */
-  private setModeEmpty(show: boolean, message: string): void {
+  /** Shows or clears the panel empty message without leaving stale state. */
+  private setEmpty(show: boolean, message: string): void {
     const empty = required<HTMLElement>(this.element, ".panel-empty");
     empty.hidden = !show;
     if (show) empty.textContent = message;
-  }
-
-  private setDropStripVisible(visible: boolean): void {
-    required<HTMLElement>(this.element, ".xy-drop-strip").hidden = !visible;
-  }
-
-  /** True when the pointer is inside the 36px strip at the plot's foot. */
-  private overStrip(event: DragEvent): boolean {
-    const strip = required<HTMLElement>(this.element, ".xy-drop-strip");
-    if (strip.hidden) return false;
-    const rect = strip.getBoundingClientRect();
-    return (
-      event.clientX >= rect.left &&
-      event.clientX <= rect.right &&
-      event.clientY >= rect.top &&
-      event.clientY <= rect.bottom
-    );
   }
 
   invalidateTheme(): void {
@@ -1228,9 +929,9 @@ export class PanelView {
     threshold: number,
   ): { path: string; distance: number } | null {
     const layout = this.renderer.lastLayout();
-    return layout === null || this.hitAdapter === null
+    return layout === null || this.preparedPlot === null
       ? null
-      : this.hitAdapter.seriesAt(layout, offsetX, offsetY, threshold);
+      : this.preparedPlot.seriesAt(layout, offsetX, offsetY, threshold);
   }
 
   private updateHover(
@@ -1334,13 +1035,16 @@ export class PanelView {
     const prepared = this.preparedPlot;
     if (layout === null || state === null || prepared === null) return false;
     const annotation = state.annotations
-      .filter((entry) => entry.domain === prepared.domain)
       .map((entry) => prepared.resolveAnnotation(entry))
       .filter((entry) => entry !== null)
       .find(
         (entry) =>
           Math.hypot(
-            projectX(layout, entry.x) - offsetX,
+            layout.plot.x +
+              ((entry.x - layout.xRange.min) /
+                (layout.xRange.max - layout.xRange.min)) *
+                layout.plot.width -
+              offsetX,
             projectY(layout, entry.y) - offsetY,
           ) <= radius,
       );
@@ -1369,14 +1073,9 @@ export class PanelView {
     layout: PlotLayout,
     offsetX: number,
     offsetY: number,
-    xyRadius: number,
   ): PanelCursor | null {
     return (
-      this.preparedPlot?.cursorAt(
-        layout,
-        { x: offsetX, y: offsetY },
-        xyRadius,
-      ) ?? null
+      this.preparedPlot?.cursorAt(layout, { x: offsetX, y: offsetY }) ?? null
     );
   }
 
@@ -1384,7 +1083,6 @@ export class PanelView {
     const prepared = this.preparedPlot;
     if (prepared === null) return { resolved: [], delta: null };
     const resolved = state.annotations
-      .filter((annotation) => annotation.domain === prepared.domain)
       .map((annotation) => prepared.resolveAnnotation(annotation))
       .filter((annotation) => annotation !== null);
     return { resolved, delta: prepared.delta(resolved) };
@@ -1401,23 +1099,14 @@ export class PanelView {
       (state?.series ?? []).map((series) => [series.path, series]),
     );
     const cursorT = this.cursorT;
-    const xyMarkers =
-      state?.mode === "xy" && cursorT !== null && this.cursorMode !== "none"
-        ? this.xyTraces.flatMap((entry) => {
-            const point = markerAt(entry.trace, cursorT);
-            return point === null
-              ? []
-              : [{ ...point, ghost: entry.hue === null }];
-          })
-        : [];
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
-      cursorT: state?.mode === "xy" ? null : cursorT,
+      cursorT,
       cursorMode: this.cursorMode,
       cursorPoints:
         this.cursorMode === "track" && cursorT !== null
-          ? this.cursorPointsAt(state?.mode, cursorT, bySeries)
+          ? this.cursorPointsAt(cursorT, bySeries)
           : [],
-      xyMarkers,
+      xyMarkers: [],
       box: this.box,
       annotations: resolved.map((annotation) => ({
         x: annotation.x,
@@ -1429,49 +1118,31 @@ export class PanelView {
     });
   }
 
-  /** The dots the cursor puts on each series, in that mode's own domain. */
   private cursorPointsAt(
-    mode: PanelMode | undefined,
     cursorT: number,
     bySeries: ReadonlyMap<string, RenderSeries>,
   ): CursorPoint[] {
-    if (mode === "fft") {
-      return this.domainSeries.map((series) => ({
-        value: lerpSample(series.x, series.y, cursorT),
-        colorIndex: series.hue === null ? null : series.colorIndex,
-        alpha: series.opacity,
-      }));
-    }
-    if (mode === "histogram") {
-      const layout = this.renderer.lastLayout();
-      if (layout === null) return [];
-      const cursor = this.preparedPlot?.cursorAt(
-        layout,
-        {
-          x: projectX(layout, cursorT),
-          y: layout.plot.y + layout.plot.height / 2,
-        },
-        0,
+    const layout = this.renderer.lastLayout();
+    if (layout === null || this.preparedPlot === null) return [];
+    const cursor = this.preparedPlot.cursorAt(layout, {
+      x:
+        layout.plot.x +
+        ((cursorT - layout.xRange.min) /
+          (layout.xRange.max - layout.xRange.min)) *
+          layout.plot.width,
+      y: layout.plot.y + layout.plot.height / 2,
+    });
+    return (cursor?.markers ?? []).flatMap((point) => {
+      const tile = (this.lastTiles?.series ?? []).find(
+        (entry) => entry.signalPath === point.path,
       );
-      const visible = [...bySeries.values()].filter((series) => series.visible);
-      return (cursor?.markers ?? []).map((point, index) => {
-        const series = visible[index];
-        return {
-          value: point.y,
-          colorIndex: series?.hue === null ? null : point.colorIndex,
-          alpha: series?.opacity ?? 1,
-        };
-      });
-    }
-    return (this.lastTiles?.series ?? []).flatMap((tile) => {
+      if (tile === undefined) return [];
       const series = bySeries.get(tile.signalPath);
       if (series?.visible !== true) return [];
-      const value = columnsValueAtTime(tile.bins, cursorT);
-      if (value === null) return [];
       return [
         {
-          value,
-          colorIndex: series.hue === null ? null : colorIndexForHue(series.hue),
+          value: point.y,
+          colorIndex: series.hue === null ? null : point.colorIndex,
           alpha: series.opacity,
         },
       ];
@@ -1479,15 +1150,10 @@ export class PanelView {
   }
 
   /**
-   * Applies an x-axis range: the linked time window in time mode, a
-   * panel-local value range everywhere else.
+   * Applies the linked time range owned by the workspace.
    */
   private applyXRange(min: number, max: number): void {
-    if (this.preparedPlot?.interaction.xAxis === "linked-time") {
-      this.callbacks.onTimeWindow(this.id, min, max);
-    } else {
-      this.callbacks.onXRange(this.id, [min, max]);
-    }
+    this.callbacks.onTimeWindow(this.id, min, max);
   }
 
   private renderStats(): void {
@@ -1532,12 +1198,7 @@ export class PanelView {
   ): void {
     const list = required<HTMLElement>(this.element, ".panel-annotations");
     const prepared = this.preparedPlot;
-    const annotations =
-      prepared === null
-        ? []
-        : state.annotations.filter(
-            (annotation) => annotation.domain === prepared.domain,
-          );
+    const annotations = prepared === null ? [] : state.annotations;
     list.hidden = annotations.length === 0;
     if (annotations.length === 0) {
       list.replaceChildren();
@@ -1555,14 +1216,8 @@ export class PanelView {
       const text = document.createElement("span");
       text.className = "annotation-text";
       const current = resolvedById.get(annotation.id);
-      const domainLabel =
-        annotation.domain === "time"
-          ? "t"
-          : annotation.domain === "frequency"
-            ? "f"
-            : "value";
       text.textContent =
-        `${marker(index)} ${domainLabel} ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
+        `${marker(index)} t ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
         (annotation.label === "" ? "" : ` "${annotation.label}"`);
       const edit = document.createElement("button");
       edit.className = "annotation-action";
@@ -1664,11 +1319,11 @@ export class PanelView {
     selection?.addRange(range);
   }
 
-  canEditAxis(axis: "x" | "y" | "c"): boolean {
-    return axis !== "c" || (this.lastState?.mode === "xy" && this.hasColorbar);
+  canEditAxis(axis: "x" | "y"): boolean {
+    return ["x", "y"].includes(axis);
   }
 
-  beginAxisEdit(axis: "x" | "y" | "c"): void {
+  beginAxisEdit(axis: "x" | "y"): void {
     if (!this.canEditAxis(axis)) return;
     const wrap = required<HTMLElement>(this.element, ".plot-wrap");
     if (wrap.querySelector(".axis-label-editor") !== null) return;
@@ -1677,20 +1332,10 @@ export class PanelView {
     input.className = `axis-label-editor axis-label-editor-${axis}`;
     input.setAttribute(
       "aria-label",
-      axis === "x"
-        ? "X axis name"
-        : axis === "y"
-          ? "Y axis name"
-          : "Color axis name",
+      axis === "x" ? "X axis name" : "Y axis name",
     );
-    input.value =
-      (axis === "x"
-        ? state?.x_label
-        : axis === "y"
-          ? state?.y_label
-          : state?.c_label) ?? "";
-    input.placeholder =
-      axis === "x" ? "time (s)" : axis === "y" ? "value" : "color";
+    input.value = (axis === "x" ? state?.x_label : state?.y_label) ?? "";
+    input.placeholder = axis === "x" ? "time (s)" : "value";
     let cancelled = false;
     input.addEventListener("keydown", (event) => {
       event.stopPropagation();
@@ -1885,12 +1530,11 @@ export class PanelView {
     if (setsEqual(this.emphasizePaths, next)) return;
     this.emphasizePaths = next;
     if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderForMode(
-        this.lastState,
+      this.lastRevision = null;
+      this.renderData(
+        this.lastInputState ?? this.lastState,
         this.lastTiles,
-        this.lastSamples,
         this.lastWindow,
-        this.lastContextTiles,
       );
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
@@ -2383,13 +2027,6 @@ export class PanelView {
       });
       overrideAction.append(revert);
     }
-    const useAsX = document.createElement("button");
-    useAsX.className = "inspector-action";
-    useAsX.textContent = "use as X";
-    useAsX.addEventListener("click", () => {
-      this.closeInspector();
-      this.callbacks.onSetXSignal(this.id, path);
-    });
     const remove = document.createElement("button");
     remove.className = "inspector-remove";
     remove.textContent = "remove";
@@ -2403,7 +2040,6 @@ export class PanelView {
       dashes,
       transforms,
       ...(overrideAction === null ? [] : [overrideAction]),
-      useAsX,
       remove,
     );
     this.element.append(popover);
@@ -2476,21 +2112,10 @@ function overrideFields(override: SeriesOverride): string {
     .join(" · ");
 }
 
-function chipPrefix(text: string): HTMLElement {
-  const prefix = document.createElement("span");
-  prefix.className = "axis-chip-prefix";
-  prefix.textContent = text;
-  return prefix;
-}
-
-/** The trajectory point at a cursor time, or null outside its coverage. */
-function markerAt(
-  trace: XyTrace,
-  cursorT: number,
-): { x: number; y: number } | null {
-  const x = lerpSample(trace.time, trace.x, cursorT);
-  const y = lerpSample(trace.time, trace.y, cursorT);
-  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+function colorIndexForHue(hue: number | null): number {
+  return hue === null
+    ? 0
+    : Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
 }
 
 function axisEditZone(
@@ -2498,17 +2123,8 @@ function axisEditZone(
   axisStyle: AxisStyle,
   px: number,
   py: number,
-  hasColorbar: boolean,
-): "x" | "y" | "c" | null {
+): "x" | "y" | null {
   const { plot } = layout;
-  if (
-    hasColorbar &&
-    px > plot.x + plot.width &&
-    py >= plot.y &&
-    py <= plot.y + plot.height
-  ) {
-    return "c";
-  }
   if (axisStyle === "inline") {
     if (px <= plot.x + 90 && py <= plot.y + 18) return "y";
     if (px >= plot.x + plot.width - 90 && py >= plot.y + plot.height - 18) {
@@ -2548,25 +2164,9 @@ function panelMarkup(): string {
   return `<header class="panel-header">
       <span class="drag-handle" aria-hidden="true">⠿</span>
       <span class="panel-title"></span>
-      <span class="mode-pills" aria-label="Panel mode">${MODES.map(
-        ({ mode, label }) =>
-          `<button class="mode-pill" data-mode="${mode}">${label}</button>`,
-      ).join("")}</span>
-      <button class="axis-chip x-chip" hidden></button>
       <span class="panel-bindings"></span>
       <button class="panel-ghost-toggle" type="button" aria-pressed="false">all</button>
-      <button class="axis-chip c-chip" hidden></button>
       <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
-      <button
-        class="panel-action panel-aspect-toggle"
-        type="button"
-        aria-pressed="false"
-        hidden
-        title="Equal axis scaling (XY only)"
-      >
-        1:1
-      </button>
-      <span class="panel-mode-note" hidden></span>
       <span class="panel-actions">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">
@@ -2585,9 +2185,6 @@ function panelMarkup(): string {
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
       <div class="panel-empty" hidden></div>
-      <div class="xy-drop-strip" hidden>
-        ⇄ <span>drop here — use as X axis (switches panel to XY)</span>
-      </div>
     </div>
     <div class="panel-stats" hidden></div>
     <div class="panel-annotations" hidden></div>`;
