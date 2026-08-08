@@ -786,12 +786,12 @@ fn latency_ladder_covers_each_zoom_span() {
 
 #[test]
 fn workspace_fixtures_load_at_current_schema() {
-    for (name, span) in [("mc1000", 1000.0), ("smoke", 10.0)] {
+    for (name, span, panel_count) in [("mc1000", 1000.0, 1), ("smoke", 10.0, 2)] {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("../../examples/bench/{name}.workspace.json"));
         let session = crate::session::load_from_path(&path).unwrap();
         assert_eq!(session.tabs.len(), 1, "{name}");
-        assert_eq!(session.tabs[0].panels.len(), 2, "{name}");
+        assert_eq!(session.tabs[0].panels.len(), panel_count, "{name}");
         assert!(
             (session.linked_time.t1 - span).abs() < f64::EPSILON,
             "{name}"

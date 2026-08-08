@@ -14,6 +14,7 @@ use scope_core::{
     cache::{self, CacheRoot},
     columns::Column,
     compute, expr,
+    gaps::GapRuns,
     ingest::{
         self, DecodedSource, IngestError, IngestSummary,
         admission::{BudgetConfig, MemoryBudget, ResidentCharge},
@@ -1081,6 +1082,7 @@ impl DataState {
         evaluated: expr::Evaluated,
         references: Vec<String>,
     ) -> Result<SignalSummary, String> {
+        let gap_runs = GapRuns::from_values(&evaluated.values);
         let bytes = evaluated.values.len().saturating_mul(size_of::<f64>());
         let charge = self
             .budget
@@ -1106,7 +1108,7 @@ impl DataState {
         };
         let signal_id = self
             .store
-            .insert_signal(source_id, path, None, evaluated.time, values)
+            .insert_signal_with_gaps(source_id, path, None, evaluated.time, values, gap_runs)
             .map_err(|error| error.to_string())?;
         let signal = self
             .store
@@ -1118,7 +1120,7 @@ impl DataState {
             .find(|source| source.id == source_id)
             .expect("derived source")
             .key;
-        let pyramid = Pyramid::from_signal(signal);
+        let pyramid = Pyramid::try_from_signal(signal).map_err(|error| error.to_string())?;
         let summary = signal_summary(signal, source_key, pyramid.last_finite_value());
         self.pyramids.insert(signal_id, pyramid);
         self.derived_references
@@ -2138,6 +2140,7 @@ t0 = 0.0
                 unit: None,
                 time: time.into(),
                 values: vec![1.0, 2.0, 3.0, 4.0].into(),
+                gap_runs: GapRuns::default(),
             }],
         };
 

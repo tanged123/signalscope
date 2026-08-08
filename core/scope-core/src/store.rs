@@ -11,7 +11,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::columns::{Column, ColumnGuard, TimebaseId};
+use crate::{
+    columns::{Column, ColumnGuard, TimebaseId},
+    gaps::GapRuns,
+};
 
 /// Stable identifier for a loaded source.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -46,6 +49,7 @@ pub struct Signal {
     time: Column,
     values: Column,
     timebase_id: TimebaseId,
+    gap_runs: GapRuns,
 }
 
 impl Signal {
@@ -63,6 +67,32 @@ impl Signal {
         unit: Option<String>,
         time: impl Into<Column>,
         values: impl Into<Column>,
+    ) -> Result<Self, StoreError> {
+        let values = values.into();
+        let gap_runs = match &values {
+            Column::Owned(values) => GapRuns::from_values(values),
+            Column::Paged(_) => GapRuns::default(),
+        };
+        Self::new_with_gaps(
+            id, source_id, local_path, path, unit, time, values, gap_runs,
+        )
+    }
+
+    /// Creates a signal with gap metadata produced while decoding its values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the columns have different lengths or the time
+    /// column is not finite and nondecreasing.
+    pub fn new_with_gaps(
+        id: SignalId,
+        source_id: SourceId,
+        local_path: impl Into<String>,
+        path: impl Into<String>,
+        unit: Option<String>,
+        time: impl Into<Column>,
+        values: impl Into<Column>,
+        gap_runs: GapRuns,
     ) -> Result<Self, StoreError> {
         let time = time.into();
         let values = values.into();
@@ -97,6 +127,7 @@ impl Signal {
             time,
             values,
             timebase_id: TimebaseId(0),
+            gap_runs,
         })
     }
 
@@ -159,6 +190,11 @@ impl Signal {
     #[must_use]
     pub fn values_column(&self) -> &Column {
         &self.values
+    }
+
+    #[must_use]
+    pub fn gap_runs(&self) -> &GapRuns {
+        &self.gap_runs
     }
 }
 
@@ -236,6 +272,24 @@ impl SignalStore {
         time: impl Into<Column>,
         values: impl Into<Column>,
     ) -> Result<SignalId, StoreError> {
+        let values = values.into();
+        let gap_runs = match &values {
+            Column::Owned(values) => GapRuns::from_values(values),
+            Column::Paged(_) => GapRuns::default(),
+        };
+        self.insert_signal_with_gaps(source_id, local_path, unit, time, values, gap_runs)
+    }
+
+    /// Registers a signal with gap metadata produced during decoding.
+    pub fn insert_signal_with_gaps(
+        &mut self,
+        source_id: SourceId,
+        local_path: impl Into<String>,
+        unit: Option<String>,
+        time: impl Into<Column>,
+        values: impl Into<Column>,
+        gap_runs: GapRuns,
+    ) -> Result<SignalId, StoreError> {
         let source = self
             .sources
             .get(&source_id)
@@ -268,7 +322,7 @@ impl SignalStore {
         let timebase_id = known_timebase.unwrap_or(TimebaseId(self.next_timebase_id));
         let id = SignalId(self.next_signal_id);
         let point_count = values.len();
-        let mut signal = Signal::new(
+        let mut signal = Signal::new_with_gaps(
             id,
             source_id,
             local_path,
@@ -276,6 +330,7 @@ impl SignalStore {
             unit,
             time.clone(),
             values,
+            gap_runs,
         )?;
         signal.timebase_id = timebase_id;
         if known_timebase.is_none() {

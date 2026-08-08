@@ -2,11 +2,13 @@
 
 use std::sync::{Arc, OnceLock};
 
+use thiserror::Error;
+
 use crate::{
-    bins::{BinLevel, BinRef, HAS_FIRST, HAS_GAP, HAS_LAST, HAS_MAX, HAS_MIN, MISSING_INDEX},
+    bins::{BinLevel, HAS_FIRST, HAS_LAST, HAS_MAX, HAS_MIN, MISSING_INDEX},
     columns::{Column, WeakColumn},
     gaps::GapRuns,
-    paging::PageHandle,
+    paging::{PageError, PageHandle},
     points::ordered_points,
     store::Signal,
 };
@@ -15,6 +17,17 @@ type ColumnPair = (Column, Column);
 use scope_protocol::EnvelopeBin;
 
 pub const FINEST_STORED_LEVEL: usize = 3;
+const BUILD_CHUNK_VALUES: usize = 8192;
+
+#[derive(Debug, Error)]
+pub enum PyramidError {
+    #[error("column read failed: {0}")]
+    Column(#[from] PageError),
+    #[error("time/value lengths differ: time={time}, values={values}")]
+    LengthMismatch { time: usize, values: usize },
+    #[error("invalid representative at level {level}, bin {bin}: index {index}")]
+    InvalidRepresentative { level: u32, bin: usize, index: u64 },
+}
 
 #[derive(Clone, Debug)]
 struct IndexedBin {
@@ -129,7 +142,6 @@ pub struct Pyramid {
     gap_runs: Arc<GapRuns>,
     merged: Vec<CachedBinLevel>,
     column_cache: Arc<OnceLock<Option<ColumnPair>>>,
-    synthesized_level: Arc<OnceLock<Option<BinLevel>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -233,6 +245,26 @@ impl CachedBinLevel {
             }
         }
     }
+
+    pub(crate) fn validate_representatives(
+        &self,
+        sample_count: usize,
+        level: usize,
+    ) -> Result<(), PyramidError> {
+        match self {
+            Self::Resident(level_data) => validate_bin_level(level_data, sample_count, level, 0),
+            Self::Paged(level_data) => {
+                for start in (0..level_data.len).step_by(BUILD_CHUNK_VALUES) {
+                    let end = start.saturating_add(BUILD_CHUNK_VALUES).min(level_data.len);
+                    let chunk = level_data
+                        .range(start..end)
+                        .ok_or(PyramidError::Column(PageError::InvalidRange))?;
+                    validate_bin_level(&chunk, sample_count, level, start)?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -250,12 +282,15 @@ enum PyramidColumns {
 impl Pyramid {
     #[must_use]
     pub fn from_signal(signal: &Signal) -> Self {
-        let time = signal.time();
-        let values = signal.values();
-        Self::build(
-            &time,
-            &values,
+        Self::try_from_signal(signal).expect("signal columns are readable")
+    }
+
+    pub fn try_from_signal(signal: &Signal) -> Result<Self, PyramidError> {
+        Self::build_from_columns(
+            signal.time_column(),
+            signal.values_column(),
             FINEST_STORED_LEVEL,
+            signal.gap_runs().clone(),
             PyramidColumns::Weak {
                 time: signal.time_column().downgrade(),
                 values: signal.values_column().downgrade(),
@@ -272,79 +307,69 @@ impl Pyramid {
     pub fn from_samples(time: &[f64], values: &[f64]) -> Self {
         let time = Arc::from(time.to_vec());
         let values = Arc::from(values.to_vec());
-        Self::from_columns(&time, &values)
+        let gap_runs = GapRuns::from_values(&values);
+        Self::from_columns(&Column::owned(time), &Column::owned(values), gap_runs)
+            .expect("owned columns are readable")
     }
 
-    fn from_columns(time: &Arc<[f64]>, values: &Arc<[f64]>) -> Self {
-        Self::from_columns_with_cutoff(time, values, FINEST_STORED_LEVEL)
+    pub fn from_columns(
+        time: &Column,
+        values: &Column,
+        gap_runs: GapRuns,
+    ) -> Result<Self, PyramidError> {
+        Self::build_from_columns(
+            time,
+            values,
+            FINEST_STORED_LEVEL,
+            gap_runs,
+            PyramidColumns::Retained {
+                time: time.clone(),
+                values: values.clone(),
+            },
+        )
     }
 
+    #[cfg(test)]
     fn from_columns_with_cutoff(
         time: &Arc<[f64]>,
         values: &Arc<[f64]>,
         first_stored_level: usize,
     ) -> Self {
-        let columns = PyramidColumns::Retained {
-            time: Column::owned(Arc::clone(time)),
-            values: Column::owned(Arc::clone(values)),
-        };
-        Self::build(time, values, first_stored_level, columns)
+        Self::build_from_columns(
+            &Column::owned(Arc::clone(time)),
+            &Column::owned(Arc::clone(values)),
+            first_stored_level,
+            GapRuns::from_values(values),
+            PyramidColumns::Retained {
+                time: Column::owned(Arc::clone(time)),
+                values: Column::owned(Arc::clone(values)),
+            },
+        )
+        .expect("owned columns are readable")
     }
 
-    fn build(
-        time: &[f64],
-        values: &[f64],
+    fn build_from_columns(
+        time: &Column,
+        values: &Column,
         first_stored_level: usize,
+        gap_runs: GapRuns,
         columns: PyramidColumns,
-    ) -> Self {
-        assert_eq!(time.len(), values.len(), "time/value lengths differ");
-        let level_one: Vec<IndexedBin> = time
-            .chunks(2)
-            .zip(values.chunks(2))
-            .enumerate()
-            .map(|(chunk_index, (chunk_time, chunk_values))| {
-                let sample_start = chunk_index.saturating_mul(2);
-                let first = sample_bin(
-                    chunk_time[0],
-                    chunk_values[0],
-                    u64::try_from(sample_start).unwrap_or(u64::MAX),
-                );
-                if chunk_time.len() == 2 {
-                    merge_bins(
-                        &first,
-                        &sample_bin(
-                            chunk_time[1],
-                            chunk_values[1],
-                            u64::try_from(sample_start.saturating_add(1)).unwrap_or(u64::MAX),
-                        ),
-                    )
-                } else {
-                    first
-                }
-            })
-            .collect();
-        let mut merged = Vec::new();
-        let mut logical_level = 1;
-        let mut previous = indexed_level(&level_one);
-        while !previous.is_empty() {
-            if logical_level >= first_stored_level {
-                merged.push(CachedBinLevel::Resident(Box::new(previous.clone())));
-            }
-            if previous.len() == 1 {
-                break;
-            }
-            previous = merge_level(&previous);
-            logical_level += 1;
+    ) -> Result<Self, PyramidError> {
+        if time.len() != values.len() {
+            return Err(PyramidError::LengthMismatch {
+                time: time.len(),
+                values: values.len(),
+            });
         }
-        Self {
+        let merged = build_levels(time, values, first_stored_level)?;
+        Ok(Self {
             columns,
             sample_count: time.len(),
             first_stored_level,
-            gap_runs: Arc::new(GapRuns::from_values(values)),
+            gap_runs: Arc::new(gap_runs),
             merged,
             column_cache: Arc::new(OnceLock::new()),
-            synthesized_level: Arc::new(OnceLock::new()),
-        }
+        })
     }
 
     #[cfg(test)]
@@ -380,7 +405,6 @@ impl Pyramid {
                 .map(|level| CachedBinLevel::Resident(Box::new(level)))
                 .collect(),
             column_cache: Arc::new(OnceLock::new()),
-            synthesized_level: Arc::new(OnceLock::new()),
         }
     }
 
@@ -399,7 +423,6 @@ impl Pyramid {
             gap_runs: Arc::new(gap_runs),
             merged,
             column_cache: Arc::new(OnceLock::new()),
-            synthesized_level: Arc::new(OnceLock::new()),
         }
     }
 
@@ -654,28 +677,10 @@ impl Pyramid {
     ///
     /// Panics when `index` cannot be represented as a sample stride.
     pub fn synthesize_level(&self, index: usize, range: std::ops::Range<usize>) -> BinLevel {
-        let full_len = level_len(self.sample_count, index);
-        if index.saturating_add(1) == self.first_stored_level
-            && range.start == 0
-            && range.end >= full_len
-        {
-            if let Some(level) = self.cached_synthesized_level(index) {
-                return level.slice(0..range.end.min(level.len()));
-            }
-        }
         let Some((time, values)) = self.columns() else {
             return BinLevel::default();
         };
-        let width = 1 << index;
-        let sample_start = range.start.saturating_mul(width).min(self.sample_count);
-        let sample_end = range.end.saturating_mul(width).min(self.sample_count);
-        let Ok(time) = time.range(sample_start..sample_end) else {
-            return BinLevel::default();
-        };
-        let Ok(values) = values.range(sample_start..sample_end) else {
-            return BinLevel::default();
-        };
-        synthesize_level_from_columns(&time, &values, index, 0..range.len(), sample_start)
+        synthesize_level_from_handles(&time, &values, index, range).unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -722,21 +727,6 @@ impl Pyramid {
     fn cached_columns(&self) -> Option<&ColumnPair> {
         self.column_cache.get_or_init(|| self.columns()).as_ref()
     }
-
-    fn cached_synthesized_level(&self, index: usize) -> Option<&BinLevel> {
-        let full_range = 0..level_len(self.sample_count, index);
-        self.synthesized_level
-            .get_or_init(|| {
-                let (time, values) = self.cached_columns()?;
-                let time = time.range(0..time.len()).ok()?;
-                let values = values.range(0..values.len()).ok()?;
-                Some(
-                    synthesize_level_from_columns(&time, &values, index, full_range, 0)
-                        .into_shared(),
-                )
-            })
-            .as_ref()
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -760,78 +750,109 @@ impl PyramidQuery {
     }
 }
 
-fn synthesize_level_from_columns(
-    time: &[f64],
-    values: &[f64],
+fn build_levels(
+    time: &Column,
+    values: &Column,
+    first_stored_level: usize,
+) -> Result<Vec<CachedBinLevel>, PyramidError> {
+    let level_count = level_count(values.len());
+    let mut levels = (first_stored_level..level_count)
+        .map(|_| BinLevel::default())
+        .collect::<Vec<_>>();
+    let mut carries = (0..level_count.saturating_add(1))
+        .map(|_| None)
+        .collect::<Vec<Option<IndexedBin>>>();
+
+    for base in (0..values.len()).step_by(BUILD_CHUNK_VALUES) {
+        let end = base.saturating_add(BUILD_CHUNK_VALUES).min(values.len());
+        let time_chunk = time.range(base..end)?;
+        let value_chunk = values.range(base..end)?;
+        for (offset, (time, value)) in time_chunk.iter().zip(value_chunk.iter()).enumerate() {
+            let mut level = 0;
+            let mut bin = sample_bin(
+                *time,
+                *value,
+                u64::try_from(base.saturating_add(offset)).unwrap_or(u64::MAX),
+            );
+            loop {
+                if level >= first_stored_level && level < level_count {
+                    levels[level - first_stored_level].push_indexed(
+                        &bin.summary,
+                        bin.first_index,
+                        bin.last_index,
+                        bin.min_index,
+                        bin.max_index,
+                    );
+                }
+                if let Some(left) = carries[level].take() {
+                    bin = merge_bins(&left, &bin);
+                    level += 1;
+                } else {
+                    carries[level] = Some(bin);
+                    break;
+                }
+            }
+        }
+    }
+
+    for level in first_stored_level..level_count {
+        let mut partial = None;
+        for lower in (0..level).rev() {
+            if let Some(bin) = carries[lower].as_ref() {
+                partial = Some(match partial {
+                    Some(right) => merge_bins(&right, bin),
+                    None => bin.clone(),
+                });
+            }
+        }
+        if let Some(bin) = partial {
+            levels[level - first_stored_level].push_indexed(
+                &bin.summary,
+                bin.first_index,
+                bin.last_index,
+                bin.min_index,
+                bin.max_index,
+            );
+        }
+    }
+
+    Ok(levels
+        .into_iter()
+        .map(|level| CachedBinLevel::Resident(Box::new(level)))
+        .collect())
+}
+
+fn synthesize_level_from_handles(
+    time: &Column,
+    values: &Column,
     index: usize,
     range: std::ops::Range<usize>,
-    source_start: usize,
-) -> BinLevel {
-    let width = 1 << index;
+) -> Result<BinLevel, PyramidError> {
+    let width = 1usize
+        .checked_shl(u32::try_from(index).unwrap_or(u32::MAX))
+        .ok_or(PageError::InvalidRange)?;
     let mut level = BinLevel::with_capacity(range.len());
-    if index == 0 {
-        let start = range.start.min(time.len());
-        let end = range.end.min(time.len()).min(values.len());
-        let time = &time[start..end];
-        let values = &values[start..end];
-        level.t0.extend_from_slice(time);
-        level.t1.extend_from_slice(time);
-        level.first.extend_from_slice(values);
-        level.last.extend_from_slice(values);
-        level.min.extend_from_slice(values);
-        level.max.extend_from_slice(values);
-        level.sum.extend(
-            values
-                .iter()
-                .map(|value| if value.is_finite() { *value } else { 0.0 }),
-        );
-        level.sum_sq.extend(values.iter().map(|value| {
-            if value.is_finite() {
-                *value * *value
-            } else {
-                0.0
-            }
-        }));
-        level.sample_count.resize(values.len(), 1);
-        level
-            .finite_count
-            .extend(values.iter().map(|value| u32::from(value.is_finite())));
-        for (offset, value) in values.iter().enumerate() {
-            let source_index = if value.is_finite() {
-                u64::try_from(source_start.saturating_add(offset)).unwrap_or(u64::MAX)
-            } else {
-                MISSING_INDEX
-            };
-            level.first_index.push(source_index);
-            level.last_index.push(source_index);
-            level.min_index.push(source_index);
-            level.max_index.push(source_index);
-        }
-        level.flags.extend(values.iter().map(|value| {
-            if value.is_finite() {
-                HAS_FIRST | HAS_LAST | HAS_MIN | HAS_MAX
-            } else {
-                HAS_GAP
-            }
-        }));
-        return level;
-    }
     let mut stack = Vec::with_capacity(index + 2);
-    for bin in 0..range.len() {
-        let start = bin.saturating_mul(width);
-        if start >= time.len() {
+    for bin_index in range {
+        let start = bin_index
+            .checked_mul(width)
+            .ok_or(PageError::InvalidRange)?;
+        if start >= values.len() {
             break;
         }
-        let merged = fold_bin(time, values, start, width, source_start, &mut stack);
+        let end = start.saturating_add(width).min(values.len());
+        let time_chunk = time.range(start..end)?;
+        let value_chunk = values.range(start..end)?;
+        let bin = fold_bin(&time_chunk, &value_chunk, 0, width, start, &mut stack);
         level.push_indexed(
-            &merged.summary,
-            merged.first_index,
-            merged.last_index,
-            merged.min_index,
-            merged.max_index,
+            &bin.summary,
+            bin.first_index,
+            bin.last_index,
+            bin.min_index,
+            bin.max_index,
         );
     }
-    level
+    Ok(level)
 }
 
 fn fold_bin(
@@ -868,25 +889,6 @@ fn fold_bin(
     bin
 }
 
-fn merge_level(previous: &BinLevel) -> BinLevel {
-    let mut next = BinLevel::with_capacity(previous.len().div_ceil(2));
-    for index in (0..previous.len()).step_by(2) {
-        let left = indexed_from_ref(previous.get(index).expect("bin index"));
-        let bin = match previous.get(index + 1) {
-            Some(right) => merge_bins(&left, &indexed_from_ref(right)),
-            None => left,
-        };
-        next.push_indexed(
-            &bin.summary,
-            bin.first_index,
-            bin.last_index,
-            bin.min_index,
-            bin.max_index,
-        );
-    }
-    next
-}
-
 fn level_count(samples: usize) -> usize {
     let mut count = 1;
     let mut bins = samples;
@@ -914,28 +916,43 @@ fn validate_merged(sample_count: usize, merged: &[BinLevel]) {
     );
 }
 
-fn indexed_level(bins: &[IndexedBin]) -> BinLevel {
-    let mut level = BinLevel::with_capacity(bins.len());
-    for bin in bins {
-        level.push_indexed(
-            &bin.summary,
-            bin.first_index,
-            bin.last_index,
-            bin.min_index,
-            bin.max_index,
-        );
+fn validate_bin_level(
+    level_data: &BinLevel,
+    sample_count: usize,
+    level: usize,
+    bin_offset: usize,
+) -> Result<(), PyramidError> {
+    let width = 1usize
+        .checked_shl(u32::try_from(level).unwrap_or(u32::MAX))
+        .unwrap_or(usize::MAX);
+    for bin in 0..level_data.len() {
+        let source_start = bin_offset.saturating_add(bin).saturating_mul(width);
+        let source_end = source_start.saturating_add(width).min(sample_count);
+        for (flag, indexes) in [
+            (HAS_FIRST, level_data.first_index_column()),
+            (HAS_LAST, level_data.last_index_column()),
+            (HAS_MIN, level_data.min_index_column()),
+            (HAS_MAX, level_data.max_index_column()),
+        ] {
+            let index = indexes[bin];
+            let valid = if level_data.flags_column()[bin] & flag != 0 {
+                index != MISSING_INDEX
+                    && index < u64::try_from(sample_count).unwrap_or(u64::MAX)
+                    && index >= u64::try_from(source_start).unwrap_or(u64::MAX)
+                    && index < u64::try_from(source_end).unwrap_or(u64::MAX)
+            } else {
+                index == MISSING_INDEX
+            };
+            if !valid {
+                return Err(PyramidError::InvalidRepresentative {
+                    level: u32::try_from(level).unwrap_or(u32::MAX),
+                    bin: bin_offset.saturating_add(bin),
+                    index,
+                });
+            }
+        }
     }
-    level
-}
-
-fn indexed_from_ref(bin: BinRef<'_>) -> IndexedBin {
-    IndexedBin {
-        summary: bin.to_wire(),
-        first_index: bin.first_index().unwrap_or(MISSING_INDEX),
-        last_index: bin.last_index().unwrap_or(MISSING_INDEX),
-        min_index: bin.min_index().unwrap_or(MISSING_INDEX),
-        max_index: bin.max_index().unwrap_or(MISSING_INDEX),
-    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -955,6 +972,37 @@ mod tests {
             Some(3.0)
         );
         assert_eq!(Pyramid::from_samples(&[], &[]).last_finite_value(), None);
+    }
+
+    #[test]
+    fn streamed_owned_and_paged_columns_produce_identical_pyramids() {
+        let time: Arc<[f64]> = Arc::from((0..129).map(f64::from).collect::<Vec<_>>());
+        let values: Arc<[f64]> = Arc::from(
+            (0..129)
+                .map(|index| f64::from(index).sin())
+                .collect::<Vec<_>>(),
+        );
+        let gaps = GapRuns::from_values(&values);
+        let owned = Pyramid::from_columns(
+            &Column::owned(Arc::clone(&time)),
+            &Column::owned(Arc::clone(&values)),
+            gaps.clone(),
+        )
+        .expect("owned columns");
+        let paged = Pyramid::from_columns(
+            &Column::paged(PageHandle::memory(Arc::clone(&time))),
+            &Column::paged(PageHandle::memory(Arc::clone(&values))),
+            gaps,
+        )
+        .expect("paged columns");
+
+        for index in 0..owned.level_count() {
+            assert_eq!(
+                owned.query_at_level(index, None).bins,
+                paged.query_at_level(index, None).bins,
+                "level {index}"
+            );
+        }
     }
 
     #[test]

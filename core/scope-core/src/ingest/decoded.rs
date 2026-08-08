@@ -86,12 +86,13 @@ pub fn commit(
         let source_id = store.register_source(path, key, prefix)?;
         let mut signals = Vec::with_capacity(decoded.signals.len());
         for signal in decoded.signals {
-            signals.push(store.insert_signal(
+            signals.push(store.insert_signal_with_gaps(
                 source_id,
                 signal.local_path,
                 signal.unit,
                 signal.time,
                 signal.values,
+                signal.gap_runs,
             )?);
         }
         Ok(IngestSummary {

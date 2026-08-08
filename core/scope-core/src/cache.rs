@@ -42,11 +42,11 @@ use crate::{
     },
     paging::{PageCache, PageError, PageHandle},
     preferences::Preferences,
-    pyramid::{CachedBinLevel, PagedBinLevel, Pyramid},
+    pyramid::{CachedBinLevel, PagedBinLevel, Pyramid, PyramidError},
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
 
-pub const CACHE_VERSION: u32 = 5;
+pub const CACHE_VERSION: u32 = 6;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
 const HEADER_LEN: usize = 52;
 const PAGE_CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -200,6 +200,8 @@ pub enum CacheError {
     Ingest(#[from] IngestError),
     #[error(transparent)]
     Page(#[from] PageError),
+    #[error(transparent)]
+    Pyramid(#[from] PyramidError),
     #[error("invalid provenance digest: {0}")]
     InvalidProvenance(String),
 }
@@ -390,7 +392,7 @@ pub(crate) fn ingest_or_load_at_with_provider(
     let mut pyramids = Vec::new();
     for (index, id) in summary.signals.iter().enumerate() {
         if let Some(signal) = store.signal(*id) {
-            pyramids.push((*id, Pyramid::from_signal(signal)));
+            pyramids.push((*id, Pyramid::try_from_signal(signal)?));
         }
         progress(IngestStage::Pyramid, fraction(index + 1, total));
     }
@@ -630,12 +632,13 @@ fn try_load_from_root(
         let mut pyramids = Vec::new();
         let mut signals = Vec::new();
         for entry in decoded {
-            let id = store.insert_signal(
+            let id = store.insert_signal_with_gaps(
                 source_id,
                 entry.local_path,
                 entry.unit,
                 entry.time,
                 entry.values,
+                entry.gap_runs.clone(),
             )?;
             let signal = store.signal(id).expect("inserted signal exists");
             pyramids.push((
@@ -706,11 +709,18 @@ fn decode_paged_signal(
         if count != expected_len || BinLevel::cache_len(count)? != handle.byte_len() {
             return None;
         }
-        merged.push(if count > RESIDENT_LEVEL_BINS {
+        let level = if count > RESIDENT_LEVEL_BINS {
             CachedBinLevel::Paged(PagedBinLevel::new(handle, count)?)
         } else {
             CachedBinLevel::Resident(Box::new(BinLevel::decode_cache(&handle.bytes().ok()?)?))
-        });
+        };
+        level
+            .validate_representatives(
+                point_count,
+                crate::pyramid::FINEST_STORED_LEVEL + merged.len(),
+            )
+            .ok()?;
+        merged.push(level);
         expected_len = expected_len.div_ceil(2);
     }
     if point_count > 0 && merged.last().is_none_or(|level| level.len() != 1) {
@@ -1098,6 +1108,46 @@ mod tests {
         let path = sidecar_path(&source);
         let mut bytes = fs::read(&path).unwrap();
         bytes[8..12].copy_from_slice(&4_u32.to_le_bytes());
+        fs::write(path, bytes).unwrap();
+
+        assert!(
+            try_load_test(&source, &mut SignalStore::new(), &mut |_| {})
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_index_outside_its_source_bin_is_a_cache_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = csv_source(&dir);
+        let (store, summary, pyramids) = build(&source);
+        write_sidecar(&source, &store, &summary, &pyramids);
+
+        let path = sidecar_path(&source);
+        let mut bytes = fs::read(&path).unwrap();
+        let directory_len =
+            usize::try_from(u64::from_le_bytes(bytes[44..52].try_into().unwrap())).unwrap();
+        let directory_end = HEADER_LEN + directory_len;
+        let payload_base = directory_end.next_multiple_of(8);
+        let mut directory: CacheDirectory =
+            serde_json::from_slice(&bytes[HEADER_LEN..directory_end]).unwrap();
+        let section = directory.signals[0].levels[0];
+        let level_start = payload_base + usize::try_from(section.offset).unwrap();
+        let count = usize::try_from(u64::from_le_bytes(
+            bytes[level_start..level_start + 8].try_into().unwrap(),
+        ))
+        .unwrap();
+        let first_index_base = 8 + 8 * count * size_of::<f64>();
+        let corrupted = level_start + first_index_base + size_of::<u64>();
+        bytes[corrupted..corrupted + size_of::<u64>()].copy_from_slice(&0_u64.to_le_bytes());
+        let section_start = level_start;
+        let section_end = section_start + usize::try_from(section.len).unwrap();
+        directory.signals[0].levels[0].crc32 = crc32fast::hash(&bytes[section_start..section_end]);
+        let mut encoded = serde_json::to_vec(&directory).unwrap();
+        assert!(encoded.len() <= directory_len);
+        encoded.resize(directory_len, b' ');
+        bytes[HEADER_LEN..directory_end].copy_from_slice(&encoded);
         fs::write(path, bytes).unwrap();
 
         assert!(

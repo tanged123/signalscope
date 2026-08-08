@@ -99,7 +99,11 @@ fn run(args: &Args) -> Result<(), String> {
         .map_err(|error| format!("ingest {}: {error}", path.display()))?;
         for id in summary.signals {
             let signal = store.signal(id).ok_or("ingested signal vanished")?;
-            pyramids.insert(id, Pyramid::from_signal(signal));
+            pyramids.insert(
+                id,
+                Pyramid::try_from_signal(signal)
+                    .map_err(|error| format!("pyramid {}: {error}", signal.path))?,
+            );
         }
     }
     let session = match &args.workspace {

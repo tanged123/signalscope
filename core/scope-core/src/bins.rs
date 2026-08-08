@@ -347,6 +347,7 @@ impl BinLevel {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn into_shared(self) -> Self {
         if self.shared.is_some() {
             return self;
