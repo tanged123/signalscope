@@ -20,10 +20,25 @@ import {
   type PickViewport,
 } from "./picker";
 import type { GpuMetrics } from "./metrics";
+import { PanelRenderTargets, PANEL_MSAA_SAMPLE_COUNT } from "./render-targets";
 import quadShader from "./shaders/line-quad.wgsl?raw";
 import hairlineShader from "./shaders/line-hairline.wgsl?raw";
 
 const GPU_BUFFER_UNIFORM = 0x0040;
+const HAIRLINE_SAMPLE_COUNT = 1;
+
+export const PREMULTIPLIED_ALPHA_BLEND: GPUBlendState = {
+  color: {
+    srcFactor: "one",
+    dstFactor: "one-minus-src-alpha",
+    operation: "add",
+  },
+  alpha: {
+    srcFactor: "one",
+    dstFactor: "one-minus-src-alpha",
+    operation: "add",
+  },
+};
 
 export interface LineViewport {
   readonly xMin: number;
@@ -41,6 +56,30 @@ export interface LineMetrics {
   readonly pages: number;
   readonly drawCalls: number;
   readonly descriptors: number;
+}
+
+export interface PlotScissor {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export function plotScissor(
+  viewport: Pick<LineViewport, "plotX" | "plotY" | "plotWidth" | "plotHeight">,
+  canvasWidth: number,
+  canvasHeight: number,
+): PlotScissor {
+  const left = clampPixel(viewport.plotX, canvasWidth);
+  const top = clampPixel(viewport.plotY, canvasHeight);
+  const right = clampPixel(viewport.plotX + viewport.plotWidth, canvasWidth);
+  const bottom = clampPixel(viewport.plotY + viewport.plotHeight, canvasHeight);
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
 }
 
 interface PageBuffers {
@@ -72,6 +111,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   readonly runtime: GpuRuntime;
   readonly context: GPUCanvasContext | undefined;
   readonly picker: GpuPicker;
+  private readonly renderTargets = new PanelRenderTargets();
   private readonly arena: GpuArena | undefined;
   private readonly residency: GpuResidency | undefined;
   private viewport: LineViewport | null = null;
@@ -102,6 +142,9 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.arena = arena;
     this.residency = residency;
     this.picker = new GpuPicker(runtime);
+    if (context !== undefined) {
+      this.renderTargets.configure(runtime.device, context, runtime.format);
+    }
   }
 
   setViewport(viewport: LineViewport): void {
@@ -129,6 +172,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     const nextHeight = Math.max(1, Math.trunc(height));
     this.width = nextWidth;
     this.height = nextHeight;
+    this.renderTargets.resize(nextWidth, nextHeight);
     this.transformDirty = true;
   }
 
@@ -172,12 +216,14 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     if (this.residencyDirty) this.rebuildPages(pageIds, encoder);
     this.picker.encode(encoder);
 
-    const view = this.context.getCurrentTexture().createView();
+    const targets = this.renderTargets.frame();
+    const scissor = plotScissor(this.viewport, this.width, this.height);
     const quadPipeline = this.quadPipeline();
     const quadPass = encoder.beginRenderPass({
       colorAttachments: [
         {
-          view,
+          view: targets.msaa,
+          resolveTarget: targets.swapchain,
           clearValue: { r: 0, g: 0, b: 0, a: 0 },
           loadOp: "clear",
           storeOp: "store",
@@ -185,6 +231,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       ],
     });
     quadPass.setPipeline(quadPipeline);
+    setScissor(quadPass, scissor);
     for (const page of pageIds) {
       const buffers = this.pages.get(page);
       if (
@@ -194,6 +241,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         buffers.quadArgs === null
       )
         continue;
+      setScissor(quadPass, scissor);
       quadPass.setBindGroup(0, this.bindGroup(quadPipeline, page, buffers));
       quadPass.drawIndirect(buffers.quadArgs, 0);
     }
@@ -204,13 +252,14 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       const hairlinePass = encoder.beginRenderPass({
         colorAttachments: [
           {
-            view,
+            view: targets.swapchain,
             loadOp: "load",
             storeOp: "store",
           },
         ],
       });
       hairlinePass.setPipeline(hairlinePipeline);
+      setScissor(hairlinePass, scissor);
       for (const page of pageIds) {
         const buffers = this.pages.get(page);
         if (
@@ -220,6 +269,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
           buffers.hairlineArgs === null
         )
           continue;
+        setScissor(hairlinePass, scissor);
         hairlinePass.setBindGroup(
           0,
           this.bindGroup(hairlinePipeline, page, buffers),
@@ -246,6 +296,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   }
 
   deviceLost(): void {
+    this.renderTargets.destroy();
     this.arena?.destroy();
     this.residency?.dropDevice();
     this.tiles = [];
@@ -255,6 +306,10 @@ export class GpuLineRenderer implements GpuPanelEncoder {
 
   deviceRestored(device: GPUDevice): void {
     this.arena?.restore(device, this.runtime.queue);
+    if (this.context !== undefined) {
+      this.renderTargets.configure(device, this.context, this.runtime.format);
+      this.renderTargets.resize(this.width, this.height);
+    }
     this.picker.resetDevice(this.runtime);
     this.uniformBuffer = null;
     this.styleBuffer = null;
@@ -585,9 +640,15 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         fragment: {
           module: this.runtime.shader("line-quad", quadShader),
           entryPoint: "fs_main",
-          targets: [{ format: this.runtime.format }],
+          targets: [
+            {
+              format: this.runtime.format,
+              blend: PREMULTIPLIED_ALPHA_BLEND,
+            },
+          ],
         },
         primitive: { topology: "triangle-list" },
+        multisample: { count: PANEL_MSAA_SAMPLE_COUNT },
       }),
     );
   }
@@ -603,9 +664,15 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         fragment: {
           module: this.runtime.shader("line-hairline", hairlineShader),
           entryPoint: "fs_main",
-          targets: [{ format: this.runtime.format }],
+          targets: [
+            {
+              format: this.runtime.format,
+              blend: PREMULTIPLIED_ALPHA_BLEND,
+            },
+          ],
         },
         primitive: { topology: "line-list" },
+        multisample: { count: HAIRLINE_SAMPLE_COUNT },
       }),
     );
   }
@@ -636,6 +703,14 @@ function nextCapacity(required: number): number {
   let capacity = 1;
   while (capacity < required) capacity *= 2;
   return capacity;
+}
+
+function clampPixel(value: number, limit: number): number {
+  return Math.max(0, Math.min(limit, Math.round(value)));
+}
+
+function setScissor(pass: GPURenderPassEncoder, scissor: PlotScissor): void {
+  pass.setScissorRect(scissor.x, scissor.y, scissor.width, scissor.height);
 }
 
 function dashValue(dash: SeriesStyle["dash"]): number {

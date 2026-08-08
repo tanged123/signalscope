@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { GpuLineRenderer } from "./line-renderer";
+import {
+  GpuLineRenderer,
+  plotScissor,
+  PREMULTIPLIED_ALPHA_BLEND,
+} from "./line-renderer";
 
 function runtime() {
   return {
@@ -61,5 +65,27 @@ describe("GpuLineRenderer", () => {
     renderer.setTiles([tile(0, "a"), tile(0, "b")]);
     renderer.encode({} as GPUCommandEncoder);
     expect(renderer.metrics().descriptors).toBe(2);
+  });
+
+  it("clamps the same device-pixel plot scissor for both render passes", () => {
+    expect(
+      plotScissor(
+        { plotX: -4, plotY: 8, plotWidth: 120.4, plotHeight: 80.2 },
+        100,
+        60,
+      ),
+    ).toEqual({ x: 0, y: 8, width: 100, height: 52 });
+    expect(PREMULTIPLIED_ALPHA_BLEND).toEqual({
+      color: {
+        srcFactor: "one",
+        dstFactor: "one-minus-src-alpha",
+        operation: "add",
+      },
+      alpha: {
+        srcFactor: "one",
+        dstFactor: "one-minus-src-alpha",
+        operation: "add",
+      },
+    });
   });
 });
