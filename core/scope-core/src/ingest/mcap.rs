@@ -17,6 +17,7 @@ use super::{
     provenance::CACHE_ABI_MCAP,
     registry::{Confidence, FormatProvider},
 };
+use crate::gaps::GapRunBuilder;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct McapDecoder;
@@ -135,11 +136,14 @@ impl Decoder for McapDecoder {
                 } else {
                     field
                 };
+                let mut gap_builder = GapRunBuilder::default();
+                gap_builder.extend(&values);
                 signals.push(DecodedSignal {
                     local_path: format!("{topic}/{name}"),
                     unit: None,
                     time: Arc::clone(&time).into(),
                     values: values.into(),
+                    gap_runs: gap_builder.finish(),
                 });
             }
         }

@@ -6,6 +6,7 @@ use std::{
 
 use crate::{
     columns::Column,
+    gaps::GapRunBuilder,
     ingest::{
         DecodeContext, DecodedSignal, DecodedSource, Decoder, IngestError, apply_permutation,
         sort_permutation,
@@ -145,6 +146,8 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
             if !names.insert(name.clone()) {
                 return Err(RecipeError::DuplicateName(name).into());
             }
+            let mut gap_builder = GapRunBuilder::default();
+            gap_builder.extend(&values);
             let unit = selection
                 .unit
                 .clone()
@@ -170,6 +173,7 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
                 unit,
                 time: Column::from(Arc::clone(&timebase.values)),
                 values: values.into(),
+                gap_runs: gap_builder.finish(),
             });
         }
     }

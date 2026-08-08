@@ -722,12 +722,20 @@ impl Worker {
                 .summary
                 .signals
                 .iter()
-                .filter_map(|id| temporary.signal(*id))
-                .map(|signal| DecodedSignal {
-                    local_path: signal.local_path.clone(),
-                    unit: signal.unit.clone(),
-                    time: signal.time_column().clone(),
-                    values: signal.values_column().clone(),
+                .filter_map(|id| {
+                    let signal = temporary.signal(*id)?;
+                    let (_, pyramid) = outcome
+                        .loaded
+                        .pyramids
+                        .iter()
+                        .find(|(pyramid_id, _)| pyramid_id == id)?;
+                    Some(DecodedSignal {
+                        local_path: signal.local_path.clone(),
+                        unit: signal.unit.clone(),
+                        time: signal.time_column().clone(),
+                        values: signal.values_column().clone(),
+                        gap_runs: pyramid.gap_runs().clone(),
+                    })
                 })
                 .collect(),
         };

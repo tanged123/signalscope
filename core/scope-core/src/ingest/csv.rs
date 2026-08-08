@@ -15,6 +15,7 @@ use super::{
     provenance::CACHE_ABI_CSV,
     registry::{Confidence, FormatProvider},
 };
+use crate::gaps::GapRunBuilder;
 
 const TIME_NAMES: &[&str] = &[
     "t",
@@ -224,11 +225,14 @@ fn finish(headers: Vec<String>, mut columns: Vec<Vec<f64>>) -> Result<DecodedSou
         if Some(index) == time_index || !values.iter().any(|value| value.is_finite()) {
             continue;
         }
+        let mut gap_builder = GapRunBuilder::default();
+        gap_builder.extend(&values);
         signals.push(DecodedSignal {
             local_path: normalize_segment(&header),
             unit: None,
             time: Arc::clone(&time).into(),
             values: values.into(),
+            gap_runs: gap_builder.finish(),
         });
     }
     Ok(DecodedSource { row_count, signals })

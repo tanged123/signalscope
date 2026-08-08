@@ -180,35 +180,36 @@ impl PageHandle {
             )
         });
         let page_size = cache.page_size();
-        let mut pages: HashMap<usize, (usize, Arc<[u8]>)> = HashMap::new();
-        for index in &indexes {
-            let offset = index
-                .checked_mul(size_of::<f64>())
-                .ok_or(PageError::InvalidRange)?;
-            let page = offset / page_size;
-            if let MapEntry::Vacant(entry) = pages.entry(page) {
-                entry.insert(cache.read_page(self, page)?);
-            }
-        }
-        indexes
+        let mut requests = indexes
             .iter()
-            .map(|index| {
+            .enumerate()
+            .map(|(output_index, index)| {
                 let offset = index
                     .checked_mul(size_of::<f64>())
                     .ok_or(PageError::InvalidRange)?;
-                let page = offset / page_size;
-                let (page_start, bytes) = pages.get(&page).ok_or(PageError::InvalidRange)?;
+                Ok((offset / page_size, output_index, offset))
+            })
+            .collect::<Result<Vec<_>, PageError>>()?;
+        requests.sort_unstable_by_key(|(page, _, _)| *page);
+        let mut output = vec![0.0; indexes.len()];
+        let mut start = 0;
+        while start < requests.len() {
+            let page = requests[start].0;
+            let end = start + requests[start..].partition_point(|request| request.0 == page);
+            let (page_start, bytes) = cache.read_page(self, page)?;
+            for (_, output_index, offset) in &requests[start..end] {
                 let local = offset
-                    .checked_sub(*page_start)
+                    .checked_sub(page_start)
                     .ok_or(PageError::InvalidRange)?;
                 let bytes = bytes
                     .get(local..local + size_of::<f64>())
                     .ok_or(PageError::InvalidRange)?;
-                Ok(f64::from_le_bytes(
-                    bytes.try_into().map_err(|_| PageError::InvalidRange)?,
-                ))
-            })
-            .collect()
+                output[*output_index] =
+                    f64::from_le_bytes(bytes.try_into().map_err(|_| PageError::InvalidRange)?);
+            }
+            start = end;
+        }
+        Ok(output)
     }
 
     /// Finds a partition point without re-reading or copying one value at a
@@ -904,6 +905,29 @@ mod tests {
         assert_eq!(
             handle.values_at(&[7, 8, 8, 15]).unwrap(),
             vec![7.0, 8.0, 8.0, 15.0]
+        );
+    }
+
+    #[test]
+    fn values_at_gathers_shuffled_duplicates_across_sixteen_pages() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("values.bin");
+        let values = (0..128).map(f64::from).collect::<Vec<_>>();
+        let bytes = values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>();
+        std::fs::write(&path, bytes).unwrap();
+        let cache = PageCache::with_page_bytes(directory.path(), PAGE_BYTES_TEST, PAGE_BYTES_TEST);
+        let handle = PageHandle::cached(cache, &path, 0, values.len() * size_of::<f64>());
+        let indexes = vec![127, 0, 64, 64, 8, 120, 1, 95, 32, 15, 80, 7, 119, 48, 3, 96];
+
+        assert_eq!(
+            handle.values_at(&indexes).unwrap(),
+            indexes
+                .iter()
+                .map(|index| values[usize::try_from(*index).unwrap()])
+                .collect::<Vec<_>>()
         );
     }
 }

@@ -8,6 +8,7 @@ use std::{
 use super::{IngestError, IngestSummary};
 use crate::{
     columns::Column,
+    gaps::GapRuns,
     store::{SignalStore, SourceKey},
 };
 
@@ -17,6 +18,7 @@ pub struct DecodedSignal {
     pub unit: Option<String>,
     pub time: Column,
     pub values: Column,
+    pub gap_runs: GapRuns,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -117,12 +119,14 @@ mod tests {
                     unit: None,
                     time: Arc::clone(&time).into(),
                     values: vec![1.0, 2.0].into(),
+                    gap_runs: GapRuns::default(),
                 },
                 DecodedSignal {
                     local_path: "imu/ay".into(),
                     unit: Some("m/s2".into()),
                     time: time.into(),
                     values: vec![3.0, 4.0].into(),
+                    gap_runs: GapRuns::default(),
                 },
             ],
         }
