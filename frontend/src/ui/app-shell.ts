@@ -2459,6 +2459,7 @@ export class AppShell {
 
   private refreshTiles(): Promise<void> {
     this.refreshQueued = true;
+    this.refinements.forEach((controller) => controller.cancelActive());
     if (this.refreshPromise !== null) {
       return this.refreshPromise;
     }

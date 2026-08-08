@@ -49,14 +49,17 @@ describe("TileRefinementController", () => {
     pending[0]?.resolve();
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
     expect(events).toContain("coarse");
     expect(events.filter((event) => event.startsWith("800:"))).toHaveLength(0);
     expect(events).toContain(`64:128-255`);
     pending[1]?.resolve();
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
     expect(events).toContain(`64:256-299`);
     pending[2]?.resolve();
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     expect(events).toEqual([
@@ -72,8 +75,10 @@ describe("TileRefinementController", () => {
     pending[3]?.resolve();
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
     expect(pending).toHaveLength(5);
     pending[4]?.resolve();
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     expect(pending).toHaveLength(6);
@@ -128,5 +133,24 @@ describe("TileRefinementController", () => {
       COARSE_POINT_TARGET,
       COARSE_POINT_TARGET,
     ]);
+  });
+
+  it("aborts the active generation before starting its successor", () => {
+    let firstSignal: AbortSignal | undefined;
+    const controller = new TileRefinementController(
+      (_ids, _window, _target, signal) => {
+        firstSignal ??= signal;
+        return new Promise<never>(() => undefined);
+      },
+    );
+    const sink = {
+      acceptCoarse: () => undefined,
+      acceptFine: () => undefined,
+      fail: () => undefined,
+    };
+    controller.start(request(10), sink);
+    controller.start({ ...request(11), signalIds: ["new"] }, sink);
+    expect(firstSignal?.aborted).toBe(true);
+    controller.cancelActive();
   });
 });
