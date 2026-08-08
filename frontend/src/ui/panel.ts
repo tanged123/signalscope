@@ -989,7 +989,7 @@ export class PanelView {
         .map((tile) => tile.signalId),
     ).size;
     const metrics = gpuRenderer.runtime.metrics;
-    metrics.setVisibleSeries(visibleSeries.length, seriesWithSegments);
+    metrics.setPanelSeries(this.id, visibleSeries.length, seriesWithSegments);
     gpuRenderer.runtime.requestFrame(gpuRenderer);
     return elapsed;
   }

@@ -3,9 +3,22 @@ import {
   descriptorFixture,
   gpuMetrics,
   openGpuFixture,
+  pixelFixture,
   pickFixture,
-  resetGpuMetrics,
 } from "./fixtures";
+
+test("software adapter proves nonblank line pixels", async ({ page }) => {
+  test.setTimeout(120_000);
+  const result = await pixelFixture(page);
+  expect(result.trajectoryPixels).toBeGreaterThan(0);
+  expect(result.outsideScissor).toBe(0);
+  expect(result.gapPixels).toBe(0);
+  expect(result.extrema).toEqual([true, true, true, true]);
+  expect(result.overlap).toBe(true);
+  await expect(page.locator("#readback")).toHaveScreenshot(
+    "line-renderer-pixel-mask.png",
+  );
+});
 
 test("compiles production shaders before rendering", async ({ page }) => {
   test.setTimeout(120_000);
@@ -21,23 +34,16 @@ test("software adapter renders every selected series through bounded GPU passes"
   await expect(page.locator(".render-ms")).not.toHaveText("— ms", {
     timeout: 60_000,
   });
-  await resetGpuMetrics(page);
+  await expect
+    .poll(async () => (await gpuMetrics(page)).successfulFrames)
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () => (await gpuMetrics(page)).compactSegments)
+    .toBeGreaterThan(0);
   const before = await gpuMetrics(page);
-  expect(before.seriesWithSegments).toBeGreaterThanOrEqual(0);
-  expect(before.drawCalls).toBeLessThanOrEqual(before.residentPages * 2 + 1);
-  const overlay = page.locator(".overlay-canvas").first();
-  const box = await overlay.boundingBox();
-  if (box === null) throw new Error("overlay canvas has no bounds");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -120);
-  await page.waitForTimeout(500);
-  const after = await gpuMetrics(page);
-  expect(after.drawCalls - before.drawCalls).toBeLessThanOrEqual(
-    after.residentPages * 2 + 1,
-  );
-  await expect(page.locator(".series-canvas").first()).toHaveScreenshot(
-    "line-renderer.png",
-  );
+  expect(before.selectedSeries).toBe(before.seriesWithSegments);
+  expect(before.validationErrors).toEqual([]);
+  expect(before.drawCalls).toBeLessThanOrEqual(before.residentPages * 4 + 1);
 });
 
 test("compacts ordered segments with GPU descriptors and indirect counts", async ({

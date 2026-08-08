@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SignalScope GPU pixel fixture</title>
+    <style>
+      body { margin: 0; background: #101214; }
+      canvas { width: 256px; height: 256px; image-rendering: pixelated; }
+    </style>
+  </head>
+  <body>
+    <canvas id="readback" width="64" height="64"></canvas>
+    <script type="module">
+      import { GpuRuntime } from "/src/render/gpu/runtime.ts";
+      import { splitF64 } from "/src/render/gpu/precision.ts";
+
+      const RENDER_ATTACHMENT = 0x0010;
+      const COPY_SRC = 0x0001;
+      const COPY_DST = 0x0008;
+      const STORAGE = 0x0080;
+      const UNIFORM = 0x0040;
+      const MAP_READ = 0x0001;
+      const width = 64;
+      const height = 64;
+      const plot = { x: 8, y: 8, width: 48, height: 48 };
+      const body = document.body;
+
+      function pointBuffer(device) {
+        const values = new ArrayBuffer(4 * 16);
+        const view = new DataView(values);
+        [0, 20, 30, 48].forEach((time, index) => {
+          const offset = index * 16;
+          view.setFloat32(offset, time, true);
+          view.setFloat32(offset + 4, index < 2 ? 0.2 : 0.8, true);
+        });
+        const buffer = device.createBuffer({ size: values.byteLength, usage: STORAGE | COPY_DST });
+        device.queue.writeBuffer(buffer, 0, values);
+        return buffer;
+      }
+
+      function buffer(device, values, usage) {
+        const result = device.createBuffer({ size: values.byteLength, usage });
+        device.queue.writeBuffer(result, 0, values);
+        return result;
+      }
+
+      try {
+        const created = await GpuRuntime.create(navigator.gpu);
+        if (!created.supported) {
+          body.dataset.error = `${created.capability}: ${created.reason}`;
+        } else {
+          const runtime = created.runtime;
+          const device = runtime.device;
+          const origin = splitF64(1_000_000_000_000);
+          const points = pointBuffer(device);
+          const descriptors = buffer(
+            device,
+            new Uint32Array([
+              0, 1, 0, 0,
+              0, 1, 1, 0,
+              2, 3, 0, 0,
+              2, 3, 1, 0,
+            ]),
+            STORAGE | COPY_DST,
+          );
+          const styles = new ArrayBuffer(64);
+          const styleView = new DataView(styles);
+          [[1, 0, 0], [0, 0, 1]].forEach(([red, green, blue], index) => {
+            const offset = index * 32;
+            styleView.setFloat32(offset, red, true);
+            styleView.setFloat32(offset + 4, green, true);
+            styleView.setFloat32(offset + 8, blue, true);
+            styleView.setFloat32(offset + 12, 0.5, true);
+            styleView.setFloat32(offset + 16, 3, true);
+            styleView.setUint32(offset + 24, 1, true);
+          });
+          const styleBuffer = buffer(device, styles, STORAGE | COPY_DST);
+          const metadata = buffer(
+            device,
+            new Float32Array([0, 4, origin[0], origin[1]]),
+            STORAGE | COPY_DST,
+          );
+          const view = buffer(
+            device,
+            new Float32Array([
+              origin[0], origin[1], 1,
+              plot.x, plot.y, plot.width, plot.height, height,
+              0, plot.height, 0, width,
+            ]),
+            UNIFORM | COPY_DST,
+          );
+          const module = runtime.shader(
+            "pixel-line-quad",
+            "" + (await import("/src/render/gpu/shaders/line-quad.wgsl?raw")).default,
+          );
+          const pipeline = device.createRenderPipeline({
+            layout: "auto",
+            vertex: { module, entryPoint: "vs_main" },
+            fragment: {
+              module,
+              entryPoint: "fs_main",
+              targets: [{
+                format: runtime.format,
+                blend: {
+                  color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+                  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+                },
+              }],
+            },
+            primitive: { topology: "triangle-list" },
+          });
+          const bindGroup = device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [
+              { binding: 0, resource: { buffer: view } },
+              { binding: 1, resource: { buffer: points } },
+              { binding: 2, resource: { buffer: descriptors } },
+              { binding: 3, resource: { buffer: styleBuffer } },
+              { binding: 4, resource: { buffer: metadata } },
+            ],
+          });
+          const texture = device.createTexture({
+            size: [width, height, 1],
+            format: runtime.format,
+            usage: RENDER_ATTACHMENT | COPY_SRC,
+          });
+          const readback = device.createBuffer({
+            size: width * height * 4,
+            usage: MAP_READ | COPY_DST,
+          });
+          const encoder = device.createCommandEncoder();
+          const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+              view: texture.createView(),
+              clearValue: { r: 0, g: 0, b: 0, a: 0 },
+              loadOp: "clear",
+              storeOp: "store",
+            }],
+          });
+          pass.setPipeline(pipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.setScissorRect(plot.x, plot.y, plot.width, plot.height);
+          pass.draw(6, 4, 0, 0);
+          pass.end();
+          encoder.copyTextureToBuffer(
+            { texture },
+            { buffer: readback, bytesPerRow: width * 4, rowsPerImage: height },
+            [width, height, 1],
+          );
+          device.queue.submit([encoder.finish()]);
+          await device.queue.onSubmittedWorkDone();
+          await readback.mapAsync(MAP_READ);
+          const raw = new Uint8Array(readback.getMappedRange()).slice();
+          readback.unmap();
+          const rgba = new Uint8ClampedArray(raw.length);
+          const bgra = runtime.format === "bgra8unorm";
+          for (let index = 0; index < width * height; index += 1) {
+            const offset = index * 4;
+            rgba[offset] = bgra ? raw[offset + 2] : raw[offset];
+            rgba[offset + 1] = raw[offset + 1];
+            rgba[offset + 2] = bgra ? raw[offset] : raw[offset + 2];
+            rgba[offset + 3] = raw[offset + 3];
+          }
+          const alphaAt = (x, y) => rgba[(y * width + x) * 4 + 3] ?? 0;
+          const trajectory = [];
+          let outsideScissor = 0;
+          let gapPixels = 0;
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const alpha = alphaAt(x, y);
+              if (alpha > 4) trajectory.push([x, y]);
+              if ((x < plot.x || x >= plot.x + plot.width || y < plot.y || y >= plot.y + plot.height) && alpha > 4) {
+                outsideScissor += 1;
+              }
+              if (x >= 29 && x <= 37 && alpha > 4) gapPixels += 1;
+            }
+          }
+          const neighborhoods = [[8, 46], [28, 46], [38, 18], [56, 18]];
+          const extrema = neighborhoods.map(([x, y]) => {
+            for (let yy = y - 3; yy <= y + 3; yy += 1) {
+              for (let xx = x - 3; xx <= x + 3; xx += 1) {
+                if (xx >= 0 && yy >= 0 && xx < width && yy < height && alphaAt(xx, yy) > 4) return true;
+              }
+            }
+            return false;
+          });
+          const overlap = trajectory.some(([x, y]) => {
+            const offset = (y * width + x) * 4;
+            return x >= 12 && x <= 24 && rgba[offset] > 20 && rgba[offset + 2] > 20;
+          });
+          const result = {
+            trajectoryPixels: trajectory.length,
+            outsideScissor,
+            gapPixels,
+            extrema,
+            overlap,
+            format: runtime.format,
+          };
+          const canvas = document.querySelector("#readback");
+          canvas.getContext("2d").putImageData(new ImageData(rgba, width, height), 0, 0);
+          body.dataset.result = JSON.stringify(result);
+          [points, descriptors, styleBuffer, metadata, view, texture, readback].forEach((resource) => resource.destroy());
+          device.destroy();
+        }
+      } catch (error) {
+        body.dataset.error = error instanceof Error ? error.message : String(error);
+      }
+    </script>
+  </body>
+</html>

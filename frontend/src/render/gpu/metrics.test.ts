@@ -8,13 +8,16 @@ describe("GpuMetrics", () => {
     metrics.recordUpload(128);
     metrics.setResident(512, 2);
     metrics.recordDraw(3);
-    metrics.recordSegments(983);
+    metrics.recordCompactSegments(977);
     metrics.setVisibleSeries(1000, 983);
+    metrics.recordSuccessfulFrame();
+    metrics.recordValidationError("validation");
     metrics.recordDescriptorRebuild();
     metrics.recordPickLatency(2);
     metrics.recordRecovery(8);
     const snapshot = metrics.snapshot();
-    snapshot.frameCpuMs.push(99);
+    const frameCopy = [...snapshot.frameCpuMs];
+    frameCopy.push(99);
     expect(metrics.snapshot()).toMatchObject({
       frameCount: 1,
       frameCpuMs: [4],
@@ -22,10 +25,14 @@ describe("GpuMetrics", () => {
       residentBytes: 512,
       residentPages: 2,
       drawCalls: 3,
-      submittedSegments: 983,
+      submittedSegments: 977,
+      compactSegments: 977,
+      selectedSeries: 1000,
       visibleSeries: 1000,
       seriesWithSegments: 983,
       descriptorRebuilds: 1,
+      successfulFrames: 1,
+      validationErrors: ["validation"],
       pickLatencyMs: [2],
       deviceRecoveryMs: [8],
     });
@@ -43,6 +50,8 @@ describe("GpuMetrics", () => {
       uploadBytes: 0,
       residentBytes: 1024,
       residentPages: 4,
+      successfulFrames: 0,
+      validationErrors: [],
     });
   });
 
@@ -54,6 +63,25 @@ describe("GpuMetrics", () => {
       visibleSeries: 1000,
       seriesWithSegments: 983,
       drawCalls: 2,
+    });
+  });
+
+  it("aggregates drawable series across live panels", () => {
+    const metrics = new GpuMetrics();
+    metrics.setPanelSeries("left", 3, 3);
+    metrics.setPanelSeries("right", 2, 1);
+
+    expect(metrics.snapshot()).toMatchObject({
+      selectedSeries: 5,
+      visibleSeries: 5,
+      seriesWithSegments: 4,
+    });
+
+    metrics.removePanelSeries("left");
+    expect(metrics.snapshot()).toMatchObject({
+      selectedSeries: 2,
+      visibleSeries: 2,
+      seriesWithSegments: 1,
     });
   });
 });

@@ -2,6 +2,7 @@ export interface GpuPanelEncoder {
   readonly id: string;
   encode(encoder: GPUCommandEncoder): void;
   afterSubmit(): void;
+  hasSubmittedGeometry?(): boolean;
   deviceLost(): void;
   deviceRestored(device: GPUDevice, format: GPUTextureFormat): void;
   dispose(): void;
@@ -89,7 +90,9 @@ export class GpuFrameLoop {
     if (encoded.length > 0) {
       this.queue.submit([encoder.finish()]);
       encoded.forEach((panel) => panel.afterSubmit());
-      this.onSuccessfulSubmit();
+      if (encoded.some((panel) => panel.hasSubmittedGeometry?.() === true)) {
+        this.onSuccessfulSubmit();
+      }
     }
     this.onFrame(performance.now() - started);
   }

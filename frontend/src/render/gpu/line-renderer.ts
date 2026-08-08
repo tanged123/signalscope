@@ -125,6 +125,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   private styleCapacity = 0;
   private readonly pages = new Map<number, PageBuffers>();
   private disposed = false;
+  private submittedGeometry = false;
   private lastMetrics: LineMetrics = { pages: 0, drawCalls: 0, descriptors: 0 };
   sceneDirty = false;
   transformDirty = false;
@@ -182,6 +183,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   }
 
   encode(encoder: GPUCommandEncoder): void {
+    this.submittedGeometry = false;
     if (
       !this.sceneDirty &&
       !this.transformDirty &&
@@ -202,12 +204,12 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       descriptors,
     };
     this.gpuMetrics()?.recordDraw(this.lastMetrics.drawCalls);
-    this.gpuMetrics()?.recordSegments(descriptors);
 
+    const viewport = this.viewport;
     if (
       this.context === undefined ||
       this.arena === undefined ||
-      this.viewport === null ||
+      viewport === null ||
       pageIds.length === 0
     ) {
       this.clearDirty();
@@ -222,7 +224,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.picker.encode(encoder);
 
     const targets = this.renderTargets.frame();
-    const scissor = plotScissor(this.viewport, this.width, this.height);
+    const scissor = plotScissor(viewport, this.width, this.height);
     const quadPipeline = this.quadPipeline();
     const quadPass = encoder.beginRenderPass({
       colorAttachments: [
@@ -238,7 +240,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     quadPass.setPipeline(quadPipeline);
     setScissor(quadPass, scissor);
     for (const page of pageIds) {
-      const buffers = this.pages.get(page);
+      const buffers = this.pages.get(page)!;
       if (
         buffers === undefined ||
         buffers.descriptorCount === 0 ||
@@ -246,12 +248,12 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         buffers.quadArgs === null
       )
         continue;
-      setScissor(quadPass, scissor);
       quadPass.setBindGroup(0, this.bindGroup(quadPipeline, page, buffers));
+      setScissor(quadPass, scissor);
       quadPass.drawIndirect(buffers.quadArgs, 0);
+      this.submittedGeometry = true;
     }
     quadPass.end();
-
     if (dense) {
       const hairlinePipeline = this.hairlinePipeline();
       const hairlinePass = encoder.beginRenderPass({
@@ -266,7 +268,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       hairlinePass.setPipeline(hairlinePipeline);
       setScissor(hairlinePass, scissor);
       for (const page of pageIds) {
-        const buffers = this.pages.get(page);
+        const buffers = this.pages.get(page)!;
         if (
           buffers === undefined ||
           buffers.descriptorCount === 0 ||
@@ -288,6 +290,15 @@ export class GpuLineRenderer implements GpuPanelEncoder {
 
   afterSubmit(): void {
     this.picker.afterSubmit();
+    for (const buffers of this.pages.values()) {
+      buffers.descriptorPipeline.afterSubmit((count) => {
+        this.gpuMetrics()?.recordCompactSegments(count);
+      });
+    }
+  }
+
+  hasSubmittedGeometry(): boolean {
+    return this.submittedGeometry;
   }
 
   requestPick(request: PickRequest): Promise<PickResult | null> {
@@ -355,6 +366,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.styleBuffer = null;
     this.residency?.clear();
     this.arena?.destroy();
+    this.gpuMetrics()?.removePanelSeries(this.id);
     this.tiles = [];
   }
 

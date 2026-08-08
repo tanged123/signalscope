@@ -65,7 +65,7 @@ pub fn bench_root() -> PathBuf {
 /// xorshift64*: deterministic, dependency-free.
 struct Rng(u64);
 
-const GENERATOR_VERSION: u32 = 4;
+const GENERATOR_VERSION: u32 = 5;
 
 impl Rng {
     fn new(seed: u64) -> Self {
@@ -113,12 +113,13 @@ pub fn generate(spec: &TierSpec, dir: &Path) -> std::io::Result<()> {
         writeln!(writer, "time,{}", spec.channels.join(","))?;
         let mut rng = Rng::new(u64::from(file) * 1_000_003);
         let gap = spec.nan_every != 0 && file % spec.nan_every == 0;
+        let gap_channel = usize::from(spec.channels.len() > 1);
         for row in 0..=spec.rows {
             let time = f64::from(row) / spec.hz;
             write!(writer, "{time:.4}")?;
             for (channel, _) in spec.channels.iter().enumerate() {
                 let noise = rng.next_f64();
-                if gap && channel == 1 && spec.nan_rows.contains(&row) {
+                if gap && channel == gap_channel && spec.nan_rows.contains(&row) {
                     write!(writer, ",NaN")?;
                 } else {
                     write!(writer, ",{:.6}", sample(file, channel, time, noise))?;
@@ -231,6 +232,17 @@ mod tests {
             .collect();
         assert_eq!(gap_lines.first(), Some(&41));
         assert_eq!(gap_lines.last(), Some(&50));
+    }
+
+    #[test]
+    fn single_channel_dense_fixture_contains_gap_values() {
+        let mut spec = dense10k();
+        spec.files = 1;
+        spec.nan_every = 1;
+        let dir = tempfile::tempdir().unwrap();
+        generate(&spec, dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("run_0001.csv")).unwrap();
+        assert!(text.lines().any(|line| line.ends_with(",NaN")));
     }
 
     #[test]

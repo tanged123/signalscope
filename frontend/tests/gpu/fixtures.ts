@@ -81,6 +81,39 @@ export async function gpuMetrics(page: Page): Promise<GpuMetricsSnapshot> {
   return snapshot;
 }
 
+export async function pixelFixture(page: Page): Promise<{
+  trajectoryPixels: number;
+  outsideScissor: number;
+  gapPixels: number;
+  extrema: readonly boolean[];
+  overlap: boolean;
+  format: string;
+}> {
+  await page.goto("http://127.0.0.1:4173/tests/gpu/pixel-fixture.html");
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () =>
+            document.body.dataset.result ?? document.body.dataset.error ?? null,
+        ),
+      { timeout: 60_000 },
+    )
+    .not.toBeNull();
+  const error = await page.locator("body").getAttribute("data-error");
+  if (error !== null) throw new Error(error);
+  const encoded = await page.locator("body").getAttribute("data-result");
+  if (encoded === null) throw new Error("GPU pixel fixture is unavailable");
+  return JSON.parse(encoded) as {
+    trajectoryPixels: number;
+    outsideScissor: number;
+    gapPixels: number;
+    extrema: readonly boolean[];
+    overlap: boolean;
+    format: string;
+  };
+}
+
 export async function resetGpuMetrics(page: Page): Promise<void> {
   await page.evaluate(() => {
     const host = window as typeof window & {

@@ -37,6 +37,7 @@ export class GpuRuntime {
   private readonly gpu: GPU;
   private recovery: Promise<void> | null = null;
   private lossStartedAt: number | null = null;
+  private lossMessage = "";
   private stateValue: GpuRuntimeState = { kind: "ready" };
 
   private static frameScheduler(): [
@@ -158,6 +159,7 @@ export class GpuRuntime {
     if (this.recovery !== null) return;
     this.frameLoop.stop();
     this.stateValue = { kind: "recovering", message: info.message };
+    this.lossMessage = info.message;
     this.lossStartedAt = performance.now();
     this.shaders.clear();
     this.renderPipelines.clear();
@@ -173,15 +175,16 @@ export class GpuRuntime {
     const result = await requestGpuDevice(this.gpu);
     if (!result.supported) {
       this.lossStartedAt = null;
+      const reason = `${result.reason} (device lost: ${this.lossMessage})`;
       this.stateValue = {
         kind: "unsupported",
         capability: result.capability,
-        reason: result.reason,
+        reason,
       };
       this.publish({
         kind: "unsupported",
         capability: result.capability,
-        reason: result.reason,
+        reason,
       });
       return;
     }
@@ -231,9 +234,15 @@ export class GpuRuntime {
       this.queue,
       requestFrame,
       cancelFrame,
-      (panelId, error) => this.publish({ kind: "panel", panelId, error }),
+      (panelId, error) => {
+        this.metrics.recordValidationError(
+          error instanceof Error ? error.message : String(error),
+        );
+        this.publish({ kind: "panel", panelId, error });
+      },
       (durationMs) => this.metrics.recordFrame(durationMs),
       () => {
+        this.metrics.recordSuccessfulFrame();
         if (this.lossStartedAt === null) return;
         this.metrics.recordRecovery(performance.now() - this.lossStartedAt);
         this.lossStartedAt = null;
@@ -244,6 +253,7 @@ export class GpuRuntime {
   private installDeviceListeners(): void {
     this.device.addEventListener("uncapturederror", (event) => {
       const reason = event.error.message;
+      this.metrics.recordValidationError(reason);
       this.stateValue = {
         kind: "unsupported",
         capability: "uncaptured-error",

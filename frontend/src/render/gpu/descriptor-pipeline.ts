@@ -10,6 +10,7 @@ const GPU_BUFFER_COPY_SRC = 0x0004;
 const GPU_BUFFER_STORAGE = 0x0080;
 const GPU_BUFFER_INDIRECT = 0x0100;
 const GPU_BUFFER_UNIFORM = 0x0040;
+const GPU_BUFFER_MAP_READ = 0x0001;
 const WORKGROUP_SIZE = 256;
 
 export interface DescriptorBuildBuffers {
@@ -62,6 +63,9 @@ export class GpuDescriptorPipeline {
   private descriptorCount: GPUBuffer | null = null;
   private quadArgs: GPUBuffer | null = null;
   private hairlineArgs: GPUBuffer | null = null;
+  private hairlineComputeArgs: GPUBuffer | null = null;
+  private descriptorCountReadback: GPUBuffer | null = null;
+  private countReadbackPending = false;
   private blocks: BlockBuffers[] = [];
   private candidateCapacity = 0;
   private directoryCount = 0;
@@ -129,11 +133,18 @@ export class GpuDescriptorPipeline {
     this.hairlineArgs = this.createBuffer(
       "hairline-indirect-args",
       16,
-      GPU_BUFFER_STORAGE |
-        GPU_BUFFER_COPY_DST |
-        GPU_BUFFER_COPY_SRC |
-        GPU_BUFFER_INDIRECT,
+      GPU_BUFFER_COPY_DST | GPU_BUFFER_COPY_SRC | GPU_BUFFER_INDIRECT,
     );
+    this.hairlineComputeArgs = this.createBuffer(
+      "hairline-compute-args",
+      16,
+      GPU_BUFFER_STORAGE | GPU_BUFFER_COPY_DST | GPU_BUFFER_COPY_SRC,
+    );
+    this.descriptorCountReadback = this.runtime.device.createBuffer({
+      label: "signalscope-descriptor-count-readback",
+      size: 4,
+      usage: GPU_BUFFER_MAP_READ | GPU_BUFFER_COPY_DST,
+    });
 
     let valueCount = this.candidateCapacity;
     while (true) {
@@ -338,13 +349,39 @@ export class GpuDescriptorPipeline {
           { binding: 0, resource: { buffer: totalBlock.sums } },
           { binding: 1, resource: { buffer: this.descriptorCount } },
           { binding: 2, resource: { buffer: this.quadArgs } },
-          { binding: 3, resource: { buffer: this.hairlineArgs } },
+          { binding: 3, resource: { buffer: this.hairlineComputeArgs! } },
         ]),
       );
       pass.dispatchWorkgroups(1);
       pass.end();
     }
+    if (this.hairlineComputeArgs !== null && this.hairlineArgs !== null) {
+      encoder.copyBufferToBuffer(
+        this.hairlineComputeArgs,
+        0,
+        this.hairlineArgs,
+        0,
+        16,
+      );
+    }
+    if (this.descriptorCountReadback !== null) {
+      encoder.copyBufferToBuffer(
+        this.descriptorCount,
+        0,
+        this.descriptorCountReadback,
+        0,
+        4,
+      );
+      this.countReadbackPending = true;
+    }
     return this.buffers();
+  }
+
+  afterSubmit(onCount: (count: number) => void): void {
+    if (!this.countReadbackPending || this.descriptorCountReadback === null)
+      return;
+    this.countReadbackPending = false;
+    void this.readCount(onCount);
   }
 
   destroy(): void {
@@ -444,6 +481,8 @@ export class GpuDescriptorPipeline {
     this.descriptorCount?.destroy();
     this.quadArgs?.destroy();
     this.hairlineArgs?.destroy();
+    this.hairlineComputeArgs?.destroy();
+    this.descriptorCountReadback?.destroy();
     this.blocks.forEach((block) => {
       block.sums.destroy();
       block.prefixes.destroy();
@@ -457,7 +496,23 @@ export class GpuDescriptorPipeline {
     this.descriptorCount = null;
     this.quadArgs = null;
     this.hairlineArgs = null;
+    this.hairlineComputeArgs = null;
+    this.descriptorCountReadback = null;
+    this.countReadbackPending = false;
     this.blocks = [];
+  }
+
+  private async readCount(onCount: (count: number) => void): Promise<void> {
+    const readback = this.descriptorCountReadback;
+    if (readback === null) return;
+    try {
+      await readback.mapAsync(GPU_BUFFER_MAP_READ);
+      const count = new Uint32Array(readback.getMappedRange())[0] ?? 0;
+      readback.unmap();
+      onCount(count);
+    } catch {
+      // Device loss resolves the pending frame through runtime recovery.
+    }
   }
 }
 

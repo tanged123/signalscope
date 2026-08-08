@@ -2746,12 +2746,14 @@ export class AppShell {
         snapshot: () => GpuMetricsSnapshot;
         reset: () => void;
         loseDeviceForTest: () => void;
+        state: () => ReturnType<GpuRuntime["state"]>;
       };
     };
     host.__signalscopeBench = {
       snapshot: () => runtime.metrics.snapshot(),
       reset: () => runtime.metrics.reset(),
       loseDeviceForTest: () => runtime.destroyDeviceForTest(),
+      state: () => runtime.state(),
     };
   }
 

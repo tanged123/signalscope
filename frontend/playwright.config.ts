@@ -4,7 +4,11 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const coverage = process.env.SIGNALSCOPE_COVERAGE === "1";
 const webGpuLaunchOptions = {
   ...(executablePath === undefined ? {} : { executablePath }),
-  args: ["--enable-unsafe-webgpu", "--use-angle=swiftshader"],
+  args: [
+    "--enable-unsafe-webgpu",
+    "--use-angle=swiftshader",
+    "--enable-features=Vulkan",
+  ],
 };
 const softwareWebGpuLaunchOptions = {
   ...webGpuLaunchOptions,
