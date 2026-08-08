@@ -26,7 +26,7 @@ struct TileMeta { point_start: u32, point_count: u32, origin_high: f32, origin_l
 
 struct VertexOutput {
   @builtin(position) position: vec4f,
-  @location(0) dash: u32,
+  @location(0) @interpolate(flat) dash: u32,
   @location(1) color: vec4f,
   @location(2) width: f32,
 };
@@ -80,7 +80,7 @@ fn vs_main(@builtin(vertex_index) vertex: u32) -> VertexOutput {
 }
 
 @fragment
-fn fs_main(input: VertexOutput, @builtin(position) position: vec4f) -> @location(0) vec4f {
+fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let alpha = input.color.a;
   return vec4f(input.color.rgb * alpha, alpha);
 }

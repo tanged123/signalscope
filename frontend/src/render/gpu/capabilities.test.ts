@@ -3,6 +3,7 @@ import {
   MIN_STORAGE_BINDING_BYTES,
   SCAN_WORKGROUP_SIZE,
   requestGpuDevice,
+  validateLimits,
 } from "./capabilities";
 
 function limits(
@@ -35,6 +36,12 @@ function gpuWith(
 }
 
 describe("requestGpuDevice", () => {
+  it("requires the five storage buffers used by the renderer and picker", () => {
+    expect(validateLimits(limits({ maxStorageBuffersPerShaderStage: 4 }))).toBe(
+      "WebGPU requires five storage buffers per shader stage",
+    );
+  });
+
   it("reports an unavailable navigator GPU", async () => {
     await expect(requestGpuDevice(undefined)).resolves.toEqual({
       supported: false,

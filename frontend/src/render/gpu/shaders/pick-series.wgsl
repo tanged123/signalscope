@@ -77,7 +77,7 @@ fn segment_candidate(
 ) -> Candidate {
   let first = points[first_index];
   let second = points[second_index];
-  if ((second.flags & 1u) != 0u || isNan(first.value) || isNan(second.value)) {
+  if ((second.flags & 1u) != 0u || first.value != first.value || second.value != second.value) {
     return invalid();
   }
   let first_pixel = project(first, origin);
@@ -91,7 +91,9 @@ fn segment_candidate(
   );
   let pixel = first_pixel + direction * ratio;
   let distance_px = distance(pixel, vec2f(request.cursor_x, request.cursor_y));
-  if (distance_px > request.radius) return invalid();
+  if (distance_px > request.radius) {
+    return invalid();
+  }
   return Candidate(
     request.sequence,
     series_slot,
@@ -105,8 +107,12 @@ fn segment_candidate(
 }
 
 fn nearer(left: Candidate, right: Candidate) -> Candidate {
-  if (left.valid == 0u) return right;
-  if (right.valid == 0u) return left;
+  if (left.valid == 0u) {
+    return right;
+  }
+  if (right.valid == 0u) {
+    return left;
+  }
   if (right.distance < left.distance ||
     (right.distance == left.distance && right.series_slot < left.series_slot)) {
     return right;
@@ -116,7 +122,9 @@ fn nearer(left: Candidate, right: Candidate) -> Candidate {
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= page.series_count) return;
+  if (id.x >= page.series_count) {
+    return;
+  }
   let range = ranges[id.x];
   let style = styles[range.series_slot];
   let output_index = page.candidate_offset + id.x;

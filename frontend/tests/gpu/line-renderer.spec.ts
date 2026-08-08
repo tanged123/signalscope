@@ -1,6 +1,12 @@
 import { expect, test } from "../e2e/fixtures";
 import { gpuMetrics, openGpuFixture, resetGpuMetrics } from "./fixtures";
 
+test("compiles production shaders before rendering", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openGpuFixture(page);
+  expect((await gpuMetrics(page)).residentPages).toBeGreaterThan(0);
+});
+
 test("software adapter renders every selected series through bounded GPU passes", async ({
   page,
 }) => {

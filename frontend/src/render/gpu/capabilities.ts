@@ -75,9 +75,9 @@ export async function requestGpuDevice(
   };
 }
 
-function validateLimits(limits: GPUSupportedLimits): string | null {
-  if (limits.maxStorageBuffersPerShaderStage < 4) {
-    return "WebGPU requires four storage buffers per shader stage";
+export function validateLimits(limits: GPUSupportedLimits): string | null {
+  if (limits.maxStorageBuffersPerShaderStage < 5) {
+    return "WebGPU requires five storage buffers per shader stage";
   }
   if (limits.maxComputeWorkgroupSizeX < SCAN_WORKGROUP_SIZE) {
     return "WebGPU compute workgroups are too small";

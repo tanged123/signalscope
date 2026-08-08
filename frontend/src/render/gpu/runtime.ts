@@ -1,6 +1,7 @@
 import { requestGpuDevice, type GpuDeviceResult } from "./capabilities";
 import { GpuFrameLoop, type GpuPanelEncoder } from "./frame-loop";
 import { GpuMetrics } from "./metrics";
+import { compileProductionShaders } from "./shader-sources";
 
 export type GpuRuntimeError =
   | { kind: "lost"; message: string }
@@ -66,6 +67,19 @@ export class GpuRuntime {
   static async create(gpu?: GPU): Promise<GpuRuntimeResult> {
     const result = await requestGpuDevice(gpu);
     if (!result.supported) return result;
+    const shaderErrors = await compileProductionShaders(result.device);
+    if (shaderErrors.length > 0) {
+      result.device.destroy();
+      const first = shaderErrors[0] ?? "shader compilation failed";
+      const separator = first.indexOf(":");
+      const label = separator < 0 ? first : first.slice(0, separator);
+      const reason = separator < 0 ? first : first.slice(separator + 1).trim();
+      return {
+        supported: false,
+        capability: `shader.${label}`,
+        reason,
+      };
+    }
     return { supported: true, runtime: new GpuRuntime(gpu as GPU, result) };
   }
 
