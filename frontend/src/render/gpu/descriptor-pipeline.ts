@@ -147,7 +147,7 @@ export class GpuDescriptorPipeline {
     });
 
     let valueCount = this.candidateCapacity;
-    while (true) {
+    do {
       const blockCount = Math.ceil(valueCount / WORKGROUP_SIZE);
       this.blocks.push({
         sums: this.createBuffer(
@@ -166,9 +166,8 @@ export class GpuDescriptorPipeline {
           GPU_BUFFER_UNIFORM | GPU_BUFFER_COPY_DST,
         ),
       });
-      if (blockCount <= 1) break;
       valueCount = blockCount;
-    }
+    } while (valueCount > 1);
   }
 
   encode(
@@ -185,7 +184,8 @@ export class GpuDescriptorPipeline {
       this.descriptors === null ||
       this.descriptorCount === null ||
       this.quadArgs === null ||
-      this.hairlineArgs === null
+      this.hairlineArgs === null ||
+      this.hairlineComputeArgs === null
     ) {
       throw new Error("descriptor pipeline capacity is not initialized");
     }
@@ -349,21 +349,19 @@ export class GpuDescriptorPipeline {
           { binding: 0, resource: { buffer: totalBlock.sums } },
           { binding: 1, resource: { buffer: this.descriptorCount } },
           { binding: 2, resource: { buffer: this.quadArgs } },
-          { binding: 3, resource: { buffer: this.hairlineComputeArgs! } },
+          { binding: 3, resource: { buffer: this.hairlineComputeArgs } },
         ]),
       );
       pass.dispatchWorkgroups(1);
       pass.end();
     }
-    if (this.hairlineComputeArgs !== null && this.hairlineArgs !== null) {
-      encoder.copyBufferToBuffer(
-        this.hairlineComputeArgs,
-        0,
-        this.hairlineArgs,
-        0,
-        16,
-      );
-    }
+    encoder.copyBufferToBuffer(
+      this.hairlineComputeArgs,
+      0,
+      this.hairlineArgs,
+      0,
+      16,
+    );
     if (this.descriptorCountReadback !== null) {
       encoder.copyBufferToBuffer(
         this.descriptorCount,

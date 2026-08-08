@@ -3194,7 +3194,7 @@ function emitBenchEvent(
   kind: string,
   payload: Record<string, unknown> = {},
 ): void {
-  const query = new URLSearchParams(globalThis.location?.search ?? "");
+  const query = new URLSearchParams(globalThis.location.search);
   if (query.get("signalscope-bench") !== "1") return;
   const host = globalThis as typeof globalThis & {
     __signalscopeBenchEvents?: Array<{

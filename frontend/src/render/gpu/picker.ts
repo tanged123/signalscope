@@ -364,7 +364,6 @@ export class GpuPicker {
       usage: STORAGE | COPY_SRC | COPY_DST,
     });
     const resultBuffer = this.resultBuffer;
-    if (resultBuffer === null) return;
     this.ensureCandidateBuffer(candidateCount);
     const candidateBuffer = this.candidateBuffer;
     if (candidateBuffer === null) return;

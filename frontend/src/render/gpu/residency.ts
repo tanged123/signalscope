@@ -153,7 +153,11 @@ export class GpuResidency {
       entry.lastUsed = ++this.tick;
     }
     this.activeGeneration = generation;
-    return entries.map((entry) => entry!.resident);
+    return entries.map((entry) => {
+      if (entry === undefined)
+        throw new Error("GPU residency selection changed");
+      return entry.resident;
+    });
   }
 
   discardGeneration(generation: number): void {

@@ -1331,13 +1331,7 @@ export class PanelView {
   private cursorPointsAt(cursorT: number): CursorPoint[] {
     const renderer = this.gpuRenderer;
     const result = renderer?.latestPick();
-    if (
-      renderer === null ||
-      renderer === undefined ||
-      result === null ||
-      result === undefined
-    )
-      return [];
+    if (renderer === null || result === null || result === undefined) return [];
     const time = renderer.pickTime(result);
     const series = this.seriesBySlot.get(result.seriesSlot);
     if (

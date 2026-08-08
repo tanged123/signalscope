@@ -2,14 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { PanelRenderTargets, PANEL_MSAA_SAMPLE_COUNT } from "./render-targets";
 
 function device() {
+  const destroy = vi.fn();
   const texture = {
     createView: vi.fn(() => ({ kind: "msaa-view" })),
-    destroy: vi.fn(),
+    destroy,
   } as unknown as GPUTexture;
   const createTexture = vi.fn(() => texture);
   return {
     device: { createTexture } as unknown as GPUDevice,
     texture,
+    destroy,
     createTexture,
   };
 }
@@ -56,9 +58,9 @@ describe("PanelRenderTargets", () => {
     targets.resize(100, 50);
     expect(gpu.createTexture).toHaveBeenCalledTimes(1);
     targets.resize(101, 50);
-    expect(gpu.texture.destroy).toHaveBeenCalledTimes(1);
+    expect(gpu.destroy).toHaveBeenCalledTimes(1);
     targets.destroy();
-    expect(gpu.texture.destroy).toHaveBeenCalledTimes(2);
+    expect(gpu.destroy).toHaveBeenCalledTimes(2);
   });
 
   it("recreates the attachment when the device or format changes", () => {
@@ -70,7 +72,7 @@ describe("PanelRenderTargets", () => {
     targets.resize(20, 20);
     targets.configure(second.device, surface.context, "rgba8unorm");
     targets.resize(20, 20);
-    expect(first.texture.destroy).toHaveBeenCalledTimes(1);
+    expect(first.destroy).toHaveBeenCalledTimes(1);
     expect(second.createTexture).toHaveBeenCalledTimes(1);
   });
 });

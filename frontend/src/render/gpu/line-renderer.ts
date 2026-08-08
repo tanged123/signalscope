@@ -243,7 +243,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     quadPass.setPipeline(quadPipeline);
     setScissor(quadPass, scissor);
     for (const page of pageIds) {
-      const buffers = this.pages.get(page)!;
+      const buffers = this.pages.get(page);
       if (
         buffers === undefined ||
         buffers.descriptorCount === 0 ||
@@ -271,7 +271,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       hairlinePass.setPipeline(hairlinePipeline);
       setScissor(hairlinePass, scissor);
       for (const page of pageIds) {
-        const buffers = this.pages.get(page)!;
+        const buffers = this.pages.get(page);
         if (
           buffers === undefined ||
           buffers.descriptorCount === 0 ||

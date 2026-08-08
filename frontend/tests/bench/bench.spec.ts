@@ -139,7 +139,7 @@ test(`${tier} snapshot first plot and pan/zoom stay interactive`, async ({
         device_recovery_ms: metrics.deviceRecoveryMs.at(-1) ?? 0,
         resident_pan_upload_bytes: residentPan.uploadBytes,
         resident_pan_descriptor_rebuilds: residentPan.descriptorRebuilds,
-        ...(metrics ?? {}),
+        ...metrics,
         visible_series: visibleSeries,
         series_with_segments: seriesWithSegments,
         floor_first_plot_ms: 10_000,

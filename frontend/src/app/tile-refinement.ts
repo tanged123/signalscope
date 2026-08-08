@@ -129,7 +129,7 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
       },
       (error: unknown) => {
         signal.removeEventListener("abort", onAbort);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
   });
