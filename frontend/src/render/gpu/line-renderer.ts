@@ -126,6 +126,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   private readonly pages = new Map<number, PageBuffers>();
   private disposed = false;
   private submittedGeometry = false;
+  private pickDirty = false;
   private lastMetrics: LineMetrics = { pages: 0, drawCalls: 0, descriptors: 0 };
   sceneDirty = false;
   transformDirty = false;
@@ -188,7 +189,8 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       !this.sceneDirty &&
       !this.transformDirty &&
       !this.styleDirty &&
-      !this.residencyDirty
+      !this.residencyDirty &&
+      !this.pickDirty
     ) {
       return;
     }
@@ -222,6 +224,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     if (this.styleDirty) this.writeStyles();
     if (this.residencyDirty) this.rebuildPages(pageIds, encoder);
     this.picker.encode(encoder);
+    this.pickDirty = false;
 
     const targets = this.renderTargets.frame();
     const scissor = plotScissor(viewport, this.width, this.height);
@@ -302,6 +305,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   }
 
   requestPick(request: PickRequest): Promise<PickResult | null> {
+    this.pickDirty = true;
     const result = this.picker.request(request);
     this.runtime.requestFrame(this);
     return result;
@@ -328,6 +332,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.picker.setScene([]);
     this.picker.resetDevice(this.runtime);
     this.sceneDirty = true;
+    this.pickDirty = false;
   }
 
   deviceRestored(device: GPUDevice, format: GPUTextureFormat): void {
@@ -352,6 +357,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.transformDirty = true;
     this.styleDirty = true;
     this.residencyDirty = true;
+    this.pickDirty = false;
   }
 
   dispose(): void {

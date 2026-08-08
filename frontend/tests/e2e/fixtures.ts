@@ -1,10 +1,24 @@
-import { expect, test as base } from "@playwright/test";
+import { expect, test as base, type Page } from "@playwright/test";
 
 interface CoverageFixtures {
   collectCoverage: undefined;
 }
 
 export const test = base.extend<CoverageFixtures>({
+  page: async ({ page }, use) => {
+    const originalGoto = page.goto.bind(page);
+    page.goto = async (...args: Parameters<Page["goto"]>) => {
+      const response = await originalGoto(...args);
+      if (new URL(page.url()).pathname === "/") {
+        await page.locator(".panel").first().waitFor({
+          state: "visible",
+          timeout: 120_000,
+        });
+      }
+      return response;
+    };
+    await use(page);
+  },
   collectCoverage: [
     async ({ page }, use, testInfo) => {
       if (testInfo.config.metadata["coverage"] !== true) {

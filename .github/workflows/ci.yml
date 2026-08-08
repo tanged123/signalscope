@@ -95,6 +95,17 @@ jobs:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: ./scripts/ci.sh e2e
 
+  gpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: ./scripts/test.sh gpu
+
   coverage:
     runs-on: ubuntu-latest
     env:
@@ -118,7 +129,7 @@ jobs:
 
   ci-ok:
     if: always()
-    needs: [version, flake, quality, rust, frontend, e2e, coverage]
+    needs: [version, flake, quality, rust, frontend, e2e, gpu, coverage]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

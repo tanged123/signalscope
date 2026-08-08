@@ -214,7 +214,6 @@ export class AppShell {
   private supportedFormatHint = "—";
   private restoringHistory = false;
   private historyGestureKey: string | null = null;
-  private historyDirty: string | null = null;
   private historyCoalesceTimer: number | null = null;
   private gpuRuntime: GpuRuntime | null = null;
 
@@ -224,6 +223,7 @@ export class AppShell {
   ) {}
 
   async mount(): Promise<void> {
+    emitBenchEvent("navigation-start");
     const baked = this.plane.bakedSessionJson;
     const bakedSession =
       baked !== undefined && baked !== ""
@@ -237,6 +237,7 @@ export class AppShell {
     this.gpuRuntime = gpu.runtime;
     this.exposeBenchApi(gpu.runtime);
     gpu.runtime.onRestored(() => {
+      emitBenchEvent("restored");
       this.root.dataset.gpuState = "ready";
       this.tileWindowCache.invalidate();
       this.acquisitionIdentityByPanel.clear();
@@ -1764,28 +1765,15 @@ export class AppShell {
 
   private markHistoryDirty(coalesceKey: string): void {
     if (this.restoringHistory) return;
-    this.historyDirty = coalesceKey;
     this.clearHistoryCoalesceTimer();
-    this.historyCoalesceTimer = window.setTimeout(() => {
-      this.historyCoalesceTimer = null;
-      const key = this.historyDirty;
-      this.historyDirty = null;
-      if (key !== null) {
-        this.history.commit(historySnapshot(this.workspace.snapshot()), key);
-      }
-      this.history.commit(historySnapshot(this.workspace.snapshot()));
-    }, 250);
+    this.history.commit(
+      historySnapshot(this.workspace.snapshot()),
+      coalesceKey,
+    );
   }
 
   private closeHistoryCoalescing(): void {
     this.clearHistoryCoalesceTimer();
-    const key = this.historyDirty;
-    this.historyDirty = null;
-    if (key !== null) {
-      this.history.commit(historySnapshot(this.workspace.snapshot()), key);
-      this.history.commit(historySnapshot(this.workspace.snapshot()));
-      return;
-    }
     this.history.commit(historySnapshot(this.workspace.snapshot()));
   }
 
@@ -2541,6 +2529,10 @@ export class AppShell {
             window.t1,
           );
           if (cached !== null) {
+            emitBenchEvent("fine-complete", {
+              panelId: panel.id,
+              cached: true,
+            });
             nextTiles.set(panel.id, cached);
             nextAcquisition.set(
               panel.id,
@@ -2566,6 +2558,7 @@ export class AppShell {
           const publishCoarse = (response: ColumnarTileResponse): void => {
             coarseResponse = mergeTileResponses(coarseResponse, response);
             if (refreshToken !== this.refreshToken) return;
+            emitBenchEvent("coarse-complete", { panelId: panel.id });
             nextTiles.set(panel.id, coarseResponse);
             nextAcquisition.set(
               panel.id,
@@ -2597,6 +2590,10 @@ export class AppShell {
             hasAllSignals(fineResponse, ids)
               ? fineResponse
               : coarseResponse;
+          emitBenchEvent("fine-complete", {
+            panelId: panel.id,
+            refined: response === fineResponse,
+          });
           this.tileWindowCache.store(panel.id, {
             response,
             window: paddedWindow,
@@ -3191,6 +3188,27 @@ function unsupportedHostMarkup(capability: string, reason: string): string {
       '<p class="unsupported-reason"></p>',
       `<p class="unsupported-reason">${escapeText(reason)}</p>`,
     );
+}
+
+function emitBenchEvent(
+  kind: string,
+  payload: Record<string, unknown> = {},
+): void {
+  const query = new URLSearchParams(globalThis.location?.search ?? "");
+  if (query.get("signalscope-bench") !== "1") return;
+  const host = globalThis as typeof globalThis & {
+    __signalscopeBenchEvents?: Array<{
+      kind: string;
+      time: number;
+      [key: string]: unknown;
+    }>;
+  };
+  host.__signalscopeBenchEvents ??= [];
+  host.__signalscopeBenchEvents.push({
+    kind,
+    time: performance.now(),
+    ...payload,
+  });
 }
 
 function mergeTileResponses(

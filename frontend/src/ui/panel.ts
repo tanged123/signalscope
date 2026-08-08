@@ -1019,6 +1019,18 @@ export class PanelView {
 
   setCursorMode(cursorMode: CursorMode): void {
     this.cursorMode = cursorMode;
+    if (
+      cursorMode === "track" &&
+      this.hoverPoint !== null &&
+      this.hoverClient !== null
+    ) {
+      this.updateHover(
+        this.hoverPoint.x,
+        this.hoverPoint.y,
+        this.hoverClient.x,
+        this.hoverClient.y,
+      );
+    }
     this.drawOverlay();
   }
 
@@ -1103,7 +1115,13 @@ export class PanelView {
     this.hoverPoint = { x: offsetX, y: offsetY };
     this.hoverClient = { x: clientX, y: clientY };
     const sequence = ++this.hoverSequence;
-    void this.pickAt(offsetX, offsetY, 6, false, sequence).then((result) => {
+    void this.pickAt(
+      offsetX,
+      offsetY,
+      Math.max(6, this.canvas.height),
+      false,
+      sequence,
+    ).then((result) => {
       if (sequence !== this.hoverSequence) return;
       this.callbacks.onCursor(
         this.id,

@@ -15,7 +15,7 @@ Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|gpu|bench|full]
   unit      Run frontend unit tests, optionally filtered.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
-  e2e       Run Playwright desktop and mobile-review smoke tests.
+  e2e       Run Playwright desktop/mobile smoke tests and the GPU proof.
   gpu       Run WebGPU software-adapter fidelity tests.
   bench     Run corpus, core, and Playwright performance benchmarks.
   full      Run quick checks, compile/test the Tauri shell, then run e2e.
@@ -147,6 +147,8 @@ e2e)
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
   pnpm e2e
+  bake_bench_smoke_artifact
+  pnpm --filter @signalscope/frontend exec playwright test --project=gpu
   ;;
 gpu)
   shift || true
@@ -182,6 +184,8 @@ full)
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
   pnpm e2e
+  bake_bench_smoke_artifact
+  pnpm --filter @signalscope/frontend exec playwright test --project=gpu
   ;;
 -h | --help | help)
   show_help

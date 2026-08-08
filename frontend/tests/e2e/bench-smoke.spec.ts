@@ -18,7 +18,7 @@ test("bench smoke: baked monte-carlo workspace renders and survives interaction"
   const readout = page.locator(".window-readout").first();
   const before = await readout.textContent();
   await startFrameProbe(page);
-  await interact(page);
+  await interact(page, false);
   const stats = await stopFrameProbe(page);
   expect(stats.frames).toBeGreaterThan(0);
   await expect(readout).not.toHaveText(before ?? "");

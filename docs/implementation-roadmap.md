@@ -108,8 +108,12 @@ phase.
 The four-phase WebGPU renderer sequence is complete: the product is one
 time-series path, pyramid tiles arrive in stable render order, Canvas2D line
 strokes are replaced by WebGPU pages, and interaction is proven with
-generation-safe refinement, asynchronous GPU picking, software-adapter image
-coverage, and the `mc1000`/`dense10k` benchmark matrix.
+generation-safe refinement, asynchronous GPU picking, software-adapter pixel
+masks, and the `mc1000`/`dense10k` benchmark matrix. The corrective proof
+requires GPU descriptor counts, successful frames, completed picks, recovery,
+and zero validation errors; the native smoke path remains capability-dependent
+on the host webview, so WSL/WebKitGTK without WebGPU reports the unsupported
+state rather than claiming native rendering.
 
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18

@@ -57,6 +57,7 @@ check_e2e() {
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
   pnpm e2e
+  "$signalscope_scripts_dir/test.sh" gpu
 }
 
 case "$mode" in
