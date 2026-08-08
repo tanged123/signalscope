@@ -88,9 +88,13 @@ pub struct OwnedBinarySeries {
     pub points: Vec<OwnedBinaryPoint>,
 }
 
-#[must_use]
 /// Encodes a set of columnar tile series into the native tile framing.
 ///
+/// # Errors
+///
+/// Returns a [`TileBinaryError`] when a series is inconsistent or cannot be
+/// represented by the binary framing fields.
+#[allow(clippy::cast_possible_truncation)]
 pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Result<Vec<u8>, TileBinaryError> {
     let capacity = 16usize
         .checked_add(

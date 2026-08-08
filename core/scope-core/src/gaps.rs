@@ -25,6 +25,9 @@ impl GapRunBuilder {
     }
 
     #[must_use]
+    /// # Panics
+    ///
+    /// Panics only if the builder's internal range invariants are violated.
     pub fn finish(mut self) -> GapRuns {
         if let Some(start) = self.open_start.take() {
             self.ranges.push((start, self.next_index));

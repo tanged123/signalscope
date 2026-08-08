@@ -281,10 +281,17 @@ enum PyramidColumns {
 
 impl Pyramid {
     #[must_use]
+    /// # Panics
+    ///
+    /// Panics when the signal's columns cannot be read.
     pub fn from_signal(signal: &Signal) -> Self {
         Self::try_from_signal(signal).expect("signal columns are readable")
     }
 
+    /// # Errors
+    ///
+    /// Returns a [`PyramidError`] when the signal columns cannot be read or
+    /// fail pyramid validation.
     pub fn try_from_signal(signal: &Signal) -> Result<Self, PyramidError> {
         Self::build_from_columns(
             signal.time_column(),
@@ -312,6 +319,10 @@ impl Pyramid {
             .expect("owned columns are readable")
     }
 
+    /// # Errors
+    ///
+    /// Returns a [`PyramidError`] when the columns cannot be read or fail
+    /// pyramid validation.
     pub fn from_columns(
         time: &Column,
         values: &Column,

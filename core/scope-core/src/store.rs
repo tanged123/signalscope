@@ -84,6 +84,7 @@ impl Signal {
     ///
     /// Returns an error when the columns have different lengths or the time
     /// column is not finite and nondecreasing.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_gaps(
         id: SignalId,
         source_id: SourceId,
@@ -281,6 +282,11 @@ impl SignalStore {
     }
 
     /// Registers a signal with gap metadata produced during decoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StoreError`] when the source is unknown, the signal
+    /// identity is already registered, or the columns are invalid.
     pub fn insert_signal_with_gaps(
         &mut self,
         source_id: SourceId,
