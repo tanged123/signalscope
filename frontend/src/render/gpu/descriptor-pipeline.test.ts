@@ -4,7 +4,11 @@ import {
   prepareSegmentDirectories,
   type SegmentDirectory,
 } from "./descriptor-builder";
-import { GpuDescriptorPipeline } from "./descriptor-pipeline";
+import {
+  descriptorFixtureResult,
+  GpuDescriptorPipeline,
+  runDescriptorFixture,
+} from "./descriptor-pipeline";
 
 function directory(
   seriesSlot: number,
@@ -33,5 +37,7 @@ describe("GPU descriptor pipeline", () => {
 
   it("exposes the GPU-owned buffer contract", () => {
     expect(GpuDescriptorPipeline).toBeDefined();
+    expect(descriptorFixtureResult).toBeDefined();
+    expect(runDescriptorFixture).toBeDefined();
   });
 });

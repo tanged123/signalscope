@@ -9,8 +9,6 @@ export interface TileIdentity {
   readonly sourceEnd: string;
 }
 
-export interface TileKey extends TileIdentity {}
-
 export interface ResidencyTile extends TileIdentity {
   readonly origin: number;
   readonly seriesSlot: number;

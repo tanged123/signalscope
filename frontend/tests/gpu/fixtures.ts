@@ -114,15 +114,6 @@ export async function pixelFixture(page: Page): Promise<{
   };
 }
 
-export async function resetGpuMetrics(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const host = window as typeof window & {
-      __signalscopeBench?: { reset: () => void };
-    };
-    host.__signalscopeBench?.reset();
-  });
-}
-
 export async function openGpuFixture(page: Page): Promise<void> {
   const artifact =
     process.env.SIGNALSCOPE_GPU_ARTIFACT ?? "build/bench/smoke.html";
