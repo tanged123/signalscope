@@ -14,7 +14,7 @@ struct View {
 };
 
 struct Point { time_offset: f32, value: f32, flags: u32, reserved: u32 };
-struct Descriptor { first_point: u32, second_point: u32, series_slot: u32, source_order: u32 };
+struct Descriptor { first_point: u32, second_point: u32, series_slot: u32, tile_meta_index: u32 };
 struct Style { rgba: vec4f, width: f32, dash: u32, flags: u32, reserved: u32 };
 struct TileMeta { point_start: u32, point_count: u32, origin_high: f32, origin_low: f32 };
 
@@ -34,19 +34,10 @@ struct VertexOutput {
 
 fn outside() -> vec4f { return vec4f(2.0, 2.0, 0.0, 1.0); }
 
-fn origin_for(point_index: u32) -> vec2f {
-  for (var index = 0u; index < arrayLength(&tile_meta); index += 1u) {
-    let tile = tile_meta[index];
-    if (point_index >= tile.point_start && point_index < tile.point_start + tile.point_count) {
-      return vec2f(tile.origin_high, tile.origin_low);
-    }
-  }
-  return vec2f(0.0, 0.0);
-}
-
-fn project(point_index: u32) -> vec2f {
+fn project(point_index: u32, tile_meta_index: u32) -> vec2f {
   let point = points[point_index];
-  let origin = origin_for(point_index);
+  let tile = tile_meta[tile_meta_index];
+  let origin = vec2f(tile.origin_high, tile.origin_low);
   let time = (origin.x - view.view_origin_high) + (origin.y - view.view_origin_low) + point.time_offset;
   return vec2f(
     view.plot_x + time * view.time_scale,
@@ -80,8 +71,8 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance
     output.position = outside();
     return output;
   }
-  let first = project(descriptor.first_point);
-  let second = project(descriptor.second_point);
+  let first = project(descriptor.first_point, descriptor.tile_meta_index);
+  let second = project(descriptor.second_point, descriptor.tile_meta_index);
   let direction = normalize(second - first);
   let normal = vec2f(-direction.y, direction.x);
   let corners = array<vec2f, 6>(

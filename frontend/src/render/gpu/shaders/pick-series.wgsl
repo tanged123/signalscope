@@ -19,7 +19,7 @@ struct Request {
 };
 
 struct Point { time_offset: f32, value: f32, flags: u32, reserved: u32 };
-struct SeriesRange { point_start: u32, point_count: u32, series_slot: u32, reserved: u32 };
+struct SeriesRange { point_start: u32, point_count: u32, series_slot: u32, tile_meta_index: u32 };
 struct Style { rgba: vec4f, width: f32, dash: u32, flags: u32, reserved: u32 };
 struct TileMeta { point_start: u32, point_count: u32, origin_high: f32, origin_low: f32 };
 struct Candidate {
@@ -41,16 +41,6 @@ struct Page { candidate_offset: u32, series_count: u32, reserved0: u32, reserved
 @group(0) @binding(4) var<storage, read> styles: array<Style>;
 @group(0) @binding(5) var<storage, read_write> candidates: array<Candidate>;
 @group(0) @binding(6) var<uniform> page: Page;
-
-fn origin_for(point_index: u32) -> vec2f {
-  for (var index = 0u; index < arrayLength(&tile_meta); index += 1u) {
-    let tile = tile_meta[index];
-    if (point_index >= tile.point_start && point_index < tile.point_start + tile.point_count) {
-      return vec2f(tile.origin_high, tile.origin_low);
-    }
-  }
-  return vec2f(0.0, 0.0);
-}
 
 fn point_time(point: Point, origin: vec2f) -> f32 {
   return origin.x + origin.y + point.time_offset;
@@ -132,7 +122,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     candidates[output_index] = invalid();
     return;
   }
-  let origin = origin_for(range.point_start);
+  let tile = tile_meta[range.tile_meta_index];
+  let origin = vec2f(tile.origin_high, tile.origin_low);
   let cursor_time = request.view_origin_high + request.view_origin_low +
     (request.cursor_x - request.plot_x) / request.time_scale;
   var low = 0u;

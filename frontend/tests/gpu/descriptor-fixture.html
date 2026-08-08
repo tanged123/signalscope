@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SignalScope GPU descriptor fixture</title>
+  </head>
+  <body>
+    <script type="module">
+      import { GpuRuntime } from "/src/render/gpu/runtime.ts";
+      import {
+        descriptorFixtureResult,
+        runDescriptorFixture,
+      } from "/src/render/gpu/descriptor-pipeline.ts";
+
+      try {
+        const created = await GpuRuntime.create(navigator.gpu);
+        if (!created.supported) {
+          document.body.dataset.error =
+            String(created.capability) + ": " + String(created.reason);
+        } else {
+          const result = await runDescriptorFixture(created.runtime);
+          document.body.dataset.result = JSON.stringify(
+            descriptorFixtureResult(result),
+          );
+          created.runtime.device.destroy();
+        }
+      } catch (error) {
+        document.body.dataset.error =
+          error instanceof Error ? error.message : String(error);
+      }
+    </script>
+  </body>
+</html>

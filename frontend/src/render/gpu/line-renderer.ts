@@ -5,13 +5,16 @@ import type { GpuArena } from "./arena";
 import {
   directoryFromResident,
   prepareSegmentDirectories,
-  type SegmentDescriptor,
+  tileDirectoryFromPrepared,
+  type TileDirectory,
 } from "./descriptor-builder";
+import { GpuDescriptorPipeline } from "./descriptor-pipeline";
 import { type GpuResidency, type ResidentTile } from "./residency";
 import type { SeriesStyle } from "./series-slots";
 import { splitF64 } from "./precision";
 import {
   GpuPicker,
+  type PickPage,
   type PickRequest,
   type PickResult,
   type PickViewport,
@@ -21,7 +24,6 @@ import quadShader from "./shaders/line-quad.wgsl?raw";
 import hairlineShader from "./shaders/line-hairline.wgsl?raw";
 
 const GPU_BUFFER_UNIFORM = 0x0040;
-const GPU_BUFFER_INDIRECT = 0x0100;
 
 export interface LineViewport {
   readonly xMin: number;
@@ -42,14 +44,17 @@ export interface LineMetrics {
 }
 
 interface PageBuffers {
-  descriptors: GPUBuffer;
+  descriptors: GPUBuffer | null;
   descriptorCapacity: number;
   descriptorCount: number;
+  directories: GPUBuffer;
+  directoryCapacity: number;
+  descriptorPipeline: GpuDescriptorPipeline;
   metadata: GPUBuffer;
   metadataCapacity: number;
   metadataCount: number;
-  quadArgs: GPUBuffer;
-  hairlineArgs: GPUBuffer;
+  quadArgs: GPUBuffer | null;
+  hairlineArgs: GPUBuffer | null;
   pickRanges: GPUBuffer;
   pickRangeCapacity: number;
   pickRangeCount: number;
@@ -128,7 +133,6 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   }
 
   encode(encoder: GPUCommandEncoder): void {
-    this.picker.encode(encoder);
     if (
       !this.sceneDirty &&
       !this.transformDirty &&
@@ -165,7 +169,8 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.writeUniform(dense);
     this.ensureStyleBuffer();
     if (this.styleDirty) this.writeStyles();
-    if (this.residencyDirty) this.rebuildPages(pageIds);
+    if (this.residencyDirty) this.rebuildPages(pageIds, encoder);
+    this.picker.encode(encoder);
 
     const view = this.context.getCurrentTexture().createView();
     const quadPipeline = this.quadPipeline();
@@ -182,7 +187,13 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     quadPass.setPipeline(quadPipeline);
     for (const page of pageIds) {
       const buffers = this.pages.get(page);
-      if (buffers === undefined || buffers.descriptorCount === 0) continue;
+      if (
+        buffers === undefined ||
+        buffers.descriptorCount === 0 ||
+        buffers.descriptors === null ||
+        buffers.quadArgs === null
+      )
+        continue;
       quadPass.setBindGroup(0, this.bindGroup(quadPipeline, page, buffers));
       quadPass.drawIndirect(buffers.quadArgs, 0);
     }
@@ -202,7 +213,13 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       hairlinePass.setPipeline(hairlinePipeline);
       for (const page of pageIds) {
         const buffers = this.pages.get(page);
-        if (buffers === undefined || buffers.descriptorCount === 0) continue;
+        if (
+          buffers === undefined ||
+          buffers.descriptorCount === 0 ||
+          buffers.descriptors === null ||
+          buffers.hairlineArgs === null
+        )
+          continue;
         hairlinePass.setBindGroup(
           0,
           this.bindGroup(hairlinePipeline, page, buffers),
@@ -331,18 +348,36 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     );
   }
 
-  private rebuildPages(pageIds: readonly number[]): void {
+  private rebuildPages(
+    pageIds: readonly number[],
+    encoder: GPUCommandEncoder,
+  ): void {
     const active = new Set(pageIds);
     for (const page of this.pages.keys()) {
-      if (!active.has(page)) this.pages.delete(page);
+      if (!active.has(page)) {
+        const buffers = this.pages.get(page);
+        buffers?.descriptorPipeline.destroy();
+        buffers?.directories.destroy();
+        this.pages.delete(page);
+      }
     }
     for (const page of pageIds) {
       const pageTiles = this.tiles.filter((tile) => tile.points.page === page);
-      const directories = prepareSegmentDirectories(
+      const prepared = prepareSegmentDirectories(
         pageTiles.map(directoryFromResident),
       );
-      const descriptors = directories.flatMap((entry) => entry.candidates);
-      const metadata = pageTiles.map((tile): TileMetadata => {
+      const directories = prepared.map(tileDirectoryFromPrepared);
+      const tilesByPointStart = new Map(
+        pageTiles.map((tile) => [tile.points.offset / 16, tile]),
+      );
+      const orderedTiles = prepared
+        .map((entry) => tilesByPointStart.get(entry.pointOffset))
+        .filter((tile): tile is ResidentTile => tile !== undefined);
+      const candidateCount = directories.reduce(
+        (total, directory) => total + Math.max(0, directory.pointCount - 1),
+        0,
+      );
+      const metadata = orderedTiles.map((tile): TileMetadata => {
         const [originHigh, originLow] = splitF64(tile.origin);
         return {
           pointStart: tile.points.offset / 16,
@@ -353,45 +388,50 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       });
       const buffers = this.pageBuffers(
         page,
-        descriptors.length,
+        candidateCount,
+        directories.length,
         metadata.length,
-        pageTiles.length,
+        orderedTiles.length,
       );
-      buffers.descriptorCount = descriptors.length;
+      buffers.descriptorCount = candidateCount;
       buffers.metadataCount = metadata.length;
-      buffers.pickRangeCount = pageTiles.length;
-      this.writeDescriptors(buffers.descriptors, descriptors);
+      buffers.pickRangeCount = orderedTiles.length;
+      buffers.descriptorPipeline.ensureCapacity(
+        candidateCount,
+        directories.length,
+      );
+      this.writeDirectories(buffers.directories, directories);
       this.writeMetadata(buffers.metadata, metadata);
-      this.writePickRanges(buffers.pickRanges, pageTiles);
+      this.writePickRanges(buffers.pickRanges, orderedTiles);
+      const built = buffers.descriptorPipeline.encode(
+        encoder,
+        buffers.directories,
+        candidateCount,
+      );
+      buffers.descriptors = built.descriptors;
+      buffers.quadArgs = built.quadArgs;
+      buffers.hairlineArgs = built.hairlineArgs;
       this.gpuMetrics()?.recordDescriptorRebuild();
-      this.writeIndirect(buffers.quadArgs, [6, descriptors.length, 0, 0]);
-      this.writeIndirect(buffers.hairlineArgs, [
-        descriptors.length * 2,
-        1,
-        0,
-        0,
-      ]);
     }
-    this.picker.setScene(
-      pageIds.flatMap((page) => {
-        const buffers = this.pages.get(page);
-        if (buffers === undefined || this.arena === undefined) return [];
-        return [
-          {
-            pointBuffer: this.arena.buffer(page),
-            rangeBuffer: buffers.pickRanges,
-            metadataBuffer: buffers.metadata,
-            styleBuffer: this.styleBuffer as GPUBuffer,
-            seriesCount: buffers.pickRangeCount,
-          },
-        ];
-      }),
-    );
+    const pickerPages: PickPage[] = [];
+    for (const page of pageIds) {
+      const buffers = this.pages.get(page);
+      if (buffers === undefined || this.arena === undefined) continue;
+      pickerPages.push({
+        pointBuffer: this.arena.buffer(page),
+        rangeBuffer: buffers.pickRanges,
+        metadataBuffer: buffers.metadata,
+        styleBuffer: this.styleBuffer as GPUBuffer,
+        seriesCount: buffers.pickRangeCount,
+      });
+    }
+    this.picker.setScene(pickerPages);
   }
 
   private pageBuffers(
     page: number,
     descriptorCount: number,
+    directoryCount: number,
     metadataCount: number,
     pickRangeCount: number,
   ): PageBuffers {
@@ -399,24 +439,36 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     if (
       existing !== undefined &&
       existing.descriptorCapacity >= descriptorCount &&
+      existing.directoryCapacity >= directoryCount &&
       existing.metadataCapacity >= metadataCount &&
       existing.pickRangeCapacity >= pickRangeCount
     ) {
       return existing;
     }
-    existing?.descriptors.destroy();
+    existing?.descriptorPipeline.destroy();
+    existing?.directories.destroy();
     existing?.metadata.destroy();
-    existing?.quadArgs.destroy();
-    existing?.hairlineArgs.destroy();
     existing?.pickRanges.destroy();
+    const directoryCapacity = nextCapacity(directoryCount);
     const next: PageBuffers = {
-      descriptors: this.runtime.device.createBuffer({
-        label: `${this.id}-page-${String(page)}-descriptors`,
-        size: Math.max(16, nextCapacity(descriptorCount) * 16),
+      descriptors: null,
+      quadArgs: null,
+      hairlineArgs: null,
+      directories: this.runtime.device.createBuffer({
+        label: `${this.id}-page-${String(page)}-directories`,
+        size: Math.max(16, directoryCapacity * 16),
         usage: GPU_BUFFER_STORAGE | GPU_BUFFER_COPY_DST,
       }),
       descriptorCapacity: nextCapacity(descriptorCount),
+      directoryCapacity,
       descriptorCount: 0,
+      descriptorPipeline: new GpuDescriptorPipeline(
+        this.runtime,
+        this.arena?.buffer(page) ??
+          (() => {
+            throw new Error("line renderer arena missing");
+          })(),
+      ),
       metadata: this.runtime.device.createBuffer({
         label: `${this.id}-page-${String(page)}-tile-metadata`,
         size: Math.max(16, nextCapacity(metadataCount) * 16),
@@ -424,16 +476,6 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       }),
       metadataCapacity: nextCapacity(metadataCount),
       metadataCount: 0,
-      quadArgs: this.runtime.device.createBuffer({
-        label: `${this.id}-page-${String(page)}-quad-args`,
-        size: 16,
-        usage: GPU_BUFFER_STORAGE | GPU_BUFFER_COPY_DST | GPU_BUFFER_INDIRECT,
-      }),
-      hairlineArgs: this.runtime.device.createBuffer({
-        label: `${this.id}-page-${String(page)}-hairline-args`,
-        size: 16,
-        usage: GPU_BUFFER_STORAGE | GPU_BUFFER_COPY_DST | GPU_BUFFER_INDIRECT,
-      }),
       pickRanges: this.runtime.device.createBuffer({
         label: `${this.id}-page-${String(page)}-pick-ranges`,
         size: Math.max(16, nextCapacity(pickRangeCount) * 16),
@@ -446,16 +488,16 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     return next;
   }
 
-  private writeDescriptors(
+  private writeDirectories(
     buffer: GPUBuffer,
-    descriptors: readonly SegmentDescriptor[],
+    directories: readonly TileDirectory[],
   ): void {
-    const values = new Uint32Array(Math.max(1, descriptors.length) * 4);
-    descriptors.forEach((descriptor, index) => {
-      values[index * 4] = descriptor.firstPoint;
-      values[index * 4 + 1] = descriptor.secondPoint;
-      values[index * 4 + 2] = descriptor.seriesSlot;
-      values[index * 4 + 3] = descriptor.sourceOrder;
+    const values = new Uint32Array(Math.max(1, directories.length) * 4);
+    directories.forEach((directory, index) => {
+      values[index * 4] = directory.pointStart;
+      values[index * 4 + 1] = directory.pointCount;
+      values[index * 4 + 2] = directory.seriesSlot;
+      values[index * 4 + 3] = directory.tileMetaIndex;
     });
     this.runtime.queue.writeBuffer(
       buffer,
@@ -494,20 +536,12 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       values[offset] = tile.points.offset / 16;
       values[offset + 1] = tile.pointCount;
       values[offset + 2] = tile.seriesSlot;
-      values[offset + 3] = tile.forceBreakFirst ? 1 : 0;
+      values[offset + 3] = index;
     });
     this.runtime.queue.writeBuffer(
       buffer,
       0,
       values as unknown as GPUAllowSharedBufferSource,
-    );
-  }
-
-  private writeIndirect(buffer: GPUBuffer, values: readonly number[]): void {
-    this.runtime.queue.writeBuffer(
-      buffer,
-      0,
-      new Uint32Array(values) as unknown as GPUAllowSharedBufferSource,
     );
   }
 
@@ -526,6 +560,8 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       throw new Error("line renderer buffers are not initialized");
     if (this.arena === undefined)
       throw new Error("line renderer arena missing");
+    if (buffers.descriptors === null)
+      throw new Error("line renderer descriptors are not initialized");
     return this.runtime.device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [

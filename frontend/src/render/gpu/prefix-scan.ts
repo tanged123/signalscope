@@ -4,7 +4,7 @@ export interface ScanDispatch {
   readonly workgroups: number;
 }
 
-const VALUES_PER_WORKGROUP = 512;
+const VALUES_PER_WORKGROUP = 256;
 
 export function exclusiveScan(values: readonly number[]): {
   values: number[];

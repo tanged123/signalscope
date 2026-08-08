@@ -1,6 +1,36 @@
 import { expect, type Page } from "@playwright/test";
 import type { GpuMetricsSnapshot } from "../../src/render/gpu/metrics";
 
+export async function descriptorFixture(page: Page): Promise<{
+  descriptors: readonly number[];
+  descriptorCount: number;
+  quadArgs: readonly number[];
+  hairlineArgs: readonly number[];
+}> {
+  await page.goto("http://127.0.0.1:4173/tests/gpu/descriptor-fixture.html");
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () =>
+            document.body.dataset.result ?? document.body.dataset.error ?? null,
+        ),
+      { timeout: 60_000 },
+    )
+    .not.toBeNull();
+  const error = await page.locator("body").getAttribute("data-error");
+  if (error !== null) throw new Error(error);
+  const encoded = await page.locator("body").getAttribute("data-result");
+  if (encoded === null)
+    throw new Error("GPU descriptor fixture is unavailable");
+  return JSON.parse(encoded) as {
+    descriptors: readonly number[];
+    descriptorCount: number;
+    quadArgs: readonly number[];
+    hairlineArgs: readonly number[];
+  };
+}
+
 export async function gpuMetrics(page: Page): Promise<GpuMetricsSnapshot> {
   const snapshot = await page.evaluate(() => {
     const host = window as typeof window & {

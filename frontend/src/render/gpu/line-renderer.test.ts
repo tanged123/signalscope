@@ -55,4 +55,11 @@ describe("GpuLineRenderer", () => {
     expect(renderer.metrics().pages).toBe(2);
     expect(renderer.metrics().drawCalls).toBe(2);
   });
+
+  it("reports compacted GPU candidates separately from source segments", () => {
+    const renderer = new GpuLineRenderer(runtime(), undefined, "panel");
+    renderer.setTiles([tile(0, "a"), tile(0, "b")]);
+    renderer.encode({} as GPUCommandEncoder);
+    expect(renderer.metrics().descriptors).toBe(2);
+  });
 });

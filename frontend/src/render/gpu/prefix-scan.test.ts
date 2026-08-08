@@ -20,6 +20,10 @@ describe("GPU prefix scan", () => {
     },
   );
 
+  it("uses 256 values per scan workgroup", () => {
+    expect(scanDispatchPlan(257)[0]?.workgroups).toBe(2);
+  });
+
   it("does not dispatch a zero-length scan", () => {
     const encoder = {
       dispatchWorkgroups: vi.fn(),

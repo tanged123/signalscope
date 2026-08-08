@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCpuSegmentDescriptors,
   prepareSegmentDirectories,
   type SegmentDirectory,
 } from "./descriptor-builder";
@@ -34,7 +35,7 @@ describe("segment directories", () => {
     const prepared = prepareSegmentDirectories([
       directory(0, "0", 100, 4, [false, true, false, false]),
     ]);
-    expect(prepared[0]?.candidates).toEqual([
+    expect(buildCpuSegmentDescriptors(prepared)).toEqual([
       { firstPoint: 101, secondPoint: 102, seriesSlot: 0, sourceOrder: 0 },
       { firstPoint: 102, secondPoint: 103, seriesSlot: 0, sourceOrder: 1 },
     ]);

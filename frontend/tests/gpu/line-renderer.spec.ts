@@ -1,5 +1,10 @@
 import { expect, test } from "../e2e/fixtures";
-import { gpuMetrics, openGpuFixture, resetGpuMetrics } from "./fixtures";
+import {
+  descriptorFixture,
+  gpuMetrics,
+  openGpuFixture,
+  resetGpuMetrics,
+} from "./fixtures";
 
 test("compiles production shaders before rendering", async ({ page }) => {
   test.setTimeout(120_000);
@@ -32,4 +37,15 @@ test("software adapter renders every selected series through bounded GPU passes"
   await expect(page.locator(".series-canvas").first()).toHaveScreenshot(
     "line-renderer.png",
   );
+});
+
+test("compacts ordered segments with GPU descriptors and indirect counts", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const result = await descriptorFixture(page);
+  expect(result.descriptorCount).toBe(2);
+  expect([...result.descriptors]).toEqual([0, 1, 0, 0, 5, 6, 1, 1]);
+  expect([...result.quadArgs]).toEqual([6, 2, 0, 0]);
+  expect([...result.hairlineArgs]).toEqual([2, 2, 0, 0]);
 });

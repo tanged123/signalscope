@@ -16,8 +16,15 @@ export interface SegmentDirectory {
   readonly breaks: readonly boolean[];
 }
 
+export interface TileDirectory {
+  readonly pointStart: number;
+  readonly pointCount: number;
+  readonly seriesSlot: number;
+  readonly tileMetaIndex: number;
+}
+
 export interface PreparedDirectory extends SegmentDirectory {
-  readonly candidates: SegmentDescriptor[];
+  readonly tileMetaIndex: number;
 }
 
 export function prepareSegmentDirectories(
@@ -29,12 +36,21 @@ export function prepareSegmentDirectories(
       compareU64(left.sourceStart, right.sourceStart) ||
       left.pointOffset - right.pointOffset,
   );
+  return sorted.map((directory, tileMetaIndex) => ({
+    ...directory,
+    tileMetaIndex,
+  }));
+}
+
+export function buildCpuSegmentDescriptors(
+  directories: readonly PreparedDirectory[],
+): SegmentDescriptor[] {
   let sourceOrder = 0;
-  return sorted.map((directory) => {
-    const candidates: SegmentDescriptor[] = [];
+  const descriptors: SegmentDescriptor[] = [];
+  for (const directory of directories) {
     for (let index = 0; index + 1 < directory.pointCount; index += 1) {
       if (directory.breaks[index + 1] === true) continue;
-      candidates.push({
+      descriptors.push({
         firstPoint: directory.pointOffset + index,
         secondPoint: directory.pointOffset + index + 1,
         seriesSlot: directory.seriesSlot,
@@ -42,8 +58,19 @@ export function prepareSegmentDirectories(
       });
       sourceOrder += 1;
     }
-    return { ...directory, candidates };
-  });
+  }
+  return descriptors;
+}
+
+export function tileDirectoryFromPrepared(
+  directory: PreparedDirectory,
+): TileDirectory {
+  return {
+    pointStart: directory.pointOffset,
+    pointCount: directory.pointCount,
+    seriesSlot: directory.seriesSlot,
+    tileMetaIndex: directory.tileMetaIndex,
+  };
 }
 
 export function directoryFromResident(tile: ResidentTile): SegmentDirectory {
