@@ -49,6 +49,7 @@ export class WorkspaceView {
     const alive = new Set(this.model.panels().map((panel) => panel.id));
     for (const [id, view] of this.views) {
       if (!alive.has(id)) {
+        view.dispose();
         view.element.remove();
         this.views.delete(id);
       }

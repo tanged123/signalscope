@@ -29,6 +29,7 @@ function deviceMock() {
     createShaderModule: vi.fn(
       (descriptor: GPUShaderModuleDescriptor) => descriptor,
     ),
+    destroy: vi.fn(),
     addEventListener: vi.fn(),
   } as unknown as GPUDevice;
   return { device, lose };
@@ -58,8 +59,10 @@ describe("GpuRuntime", () => {
     const panel = {
       id: "panel",
       encode: vi.fn(),
+      afterSubmit: vi.fn(),
       deviceLost: vi.fn(),
       deviceRestored: vi.fn(),
+      dispose: vi.fn(),
     };
     const errors: unknown[] = [];
     runtimeResult.runtime.onError((error) => errors.push(error));
@@ -68,6 +71,10 @@ describe("GpuRuntime", () => {
     await Promise.resolve();
     expect(panel.deviceLost).toHaveBeenCalledTimes(1);
     expect(errors).toEqual([{ kind: "lost", message: "lost" }]);
+    expect(runtimeResult.runtime.state()).toEqual({
+      kind: "recovering",
+      message: "lost",
+    });
   });
 
   it("reacquires one device and restores registered panels", async () => {
@@ -99,8 +106,10 @@ describe("GpuRuntime", () => {
     const panel = {
       id: "panel",
       encode: vi.fn(),
+      afterSubmit: vi.fn(),
       deviceLost: vi.fn(),
       deviceRestored: vi.fn(),
+      dispose: vi.fn(),
     };
     const restored = vi.fn();
     runtimeResult.runtime.onRestored(restored);

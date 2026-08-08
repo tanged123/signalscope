@@ -130,6 +130,7 @@ export class GpuPicker {
   private scheduler: GpuPickerScheduler | null = null;
   private pickPipeline: GPUComputePipeline | null = null;
   private reducePipeline: GPUComputePipeline | null = null;
+  private disposed = false;
 
   constructor(
     deviceOrRuntime?: GPUDevice | PickerRuntime,
@@ -142,6 +143,7 @@ export class GpuPicker {
   }
 
   setScene(scene: readonly PickPage[]): void {
+    if (this.disposed) return;
     this.scene = scene;
     const origins: number[] = [];
     for (const page of scene) {
@@ -166,16 +168,11 @@ export class GpuPicker {
   }
 
   resetDevice(deviceOrRuntime: GPUDevice | PickerRuntime): void {
-    this.uniformBuffer = null;
-    this.resultBuffer = null;
-    this.candidateBuffer = null;
-    this.reduceScratchBuffer = null;
-    this.candidateCapacity = 0;
-    this.reduceCapacity = 0;
-    this.pageUniforms.length = 0;
-    this.reduceParams.length = 0;
-    this.pickPipeline = null;
-    this.reducePipeline = null;
+    this.clearWork();
+    this.destroyGpuResources();
+    this.latestResult = null;
+    this.lastHoverAt = Number.NEGATIVE_INFINITY;
+    this.disposed = false;
     if ("device" in deviceOrRuntime) {
       this.runtime = deviceOrRuntime;
       this.device = deviceOrRuntime.device;
@@ -186,6 +183,7 @@ export class GpuPicker {
   }
 
   request(request: PickRequest): Promise<PickResult | null> {
+    if (this.disposed) return Promise.resolve(null);
     return new Promise((resolve) => {
       const work = { request, resolve, startedAt: this.now() };
       if (request.explicit) {
@@ -208,6 +206,7 @@ export class GpuPicker {
   }
 
   encode(encoder: GPUCommandEncoder): void {
+    if (this.disposed) return;
     const work = this.explicit[0] ?? this.pendingHover;
     if (work === null) return;
     const slot = this.slots.find((candidate) => candidate.work === null);
@@ -261,6 +260,20 @@ export class GpuPicker {
     }
   }
 
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.clearWork();
+    this.destroyGpuResources();
+    this.latestResult = null;
+    this.scene = [];
+    this.tileOrigins = [];
+    this.viewport = null;
+    this.scheduler = null;
+    this.runtime = undefined;
+    this.device = undefined;
+  }
+
   private async readSlot(slot: Slot): Promise<void> {
     if (slot.buffer === null || slot.sequence === null || slot.work === null)
       return;
@@ -284,6 +297,43 @@ export class GpuPicker {
     } catch {
       this.complete(sequence, null);
     }
+  }
+
+  private clearWork(): void {
+    for (const work of this.explicit.splice(0)) work.resolve(null);
+    if (this.pendingHover !== null) {
+      this.pendingHover.resolve(null);
+      this.pendingHover = null;
+    }
+    for (const slot of this.slots) {
+      slot.work?.resolve(null);
+      slot.work = null;
+      slot.sequence = null;
+      slot.submitted = false;
+    }
+  }
+
+  private destroyGpuResources(): void {
+    for (const slot of this.slots) {
+      slot.buffer?.destroy();
+      slot.buffer = null;
+    }
+    this.uniformBuffer?.destroy();
+    this.resultBuffer?.destroy();
+    this.candidateBuffer?.destroy();
+    this.reduceScratchBuffer?.destroy();
+    this.pageUniforms.forEach((buffer) => buffer.destroy());
+    this.reduceParams.forEach((buffer) => buffer.destroy());
+    this.uniformBuffer = null;
+    this.resultBuffer = null;
+    this.candidateBuffer = null;
+    this.reduceScratchBuffer = null;
+    this.candidateCapacity = 0;
+    this.reduceCapacity = 0;
+    this.pageUniforms.length = 0;
+    this.reduceParams.length = 0;
+    this.pickPipeline = null;
+    this.reducePipeline = null;
   }
 
   private encodeGpu(

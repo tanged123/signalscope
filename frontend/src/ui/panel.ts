@@ -517,6 +517,9 @@ export class PanelView {
   private rosterCleanup: (() => void) | null = null;
   private bindingCleanup: (() => void) | null = null;
   private rulesCleanup: (() => void) | null = null;
+  private runtimeDisposer: (() => void) | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+  private disposed = false;
 
   constructor(
     private readonly id: string,
@@ -559,7 +562,7 @@ export class PanelView {
         this.arena,
         this.residency,
       );
-      runtime.register(this.gpuRenderer);
+      this.runtimeDisposer = runtime.register(this.gpuRenderer);
     }
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
@@ -595,9 +598,25 @@ export class PanelView {
         this.beginAxisEdit(axis);
       },
     });
-    new ResizeObserver(() => {
+    this.resizeObserver = new ResizeObserver(() => {
       this.callbacks.onResized(this.id);
-    }).observe(this.canvas);
+    });
+    this.resizeObserver.observe(this.canvas);
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.runtimeDisposer?.();
+    this.runtimeDisposer = null;
+    this.closeInspector();
+    this.closeRoster();
+    this.closeBindingPopover();
+    this.closeRulesPopover();
+    this.clearHover();
+    this.gpuRenderer?.dispose();
   }
 
   private bind(): void {

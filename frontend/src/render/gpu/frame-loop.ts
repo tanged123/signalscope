@@ -1,9 +1,10 @@
 export interface GpuPanelEncoder {
   readonly id: string;
   encode(encoder: GPUCommandEncoder): void;
-  afterSubmit?(): void;
+  afterSubmit(): void;
   deviceLost(): void;
   deviceRestored(device: GPUDevice, format: GPUTextureFormat): void;
+  dispose(): void;
 }
 
 export class GpuFrameLoop {
@@ -27,6 +28,7 @@ export class GpuFrameLoop {
       error: unknown,
     ) => void = () => undefined,
     private readonly onFrame: (durationMs: number) => void = () => undefined,
+    private readonly onSuccessfulSubmit: () => void = () => undefined,
   ) {}
 
   register(panel: GpuPanelEncoder): () => void {
@@ -86,7 +88,8 @@ export class GpuFrameLoop {
     }
     if (encoded.length > 0) {
       this.queue.submit([encoder.finish()]);
-      encoded.forEach((panel) => panel.afterSubmit?.());
+      encoded.forEach((panel) => panel.afterSubmit());
+      this.onSuccessfulSubmit();
     }
     this.onFrame(performance.now() - started);
   }

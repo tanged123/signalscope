@@ -124,6 +124,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
   private styleBuffer: GPUBuffer | null = null;
   private styleCapacity = 0;
   private readonly pages = new Map<number, PageBuffers>();
+  private disposed = false;
   private lastMetrics: LineMetrics = { pages: 0, drawCalls: 0, descriptors: 0 };
   sceneDirty = false;
   transformDirty = false;
@@ -305,26 +306,56 @@ export class GpuLineRenderer implements GpuPanelEncoder {
 
   deviceLost(): void {
     this.renderTargets.destroy();
+    this.destroyPageBuffers();
+    this.uniformBuffer?.destroy();
+    this.uniformBuffer = null;
+    this.styleBuffer?.destroy();
+    this.styleBuffer = null;
     this.arena?.destroy();
     this.residency?.dropDevice();
     this.tiles = [];
     this.picker.setScene([]);
+    this.picker.resetDevice(this.runtime);
     this.sceneDirty = true;
   }
 
-  deviceRestored(device: GPUDevice): void {
+  deviceRestored(device: GPUDevice, format: GPUTextureFormat): void {
     this.arena?.restore(device, this.runtime.queue);
     if (this.context !== undefined) {
-      this.renderTargets.configure(device, this.context, this.runtime.format);
+      this.context.configure({
+        device,
+        format,
+        alphaMode: "premultiplied",
+      });
+      this.renderTargets.configure(device, this.context, format);
       this.renderTargets.resize(this.width, this.height);
     }
     this.picker.resetDevice(this.runtime);
+    this.uniformBuffer?.destroy();
     this.uniformBuffer = null;
+    this.styleBuffer?.destroy();
     this.styleBuffer = null;
     this.styleCapacity = 0;
-    this.pages.clear();
+    this.destroyPageBuffers();
     this.sceneDirty = true;
+    this.transformDirty = true;
+    this.styleDirty = true;
     this.residencyDirty = true;
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.picker.dispose();
+    this.renderTargets.destroy();
+    this.destroyPageBuffers();
+    this.uniformBuffer?.destroy();
+    this.uniformBuffer = null;
+    this.styleBuffer?.destroy();
+    this.styleBuffer = null;
+    this.residency?.clear();
+    this.arena?.destroy();
+    this.tiles = [];
   }
 
   metrics(): LineMetrics {
@@ -336,6 +367,16 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.transformDirty = false;
     this.styleDirty = false;
     this.residencyDirty = false;
+  }
+
+  private destroyPageBuffers(): void {
+    for (const buffers of this.pages.values()) {
+      buffers.descriptorPipeline.destroy();
+      buffers.directories.destroy();
+      buffers.metadata.destroy();
+      buffers.pickRanges.destroy();
+    }
+    this.pages.clear();
   }
 
   private ensureUniformBuffer(): void {

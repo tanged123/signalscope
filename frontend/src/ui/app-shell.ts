@@ -237,11 +237,31 @@ export class AppShell {
     this.gpuRuntime = gpu.runtime;
     this.exposeBenchApi(gpu.runtime);
     gpu.runtime.onRestored(() => {
+      this.root.dataset.gpuState = "ready";
       this.tileWindowCache.invalidate();
       this.acquisitionIdentityByPanel.clear();
       void this.refreshTiles();
     });
     this.root.innerHTML = shellMarkup();
+    gpu.runtime.onError((error) => {
+      if (error.kind === "lost") {
+        this.root.dataset.gpuState = "recovering";
+        this.root
+          .querySelector<HTMLElement>(".render-ms")
+          ?.replaceChildren(document.createTextNode("Recovering GPU…"));
+        return;
+      }
+      if (error.kind === "unsupported") {
+        this.root.dataset.gpuState = "unsupported";
+        this.root.innerHTML = unsupportedHostMarkup(
+          error.capability,
+          `WebGPU unavailable: ${error.capability} — ${error.reason}`,
+        );
+        return;
+      }
+      if (error.kind === "panel") this.reportError(error.error);
+      else if (error.kind === "uncaptured") this.reportError(error.message);
+    });
     await this.loadFormatHint();
     await this.loadPreferences();
     await this.restoreSession(bakedSession);

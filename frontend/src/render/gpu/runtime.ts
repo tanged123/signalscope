@@ -6,12 +6,18 @@ import { compileProductionShaders } from "./shader-sources";
 export type GpuRuntimeError =
   | { kind: "lost"; message: string }
   | { kind: "restored" }
+  | { kind: "unsupported"; capability: string; reason: string }
   | { kind: "uncaptured"; message: string }
   | { kind: "panel"; panelId: string; error: unknown };
 
 export type GpuRuntimeResult =
   | { supported: true; runtime: GpuRuntime }
   | { supported: false; reason: string; capability: string };
+
+export type GpuRuntimeState =
+  | { kind: "ready" }
+  | { kind: "recovering"; message: string }
+  | { kind: "unsupported"; capability: string; reason: string };
 
 export class GpuRuntime {
   adapter: GPUAdapter;
@@ -31,6 +37,7 @@ export class GpuRuntime {
   private readonly gpu: GPU;
   private recovery: Promise<void> | null = null;
   private lossStartedAt: number | null = null;
+  private stateValue: GpuRuntimeState = { kind: "ready" };
 
   private static frameScheduler(): [
     (callback: FrameRequestCallback) => number,
@@ -85,7 +92,18 @@ export class GpuRuntime {
 
   register(panel: GpuPanelEncoder): () => void {
     this.panels.add(panel);
-    return this.frameLoop.register(panel);
+    this.frameLoop.register(panel);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.panels.delete(panel);
+      this.frameLoop.unregister(panel);
+    };
+  }
+
+  state(): GpuRuntimeState {
+    return this.stateValue;
   }
 
   requestFrame(panel: GpuPanelEncoder): void {
@@ -139,6 +157,7 @@ export class GpuRuntime {
   private handleLoss(info: GPUDeviceLostInfo): void {
     if (this.recovery !== null) return;
     this.frameLoop.stop();
+    this.stateValue = { kind: "recovering", message: info.message };
     this.lossStartedAt = performance.now();
     this.shaders.clear();
     this.renderPipelines.clear();
@@ -153,7 +172,37 @@ export class GpuRuntime {
   private async restore(): Promise<void> {
     const result = await requestGpuDevice(this.gpu);
     if (!result.supported) {
-      this.publish({ kind: "lost", message: result.reason });
+      this.lossStartedAt = null;
+      this.stateValue = {
+        kind: "unsupported",
+        capability: result.capability,
+        reason: result.reason,
+      };
+      this.publish({
+        kind: "unsupported",
+        capability: result.capability,
+        reason: result.reason,
+      });
+      return;
+    }
+    const shaderErrors = await compileProductionShaders(result.device);
+    if (shaderErrors.length > 0) {
+      this.lossStartedAt = null;
+      result.device.destroy();
+      const first = shaderErrors[0] ?? "shader compilation failed";
+      const separator = first.indexOf(":");
+      const label = separator < 0 ? first : first.slice(0, separator);
+      const reason = separator < 0 ? first : first.slice(separator + 1).trim();
+      this.stateValue = {
+        kind: "unsupported",
+        capability: `shader.${label}`,
+        reason,
+      };
+      this.publish({
+        kind: "unsupported",
+        capability: `shader.${label}`,
+        reason,
+      });
       return;
     }
     this.adapter = result.adapter;
@@ -168,11 +217,8 @@ export class GpuRuntime {
       panel.deviceRestored(this.device, this.format);
       this.frameLoop.register(panel);
     });
+    this.stateValue = { kind: "ready" };
     this.restoreListeners.forEach((listener) => listener());
-    if (this.lossStartedAt !== null) {
-      this.metrics.recordRecovery(performance.now() - this.lossStartedAt);
-      this.lossStartedAt = null;
-    }
     this.publish({ kind: "restored" });
   }
 
@@ -187,12 +233,28 @@ export class GpuRuntime {
       cancelFrame,
       (panelId, error) => this.publish({ kind: "panel", panelId, error }),
       (durationMs) => this.metrics.recordFrame(durationMs),
+      () => {
+        if (this.lossStartedAt === null) return;
+        this.metrics.recordRecovery(performance.now() - this.lossStartedAt);
+        this.lossStartedAt = null;
+      },
     );
   }
 
   private installDeviceListeners(): void {
     this.device.addEventListener("uncapturederror", (event) => {
-      this.publish({ kind: "uncaptured", message: event.error.message });
+      const reason = event.error.message;
+      this.stateValue = {
+        kind: "unsupported",
+        capability: "uncaptured-error",
+        reason,
+      };
+      this.publish({ kind: "uncaptured", message: reason });
+      this.publish({
+        kind: "unsupported",
+        capability: "uncaptured-error",
+        reason,
+      });
     });
     void this.device.lost.then((info) => this.handleLoss(info));
   }

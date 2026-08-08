@@ -24,12 +24,14 @@ function panel(id: string): TestPanel {
   const afterSubmit = vi.fn();
   const deviceLost = vi.fn();
   const deviceRestored = vi.fn();
+  const dispose = vi.fn();
   return {
     id,
     encode,
     afterSubmit,
     deviceLost,
     deviceRestored,
+    dispose,
     encodeSpy: encode,
     afterSubmitSpy: afterSubmit,
   };
