@@ -509,6 +509,7 @@ export class PanelView {
   private hoverClient: { x: number; y: number } | null = null;
   private hoverSequence = 0;
   private readonly pathsBySlot = new Map<number, string>();
+  private readonly seriesBySlot = new Map<number, RenderSeries>();
   private selectedSignalIds = new Set<string>();
   private hoverTag: HTMLElement | null = null;
   private inspectorPath: string | null = null;
@@ -716,10 +717,7 @@ export class PanelView {
       const layout = this.renderer.lastLayout();
       const inside =
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
-      const cursor =
-        layout !== null && inside
-          ? this.cursorAt(layout, event.offsetX, event.offsetY)
-          : null;
+      const cursor = layout !== null && inside ? this.cursorFromPick() : null;
       if (layout !== null && inside) {
         this.updateHover(
           event.offsetX,
@@ -910,7 +908,10 @@ export class PanelView {
     for (const signalId of this.selectedSignalIds) {
       if (selectedSignalIds.has(signalId)) continue;
       const slot = this.seriesSlots.remove(signalId, generation);
-      if (slot !== null) this.pathsBySlot.delete(slot);
+      if (slot !== null) {
+        this.pathsBySlot.delete(slot);
+        this.seriesBySlot.delete(slot);
+      }
     }
     this.selectedSignalIds = selectedSignalIds;
     let residents;
@@ -949,6 +950,7 @@ export class PanelView {
       if (entry === undefined) continue;
       const slot = this.seriesSlots.slotOf(tile.signalId);
       this.pathsBySlot.set(slot, tile.signalPath);
+      this.seriesBySlot.set(slot, entry);
       const [red, green, blue] = parseHexColor(
         css.getPropertyValue(SERIES_TOKENS[colorIndexForHue(entry.hue)] ?? ""),
       );
@@ -1044,9 +1046,11 @@ export class PanelView {
         if (hit === null) return;
         const path = this.pathsBySlot.get(hit.seriesSlot);
         if (path === undefined) return;
+        const time = this.gpuRenderer?.pickTime(hit);
+        if (time === null || time === undefined) return;
         this.callbacks.onPinAnnotation(this.id, {
           path,
-          anchor: hit.time,
+          anchor: time,
           pinnedValue: hit.value,
         });
       });
@@ -1056,9 +1060,7 @@ export class PanelView {
       if (hit === null) return;
       const path = this.pathsBySlot.get(hit.seriesSlot);
       if (path === undefined) return;
-      const series = this.lastState?.series.find(
-        (entry) => entry.path === path,
-      );
+      const series = this.seriesBySlot.get(hit.seriesSlot);
       if (series !== undefined) {
         if (modifiers.alt) this.callbacks.onMuteSeries(this.id, series.ref);
         else if (modifiers.shift) {
@@ -1083,16 +1085,24 @@ export class PanelView {
     this.hoverClient = { x: clientX, y: clientY };
     const sequence = ++this.hoverSequence;
     void this.pickAt(offsetX, offsetY, 6, false, sequence).then((result) => {
-      if (result === null || sequence !== this.hoverSequence) return;
-      const path = this.pathsBySlot.get(result.seriesSlot);
-      if (path === undefined || this.hoverClient === null) return;
-      this.showHoverTag(path, this.hoverClient.x, this.hoverClient.y);
+      if (sequence !== this.hoverSequence) return;
+      this.callbacks.onCursor(
+        this.id,
+        this.cursorFromPick(result),
+        this.hoverClient,
+      );
+      if (result === null) return;
+      const series = this.seriesBySlot.get(result.seriesSlot);
+      if (series === undefined || this.hoverClient === null) return;
+      this.showHoverTag(series, this.hoverClient.x, this.hoverClient.y);
     });
   }
 
-  private showHoverTag(path: string, clientX: number, clientY: number): void {
-    const series = this.lastState?.series.find((entry) => entry.path === path);
-    if (series === undefined) return;
+  private showHoverTag(
+    series: RenderSeries,
+    clientX: number,
+    clientY: number,
+  ): void {
     const panelRect = this.element.getBoundingClientRect();
     const tag = this.hoverTag ?? document.createElement("div");
     this.hoverTag = tag;
@@ -1147,6 +1157,39 @@ export class PanelView {
     });
   }
 
+  private cursorFromPick(
+    result = this.gpuRenderer?.latestPick(),
+  ): PanelCursor | null {
+    if (result === null || result === undefined || this.gpuRenderer === null) {
+      return null;
+    }
+    const time = this.gpuRenderer.pickTime(result);
+    const series = this.seriesBySlot.get(result.seriesSlot);
+    if (time === null || series === undefined) return null;
+    const row = {
+      path: series.path,
+      label: series.path,
+      value: result.value,
+      unit: null,
+      colorIndex:
+        series.hue === null ? COLOR_SLOTS : colorIndexForHue(series.hue),
+    };
+    return {
+      x: time,
+      heading: `t = ${formatValue(time)} s`,
+      rows: [row],
+      markers: [
+        {
+          path: series.path,
+          x: time,
+          y: result.value,
+          colorIndex: row.colorIndex,
+        },
+      ],
+      link: "time",
+    };
+  }
+
   private walkHover(direction: -1 | 1): void {
     const state = this.lastState;
     if (state === null) return;
@@ -1181,7 +1224,7 @@ export class PanelView {
     if (this.hoverPoint !== null) {
       const canvasRect = this.canvas.getBoundingClientRect();
       this.showHoverTag(
-        wrapped.entry.path,
+        wrapped.entry,
         canvasRect.left + this.hoverPoint.x,
         canvasRect.top + this.hoverPoint.y,
       );
@@ -1213,16 +1256,6 @@ export class PanelView {
     return true;
   }
 
-  private cursorAt(
-    layout: PlotLayout,
-    offsetX: number,
-    offsetY: number,
-  ): PanelCursor | null {
-    return (
-      this.preparedPlot?.cursorAt(layout, { x: offsetX, y: offsetY }) ?? null
-    );
-  }
-
   private resolvedAnnotations(state: RenderPanelState): ResolvedAnnotations {
     const prepared = this.preparedPlot;
     if (prepared === null) return { resolved: [], delta: null };
@@ -1239,16 +1272,13 @@ export class PanelView {
       (state === null
         ? { resolved: [], delta: null }
         : this.resolvedAnnotations(state));
-    const bySeries = new Map(
-      (state?.series ?? []).map((series) => [series.path, series]),
-    );
     const cursorT = this.cursorT;
     this.overlayRenderer.draw(this.renderer.lastLayout(), {
       cursorT,
       cursorMode: this.cursorMode,
       cursorPoints:
         this.cursorMode === "track" && cursorT !== null
-          ? this.cursorPointsAt(cursorT, bySeries)
+          ? this.cursorPointsAt(cursorT)
           : [],
       box: this.box,
       annotations: resolved.map((annotation) => ({
@@ -1261,35 +1291,33 @@ export class PanelView {
     });
   }
 
-  private cursorPointsAt(
-    cursorT: number,
-    bySeries: ReadonlyMap<string, RenderSeries>,
-  ): CursorPoint[] {
-    const layout = this.renderer.lastLayout();
-    if (layout === null || this.preparedPlot === null) return [];
-    const cursor = this.preparedPlot.cursorAt(layout, {
-      x:
-        layout.plot.x +
-        ((cursorT - layout.xRange.min) /
-          (layout.xRange.max - layout.xRange.min)) *
-          layout.plot.width,
-      y: layout.plot.y + layout.plot.height / 2,
-    });
-    return (cursor?.markers ?? []).flatMap((point) => {
-      const tile = (this.lastTiles?.series ?? []).find(
-        (entry) => entry.signalPath === point.path,
-      );
-      if (tile === undefined) return [];
-      const series = bySeries.get(tile.signalPath);
-      if (series?.visible !== true) return [];
-      return [
-        {
-          value: point.y,
-          colorIndex: series.hue === null ? null : point.colorIndex,
-          alpha: series.opacity,
-        },
-      ];
-    });
+  private cursorPointsAt(cursorT: number): CursorPoint[] {
+    const renderer = this.gpuRenderer;
+    const result = renderer?.latestPick();
+    if (
+      renderer === null ||
+      renderer === undefined ||
+      result === null ||
+      result === undefined
+    )
+      return [];
+    const time = renderer.pickTime(result);
+    const series = this.seriesBySlot.get(result.seriesSlot);
+    if (
+      time === null ||
+      series === undefined ||
+      !series.visible ||
+      Math.abs(time - cursorT) >
+        Number.EPSILON * Math.max(1, Math.abs(cursorT)) * 8
+    )
+      return [];
+    return [
+      {
+        value: result.value,
+        colorIndex: series.hue === null ? null : colorIndexForHue(series.hue),
+        alpha: series.opacity,
+      },
+    ];
   }
 
   /**

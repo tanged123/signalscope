@@ -3,6 +3,7 @@ import {
   descriptorFixture,
   gpuMetrics,
   openGpuFixture,
+  pickFixture,
   resetGpuMetrics,
 } from "./fixtures";
 
@@ -48,4 +49,18 @@ test("compacts ordered segments with GPU descriptors and indirect counts", async
   expect([...result.descriptors]).toEqual([0, 1, 0, 0, 5, 6, 1, 1]);
   expect([...result.quadArgs]).toEqual([6, 2, 0, 0]);
   expect([...result.hairlineArgs]).toEqual([2, 2, 0, 0]);
+});
+
+test("picks epoch-scale lines with relative tile time", async ({ page }) => {
+  test.setTimeout(120_000);
+  const picked = await pickFixture(page);
+  expect(picked.result).toMatchObject({
+    sequence: 1,
+    seriesSlot: 0,
+    tileMetaIndex: 0,
+  });
+  expect(picked.result?.relativeTime).toBeCloseTo(0.25, 4);
+  expect(picked.result?.value).toBeCloseTo(0.5, 4);
+  expect(picked.result?.distance).toBeLessThan(0.01);
+  expect(picked.time).toBeCloseTo(1_000_000_000_000.25, 4);
 });

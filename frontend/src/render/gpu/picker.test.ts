@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   GpuPicker,
   nearestCpuPick,
+  pickReductionPlan,
   type PickSeries,
   type PickRequest,
 } from "./picker";
@@ -26,7 +27,8 @@ describe("GpuPicker", () => {
     picker.complete(2, {
       sequence: 2,
       seriesSlot: 0,
-      time: 1,
+      tileMetaIndex: 0,
+      relativeTime: 1,
       value: 2,
       distance: 0,
     });
@@ -42,14 +44,16 @@ describe("GpuPicker", () => {
     picker.complete(8, {
       sequence: 8,
       seriesSlot: 2,
-      time: 1,
+      tileMetaIndex: 0,
+      relativeTime: 1,
       value: 2,
       distance: 1,
     });
     picker.complete(7, {
       sequence: 7,
       seriesSlot: 1,
-      time: 0,
+      tileMetaIndex: 0,
+      relativeTime: 0,
       value: 1,
       distance: 0,
     });
@@ -83,6 +87,29 @@ describe("GpuPicker", () => {
     picker.encode({} as GPUCommandEncoder);
     expect(mapAsync).not.toHaveBeenCalled();
   });
+
+  it("wakes queued work after a readback slot is released", () => {
+    const requestFrame = vi.fn();
+    const picker = new GpuPicker(undefined, () => 1000);
+    picker.setScheduler({ requestFrame });
+    const first = picker.request(request(1, true));
+    const second = picker.request(request(2, true));
+    picker.encode({} as GPUCommandEncoder);
+    picker.complete(1, null);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    void first;
+    void second;
+  });
+});
+
+describe("pickReductionPlan", () => {
+  it("reduces every candidate count to one bounded block", () => {
+    expect(pickReductionPlan(1)).toEqual([]);
+    expect(pickReductionPlan(255)).toEqual([1]);
+    expect(pickReductionPlan(256)).toEqual([1]);
+    expect(pickReductionPlan(257)).toEqual([2, 1]);
+    expect(pickReductionPlan(10_000)).toEqual([40, 1]);
+  });
 });
 
 describe("nearestCpuPick", () => {
@@ -115,7 +142,11 @@ describe("nearestCpuPick", () => {
       series,
       project,
     );
-    expect(result).toMatchObject({ seriesSlot: 1, time: 5, value: 5 });
+    expect(result).toMatchObject({
+      seriesSlot: 1,
+      relativeTime: 5,
+      value: 5,
+    });
   });
 
   it("refuses gaps, hidden series, and points outside the radius", () => {

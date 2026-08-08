@@ -5,12 +5,7 @@ import {
   columnsYExtent,
   type BinColumns,
 } from "./bin-columns";
-import {
-  formatValue,
-  invertX,
-  paddedExtent,
-  type PlotLayout,
-} from "./plot-math";
+import { formatValue, paddedExtent } from "./plot-math";
 
 export interface PlotCursor {
   x: number;
@@ -66,10 +61,6 @@ export interface PreparedTimePlot {
     x: readonly [number, number];
     y: readonly [number, number];
   } | null;
-  cursorAt(
-    layout: PlotLayout,
-    point: { x: number; y: number },
-  ): PlotCursor | null;
   resolveAnnotation(annotation: Annotation): ResolvedAnnotation | null;
   stats(): readonly PlotStatGroup[];
   delta(resolved: readonly ResolvedAnnotation[]): PlotDelta | null;
@@ -145,35 +136,6 @@ export function prepareTimePlot(input: TimePlotInput): PreparedTimePlot {
       }
       const y = paddedExtent(min, max);
       return y === null ? null : { x: [input.window.t0, input.window.t1], y };
-    },
-    cursorAt(layout, point) {
-      const x = invertX(layout, point.x);
-      const rows = input.series.flatMap((series) => {
-        const value = columnsValueAtTime(series.bins, x);
-        return value === null
-          ? []
-          : [
-              {
-                path: series.path,
-                label: series.path,
-                value,
-                unit: null,
-                colorIndex: series.colorIndex,
-              },
-            ];
-      });
-      return {
-        x,
-        heading: `t = ${formatValue(x)} s`,
-        rows,
-        markers: rows.map((row) => ({
-          path: row.path,
-          x,
-          y: row.value,
-          colorIndex: row.colorIndex,
-        })),
-        link: "time",
-      };
     },
     resolveAnnotation: resolve,
     stats() {

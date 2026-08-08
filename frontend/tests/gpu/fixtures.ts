@@ -31,6 +31,45 @@ export async function descriptorFixture(page: Page): Promise<{
   };
 }
 
+export async function pickFixture(page: Page): Promise<{
+  result: {
+    sequence: number;
+    seriesSlot: number;
+    tileMetaIndex: number;
+    relativeTime: number;
+    value: number;
+    distance: number;
+  } | null;
+  time: number | null;
+}> {
+  await page.goto("http://127.0.0.1:4173/tests/gpu/pick-fixture.html");
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () =>
+            document.body.dataset.result ?? document.body.dataset.error ?? null,
+        ),
+      { timeout: 60_000 },
+    )
+    .not.toBeNull();
+  const error = await page.locator("body").getAttribute("data-error");
+  if (error !== null) throw new Error(error);
+  const encoded = await page.locator("body").getAttribute("data-result");
+  if (encoded === null) throw new Error("GPU picker fixture is unavailable");
+  return JSON.parse(encoded) as {
+    result: {
+      sequence: number;
+      seriesSlot: number;
+      tileMetaIndex: number;
+      relativeTime: number;
+      value: number;
+      distance: number;
+    } | null;
+    time: number | null;
+  };
+}
+
 export async function gpuMetrics(page: Page): Promise<GpuMetricsSnapshot> {
   const snapshot = await page.evaluate(() => {
     const host = window as typeof window & {

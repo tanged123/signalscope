@@ -18,7 +18,8 @@ export interface PickRequest {
 export interface PickResult {
   readonly sequence: number;
   readonly seriesSlot: number;
-  readonly time: number;
+  readonly tileMetaIndex: number;
+  readonly relativeTime: number;
   readonly value: number;
   readonly distance: number;
 }
@@ -48,6 +49,8 @@ export interface PickPage {
   readonly metadataBuffer: GPUBuffer;
   readonly styleBuffer: GPUBuffer;
   readonly seriesCount: number;
+  readonly tileMetaBase: number;
+  readonly tileOrigins: readonly number[];
 }
 
 export interface PickViewport {
@@ -62,6 +65,20 @@ export interface PickViewport {
   readonly yMin: number;
   readonly yScale: number;
   readonly canvasWidth: number;
+}
+
+export interface GpuPickerScheduler {
+  requestFrame(): void;
+}
+
+export function pickReductionPlan(candidateCount: number): readonly number[] {
+  const dispatches: number[] = [];
+  let count = Math.max(0, Math.trunc(candidateCount));
+  while (count > 1) {
+    count = Math.ceil(count / 256);
+    dispatches.push(count);
+  }
+  return dispatches;
 }
 
 interface PickerRuntime {
@@ -104,8 +121,13 @@ export class GpuPicker {
   private uniformBuffer: GPUBuffer | null = null;
   private resultBuffer: GPUBuffer | null = null;
   private candidateBuffer: GPUBuffer | null = null;
+  private reduceScratchBuffer: GPUBuffer | null = null;
   private candidateCapacity = 0;
+  private reduceCapacity = 0;
   private readonly pageUniforms: GPUBuffer[] = [];
+  private readonly reduceParams: GPUBuffer[] = [];
+  private tileOrigins: readonly number[] = [];
+  private scheduler: GpuPickerScheduler | null = null;
   private pickPipeline: GPUComputePipeline | null = null;
   private reducePipeline: GPUComputePipeline | null = null;
 
@@ -121,6 +143,22 @@ export class GpuPicker {
 
   setScene(scene: readonly PickPage[]): void {
     this.scene = scene;
+    const origins: number[] = [];
+    for (const page of scene) {
+      page.tileOrigins.forEach((origin, index) => {
+        origins[page.tileMetaBase + index] = origin;
+      });
+    }
+    this.tileOrigins = origins;
+  }
+
+  setScheduler(scheduler: GpuPickerScheduler): void {
+    this.scheduler = scheduler;
+  }
+
+  resolveTime(result: PickResult): number | null {
+    const origin = this.tileOrigins[result.tileMetaIndex];
+    return origin === undefined ? null : origin + result.relativeTime;
   }
 
   setViewport(viewport: PickViewport): void {
@@ -131,8 +169,11 @@ export class GpuPicker {
     this.uniformBuffer = null;
     this.resultBuffer = null;
     this.candidateBuffer = null;
+    this.reduceScratchBuffer = null;
     this.candidateCapacity = 0;
+    this.reduceCapacity = 0;
     this.pageUniforms.length = 0;
+    this.reduceParams.length = 0;
     this.pickPipeline = null;
     this.reducePipeline = null;
     if ("device" in deviceOrRuntime) {
@@ -215,6 +256,9 @@ export class GpuPicker {
       this.latestResult = result;
     this.runtime?.metrics?.recordPickLatency(this.now() - work.startedAt);
     work.resolve(result);
+    if (this.explicit.length > 0 || this.pendingHover !== null) {
+      this.scheduler?.requestFrame();
+    }
   }
 
   private async readSlot(slot: Slot): Promise<void> {
@@ -225,14 +269,15 @@ export class GpuPicker {
       await slot.buffer.mapAsync(MAP_READ);
       const view = new DataView(slot.buffer.getMappedRange());
       const result: PickResult | null =
-        view.getUint32(20, true) === 0
+        view.getUint32(24, true) === 0
           ? null
           : {
               sequence: view.getUint32(0, true),
               seriesSlot: view.getUint32(4, true),
-              distance: view.getFloat32(8, true),
-              time: view.getFloat32(12, true),
-              value: view.getFloat32(16, true),
+              tileMetaIndex: view.getUint32(8, true),
+              distance: view.getFloat32(12, true),
+              relativeTime: view.getFloat32(16, true),
+              value: view.getFloat32(20, true),
             };
       slot.buffer.unmap();
       this.complete(sequence, result);
@@ -268,9 +313,14 @@ export class GpuPicker {
       size: 32,
       usage: STORAGE | COPY_SRC | COPY_DST,
     });
+    const resultBuffer = this.resultBuffer;
+    if (resultBuffer === null) return;
     this.ensureCandidateBuffer(candidateCount);
     const candidateBuffer = this.candidateBuffer;
     if (candidateBuffer === null) return;
+    this.ensureReduceScratch(candidateCount);
+    const reduceScratchBuffer = this.reduceScratchBuffer;
+    if (reduceScratchBuffer === null) return;
     const values = new ArrayBuffer(80);
     const view = new DataView(values);
     view.setFloat32(0, request.cursorX, true);
@@ -312,7 +362,7 @@ export class GpuPicker {
       const pageData = new Uint32Array([
         candidateOffset,
         page.seriesCount,
-        0,
+        page.tileMetaBase,
         0,
       ]);
       this.device.queue.writeBuffer(
@@ -339,24 +389,55 @@ export class GpuPicker {
       candidateOffset += page.seriesCount;
     }
     pass.end();
-    const reducePass = encoder.beginComputePass({
-      label: "signalscope-pick-reduce",
-    });
-    reducePass.setPipeline(this.reducePipeline);
-    reducePass.setBindGroup(
-      0,
-      this.device.createBindGroup({
-        layout: this.reducePipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: this.uniformBuffer } },
-          { binding: 1, resource: { buffer: candidateBuffer } },
-          { binding: 2, resource: { buffer: this.resultBuffer } },
-        ],
-      }),
-    );
-    reducePass.dispatchWorkgroups(1);
-    reducePass.end();
-    encoder.copyBufferToBuffer(this.resultBuffer, 0, readback, 0, 32);
+    let currentCount = candidateCount;
+    let input = candidateBuffer;
+    let output = reduceScratchBuffer;
+    let reduceLevel = 0;
+    while (currentCount > 1) {
+      const outputCount = Math.ceil(currentCount / 256);
+      if (outputCount === 1) output = resultBuffer;
+      const params =
+        this.reduceParams[reduceLevel] ?? this.createReduceParams(reduceLevel);
+      this.device.queue.writeBuffer(
+        params,
+        0,
+        new Uint32Array([
+          currentCount,
+          0,
+          0,
+          0,
+        ]) as unknown as GPUAllowSharedBufferSource,
+      );
+      const reducePass = encoder.beginComputePass({
+        label: "signalscope-pick-reduce",
+      });
+      reducePass.setPipeline(this.reducePipeline);
+      reducePass.setBindGroup(
+        0,
+        this.device.createBindGroup({
+          layout: this.reducePipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: this.uniformBuffer } },
+            { binding: 1, resource: { buffer: input } },
+            { binding: 2, resource: { buffer: output } },
+            { binding: 3, resource: { buffer: params } },
+          ],
+        }),
+      );
+      reducePass.dispatchWorkgroups(outputCount);
+      reducePass.end();
+      currentCount = outputCount;
+      reduceLevel += 1;
+      if (currentCount > 1) {
+        const next = input;
+        input = output;
+        output = next;
+      }
+    }
+    if (candidateCount === 1) {
+      encoder.copyBufferToBuffer(candidateBuffer, 0, resultBuffer, 0, 32);
+    }
+    encoder.copyBufferToBuffer(resultBuffer, 0, readback, 0, 32);
   }
 
   private makePipeline(): GPUComputePipeline {
@@ -400,8 +481,22 @@ export class GpuPicker {
       this.device?.createBuffer({
         label: "signalscope-pick-candidates",
         size: this.candidateCapacity * 32,
+        usage: STORAGE | COPY_SRC,
+      }) ?? null;
+  }
+
+  private ensureReduceScratch(count: number): void {
+    const required = nextPowerOfTwo(Math.max(1, Math.ceil(count / 256)));
+    if (this.reduceScratchBuffer !== null && this.reduceCapacity >= required)
+      return;
+    this.reduceScratchBuffer?.destroy();
+    this.reduceScratchBuffer =
+      this.device?.createBuffer({
+        label: "signalscope-pick-reduce-scratch",
+        size: Math.max(32, required * 32),
         usage: STORAGE,
       }) ?? null;
+    this.reduceCapacity = required;
   }
 
   private createPageUniform(index: number): GPUBuffer {
@@ -412,6 +507,17 @@ export class GpuPicker {
     });
     if (buffer === undefined) throw new Error("GPU picker device unavailable");
     this.pageUniforms[index] = buffer;
+    return buffer;
+  }
+
+  private createReduceParams(index: number): GPUBuffer {
+    const buffer = this.device?.createBuffer({
+      label: `signalscope-pick-reduce-params-${String(index)}`,
+      size: 16,
+      usage: 0x0040 | COPY_DST,
+    });
+    if (buffer === undefined) throw new Error("GPU picker device unavailable");
+    this.reduceParams[index] = buffer;
     return buffer;
   }
 }
@@ -496,5 +602,12 @@ function nearer(
       (distance === best.distance && seriesSlot >= best.seriesSlot))
   )
     return best;
-  return { sequence: 0, seriesSlot, time, value, distance };
+  return {
+    sequence: 0,
+    seriesSlot,
+    tileMetaIndex: 0,
+    relativeTime: time,
+    value,
+    distance,
+  };
 }

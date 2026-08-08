@@ -25,14 +25,14 @@ struct TileMeta { point_start: u32, point_count: u32, origin_high: f32, origin_l
 struct Candidate {
   sequence: u32,
   series_slot: u32,
+  tile_meta_index: u32,
   distance: f32,
-  time: f32,
+  relative_time: f32,
   value: f32,
   valid: u32,
-  reserved0: u32,
-  reserved1: u32,
+  reserved: u32,
 };
-struct Page { candidate_offset: u32, series_count: u32, reserved0: u32, reserved1: u32 };
+struct Page { candidate_offset: u32, series_count: u32, tile_meta_base: u32, reserved: u32 };
 
 @group(0) @binding(0) var<uniform> request: Request;
 @group(0) @binding(1) var<storage, read> points: array<Point>;
@@ -42,8 +42,8 @@ struct Page { candidate_offset: u32, series_count: u32, reserved0: u32, reserved
 @group(0) @binding(5) var<storage, read_write> candidates: array<Candidate>;
 @group(0) @binding(6) var<uniform> page: Page;
 
-fn point_time(point: Point, origin: vec2f) -> f32 {
-  return origin.x + origin.y + point.time_offset;
+fn point_time(point: Point) -> f32 {
+  return point.time_offset;
 }
 
 fn project(point: Point, origin: vec2f) -> vec2f {
@@ -56,13 +56,14 @@ fn project(point: Point, origin: vec2f) -> vec2f {
 }
 
 fn invalid() -> Candidate {
-  return Candidate(request.sequence, 0xffffffffu, 0.0, 0.0, 0.0, 0u, 0u, 0u);
+  return Candidate(request.sequence, 0xffffffffu, 0xffffffffu, 0.0, 0.0, 0.0, 0u, 0u);
 }
 
 fn segment_candidate(
   first_index: u32,
   second_index: u32,
   series_slot: u32,
+  tile_meta_index: u32,
   origin: vec2f,
 ) -> Candidate {
   let first = points[first_index];
@@ -87,11 +88,11 @@ fn segment_candidate(
   return Candidate(
     request.sequence,
     series_slot,
+    tile_meta_index,
     distance_px,
-    mix(point_time(first, origin), point_time(second, origin), ratio),
+    mix(first.time_offset, second.time_offset, ratio),
     mix(first.value, second.value, ratio),
     1u,
-    0u,
     0u,
   );
 }
@@ -124,13 +125,16 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   }
   let tile = tile_meta[range.tile_meta_index];
   let origin = vec2f(tile.origin_high, tile.origin_low);
-  let cursor_time = request.view_origin_high + request.view_origin_low +
+  let tile_meta_index = page.tile_meta_base + range.tile_meta_index;
+  let cursor_time =
+    (request.view_origin_high - origin.x) +
+    (request.view_origin_low - origin.y) +
     (request.cursor_x - request.plot_x) / request.time_scale;
   var low = 0u;
   var high = range.point_count;
   while (low < high) {
     let middle = (low + high) / 2u;
-    if (point_time(points[range.point_start + middle], origin) < cursor_time) {
+    if (point_time(points[range.point_start + middle]) < cursor_time) {
       low = middle + 1u;
     } else {
       high = middle;
@@ -138,14 +142,27 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   }
   var best = invalid();
   if (range.point_count == 1u) {
-    best = segment_candidate(range.point_start, range.point_start, range.series_slot, origin);
+    best = segment_candidate(
+      range.point_start,
+      range.point_start,
+      range.series_slot,
+      tile_meta_index,
+      origin,
+    );
   } else if (low == 0u) {
-    best = segment_candidate(range.point_start, range.point_start + 1u, range.series_slot, origin);
+    best = segment_candidate(
+      range.point_start,
+      range.point_start + 1u,
+      range.series_slot,
+      tile_meta_index,
+      origin,
+    );
   } else if (low >= range.point_count) {
     best = segment_candidate(
       range.point_start + range.point_count - 2u,
       range.point_start + range.point_count - 1u,
       range.series_slot,
+      tile_meta_index,
       origin,
     );
   } else {
@@ -153,6 +170,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       range.point_start + low - 1u,
       range.point_start + low,
       range.series_slot,
+      tile_meta_index,
       origin,
     );
     if (low + 1u < range.point_count) {
@@ -162,6 +180,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           range.point_start + low,
           range.point_start + low + 1u,
           range.series_slot,
+          tile_meta_index,
           origin,
         ),
       );

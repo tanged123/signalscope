@@ -92,6 +92,7 @@ interface PageBuffers {
   metadata: GPUBuffer;
   metadataCapacity: number;
   metadataCount: number;
+  tileOrigins: readonly number[];
   quadArgs: GPUBuffer | null;
   hairlineArgs: GPUBuffer | null;
   pickRanges: GPUBuffer;
@@ -142,6 +143,9 @@ export class GpuLineRenderer implements GpuPanelEncoder {
     this.arena = arena;
     this.residency = residency;
     this.picker = new GpuPicker(runtime);
+    this.picker.setScheduler({
+      requestFrame: () => runtime.requestFrame(this),
+    });
     if (context !== undefined) {
       this.renderTargets.configure(runtime.device, context, runtime.format);
     }
@@ -293,6 +297,10 @@ export class GpuLineRenderer implements GpuPanelEncoder {
 
   latestPick(): PickResult | null {
     return this.picker.latest();
+  }
+
+  pickTime(result: PickResult): number | null {
+    return this.picker.resolveTime(result);
   }
 
   deviceLost(): void {
@@ -450,6 +458,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       );
       buffers.descriptorCount = candidateCount;
       buffers.metadataCount = metadata.length;
+      buffers.tileOrigins = orderedTiles.map((tile) => tile.origin);
       buffers.pickRangeCount = orderedTiles.length;
       buffers.descriptorPipeline.ensureCapacity(
         candidateCount,
@@ -469,6 +478,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       this.gpuMetrics()?.recordDescriptorRebuild();
     }
     const pickerPages: PickPage[] = [];
+    let tileMetaBase = 0;
     for (const page of pageIds) {
       const buffers = this.pages.get(page);
       if (buffers === undefined || this.arena === undefined) continue;
@@ -478,7 +488,10 @@ export class GpuLineRenderer implements GpuPanelEncoder {
         metadataBuffer: buffers.metadata,
         styleBuffer: this.styleBuffer as GPUBuffer,
         seriesCount: buffers.pickRangeCount,
+        tileMetaBase,
+        tileOrigins: buffers.tileOrigins,
       });
+      tileMetaBase += buffers.metadataCount;
     }
     this.picker.setScene(pickerPages);
   }
@@ -531,6 +544,7 @@ export class GpuLineRenderer implements GpuPanelEncoder {
       }),
       metadataCapacity: nextCapacity(metadataCount),
       metadataCount: 0,
+      tileOrigins: [],
       pickRanges: this.runtime.device.createBuffer({
         label: `${this.id}-page-${String(page)}-pick-ranges`,
         size: Math.max(16, nextCapacity(pickRangeCount) * 16),

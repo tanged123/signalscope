@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SignalScope GPU picker fixture</title>
+  </head>
+  <body>
+    <script type="module">
+      import { GpuPicker } from "/src/render/gpu/picker.ts";
+      import { splitF64 } from "/src/render/gpu/precision.ts";
+      import { GpuRuntime } from "/src/render/gpu/runtime.ts";
+
+      const STORAGE = 0x0080;
+      const COPY_DST = 0x0008;
+
+      try {
+        const created = await GpuRuntime.create(navigator.gpu);
+        if (!created.supported) {
+          document.body.dataset.error =
+            String(created.capability) + ": " + String(created.reason);
+        } else {
+          const runtime = created.runtime;
+          const device = runtime.device;
+          const origin = 1_000_000_000_000;
+          const [originHigh, originLow] = splitF64(origin);
+          const points = device.createBuffer({
+            size: 32,
+            usage: STORAGE | COPY_DST,
+          });
+          const ranges = device.createBuffer({
+            size: 16,
+            usage: STORAGE | COPY_DST,
+          });
+          const metadata = device.createBuffer({
+            size: 16,
+            usage: STORAGE | COPY_DST,
+          });
+          const styles = device.createBuffer({
+            size: 32,
+            usage: STORAGE | COPY_DST,
+          });
+          const pointBytes = new ArrayBuffer(32);
+          const pointView = new DataView(pointBytes);
+          pointView.setFloat32(0, 0, true);
+          pointView.setFloat32(4, 0, true);
+          pointView.setFloat32(16, 0.5, true);
+          pointView.setFloat32(20, 1, true);
+          device.queue.writeBuffer(points, 0, pointBytes);
+          device.queue.writeBuffer(
+            ranges,
+            0,
+            new Uint32Array([0, 2, 0, 0]),
+          );
+          device.queue.writeBuffer(
+            metadata,
+            0,
+            new Float32Array([0, 2, originHigh, originLow]),
+          );
+          const styleBytes = new ArrayBuffer(32);
+          const styleView = new DataView(styleBytes);
+          styleView.setFloat32(0, 1, true);
+          styleView.setFloat32(4, 1, true);
+          styleView.setFloat32(8, 1, true);
+          styleView.setFloat32(12, 1, true);
+          styleView.setFloat32(16, 1, true);
+          styleView.setUint32(20, 0, true);
+          styleView.setUint32(24, 1, true);
+          device.queue.writeBuffer(styles, 0, styleBytes);
+
+          const picker = new GpuPicker(runtime);
+          picker.setScene([
+            {
+              pointBuffer: points,
+              rangeBuffer: ranges,
+              metadataBuffer: metadata,
+              styleBuffer: styles,
+              seriesCount: 1,
+              tileMetaBase: 0,
+              tileOrigins: [origin],
+            },
+          ]);
+          picker.setViewport({
+            viewOriginHigh: originHigh,
+            viewOriginLow: originLow,
+            timeScale: 100,
+            plotX: 0,
+            plotY: 0,
+            plotWidth: 100,
+            plotHeight: 100,
+            canvasHeight: 100,
+            yMin: 0,
+            yScale: 100,
+            canvasWidth: 100,
+          });
+          const resultPromise = picker.request({
+            sequence: 1,
+            cursorX: 25,
+            cursorY: 50,
+            radius: 1,
+            explicit: true,
+          });
+          const encoder = device.createCommandEncoder();
+          picker.encode(encoder);
+          device.queue.submit([encoder.finish()]);
+          picker.afterSubmit();
+          const result = await resultPromise;
+          const time = result === null ? null : picker.resolveTime(result);
+          document.body.dataset.result = JSON.stringify({ result, time });
+          points.destroy();
+          ranges.destroy();
+          metadata.destroy();
+          styles.destroy();
+          device.destroy();
+        }
+      } catch (error) {
+        document.body.dataset.error =
+          error instanceof Error ? error.message : String(error);
+      }
+    </script>
+  </body>
+</html>
