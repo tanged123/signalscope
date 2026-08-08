@@ -904,7 +904,27 @@ async fn query_tiles_bin(
                 scope_core::tile_wire::binary_series(*id, path, unit.as_deref(), query)
             })
             .collect();
-        Ok::<_, String>(scope_protocol::tile_binary::encode_tile_response(&series))
+        scope_protocol::tile_binary::encode_tile_response(&series).map_err(|error| match &error {
+            scope_protocol::TileBinaryError::UnrepresentableTimeOffset {
+                signal_id,
+                source_index,
+            }
+            | scope_protocol::TileBinaryError::UnrepresentableValue {
+                signal_id,
+                source_index,
+            } => {
+                let path = owned
+                    .iter()
+                    .find(|(id, _, _, _)| *id == *signal_id)
+                    .map_or("<unknown>", |(_, path, _, _)| path.as_str());
+                format!("tile {path} ({signal_id}) source index {source_index}: {error}")
+            }
+            scope_protocol::TileBinaryError::NonFiniteOrigin {
+                signal_id,
+                signal_path,
+            } => format!("tile {signal_path} ({signal_id}): {error}"),
+            error => error.to_string(),
+        })
     })
     .await
     .map_err(|error| error.to_string())??;

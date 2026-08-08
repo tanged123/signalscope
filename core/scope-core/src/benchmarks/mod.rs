@@ -593,26 +593,6 @@ fn bench_tile_wire_cost() {
             (format!("run_{index:04}/response"), query)
         })
         .collect();
-    let series: Vec<scope_protocol::SignalTile> = queried
-        .iter()
-        .enumerate()
-        .map(|(index, (path, query))| scope_protocol::SignalTile {
-            signal_id: index as u64,
-            signal_path: path.clone(),
-            unit: None,
-            level: query.level,
-            bins: query.bins.to_wire_vec(),
-        })
-        .collect();
-    assert_eq!(series.len(), 1000);
-    let response = scope_protocol::TileResponse {
-        request_id: "bench".into(),
-        series,
-    };
-
-    let started = Instant::now();
-    let json = serde_json::to_string(&response).unwrap();
-    let json_encode_ms = started.elapsed().as_secs_f64() * 1000.0;
     let binary_series: Vec<_> = queried
         .iter()
         .enumerate()
@@ -621,22 +601,18 @@ fn bench_tile_wire_cost() {
         })
         .collect();
     let started = Instant::now();
-    let binary = scope_protocol::tile_binary::encode_tile_response(&binary_series);
+    let binary = scope_protocol::tile_binary::encode_tile_response(&binary_series).unwrap();
     let binary_encode_ms = started.elapsed().as_secs_f64() * 1000.0;
     let binary_bytes = binary.len();
-    let json_to_binary_ratio = json.len() as f64 / binary_bytes as f64;
     let pass = binary_encode_ms <= 100.0 && binary_bytes <= 64 * 1024 * 1024;
     report::write_report(
         "tile_wire_cost",
         serde_json::json!({
             "bench": "tile_wire_cost",
             "series": 1000,
-            "bins": response.series.iter().map(|s| s.bins.len()).sum::<usize>(),
-            "json_bytes": json.len(),
-            "json_encode_ms": json_encode_ms,
+            "bins": queried.iter().map(|(_, query)| query.bins.len()).sum::<usize>(),
             "binary_bytes": binary_bytes,
             "binary_encode_ms": binary_encode_ms,
-            "json_to_binary_ratio": json_to_binary_ratio,
             "pass": pass,
         }),
     );
@@ -648,7 +624,6 @@ fn bench_tile_wire_cost() {
         binary_bytes <= 64 * 1024 * 1024,
         "binary payload {binary_bytes} bytes (floor 64MiB)"
     );
-    std::hint::black_box(json.len());
     std::hint::black_box(binary);
 }
 

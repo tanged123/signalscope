@@ -1,5 +1,5 @@
 {
-  "protocol_version": 20,
+  "protocol_version": 21,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -198,23 +198,6 @@
         "finite_count": "u64",
         "sample_count": "u64",
         "has_gap": "bool"
-      }
-    },
-    "SignalTile": {
-      "kind": "object",
-      "fields": {
-        "signal_id": "u64",
-        "signal_path": "string",
-        "unit": "string?",
-        "level": "u32",
-        "bins": "EnvelopeBin[]"
-      }
-    },
-    "TileResponse": {
-      "kind": "object",
-      "fields": {
-        "request_id": "string",
-        "series": "SignalTile[]"
       }
     },
     "SampleRequest": {

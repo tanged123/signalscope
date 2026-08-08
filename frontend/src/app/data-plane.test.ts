@@ -103,6 +103,78 @@ describe("BakedPlane.querySamples", () => {
     expect(response.series[0]?.values).toEqual([0, 3, 4]);
   });
 
+  it("returns packed partial tile metadata from the same ordered points", async () => {
+    const summary: SignalSummary = {
+      signal_id: "7",
+      source_id: "3",
+      source_key: "00000000-0000-0000-0000-000000000003",
+      local_path: "speed",
+      path: "vehicle/speed",
+      unit: "m/s",
+      point_count: "4",
+      t_min: 100,
+      t_max: 103,
+      last_value: 4,
+    };
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          {
+            summary,
+            levels: [
+              {
+                level: 0,
+                source_start: "10",
+                source_end: "14",
+                origin: 100,
+                bins: [100, 101, 102, 103].map(bin),
+                points: [
+                  {
+                    time: 100,
+                    value: 1,
+                    source_index: "10",
+                    break_before: false,
+                  },
+                  {
+                    time: 101,
+                    value: 2,
+                    source_index: "11",
+                    break_before: false,
+                  },
+                  {
+                    time: 102,
+                    value: 3,
+                    source_index: "12",
+                    break_before: true,
+                  },
+                  {
+                    time: 103,
+                    value: 4,
+                    source_index: "13",
+                    break_before: false,
+                  },
+                ],
+              } satisfies BakedLevel,
+            ],
+          },
+        ],
+      }),
+    );
+
+    const response = await plane.queryTiles({
+      request_id: "tiles-1",
+      signal_ids: ["7"],
+      window: { t0: 101.5, t1: 102.5 },
+      pixel_width: 100,
+    });
+    const tile = response.series[0];
+    expect(tile?.sourceStart).toBe("11");
+    expect(tile?.sourceEnd).toBe("14");
+    expect(tile?.origin).toBe(101);
+    expect(tile?.points.count).toBe(3);
+  });
+
   it("reports finite last values for both generated demo signals", async () => {
     const plane = BakedPlane.fromDocument({
       querySelector: () => null,

@@ -8,13 +8,20 @@ pub fn binary_series<'a>(
     unit: Option<&'a str>,
     query: &'a PyramidQuery,
 ) -> BinaryTileSeries<'a> {
+    let source_start = query
+        .points
+        .first()
+        .map_or(query.source_start, |point| point.source_index);
+    let source_end = query.points.last().map_or(query.source_end, |point| {
+        point.source_index.saturating_add(1)
+    });
     BinaryTileSeries {
         signal_id,
         signal_path: path,
         unit,
         level: query.level,
-        source_start: query.source_start,
-        source_end: query.source_end,
+        source_start,
+        source_end,
         origin: query.points.first().map_or(0.0, |point| point.time),
         bin_count: query.bins.len(),
         t0: query.bins.t0_column(),
@@ -43,7 +50,8 @@ mod tests {
         let query = crate::pyramid::Pyramid::from_samples(&[1.0, 2.0, 3.0], &[3.0, f64::NAN, 4.0])
             .query(1.0, 3.0, 100);
         let wire = binary_series(7, "run/response", Some("V"), &query);
-        let decoded = decode_tile_response(&encode_tile_response(&[wire])).expect("decode");
+        let encoded = encode_tile_response(&[wire]).expect("encode");
+        let decoded = decode_tile_response(&encoded).expect("decode");
         assert_eq!(decoded[0].signal_id, 7);
         assert_eq!(decoded[0].signal_path, "run/response");
         assert_eq!(decoded[0].unit.as_deref(), Some("V"));
@@ -67,15 +75,19 @@ mod fixture_tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../../protocol/testdata/tile-binary-conformance.bin"
     );
-    const JSON_FIXTURE_PATH: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../protocol/testdata/tile-binary-conformance.json"
-    );
-
     #[derive(Debug, Deserialize, PartialEq, Serialize)]
     struct Fixture {
         request_id: String,
-        series: Vec<scope_protocol::SignalTile>,
+        series: Vec<FixtureSeries>,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Serialize)]
+    struct FixtureSeries {
+        signal_id: String,
+        signal_path: String,
+        unit: Option<String>,
+        level: u32,
+        bins: Vec<scope_protocol::EnvelopeBin>,
     }
 
     fn fixture_data() -> (
@@ -113,14 +125,14 @@ mod fixture_tests {
                 )
             })
             .collect();
-        let bytes = scope_protocol::tile_binary::encode_tile_response(&series);
+        let bytes = scope_protocol::tile_binary::encode_tile_response(&series).expect("encode");
         let expected = Fixture {
             request_id: "tile-binary-fixture".into(),
             series: queries
                 .iter()
                 .enumerate()
-                .map(|(index, query)| scope_protocol::SignalTile {
-                    signal_id: u64::try_from(index + 1).expect("fixture id"),
+                .map(|(index, query)| FixtureSeries {
+                    signal_id: (index + 1).to_string(),
                     signal_path: "run/response".into(),
                     unit: Some("V".into()),
                     level: query.level,
@@ -138,11 +150,6 @@ mod fixture_tests {
         let (current_binary, current_json, bytes) = fixture_data();
         if std::env::var("REGENERATE_FIXTURES").is_ok() {
             std::fs::write(BINARY_FIXTURE_PATH, bytes).expect("binary fixture written");
-            std::fs::write(
-                JSON_FIXTURE_PATH,
-                serde_json::to_string_pretty(&current_json).expect("json fixture serializes"),
-            )
-            .expect("json fixture written");
             return;
         }
         let binary = std::fs::read(BINARY_FIXTURE_PATH)
@@ -151,8 +158,11 @@ mod fixture_tests {
         let stored_binary = scope_protocol::tile_binary::decode_tile_response(&binary)
             .expect("stored binary fixture decodes");
         assert_owned_series_equal(&stored_binary, &current_binary);
-        let json_text = std::fs::read_to_string(JSON_FIXTURE_PATH)
-            .expect("json fixture exists; regenerate with REGENERATE_FIXTURES=1");
+        let json_text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../protocol/testdata/tile-binary-conformance.json"
+        ))
+        .expect("json fixture exists");
         let stored_json: Fixture = serde_json::from_str(&json_text).expect("json fixture parses");
         assert_eq!(stored_json.request_id, current_json.request_id);
         assert_eq!(stored_json.series.len(), current_json.series.len());

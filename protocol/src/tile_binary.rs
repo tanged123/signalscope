@@ -18,6 +18,20 @@ pub enum TileBinaryError {
     Truncated,
     #[error("malformed tile binary payload: {0}")]
     Malformed(&'static str),
+    #[error("tile binary field is too large: {field}")]
+    FieldTooLarge { field: &'static str },
+    #[error("tile binary payload size overflow")]
+    SizeOverflow,
+    #[error("tile binary series columns have inconsistent lengths")]
+    ColumnLengthMismatch,
+    #[error("tile binary source range is reversed")]
+    ReversedSourceRange,
+    #[error("tile {signal_id} ({signal_path}) has a non-finite origin")]
+    NonFiniteOrigin { signal_id: u64, signal_path: String },
+    #[error("tile {signal_id} point {source_index} has an unrepresentable time offset")]
+    UnrepresentableTimeOffset { signal_id: u64, source_index: u64 },
+    #[error("tile {signal_id} point {source_index} has an unrepresentable value")]
+    UnrepresentableValue { signal_id: u64, source_index: u64 },
 }
 
 pub struct BinaryTileSeries<'a> {
@@ -77,43 +91,56 @@ pub struct OwnedBinarySeries {
 #[must_use]
 /// Encodes a set of columnar tile series into the native tile framing.
 ///
-/// # Panics
-///
-/// Panics when a series count, bin count, path, unit, or column length cannot
-/// be represented by the binary framing fields.
-#[allow(clippy::cast_possible_truncation)]
-pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
-    let capacity = 16 + series.iter().map(series_bytes).sum::<usize>();
+pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Result<Vec<u8>, TileBinaryError> {
+    let capacity = 16usize
+        .checked_add(
+            series
+                .iter()
+                .map(series_bytes)
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .try_fold(0usize, usize::checked_add)
+                .ok_or(TileBinaryError::SizeOverflow)?,
+        )
+        .ok_or(TileBinaryError::SizeOverflow)?;
     let mut bytes = Vec::with_capacity(capacity);
     put_u32(&mut bytes, TILE_BINARY_MAGIC);
     put_u32(&mut bytes, crate::PROTOCOL_VERSION);
     put_u32(
         &mut bytes,
-        u32::try_from(series.len()).expect("series count fits in u32"),
+        u32::try_from(series.len()).map_err(|_| TileBinaryError::FieldTooLarge {
+            field: "series count",
+        })?,
     );
     put_u32(&mut bytes, 0);
 
     for item in series {
-        validate_series(item);
+        validate_series(item)?;
         put_u64(&mut bytes, item.signal_id);
         put_u32(&mut bytes, item.level);
         put_u32(
             &mut bytes,
-            u32::try_from(item.bin_count).expect("bin count fits in u32"),
+            u32::try_from(item.bin_count)
+                .map_err(|_| TileBinaryError::FieldTooLarge { field: "bin count" })?,
         );
         put_u32(
             &mut bytes,
-            u32::try_from(item.points.len()).expect("point count fits in u32"),
+            u32::try_from(item.points.len()).map_err(|_| TileBinaryError::FieldTooLarge {
+                field: "point count",
+            })?,
         );
         put_u16(
             &mut bytes,
-            u16::try_from(item.signal_path.len()).expect("signal path fits in u16"),
+            u16::try_from(item.signal_path.len()).map_err(|_| TileBinaryError::FieldTooLarge {
+                field: "signal path",
+            })?,
         );
         put_u16(
             &mut bytes,
-            item.unit.map_or(u16::MAX, |unit| {
-                u16::try_from(unit.len()).expect("unit fits in u16")
-            }),
+            item.unit.map_or(Ok(u16::MAX), |unit| {
+                u16::try_from(unit.len())
+                    .map_err(|_| TileBinaryError::FieldTooLarge { field: "unit" })
+            })?,
         );
         put_u64(&mut bytes, item.source_start);
         put_u64(&mut bytes, item.source_end);
@@ -122,7 +149,7 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
         if let Some(unit) = item.unit {
             bytes.extend_from_slice(unit.as_bytes());
         }
-        bytes.resize(align8(bytes.len()), 0);
+        resize_aligned(&mut bytes)?;
 
         append_f64_column(&mut bytes, item.t0, None);
         append_f64_column(&mut bytes, item.t1, None);
@@ -139,17 +166,22 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
             put_u32(&mut bytes, *value);
         }
         bytes.extend_from_slice(item.flags);
-        bytes.resize(align8(bytes.len()), 0);
+        resize_aligned(&mut bytes)?;
         for point in item.points {
             let offset = (point.time - item.origin) as f32;
+            if !point.time.is_finite() || !offset.is_finite() {
+                return Err(TileBinaryError::UnrepresentableTimeOffset {
+                    signal_id: item.signal_id,
+                    source_index: point.source_index,
+                });
+            }
             let value = point.value as f32;
-            assert!(
-                point.time.is_finite()
-                    && point.value.is_finite()
-                    && offset.is_finite()
-                    && value.is_finite(),
-                "tile point is not representable as finite f32"
-            );
+            if !point.value.is_finite() || !value.is_finite() {
+                return Err(TileBinaryError::UnrepresentableValue {
+                    signal_id: item.signal_id,
+                    source_index: point.source_index,
+                });
+            }
             bytes.extend_from_slice(&offset.to_le_bytes());
             bytes.extend_from_slice(&value.to_le_bytes());
             put_u32(
@@ -158,10 +190,9 @@ pub fn encode_tile_response(series: &[BinaryTileSeries<'_>]) -> Vec<u8> {
             );
             put_u32(&mut bytes, 0);
         }
-        bytes.resize(align8(bytes.len()), 0);
+        resize_aligned(&mut bytes)?;
     }
-    debug_assert_eq!(bytes.len(), capacity);
-    bytes
+    Ok(bytes)
 }
 
 /// Decodes a native columnar tile response.
@@ -222,7 +253,9 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
                     .map_err(|_| TileBinaryError::Malformed("unit is not utf8"))?,
             )
         };
-        at = align8(at);
+        let padding_start = at;
+        at = checked_align8(at)?;
+        validate_padding(bytes, padding_start..at)?;
 
         let t0 = read_f64s(bytes, &mut at, bin_count)?;
         let t1 = read_f64s(bytes, &mut at, bin_count)?;
@@ -241,7 +274,9 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
         {
             return Err(TileBinaryError::Malformed("unknown bin flags"));
         }
-        at = align8(at);
+        let padding_start = at;
+        at = checked_align8(at)?;
+        validate_padding(bytes, padding_start..at)?;
         let points = (0..point_count)
             .map(|_| {
                 let time_offset = read_f32(bytes, &mut at)?;
@@ -263,7 +298,9 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        at = align8(at);
+        let padding_start = at;
+        at = checked_align8(at)?;
+        validate_padding(bytes, padding_start..at)?;
         decoded.push(OwnedBinarySeries {
             signal_id,
             signal_path: path,
@@ -293,34 +330,72 @@ pub fn decode_tile_response(bytes: &[u8]) -> Result<Vec<OwnedBinarySeries>, Tile
     Ok(decoded)
 }
 
-fn series_bytes(series: &BinaryTileSeries<'_>) -> usize {
-    validate_series(series);
-    48 + align8(series.signal_path.len() + series.unit.map_or(0, str::len))
-        + align8(series.bin_count * 73)
-        + align8(series.points.len() * 16)
+fn series_bytes(series: &BinaryTileSeries<'_>) -> Result<usize, TileBinaryError> {
+    validate_series(series)?;
+    let metadata = series
+        .signal_path
+        .len()
+        .checked_add(series.unit.map_or(0, str::len))
+        .ok_or(TileBinaryError::SizeOverflow)?;
+    let columns = series
+        .bin_count
+        .checked_mul(73)
+        .ok_or(TileBinaryError::SizeOverflow)?;
+    let points = series
+        .points
+        .len()
+        .checked_mul(16)
+        .ok_or(TileBinaryError::SizeOverflow)?;
+    let size = 48usize
+        .checked_add(checked_align8(metadata)?)
+        .ok_or(TileBinaryError::SizeOverflow)?;
+    let size = size
+        .checked_add(checked_align8(columns)?)
+        .ok_or(TileBinaryError::SizeOverflow)?;
+    size.checked_add(checked_align8(points)?)
+        .ok_or(TileBinaryError::SizeOverflow)
 }
 
-fn validate_series(series: &BinaryTileSeries<'_>) {
-    assert!(u16::try_from(series.signal_path.len()).is_ok());
-    assert!(
-        series
-            .unit
-            .is_none_or(|unit| u16::try_from(unit.len()).is_ok())
-    );
-    assert_eq!(series.bin_count, series.t0.len());
-    assert_eq!(series.bin_count, series.t1.len());
-    assert_eq!(series.bin_count, series.first.len());
-    assert_eq!(series.bin_count, series.last.len());
-    assert_eq!(series.bin_count, series.min.len());
-    assert_eq!(series.bin_count, series.max.len());
-    assert_eq!(series.bin_count, series.sum.len());
-    assert_eq!(series.bin_count, series.sum_sq.len());
-    assert_eq!(series.bin_count, series.sample_count.len());
-    assert_eq!(series.bin_count, series.finite_count.len());
-    assert_eq!(series.bin_count, series.flags.len());
-    assert!(series.source_start <= series.source_end);
-    assert!(series.origin.is_finite());
-    assert_eq!(series.bin_count, series.t0.len());
+fn validate_series(series: &BinaryTileSeries<'_>) -> Result<(), TileBinaryError> {
+    if u16::try_from(series.signal_path.len()).is_err() {
+        return Err(TileBinaryError::FieldTooLarge {
+            field: "signal path",
+        });
+    }
+    if series
+        .unit
+        .is_some_and(|unit| u16::try_from(unit.len()).is_err())
+    {
+        return Err(TileBinaryError::FieldTooLarge { field: "unit" });
+    }
+    if [
+        series.t0.len(),
+        series.t1.len(),
+        series.first.len(),
+        series.last.len(),
+        series.min.len(),
+        series.max.len(),
+        series.sum.len(),
+        series.sum_sq.len(),
+        series.sample_count.len(),
+        series.finite_count.len(),
+        series.flags.len(),
+    ]
+    .into_iter()
+    .any(|length| length != series.bin_count)
+    {
+        return Err(TileBinaryError::ColumnLengthMismatch);
+    }
+    if series.source_start > series.source_end {
+        return Err(TileBinaryError::ReversedSourceRange);
+    }
+    if !series.origin.is_finite() {
+        return Err(TileBinaryError::NonFiniteOrigin {
+            signal_id: series.signal_id,
+            signal_path: series.signal_path.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn append_f64_column(bytes: &mut Vec<u8>, values: &[f64], optional: Option<(&[u8], u8)>) {
@@ -348,8 +423,29 @@ fn put_u64(bytes: &mut Vec<u8>, value: u64) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
-fn align8(value: usize) -> usize {
-    value.checked_add(7).expect("tile payload size overflow") & !7
+fn checked_align8(value: usize) -> Result<usize, TileBinaryError> {
+    value
+        .checked_add(7)
+        .map(|aligned| aligned & !7)
+        .ok_or(TileBinaryError::SizeOverflow)
+}
+
+fn resize_aligned(bytes: &mut Vec<u8>) -> Result<(), TileBinaryError> {
+    let length = checked_align8(bytes.len())?;
+    bytes.resize(length, 0);
+    Ok(())
+}
+
+fn validate_padding(bytes: &[u8], range: std::ops::Range<usize>) -> Result<(), TileBinaryError> {
+    if bytes
+        .get(range)
+        .ok_or(TileBinaryError::Truncated)?
+        .iter()
+        .any(|byte| *byte != 0)
+    {
+        return Err(TileBinaryError::Malformed("nonzero alignment padding"));
+    }
+    Ok(())
 }
 
 fn take<'a>(bytes: &'a [u8], at: &mut usize, len: usize) -> Result<&'a [u8], TileBinaryError> {
@@ -429,6 +525,19 @@ fn read_u32s(bytes: &[u8], at: &mut usize, count: usize) -> Result<Vec<u32>, Til
 mod tests {
     use super::*;
 
+    static UNREPRESENTABLE_TIME_POINTS: [crate::TilePoint; 1] = [crate::TilePoint {
+        time: 1.0e40,
+        value: 2.0,
+        source_index: 17,
+        break_before: false,
+    }];
+    static UNREPRESENTABLE_VALUE_POINTS: [crate::TilePoint; 1] = [crate::TilePoint {
+        time: 1.0,
+        value: 1.0e40,
+        source_index: 17,
+        break_before: false,
+    }];
+
     fn series() -> [BinaryTileSeries<'static>; 2] {
         [
             BinaryTileSeries {
@@ -482,7 +591,7 @@ mod tests {
     #[test]
     fn round_trip_preserves_series_and_aligns_float_columns() {
         let series = series();
-        let bytes = encode_tile_response(&series);
+        let bytes = encode_tile_response(&series).expect("encode");
         let decoded = decode_tile_response(&bytes).expect("decode");
         assert_eq!(decoded.len(), series.len());
         for (actual, expected) in decoded.iter().zip(series.iter()) {
@@ -533,6 +642,50 @@ mod tests {
                 .iter()
                 .map(|value| value.to_bits())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    fn align8(value: usize) -> usize {
+        checked_align8(value).expect("test payload fits")
+    }
+
+    #[test]
+    fn rejects_nonfinite_origin_with_a_typed_error() {
+        let mut series = series();
+        series[0].origin = f64::NAN;
+        assert_eq!(
+            encode_tile_response(&series),
+            Err(TileBinaryError::NonFiniteOrigin {
+                signal_id: 9_007_199_254_740_993,
+                signal_path: "run/response".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_unrepresentable_point_time_without_panicking() {
+        let mut series = series();
+        series[0].origin = 0.0;
+        series[0].points = &UNREPRESENTABLE_TIME_POINTS;
+        assert_eq!(
+            encode_tile_response(&series),
+            Err(TileBinaryError::UnrepresentableTimeOffset {
+                signal_id: 9_007_199_254_740_993,
+                source_index: 17,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_unrepresentable_point_value_without_panicking() {
+        let mut series = series();
+        series[0].points = &UNREPRESENTABLE_VALUE_POINTS;
+        assert_eq!(
+            encode_tile_response(&series),
+            Err(TileBinaryError::UnrepresentableValue {
+                signal_id: 9_007_199_254_740_993,
+                source_index: 17,
+            })
         );
     }
 }

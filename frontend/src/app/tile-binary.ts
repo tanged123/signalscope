@@ -8,6 +8,7 @@ if (new Uint8Array(new Uint32Array([1]).buffer)[0] !== 1) {
 
 const MAGIC = 0x42545353;
 const FIXED_SERIES_BYTES = 48;
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
 
 export function decodeTileResponse(
   buffer: ArrayBuffer,
@@ -43,18 +44,30 @@ export function decodeTileResponse(
     const sourceStart = view.getBigUint64(offset + 24, true).toString();
     const sourceEnd = view.getBigUint64(offset + 32, true).toString();
     const origin = view.getFloat64(offset + 40, true);
+    if (BigInt(sourceStart) > BigInt(sourceEnd) || !Number.isFinite(origin)) {
+      throw new Error("invalid tile source range or origin");
+    }
     offset += FIXED_SERIES_BYTES;
     need(view, offset, pathLength + (unitLength === 0xffff ? 0 : unitLength));
-    const path = new TextDecoder().decode(
-      new Uint8Array(buffer, offset, pathLength),
-    );
+    let path: string;
+    try {
+      path = UTF8.decode(new Uint8Array(buffer, offset, pathLength));
+    } catch {
+      throw new Error("signal path is not valid UTF-8");
+    }
     offset += pathLength;
-    const unit =
-      unitLength === 0xffff
-        ? null
-        : new TextDecoder().decode(new Uint8Array(buffer, offset, unitLength));
+    let unit: string | null;
+    if (unitLength === 0xffff) {
+      unit = null;
+    } else {
+      try {
+        unit = UTF8.decode(new Uint8Array(buffer, offset, unitLength));
+      } catch {
+        throw new Error("unit is not valid UTF-8");
+      }
+    }
     offset += unitLength === 0xffff ? 0 : unitLength;
-    offset = align8(offset);
+    offset = align8AndValidate(view, offset);
 
     need(view, offset, count * 73);
     const columns: Omit<BinColumns, "count"> = {
@@ -74,13 +87,18 @@ export function decodeTileResponse(
       ),
       flags: new Uint8Array(buffer, offset + count * 64 + count * 8, count),
     };
-    offset = align8(offset + count * 73);
+    for (const flags of columns.flags) {
+      if ((flags & ~(1 | 2 | 4 | 8 | 16)) !== 0) {
+        throw new Error("unknown tile bin flags");
+      }
+    }
+    offset = align8AndValidate(view, offset + count * 73);
     need(view, offset, pointCount * POINT_STRIDE);
     const points = validatePointStream(
       new Uint8Array(buffer, offset, pointCount * POINT_STRIDE),
       pointCount,
     );
-    offset = align8(offset + pointCount * POINT_STRIDE);
+    offset = align8AndValidate(view, offset + pointCount * POINT_STRIDE);
     series.push({
       signalId,
       signalPath: path,
@@ -112,8 +130,15 @@ function floatColumn(
   return new Float64Array(buffer, offset, count);
 }
 
-function align8(offset: number): number {
-  return (offset + 7) & ~7;
+function align8AndValidate(view: DataView, offset: number): number {
+  const aligned = Math.ceil(offset / 8) * 8;
+  need(view, offset, aligned - offset);
+  for (let index = offset; index < aligned; index += 1) {
+    if (view.getUint8(index) !== 0) {
+      throw new Error("nonzero tile binary alignment padding");
+    }
+  }
+  return aligned;
 }
 
 function need(view: DataView, offset: number, length: number): void {

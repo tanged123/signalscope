@@ -83,6 +83,11 @@ export function validatePointStream(
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   for (let index = 0; index < count; index += 1) {
+    const timeOffset = view.getFloat32(index * POINT_STRIDE, true);
+    const value = view.getFloat32(index * POINT_STRIDE + 4, true);
+    if (!Number.isFinite(timeOffset) || !Number.isFinite(value)) {
+      throw new Error("nonfinite tile point value");
+    }
     const flags = view.getUint32(index * POINT_STRIDE + 8, true);
     if ((flags & ~BREAK_BEFORE) !== 0) {
       throw new Error("unknown tile point flags");

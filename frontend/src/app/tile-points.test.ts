@@ -50,4 +50,14 @@ describe("packed tile points", () => {
     view.setUint32(12, 1, true);
     expect(() => validatePointStream(bytes, 1)).toThrow(/reserved/i);
   });
+
+  it("rejects nonfinite packed point values", () => {
+    const bytes = new Uint8Array(POINT_STRIDE);
+    const view = new DataView(bytes.buffer);
+    view.setFloat32(0, Number.NaN, true);
+    expect(() => validatePointStream(bytes, 1)).toThrow(/finite/i);
+    view.setFloat32(0, 0, true);
+    view.setFloat32(4, Number.POSITIVE_INFINITY, true);
+    expect(() => validatePointStream(bytes, 1)).toThrow(/finite/i);
+  });
 });
