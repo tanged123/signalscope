@@ -10,7 +10,6 @@ function tile(id: string, sourceStart: string, bytes = 256): ResidencyTile {
     level: 0,
     sourceStart,
     sourceEnd: String(Number(sourceStart) + 2),
-    generation: 1,
     origin: 0,
     seriesSlot: Number(id),
     coarse: false,
@@ -40,7 +39,7 @@ describe("GpuResidency", () => {
     const first = store.upload(tile("7", "10"));
     const again = store.upload(tile("7", "10"));
     expect(again).toBe(first);
-    expect(first.key).toBe("7/0/10/1");
+    expect(first.key).toBe("7/0/10");
     expect(first.points.size).toBe(256);
   });
 
@@ -68,8 +67,54 @@ describe("GpuResidency", () => {
       store.uploadBatch([tile("1", "2", 512), tile("2", "2", 512)]),
     ).toThrow("GPU residency batch exceeds panel budget");
     expect(store.visible().map((entry) => entry.key)).toEqual([
-      "1/0/0/1",
-      "2/0/0/1",
+      "1/0/0",
+      "2/0/0",
     ]);
   });
+
+  it("keeps identity stable across acquisition generations", () => {
+    const store = residency();
+    const first = store.stage(4, [tile("7", "10")]);
+    const second = store.stage(5, [tile("7", "10")]);
+    expect(second[0]).toBe(first[0]);
+    expect(second[0]?.key).toBe("7/0/10");
+    expect(store.select(5, ["7/0/10"])).toEqual(second);
+  });
+
+  it("stages fine tiles without disturbing a complete coarse selection", () => {
+    const store = residency();
+    const coarse = tile("1", "0");
+    const coarseResident = store.stage(1, [{ ...coarse, coarse: true }]);
+    store.select(
+      1,
+      coarseResident.map((entry) => entry.key),
+    );
+    expect(() =>
+      store.stage(2, [tile("1", "2", 512), tile("2", "0", 512)]),
+    ).toThrow("GPU residency batch exceeds panel budget");
+    expect(store.visible().map((entry) => entry.key)).toEqual(["1/0/0"]);
+    expect(store.has("1/0/2")).toBe(false);
+    expect(store.has("2/0/0")).toBe(false);
+  });
+
+  it("reports selected point coverage without scanning the point stream", () => {
+    const store = residency();
+    const resident = store.stage(1, [
+      { ...tile("1", "0", 32), points: points(0, 10) },
+    ]);
+    store.select(
+      1,
+      resident.map((entry) => entry.key),
+    );
+    expect(store.covers(["1/0/0"], 2, 8)).toBe(true);
+    expect(store.covers(["1/0/0"], -1, 8)).toBe(false);
+  });
 });
+
+function points(first: number, last: number): ResidencyTile["points"] {
+  const bytes = new Uint8Array(32);
+  const view = new DataView(bytes.buffer);
+  view.setFloat32(0, first, true);
+  view.setFloat32(16, last, true);
+  return { count: 2, bytes, forceBreakFirst: false };
+}

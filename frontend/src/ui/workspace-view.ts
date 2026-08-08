@@ -15,6 +15,7 @@ import {
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
 import type { GpuRuntime } from "../render/gpu/runtime";
+import type { ResidencySelection } from "../render/gpu/residency";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -117,7 +118,7 @@ export class WorkspaceView {
     tilesByPanel: ReadonlyMap<string, ColumnarTileResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
-    revision: number | null = null,
+    selectionFor: (panelId: string) => ResidencySelection | null = () => null,
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -131,7 +132,7 @@ export class WorkspaceView {
             tilesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
-            revision,
+            selectionFor(panel.id),
           ) ?? 0;
     }
     return total;

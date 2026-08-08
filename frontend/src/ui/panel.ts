@@ -40,7 +40,7 @@ import { prepareTimePlot, type PreparedTimePlot } from "../app/time-plot";
 import { AxisRenderer, COLOR_SLOTS } from "../render/axis-renderer";
 import { GpuArena } from "../render/gpu/arena";
 import { GpuLineRenderer } from "../render/gpu/line-renderer";
-import { GpuResidency } from "../render/gpu/residency";
+import { GpuResidency, type ResidencySelection } from "../render/gpu/residency";
 import type { GpuRuntime } from "../render/gpu/runtime";
 import { GpuSeriesSlots, type SeriesStyle } from "../render/gpu/series-slots";
 import type { PickResult } from "../render/gpu/picker";
@@ -509,6 +509,7 @@ export class PanelView {
   private hoverClient: { x: number; y: number } | null = null;
   private hoverSequence = 0;
   private readonly pathsBySlot = new Map<number, string>();
+  private selectedSignalIds = new Set<string>();
   private hoverTag: HTMLElement | null = null;
   private inspectorPath: string | null = null;
   private inspectorCleanup: (() => void) | null = null;
@@ -790,7 +791,7 @@ export class PanelView {
     tiles: ColumnarTileResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
-    revision: number | null = null,
+    selection: ResidencySelection | null = null,
   ): number {
     if (
       sameRenderInputs(
@@ -801,7 +802,7 @@ export class PanelView {
           missingEmpty: this.lastMissingEmpty,
         },
         {
-          revision,
+          revision: selection?.generation ?? null,
           tiles,
           window,
           missingEmpty: missing.length === 0,
@@ -812,16 +813,17 @@ export class PanelView {
     }
     const rendered = renderState(state, this.callbacks);
     this.lastInputState = state;
-    this.lastRevision = revision;
+    this.lastRevision = selection?.generation ?? null;
     this.lastState = rendered;
     this.lastTiles = tiles;
     this.lastWindow = { ...window };
     this.lastMissingEmpty = missing.length === 0;
     this.preparedPlot = null;
+    const seriesByPath = new Map(
+      rendered.series.map((entry) => [entry.path, entry]),
+    );
     const series = (tiles?.series ?? []).map((tile) => {
-      const entry = rendered.series.find(
-        (candidate) => candidate.path === tile.signalPath,
-      );
+      const entry = seriesByPath.get(tile.signalPath);
       return {
         path: tile.signalPath,
         colorIndex:
@@ -851,7 +853,7 @@ export class PanelView {
     const elapsed =
       tiles === null || tiles.series.length === 0 || ranges === null
         ? 0
-        : this.renderGpuPlot(tiles, rendered, ranges.x, ranges.y, revision);
+        : this.renderGpuPlot(tiles, rendered, ranges.x, ranges.y, selection);
     this.renderStats();
     const annotations = this.resolvedAnnotations(rendered);
     this.renderAnnotationList(rendered, annotations);
@@ -867,7 +869,7 @@ export class PanelView {
     rendered: RenderPanelState,
     xRange: { min: number; max: number },
     yRange: { min: number; max: number },
-    revision: number | null,
+    selection: ResidencySelection | null,
   ): number {
     const elapsed = this.renderer.render(
       xRange,
@@ -882,7 +884,10 @@ export class PanelView {
     this.seriesCanvas.width = this.canvas.width;
     this.seriesCanvas.height = this.canvas.height;
     gpuRenderer.resize(this.seriesCanvas.width, this.seriesCanvas.height);
-    const generation = revision ?? 0;
+    const generation = selection?.generation ?? 0;
+    const seriesByPath = new Map(
+      rendered.series.map((entry) => [entry.path, entry]),
+    );
     const residencyTiles = tiles.series.flatMap((tile) => {
       if (tile.points.count === 0) return [];
       const seriesSlot = this.seriesSlots.acquire(tile.signalId, generation);
@@ -892,7 +897,6 @@ export class PanelView {
           level: tile.level,
           sourceStart: tile.sourceStart,
           sourceEnd: tile.sourceEnd,
-          generation,
           origin: tile.origin,
           seriesSlot,
           coarse: tile.level > 0,
@@ -900,10 +904,25 @@ export class PanelView {
         },
       ];
     });
+    const selectedSignalIds = new Set(
+      residencyTiles.map((tile) => tile.signalId),
+    );
+    for (const signalId of this.selectedSignalIds) {
+      if (selectedSignalIds.has(signalId)) continue;
+      const slot = this.seriesSlots.remove(signalId, generation);
+      if (slot !== null) this.pathsBySlot.delete(slot);
+    }
+    this.selectedSignalIds = selectedSignalIds;
     let residents;
     try {
-      residents = residency.uploadBatch(residencyTiles);
+      const staged = residency.stage(generation, residencyTiles);
+      const keys = selection?.keys ?? staged.map((resident) => resident.key);
+      residents = [...residency.select(generation, keys)];
+      if (keys.length > 0 && residents.length === 0) {
+        throw new Error("GPU residency selection is empty");
+      }
     } catch (error: unknown) {
+      residency.discardGeneration(generation);
       const coarse = residency.visible().filter((tile) => tile.coarse);
       if (coarse.length === 0) throw error;
       residents = coarse;
@@ -926,9 +945,7 @@ export class PanelView {
     const styles: SeriesStyle[] = [];
     const css = getComputedStyle(document.documentElement);
     for (const tile of tiles.series) {
-      const entry = rendered.series.find(
-        (candidate) => candidate.path === tile.signalPath,
-      );
+      const entry = seriesByPath.get(tile.signalPath);
       if (entry === undefined) continue;
       const slot = this.seriesSlots.slotOf(tile.signalId);
       this.pathsBySlot.set(slot, tile.signalPath);

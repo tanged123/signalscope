@@ -98,6 +98,7 @@ import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import { GpuRuntime } from "../render/gpu/runtime";
 import type { GpuMetricsSnapshot } from "../render/gpu/metrics";
+import { tileKey, type ResidencySelection } from "../render/gpu/residency";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -191,6 +192,9 @@ export class AppShell {
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
+  private acquisitionByPanel = new Map<string, ResidencySelection>();
+  private acquisitionIdentityByPanel = new Map<string, string>();
+  private nextAcquisitionGeneration = 0;
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -234,6 +238,7 @@ export class AppShell {
     this.exposeBenchApi(gpu.runtime);
     gpu.runtime.onRestored(() => {
       this.tileWindowCache.invalidate();
+      this.acquisitionIdentityByPanel.clear();
       void this.refreshTiles();
     });
     this.root.innerHTML = shellMarkup();
@@ -2186,6 +2191,8 @@ export class AppShell {
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
       this.tilesByPanel.clear();
+      this.acquisitionByPanel.clear();
+      this.acquisitionIdentityByPanel.clear();
       this.missingByPanel.clear();
       clearIngestProgress(this.root);
       this.workspace.setTheme(this.prefs.theme);
@@ -2433,6 +2440,7 @@ export class AppShell {
     this.catalog = Catalog.build(this.signals);
     this.catalogRevision += 1;
     this.tileWindowCache.invalidate();
+    this.acquisitionIdentityByPanel.clear();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2478,6 +2486,7 @@ export class AppShell {
       Math.round(required(this.root, ".workspace").clientWidth),
     );
     const nextTiles = new Map<string, ColumnarTileResponse>();
+    const nextAcquisition = new Map<string, ResidencySelection>();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
@@ -2493,6 +2502,16 @@ export class AppShell {
             1,
             Math.round((panelWidth > 0 ? panelWidth : width) * dpr),
           );
+          const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+          const target = TileWindowCache.requestPixelWidth(
+            pixelWidth,
+            window,
+            paddedWindow,
+          );
+          const generation = this.generationForAcquisition(
+            panel.id,
+            `${idsKey}:${String(pixelWidth)}:${String(paddedWindow.t0)}:${String(paddedWindow.t1)}:${String(target)}`,
+          );
           const cached = this.tileWindowCache.slice(
             panel.id,
             idsKey,
@@ -2502,17 +2521,15 @@ export class AppShell {
           );
           if (cached !== null) {
             nextTiles.set(panel.id, cached);
+            nextAcquisition.set(
+              panel.id,
+              selectionForTiles(generation, cached),
+            );
             return;
           }
-          const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
-          const target = TileWindowCache.requestPixelWidth(
-            pixelWidth,
-            window,
-            paddedWindow,
-          );
           const request: RefinementRequest = {
             panelId: panel.id,
-            generation: refreshToken,
+            generation,
             signalIds: ids,
             window: paddedWindow,
             target,
@@ -2529,7 +2546,11 @@ export class AppShell {
             coarseResponse = mergeTileResponses(coarseResponse, response);
             if (refreshToken !== this.refreshToken) return;
             nextTiles.set(panel.id, coarseResponse);
-            this.publishPartialTiles(nextTiles, nextMissing);
+            nextAcquisition.set(
+              panel.id,
+              selectionForTiles(generation, coarseResponse),
+            );
+            this.publishPartialTiles(nextTiles, nextMissing, nextAcquisition);
           };
           const sink: RefinementSink = {
             acceptCoarse: (_generation, response) => publishCoarse(response),
@@ -2571,6 +2592,13 @@ export class AppShell {
               window.t1,
             ) ?? response,
           );
+          const finalTiles = nextTiles.get(panel.id);
+          if (finalTiles !== undefined) {
+            nextAcquisition.set(
+              panel.id,
+              selectionForTiles(generation, finalTiles),
+            );
+          }
         } catch (error: unknown) {
           this.reportError(error);
         }
@@ -2578,6 +2606,7 @@ export class AppShell {
     );
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
+    this.acquisitionByPanel = nextAcquisition;
     this.missingByPanel = nextMissing;
     this.renderTiles();
   }
@@ -2598,13 +2627,25 @@ export class AppShell {
     return controller;
   }
 
+  private generationForAcquisition(panelId: string, identity: string): number {
+    if (this.acquisitionIdentityByPanel.get(panelId) === identity) {
+      const existing = this.acquisitionByPanel.get(panelId)?.generation;
+      if (existing !== undefined) return existing;
+    }
+    const generation = ++this.nextAcquisitionGeneration;
+    this.acquisitionIdentityByPanel.set(panelId, identity);
+    return generation;
+  }
+
   private publishPartialTiles(
     tiles: ReadonlyMap<string, ColumnarTileResponse>,
     missing: ReadonlyMap<string, string[]>,
+    acquisition: ReadonlyMap<string, ResidencySelection>,
   ): void {
     if (this.refreshPromise === null) return;
     this.tilesByPanel = new Map(tiles);
     this.missingByPanel = new Map(missing);
+    this.acquisitionByPanel = new Map(acquisition);
     this.renderTiles();
   }
 
@@ -2660,7 +2701,7 @@ export class AppShell {
             : this.effectiveWindow(panel);
         },
         (panelId) => this.missingByPanel.get(panelId) ?? [],
-        this.workspace.revision(),
+        (panelId) => this.acquisitionByPanel.get(panelId) ?? null,
       ) ?? 0;
     const frame = this.gpuRuntime?.metrics.snapshot().frameCpuMs.at(-1);
     required(this.root, ".render-ms").textContent =
@@ -3140,6 +3181,18 @@ function mergeTileResponses(
   return {
     requestId: next.requestId,
     series: [...bySignal.values()],
+  };
+}
+
+function selectionForTiles(
+  generation: number,
+  response: ColumnarTileResponse,
+): ResidencySelection {
+  return {
+    generation,
+    keys: response.series
+      .filter((tile) => tile.points.count > 0)
+      .map((tile) => tileKey(tile)),
   };
 }
 

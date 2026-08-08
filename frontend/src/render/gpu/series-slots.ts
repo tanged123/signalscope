@@ -47,12 +47,14 @@ export class GpuSeriesSlots {
     return slot;
   }
 
-  remove(signalId: string, generation: number): void {
+  remove(signalId: string, generation: number): number | null {
     const slot = this.records.get(signalId);
-    if (slot === undefined) return;
-    this.released.set(this.slotOf(signalId), generation);
+    if (slot === undefined) return null;
+    const index = this.slotOf(signalId);
+    this.released.set(index, generation);
     this.records.delete(signalId);
     this.slots.delete(signalId);
+    return index;
   }
 
   slotOf(signalId: string): number {
