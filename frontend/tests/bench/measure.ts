@@ -158,7 +158,7 @@ async function pan(page: Page, distance: number): Promise<void> {
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(x + distance, y, { steps: 4 });
+  await page.mouse.move(x + distance, y);
   await page.mouse.up();
   await page.waitForTimeout(80);
 }
