@@ -93,13 +93,15 @@ async function gpuInfo(): Promise<DesktopGpuInfo> {
 }
 
 async function start(): Promise<void> {
+  const resourceRoot =
+    process.env.SIGNALSCOPE_RESOURCE_DIR ?? process.resourcesPath;
   const frontendRoot = isDevelopment
     ? join(__dirname, "../../frontend/dist")
-    : join(process.resourcesPath, "frontend");
+    : join(resourceRoot, "frontend");
   const executable =
     process.env.SIGNALSCOPE_HOST_BIN ??
     join(
-      process.resourcesPath,
+      resourceRoot,
       "bin",
       process.platform === "win32"
         ? "signalscope-host.exe"

@@ -7,29 +7,25 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|host|shell|desktop|unit|frontend|e2e|native-e2e|gpu|bench|full]
+Usage: ./scripts/test.sh [quick|core|host|desktop|policy|unit|frontend|e2e|native-e2e|gpu|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
   host      Test the shell-independent Rust host and server, optionally filtered.
-  shell     Test the Tauri shell, optionally filtered.
   desktop   Test the Electron desktop package, optionally filtered.
+  policy    Test CI and release policy invariants.
   unit      Run frontend unit tests, optionally filtered.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
   e2e       Run Playwright desktop/mobile smoke tests and the GPU proof.
   gpu       Run WebGPU software-adapter fidelity tests.
   bench     Run corpus, core, and Playwright performance benchmarks.
-  full      Run quick checks, compile/test the Tauri shell, then run e2e.
+  full      Run quick checks, then run desktop and browser e2e checks.
 EOF
 }
 
 test_core() {
-  cargo test --workspace --exclude signalscope-shell -- "$@"
-}
-
-test_shell() {
-  cargo test -p signalscope-shell -- "$@"
+  cargo test --workspace -- "$@"
 }
 
 test_host() {
@@ -37,6 +33,39 @@ test_host() {
 }
 
 test_desktop() {
+  if [ "${1:-}" = package ]; then
+    shift
+    "$signalscope_scripts_dir/build.sh" native --dir
+    local packaged_bin packaged_app packaged_resource packaged_host
+    case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      packaged_bin="$signalscope_root/desktop/release/win-unpacked/signalscope.exe"
+      packaged_app="$signalscope_root/desktop/release/win-unpacked/resources/app.asar"
+      packaged_resource="$signalscope_root/desktop/release/win-unpacked/resources"
+      packaged_host="$packaged_resource/bin/signalscope-host.exe"
+      ;;
+    Darwin*)
+      packaged_bin="$signalscope_root/desktop/release/mac/SignalScope.app/Contents/MacOS/signalscope"
+      packaged_app="$signalscope_root/desktop/release/mac/SignalScope.app/Contents/Resources/app.asar"
+      packaged_resource="$signalscope_root/desktop/release/mac/SignalScope.app/Contents/Resources"
+      packaged_host="$packaged_resource/bin/signalscope-host"
+      ;;
+    *)
+      packaged_bin="$signalscope_root/desktop/release/linux-unpacked/signalscope"
+      packaged_app="$signalscope_root/desktop/release/linux-unpacked/resources/app.asar"
+      packaged_resource="$signalscope_root/desktop/release/linux-unpacked/resources"
+      packaged_host="$packaged_resource/bin/signalscope-host"
+      ;;
+    esac
+    SIGNALSCOPE_PACKAGED_BIN="$packaged_bin" \
+      SIGNALSCOPE_PACKAGED_APP="$packaged_app" \
+      SIGNALSCOPE_HOST_BIN="$packaged_host" \
+      SIGNALSCOPE_RESOURCE_DIR="$packaged_resource" \
+      SIGNALSCOPE_PACKAGE_SMOKE=1 \
+      pnpm --filter @signalscope/frontend exec playwright test \
+      --project=electron-packaged "$@"
+    return
+  fi
   pnpm --filter @signalscope/desktop test -- "$@"
 }
 
@@ -174,13 +203,12 @@ desktop)
   shift || true
   test_desktop "$@"
   ;;
+policy)
+  "$signalscope_scripts_dir/ci-policy.test.sh"
+  ;;
 native-e2e)
   shift || true
   test_native_e2e "$@"
-  ;;
-shell)
-  shift || true
-  test_shell "$@"
   ;;
 unit)
   shift || true
@@ -227,7 +255,7 @@ bench)
 full)
   test_core
   test_frontend
-  cargo test -p signalscope-shell
+  test_desktop
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
   pnpm e2e

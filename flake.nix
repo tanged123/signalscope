@@ -49,7 +49,7 @@
           programs.taplo.enable = true;
         };
 
-        linuxTauriPackages = lib.optionals pkgs.stdenv.isLinux (
+        linuxDesktopPackages = lib.optionals pkgs.stdenv.isLinux (
           with pkgs;
           [
             at-spi2-atk
@@ -63,7 +63,6 @@
             libsoup_3
             librsvg
             pango
-            webkitgtk_4_1
           ]
         );
       in
@@ -77,7 +76,6 @@
               cargo-deny
               cargo-llvm-cov
               cargo-machete
-              cargo-tauri
               clippy
               electron_43
               ffmpeg
@@ -93,9 +91,10 @@
               typos
               zizmor
             ]
-            ++ linuxTauriPackages;
+            ++ linuxDesktopPackages;
 
           shellHook = ''
+            export SIGNALSCOPE_DEV_SHELL_READY=1
             export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-2}"
             export RUST_BACKTRACE=1
             export HDF5_DIR="${hdf5Root}"

@@ -173,7 +173,7 @@ Ordered by how much they constrain everything else.
 
 2. **Density policy above ~138 series.** `TILE_BIN_BUDGET = 250_000` split
    across series with a 64-bin floor (`ui/app-shell.ts:102`,
-   `shell/src-tauri/src/lib.rs:877`) starves resolution below one bin per pixel
+   native tile planning starves resolution below one bin per pixel
    once a panel carries more than roughly `250_000 / 1800` series. Either the
    budget scales and wire cost grows, or the panel switches to a density or
    aggregate raster past a threshold. Note that
@@ -222,7 +222,7 @@ Ordered by how much they constrain everything else.
   density is bounded by viewport width; the renderer never scans raw arrays for
   ordinary pan/zoom.
 - The renderer stays deterministic from tiles + viewport + tokens, so snapshot
-  and workbench output stay pixel-aligned. `TauriPlane` and `BakedPlane`
+  and workbench output stay pixel-aligned. `NativePlane` and `BakedPlane`
   implement the same contract; UI code never branches on host identity.
 - Snapshots stay self-contained and offline, within the export budget. No new
   runtime dependencies in the snapshot frontend.

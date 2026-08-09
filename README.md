@@ -7,7 +7,7 @@
 
 SignalScope combines a Rust data plane for logs larger than memory with one TypeScript/WebGPU presentation plane that runs in two hosts:
 
-- The native Tauri workbench streams and memory-maps source data.
+- The native Electron workbench streams and memory-maps source data.
 - A self-contained HTML snapshot uses the same renderer against embedded, size-budgeted tiles.
 
 The repository ships the time-series WebGPU renderer and workbench fundamentals:
@@ -45,7 +45,7 @@ Run the software-adapter renderer proof or a browser benchmark:
 ./scripts/test.sh bench e2e
 ```
 
-Run the native shell:
+Run the native Electron workbench:
 
 ```bash
 ./scripts/run.sh native
@@ -118,13 +118,14 @@ frontend/
   src/app/           host-neutral application and DataPlane implementations
   src/render/        WebGPU line renderer, axes, and overlays
   src/ui/            workbench chrome and design tokens
-shell/src-tauri/     thin native host and IPC commands
+desktop/              sandboxed Electron host and packaging
+host/                 authenticated Rust host and loopback server
 docs/adr/            accepted architecture decisions
 ```
 
 ## Architecture
 
-The frontend depends only on the versioned `DataPlane` contract. `TauriPlane` invokes the native Rust plane; `BakedPlane` reads the same response shapes from a snapshot data slot. WebGPU renders ordered time-series pages and asynchronous nearest picks while Canvas2D supplies axes and overlays, with no host-specific branch.
+The frontend depends only on the versioned `DataPlane` contract. `NativePlane` invokes the authenticated Rust host through Electron's narrow bridge; `BakedPlane` reads the same response shapes from a snapshot data slot. WebGPU renders ordered time-series pages and asynchronous nearest picks while Canvas2D supplies axes and overlays, with no host-specific branch.
 
 See [the ADR index](docs/adr/README.md) for the decisions behind the two-host product shape, layer boundaries, tile pyramid, protocol, session schema, linked-time model, and snapshot injection mechanism.
 
@@ -137,13 +138,12 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/setup.sh --update-lock # refresh the lockfile after an intentional manifest edit
 ./scripts/dev.sh            # enter the development shell
 ./scripts/run.sh web        # launch browser frontend
-./scripts/run.sh native     # launch native Tauri workbench
+./scripts/run.sh native     # launch native Electron workbench
 ./scripts/test.sh           # lightweight core + frontend checks
-./scripts/test.sh full      # Tauri compile + Playwright checks too
+./scripts/test.sh full      # desktop + Playwright checks too
 ./scripts/build.sh web      # frontend + snapshot-template.html
 ./scripts/build.sh native   # native bundle + shared frontend
-./scripts/setup-appimage.sh # install AppImage dependencies on Ubuntu
-./scripts/build.sh appimage # portable Linux AppImage (Ubuntu/FHS only)
+./scripts/build.sh appimage # portable Linux AppImage
 ./scripts/build.sh windows  # Windows NSIS installer (Git Bash only)
 ./scripts/coverage.sh       # Rust + merged Vitest/Playwright frontend LCOV
 ./scripts/version.sh check  # verify synchronized release manifests
@@ -154,9 +154,9 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/ci.sh rust        # reproduce one named GitHub Actions job
 nix fmt                     # format the workspace
 
-Windows installer builds require CMake in addition to Git Bash. Linux builds
-use the pinned Nix shell, which supplies HDF5; AppImage builds additionally
-require libhdf5-dev.
+Linux and macOS builds use the pinned Nix shell, which supplies HDF5 and the
+Electron development binary. Windows packaging runs in Git Bash with the
+runner's Rust and Node toolchains.
 ```
 
 `./scripts/ci.sh quality` is implemented by `quality_checks()` in

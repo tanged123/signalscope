@@ -53,7 +53,7 @@ assets() {
     exit 1
   fi
 
-  find "$asset_dir" -type f \
+  find "$asset_dir" -type f -size +0c \
     \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' \
     -o -name '*-setup.exe' \) -print0 | sort -z
 }

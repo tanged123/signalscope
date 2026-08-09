@@ -40,7 +40,3 @@ declare global {
     scopeDesktop?: ScopeDesktopBridge;
   }
 }
-
-export function desktopBridge(): ScopeDesktopBridge | null {
-  return window.scopeDesktop ?? null;
-}

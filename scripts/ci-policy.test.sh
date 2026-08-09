@@ -31,6 +31,16 @@ if ! grep -q '^## Interactive demo$' "$readme"; then
   echo "README must give the hosted demo its own section" >&2
   failures=$((failures + 1))
 fi
+
+workflow_root="$script_dir/../.github/workflows"
+if rg -n 'target/release/bundle|cargo tauri|tauri build|@tauri-apps' "$workflow_root" >/dev/null; then
+  echo "workflows must use Electron scripts and desktop/release artifacts" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -q 'desktop/release' "$workflow_root/ci.yml"; then
+  echo "package jobs must upload desktop/release" >&2
+  failures=$((failures + 1))
+fi
 if ! grep -Eq '!\[SignalScope interactive demo\]\(https://tanged123\.github\.io/signalscope/demo\.gif\?v=[0-9]+\.[0-9]+\.[0-9]+\)' "$readme"; then
   echo "README must embed the release-generated demo GIF" >&2
   failures=$((failures + 1))
@@ -48,7 +58,7 @@ mkdir -p \
   "$version_root/core" \
   "$version_root/frontend/src/ui" \
   "$version_root/scripts" \
-  "$version_root/shell/src-tauri"
+  "$version_root/desktop"
 cp "$script_dir/version.mjs" "$version_root/scripts/version.mjs"
 cat >"$version_root/Cargo.toml" <<'EOF'
 [workspace]
@@ -70,7 +80,7 @@ name = "core"
 version = "1.2.3"
 EOF
 printf '{"version":"1.2.3"}\n' >"$version_root/frontend/package.json"
-printf '{"version":"1.2.3"}\n' >"$version_root/shell/src-tauri/tauri.conf.json"
+printf '{"version":"1.2.3"}\n' >"$version_root/desktop/package.json"
 printf 'showModeHelp("SignalScope 1.2.3")\n' >"$version_root/frontend/src/ui/app-shell.ts"
 cat >"$version_root/README.md" <<'EOF'
 [![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.2.2)](https://tanged123.github.io/signalscope/demo.html)
@@ -147,8 +157,8 @@ fi
 
 windows_asset_dir="$test_root/windows-assets"
 mkdir -p "$windows_asset_dir"
-: >"$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe"
-: >"$windows_asset_dir/signalscope-shell.exe"
+printf x >"$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe"
+: >"$windows_asset_dir/signalscope-host.exe"
 listed="$("$script_dir/release.sh" assets "$windows_asset_dir" | tr -d '\0')"
 if [ "$listed" != "$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe" ]; then
   printf 'release assets must list the NSIS installer and nothing else, got: %s\n' "$listed" >&2
@@ -159,9 +169,9 @@ fi
 # so that hand-off is covered without a token or network access.
 publish_dir="$test_root/publish-assets"
 mkdir -p "$publish_dir" "$stub_dir"
-: >"$publish_dir/signalscope_1.2.3_amd64.deb"
-: >"$publish_dir/SignalScope_1.2.3_x64-setup.exe"
-: >"$publish_dir/signalscope-shell.exe"
+printf x >"$publish_dir/signalscope_1.2.3_amd64.deb"
+printf x >"$publish_dir/SignalScope_1.2.3_x64-setup.exe"
+: >"$publish_dir/signalscope-host.exe"
 : >"$publish_dir/latest.json"
 
 cat >"$stub_dir/gh" <<'STUB'

@@ -79,12 +79,18 @@ export default defineConfig({
     {
       name: "electron-native",
       testDir: "./tests/e2e",
-      testMatch: /electron-native\.spec\.ts/,
+      testMatch: /electron-native(?:-export)?\.spec\.ts/,
+    },
+    {
+      name: "electron-packaged",
+      testDir: "./tests/e2e",
+      testMatch: /electron-packaged\.spec\.ts/,
     },
   ],
   webServer:
     process.env.SIGNALSCOPE_DEMO === "1" ||
-    process.env.SIGNALSCOPE_BENCH === "1"
+    process.env.SIGNALSCOPE_BENCH === "1" ||
+    process.env.SIGNALSCOPE_PACKAGE_SMOKE === "1"
       ? undefined
       : {
           command: "pnpm dev",

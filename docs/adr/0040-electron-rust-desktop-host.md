@@ -27,9 +27,9 @@ those operations over authenticated loopback HTTP. It binds only to
 the versioned JSON envelopes and binary tile framing, and keeps transport
 errors separate from scientific protocol errors.
 
-The completed architecture has no dual-shell compatibility state. Tauri is a
-temporary caller while the host boundary is extracted and is deleted after
-Electron parity and packaging gates pass. The renderer selects between
+The completed architecture has no dual-shell compatibility state. During
+extraction, Tauri was a temporary caller; it is retired after Electron parity
+and packaging gates pass. The renderer selects between
 `NativePlane` and `BakedPlane` by capability presence, never by host identity.
 
 ## Consequences

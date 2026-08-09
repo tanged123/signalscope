@@ -10,14 +10,11 @@ show_help() {
   cat <<'EOF'
 Usage: ./scripts/build.sh [native|host|appimage|windows|web] [additional arguments]
 
-  native  Build the Electron desktop TypeScript, Rust host, and frontend.
+  native  Build and package the Electron desktop, Rust host, and frontend.
   host    Build the shell-independent Rust host executable.
-  appimage
-          Build the Linux AppImage in an Ubuntu/FHS environment. Run
-          ./scripts/setup-appimage.sh once before using this mode.
+  appimage Build the Linux AppImage through the Electron package wrapper.
   windows
-          Build the Windows NSIS installer. Runs outside the Nix shell using
-          Git Bash and the runner-provided Rust, Node, and npm toolchain.
+          Build the Windows NSIS installer through the Electron package wrapper.
   web     Build only the browser frontend and snapshot-template.html.
 EOF
 }
@@ -32,7 +29,11 @@ if [ "$mode" = "windows" ]; then
   exec "$signalscope_scripts_dir/build-windows.sh" "$@"
 fi
 
-ensure_dev_shell "$@"
+if [ "${SIGNALSCOPE_WINDOWS_BUILD:-}" = 1 ]; then
+  cd "$signalscope_root" || exit 1
+else
+  ensure_dev_shell "$@"
+fi
 
 case "$mode" in
 host)
@@ -43,7 +44,10 @@ native)
   shift || true
   pnpm --filter @signalscope/frontend build
   pnpm --filter @signalscope/desktop build
-  exec cargo build --release -p scope-server --bin signalscope-host "$@"
+  cargo build --release -p scope-server --bin signalscope-host
+  node "$signalscope_root/desktop/scripts/stage.mjs"
+  exec pnpm --filter @signalscope/desktop exec electron-builder \
+    --config electron-builder.yml "$@"
   ;;
 web)
   shift || true

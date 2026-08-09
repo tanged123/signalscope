@@ -56,7 +56,10 @@ export class NativeClient {
   private readonly connection: NativeConnection;
   private readonly fetchFn: typeof fetch;
 
-  constructor(connection: NativeConnection, fetchFn: typeof fetch = fetch) {
+  constructor(
+    connection: NativeConnection,
+    fetchFn: typeof fetch = (input, init) => fetch(input, init),
+  ) {
     this.connection = validateConnection(connection);
     this.fetchFn = fetchFn;
   }

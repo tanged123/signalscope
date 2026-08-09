@@ -111,9 +111,15 @@ strokes are replaced by WebGPU pages, and interaction is proven with
 generation-safe refinement, asynchronous GPU picking, software-adapter pixel
 masks, and the `mc1000`/`dense10k` benchmark matrix. The corrective proof
 requires GPU descriptor counts, successful frames, completed picks, recovery,
-and zero validation errors; the native smoke path remains capability-dependent
-on the host webview, so WSL/WebKitGTK without WebGPU reports the unsupported
-state rather than claiming native rendering.
+and zero validation errors. Electron software WebGPU proves shell integration
+and pixels; only a non-fallback Electron adapter is authoritative for
+performance.
+
+The Electron desktop migration is complete: `scope-host` and `scope-server`
+own native operations, `NativePlane` uses their authenticated loopback
+boundary, and electron-builder packages the Rust host beside the shared
+frontend on Linux, Windows, and macOS. The unpacked package smoke runs outside
+the checkout; cross-platform artifacts are produced by their target runners.
 
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18

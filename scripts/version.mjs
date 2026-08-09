@@ -9,7 +9,7 @@ const releaseFiles = {
   cargo: resolve(repositoryRoot, "Cargo.toml"),
   lock: resolve(repositoryRoot, "Cargo.lock"),
   frontend: resolve(repositoryRoot, "frontend/package.json"),
-  tauri: resolve(repositoryRoot, "shell/src-tauri/tauri.conf.json"),
+  desktop: resolve(repositoryRoot, "desktop/package.json"),
   about: resolve(repositoryRoot, "frontend/src/ui/app-shell.ts"),
   readme: resolve(repositoryRoot, "README.md"),
 };
@@ -123,14 +123,20 @@ function demoVersion(text) {
 }
 
 async function readReleaseState(packageNames) {
-  const [cargoText, lockText, frontendText, tauriText, aboutText, readmeText] =
-    await Promise.all(
-      Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
-    );
+  const [
+    cargoText,
+    lockText,
+    frontendText,
+    desktopText,
+    aboutText,
+    readmeText,
+  ] = await Promise.all(
+    Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
+  );
   const versions = new Map([
     ["Cargo.toml [workspace.package]", cargoWorkspaceVersion(cargoText)],
     ["frontend/package.json", JSON.parse(frontendText).version],
-    ["shell/src-tauri/tauri.conf.json", JSON.parse(tauriText).version],
+    ["desktop/package.json", JSON.parse(desktopText).version],
     ["frontend/src/ui/app-shell.ts About", aboutVersion(aboutText)],
     ["README.md demo GIF", demoVersion(readmeText)],
   ]);
@@ -240,10 +246,16 @@ function setDemoVersion(text, version) {
 
 async function setVersion(version, packageNames) {
   parseVersion(version);
-  const [cargoText, lockText, frontendText, tauriText, aboutText, readmeText] =
-    await Promise.all(
-      Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
-    );
+  const [
+    cargoText,
+    lockText,
+    frontendText,
+    desktopText,
+    aboutText,
+    readmeText,
+  ] = await Promise.all(
+    Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
+  );
   await Promise.all([
     writeFile(
       releaseFiles.cargo,
@@ -258,8 +270,8 @@ async function setVersion(version, packageNames) {
       setJsonVersion(frontendText, version, "frontend/package.json"),
     ),
     writeFile(
-      releaseFiles.tauri,
-      setJsonVersion(tauriText, version, "shell/src-tauri/tauri.conf.json"),
+      releaseFiles.desktop,
+      setJsonVersion(desktopText, version, "desktop/package.json"),
     ),
     writeFile(releaseFiles.about, setAboutVersion(aboutText, version)),
     writeFile(releaseFiles.readme, setDemoVersion(readmeText, version)),

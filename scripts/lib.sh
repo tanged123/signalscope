@@ -7,7 +7,7 @@ signalscope_root="$(cd "$signalscope_scripts_dir/.." && pwd)"
 # Re-exec the calling script inside the Nix dev shell when invoked outside it,
 # then apply the defaults every wrapper relies on.
 ensure_dev_shell() {
-  if [ -z "${IN_NIX_SHELL:-}" ]; then
+  if [ "${SIGNALSCOPE_DEV_SHELL_READY:-}" != 1 ]; then
     exec "$signalscope_scripts_dir/dev.sh" "$0" "$@"
   fi
   # Keep local machines responsive; let CI runners use every core.
@@ -47,15 +47,29 @@ artifact_checks() {
 }
 
 rust_checks() {
-  local check_config='{"bundle":{"resources":[]}}'
   "$signalscope_scripts_dir/test.sh" host
-  TAURI_CONFIG="$check_config" cargo clippy --workspace --all-targets -- -D warnings
-  TAURI_CONFIG="$check_config" cargo test --workspace
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test --workspace
+}
+
+live_host_deletion_check() {
+  local matches
+  matches=$(rg -n -i \
+    'shell/src-tauri|TauriPlane|__TAURI_INTERNALS__|cargo tauri|@tauri-apps|tauri-build|tauri-plugin|webkit2gtk|WebKitGTK' \
+    .github AGENTS.md CLAUDE.md README.md Cargo.toml Cargo.lock flake.nix \
+    package.json pnpm-workspace.yaml frontend host core protocol desktop scripts \
+    --glob '!target/**' --glob '!node_modules/**' --glob '!**/node_modules/**' \
+    --glob '!build/**' --glob '!desktop/release/**' --glob '!scripts/lib.sh' || true)
+  if [ -n "$matches" ]; then
+    printf '%s\n' "$matches" >&2
+    return 1
+  fi
 }
 
 quality_checks() {
   shellcheck scripts/*.sh .github/hooks/pre-commit
   "$signalscope_scripts_dir/ci-policy.test.sh"
+  live_host_deletion_check
   node "$signalscope_scripts_dir/generate-monte-carlo-demo.mjs" --check
   actionlint
   typos

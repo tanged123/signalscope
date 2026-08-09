@@ -25,16 +25,6 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
-          selector: "MemberExpression[property.name='__TAURI__']",
-          message:
-            "UI and renderer code must not branch on host identity (AGENTS.md). Go through the DataPlane contract.",
-        },
-        {
-          selector: "Identifier[name='isTauri']",
-          message:
-            "UI and renderer code must not branch on host identity (AGENTS.md). Go through the DataPlane contract.",
-        },
-        {
           selector:
             "AssignmentExpression[left.property.name='innerHTML'][right.type='TemplateLiteral'][right.expressions.length>0]",
           message:
@@ -45,24 +35,6 @@ export default tseslint.config(
             "AssignmentExpression[left.property.name='innerHTML'][right.type='BinaryExpression']",
           message:
             "Do not concatenate values into innerHTML (AGENTS.md): signal and source names are untrusted. Use textContent.",
-        },
-      ],
-    },
-  },
-  {
-    files: ["src/ui/**/*.ts", "src/render/**/*.ts"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["**/data-plane"],
-              importNames: ["TauriPlane", "BakedPlane"],
-              message:
-                "UI and renderer code must depend on the DataPlane contract, not a concrete host plane (AGENTS.md).",
-            },
-          ],
         },
       ],
     },

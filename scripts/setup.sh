@@ -3,7 +3,11 @@ set -euo pipefail
 
 # shellcheck source=scripts/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-ensure_dev_shell "$@"
+if [ "${SIGNALSCOPE_WINDOWS_BUILD:-}" = 1 ]; then
+  cd "$signalscope_root" || exit 1
+else
+  ensure_dev_shell "$@"
+fi
 
 case "${1:-}" in
 --update-lock)

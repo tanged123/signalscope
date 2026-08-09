@@ -4,7 +4,9 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc",
+    "build": "node scripts/clean.mjs && tsc",
+    "package": "electron-builder --config electron-builder.yml",
+    "package:dir": "electron-builder --config electron-builder.yml --dir",
     "start": "pnpm build && node scripts/start.mjs",
     "test": "vitest run"
   },

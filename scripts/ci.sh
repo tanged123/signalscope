@@ -22,9 +22,9 @@ Each named mode matches the GitHub Actions job with the same name:
             snapshot artifact checks.
   e2e       Playwright desktop smoke tests.
   bench     Full benchmark suite; writes build/bench/report.json.
-  build     Native Tauri bundles via ./scripts/build.sh native.
-  appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
-  windows   Windows-only NSIS installer build; runs outside the Nix shell.
+  build     Electron packages via ./scripts/build.sh native.
+  appimage  Linux AppImage build through the Electron package wrapper.
+  windows   Windows NSIS installer build through the Electron package wrapper.
 
 `all` runs format, quality, rust, frontend, and e2e sequentially with Cargo
 capped at two jobs by default — the complete local quality gate.
@@ -58,6 +58,7 @@ check_e2e() {
   bake_bench_smoke_artifact
   pnpm e2e
   "$signalscope_scripts_dir/test.sh" gpu
+  "$signalscope_scripts_dir/test.sh" native-e2e
 }
 
 case "$mode" in

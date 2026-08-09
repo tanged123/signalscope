@@ -6,9 +6,9 @@
 **/node_modules/
 /frontend/dist/
 /desktop/dist/
+/desktop/release/
 /frontend/playwright-report/
 /frontend/test-results/
-/shell/src-tauri/gen/
 *.log
 .DS_Store
 *.sspyr
@@ -16,7 +16,6 @@
 /frontend/dist/**/*.png
 /frontend/playwright-report/**/*.png
 /frontend/test-results/**/*.png
-/shell/src-tauri/gen/**/*.png
 /Screenshot*.png
 .worktrees/
 /refs/

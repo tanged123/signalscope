@@ -3,7 +3,6 @@ resolver = "2"
 members = [
   "core/scope-core",
   "protocol",
-  "shell/src-tauri",
   "host/scope-host",
   "host/scope-server",
 ]
@@ -52,8 +51,8 @@ tokio = { version = "1", features = [
 tower = { version = "0.5", features = ["util"] }
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
-# The dev-profile workbench (`cargo tauri dev`) runs the full ingest and
-# pyramid pipeline; unoptimized scope-core is ~5x slower on multi-GB opens.
+# The development workbench runs the full ingest and pyramid pipeline;
+# unoptimized scope-core is ~5x slower on multi-GB opens.
 [profile.dev.package."*"]
 opt-level = 2
 
