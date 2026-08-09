@@ -5,6 +5,17 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 failures=0
 
 node "$script_dir/check-electron-version.test.mjs"
+node --test "$script_dir/process-supervisor.test.mjs"
+
+if rg -n 'vite_pid|wait_for_port|trap cleanup|exec pnpm --filter @signalscope/desktop start' \
+  "$script_dir/run.sh" >/dev/null; then
+  echo "run.sh native must delegate process ownership to native-dev.mjs" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'native-dev.mjs' "$script_dir/run.sh"; then
+  echo "run.sh native must call native-dev.mjs" >&2
+  failures=$((failures + 1))
+fi
 
 expect_status() {
   local expected="$1"

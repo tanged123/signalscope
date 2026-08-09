@@ -43,23 +43,12 @@ native)
   done
   "$signalscope_scripts_dir/build.sh" host
   "$signalscope_scripts_dir/build.sh" web
-  vite_pid=""
-  cleanup() {
-    if [ -n "$vite_pid" ]; then
-      kill "$vite_pid" 2>/dev/null || true
-      wait "$vite_pid" 2>/dev/null || true
-    fi
-  }
-  trap cleanup EXIT INT TERM
-  pnpm --filter @signalscope/frontend dev >"$signalscope_root/build/vite.log" 2>&1 &
-  vite_pid=$!
-  wait_for_port 4173
-  export NODE_ENV=development
-  export SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host"
+  native_dev_args=()
   if [ "$software_gpu" -eq 1 ]; then
-    export SIGNALSCOPE_GPU_MODE=software
+    native_dev_args+=(--software-gpu)
   fi
-  exec pnpm --filter @signalscope/desktop start -- "${electron_args[@]}"
+  native_dev_args+=(-- "${electron_args[@]}")
+  exec node "$signalscope_scripts_dir/native-dev.mjs" "${native_dev_args[@]}"
   ;;
 web)
   shift || true
