@@ -17,10 +17,8 @@ import {
 
 const isDevelopment = process.env.NODE_ENV === "development";
 const developmentOrigin = "http://127.0.0.1:4173";
-const developmentUrl =
-  process.env.SIGNALSCOPE_BENCH === "1"
-    ? `${developmentOrigin}/?signalscope-bench=1`
-    : developmentOrigin;
+const benchQuery =
+  process.env.SIGNALSCOPE_BENCH === "1" ? "?signalscope-bench=1" : "";
 const gpuMode = process.env.SIGNALSCOPE_GPU_MODE;
 if (gpuMode !== undefined && gpuMode !== "software") {
   throw new Error("SIGNALSCOPE_GPU_MODE must be software when set");
@@ -136,8 +134,9 @@ async function start(): Promise<void> {
   registerDialogHandlers(() => mainWindow);
   registerAppProtocol(frontendRoot);
   mainWindow = createWindow({
-    developmentUrl: isDevelopment ? developmentUrl : null,
-    frontendRoot,
+    entryUrl: isDevelopment
+      ? `${developmentOrigin}/${benchQuery}`
+      : `app://signalscope/index.html${benchQuery}`,
     preloadPath: join(__dirname, "preload.js"),
   });
 }

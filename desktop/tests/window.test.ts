@@ -39,8 +39,7 @@ describe("secure Electron window", () => {
 
   it("uses the fixed sandboxed BrowserWindow policy", () => {
     createWindow({
-      developmentUrl: null,
-      frontendRoot: "/tmp/frontend",
+      entryUrl: "app://signalscope/index.html",
       preloadPath: "/tmp/preload.js",
     });
     expect(mocks.BrowserWindow).toHaveBeenCalledWith({
@@ -66,13 +65,17 @@ describe("secure Electron window", () => {
     ).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("loads only the exact development origin", () => {
+  it.each([
+    ["development", "http://127.0.0.1:4173/"],
+    ["development bench", "http://127.0.0.1:4173/?signalscope-bench=1"],
+    ["production", "app://signalscope/index.html"],
+    ["production bench", "app://signalscope/index.html?signalscope-bench=1"],
+  ])("loads only the exact %s origin", (_name, entryUrl) => {
     createWindow({
-      developmentUrl: "http://127.0.0.1:4173",
-      frontendRoot: "/tmp/frontend",
+      entryUrl,
       preloadPath: "/tmp/preload.js",
     });
-    expect(mocks.window.loadURL).toHaveBeenCalledWith("http://127.0.0.1:4173");
+    expect(mocks.window.loadURL).toHaveBeenCalledWith(entryUrl);
     const navigation = mocks.webContents.on.mock.calls.find(
       ([name]) => name === "will-navigate",
     )?.[1] as

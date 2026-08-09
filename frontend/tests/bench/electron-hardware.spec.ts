@@ -1,4 +1,7 @@
 import { _electron as electron, expect, test } from "@playwright/test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   classifyGpuEvidence,
@@ -9,55 +12,186 @@ import {
   gpuMetrics,
   interact,
   meetsInteractiveFloors,
+  plotPixelEvidence,
   startFrameProbe,
   stopFrameProbe,
   waitForBenchEvent,
   waitForPickCount,
   waitForSuccessfulFrame,
 } from "./measure";
-import { waitForNativeSourceCount } from "./native-measure";
-import { writeElectronHardwareReport } from "./report";
+import { installBenchmarkSession } from "./native-session";
+import { nativeSourceCount, waitForNativeSourceCount } from "./native-measure";
+import {
+  writeElectronHardwareReport,
+  type ElectronHardwareReport,
+} from "./report";
 import { percentile } from "../../src/app/percentile";
 
-test("native Electron hardware acceptance uses the full corpus", async () => {
-  const corpusTier = process.env.SIGNALSCOPE_BENCH_TIER ?? "mc1000";
-  const electronPath = process.env.SIGNALSCOPE_ELECTRON_BIN;
-  const hostPath = process.env.SIGNALSCOPE_HOST_BIN;
-  const corpusPath = process.env.SIGNALSCOPE_BENCH_CORPUS_DIR;
-  if (electronPath === undefined || hostPath === undefined) {
-    throw new Error(
-      "native hardware acceptance requires SIGNALSCOPE_ELECTRON_BIN and SIGNALSCOPE_HOST_BIN",
-    );
-  }
-  if (corpusPath === undefined) {
-    throw new Error(
-      "native hardware acceptance requires SIGNALSCOPE_BENCH_CORPUS_DIR",
-    );
-  }
+const tiers = {
+  mc1000: { sourceCount: 1000, seriesCount: 1000 },
+  dense10k: { sourceCount: 10_000, seriesCount: 10_000 },
+} as const;
 
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] =>
-        entry[1] !== undefined && entry[0] !== "SIGNALSCOPE_GPU_MODE",
-    ),
-  );
-  const app = await electron.launch({
-    executablePath: electronPath,
-    args: [
-      fileURLToPath(new URL("../../../desktop", import.meta.url)),
-      "--open-folder",
-      corpusPath,
-    ],
-    env: {
-      ...env,
-      NODE_ENV: "development",
-      SIGNALSCOPE_BENCH: "1",
-      SIGNALSCOPE_HOST_BIN: hostPath,
-    },
-  });
+const emptyEvidence: GpuEvidence = {
+  electronVersion: "unknown",
+  chromiumVersion: "unknown",
+  adapterVendor: "",
+  adapterArchitecture: "",
+  adapterDevice: "",
+  adapterDescription: "",
+  softwareRendering: false,
+  fallbackReason: "benchmark did not reach GPU diagnostics",
+  limits: {},
+};
+
+const packageJsonPath = fileURLToPath(
+  new URL("../../../desktop/package.json", import.meta.url),
+);
+
+function baseReport(
+  corpusTier: string,
+  backend: string,
+  evidence: GpuEvidence,
+  expectedSeries: number,
+): ElectronHardwareReport {
+  return {
+    bench: "electron_hardware",
+    corpus_tier: corpusTier,
+    backend,
+    fallback_reason: evidence.fallbackReason,
+    software_rendering: evidence.softwareRendering,
+    pass: false,
+    electron: evidence.electronVersion,
+    chromium: evidence.chromiumVersion,
+    adapter_vendor: evidence.adapterVendor,
+    adapter_architecture: evidence.adapterArchitecture,
+    adapter_device: evidence.adapterDevice,
+    adapter_description: evidence.adapterDescription,
+    adapter_limits: evidence.limits,
+    expected_series: expectedSeries,
+    source_count: 0,
+    cold_first_plot_ms: 0,
+    coarse_first_ms: 0,
+    refinement_ms: 0,
+    first_plot_ms: 0,
+    upload_bytes: 0,
+    resident_gpu_bytes: 0,
+    resident_pages: 0,
+    draw_calls: 0,
+    draw_calls_after: 0,
+    draw_call_bound: 0,
+    submitted_segments: 0,
+    compact_segments: 0,
+    selected_series: 0,
+    visible_series: 0,
+    series_with_segments: 0,
+    successful_frames: 0,
+    validation_errors: 0,
+    validation_error_messages: [],
+    frame_p50_ms: 0,
+    frame_p95_ms: 0,
+    frame_max_ms: 0,
+    raf_interval_p95_ms: 0,
+    raf_interval_max_ms: 0,
+    longest_task_ms: 0,
+    pick_count: 0,
+    pick_p95_ms: 0,
+    recovery_samples: 0,
+    device_recovery_ms: 0,
+    resident_pan_upload_bytes: 0,
+    resident_pan_descriptor_rebuilds: 0,
+    resident_pan_resident_bytes_before: 0,
+    resident_pan_resident_bytes_after: 0,
+    resident_pan_resident_pages_before: 0,
+    resident_pan_resident_pages_after: 0,
+    pre_plot_pixels: 0,
+    post_recovery_pixels: 0,
+    pre_plot_total_pixels: 0,
+    post_recovery_total_pixels: 0,
+    url: "",
+    failure_reasons: [],
+    evidence,
+  };
+}
+
+test("native Electron hardware acceptance uses the packaged production app", async () => {
+  test.setTimeout(2_000_000);
+  const corpusTier = process.env.SIGNALSCOPE_BENCH_TIER ?? "mc1000";
+  const tier = Object.hasOwn(tiers, corpusTier)
+    ? tiers[corpusTier as keyof typeof tiers]
+    : undefined;
+  if (tier === undefined)
+    throw new Error(`unknown benchmark tier: ${corpusTier}`);
+  const expectedSeries = tier.seriesCount;
+  const executablePath = process.env.SIGNALSCOPE_PACKAGED_BIN;
+  const corpusPath = process.env.SIGNALSCOPE_BENCH_CORPUS_DIR;
+  const root = await mkdtemp(join(tmpdir(), "signalscope-hardware-"));
+  const userData = join(root, "user-data");
+  let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
+  let backend = "unsupported";
+  let evidence = emptyEvidence;
+  let reportWritten = false;
+
+  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+    devDependencies?: { electron?: string };
+  };
+  const expectedElectron = packageJson.devDependencies?.electron ?? "unknown";
+
+  const writeFailure = async (
+    reasons: readonly string[],
+    extra: Readonly<Record<string, unknown>> = {},
+  ): Promise<void> => {
+    await writeElectronHardwareReport({
+      ...baseReport(corpusTier, backend, evidence, expectedSeries),
+      package_electron_version: expectedElectron,
+      failure_reasons: reasons,
+      ...extra,
+    });
+    reportWritten = true;
+  };
+
   try {
+    const missing = [
+      executablePath === undefined ? "SIGNALSCOPE_PACKAGED_BIN" : null,
+      corpusPath === undefined ? "SIGNALSCOPE_BENCH_CORPUS_DIR" : null,
+    ].filter((value): value is string => value !== null);
+    if (
+      missing.length > 0 ||
+      executablePath === undefined ||
+      corpusPath === undefined
+    ) {
+      await writeFailure([`missing environment: ${missing.join(", ")}`]);
+      throw new Error(`hardware acceptance requires ${missing.join(" and ")}`);
+    }
+
+    await installBenchmarkSession(userData);
+    const removedVariables = new Set([
+      "NODE_ENV",
+      "SIGNALSCOPE_ELECTRON_BIN",
+      "SIGNALSCOPE_PACKAGED_BIN",
+      "SIGNALSCOPE_PACKAGED_APP",
+      "SIGNALSCOPE_HOST_BIN",
+      "SIGNALSCOPE_RESOURCE_DIR",
+      "SIGNALSCOPE_BENCH_NATIVE_FILES",
+    ]);
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] =>
+          entry[1] !== undefined &&
+          entry[0] !== "SIGNALSCOPE_GPU_MODE" &&
+          !removedVariables.has(entry[0]),
+      ),
+    );
+    env.NODE_ENV = "production";
+    env.SIGNALSCOPE_BENCH = "1";
+    app = await electron.launch({
+      executablePath,
+      cwd: root,
+      args: [`--user-data-dir=${userData}`, `--open-folder=${corpusPath}`],
+      env,
+    });
+
     const page = await app.firstWindow();
-    await expect(page).toHaveURL("http://127.0.0.1:4173/?signalscope-bench=1");
     const diagnostics = await page.evaluate(async () => {
       const bridge = window.scopeDesktop;
       if (bridge === undefined) throw new Error("desktop bridge is absent");
@@ -70,54 +204,106 @@ test("native Electron hardware acceptance uses the full corpus", async () => {
       };
       return {
         native,
-        backend: host.__signalscopeBench?.backend() ?? "unsupported",
         evidence: host.__signalscopeBench?.evidence() ?? null,
+        backend: host.__signalscopeBench?.backend() ?? "unsupported",
+        node: typeof (globalThis as { process?: unknown }).process,
+        require: typeof (globalThis as { require?: unknown }).require,
+        gpu: typeof navigator.gpu,
+        url: location.href,
       };
     });
-    const evidence =
+    evidence =
       diagnostics.evidence ?? gpuEvidenceFromNative(diagnostics.native);
-    const backend =
-      diagnostics.backend === "unsupported"
-        ? classifyGpuEvidence(evidence)
-        : diagnostics.backend;
-    if (backend !== "hardware") {
-      await writeElectronHardwareReport({
-        bench: "electron_hardware",
-        backend,
-        fallback_reason: evidence.fallbackReason,
-        software_rendering: evidence.softwareRendering,
-        pass: false,
-        corpus_tier: corpusTier,
-        electron: evidence.electronVersion,
-        chromium: evidence.chromiumVersion,
-        adapter_vendor: evidence.adapterVendor,
-        adapter_architecture: evidence.adapterArchitecture,
-        adapter_device: evidence.adapterDevice,
-        adapter_description: evidence.adapterDescription,
-        adapter_limits: evidence.limits,
-        evidence,
+    backend = classifyGpuEvidence(evidence);
+    const parsedUrl = new URL(diagnostics.url);
+    const earlyFailures = [
+      parsedUrl.protocol !== "app:" ||
+      parsedUrl.host !== "signalscope" ||
+      parsedUrl.pathname !== "/index.html" ||
+      parsedUrl.search !== "?signalscope-bench=1"
+        ? "packaged app URL is not the production benchmark entry"
+        : null,
+      diagnostics.native.electron !== expectedElectron
+        ? `Electron version ${diagnostics.native.electron} does not match package ${expectedElectron}`
+        : null,
+      diagnostics.node !== "undefined"
+        ? "Node is exposed to the renderer"
+        : null,
+      diagnostics.require !== "undefined"
+        ? "require is exposed to the renderer"
+        : null,
+      diagnostics.gpu !== "object" ? "WebGPU is unavailable" : null,
+      backend !== "hardware"
+        ? `selected WebGPU adapter is ${backend}: ${evidence.fallbackReason ?? evidence.adapterDescription}`
+        : null,
+    ].filter((value): value is string => value !== null);
+    if (earlyFailures.length > 0) {
+      await writeFailure(earlyFailures, {
+        electron_package_version: expectedElectron,
+        url: diagnostics.url,
       });
-      throw new Error(
-        `native hardware acceptance requires hardware WebGPU; observed ${backend}`,
-      );
+      throw new Error(earlyFailures.join("; "));
     }
 
-    const expectedSources = Number(
-      process.env.SIGNALSCOPE_BENCH_NATIVE_FILES ?? "1000",
+    await waitForNativeSourceCount(page, tier.sourceCount);
+    const sourceCount = await nativeSourceCount(page);
+    await expect(page.locator(".panel")).toHaveCount(1);
+    const panel = page.locator(".panel").first();
+    await expect(panel.locator(".panel-bindings .binding-chip")).toHaveCount(1);
+    await expect(panel.locator(".panel-bindings .binding-chip")).toHaveText(
+      /response @\* ·/,
     );
-    await waitForNativeSourceCount(page, expectedSources);
     await expect(page.locator(".series-canvas").first()).toBeVisible({
       timeout: 120_000,
     });
+
     const navigationStart = await waitForBenchEvent(page, "navigation-start");
     const coarseComplete = await waitForBenchEvent(page, "coarse-complete");
-    const firstPlot = await waitForSuccessfulFrame(page);
+    const firstPlotAt = await waitForSuccessfulFrame(page);
     const fineComplete = await waitForBenchEvent(page, "fine-complete");
+    const beforeInteraction = await gpuMetrics(page);
+    const pixelsBefore = await plotPixelEvidence(page);
+    const preInteractionFailures = [
+      sourceCount !== tier.sourceCount
+        ? `source count ${String(sourceCount)} does not match ${String(tier.sourceCount)}`
+        : null,
+      beforeInteraction.selectedSeries !== expectedSeries
+        ? `selected series ${String(beforeInteraction.selectedSeries)} does not match ${String(expectedSeries)}`
+        : null,
+      beforeInteraction.visibleSeries !== expectedSeries
+        ? `visible series ${String(beforeInteraction.visibleSeries)} does not match ${String(expectedSeries)}`
+        : null,
+      beforeInteraction.seriesWithSegments !== expectedSeries
+        ? `drawable series ${String(beforeInteraction.seriesWithSegments)} does not match ${String(expectedSeries)}`
+        : null,
+      beforeInteraction.residentPages <= 0 ? "no resident GPU pages" : null,
+      pixelsBefore.nonBackgroundPixels <= 0
+        ? "initial plot pixels are blank"
+        : null,
+      beforeInteraction.validationErrors.length > 0
+        ? "initial renderer validation errors"
+        : null,
+    ].filter((value): value is string => value !== null);
+    if (preInteractionFailures.length > 0) {
+      await writeFailure(preInteractionFailures, {
+        package_electron_version: expectedElectron,
+        source_count: sourceCount,
+        selected_series: beforeInteraction.selectedSeries,
+        visible_series: beforeInteraction.visibleSeries,
+        series_with_segments: beforeInteraction.seriesWithSegments,
+        resident_gpu_bytes: beforeInteraction.residentBytes,
+        resident_pages: beforeInteraction.residentPages,
+        pre_plot_pixels: pixelsBefore.nonBackgroundPixels,
+        pre_plot_total_pixels: pixelsBefore.totalPixels,
+        url: diagnostics.url,
+      });
+      throw new Error(preInteractionFailures.join("; "));
+    }
+
     await startFrameProbe(page);
     const residentPan = await interact(page);
     const frameStats = await stopFrameProbe(page);
-    await waitForPickCount(page, 40);
-    const beforeRecovery = await gpuMetrics(page);
+    const afterInteractions = await waitForPickCount(page, 40);
     await page.evaluate(() => {
       const host = window as typeof window & {
         __signalscopeBench?: { loseDeviceForTest: () => void };
@@ -148,72 +334,92 @@ test("native Electron hardware acceptance uses the full corpus", async () => {
           (host.__signalscopeBench?.snapshot().successfulFrames ?? 0) > previous
         );
       },
-      beforeRecovery.successfulFrames,
+      afterInteractions.successfulFrames,
       { timeout: 120_000 },
     );
     await waitForBenchEvent(page, "restored");
+    const pixelsAfter = await plotPixelEvidence(page);
     const metrics = await gpuMetrics(page);
     const frameTimes = [...metrics.frameCpuMs].sort(
       (left, right) => left - right,
     );
-    const firstPlotMs = firstPlot - navigationStart;
+    const drawCallBound = beforeInteraction.residentPages * 4 + 1;
+    const firstPlotMs = firstPlotAt - navigationStart;
     const failures = [
       ...(!meetsInteractiveFloors(firstPlotMs, frameStats, metrics, residentPan)
         ? ["renderer interaction floor"]
         : []),
-      ...(metrics.selectedSeries !== expectedSources
-        ? ["selected series cardinality"]
+      ...(beforeInteraction.drawCalls > drawCallBound
+        ? [
+            `draw calls ${String(beforeInteraction.drawCalls)} exceed ${String(drawCallBound)}`,
+          ]
         : []),
-      ...(metrics.visibleSeries !== expectedSources
-        ? ["visible series cardinality"]
+      ...(afterInteractions.pickLatencyMs.length < 40
+        ? ["pick completions"]
         : []),
-      ...(metrics.seriesWithSegments !== expectedSources
-        ? ["drawable series cardinality"]
+      ...(metrics.deviceRecoveryMs.length < 1 ? ["device recovery"] : []),
+      ...(pixelsAfter.nonBackgroundPixels <= 0
+        ? ["recovered plot pixels are blank"]
         : []),
-      ...(metrics.pickLatencyMs.length < 40 ? ["pick completions"] : []),
-      ...(metrics.deviceRecoveryMs.length === 0 ? ["device recovery"] : []),
     ];
     const pass = failures.length === 0;
     await writeElectronHardwareReport({
-      bench: "electron_hardware",
-      backend,
-      fallback_reason: evidence.fallbackReason,
-      software_rendering: evidence.softwareRendering,
+      ...baseReport(corpusTier, backend, evidence, expectedSeries),
       pass,
-      corpus_tier: corpusTier,
-      electron: evidence.electronVersion,
-      chromium: evidence.chromiumVersion,
-      adapter_vendor: evidence.adapterVendor,
-      adapter_architecture: evidence.adapterArchitecture,
-      adapter_device: evidence.adapterDevice,
-      adapter_description: evidence.adapterDescription,
-      adapter_limits: evidence.limits,
-      evidence,
-      input_files: expectedSources,
+      package_electron_version: expectedElectron,
+      source_count: sourceCount,
+      url: diagnostics.url,
+      cold_first_plot_ms: firstPlotMs,
       first_plot_ms: firstPlotMs,
       coarse_first_ms: coarseComplete - navigationStart,
       refinement_ms: fineComplete - coarseComplete,
+      upload_bytes: metrics.uploadBytes,
+      resident_gpu_bytes: metrics.residentBytes,
+      resident_pages: metrics.residentPages,
+      draw_calls: beforeInteraction.drawCalls,
+      draw_calls_after: metrics.drawCalls,
+      draw_call_bound: drawCallBound,
+      submitted_segments: metrics.submittedSegments,
+      compact_segments: metrics.compactSegments,
+      selected_series: metrics.selectedSeries,
+      visible_series: metrics.visibleSeries,
+      series_with_segments: metrics.seriesWithSegments,
+      successful_frames: metrics.successfulFrames,
+      validation_errors: metrics.validationErrors.length,
+      validation_error_messages: metrics.validationErrors,
+      frame_p50_ms: percentile(frameTimes, 0.5),
       frame_p95_ms: percentile(frameTimes, 0.95),
       frame_max_ms: frameTimes.at(-1) ?? 0,
       raf_interval_p95_ms: frameStats.p95Ms,
       raf_interval_max_ms: frameStats.maxMs,
       longest_task_ms: frameStats.longestTaskMs,
-      validation_errors: metrics.validationErrors.length,
-      selected_series: metrics.selectedSeries,
-      visible_series: metrics.visibleSeries,
-      series_with_segments: metrics.seriesWithSegments,
-      draw_calls: metrics.drawCalls,
-      compact_segments: metrics.compactSegments,
       pick_count: metrics.pickLatencyMs.length,
       pick_p95_ms: percentile(metrics.pickLatencyMs, 0.95),
+      recovery_samples: metrics.deviceRecoveryMs.length,
       device_recovery_ms: metrics.deviceRecoveryMs.at(-1) ?? 0,
       resident_pan_upload_bytes: residentPan.uploadBytes,
       resident_pan_descriptor_rebuilds: residentPan.descriptorRebuilds,
+      resident_pan_resident_bytes_before: residentPan.residentBytesBefore,
+      resident_pan_resident_bytes_after: residentPan.residentBytesAfter,
+      resident_pan_resident_pages_before: residentPan.residentPagesBefore,
+      resident_pan_resident_pages_after: residentPan.residentPagesAfter,
+      pre_plot_pixels: pixelsBefore.nonBackgroundPixels,
+      post_recovery_pixels: pixelsAfter.nonBackgroundPixels,
+      pre_plot_total_pixels: pixelsBefore.totalPixels,
+      post_recovery_total_pixels: pixelsAfter.totalPixels,
       failure_reasons: failures,
       metrics,
     });
+    reportWritten = true;
     expect(pass, "native hardware benchmark floors").toBe(true);
+  } catch (error) {
+    if (!reportWritten) {
+      const message = error instanceof Error ? error.message : String(error);
+      await writeFailure([message]);
+    }
+    throw error;
   } finally {
-    await app.close();
+    await app?.close();
+    await rm(root, { recursive: true, force: true });
   }
 });

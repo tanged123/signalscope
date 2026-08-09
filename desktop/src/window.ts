@@ -3,8 +3,7 @@ import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { BrowserWindow, protocol } from "electron";
 
 export interface WindowConfig {
-  readonly developmentUrl: string | null;
-  readonly frontendRoot: string;
+  readonly entryUrl: string;
   readonly preloadPath: string;
 }
 
@@ -70,9 +69,12 @@ function originOf(url: string): string {
 }
 
 function allowedOrigin(config: WindowConfig): string {
-  return config.developmentUrl === null
-    ? "app://signalscope"
-    : originOf(config.developmentUrl);
+  const parsed = new URL(config.entryUrl);
+  const origin = originOf(config.entryUrl);
+  if (origin !== "app://signalscope" && origin !== "http://127.0.0.1:4173") {
+    throw new Error(`unsupported Electron entry origin: ${parsed.origin}`);
+  }
+  return origin;
 }
 
 export function createWindow(config: WindowConfig): BrowserWindow {
@@ -102,11 +104,7 @@ export function createWindow(config: WindowConfig): BrowserWindow {
     },
   );
   window.webContents.on("did-finish-load", () => window.show());
-  if (config.developmentUrl === null) {
-    void window.loadURL("app://signalscope/index.html");
-  } else {
-    void window.loadURL(config.developmentUrl);
-  }
+  void window.loadURL(config.entryUrl);
   return window;
 }
 

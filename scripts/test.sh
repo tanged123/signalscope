@@ -90,42 +90,32 @@ test_frontend() {
 }
 
 bench_e2e() {
-  if [ -z "${SIGNALSCOPE_ELECTRON_BIN:-}" ]; then
-    echo "SIGNALSCOPE_ELECTRON_BIN is not configured; native hardware acceptance needs Electron" >&2
-    return 1
-  fi
   rm -f "$signalscope_root/build/bench/report/electron-hardware.json"
-  "$signalscope_scripts_dir/build.sh" host
-  pnpm --filter @signalscope/frontend build
-  pnpm --filter @signalscope/desktop build
-  mkdir -p "$signalscope_root/build"
-  pnpm --filter @signalscope/frontend dev >"$signalscope_root/build/vite-bench-e2e.log" 2>&1 &
-  bench_e2e_vite_pid=$!
-  cleanup_bench_e2e() {
-    if [ -n "${bench_e2e_vite_pid:-}" ]; then
-      kill "$bench_e2e_vite_pid" 2>/dev/null || true
-      wait "$bench_e2e_vite_pid" 2>/dev/null || true
-    fi
-  }
-  trap cleanup_bench_e2e EXIT
-  wait_for_port 4173
+  "$signalscope_scripts_dir/build.sh" native --dir
 
   local requested_tier="${SIGNALSCOPE_BENCH_TIER:-all}"
   local -a tiers=(mc1000 dense10k)
   if [ "$requested_tier" != all ]; then tiers=("$requested_tier"); fi
-  local tier corpus_dir native_files
+  local tier corpus_dir packaged_bin package_platform
+  case "$(uname -s)" in
+  Linux*) package_platform=linux ;;
+  Darwin*) package_platform=darwin ;;
+  MINGW* | MSYS* | CYGWIN*) package_platform=win32 ;;
+  *) package_platform=unknown ;;
+  esac
+  packaged_bin=$(node "$signalscope_root/desktop/scripts/package-paths.mjs" \
+    "$signalscope_root/desktop/release" executable)
+  export SIGNALSCOPE_BENCH_REQUESTED_TIERS="$requested_tier"
   for tier in "${tiers[@]}"; do
     corpus_dir="$signalscope_root/build/bench/corpus/$tier"
     if [ ! -f "$corpus_dir/manifest.json" ]; then
       cargo test --release -p scope-core -- --ignored --test-threads=1 "bench_corpus_$tier"
     fi
-    native_files=1000
-    if [ "$tier" = dense10k ]; then native_files=10000; fi
     SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=none \
-      SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
-      SIGNALSCOPE_BENCH=1 SIGNALSCOPE_BENCH_TIER="$tier" \
+      SIGNALSCOPE_PACKAGED_BIN="$packaged_bin" \
+      SIGNALSCOPE_PACKAGE_PLATFORM="$package_platform" \
+      SIGNALSCOPE_BENCH_TIER="$tier" \
       SIGNALSCOPE_BENCH_CORPUS_DIR="$corpus_dir" \
-      SIGNALSCOPE_BENCH_NATIVE_FILES="$native_files" NODE_ENV=development \
       pnpm --filter @signalscope/frontend exec playwright test \
       --project=electron-hardware
   done

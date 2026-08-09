@@ -8,6 +8,7 @@ const reportDir = fileURLToPath(
 
 export interface ElectronHardwareReport {
   readonly bench: "electron_hardware";
+  readonly corpus_tier: string;
   readonly backend: string;
   readonly fallback_reason: string | null;
   readonly software_rendering: boolean;
@@ -28,14 +29,22 @@ export async function writeElectronHardwareReport(
       | undefined;
     if (previous?.bench === "electron_hardware") {
       const priorReports = previous.corpora ?? [previous];
+      const reports = [
+        ...priorReports.filter(
+          (entry) => entry.corpus_tier !== report.corpus_tier,
+        ),
+        report,
+      ];
       combined = {
         ...report,
-        pass: previous.pass && report.pass,
-        corpora: [...priorReports, report],
+        pass: reports.every((entry) => entry.pass),
+        corpora: reports,
       };
+    } else {
+      combined = { ...report, corpora: [report] };
     }
   } catch {
-    // The first corpus creates the report.
+    combined = { ...report, corpora: [report] };
   }
   await writeFile(path, `${JSON.stringify(combined, null, 2)}\n`);
 }

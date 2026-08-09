@@ -22,19 +22,18 @@ test("the unpacked Electron package starts outside the checkout", async () => {
   const source = join(root, "roundtrip.csv");
   await copyFile(csvPath, source);
   await installNativeSession(userData, "alpha @*");
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-  for (const variable of [
+  const removedVariables = new Set([
     "SIGNALSCOPE_ELECTRON_BIN",
     "SIGNALSCOPE_PACKAGED_APP",
     "SIGNALSCOPE_HOST_BIN",
     "SIGNALSCOPE_RESOURCE_DIR",
-  ]) {
-    delete env[variable];
-  }
+  ]);
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && !removedVariables.has(entry[0]),
+    ),
+  );
   env.NODE_ENV = "production";
   if (process.env.SIGNALSCOPE_PACKAGE_PLATFORM === "linux")
     env.SIGNALSCOPE_GPU_MODE = "software";

@@ -185,6 +185,10 @@ export interface MetricDelta {
   readonly uploadBytes: number;
   readonly descriptorRebuilds: number;
   readonly successfulFrames: number;
+  readonly residentBytesBefore: number;
+  readonly residentBytesAfter: number;
+  readonly residentPagesBefore: number;
+  readonly residentPagesAfter: number;
 }
 
 export interface FrameStats {
@@ -212,7 +216,9 @@ export function meetsInteractiveFloors(
     Math.max(frameStats.longestTaskMs, frameStats.maxMs) <= 250 &&
     metrics.validationErrors.length === 0 &&
     residentPan.uploadBytes === 0 &&
-    residentPan.descriptorRebuilds === 0
+    residentPan.descriptorRebuilds === 0 &&
+    residentPan.residentBytesBefore === residentPan.residentBytesAfter &&
+    residentPan.residentPagesBefore === residentPan.residentPagesAfter
   );
 }
 
@@ -402,5 +408,9 @@ export async function interact(
       residentAfter === null || residentBefore === null
         ? 0
         : residentAfter.successfulFrames - residentBefore.successfulFrames,
+    residentBytesBefore: residentBefore?.residentBytes ?? 0,
+    residentBytesAfter: residentAfter?.residentBytes ?? 0,
+    residentPagesBefore: residentBefore?.residentPages ?? 0,
+    residentPagesAfter: residentAfter?.residentPages ?? 0,
   };
 }
