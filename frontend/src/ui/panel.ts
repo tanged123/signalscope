@@ -26,6 +26,7 @@ import {
   clamp,
   formatValue,
   insidePlot,
+  projectX,
   projectY,
   type PlotLayout,
 } from "../app/plot-math";
@@ -43,7 +44,12 @@ import { GpuLineRenderer } from "../render/gpu/line-renderer";
 import { GpuResidency, type ResidencySelection } from "../render/gpu/residency";
 import type { GpuRuntime } from "../render/gpu/runtime";
 import { GpuSeriesSlots, type SeriesStyle } from "../render/gpu/series-slots";
-import type { PickResult } from "../render/gpu/picker";
+import {
+  nearestCpuPick,
+  type PickResult,
+  type PickSeries,
+} from "../render/gpu/picker";
+import { pointBreakBefore, pointTime, pointValue } from "../app/tile-points";
 import { SERIES_TOKENS } from "../render/palette";
 import {
   marker,
@@ -492,6 +498,7 @@ export class PanelView {
   private readonly seriesCanvas: HTMLCanvasElement;
   private readonly overlay: HTMLCanvasElement;
   private readonly overlayRenderer: OverlayRenderer;
+  private readonly gpuRuntime: GpuRuntime | null;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
   private lastState: RenderPanelState | null = null;
@@ -526,6 +533,7 @@ export class PanelView {
     private readonly callbacks: PanelCallbacks,
     runtime?: GpuRuntime,
   ) {
+    this.gpuRuntime = runtime ?? null;
     this.element = document.createElement("article");
     this.element.className = "panel";
     this.element.dataset.panelId = id;
@@ -1125,7 +1133,11 @@ export class PanelView {
       if (sequence !== this.hoverSequence) return;
       this.callbacks.onCursor(
         this.id,
-        this.cursorFromPick(result),
+        this.cursorFromPick(result, {
+          offsetX,
+          offsetY,
+          radius: Math.max(6, this.canvas.height),
+        }),
         this.hoverClient,
       );
       if (result === null) return;
@@ -1196,13 +1208,35 @@ export class PanelView {
 
   private cursorFromPick(
     result = this.gpuRenderer?.latestPick(),
+    softwareRequest?: {
+      offsetX: number;
+      offsetY: number;
+      radius: number;
+    },
   ): PanelCursor | null {
+    if (
+      (result === null || result === undefined) &&
+      this.gpuRuntime?.backend === "software" &&
+      softwareRequest !== undefined
+    ) {
+      result = this.softwarePick(softwareRequest);
+      if (result !== null)
+        return this.cursorFromResolvedPick(result, result.relativeTime);
+    }
     if (result === null || result === undefined || this.gpuRenderer === null) {
       return null;
     }
     const time = this.gpuRenderer.pickTime(result);
+    return this.cursorFromResolvedPick(result, time);
+  }
+
+  private cursorFromResolvedPick(
+    result: PickResult,
+    time = this.gpuRenderer?.pickTime(result),
+  ): PanelCursor | null {
     const series = this.seriesBySlot.get(result.seriesSlot);
-    if (time === null || series === undefined) return null;
+    if (time === null || time === undefined || series === undefined)
+      return null;
     const row = {
       path: series.path,
       label: series.path,
@@ -1225,6 +1259,54 @@ export class PanelView {
       ],
       link: "time",
     };
+  }
+
+  private softwarePick(request: {
+    offsetX: number;
+    offsetY: number;
+    radius: number;
+  }): PickResult | null {
+    const layout = this.renderer.lastLayout();
+    const tiles = this.lastTiles?.series ?? [];
+    if (layout === null || tiles.length === 0) return null;
+    const cursorTime =
+      layout.xRange.min +
+      ((request.offsetX - layout.plot.x) / layout.plot.width) *
+        (layout.xRange.max - layout.xRange.min);
+    const series: PickSeries[] = [];
+    for (const tile of tiles) {
+      let seriesSlot: number;
+      try {
+        seriesSlot = this.seriesSlots.slotOf(tile.signalId);
+      } catch {
+        continue;
+      }
+      const entry = this.seriesBySlot.get(seriesSlot);
+      if (entry === undefined) continue;
+      const points = Array.from({ length: tile.points.count }, (_, index) => ({
+        time: pointTime(tile.points, tile.origin, index),
+        value: pointValue(tile.points, index),
+        breakBefore: pointBreakBefore(tile.points, index),
+      }));
+      series.push({
+        seriesSlot,
+        visible: entry.visible,
+        points,
+      });
+    }
+    return nearestCpuPick(
+      {
+        cursorTime,
+        cursorX: request.offsetX,
+        cursorY: request.offsetY,
+        radius: request.radius,
+      },
+      series,
+      (time, value) => ({
+        x: projectX(layout, time),
+        y: projectY(layout, value),
+      }),
+    );
   }
 
   private walkHover(direction: -1 | 1): void {

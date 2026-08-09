@@ -32,6 +32,13 @@ export async function requestGpuDevice(
     adapter = null;
   }
   if (adapter === null) {
+    try {
+      adapter = await gpu.requestAdapter();
+    } catch {
+      adapter = null;
+    }
+  }
+  if (adapter === null) {
     return {
       supported: false,
       capability: "requestAdapter",

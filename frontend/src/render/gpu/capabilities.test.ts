@@ -61,6 +61,30 @@ describe("requestGpuDevice", () => {
     });
   });
 
+  it("tries the default adapter after a missing high-performance adapter", async () => {
+    const device = {
+      lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+    };
+    const requestAdapter = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        limits: limits(),
+        requestDevice: vi.fn().mockResolvedValue(device),
+      });
+    const gpu = {
+      requestAdapter,
+      getPreferredCanvasFormat: vi.fn().mockReturnValue("bgra8unorm"),
+    } as unknown as GPU;
+    await expect(requestGpuDevice(gpu)).resolves.toMatchObject({
+      supported: true,
+    });
+    expect(requestAdapter).toHaveBeenNthCalledWith(1, {
+      powerPreference: "high-performance",
+    });
+    expect(requestAdapter).toHaveBeenNthCalledWith(2);
+  });
+
   it.each([
     ["storage buffers", { maxStorageBuffersPerShaderStage: 3 }],
     ["workgroup size", { maxComputeWorkgroupSizeX: 128 }],

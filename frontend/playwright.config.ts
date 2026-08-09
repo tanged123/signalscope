@@ -42,6 +42,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
+      testIgnore: /electron-.*\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         launchOptions: webGpuLaunchOptions,

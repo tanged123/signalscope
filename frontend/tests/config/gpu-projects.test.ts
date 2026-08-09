@@ -11,6 +11,14 @@ function argsFor(
 }
 
 describe("Playwright GPU project flags", () => {
+  it("keeps native-only specs out of the browser desktop project", () => {
+    const project = config.projects?.find(
+      (candidate) => candidate.name === "desktop",
+    );
+    if (project === undefined) throw new Error("desktop project missing");
+    expect(project.testIgnore).toEqual(/electron-.*\.spec\.ts/);
+  });
+
   it("restricts software flags to bounded software projects", () => {
     const projects = config.projects ?? [];
     const software = new Set(["gpu", "bench-software"]);
