@@ -48,6 +48,16 @@ describe("NativeClient", () => {
     };
     const fetchFn = vi.fn<typeof fetch>((_input, init) => {
       const body = init?.body;
+      if (body instanceof ReadableStream) {
+        expect((init as RequestInit & { duplex?: string }).duplex).toBe("half");
+        return new Response(body).arrayBuffer().then((buffer) => {
+          const frame = decodeFileFrame(new Uint8Array(buffer));
+          expect(frame.bytes).toEqual(new Uint8Array([1, 2]));
+          return new Response(JSON.stringify(seal("/tmp/plot.png")), {
+            status: 200,
+          });
+        });
+      }
       if (body instanceof Uint8Array) {
         const frame = decodeFileFrame(body);
         expect(frame.bytes).toEqual(new Uint8Array([1, 2]));

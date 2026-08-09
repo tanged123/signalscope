@@ -1,4 +1,5 @@
 use std::{
+    io::Write as StdWrite,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -7,6 +8,10 @@ use scope_core::{session, snapshot};
 use scope_protocol::{
     ExportEstimate, ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind,
     ExportRange, ExportSelection, ExportWriteRequest, FileWriteDestination, FileWriteMetadata,
+};
+use tokio::{
+    fs::{File, OpenOptions},
+    io::AsyncWriteExt,
 };
 
 use crate::{HostError, ScopeHost, state::DataState};
@@ -19,29 +24,36 @@ fn invalid(message: impl Into<String>) -> HostError {
 }
 
 impl ScopeHost {
+    pub async fn begin_raw_export(
+        &self,
+        metadata: &FileWriteMetadata,
+    ) -> Result<PendingRawExport, HostError> {
+        let path = export_path(metadata)?;
+        let temporary = temporary_path(&path);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| invalid(error.to_string()))?;
+        }
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .await
+            .map_err(|error| invalid(error.to_string()))?;
+        Ok(PendingRawExport {
+            file: Some(file),
+            path,
+            temporary,
+        })
+    }
+
     pub fn write_raw_file(
         &self,
         metadata: &FileWriteMetadata,
         bytes: &[u8],
     ) -> Result<String, HostError> {
-        let extension = extension_for(metadata.kind);
-        let path = match metadata.destination {
-            FileWriteDestination::ExactPath => {
-                if !metadata.file_name.is_empty() {
-                    return Err(invalid(
-                        "exact export destinations cannot include a file name",
-                    ));
-                }
-                normalized_export_save_path(PathBuf::from(&metadata.path), extension)
-            }
-            FileWriteDestination::Directory => {
-                let directory = Path::new(&metadata.path);
-                if !directory.is_dir() {
-                    return Err(invalid("export directory does not exist"));
-                }
-                export_file_path(directory, &metadata.file_name, extension)?
-            }
-        };
+        let path = export_path(metadata)?;
         write_atomic(&path, bytes).map_err(|error| invalid(error.to_string()))?;
         Ok(path.display().to_string())
     }
@@ -108,6 +120,52 @@ impl ScopeHost {
     }
 }
 
+pub struct PendingRawExport {
+    file: Option<File>,
+    path: PathBuf,
+    temporary: PathBuf,
+}
+
+impl PendingRawExport {
+    pub async fn write(&mut self, bytes: &[u8]) -> Result<(), HostError> {
+        let Some(file) = self.file.as_mut() else {
+            return Err(invalid("raw export is no longer writable"));
+        };
+        file.write_all(bytes)
+            .await
+            .map_err(|error| invalid(error.to_string()))
+    }
+
+    pub async fn commit(mut self) -> Result<String, HostError> {
+        let Some(mut file) = self.file.take() else {
+            return Err(invalid("raw export is no longer writable"));
+        };
+        file.flush()
+            .await
+            .map_err(|error| invalid(error.to_string()))?;
+        file.sync_all()
+            .await
+            .map_err(|error| invalid(error.to_string()))?;
+        drop(file);
+        if let Err(error) = tokio::fs::rename(&self.temporary, &self.path).await {
+            let _ = tokio::fs::remove_file(&self.temporary).await;
+            return Err(invalid(error.to_string()));
+        }
+        Ok(self.path.display().to_string())
+    }
+
+    pub async fn abort(mut self) {
+        self.file.take();
+        let _ = tokio::fs::remove_file(&self.temporary).await;
+    }
+}
+
+impl Drop for PendingRawExport {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.temporary);
+    }
+}
+
 fn extension_for(kind: ExportFileKind) -> &'static str {
     match kind {
         ExportFileKind::Png => "png",
@@ -138,6 +196,31 @@ fn export_file_path(
     ))
 }
 
+fn export_path(metadata: &FileWriteMetadata) -> Result<PathBuf, HostError> {
+    let extension = extension_for(metadata.kind);
+    match metadata.destination {
+        FileWriteDestination::ExactPath => {
+            if !metadata.file_name.is_empty() {
+                return Err(invalid(
+                    "exact export destinations cannot include a file name",
+                ));
+            }
+            let path = PathBuf::from(&metadata.path);
+            if std::fs::symlink_metadata(&path).is_ok_and(|value| value.file_type().is_symlink()) {
+                return Err(invalid("destination is a symlink"));
+            }
+            Ok(normalized_export_save_path(path, extension))
+        }
+        FileWriteDestination::Directory => {
+            let directory = Path::new(&metadata.path);
+            if !directory.is_dir() {
+                return Err(invalid("export directory does not exist"));
+            }
+            export_file_path(directory, &metadata.file_name, extension)
+        }
+    }
+}
+
 fn normalized_export_save_path(mut path: PathBuf, extension: &str) -> PathBuf {
     if path.extension() != Some(std::ffi::OsStr::new(extension)) {
         path.set_extension(extension);
@@ -146,31 +229,48 @@ fn normalized_export_save_path(mut path: PathBuf, extension: &str) -> PathBuf {
 }
 
 fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         return Err(std::io::Error::other("destination is a symlink"));
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let name = path
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("export"))
-        .to_string_lossy();
-    let staged = path.with_file_name(format!(
-        ".{name}.{}.{}.tmp",
-        std::process::id(),
-        NEXT_ID.fetch_add(1, Ordering::Relaxed)
-    ));
-    if let Err(error) = std::fs::write(&staged, contents) {
+    let staged = temporary_path(path);
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staged)
+    {
+        Ok(file) => file,
+        Err(error) => return Err(error),
+    };
+    if let Err(error) = file
+        .write_all(contents)
+        .and_then(|_| file.flush())
+        .and_then(|_| file.sync_all())
+    {
         let _ = std::fs::remove_file(&staged);
         return Err(error);
     }
+    drop(file);
     if let Err(error) = std::fs::rename(&staged, path) {
         let _ = std::fs::remove_file(&staged);
         return Err(error);
     }
     Ok(())
+}
+
+fn temporary_path(path: &Path) -> PathBuf {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("export"))
+        .to_string_lossy();
+    path.with_file_name(format!(
+        ".{name}.{}.{}.tmp",
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    ))
 }
 
 fn estimate_for(

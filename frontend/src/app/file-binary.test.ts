@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { FileWriteMetadata } from "../generated/protocol";
 import { seal } from "./envelope";
-import { decodeFileFrame, encodeFileFrame } from "./file-binary";
+import {
+  createFileFrameStream,
+  decodeFileFrame,
+  decodeFileFrameHeader,
+  decodeFileFrameMetadata,
+  encodeFileFrame,
+} from "./file-binary";
 
 const metadata = seal<FileWriteMetadata>({
   destination: "directory",
@@ -27,5 +33,38 @@ describe("native file frame", () => {
     wrongMagic[0] = (wrongMagic[0] ?? 0) ^ 1;
     expect(() => decodeFileFrame(wrongMagic)).toThrow();
     expect(() => decodeFileFrame(new Uint8Array([...frame, 0]))).toThrow();
+  });
+
+  it("streams the header, metadata, and bounded payload slices", async () => {
+    const bytes = new Uint8Array(150_000);
+    bytes.forEach((_, index) => bytes.set([index % 251], index));
+    const source = bytes.slice();
+    const reader = createFileFrameStream(metadata, bytes).getReader();
+    const chunks: Uint8Array[] = [];
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      chunks.push(next.value);
+    }
+    expect(bytes).toEqual(source);
+    expect(chunks.slice(2).every((chunk) => chunk.length <= 64 * 1024)).toBe(
+      true,
+    );
+    const frame = new Uint8Array(
+      chunks.reduce((length, chunk) => length + chunk.length, 0),
+    );
+    let offset = 0;
+    for (const chunk of chunks) {
+      frame.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const header = decodeFileFrameHeader(frame);
+    expect(
+      decodeFileFrameMetadata(
+        header,
+        frame.subarray(24, 24 + header.metadataLength),
+      ),
+    ).toEqual(metadata);
+    expect(decodeFileFrame(frame).bytes).toEqual(bytes);
   });
 });

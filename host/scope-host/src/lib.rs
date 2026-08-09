@@ -17,6 +17,7 @@ mod state;
 
 pub use config::{HostConfig, HostPaths};
 pub use error::HostError;
+pub use export::PendingRawExport;
 
 use std::{path::PathBuf, sync::Arc};
 

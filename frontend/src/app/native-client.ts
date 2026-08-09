@@ -1,13 +1,15 @@
 import type { FileWriteMetadata, TileRequest } from "../generated/protocol";
 import type { NativeConnection } from "./desktop-bridge";
 import type { Envelope } from "./envelope";
-import { encodeFileFrame } from "./file-binary";
+import { createFileFrameStream } from "./file-binary";
 
 interface NativeErrorBody {
   transport_version: 1;
   code: string;
   message: string;
 }
+
+type NativeRequestInit = RequestInit & { duplex?: "half" };
 
 export class NativeClientError extends Error {
   constructor(
@@ -92,20 +94,24 @@ export class NativeClient {
     const response = await this.fetchRequest("/v1/export/file", {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
-      body: encodeFileFrame(metadata, bytes) as BodyInit,
+      body: createFileFrameStream(metadata, bytes) as BodyInit,
+      duplex: "half",
     });
     return (await response.json()) as Envelope<string>;
   }
 
   private async fetchRequest(
     path: string,
-    init: RequestInit,
+    init: NativeRequestInit,
   ): Promise<Response> {
     const route = validatePath(path);
     const url = new URL(route.pathname + route.search, this.connection.baseUrl);
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.connection.token}`);
-    const response = await this.fetchFn(url, { ...init, headers });
+    const response = await this.fetchFn(url, {
+      ...init,
+      headers,
+    } as RequestInit);
     if (response.ok) return response;
     let error: NativeErrorBody | null = null;
     try {

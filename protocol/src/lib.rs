@@ -6,7 +6,11 @@ mod generated;
 pub mod tile_binary;
 
 pub use envelope::{Envelope, VersionError};
-pub use file_binary::{FileBinaryError, decode_file_frame, encode_file_frame};
+pub use file_binary::{
+    FILE_FRAME_HEADER_BYTES, FILE_FRAME_METADATA_LIMIT, FILE_FRAME_PAYLOAD_LIMIT, FileBinaryError,
+    FileFrameHeader, decode_file_frame, decode_file_frame_header, decode_file_frame_metadata,
+    encode_file_frame,
+};
 pub use generated::*;
 pub use tile_binary::{
     BREAK_BEFORE, BinaryTileSeries, OwnedBinaryPoint, OwnedBinarySeries, TileBinaryError,

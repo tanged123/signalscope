@@ -16,11 +16,17 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine;
-use scope_host::{HostConfig, HostError, ScopeHost};
-use scope_protocol::{Envelope, IngestBatchRequest, SampleRequest, TileRequest, decode_file_frame};
+use http_body_util::BodyExt;
+use scope_host::{HostConfig, HostError, PendingRawExport, ScopeHost};
+use scope_protocol::{
+    Envelope, FILE_FRAME_HEADER_BYTES, FILE_FRAME_METADATA_LIMIT, FILE_FRAME_PAYLOAD_LIMIT,
+    FileBinaryError, IngestBatchRequest, SampleRequest, TileRequest, decode_file_frame_header,
+    decode_file_frame_metadata,
+};
 use serde::Serialize;
 
 pub const TRANSPORT_VERSION: u32 = 1;
+const JSON_BODY_LIMIT: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 struct AppState {
@@ -75,7 +81,7 @@ pub fn router(host: ScopeHost, token: String, dev_origin: Option<String>) -> Rou
         .fallback(not_found)
         .with_state(state.clone())
         .layer(middleware::from_fn_with_state(state, transport_middleware))
-        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
+        .layer(axum::extract::DefaultBodyLimit::max(JSON_BODY_LIMIT))
 }
 
 pub struct ServerConfig {
@@ -580,21 +586,149 @@ async fn export_estimate(
     }
 }
 
-async fn export_file(State(state): State<AppState>, body: Bytes) -> Response {
-    let (metadata, payload) = match decode_file_frame(&body) {
-        Ok(frame) => frame,
-        Err(error) => {
-            return error_response(StatusCode::BAD_REQUEST, "file_frame", &error.to_string());
-        }
+async fn export_file(State(state): State<AppState>, request: Request<Body>) -> Response {
+    if request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|length| {
+            length
+                > FILE_FRAME_HEADER_BYTES as u64
+                    + FILE_FRAME_METADATA_LIMIT as u64
+                    + FILE_FRAME_PAYLOAD_LIMIT
+        })
+    {
+        return error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "file_frame",
+            "file export exceeds the 1 GiB payload limit",
+        );
+    }
+    let mut body = request.into_body();
+    let mut current = Bytes::new();
+    let mut offset = 0;
+    let mut header_bytes = [0_u8; FILE_FRAME_HEADER_BYTES];
+    if let Err(error) =
+        read_body_exact(&mut body, &mut current, &mut offset, &mut header_bytes).await
+    {
+        return error_response(StatusCode::BAD_REQUEST, "file_frame", &error);
+    }
+    let frame_header = match decode_file_frame_header(&header_bytes) {
+        Ok(header) => header,
+        Err(error) => return file_frame_error(error),
+    };
+    let metadata_length = match usize::try_from(frame_header.metadata_length) {
+        Ok(length) => length,
+        Err(_) => return file_frame_error(FileBinaryError::Length),
+    };
+    let mut metadata_bytes = vec![0_u8; metadata_length];
+    if let Err(error) =
+        read_body_exact(&mut body, &mut current, &mut offset, &mut metadata_bytes).await
+    {
+        return error_response(StatusCode::BAD_REQUEST, "file_frame", &error);
+    }
+    let metadata = match decode_file_frame_metadata(&frame_header, &metadata_bytes) {
+        Ok(metadata) => metadata,
+        Err(error) => return file_frame_error(error),
     };
     let metadata = match open(metadata) {
         Ok(metadata) => metadata,
         Err(error) => return error,
     };
-    match state.host.write_raw_file(&metadata, &payload) {
+    let mut pending = match state.host.begin_raw_export(&metadata).await {
+        Ok(pending) => pending,
+        Err(error) => return host_error(error),
+    };
+    if let Err(error) = stream_payload(
+        &mut body,
+        &mut current,
+        &mut offset,
+        frame_header.payload_length,
+        &mut pending,
+    )
+    .await
+    {
+        pending.abort().await;
+        return error_response(StatusCode::BAD_REQUEST, "file_frame", &error);
+    }
+    match pending.commit().await {
         Ok(path) => Json(Envelope::new(path)).into_response(),
         Err(error) => host_error(error),
     }
+}
+
+async fn next_body_chunk(body: &mut Body) -> Result<Option<Bytes>, String> {
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|error| error.to_string())?;
+        match frame.into_data() {
+            Ok(bytes) if !bytes.is_empty() => return Ok(Some(bytes)),
+            Ok(_) => {}
+            Err(_) => return Err("file frame contains trailers".into()),
+        }
+    }
+    Ok(None)
+}
+
+async fn read_body_exact(
+    body: &mut Body,
+    current: &mut Bytes,
+    offset: &mut usize,
+    target: &mut [u8],
+) -> Result<(), String> {
+    let mut written = 0;
+    while written < target.len() {
+        if *offset == current.len() {
+            *current = next_body_chunk(body)
+                .await?
+                .ok_or_else(|| "file frame is truncated".to_owned())?;
+            *offset = 0;
+        }
+        let available = current.len() - *offset;
+        let count = available.min(target.len() - written);
+        target[written..written + count].copy_from_slice(&current[*offset..*offset + count]);
+        *offset += count;
+        written += count;
+    }
+    Ok(())
+}
+
+async fn stream_payload(
+    body: &mut Body,
+    current: &mut Bytes,
+    offset: &mut usize,
+    mut remaining: u64,
+    pending: &mut PendingRawExport,
+) -> Result<(), String> {
+    while remaining > 0 {
+        if *offset == current.len() {
+            *current = next_body_chunk(body)
+                .await?
+                .ok_or_else(|| "file frame is truncated".to_owned())?;
+            *offset = 0;
+        }
+        let available = (current.len() - *offset) as u64;
+        let count = available.min(remaining) as usize;
+        pending
+            .write(&current[*offset..*offset + count])
+            .await
+            .map_err(|error| error.to_string())?;
+        *offset += count;
+        remaining -= count as u64;
+    }
+    if *offset < current.len() || next_body_chunk(body).await?.is_some() {
+        return Err("file frame has trailing bytes".into());
+    }
+    Ok(())
+}
+
+fn file_frame_error(error: FileBinaryError) -> Response {
+    let status = if matches!(error, FileBinaryError::Length) {
+        StatusCode::PAYLOAD_TOO_LARGE
+    } else {
+        StatusCode::BAD_REQUEST
+    };
+    error_response(status, "file_frame", &error.to_string())
 }
 
 async fn export_write(
