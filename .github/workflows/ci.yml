@@ -178,7 +178,7 @@ jobs:
 
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [version, flake, quality, rust, frontend, e2e, build]
+    needs: [ci-ok, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -190,11 +190,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: release-tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          tag="$(./scripts/release.sh tag)"
-          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+        run: ./scripts/release.sh tag-output "$GITHUB_OUTPUT"
 
   demo:
     if: >-
@@ -255,14 +251,12 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: build/demo/pages
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          ./scripts/demo.sh publish build/demo
+      - run: ./scripts/demo.sh publish build/demo
       - id: deployment
         uses: actions/deploy-pages@v5
 
   publish:
+    if: needs.tag.result == 'success' && needs.build.result == 'success'
     needs: [tag, build]
     runs-on: ubuntu-latest
     permissions:

@@ -106,7 +106,8 @@ The Nix flake supplies the normal pinned toolchain. Windows packaging is the
 intentional exception: run `./scripts/build.sh windows` from Git Bash on
 Windows, where the script installs locked pnpm from npm because Nix is
 unavailable.
-Windows is build-only — every quality gate stays on Linux.
+Windows packaging and its packaged startup/host smoke run on the Windows
+runner; repository quality gates remain on Linux.
 
 Every workflow shell command must call an appropriate script. Keep setup,
 formatting, linting, tests, coverage, builds, artifact checks, and release

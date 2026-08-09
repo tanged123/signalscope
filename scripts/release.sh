@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/release.sh [version|tag|publish|assets]
+Usage: ./scripts/release.sh [version|tag|tag-output|publish|assets]
 
   version                 Validate and print the synchronized app version.
   tag                     Create and push the annotated v<version> tag.
@@ -23,7 +23,7 @@ version() {
 }
 
 tag() {
-  local version tag
+  local version tag author_name author_email
   version >/dev/null
   version="$("$script_dir/version.sh" get)"
   tag="v$version"
@@ -37,9 +37,23 @@ tag() {
     exit 1
   fi
 
-  git tag --annotate "$tag" --message "SignalScope $tag"
+  author_name="${GIT_AUTHOR_NAME:-github-actions[bot]}"
+  author_email="${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
+  git -c user.name="$author_name" -c user.email="$author_email" \
+    tag --annotate "$tag" --message "SignalScope $tag"
   git push origin "$tag" >/dev/null
   printf '%s\n' "$tag"
+}
+
+tag_output() {
+  local output_file="${1:-}"
+  if [ -z "$output_file" ]; then
+    echo "tag-output requires a GitHub output file" >&2
+    exit 2
+  fi
+  local tag_value
+  tag_value="$(tag)"
+  printf 'tag=%s\n' "$tag_value" >>"$output_file"
 }
 
 assets() {
@@ -97,6 +111,10 @@ version)
   ;;
 tag)
   tag
+  ;;
+tag-output)
+  shift
+  tag_output "$@"
   ;;
 publish)
   shift

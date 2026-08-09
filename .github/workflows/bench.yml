@@ -24,7 +24,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: bench-report
+          name: bench-report-software-core
           path: |
             build/bench/report.json
             build/bench/report/

@@ -63,9 +63,10 @@ rust_checks() {
 live_host_deletion_check() {
   local matches
   matches=$(rg -n -i \
-    'shell/src-tauri|TauriPlane|__TAURI_INTERNALS__|cargo tauri|@tauri-apps|tauri-build|tauri-plugin|webkit2gtk|WebKitGTK' \
-    .github AGENTS.md CLAUDE.md README.md Cargo.toml Cargo.lock flake.nix \
-    package.json pnpm-workspace.yaml frontend host core protocol desktop scripts \
+    'src-tauri|TauriPlane|__TAURI_INTERNALS__|@tauri-apps|cargo tauri|tauri build|tauri-build|tauri-plugin|webkit2gtk|WebKitGTK|Tauri development host|Tauri shell|Tauri bundle' \
+    .github scripts desktop frontend host core protocol \
+    AGENTS.md CLAUDE.md README.md docs/implementation-roadmap.md \
+    'docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui' \
     --glob '!target/**' --glob '!node_modules/**' --glob '!**/node_modules/**' \
     --glob '!build/**' --glob '!desktop/release/**' \
     --glob '!scripts/lib.sh' --glob '!scripts/ci-policy.test.sh' || true)

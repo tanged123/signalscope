@@ -119,7 +119,10 @@ The Electron desktop migration is complete: `scope-host` and `scope-server`
 own native operations, `NativePlane` uses their authenticated loopback
 boundary, and electron-builder packages the Rust host beside the shared
 frontend on Linux, Windows, and macOS. The unpacked package smoke runs outside
-the checkout; cross-platform artifacts are produced by their target runners.
+the checkout; cross-platform artifacts are produced by Linux x64, Windows x64,
+macOS x64, and macOS arm64 target runners. NixOS remains the development
+authority; Ubuntu owns the generic Linux package smoke because unpacked Electron
+executables require an FHS runtime.
 
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18

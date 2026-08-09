@@ -62,9 +62,11 @@ check_ci_results() {
 }
 
 expect_status 0 check_ci_results '{"version":{"result":"success"},"flake":{"result":"success"}}'
-expect_status 0 check_ci_results '{"version":{"result":"success"},"flake":{"result":"skipped"}}'
+expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"result":"skipped"}}'
 expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"result":"failure"}}'
 expect_status 1 check_ci_results '{"version":{"result":"cancelled"},"flake":{"result":"success"}}'
+expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{}}'
+expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"result":"unknown"}}'
 expect_status 1 check_ci_results ''
 
 readme="$script_dir/../README.md"
@@ -80,6 +82,33 @@ if rg -n 'target/release/bundle|cargo tauri|tauri build|@tauri-apps' "$workflow_
 fi
 if ! grep -q 'desktop/release' "$workflow_root/ci.yml"; then
   echo "package jobs must upload desktop/release" >&2
+  failures=$((failures + 1))
+fi
+for package_os in ubuntu-24.04 windows-2025 macos-26-intel macos-26; do
+  if ! grep -Fq "os: $package_os" "$workflow_root/ci.yml"; then
+    echo "package matrix is missing $package_os" >&2
+    failures=$((failures + 1))
+  fi
+done
+if ! grep -Fq 'needs: [ci-ok, build]' "$workflow_root/ci.yml"; then
+  echo "tag must wait for ci-ok and the complete package matrix" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'needs: [tag, build]' "$workflow_root/ci.yml"; then
+  echo "publish must wait for tagging and packages" >&2
+  failures=$((failures + 1))
+fi
+if rg -n 'git config user\.(name|email)' "$workflow_root" >/dev/null; then
+  echo "release and demo workflows must not configure Git identity directly" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'desktop package --no-build' "$script_dir/ci.sh" ||
+  ! grep -Fq 'test.sh desktop package --no-build' "$script_dir/build-windows.sh"; then
+  echo "package jobs must run package smoke after building" >&2
+  failures=$((failures + 1))
+fi
+if rg -n 'bench e2e|electron-hardware' "$workflow_root/bench.yml" >/dev/null; then
+  echo "scheduled benchmark must remain software/core only" >&2
   failures=$((failures + 1))
 fi
 if ! grep -Eq '!\[SignalScope interactive demo\]\(https://tanged123\.github\.io/signalscope/demo\.gif\?v=[0-9]+\.[0-9]+\.[0-9]+\)' "$readme"; then

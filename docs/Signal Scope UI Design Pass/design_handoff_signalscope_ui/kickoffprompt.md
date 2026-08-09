@@ -8,7 +8,7 @@ Stand up the production repo for **SignalScope**, an internal high-performance t
 
 SignalScope is **centralized native software with a portable export**, not a web app:
 
-- The **workbench** is a native application. It must open bigger-than-RAM logs (multi-GB MCAP/parquet/CSV) via a native data plane — mmap, streaming decode, out-of-core access. Browser memory limits are irrelevant to the workbench because the workbench is not a browser page.  
+- The **workbench** is a native Electron application. It must open bigger-than-RAM logs (multi-GB MCAP/parquet/CSV) via the authenticated Rust loopback data plane — mmap, streaming decode, out-of-core access. Browser memory limits are irrelevant to the workbench because the workbench is not a browser page.
 - The **snapshot** is the portable artifact: a single self-contained HTML file, exported from the workbench, that opens in any browser with the full interactive UI and an embedded, size-budgeted slice of the data. Snapshots are how analysis is shared; they must be pixel- and behavior-identical to the workbench, because they run the *same* frontend code.
 
 This dictates the core architectural bet: **one presentation plane, two hosts.** The TS/canvas frontend runs inside the native shell (webview) and inside exported snapshots. The Rust data plane runs only in the workbench; snapshots replace it with baked data.
@@ -23,7 +23,7 @@ This dictates the core architectural bet: **one presentation plane, two hosts.**
 
 This repo joins the pantheon family and must be indistinguishable from its siblings in structure and tooling. **Before writing anything, clone and study the reference repo: `<PANTHEON_REFERENCE_REPO>`** (confirm the exemplar with me). Mirror, do not reinvent:
 
-- **Nix**: `flake.nix` with the house devshell pattern and pinned inputs. Every tool CI uses comes from the flake — including the Rust toolchain, Node/TS toolchain, and Tauri build deps. `direnv`/`.envrc` if siblings use it.  
+- **Nix**: `flake.nix` with the house devshell pattern and pinned inputs. Every tool CI uses comes from the flake — including the Rust toolchain, Node/TS toolchain, and Electron development/package dependencies. `direnv`/`.envrc` if siblings use it.
 - **Layout**: the house top-level shape, adapted to a polyglot workspace (Cargo workspace \+ JS/TS workspace side by side; see Architecture).  
 - **CI**: the same forge workflows as siblings — job names, trigger policy, caching. Minimum jobs: nix flake check, lint (rust \+ ts), typecheck, clippy, unit tests (both languages), e2e (headless browser \+ headless shell), builds (workbench binaries \+ snapshot template), and the artifact checks defined below.  
 - **Quality gates**: house formatter/linter configs, pre-commit hooks, commit/PR conventions, CODEOWNERS, versioning/release scheme.  
@@ -45,18 +45,18 @@ If a pantheon convention conflicts with this brief, flag it and ask; don't silen
 - **`frontend/` (TypeScript, strict, zero runtime deps)** —  
   - `render/`: canvas renderer — axes (gutter \+ inline styles), grid, series strokes from tiles, colorbar, overlay (cursor, box, numbered datatips/annotations). Deterministic given (tiles, viewport, tokens): screenshot-testable.  
   - `ui/`: components per the spec — panel chrome \+ mode pills (T·XY·FFT·H), split legend chips \+ inspector popover, virtualized search-first signal tree with favorites and live values, formula bar, ⌘K command palette, export dialog with size budget, empty states, status bar. Design tokens from one token file (CSS custom properties; light theme is a pure token swap — enforce in review).  
-  - `app/`: workspace shell, panel layout management, linked-time model, input controller (full mouse \+ touch gesture set from the prototype), and a **`DataPlane` interface with two implementations**: `TauriPlane` (IPC to Rust) and `BakedPlane` (reads tiles embedded in a snapshot). UI code must not know which one it's on.  
-- **`shell/` (Tauri)** — thin: window management, native file dialogs, IPC wiring of the protocol. Keep it boring; a future headless `scope-serverd` (same crates, localhost HTTP/WS) is explicitly anticipated — don't preclude it, don't build it.
+  - `app/`: workspace shell, panel layout management, linked-time model, mouse/keyboard desktop input controller, and a **`DataPlane` interface with two implementations**: `NativePlane` (authenticated loopback HTTP through Electron) and `BakedPlane` (reads tiles embedded in a snapshot). UI code must not know which one it's on.
+- **`desktop/` (Electron)** — thin: window management, native file dialogs, and bridge wiring of the protocol. Keep it boring; a future headless `scope-serverd` (same crates, localhost HTTP/WS) is explicitly anticipated — don't preclude it, don't build it.
 
 ### Build artifacts (all produced in CI)
 
-1. **Workbench binaries** (Tauri bundles) for linux \+ macos (confirm targets).  
+1. **Workbench binaries** (Electron packages) for Linux x64, Windows x64, macOS x64, and macOS arm64.
 2. **`snapshot-template.html`** — the frontend built single-file (JS/CSS inlined, zero network requests) with an empty baked-data slot. The workbench's Export writes snapshots by injecting tiles \+ session into this template — same mechanism the prototype proved.  
 3. CI checks on the template: no external requests, opens headless with demo data, size budget (ratchet from first green build; the code budget matters because it ships inside every snapshot).
 
 ## v1 scope (from spec F6·5)
 
-Keep from prototype: linked-time model, min/max decimation (now formalized as the pyramid), drag-to-plot \+ drop-creates-panel, the full gesture set (desktop \+ touch), single-file snapshot export, derived-signals-in-tree.
+Keep from prototype: linked-time model, min/max decimation (now formalized as the pyramid), drag-to-plot \+ drop-creates-panel, the mouse/keyboard desktop gesture set, single-file snapshot export, derived-signals-in-tree.
 
 Build for v1: final skin \+ tokens (dark \+ light) · full axis system (gutter default, inline option, per-panel, serialized) · mode pills T·XY·FFT·H · legend split chips \+ inspector popover · formula bar (docked, history) · panel drag-rearrange \+ seam resize · export dialog with real size budget computed from tile selection (visible window vs. all loaded) · empty states · ⌘K command palette · XY drop-strip · numbered datatips → annotations list with text notes, embedded in exports · `c:` colorbar for XY · ingest: CSV \+ MCAP (parquet if cheap behind the trait, else v2).
 
@@ -74,7 +74,7 @@ Non-goals for v1 (v2 per spec): layout presets UI, Monte-Carlo envelope ergonomi
 
 1. Repo scaffolded to pantheon conventions; `nix develop` yields the complete polyglot toolchain; CI green on the skeleton.  
 2. ADRs for: product shape & two-host frontend, layer boundaries, tile pyramid design (levels, tile size, NaN/gap semantics, disk cache format), protocol \+ codegen approach, session schema versioning, linked-time model (with streaming reservation), snapshot injection mechanism.  
-3. Walking skeleton, end to end: Tauri shell opens; a real CSV is ingested by `scope-ingest`; `scope-pyramid` builds tiles; the frontend renders one panel from tiles over `TauriPlane` with final dark tokens and honest render-ms; `snapshot-template.html` builds, passes no-network \+ size checks, and renders the same panel from `BakedPlane` with hand-injected tiles. One Rust test suite, one TS test suite, one e2e in CI.
+3. Walking skeleton, end to end: the Electron desktop opens; a real CSV is ingested by the Rust host; the pyramid builds tiles; the frontend renders one panel from tiles over `NativePlane` with final dark tokens and honest render-ms; `snapshot-template.html` builds, passes no-network \+ size checks, and renders the same panel from `BakedPlane` with hand-injected tiles. One Rust test suite, one TS test suite, one e2e in CI.
 
 Stop after Phase 0 and present the plan for phases 1–n (sequenced from v1 scope) before proceeding.
 
@@ -82,5 +82,4 @@ Stop after Phase 0 and present the plan for phases 1–n (sequenced from v1 scop
 
 - Small PRs, conventional messages per house style, ADR for anything that contradicts this document.  
 - When the design spec is ambiguous, check the prototype's behavior first; if still ambiguous, ask — with a concrete proposal and a default.  
-- Questions for the maintainer before you start, if unanswered: (1) which pantheon repo is the reference exemplar, (2) forge/org/repo name, (3) license header convention, (4) workbench target platforms (linux/macos/ windows?), (5) webview floor (Tauri uses the system webview — confirm the oldest OS you care about), (6) any pantheon-standard telemetry/error reporting to wire.
-
+- Questions for the maintainer before you start, if unanswered: (1) which pantheon repo is the reference exemplar, (2) forge/org/repo name, (3) license header convention, (4) workbench target platforms (Linux x64, Windows x64, macOS x64/arm64), (5) Electron/Chromium floor, (6) any pantheon-standard telemetry/error reporting to wire.

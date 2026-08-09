@@ -163,7 +163,11 @@ nix fmt                     # format the workspace
 
 Linux and macOS builds use the pinned Nix shell, which supplies HDF5 and the
 Electron development binary. Windows packaging runs in Git Bash with the
-runner's Rust and Node toolchains.
+runner's Rust and Node toolchains. `./scripts/test.sh desktop package` launches
+the current unpacked production package; on NixOS the generic Linux executable
+may be blocked by its FHS dynamic-library requirements, while Ubuntu CI owns
+that package-smoke claim. The release matrix covers Linux x64, Windows x64,
+macOS x64, and macOS arm64.
 ```
 
 `./scripts/ci.sh quality` is implemented by `quality_checks()` in
