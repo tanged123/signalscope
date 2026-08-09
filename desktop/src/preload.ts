@@ -10,9 +10,11 @@ const IPC = Object.freeze({
   pickDirectory: "scope:pick-directory",
   gpuInfo: "scope:gpu-info",
   dragDrop: "scope:drag-drop",
+  rendererReady: "scope:renderer-ready",
 });
 
 const callbacks = new Set<(event: DragDropForward) => void>();
+const pendingDrops: string[][] = [];
 let listenersInstalled = false;
 let ipcListenerInstalled = false;
 
@@ -31,7 +33,18 @@ function pathsFromDataTransfer(dataTransfer: DataTransfer | null): string[] {
 }
 
 function notify(event: DragDropForward): void {
+  if (callbacks.size === 0) {
+    if (event.kind === "drop") pendingDrops.push([...event.paths]);
+    return;
+  }
   for (const callback of callbacks) callback(event);
+}
+
+function flushPendingDrops(): void {
+  while (pendingDrops.length > 0) {
+    const paths = pendingDrops.shift();
+    if (paths !== undefined) notify({ kind: "drop", paths });
+  }
 }
 
 function installIpcListener(): void {
@@ -73,9 +86,12 @@ const bridge: ScopeDesktopBridge = {
     ipcRenderer.invoke(IPC.pickExportFile, name, kind),
   pickDirectory: (kind) => ipcRenderer.invoke(IPC.pickDirectory, kind),
   onDragDrop: (handler) => {
+    const wasEmpty = callbacks.size === 0;
     callbacks.add(handler);
     installDropListeners();
     installIpcListener();
+    if (wasEmpty) flushPendingDrops();
+    ipcRenderer.send(IPC.rendererReady);
     return () => {
       callbacks.delete(handler);
     };
@@ -91,3 +107,5 @@ if (document.readyState === "loading") {
 } else {
   installDropListeners();
 }
+installIpcListener();
+ipcRenderer.send(IPC.rendererReady);

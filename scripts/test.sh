@@ -81,7 +81,7 @@ test_native_e2e() {
   run_gui_command env \
     SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed \
     SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
-    NODE_ENV=development SIGNALSCOPE_GPU_MODE=software \
+    NODE_ENV=development SIGNALSCOPE_BENCH=1 SIGNALSCOPE_GPU_MODE=software \
     pnpm --filter @signalscope/frontend exec playwright test --project=electron-native "$@"
 }
 

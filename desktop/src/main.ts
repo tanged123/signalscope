@@ -130,6 +130,7 @@ async function start(): Promise<void> {
     { executable, configDir, cacheDir, resourceDir },
     isDevelopment ? developmentOrigin : null,
   );
+  ipcMain.on(IPC.rendererReady, sendQueuedPaths);
   ipcMain.handle(IPC.connect, (): NativeConnection => backend!.connection());
   ipcMain.handle(IPC.gpuInfo, (): Promise<DesktopGpuInfo> => gpuInfo());
   registerDialogHandlers(() => mainWindow);
@@ -139,7 +140,6 @@ async function start(): Promise<void> {
     frontendRoot,
     preloadPath: join(__dirname, "preload.js"),
   });
-  mainWindow.webContents.on("did-finish-load", sendQueuedPaths);
 }
 
 function stopBackend(): Promise<void> {

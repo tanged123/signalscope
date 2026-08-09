@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { inflateSync } from "node:zlib";
 import { percentile } from "../../src/app/percentile";
 import type { GpuMetricsSnapshot } from "../../src/render/gpu/metrics";
 
@@ -23,9 +24,9 @@ export function countNonBackgroundPixels(
   let count = 0;
   const threshold = tolerance * tolerance;
   for (let offset = 0; offset < pixels.length; offset += 4) {
-    const red = pixels[offset];
-    const green = pixels[offset + 1];
-    const blue = pixels[offset + 2];
+    const red = pixels[offset] ?? 0;
+    const green = pixels[offset + 1] ?? 0;
+    const blue = pixels[offset + 2] ?? 0;
     const isBackground = backgrounds.some(
       ([backgroundRed, backgroundGreen, backgroundBlue]) => {
         const distance =
@@ -43,50 +44,141 @@ export function countNonBackgroundPixels(
 export async function plotPixelEvidence(
   page: Page,
 ): Promise<PlotPixelEvidence> {
-  const image = await page
-    .locator(".series-canvas")
-    .first()
-    .evaluate((canvas) => {
-      if (!(canvas instanceof HTMLCanvasElement)) {
-        throw new Error("first panel plot canvas is unavailable");
-      }
-      const parseColor = (value: string): [number, number, number] | null => {
-        const match = value.trim().match(/^#([0-9a-f]{6})$/i);
-        if (match === null) return null;
-        return [
-          Number.parseInt(match[1].slice(0, 2), 16),
-          Number.parseInt(match[1].slice(2, 4), 16),
-          Number.parseInt(match[1].slice(4, 6), 16),
-        ];
-      };
-      const style = getComputedStyle(document.documentElement);
-      const surface0 = style.getPropertyValue("--surface-0").trim();
-      const output = document.createElement("canvas");
-      output.width = canvas.width;
-      output.height = canvas.height;
-      const context = output.getContext("2d");
-      if (context === null)
-        throw new Error("2d pixel evidence context unavailable");
-      context.fillStyle = surface0;
-      context.fillRect(0, 0, output.width, output.height);
-      context.drawImage(canvas, 0, 0);
-      return {
-        pixels: Array.from(
-          context.getImageData(0, 0, output.width, output.height).data,
-        ),
-        width: output.width,
-        height: output.height,
-        backgrounds: [
-          parseColor(surface0),
-          parseColor(style.getPropertyValue("--surface-1")),
-        ].filter((color): color is [number, number, number] => color !== null),
-      };
-    });
-  const pixels = new Uint8ClampedArray(image.pixels);
+  const backgrounds = await page.evaluate(() => {
+    const parseColor = (value: string): RgbColor | null => {
+      const match = value.trim().match(/^#([0-9a-f]{6})$/i);
+      if (match === null || match[1] === undefined) return null;
+      return [
+        Number.parseInt(match[1].slice(0, 2), 16),
+        Number.parseInt(match[1].slice(2, 4), 16),
+        Number.parseInt(match[1].slice(4, 6), 16),
+      ];
+    };
+    const style = getComputedStyle(document.documentElement);
+    return [
+      parseColor(style.getPropertyValue("--surface-0")),
+      parseColor(style.getPropertyValue("--surface-1")),
+    ].filter((color): color is RgbColor => color !== null);
+  });
+  const png = await page.locator(".series-canvas").first().screenshot();
+  const image = decodePng(png);
   return {
     totalPixels: image.width * image.height,
-    nonBackgroundPixels: countNonBackgroundPixels(pixels, image.backgrounds),
+    nonBackgroundPixels: countNonBackgroundPixels(image.pixels, backgrounds),
   };
+}
+
+interface DecodedPng {
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: Uint8ClampedArray;
+}
+
+function decodePng(bytes: Uint8Array): DecodedPng {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (!signature.every((value, index) => bytes[index] === value)) {
+    throw new Error("plot screenshot is not a PNG");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const imageParts: Uint8Array[] = [];
+  while (offset + 12 <= bytes.length) {
+    const length = view.getUint32(offset);
+    const typeOffset = offset + 4;
+    const type = String.fromCharCode(
+      view.getUint8(typeOffset),
+      view.getUint8(typeOffset + 1),
+      view.getUint8(typeOffset + 2),
+      view.getUint8(typeOffset + 3),
+    );
+    const dataOffset = offset + 8;
+    const dataEnd = dataOffset + length;
+    if (dataEnd + 4 > bytes.length) throw new Error("truncated plot PNG");
+    if (type === "IHDR") {
+      width = view.getUint32(dataOffset);
+      height = view.getUint32(dataOffset + 4);
+      bitDepth = view.getUint8(dataOffset + 8);
+      colorType = view.getUint8(dataOffset + 9);
+    } else if (type === "IDAT") {
+      imageParts.push(bytes.slice(dataOffset, dataEnd));
+    } else if (type === "IEND") {
+      break;
+    }
+    offset = dataEnd + 4;
+  }
+  if (width === 0 || height === 0 || bitDepth !== 8) {
+    throw new Error("unsupported plot PNG dimensions or bit depth");
+  }
+  const bytesPerPixel = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
+  if (bytesPerPixel === 0) throw new Error("unsupported plot PNG color type");
+  const compressed = new Uint8Array(
+    imageParts.reduce((total, part) => total + part.length, 0),
+  );
+  let compressedOffset = 0;
+  for (const part of imageParts) {
+    compressed.set(part, compressedOffset);
+    compressedOffset += part.length;
+  }
+  const filtered = inflateSync(compressed);
+  const stride = width * bytesPerPixel;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  let inputOffset = 0;
+  let previous = new Uint8Array(stride);
+  for (let y = 0; y < height; y += 1) {
+    const filter = filtered[inputOffset] ?? 0;
+    inputOffset += 1;
+    const row = new Uint8Array(stride);
+    for (let x = 0; x < stride; x += 1) {
+      const raw = filtered[inputOffset + x] ?? 0;
+      const left = x >= bytesPerPixel ? (row[x - bytesPerPixel] ?? 0) : 0;
+      const up = previous[x] ?? 0;
+      const upperLeft =
+        x >= bytesPerPixel ? (previous[x - bytesPerPixel] ?? 0) : 0;
+      row[x] = unfilterByte(filter, raw, left, up, upperLeft);
+    }
+    inputOffset += stride;
+    for (let x = 0; x < width; x += 1) {
+      const source = x * bytesPerPixel;
+      const target = (y * width + x) * 4;
+      pixels[target] = row[source] ?? 0;
+      pixels[target + 1] = row[source + 1] ?? 0;
+      pixels[target + 2] = row[source + 2] ?? 0;
+      pixels[target + 3] = bytesPerPixel === 4 ? (row[source + 3] ?? 0) : 255;
+    }
+    previous = row;
+  }
+  return { width, height, pixels };
+}
+
+function unfilterByte(
+  filter: number,
+  raw: number,
+  left: number,
+  up: number,
+  upperLeft: number,
+): number {
+  if (filter === 0) return raw;
+  if (filter === 1) return (raw + left) & 0xff;
+  if (filter === 2) return (raw + up) & 0xff;
+  if (filter === 3) return (raw + Math.floor((left + up) / 2)) & 0xff;
+  if (filter === 4) {
+    const prediction = left + up - upperLeft;
+    const leftDistance = Math.abs(prediction - left);
+    const upDistance = Math.abs(prediction - up);
+    const upperLeftDistance = Math.abs(prediction - upperLeft);
+    const prior =
+      leftDistance <= upDistance && leftDistance <= upperLeftDistance
+        ? left
+        : upDistance <= upperLeftDistance
+          ? up
+          : upperLeft;
+    return (raw + prior) & 0xff;
+  }
+  throw new Error(`unsupported plot PNG filter ${String(filter)}`);
 }
 
 export interface MetricDelta {

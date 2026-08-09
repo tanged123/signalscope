@@ -1,8 +1,10 @@
 import { _electron as electron, expect, test } from "@playwright/test";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { plotPixelEvidence } from "../bench/measure";
+import { installNativeSession } from "./native-session";
 
 const electronPath = process.env.SIGNALSCOPE_ELECTRON_BIN;
 const desktopPath = fileURLToPath(new URL("../../../desktop", import.meta.url));
@@ -15,6 +17,7 @@ const containerPath = fileURLToPath(
 const recipePath = `${containerPath}.scope.toml`;
 
 test("Electron reaches every native data and file capability", async () => {
+  test.setTimeout(120_000);
   if (electronPath === undefined) {
     test.skip(true, "SIGNALSCOPE_ELECTRON_BIN is not configured");
     return;
@@ -23,6 +26,7 @@ test("Electron reaches every native data and file capability", async () => {
   const userData = join(root, "user-data");
   const sourceFolder = join(root, "source-folder");
   const sourceCopy = join(sourceFolder, "roundtrip.csv");
+  const uiSourceCopy = join(root, "ui-roundtrip.csv");
   const containerCopy = join(root, "flight_run.h5");
   const sessionPath = join(root, "workspace.signalscope");
   const htmlPath = join(root, "snapshot.html");
@@ -32,7 +36,9 @@ test("Electron reaches every native data and file capability", async () => {
   await mkdir(sourceFolder);
   await mkdir(directory);
   await copyFile(csvPath, sourceCopy);
+  await copyFile(csvPath, uiSourceCopy);
   await copyFile(containerPath, containerCopy);
+  await installNativeSession(userData, "alpha @*");
   const recipeText = await readFile(recipePath, "utf8");
 
   const env = Object.fromEntries(
@@ -40,9 +46,16 @@ test("Electron reaches every native data and file capability", async () => {
       (entry): entry is [string, string] => entry[1] !== undefined,
     ),
   );
+  env.NODE_ENV = "development";
+  env.SIGNALSCOPE_BENCH = "1";
+  env.SIGNALSCOPE_GPU_MODE = "software";
   const app = await electron.launch({
     executablePath: electronPath,
-    args: [desktopPath, `--user-data-dir=${userData}`],
+    args: [
+      desktopPath,
+      `--user-data-dir=${userData}`,
+      `--open=${uiSourceCopy}`,
+    ],
     env,
   });
   try {
@@ -89,7 +102,37 @@ test("Electron reaches every native data and file capability", async () => {
       },
     );
     const page = await app.firstWindow();
-    await expect(page).toHaveURL("http://127.0.0.1:4173/");
+    await expect(page).toHaveURL("http://127.0.0.1:4173/?signalscope-bench=1");
+    await expect(page.locator(".status-aggregate")).toHaveText(
+      /1 sources · 2 signals · [1-9\d,]+ pts/,
+      { timeout: 120_000 },
+    );
+    const sourcePixels = await plotPixelEvidence(page);
+    expect(sourcePixels.nonBackgroundPixels).toBeGreaterThan(0);
+    const nativePng = await page.evaluate(async () => {
+      const modulePath = "/src/app/native-plane.ts";
+      const { NativePlane } = await import(modulePath);
+      const bridge = window.scopeDesktop;
+      if (bridge === undefined) throw new Error("desktop bridge is absent");
+      const canvas =
+        document.querySelector<HTMLCanvasElement>(".series-canvas");
+      if (canvas === null) throw new Error("native plot canvas is absent");
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value === null) reject(new Error("native plot PNG is empty"));
+          else resolve(value);
+        }, "image/png");
+      });
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const plane = await NativePlane.create(bridge);
+      return {
+        bytes: bytes.length,
+        path: await plane.exporter.saveFile("plot.png", "png", bytes),
+      };
+    });
+    expect(nativePng.path).toBe(pngPath);
+    expect(nativePng.bytes).toBeGreaterThan(8);
+    expect((await stat(pngPath)).size).toBeGreaterThan(8);
 
     const result = await page.evaluate(
       async ({
@@ -204,11 +247,6 @@ test("Electron reaches every native data and file capability", async () => {
           "visible",
           "preview",
           selection,
-        );
-        await plane.exporter.saveFile(
-          "plot.png",
-          "png",
-          new Uint8Array([137, 80, 78, 71]),
         );
         await plane.exporter.saveFile(
           "plot.csv",

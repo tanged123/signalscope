@@ -17,11 +17,17 @@ const softwarePattern =
   /swiftshader|llvmpipe|lavapipe|warp|software\s+(?:rasterizer|rendering)/i;
 
 export function classifyElectronGpu(
-  featureStatus: Readonly<Record<string, string>>,
+  featureStatus:
+    | Electron.GPUFeatureStatus
+    | { readonly webgpu?: string }
+    | Readonly<Record<string, string>>,
   activeDevice: GpuDeviceInfo | undefined,
   explicitSoftwareMode: boolean,
 ): ElectronGpuClassification {
-  const webGpuStatus = featureStatus.webgpu ?? "unknown";
+  const webGpuStatus =
+    "webgpu" in featureStatus && typeof featureStatus.webgpu === "string"
+      ? featureStatus.webgpu
+      : "unknown";
   if (webGpuStatus === "disabled" || webGpuStatus === "unavailable") {
     return {
       softwareRendering: false,

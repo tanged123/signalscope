@@ -66,4 +66,5 @@ export const IPC = Object.freeze({
   pickDirectory: "scope:pick-directory",
   gpuInfo: "scope:gpu-info",
   dragDrop: "scope:drag-drop",
+  rendererReady: "scope:renderer-ready",
 });
