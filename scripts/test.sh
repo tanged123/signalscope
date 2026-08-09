@@ -7,10 +7,11 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|gpu|bench|full]
+Usage: ./scripts/test.sh [quick|core|host|shell|unit|frontend|e2e|gpu|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
+  host      Test the shell-independent Rust host and server, optionally filtered.
   shell     Test the Tauri shell, optionally filtered.
   unit      Run frontend unit tests, optionally filtered.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
@@ -28,6 +29,10 @@ test_core() {
 
 test_shell() {
   cargo test -p signalscope-shell -- "$@"
+}
+
+test_host() {
+  cargo test -p scope-host -p scope-server -- "$@"
 }
 
 test_unit() {
@@ -131,6 +136,10 @@ quick)
 core)
   shift || true
   test_core "$@"
+  ;;
+host)
+  shift || true
+  test_host "$@"
   ;;
 shell)
   shift || true

@@ -41,5 +41,6 @@ Accepted decisions:
 37. [Per-mode sample budgets](0037-per-mode-sample-budgets.md)
 38. [Unified mode pipeline and density tier](0038-unified-mode-pipeline-and-density-tier.md)
 39. [Time-series-only identity-preserving WebGPU renderer](0039-time-series-webgpu-renderer.md)
+40. [Electron desktop host and authenticated Rust data plane](0040-electron-rust-desktop-host.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

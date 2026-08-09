@@ -34,6 +34,7 @@ artifact_checks() {
 
 rust_checks() {
   local check_config='{"bundle":{"resources":[]}}'
+  "$signalscope_scripts_dir/test.sh" host
   TAURI_CONFIG="$check_config" cargo clippy --workspace --all-targets -- -D warnings
   TAURI_CONFIG="$check_config" cargo test --workspace
 }
