@@ -38,13 +38,27 @@ use scope_protocol::{
     FormatDescriptor, IngestBatchRequest, IntrospectRequest, LoadSessionRequest, LoadedSession,
     PickSessionRequest, RecipeDestination, RemoveDerivedBundleRequest, RemoveSignalRequest,
     RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
-    SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
-    SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest, ScanSourcesRequest,
-    ScanSourcesResponse, SessionDialogMode, SignalSummary, SkippedMemberSummary, SourceSummary,
-    TileRequest,
+    SampleResponse, SampleSeries, SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest,
+    ScanSourcesRequest, ScanSourcesResponse, SessionDialogMode, SignalSummary,
+    SkippedMemberSummary, SourceSummary, TileRequest,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+
+#[derive(serde::Deserialize)]
+struct LegacySaveExportFileRequest {
+    file_name: String,
+    kind: ExportFileKind,
+    data_base64: String,
+}
+
+#[derive(serde::Deserialize)]
+struct LegacySaveExportFileToDirectoryRequest {
+    directory: String,
+    file_name: String,
+    kind: ExportFileKind,
+    data_base64: String,
+}
 
 struct DataState {
     store: SignalStore,
@@ -1687,7 +1701,7 @@ async fn export_write(
 
 #[tauri::command]
 async fn save_export_file(
-    request: Envelope<SaveExportFileRequest>,
+    request: Envelope<LegacySaveExportFileRequest>,
     app: AppHandle,
 ) -> Result<Envelope<Option<String>>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
@@ -1763,7 +1777,7 @@ async fn pick_export_directory(app: AppHandle) -> Result<Envelope<Option<String>
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
 fn save_export_file_to_directory(
-    request: Envelope<SaveExportFileToDirectoryRequest>,
+    request: Envelope<LegacySaveExportFileToDirectoryRequest>,
 ) -> Result<Envelope<String>, String> {
     let request = request.open().map_err(|error| error.to_string())?;
     let extension = match request.kind {

@@ -7,12 +7,13 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|host|shell|unit|frontend|e2e|gpu|bench|full]
+Usage: ./scripts/test.sh [quick|core|host|shell|desktop|unit|frontend|e2e|native-e2e|gpu|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
   host      Test the shell-independent Rust host and server, optionally filtered.
   shell     Test the Tauri shell, optionally filtered.
+  desktop   Test the Electron desktop package, optionally filtered.
   unit      Run frontend unit tests, optionally filtered.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
@@ -33,6 +34,34 @@ test_shell() {
 
 test_host() {
   cargo test -p scope-host -p scope-server -- "$@"
+}
+
+test_desktop() {
+  pnpm --filter @signalscope/desktop test -- "$@"
+}
+
+test_native_e2e() {
+  if [ -z "${SIGNALSCOPE_ELECTRON_BIN:-}" ]; then
+    echo "SIGNALSCOPE_ELECTRON_BIN is not configured; enter the Nix dev shell" >&2
+    return 1
+  fi
+  "$signalscope_scripts_dir/build.sh" host
+  pnpm --filter @signalscope/frontend build
+  pnpm --filter @signalscope/desktop build
+  mkdir -p "$signalscope_root/build"
+  pnpm --filter @signalscope/frontend dev >"$signalscope_root/build/vite-native-e2e.log" 2>&1 &
+  native_e2e_vite_pid=$!
+  cleanup_native_e2e() {
+    if [ -n "${native_e2e_vite_pid:-}" ]; then
+      kill "$native_e2e_vite_pid" 2>/dev/null || true
+      wait "$native_e2e_vite_pid" 2>/dev/null || true
+    fi
+  }
+  trap cleanup_native_e2e EXIT
+  wait_for_port 4173
+  SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
+    NODE_ENV=development SIGNALSCOPE_GPU_MODE=software \
+    pnpm --filter @signalscope/frontend exec playwright test --project=electron-native "$@"
 }
 
 test_unit() {
@@ -141,6 +170,14 @@ host)
   shift || true
   test_host "$@"
   ;;
+desktop)
+  shift || true
+  test_desktop "$@"
+  ;;
+native-e2e)
+  shift || true
+  test_native_e2e "$@"
+  ;;
 shell)
   shift || true
   test_shell "$@"
@@ -153,9 +190,10 @@ frontend)
   test_frontend
   ;;
 e2e)
+  shift || true
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
-  pnpm e2e
+  pnpm e2e -- "$@"
   bake_bench_smoke_artifact
   pnpm --filter @signalscope/frontend exec playwright test --project=gpu
   ;;

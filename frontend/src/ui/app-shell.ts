@@ -43,7 +43,7 @@ import {
   UI_FONT_SIZE,
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
-import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
+import { composePanelPng, panelPngTargets } from "../app/png-export";
 import { TileWindowCache } from "../app/tile-window-cache";
 import {
   COARSE_POINT_TARGET,
@@ -2052,7 +2052,7 @@ export class AppShell {
         const bytes = cachedPng ?? (await this.buildVisiblePng());
         if (bytes === null) return;
         const name = exportFileStem(panel.title, panel.id);
-        path = await exporter.saveFile(`${name}.png`, "png", toBase64(bytes));
+        path = await exporter.saveFile(`${name}.png`, "png", bytes);
       }
     } else {
       const panelId = this.workspace.focusedPanelId();
@@ -2065,7 +2065,7 @@ export class AppShell {
       path = await exporter.saveFile(
         `${name}.csv`,
         "csv",
-        toBase64(new TextEncoder().encode(csv.text)),
+        new TextEncoder().encode(csv.text),
       );
     }
     if (path !== null) this.showModeHelp(`exported ${path}`);
@@ -2135,7 +2135,7 @@ export class AppShell {
             directory,
             target.fileName,
             "png",
-            toBase64(bytes),
+            bytes,
           );
         } catch (error: unknown) {
           const message =

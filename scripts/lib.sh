@@ -17,6 +17,20 @@ ensure_dev_shell() {
   cd "$signalscope_root" || exit 1
 }
 
+wait_for_port() {
+  local port="$1"
+  local attempts=100
+  while [ "$attempts" -gt 0 ]; do
+    if (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep 0.1
+  done
+  echo "timed out waiting for 127.0.0.1:$port" >&2
+  return 1
+}
+
 # Check groups shared by ci.sh and test.sh so local test runs and CI gates
 # cannot drift apart.
 # Type checking runs once inside artifact_checks' build (tsc --noEmit &&

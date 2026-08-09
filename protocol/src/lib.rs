@@ -1,10 +1,12 @@
 //! Versioned data-plane protocol generated from the repository schema.
 
 mod envelope;
+pub mod file_binary;
 mod generated;
 pub mod tile_binary;
 
 pub use envelope::{Envelope, VersionError};
+pub use file_binary::{FileBinaryError, decode_file_frame, encode_file_frame};
 pub use generated::*;
 pub use tile_binary::{
     BREAK_BEFORE, BinaryTileSeries, OwnedBinaryPoint, OwnedBinarySeries, TileBinaryError,

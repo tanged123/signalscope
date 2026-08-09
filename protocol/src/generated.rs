@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -468,6 +468,12 @@ pub struct ExportWriteRequest {
     pub selection: ExportSelection,
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportWriteAtPathRequest {
+    pub request: ExportWriteRequest,
+    pub destination: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFileKind {
@@ -475,19 +481,19 @@ pub enum ExportFileKind {
     Csv,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SaveExportFileRequest {
-    pub file_name: String,
-    pub kind: ExportFileKind,
-    pub data_base64: String,
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileWriteDestination {
+    ExactPath,
+    Directory,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SaveExportFileToDirectoryRequest {
-    pub directory: String,
+pub struct FileWriteMetadata {
+    pub destination: FileWriteDestination,
+    pub path: String,
     pub file_name: String,
     pub kind: ExportFileKind,
-    pub data_base64: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

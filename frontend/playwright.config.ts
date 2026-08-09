@@ -76,6 +76,11 @@ export default defineConfig({
         launchOptions: softwareWebGpuLaunchOptions,
       },
     },
+    {
+      name: "electron-native",
+      testDir: "./tests/e2e",
+      testMatch: /electron-native\.spec\.ts/,
+    },
   ],
   webServer:
     process.env.SIGNALSCOPE_DEMO === "1" ||

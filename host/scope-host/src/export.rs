@@ -3,12 +3,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use base64::Engine;
 use scope_core::{session, snapshot};
 use scope_protocol::{
     ExportEstimate, ExportEstimateEntry, ExportEstimateRequest, ExportFidelity, ExportFileKind,
-    ExportRange, ExportSelection, ExportWriteRequest, SaveExportFileRequest,
-    SaveExportFileToDirectoryRequest,
+    ExportRange, ExportSelection, ExportWriteRequest, FileWriteDestination, FileWriteMetadata,
 };
 
 use crate::{HostError, ScopeHost, state::DataState};
@@ -21,6 +19,33 @@ fn invalid(message: impl Into<String>) -> HostError {
 }
 
 impl ScopeHost {
+    pub fn write_raw_file(
+        &self,
+        metadata: &FileWriteMetadata,
+        bytes: &[u8],
+    ) -> Result<String, HostError> {
+        let extension = extension_for(metadata.kind);
+        let path = match metadata.destination {
+            FileWriteDestination::ExactPath => {
+                if !metadata.file_name.is_empty() {
+                    return Err(invalid(
+                        "exact export destinations cannot include a file name",
+                    ));
+                }
+                normalized_export_save_path(PathBuf::from(&metadata.path), extension)
+            }
+            FileWriteDestination::Directory => {
+                let directory = Path::new(&metadata.path);
+                if !directory.is_dir() {
+                    return Err(invalid("export directory does not exist"));
+                }
+                export_file_path(directory, &metadata.file_name, extension)?
+            }
+        };
+        write_atomic(&path, bytes).map_err(|error| invalid(error.to_string()))?;
+        Ok(path.display().to_string())
+    }
+
     pub fn export_template_bytes(&self) -> Result<u64, HostError> {
         Ok(std::fs::metadata(self.snapshot_template()?)
             .map_err(|error| invalid(error.to_string()))?
@@ -79,37 +104,6 @@ impl ScopeHost {
             snapshot::inject(&template, manifest).map_err(|error| invalid(error.to_string()))?;
         let path = normalized_export_save_path(destination, "html");
         write_atomic(&path, html.as_bytes()).map_err(|error| invalid(error.to_string()))?;
-        Ok(path.display().to_string())
-    }
-
-    pub fn write_export_file(
-        &self,
-        request: &SaveExportFileRequest,
-        destination: PathBuf,
-    ) -> Result<PathBuf, HostError> {
-        let extension = extension_for(request.kind);
-        validate_file_name(&request.file_name)?;
-        let path = normalized_export_save_path(destination, extension);
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&request.data_base64)
-            .map_err(|error| invalid(error.to_string()))?;
-        write_atomic(&path, &bytes).map_err(|error| invalid(error.to_string()))?;
-        Ok(path)
-    }
-
-    pub fn write_export_file_to_directory(
-        &self,
-        request: &SaveExportFileToDirectoryRequest,
-    ) -> Result<String, HostError> {
-        let directory = PathBuf::from(&request.directory);
-        if !directory.is_dir() {
-            return Err(invalid("export directory does not exist"));
-        }
-        let path = export_file_path(&directory, &request.file_name, extension_for(request.kind))?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&request.data_base64)
-            .map_err(|error| invalid(error.to_string()))?;
-        write_atomic(&path, &bytes).map_err(|error| invalid(error.to_string()))?;
         Ok(path.display().to_string())
     }
 }
@@ -220,7 +214,7 @@ fn estimate_for(
 #[cfg(test)]
 mod tests {
     use crate::{HostConfig, HostPaths, ScopeHost};
-    use scope_protocol::{ExportFileKind, SaveExportFileRequest};
+    use scope_protocol::{Envelope, ExportFileKind, FileWriteDestination, FileWriteMetadata};
 
     fn host(root: &std::path::Path) -> ScopeHost {
         ScopeHost::open(HostConfig {
@@ -235,32 +229,25 @@ mod tests {
     }
 
     #[test]
-    fn raw_export_write_rejects_path_traversal_and_writes_bytes() {
-        let root = tempfile::tempdir().unwrap();
-        let host = host(root.path());
-        let request = SaveExportFileRequest {
-            file_name: "plot.png".into(),
-            kind: ExportFileKind::Png,
-            data_base64: "AAEC".into(),
-        };
-        let path = host
-            .write_export_file(&request, root.path().join("plot.png"))
-            .unwrap();
-        assert_eq!(std::fs::read(path).unwrap(), [0, 1, 2]);
-        let traversal = SaveExportFileRequest {
-            file_name: "../plot.png".into(),
-            ..request
-        };
-        assert!(
-            host.write_export_file(&traversal, root.path().join("plot.png"))
-                .is_err()
-        );
-    }
-
-    #[test]
     fn missing_template_is_typed_at_export_use() {
         let root = tempfile::tempdir().unwrap();
         let error = host(root.path()).export_template_bytes().unwrap_err();
         assert_eq!(error.code(), "missing_snapshot_template");
+    }
+
+    #[test]
+    fn raw_file_metadata_selects_an_exact_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let host = host(root.path());
+        let metadata = FileWriteMetadata {
+            destination: FileWriteDestination::ExactPath,
+            path: root.path().join("plot.png").display().to_string(),
+            file_name: String::new(),
+            kind: ExportFileKind::Png,
+        };
+        let path = host.write_raw_file(&metadata, &[4, 5]).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), [4, 5]);
+        let envelope = Envelope::new(metadata);
+        assert_eq!(envelope.protocol_version, scope_protocol::PROTOCOL_VERSION);
     }
 }

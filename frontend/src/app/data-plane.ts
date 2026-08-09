@@ -1,43 +1,24 @@
 import {
   type BatchDetail,
-  type BatchDetailRequest,
-  type BatchJob,
   type BatchStatus,
   type BakedLevel,
   type ContainerOutline,
-  type CreateDerivedBundleRequest,
   type DerivedBundleResponse,
-  type DerivedRequest,
   type DragDropForward,
   type EnvelopeBin,
   type ExportEstimate,
-  type ExportEstimateRequest,
   type ExportFidelity,
   type ExportFileKind,
   type ExportRange,
   type ExportSelection,
-  type ExportWriteRequest,
   type FormatDescriptor,
-  type IngestBatchRequest,
-  type IntrospectRequest,
   type LoadedSession,
-  type LoadSessionRequest,
-  type PickSessionRequest,
-  type RemoveSignalRequest,
-  type RemoveDerivedBundleRequest,
-  type RestoreReconcileRequest,
   type RestoreReconcileResponse,
-  type RestoreSourcesRequest,
   type RecipeDestination,
-  type SaveRecipeRequest,
   type SaveRecipeResponse,
   type SampleRequest,
   type SampleResponse,
-  type SaveSessionRequest,
-  type ScanSourcesRequest,
   type ScanSourcesResponse,
-  type SaveExportFileRequest,
-  type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
   type SignalSummary,
   type SnapshotManifest,
@@ -56,7 +37,6 @@ import { open, seal, type Envelope } from "./envelope";
 import { queryPyramidRange } from "./pyramid-query";
 import { sampleWindow } from "./samples";
 import { sliceBakedTile } from "./baked-tile";
-import { decodeTileResponse } from "./tile-binary";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
@@ -126,14 +106,14 @@ export interface ExportPort {
   saveFile(
     fileName: string,
     kind: ExportFileKind,
-    dataBase64: string,
+    bytes: Uint8Array,
   ): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   saveFileToDirectory(
     directory: string,
     fileName: string,
     kind: ExportFileKind,
-    dataBase64: string,
+    bytes: Uint8Array,
   ): Promise<string>;
 }
 
@@ -154,343 +134,13 @@ export interface DataPlane {
 
 type BakedManifest = Envelope<SnapshotManifest>;
 
-interface TauriInternals {
-  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
-  transformCallback<T>(callback: (payload: T) => void): number;
-}
-
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: TauriInternals;
-  }
-}
-
-export class TauriPlane implements DataPlane {
-  readonly sourceLabel = "native data plane";
-
-  readonly ingest: IngestPort;
-
-  readonly derived: DerivedPort;
-  readonly session: SessionPort;
-
-  readonly restore: RestorePort;
-
-  readonly preferences: PreferencesPort;
-
-  readonly exporter: ExportPort;
-
-  constructor(
-    private readonly invoke: TauriInternals["invoke"],
-    private readonly transformCallback: TauriInternals["transformCallback"],
-  ) {
-    this.ingest = {
-      pickSources: async () =>
-        open(await this.invoke<Envelope<string[]>>("pick_sources")),
-      pickSourceFolder: async () =>
-        open(await this.invoke<Envelope<string | null>>("pick_source_folder")),
-      scanSources: async (path: string, recursive: boolean) =>
-        open(
-          await this.invoke<Envelope<ScanSourcesResponse>>("scan_sources", {
-            request: seal<ScanSourcesRequest>({ path, recursive }),
-          }),
-        ),
-      startBatch: async (paths: string[]) =>
-        open(
-          await this.invoke<Envelope<BatchJob>>("ingest_batch", {
-            request: seal<IngestBatchRequest>({ paths }),
-          }),
-        ).job_id,
-      batchStatus: async (jobId: string) =>
-        open(
-          await this.invoke<Envelope<BatchStatus>>("batch_status", {
-            request: seal<BatchJob>({ job_id: jobId }),
-          }),
-        ),
-      batchDetail: async (jobId: string, offset: number, limit: number) =>
-        open(
-          await this.invoke<Envelope<BatchDetail>>("batch_detail", {
-            request: seal<BatchDetailRequest>({
-              job_id: jobId,
-              offset,
-              limit,
-            }),
-          }),
-        ),
-      cancelBatch: async (jobId: string) => {
-        open(
-          await this.invoke<Envelope<null>>("cancel_batch", {
-            request: seal<BatchJob>({ job_id: jobId }),
-          }),
-        );
-      },
-      releaseBatch: async (jobId: string) => {
-        open(
-          await this.invoke<Envelope<null>>("release_batch", {
-            request: seal<BatchJob>({ job_id: jobId }),
-          }),
-        );
-      },
-      listFormats: async () =>
-        open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
-      introspect: async (path: string) =>
-        open(
-          await this.invoke<Envelope<ContainerOutline>>(
-            "introspect_container",
-            {
-              request: seal<IntrospectRequest>({ path }),
-            },
-          ),
-        ),
-      saveRecipe: async (
-        path: string,
-        recipeToml: string,
-        destination: RecipeDestination,
-      ) =>
-        open(
-          await this.invoke<Envelope<SaveRecipeResponse>>("save_recipe", {
-            request: seal<SaveRecipeRequest>({
-              path,
-              recipe_toml: recipeToml,
-              destination,
-            }),
-          }),
-        ),
-      onDragDrop: (handler) => {
-        let eventId: number | null = null;
-        let disposed = false;
-        const unlisten = () => {
-          if (eventId === null) return;
-          void this.invoke("plugin:event|unlisten", {
-            event: "scope://drag-drop",
-            eventId,
-          });
-          eventId = null;
-        };
-        void this.invoke<number>("plugin:event|listen", {
-          event: "scope://drag-drop",
-          target: { kind: "Any" },
-          handler: this.transformCallback(
-            (raw: { payload: Envelope<DragDropForward> }) => {
-              handler(open(raw.payload));
-            },
-          ),
-        })
-          .then((id) => {
-            eventId = id;
-            if (disposed) unlisten();
-          })
-          .catch((error: unknown) => {
-            console.error("drag-drop listener registration failed", error);
-          });
-        return () => {
-          disposed = true;
-          unlisten();
-        };
-      },
-    };
-    this.derived = {
-      create: async (path: string, expr: string) =>
-        open(
-          await this.invoke<Envelope<SignalSummary>>("create_derived", {
-            request: seal<DerivedRequest>({ path, expr }),
-          }),
-        ),
-      remove: async (path: string) => {
-        open(
-          await this.invoke<Envelope<null>>("remove_signal", {
-            request: seal<RemoveSignalRequest>({ path }),
-          }),
-        );
-      },
-      createBundle: async (name: string, expr: string) =>
-        open(
-          await this.invoke<Envelope<DerivedBundleResponse>>(
-            "create_derived_bundle",
-            {
-              request: seal<CreateDerivedBundleRequest>({ name, expr }),
-            },
-          ),
-        ),
-      removeBundle: async (name: string) => {
-        open(
-          await this.invoke<Envelope<null>>("remove_derived_bundle", {
-            request: seal<RemoveDerivedBundleRequest>({ name }),
-          }),
-        );
-      },
-    };
-    this.session = {
-      save: async (sessionJson: string, path: string | null) =>
-        open(
-          await this.invoke<Envelope<string>>("save_session", {
-            request: seal<SaveSessionRequest>({
-              session_json: sessionJson,
-              path,
-            }),
-          }),
-        ),
-      load: async (path: string | null) =>
-        open(
-          await this.invoke<Envelope<LoadedSession>>("load_session", {
-            request: seal<LoadSessionRequest>({ path }),
-          }),
-        ),
-      reset: async () =>
-        open(await this.invoke<Envelope<LoadedSession>>("reset_session")),
-      pick: async (mode: SessionDialogMode) =>
-        open(
-          await this.invoke<Envelope<string | null>>("pick_session_path", {
-            request: seal<PickSessionRequest>({ mode }),
-          }),
-        ),
-    };
-    this.restore = {
-      start: async (sessionJson: string) =>
-        open(
-          await this.invoke<Envelope<BatchJob>>("restore_sources", {
-            request: seal<RestoreSourcesRequest>({
-              session_json: sessionJson,
-            }),
-          }),
-        ).job_id,
-      reconcile: async (sessionJson: string, jobId: string) =>
-        open(
-          await this.invoke<Envelope<RestoreReconcileResponse>>(
-            "restore_reconcile",
-            {
-              request: seal<RestoreReconcileRequest>({
-                session_json: sessionJson,
-                job_id: jobId,
-              }),
-            },
-          ),
-        ),
-    };
-    this.preferences = {
-      load: async () =>
-        open(await this.invoke<Envelope<string | null>>("load_preferences")),
-      save: async (preferencesJson: string) => {
-        open(
-          await this.invoke<Envelope<null>>("save_preferences", {
-            request: seal(preferencesJson),
-          }),
-        );
-      },
-      effectiveRecipeDirectory: async () =>
-        open(await this.invoke<Envelope<string>>("effective_recipe_directory")),
-      pickRecipeDirectory: async () =>
-        open(
-          await this.invoke<Envelope<string | null>>("pick_recipe_directory"),
-        ),
-    };
-    this.exporter = {
-      estimate: async (sessionJson: string, selection: ExportSelection) =>
-        open(
-          await this.invoke<Envelope<ExportEstimate>>("export_estimate", {
-            request: seal<ExportEstimateRequest>({
-              session_json: sessionJson,
-              selection,
-            }),
-          }),
-        ),
-      writeHtml: async (
-        sessionJson: string,
-        range: ExportRange,
-        fidelity: ExportFidelity,
-        selection: ExportSelection,
-      ) =>
-        open(
-          await this.invoke<Envelope<string | null>>("export_write", {
-            request: seal<ExportWriteRequest>({
-              session_json: sessionJson,
-              range,
-              fidelity,
-              selection,
-            }),
-          }),
-        ),
-      saveFile: async (
-        fileName: string,
-        kind: ExportFileKind,
-        dataBase64: string,
-      ) =>
-        open(
-          await this.invoke<Envelope<string | null>>("save_export_file", {
-            request: seal<SaveExportFileRequest>({
-              file_name: fileName,
-              kind,
-              data_base64: dataBase64,
-            }),
-          }),
-        ),
-      pickDirectory: async () =>
-        open(
-          await this.invoke<Envelope<string | null>>("pick_export_directory"),
-        ),
-      saveFileToDirectory: async (
-        directory: string,
-        fileName: string,
-        kind: ExportFileKind,
-        dataBase64: string,
-      ) =>
-        open(
-          await this.invoke<Envelope<string>>("save_export_file_to_directory", {
-            request: seal<SaveExportFileToDirectoryRequest>({
-              directory,
-              file_name: fileName,
-              kind,
-              data_base64: dataBase64,
-            }),
-          }),
-        ),
-    };
-  }
-
-  async listSignals(): Promise<SignalSummary[]> {
-    return open(await this.invoke<Envelope<SignalSummary[]>>("list_signals"));
-  }
-
-  async listSources(): Promise<SourceSummary[]> {
-    return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
-  }
-
-  async queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
-    return decodeTileResponse(
-      await this.invoke<ArrayBuffer>("query_tiles_bin", {
-        request: seal(request),
-      }),
-      request.request_id,
-    );
-  }
-
-  async querySamples(request: SampleRequest): Promise<SampleResponse> {
-    const response = open(
-      await this.invoke<Envelope<SampleResponse>>("query_samples", {
-        request: seal(request),
-      }),
-    );
-    return {
-      ...response,
-      series: response.series.map((series) => ({
-        ...series,
-        // JSON represents Rust's non-finite gap samples as null. Restore the
-        // data-plane contract before presentation-plane interpolation sees it.
-        values: series.values.map((value) =>
-          typeof value === "number" && Number.isFinite(value)
-            ? value
-            : Number.NaN,
-        ),
-      })),
-    };
-  }
-}
-
 export class BakedPlane implements DataPlane {
   readonly sourceLabel = "baked demo source";
 
   readonly ingest = null;
 
   readonly derived = null;
+
   readonly session = null;
 
   readonly restore = null;
@@ -684,14 +334,13 @@ export class BakedPlane implements DataPlane {
   }
 }
 
-export function selectDataPlane(): DataPlane {
-  const internals = window.__TAURI_INTERNALS__;
-  return internals === undefined
-    ? BakedPlane.fromDocument()
-    : new TauriPlane(
-        internals.invoke.bind(internals),
-        internals.transformCallback.bind(internals),
-      );
+export async function selectDataPlane(): Promise<DataPlane> {
+  const bridge = window.scopeDesktop;
+  if (bridge !== undefined) {
+    const { NativePlane } = await import("./native-plane");
+    return NativePlane.create(bridge);
+  }
+  return BakedPlane.fromDocument();
 }
 
 function createDemoManifest(): BakedManifest {

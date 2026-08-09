@@ -5,6 +5,7 @@
 /result
 **/node_modules/
 /frontend/dist/
+/desktop/dist/
 /frontend/playwright-report/
 /frontend/test-results/
 /shell/src-tauri/gen/

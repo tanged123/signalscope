@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 
 use axum::{
     Router,
-    body::Body,
+    body::{Body, Bytes},
     extract::{Json, State},
     http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
@@ -17,7 +17,7 @@ use axum::{
 };
 use base64::Engine;
 use scope_host::{HostConfig, HostError, ScopeHost};
-use scope_protocol::{Envelope, IngestBatchRequest, SampleRequest, TileRequest};
+use scope_protocol::{Envelope, IngestBatchRequest, SampleRequest, TileRequest, decode_file_frame};
 use serde::Serialize;
 
 pub const TRANSPORT_VERSION: u32 = 1;
@@ -55,6 +55,8 @@ pub fn router(host: ScopeHost, token: String, dev_origin: Option<String>) -> Rou
         .route("/v1/ingest/release", post(release_batch))
         .route("/v1/ingest/introspect", post(introspect_container))
         .route("/v1/ingest/recipe", post(save_recipe))
+        .route("/v1/ingest/restore", post(restore_sources))
+        .route("/v1/ingest/restore-reconcile", post(restore_reconcile))
         .route("/v1/query/tiles", post(query_tiles))
         .route("/v1/query/samples", post(query_samples))
         .route("/v1/derived/create", post(create_derived))
@@ -68,10 +70,12 @@ pub fn router(host: ScopeHost, token: String, dev_origin: Option<String>) -> Rou
         .route("/v1/preferences/save", post(save_preferences))
         .route("/v1/preferences/recipe-directory", post(recipe_directory))
         .route("/v1/export/estimate", post(export_estimate))
+        .route("/v1/export/write", post(export_write))
+        .route("/v1/export/file", post(export_file))
         .fallback(not_found)
         .with_state(state.clone())
         .layer(middleware::from_fn_with_state(state, transport_middleware))
-        .layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024))
+        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
 }
 
 pub struct ServerConfig {
@@ -394,6 +398,34 @@ async fn query_samples(
         Err(error) => host_error(error),
     }
 }
+
+async fn restore_sources(
+    State(state): State<AppState>,
+    Json(request): Json<Envelope<scope_protocol::RestoreSourcesRequest>>,
+) -> Response {
+    let request = match open(request) {
+        Ok(request) => request,
+        Err(error) => return error,
+    };
+    match state.host.restore_sources(request) {
+        Ok(value) => Json(Envelope::new(value)).into_response(),
+        Err(error) => host_error(error),
+    }
+}
+
+async fn restore_reconcile(
+    State(state): State<AppState>,
+    Json(request): Json<Envelope<scope_protocol::RestoreReconcileRequest>>,
+) -> Response {
+    let request = match open(request) {
+        Ok(request) => request,
+        Err(error) => return error,
+    };
+    match state.host.restore_reconcile(request) {
+        Ok(value) => Json(Envelope::new(value)).into_response(),
+        Err(error) => host_error(error),
+    }
+}
 async fn query_tiles(
     State(state): State<AppState>,
     Json(request): Json<Envelope<TileRequest>>,
@@ -544,6 +576,40 @@ async fn export_estimate(
     };
     match state.host.export_estimate(request) {
         Ok(value) => Json(Envelope::new(value)).into_response(),
+        Err(error) => host_error(error),
+    }
+}
+
+async fn export_file(State(state): State<AppState>, body: Bytes) -> Response {
+    let (metadata, payload) = match decode_file_frame(&body) {
+        Ok(frame) => frame,
+        Err(error) => {
+            return error_response(StatusCode::BAD_REQUEST, "file_frame", &error.to_string());
+        }
+    };
+    let metadata = match open(metadata) {
+        Ok(metadata) => metadata,
+        Err(error) => return error,
+    };
+    match state.host.write_raw_file(&metadata, &payload) {
+        Ok(path) => Json(Envelope::new(path)).into_response(),
+        Err(error) => host_error(error),
+    }
+}
+
+async fn export_write(
+    State(state): State<AppState>,
+    Json(request): Json<Envelope<scope_protocol::ExportWriteAtPathRequest>>,
+) -> Response {
+    let request = match open(request) {
+        Ok(request) => request,
+        Err(error) => return error,
+    };
+    match state
+        .host
+        .export_html_to_path(request.request, request.destination.into())
+    {
+        Ok(path) => Json(Envelope::new(Some(path))).into_response(),
         Err(error) => host_error(error),
     }
 }

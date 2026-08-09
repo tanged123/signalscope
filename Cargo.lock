@@ -3344,7 +3344,6 @@ dependencies = [
 name = "scope-host"
 version = "1.0.2"
 dependencies = [
- "base64 0.22.1",
  "scope-core",
  "scope-protocol",
  "serde",
@@ -3643,6 +3642,7 @@ dependencies = [
  "base64 0.22.1",
  "scope-core",
  "scope-protocol",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",

@@ -51,7 +51,7 @@ export class GpuRuntime {
     return [
       host.requestAnimationFrame?.bind(host) ??
         ((callback: FrameRequestCallback) =>
-          globalThis.setTimeout(() => callback(performance.now()), 0)),
+          Number(globalThis.setTimeout(() => callback(performance.now()), 0))),
       host.cancelAnimationFrame?.bind(host) ??
         ((handle: number) => globalThis.clearTimeout(handle)),
     ];

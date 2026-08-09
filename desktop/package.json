@@ -1,0 +1,17 @@
+{
+  "name": "@signalscope/desktop",
+  "version": "1.0.2",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "pnpm build && node scripts/start.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "26.15.7",
+    "typescript": "5.9.3",
+    "vitest": "4.0.16"
+  }
+}

@@ -62,93 +62,91 @@ async function installDerivedPlane(page: Page): Promise<void> {
         derived_bundles: [],
         sources: [],
       });
-      const internals = {
-        // Keep the mock's Promise contract aligned with Tauri's invoke API.
-        // eslint-disable-next-line @typescript-eslint/require-await
-        invoke: async (command: string, args?: Record<string, unknown>) => {
-          const request = args?.["request"] as
-            | { payload?: Record<string, unknown> }
-            | undefined;
-          const payload = request?.payload ?? {};
-          switch (command) {
-            case "load_preferences":
-              return envelope(null);
-            case "load_session":
-            case "reset_session":
-              return envelope({ session_json: session, path: null });
-            case "restore_sources":
-              return envelope({ job_id: "restore" });
-            case "batch_status":
-              return envelope({
-                state: "done",
-                fraction: 1,
-                total: "0",
-                done: "0",
-                failed: "0",
-                current_paths: [],
-                recent_failures: [],
-              });
-            case "restore_reconcile":
-              return envelope({
-                session_json: payload["session_json"] ?? session,
-                rewritten: "0",
-                conflicts: [],
-                unresolved: [],
-              });
-            case "release_batch":
-            case "save_preferences":
-            case "remove_derived_bundle":
-              return envelope(null);
-            case "save_session":
-              return envelope("test.signalscope");
-            case "list_signals":
-              return envelope(signals);
-            case "list_sources":
-              return envelope([
-                {
-                  source_id: "0",
-                  source_key: "demo",
-                  prefix: "rocket",
-                  path: "fixture.csv",
-                  point_count: "4",
-                },
-              ]);
-            case "query_tiles":
-            case "query_samples":
-              return envelope({
-                request_id: payload["request_id"] ?? "test",
-                series: [],
-              });
-            case "create_derived": {
-              const path = String(payload["path"]);
-              const summary = {
-                ...base,
-                signal_id: `derived:${path}`,
-                source_id: "derived",
-                source_key: "derived",
-                local_path: path.slice("derived/".length),
-                path,
-                point_count: "0",
-              };
-              signals = [...signals, summary];
-              return envelope(summary);
-            }
-            case "remove_signal": {
-              const path = String(payload["path"]);
-              signals = signals.filter((signal) => signal.path !== path);
-              return envelope(null);
-            }
-            default:
-              throw new Error(`unexpected test command: ${command}`);
-          }
-        },
-        transformCallback: () => 0,
+      const bridge = {
+        connect: () =>
+          Promise.resolve({
+            transportVersion: 1 as const,
+            baseUrl: "http://127.0.0.1:43817",
+            token: "A".repeat(43),
+            protocolVersion,
+          }),
+        pickSources: () => Promise.resolve([]),
+        pickSourceFolder: () => Promise.resolve(null),
+        pickSession: () => Promise.resolve(null),
+        pickExportFile: () => Promise.resolve(null),
+        pickDirectory: () => Promise.resolve(null),
+        onDragDrop: () => () => undefined,
+        gpuInfo: () =>
+          Promise.resolve({
+            electron: "43",
+            chromium: "150",
+            os: "test",
+            featureStatus: {},
+            gpu: {},
+            softwareRendering: true,
+            gpuMode: "software" as const,
+          }),
       };
-      (
-        window as unknown as {
-          __TAURI_INTERNALS__: typeof internals;
-        }
-      ).__TAURI_INTERNALS__ = internals;
+      window.scopeDesktop = bridge;
+      window.fetch = (input, init) => {
+        const url =
+          input instanceof URL
+            ? input.href
+            : input instanceof Request
+              ? input.url
+              : input;
+        const path = new URL(url).pathname;
+        const payload =
+          typeof init?.body === "string"
+            ? ((JSON.parse(init.body) as { payload?: Record<string, unknown> })
+                .payload ?? {})
+            : {};
+        const request = path.endsWith("/signals")
+          ? signals
+          : path.endsWith("/formats")
+            ? [{ id: "csv", label: "CSV", extensions: ["csv"] }]
+            : path.endsWith("/sources")
+              ? [
+                  {
+                    source_id: "0",
+                    source_key: "demo",
+                    prefix: "rocket",
+                    path: "fixture.csv",
+                    point_count: "4",
+                  },
+                ]
+              : path.endsWith("/session/load") ||
+                  path.endsWith("/session/reset")
+                ? { session_json: session, path: null }
+                : path.endsWith("/session/save")
+                  ? "test.signalscope"
+                  : path.endsWith("/derived/create")
+                    ? (() => {
+                        const derivedPath = String(payload["path"]);
+                        const summary = {
+                          ...base,
+                          signal_id: `derived:${derivedPath}`,
+                          source_id: "derived",
+                          source_key: "derived",
+                          local_path: derivedPath.slice("derived/".length),
+                          path: derivedPath,
+                          point_count: "0",
+                        };
+                        signals = [...signals, summary];
+                        return summary;
+                      })()
+                    : path.endsWith("/derived/remove")
+                      ? (() => {
+                          signals = signals.filter(
+                            (signal) => signal.path !== String(payload["path"]),
+                          );
+                          return null;
+                        })()
+                      : null;
+        return Promise.resolve(
+          new Response(JSON.stringify(envelope(request)), { status: 200 }),
+        );
+      };
     },
     {
       protocolVersion: PROTOCOL_VERSION,

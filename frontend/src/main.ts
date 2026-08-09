@@ -9,7 +9,7 @@ async function boot(): Promise<void> {
     throw new Error("SignalScope application root is missing");
   }
 
-  const app = new AppShell(root, selectDataPlane());
+  const app = new AppShell(root, await selectDataPlane());
   await app.mount();
 }
 

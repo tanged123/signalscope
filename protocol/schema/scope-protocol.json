@@ -1,5 +1,5 @@
 {
-  "protocol_version": 21,
+  "protocol_version": 22,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -386,25 +386,28 @@
         "selection": "ExportSelection"
       }
     },
+    "ExportWriteAtPathRequest": {
+      "kind": "object",
+      "fields": {
+        "request": "ExportWriteRequest",
+        "destination": "string"
+      }
+    },
     "ExportFileKind": {
       "kind": "enum",
       "variants": ["png", "csv"]
     },
-    "SaveExportFileRequest": {
-      "kind": "object",
-      "fields": {
-        "file_name": "string",
-        "kind": "ExportFileKind",
-        "data_base64": "string"
-      }
+    "FileWriteDestination": {
+      "kind": "enum",
+      "variants": ["exact_path", "directory"]
     },
-    "SaveExportFileToDirectoryRequest": {
+    "FileWriteMetadata": {
       "kind": "object",
       "fields": {
-        "directory": "string",
+        "destination": "FileWriteDestination",
+        "path": "string",
         "file_name": "string",
-        "kind": "ExportFileKind",
-        "data_base64": "string"
+        "kind": "ExportFileKind"
       }
     },
     "TilePoint": {

@@ -10,8 +10,7 @@ show_help() {
   cat <<'EOF'
 Usage: ./scripts/build.sh [native|host|appimage|windows|web] [additional arguments]
 
-  native  Build supported Tauri bundles and shared snapshot frontend (default).
-          Linux builds .deb and .rpm packages; other platforms use their defaults.
+  native  Build the Electron desktop TypeScript, Rust host, and frontend.
   host    Build the shell-independent Rust host executable.
   appimage
           Build the Linux AppImage in an Ubuntu/FHS environment. Run
@@ -42,11 +41,9 @@ host)
   ;;
 native)
   shift || true
-  cd shell/src-tauri
-  if [ "$(uname -s)" = "Linux" ]; then
-    exec cargo tauri build --bundles deb,rpm "$@"
-  fi
-  exec cargo tauri build "$@"
+  pnpm --filter @signalscope/frontend build
+  pnpm --filter @signalscope/desktop build
+  exec cargo build --release -p scope-server --bin signalscope-host "$@"
   ;;
 web)
   shift || true

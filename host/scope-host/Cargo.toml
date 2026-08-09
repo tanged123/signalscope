@@ -7,7 +7,6 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-base64.workspace = true
 scope-core.workspace = true
 scope-protocol.workspace = true
 serde.workspace = true
