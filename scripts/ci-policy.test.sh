@@ -25,6 +25,25 @@ if rg -n 'reuseExistingServer:[[:space:]]*true' "$script_dir/../frontend" >/dev/
   echo "Playwright must reject stale servers" >&2
   failures=$((failures + 1))
 fi
+package_test="$script_dir/../frontend/tests/e2e/electron-packaged.spec.ts"
+package_runner=$(sed -n '/^test_desktop()/,/^test_native_e2e()/p' "$script_dir/test.sh")
+for variable in SIGNALSCOPE_ELECTRON_BIN SIGNALSCOPE_PACKAGED_APP SIGNALSCOPE_HOST_BIN SIGNALSCOPE_RESOURCE_DIR; do
+  if rg -n "${variable}[[:space:]]*=" <<<"$package_runner" >/dev/null ||
+    rg -n "${variable}[[:space:]]*=" "$package_test" >/dev/null; then
+    echo "package smoke must not assign $variable" >&2
+    failures=$((failures + 1))
+  fi
+  forwarded=$(
+    {
+      rg -n "$variable" <<<"$package_runner" || true
+      rg -n "$variable" "$package_test" || true
+    } | grep -Ev "delete env\\[variable\\]|\"$variable\"," || true
+  )
+  if [ -n "$forwarded" ]; then
+    echo "package smoke must only delete $variable from its child environment" >&2
+    failures=$((failures + 1))
+  fi
+done
 
 expect_status() {
   local expected="$1"

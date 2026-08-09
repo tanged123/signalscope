@@ -3,7 +3,12 @@ set -euo pipefail
 
 # shellcheck source=scripts/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-ensure_dev_shell "$@"
+if [ "${SIGNALSCOPE_WINDOWS_BUILD:-}" = 1 ] &&
+  [ "${1:-}" = desktop ] && [ "${2:-}" = package ]; then
+  cd "$signalscope_root" || exit 1
+else
+  ensure_dev_shell "$@"
+fi
 
 show_help() {
   cat <<'EOF'
@@ -35,34 +40,24 @@ test_host() {
 test_desktop() {
   if [ "${1:-}" = package ]; then
     shift
-    "$signalscope_scripts_dir/build.sh" native --dir
-    local packaged_bin packaged_app packaged_resource packaged_host
+    if [ "${1:-}" != --no-build ]; then
+      "$signalscope_scripts_dir/build.sh" native --dir
+    else
+      shift
+    fi
+    local packaged_bin
+    local package_platform
     case "$(uname -s)" in
-    MINGW* | MSYS* | CYGWIN*)
-      packaged_bin="$signalscope_root/desktop/release/win-unpacked/signalscope.exe"
-      packaged_app="$signalscope_root/desktop/release/win-unpacked/resources/app.asar"
-      packaged_resource="$signalscope_root/desktop/release/win-unpacked/resources"
-      packaged_host="$packaged_resource/bin/signalscope-host.exe"
-      ;;
-    Darwin*)
-      packaged_bin="$signalscope_root/desktop/release/mac/SignalScope.app/Contents/MacOS/signalscope"
-      packaged_app="$signalscope_root/desktop/release/mac/SignalScope.app/Contents/Resources/app.asar"
-      packaged_resource="$signalscope_root/desktop/release/mac/SignalScope.app/Contents/Resources"
-      packaged_host="$packaged_resource/bin/signalscope-host"
-      ;;
-    *)
-      packaged_bin="$signalscope_root/desktop/release/linux-unpacked/signalscope"
-      packaged_app="$signalscope_root/desktop/release/linux-unpacked/resources/app.asar"
-      packaged_resource="$signalscope_root/desktop/release/linux-unpacked/resources"
-      packaged_host="$packaged_resource/bin/signalscope-host"
-      ;;
+    Linux*) package_platform=linux ;;
+    Darwin*) package_platform=darwin ;;
+    MINGW* | MSYS* | CYGWIN*) package_platform=win32 ;;
+    *) package_platform=unknown ;;
     esac
+    packaged_bin=$(node "$signalscope_root/desktop/scripts/package-paths.mjs" \
+      "$signalscope_root/desktop/release" executable)
     SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=none \
       SIGNALSCOPE_PACKAGED_BIN="$packaged_bin" \
-      SIGNALSCOPE_PACKAGED_APP="$packaged_app" \
-      SIGNALSCOPE_HOST_BIN="$packaged_host" \
-      SIGNALSCOPE_RESOURCE_DIR="$packaged_resource" \
-      SIGNALSCOPE_PACKAGE_SMOKE=1 \
+      SIGNALSCOPE_PACKAGE_PLATFORM="$package_platform" \
       pnpm --filter @signalscope/frontend exec playwright test \
       --project=electron-packaged "$@"
     return

@@ -45,3 +45,4 @@ else
 fi
 
 SIGNALSCOPE_WINDOWS_BUILD=1 ./scripts/build.sh native --win nsis --x64 "$@"
+SIGNALSCOPE_WINDOWS_BUILD=1 ./scripts/test.sh desktop package --no-build

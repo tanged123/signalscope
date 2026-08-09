@@ -96,7 +96,8 @@ bench)
   node "$signalscope_scripts_dir/collect-bench-report.mjs"
   ;;
 build)
-  exec "$signalscope_scripts_dir/build.sh" native
+  "$signalscope_scripts_dir/build.sh" native --dir
+  exec "$signalscope_scripts_dir/test.sh" desktop package --no-build
   ;;
 *)
   echo "Unknown CI mode: $mode" >&2
