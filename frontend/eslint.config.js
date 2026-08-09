@@ -39,4 +39,8 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["tests/e2e/electron-native-export.spec.ts"],
+    ...tseslint.configs.disableTypeChecked,
+  },
 );

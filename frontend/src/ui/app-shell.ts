@@ -229,12 +229,19 @@ export class AppShell {
       baked !== undefined && baked !== ""
         ? parseBakedSession(baked)
         : undefined;
-    const gpu = await GpuRuntime.create(globalThis.navigator.gpu);
+    const nativeGpuInfo = await globalThis.window.scopeDesktop
+      ?.gpuInfo()
+      .catch(() => undefined);
+    const gpu = await GpuRuntime.create(
+      globalThis.navigator.gpu,
+      nativeGpuInfo,
+    );
     if (!gpu.supported) {
       this.root.innerHTML = unsupportedHostMarkup(gpu.capability, gpu.reason);
       return;
     }
     this.gpuRuntime = gpu.runtime;
+    this.root.dataset.gpuBackend = gpu.runtime.backend;
     this.exposeBenchApi(gpu.runtime);
     gpu.runtime.onRestored(() => {
       emitBenchEvent("restored");
@@ -244,6 +251,9 @@ export class AppShell {
       void this.refreshTiles();
     });
     this.root.innerHTML = shellMarkup();
+    required(this.root, ".gpu-backend").textContent = gpuBackendLabel(
+      gpu.runtime,
+    );
     gpu.runtime.onError((error) => {
       if (error.kind === "lost") {
         this.root.dataset.gpuState = "recovering";
@@ -2744,6 +2754,8 @@ export class AppShell {
         reset: () => void;
         loseDeviceForTest: () => void;
         state: () => ReturnType<GpuRuntime["state"]>;
+        backend: () => GpuRuntime["backend"];
+        evidence: () => GpuRuntime["evidence"];
       };
     };
     host.__signalscopeBench = {
@@ -2751,6 +2763,8 @@ export class AppShell {
       reset: () => runtime.metrics.reset(),
       loseDeviceForTest: () => runtime.destroyDeviceForTest(),
       state: () => runtime.state(),
+      backend: () => runtime.backend,
+      evidence: () => runtime.evidence,
     };
   }
 
@@ -3174,6 +3188,14 @@ export class AppShell {
   }
 }
 
+function gpuBackendLabel(runtime: GpuRuntime): string {
+  if (runtime.backend === "software") return "Software WebGPU";
+  if (runtime.backend === "unsupported") {
+    return `GPU unsupported: ${runtime.evidence.fallbackReason ?? "unknown reason"}`;
+  }
+  return `GPU ${runtime.evidence.adapterDescription || "hardware"}`;
+}
+
 function unsupportedHostMarkup(capability: string, reason: string): string {
   return `<section class="unsupported-host" role="alert">
     <h1>WebGPU required</h1>
@@ -3465,7 +3487,7 @@ export function shellMarkup(): string {
       <span class="status-separator"></span>
       <span class="source-truth">
         <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
-        <span class="render-stat"> · render <span class="render-ms">— ms</span></span>
+        <span class="render-stat"> · render <span class="render-ms">— ms</span> · <span class="gpu-backend">gpu —</span></span>
       </span>
       <span class="status-spacer"></span>
       <span class="gesture-hint"></span>

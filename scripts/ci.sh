@@ -21,7 +21,7 @@ Each named mode matches the GitHub Actions job with the same name:
   frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
             snapshot artifact checks.
   e2e       Playwright desktop smoke tests.
-  bench     Full benchmark suite; writes build/bench/report.json.
+  bench     Rust plus bounded software benchmark; writes build/bench/report.json.
   build     Electron packages via ./scripts/build.sh native.
   appimage  Linux AppImage build through the Electron package wrapper.
   windows   Windows NSIS installer build through the Electron package wrapper.
@@ -87,7 +87,9 @@ e2e)
   check_e2e
   ;;
 bench)
-  "$signalscope_scripts_dir/test.sh" bench all
+  "$signalscope_scripts_dir/test.sh" bench core
+  "$signalscope_scripts_dir/test.sh" bench software
+  node "$signalscope_scripts_dir/collect-bench-report.mjs"
   ;;
 build)
   exec "$signalscope_scripts_dir/build.sh" native

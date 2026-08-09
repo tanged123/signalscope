@@ -51,6 +51,20 @@ describe("GpuRuntime", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("classifies the active adapter for diagnostics", async () => {
+    const mocked = deviceMock();
+    const runtimeResult = await GpuRuntime.create(mockGpu(mocked.device), {
+      electron: "43.0.0",
+      chromium: "130.0.6723.44",
+      softwareRendering: true,
+      gpu: { devices: [{ active: true, description: "SwiftShader" }] },
+    });
+    expect(runtimeResult.supported).toBe(true);
+    if (!runtimeResult.supported) return;
+    expect(runtimeResult.runtime.backend).toBe("software");
+    expect(runtimeResult.runtime.evidence.electronVersion).toBe("43.0.0");
+  });
+
   it("stops panels and reports device loss", async () => {
     const mocked = deviceMock();
     const runtimeResult = await GpuRuntime.create(mockGpu(mocked.device));

@@ -55,6 +55,24 @@ if (names.length === 0) {
           `${entry.bench}: missing/nonfinite ${[...missing, ...nonfinite].join(",")}`,
         ];
   });
+  const invalidHardware = entries.flatMap((entry) => {
+    if (entry.bench !== "electron_hardware") return [];
+    const required = [
+      "backend",
+      "electron",
+      "chromium",
+      "adapter_vendor",
+      "adapter_architecture",
+      "adapter_device",
+      "adapter_description",
+      "software_rendering",
+      "pass",
+    ];
+    const missing = required.filter((key) => !(key in entry));
+    return missing.length === 0
+      ? []
+      : [`${entry.bench}: missing ${missing.join(",")}`];
+  });
   const failed = entries
     .filter((entry) => entry.pass === false)
     .map((entry) => entry.bench);
@@ -66,10 +84,16 @@ if (names.length === 0) {
   console.log(
     `bench report: ${entries.length} entries -> build/bench/report.json`,
   );
-  if (duplicateNames.length > 0 || invalid.length > 0 || failed.length > 0) {
+  if (
+    duplicateNames.length > 0 ||
+    invalid.length > 0 ||
+    invalidHardware.length > 0 ||
+    failed.length > 0
+  ) {
     if (duplicateNames.length > 0)
       console.error(`duplicate benches: ${duplicateNames.join(", ")}`);
     if (invalid.length > 0) console.error(invalid.join("\n"));
+    if (invalidHardware.length > 0) console.error(invalidHardware.join("\n"));
     console.error(`failing benches: ${failed.join(", ")}`);
     process.exitCode = 1;
   }

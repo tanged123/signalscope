@@ -1,18 +1,18 @@
 import { defineConfig, devices } from "@playwright/test";
+import {
+  browserWebGpuArgs,
+  softwareWebGpuArgs,
+} from "./src/render/gpu/playwright-projects";
 
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const coverage = process.env.SIGNALSCOPE_COVERAGE === "1";
 const webGpuLaunchOptions = {
   ...(executablePath === undefined ? {} : { executablePath }),
-  args: [
-    "--enable-unsafe-webgpu",
-    "--use-angle=swiftshader",
-    "--enable-features=Vulkan",
-  ],
+  args: [...browserWebGpuArgs],
 };
 const softwareWebGpuLaunchOptions = {
-  ...webGpuLaunchOptions,
-  args: webGpuLaunchOptions.args,
+  ...(executablePath === undefined ? {} : { executablePath }),
+  args: [...softwareWebGpuArgs],
 };
 
 export default defineConfig({
@@ -59,20 +59,21 @@ export default defineConfig({
       outputDir: "../build/demo/recording",
     },
     {
-      name: "bench",
-      testDir: "./tests/bench",
-      use: {
-        ...devices["Desktop Chrome"],
-        viewport: { width: 1280, height: 800 },
-        launchOptions: webGpuLaunchOptions,
-      },
-    },
-    {
       name: "gpu",
       testDir: "./tests/gpu",
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1000, height: 600 },
+        launchOptions: softwareWebGpuLaunchOptions,
+      },
+    },
+    {
+      name: "bench-software",
+      testDir: "./tests/bench",
+      testMatch: /software-smoke\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
         launchOptions: softwareWebGpuLaunchOptions,
       },
     },
@@ -86,15 +87,22 @@ export default defineConfig({
       testDir: "./tests/e2e",
       testMatch: /electron-packaged\.spec\.ts/,
     },
+    {
+      name: "electron-hardware",
+      testDir: "./tests/bench",
+      testMatch: /electron-hardware\.spec\.ts/,
+      use: { launchOptions: { args: [] } },
+    },
   ],
-  webServer:
-    process.env.SIGNALSCOPE_DEMO === "1" ||
-    process.env.SIGNALSCOPE_BENCH === "1" ||
-    process.env.SIGNALSCOPE_PACKAGE_SMOKE === "1"
-      ? undefined
-      : {
+  ...(process.env.SIGNALSCOPE_DEMO === "1" ||
+  process.env.SIGNALSCOPE_BENCH === "1" ||
+  process.env.SIGNALSCOPE_PACKAGE_SMOKE === "1"
+    ? {}
+    : {
+        webServer: {
           command: "pnpm dev",
           url: "http://127.0.0.1:4173",
           reuseExistingServer: !process.env.CI,
         },
+      }),
 });

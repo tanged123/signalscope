@@ -154,4 +154,7 @@ Non-time plotting and the density-tier renderer were removed by
 sequence above is now shipped. WebGPU owns time-series strokes, tile pages,
 and nearest-series picking; Canvas2D remains responsible for axes and
 annotations. Run `./scripts/test.sh gpu` for the software-adapter proof and
-`./scripts/test.sh bench e2e` for a selected browser benchmark tier.
+`./scripts/test.sh bench core` plus `./scripts/test.sh bench software` for the
+scheduled benchmark authority. `./scripts/test.sh bench e2e` is the manual
+Electron hardware authority for the full native `mc1000`/`dense10k` corpora; it
+fails early with adapter evidence when no non-fallback GPU is available.

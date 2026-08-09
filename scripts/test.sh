@@ -19,7 +19,7 @@ Usage: ./scripts/test.sh [quick|core|host|desktop|policy|unit|frontend|e2e|nativ
             snapshot artifact checks.
   e2e       Run Playwright desktop/mobile smoke tests and the GPU proof.
   gpu       Run WebGPU software-adapter fidelity tests.
-  bench     Run corpus, core, and Playwright performance benchmarks.
+  bench     Run corpus, core, browser, or software-adapter benchmarks.
   full      Run quick checks, then run desktop and browser e2e checks.
 EOF
 }
@@ -102,55 +102,53 @@ test_frontend() {
   artifact_checks
 }
 
-bench_e2e_tier() {
-  local tier="$1"
-  local corpus_dir="$signalscope_root/build/bench/corpus/$tier"
-  if [ ! -f "$corpus_dir/manifest.json" ]; then
-    cargo test --release -p scope-core -- --ignored --test-threads=1 "bench_corpus_$tier"
+bench_e2e() {
+  if [ -z "${SIGNALSCOPE_ELECTRON_BIN:-}" ]; then
+    echo "SIGNALSCOPE_ELECTRON_BIN is not configured; native hardware acceptance needs Electron" >&2
+    return 1
   fi
-  local -a data_args=()
-  local file selected=0
-  # Full corpus by default so the browser bench proves 1000 sources; PR smoke
-  # jobs pass SIGNALSCOPE_BENCH_FILES=2 to stay bounded.
-  local browser_files="${SIGNALSCOPE_BENCH_FILES:-1000}"
-  if [ "$tier" = dense10k ]; then
-    browser_files="${SIGNALSCOPE_BENCH_DENSE10K_FILES:-10000}"
-  fi
-  for file in "$corpus_dir"/run_*.csv; do
-    if [ "$selected" -eq "$browser_files" ]; then
-      break
+  rm -f "$signalscope_root/build/bench/report/electron-hardware.json"
+  "$signalscope_scripts_dir/build.sh" host
+  pnpm --filter @signalscope/frontend build
+  pnpm --filter @signalscope/desktop build
+  mkdir -p "$signalscope_root/build"
+  pnpm --filter @signalscope/frontend dev >"$signalscope_root/build/vite-bench-e2e.log" 2>&1 &
+  bench_e2e_vite_pid=$!
+  cleanup_bench_e2e() {
+    if [ -n "${bench_e2e_vite_pid:-}" ]; then
+      kill "$bench_e2e_vite_pid" 2>/dev/null || true
+      wait "$bench_e2e_vite_pid" 2>/dev/null || true
     fi
-    data_args+=(--data "$file")
-    selected=$((selected + 1))
+  }
+  trap cleanup_bench_e2e EXIT
+  wait_for_port 4173
+
+  local requested_tier="${SIGNALSCOPE_BENCH_TIER:-all}"
+  local -a tiers=(mc1000 dense10k)
+  if [ "$requested_tier" != all ]; then tiers=("$requested_tier"); fi
+  local tier corpus_dir native_files
+  for tier in "${tiers[@]}"; do
+    corpus_dir="$signalscope_root/build/bench/corpus/$tier"
+    if [ ! -f "$corpus_dir/manifest.json" ]; then
+      cargo test --release -p scope-core -- --ignored --test-threads=1 "bench_corpus_$tier"
+    fi
+    native_files=1000
+    if [ "$tier" = dense10k ]; then native_files=10000; fi
+    SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
+      SIGNALSCOPE_BENCH=1 SIGNALSCOPE_BENCH_TIER="$tier" \
+      SIGNALSCOPE_BENCH_CORPUS_DIR="$corpus_dir" \
+      SIGNALSCOPE_BENCH_NATIVE_FILES="$native_files" NODE_ENV=development \
+      pnpm --filter @signalscope/frontend exec playwright test \
+      --project=electron-hardware
   done
-  [ "$selected" -eq "$browser_files" ]
-  local out="$signalscope_root/build/bench/$tier.html"
-  local max_bytes="${SIGNALSCOPE_BENCH_MAX_BYTES:-1073741824}"
-  local fidelity=preview started elapsed bytes
-  started=$SECONDS
-  "$signalscope_scripts_dir/export.sh" "${data_args[@]}" \
-    --workspace "$signalscope_root/examples/bench/$tier.workspace.json" \
-    --range visible --fidelity "$fidelity" --out "$out"
-  elapsed=$((SECONDS - started))
-  bytes=$(stat -c %s "$out")
-  if [ "$bytes" -gt "$max_bytes" ]; then
-    echo "baked snapshot is $bytes bytes (limit $max_bytes)" >&2
-    exit 1
-  fi
-  mkdir -p "$signalscope_root/build/bench/report"
-  printf '{ "bench": "bake", "seconds": %d, "bytes": %d, "fidelity": "%s", "input_files": %d }\n' \
-    "$elapsed" "$bytes" "$fidelity" "$selected" >"$signalscope_root/build/bench/report/bake.json"
-  SIGNALSCOPE_BENCH=1 SIGNALSCOPE_BENCH_TIER="$tier" pnpm --filter @signalscope/frontend bench
 }
 
-bench_e2e() {
-  local tier="${SIGNALSCOPE_BENCH_TIER:-mc1000}"
-  if [ "$tier" = all ]; then
-    bench_e2e_tier mc1000
-    bench_e2e_tier dense10k
-  else
-    bench_e2e_tier "$tier"
-  fi
+bench_software() {
+  rm -f "$signalscope_root/build/bench/report/electron-hardware.json"
+  rm -f "$signalscope_root"/build/bench/report/e2e_*.json
+  bake_bench_smoke_artifact
+  SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend exec playwright test \
+    --project=bench-software
 }
 
 bench_all_exit() {
@@ -164,25 +162,37 @@ bench_all_exit() {
   exit "$collect_status"
 }
 
+bench_e2e_exit() {
+  local bench_status=$?
+  local collect_status=0
+  node "$signalscope_scripts_dir/collect-bench-report.mjs" || collect_status=$?
+  trap - EXIT
+  if [ "$bench_status" -ne 0 ]; then
+    exit "$bench_status"
+  fi
+  exit "$collect_status"
+}
+
 bench_all() {
   trap bench_all_exit EXIT
+  rm -f "$signalscope_root/build/bench/report/electron-hardware.json"
   local core_status=0
-  local e2e_status=0
-  # Keep collecting browser evidence when a known core floor fails.
+  local software_status=0
+  # Scheduled CI has no hardware authority; keep its software proof bounded.
   if cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_; then
     :
   else
     core_status=$?
   fi
-  if bench_e2e; then
+  if bench_software; then
     :
   else
-    e2e_status=$?
+    software_status=$?
   fi
   if [ "$core_status" -ne 0 ]; then
     return "$core_status"
   fi
-  return "$e2e_status"
+  return "$software_status"
 }
 
 mode="${1:-quick}"
@@ -241,7 +251,11 @@ bench)
     cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_
     ;;
   e2e)
+    trap bench_e2e_exit EXIT
     bench_e2e
+    ;;
+  software)
+    bench_software
     ;;
   all)
     bench_all

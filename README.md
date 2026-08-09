@@ -38,12 +38,19 @@ Run the lightweight local quality gate:
 ./scripts/test.sh
 ```
 
-Run the software-adapter renderer proof or a browser benchmark:
+Run the software-adapter correctness proof or the native hardware benchmark:
 
 ```bash
 ./scripts/test.sh gpu
+./scripts/test.sh bench core
+./scripts/test.sh bench software
 ./scripts/test.sh bench e2e
 ```
+
+`bench e2e` requires a non-fallback WebGPU adapter and fails early with its
+diagnostic report when the host only exposes software rendering. The scheduled
+benchmark workflow runs `core` and `software`; no GPU runner is currently
+reserved for hardware acceptance.
 
 Run the native Electron workbench:
 

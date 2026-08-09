@@ -19,9 +19,16 @@ export interface DesktopGpuInfo {
   readonly chromium: string;
   readonly os: string;
   readonly featureStatus: Readonly<Record<string, string>>;
+  readonly adapter: DesktopGpuAdapter;
   readonly gpu: Readonly<Record<string, unknown>>;
   readonly softwareRendering: boolean;
   readonly gpuMode: "hardware" | "software";
+}
+
+export interface DesktopGpuAdapter {
+  readonly vendor: string;
+  readonly device: string;
+  readonly description: string;
 }
 
 export interface ScopeDesktopBridge {

@@ -48,16 +48,19 @@ test("Electron reaches every native data and file capability", async () => {
   try {
     await app.evaluate(
       ({ dialog }, paths: Record<string, string>) => {
-        dialog.showOpenDialog = async (options) => {
+        dialog.showOpenDialog = (options) => {
           const properties = "properties" in options ? options.properties : [];
           const filePath = properties.includes("openDirectory")
             ? properties.includes("createDirectory")
               ? paths.directory
               : paths.sourceFolder
             : paths.source;
-          return { canceled: false, filePaths: [String(filePath)] };
+          return Promise.resolve({
+            canceled: false,
+            filePaths: [String(filePath)],
+          });
         };
-        dialog.showSaveDialog = async (options) => {
+        dialog.showSaveDialog = (options) => {
           const defaultPath =
             "defaultPath" in options && typeof options.defaultPath === "string"
               ? options.defaultPath
@@ -69,7 +72,10 @@ test("Electron reaches every native data and file capability", async () => {
               : defaultPath.endsWith(".csv")
                 ? paths.csv
                 : paths.png;
-          return { canceled: false, filePath: String(filePath) };
+          return Promise.resolve({
+            canceled: false,
+            filePath: String(filePath),
+          });
         };
       },
       {
@@ -103,7 +109,9 @@ test("Electron reaches every native data and file capability", async () => {
         const formats = await plane.ingest.listFormats();
         const picked = await plane.ingest.pickSources();
         const pickedFolder = await plane.ingest.pickSourceFolder();
-        const scan = await plane.ingest.scanSources(pickedFolder!, false);
+        if (pickedFolder === null)
+          throw new Error("source folder was not picked");
+        const scan = await plane.ingest.scanSources(pickedFolder, false);
         const jobId = await plane.ingest.startBatch([source]);
         let status = await plane.ingest.batchStatus(jobId);
         for (

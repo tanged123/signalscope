@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, protocol } from "electron";
 import { BackendProcess } from "./backend";
 import { registerDialogHandlers } from "./dialogs";
+import { parseLaunchPaths } from "./launch";
 import { IPC, type DesktopGpuInfo, type NativeConnection } from "./types";
 import {
   appProtocolPrivileges,
@@ -10,6 +11,11 @@ import {
 } from "./window";
 
 const isDevelopment = process.env.NODE_ENV === "development";
+const developmentOrigin = "http://127.0.0.1:4173";
+const developmentUrl =
+  process.env.SIGNALSCOPE_BENCH === "1"
+    ? `${developmentOrigin}/?signalscope-bench=1`
+    : developmentOrigin;
 const gpuMode = process.env.SIGNALSCOPE_GPU_MODE;
 if (gpuMode !== undefined && gpuMode !== "software") {
   throw new Error("SIGNALSCOPE_GPU_MODE must be software when set");
@@ -44,10 +50,15 @@ interface CompleteGpuInfo {
   readonly auxAttributes?: Readonly<Record<string, unknown>>;
 }
 
+function deviceNumber(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `0x${value.toString(16)}`
+    : "";
+}
+
 function launchPaths(argv: readonly string[]): void {
-  for (const path of argv) {
-    if (path.length > 0 && !path.startsWith("--")) queuedPaths.add(path);
-  }
+  const appArguments = argv[0] === app.getAppPath() ? argv.slice(1) : argv;
+  for (const path of parseLaunchPaths(appArguments)) queuedPaths.add(path);
   sendQueuedPaths();
 }
 
@@ -71,13 +82,20 @@ async function gpuInfo(): Promise<DesktopGpuInfo> {
       value,
     ),
   );
+  const devices = complete.gpuDevice ?? [];
+  const activeDevice = devices.find((device) => device.active) ?? devices[0];
   return {
     electron: process.versions.electron,
     chromium: process.versions.chrome,
     os: process.platform,
     featureStatus: { ...status },
+    adapter: {
+      vendor: activeDevice?.driverVendor ?? "",
+      device: deviceNumber(activeDevice?.deviceId),
+      description: activeDevice?.description ?? "",
+    },
     gpu: {
-      devices: (complete.gpuDevice ?? []).map((device) => ({
+      devices: devices.map((device) => ({
         vendorId: device.vendorId,
         deviceId: device.deviceId,
         driverVersion: device.driverVersion,
@@ -112,14 +130,14 @@ async function start(): Promise<void> {
   const resourceDir = frontendRoot;
   backend = await BackendProcess.start(
     { executable, configDir, cacheDir, resourceDir },
-    isDevelopment ? "http://127.0.0.1:4173" : null,
+    isDevelopment ? developmentOrigin : null,
   );
   ipcMain.handle(IPC.connect, (): NativeConnection => backend!.connection());
   ipcMain.handle(IPC.gpuInfo, (): Promise<DesktopGpuInfo> => gpuInfo());
   registerDialogHandlers(() => mainWindow);
   registerAppProtocol(frontendRoot);
   mainWindow = createWindow({
-    developmentUrl: isDevelopment ? "http://127.0.0.1:4173" : null,
+    developmentUrl: isDevelopment ? developmentUrl : null,
     frontendRoot,
     preloadPath: join(__dirname, "preload.js"),
   });

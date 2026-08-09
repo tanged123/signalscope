@@ -227,6 +227,12 @@ Add tests with behavior changes, not only compilation checks:
 - Keep generated protocol outputs synchronized and run the artifact checks for
   snapshot changes.
 
+GPU authority is split deliberately: `./scripts/test.sh gpu` and
+`./scripts/test.sh bench software` prove bounded SwiftShader correctness,
+Electron software E2E proves shell integration, and only
+`./scripts/test.sh bench e2e` on a non-fallback adapter proves performance.
+Hardware absence must remain a failed diagnostic result, not a skipped pass.
+
 ## Documentation and delivery
 
 Update the nearest README, ADR, roadmap, or design note when behavior or

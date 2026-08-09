@@ -23,6 +23,26 @@ export interface FrameStats {
   longestTaskMs: number;
 }
 
+export function meetsInteractiveFloors(
+  firstPlotMs: number,
+  frameStats: FrameStats,
+  metrics: GpuMetricsSnapshot,
+  residentPan: MetricDelta,
+): boolean {
+  const frameTimes = [...metrics.frameCpuMs].sort(
+    (left, right) => left - right,
+  );
+  return (
+    firstPlotMs <= 10_000 &&
+    frameStats.frames > 100 &&
+    percentile(frameTimes, 0.95) <= 33 &&
+    Math.max(frameStats.longestTaskMs, frameStats.maxMs) <= 250 &&
+    metrics.validationErrors.length === 0 &&
+    residentPan.uploadBytes === 0 &&
+    residentPan.descriptorRebuilds === 0
+  );
+}
+
 export async function startFrameProbe(page: Page): Promise<void> {
   await page.evaluate(() => {
     const bench = window as unknown as BenchWindow;

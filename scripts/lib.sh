@@ -59,7 +59,8 @@ live_host_deletion_check() {
     .github AGENTS.md CLAUDE.md README.md Cargo.toml Cargo.lock flake.nix \
     package.json pnpm-workspace.yaml frontend host core protocol desktop scripts \
     --glob '!target/**' --glob '!node_modules/**' --glob '!**/node_modules/**' \
-    --glob '!build/**' --glob '!desktop/release/**' --glob '!scripts/lib.sh' || true)
+    --glob '!build/**' --glob '!desktop/release/**' \
+    --glob '!scripts/lib.sh' --glob '!scripts/ci-policy.test.sh' || true)
   if [ -n "$matches" ]; then
     printf '%s\n' "$matches" >&2
     return 1

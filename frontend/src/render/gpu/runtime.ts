@@ -1,6 +1,13 @@
 import { requestGpuDevice, type GpuDeviceResult } from "./capabilities";
 import { GpuFrameLoop, type GpuPanelEncoder } from "./frame-loop";
 import { GpuMetrics } from "./metrics";
+import {
+  classifyGpuEvidence,
+  gpuEvidenceFromAdapter,
+  type GpuBackend,
+  type GpuEvidence,
+  type NativeGpuInfo,
+} from "./adapter-info";
 import { compileProductionShaders } from "./shader-sources";
 
 export type GpuRuntimeError =
@@ -25,6 +32,8 @@ export class GpuRuntime {
   queue: GPUQueue;
   format: GPUTextureFormat;
   limits: GPUSupportedLimits;
+  evidence: GpuEvidence;
+  backend: GpuBackend;
   frameLoop: GpuFrameLoop;
   readonly metrics = new GpuMetrics();
 
@@ -35,6 +44,7 @@ export class GpuRuntime {
   private readonly errorListeners = new Set<(error: GpuRuntimeError) => void>();
   private readonly restoreListeners = new Set<() => void>();
   private readonly gpu: GPU;
+  private readonly nativeGpuInfo: NativeGpuInfo | undefined;
   private recovery: Promise<void> | null = null;
   private lossStartedAt: number | null = null;
   private lossMessage = "";
@@ -60,19 +70,30 @@ export class GpuRuntime {
   private constructor(
     gpu: GPU,
     result: Extract<GpuDeviceResult, { supported: true }>,
+    nativeGpuInfo: NativeGpuInfo | undefined,
   ) {
     this.gpu = gpu;
+    this.nativeGpuInfo = nativeGpuInfo;
     this.adapter = result.adapter;
     this.device = result.device;
     this.queue = result.device.queue;
     this.format = result.format;
     this.limits = result.limits;
+    this.evidence = gpuEvidenceFromAdapter(
+      result.adapter,
+      result.limits,
+      nativeGpuInfo,
+    );
+    this.backend = classifyGpuEvidence(this.evidence);
     const [requestFrame, cancelFrame] = GpuRuntime.frameScheduler();
     this.frameLoop = this.makeFrameLoop(requestFrame, cancelFrame);
     this.installDeviceListeners();
   }
 
-  static async create(gpu?: GPU): Promise<GpuRuntimeResult> {
+  static async create(
+    gpu?: GPU,
+    nativeGpuInfo?: NativeGpuInfo,
+  ): Promise<GpuRuntimeResult> {
     const result = await requestGpuDevice(gpu);
     if (!result.supported) return result;
     const shaderErrors = await compileProductionShaders(result.device);
@@ -88,7 +109,10 @@ export class GpuRuntime {
         reason,
       };
     }
-    return { supported: true, runtime: new GpuRuntime(gpu as GPU, result) };
+    return {
+      supported: true,
+      runtime: new GpuRuntime(gpu as GPU, result, nativeGpuInfo),
+    };
   }
 
   register(panel: GpuPanelEncoder): () => void {
@@ -213,6 +237,12 @@ export class GpuRuntime {
     this.queue = result.device.queue;
     this.format = result.format;
     this.limits = result.limits;
+    this.evidence = gpuEvidenceFromAdapter(
+      result.adapter,
+      result.limits,
+      this.nativeGpuInfo,
+    );
+    this.backend = classifyGpuEvidence(this.evidence);
     const [requestFrame, cancelFrame] = GpuRuntime.frameScheduler();
     this.frameLoop = this.makeFrameLoop(requestFrame, cancelFrame);
     this.installDeviceListeners();

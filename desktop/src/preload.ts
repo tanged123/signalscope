@@ -80,7 +80,7 @@ const bridge: ScopeDesktopBridge = {
       callbacks.delete(handler);
     };
   },
-  gpuInfo: () => ipcRenderer.invoke(IPC.gpuInfo),
+  gpuInfo: async () => Object.freeze(await ipcRenderer.invoke(IPC.gpuInfo)),
 };
 
 contextBridge.exposeInMainWorld("scopeDesktop", bridge);

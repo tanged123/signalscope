@@ -36,12 +36,16 @@ test("the unpacked Electron package starts outside the checkout", async () => {
     await expect(page).toHaveURL("app://signalscope/index.html");
     await expect(page.locator("#app")).toBeVisible();
     expect(
-      await page.evaluate(async () => ({
-        bridge: typeof window.scopeDesktop,
-        protocolVersion: (await window.scopeDesktop!.connect()).protocolVersion,
-        node: typeof (globalThis as { process?: unknown }).process,
-        gpu: typeof navigator.gpu,
-      })),
+      await page.evaluate(async () => {
+        const bridge = window.scopeDesktop;
+        if (bridge === undefined) throw new Error("desktop bridge is absent");
+        return {
+          bridge: typeof bridge,
+          protocolVersion: (await bridge.connect()).protocolVersion,
+          node: typeof (globalThis as { process?: unknown }).process,
+          gpu: typeof navigator.gpu,
+        };
+      }),
     ).toMatchObject({
       bridge: "object",
       node: "undefined",

@@ -40,3 +40,8 @@ authentication and strict origin checks add startup and request plumbing, but
 keep the local HTTP boundary private. Existing host-specific Tauri decisions
 are retired by this record; data, protocol, snapshot, and renderer decisions
 from those ADRs remain in force until separately superseded.
+
+GPU acceptance follows the same boundary: SwiftShader tests renderer
+correctness, Electron software mode proves shell integration, and only a
+non-fallback Electron adapter supplies performance evidence. Hardware absence
+is reported as unsupported rather than as a passing benchmark.

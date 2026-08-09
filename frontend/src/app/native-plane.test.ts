@@ -27,6 +27,7 @@ function bridge(): ScopeDesktopBridge {
         chromium: "150",
         os: "linux",
         featureStatus: {},
+        adapter: { vendor: "", device: "", description: "" },
         gpu: {},
         softwareRendering: false,
         gpuMode: "hardware" as const,
