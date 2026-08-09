@@ -16,6 +16,8 @@ export interface NativeGpuInfo {
   readonly electron?: string;
   readonly chromium?: string;
   readonly softwareRendering?: boolean;
+  readonly webGpuStatus?: string;
+  readonly fallbackReason?: string | null;
   readonly adapter?: {
     readonly vendor?: string;
     readonly device?: string;
@@ -71,9 +73,10 @@ export function gpuEvidenceFromAdapter(
     text(device?.description);
   const adapterArchitecture = text(info?.architecture);
   const fallbackReason =
-    adapterVendor || adapterDevice || adapterDescription
+    native?.fallbackReason ??
+    (adapterVendor || adapterDevice || adapterDescription
       ? null
-      : "adapter identity unavailable";
+      : "adapter identity unavailable");
 
   return {
     electronVersion: native?.electron ?? "browser",
@@ -103,9 +106,13 @@ export function gpuEvidenceFromNative(native: NativeGpuInfo): GpuEvidence {
     adapterDescription,
     softwareRendering: native.softwareRendering ?? false,
     fallbackReason:
-      adapterVendor || adapterDevice || adapterDescription
-        ? null
-        : "adapter identity unavailable",
+      native.fallbackReason ??
+      (native.webGpuStatus === "disabled" ||
+      native.webGpuStatus === "unavailable"
+        ? `webgpu ${native.webGpuStatus}`
+        : adapterVendor || adapterDevice || adapterDescription
+          ? null
+          : "adapter identity unavailable"),
     limits: {},
   };
 }

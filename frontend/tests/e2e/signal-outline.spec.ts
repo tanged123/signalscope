@@ -85,6 +85,8 @@ async function installDerivedPlane(page: Page): Promise<void> {
             adapter: { vendor: "", device: "", description: "" },
             gpu: {},
             softwareRendering: true,
+            webGpuStatus: "enabled",
+            fallbackReason: null,
             gpuMode: "software" as const,
           }),
       };

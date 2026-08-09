@@ -76,4 +76,20 @@ describe("classifyGpuEvidence", () => {
     });
     expect(classifyGpuEvidence(normalized)).toBe("software");
   });
+
+  it("preserves an unsupported WebGPU status from native evidence", () => {
+    const normalized = gpuEvidenceFromNative({
+      electron: "43.2.0",
+      chromium: "150.0.0",
+      webGpuStatus: "unavailable",
+      fallbackReason: "webgpu unavailable",
+      adapter: {
+        vendor: "NVIDIA",
+        device: "0x2684",
+        description: "NVIDIA GeForce RTX 4090",
+      },
+    });
+    expect(normalized.fallbackReason).toBe("webgpu unavailable");
+    expect(classifyGpuEvidence(normalized)).toBe("unsupported");
+  });
 });

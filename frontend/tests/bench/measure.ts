@@ -8,6 +8,87 @@ interface BenchWindow {
   __benchStop?: () => void;
 }
 
+export interface PlotPixelEvidence {
+  readonly totalPixels: number;
+  readonly nonBackgroundPixels: number;
+}
+
+export type RgbColor = readonly [number, number, number];
+
+export function countNonBackgroundPixels(
+  pixels: Uint8ClampedArray,
+  backgrounds: readonly RgbColor[],
+  tolerance = 8,
+): number {
+  let count = 0;
+  const threshold = tolerance * tolerance;
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    const red = pixels[offset];
+    const green = pixels[offset + 1];
+    const blue = pixels[offset + 2];
+    const isBackground = backgrounds.some(
+      ([backgroundRed, backgroundGreen, backgroundBlue]) => {
+        const distance =
+          (red - backgroundRed) ** 2 +
+          (green - backgroundGreen) ** 2 +
+          (blue - backgroundBlue) ** 2;
+        return distance <= threshold;
+      },
+    );
+    if (!isBackground) count += 1;
+  }
+  return count;
+}
+
+export async function plotPixelEvidence(
+  page: Page,
+): Promise<PlotPixelEvidence> {
+  const image = await page
+    .locator(".series-canvas")
+    .first()
+    .evaluate((canvas) => {
+      if (!(canvas instanceof HTMLCanvasElement)) {
+        throw new Error("first panel plot canvas is unavailable");
+      }
+      const parseColor = (value: string): [number, number, number] | null => {
+        const match = value.trim().match(/^#([0-9a-f]{6})$/i);
+        if (match === null) return null;
+        return [
+          Number.parseInt(match[1].slice(0, 2), 16),
+          Number.parseInt(match[1].slice(2, 4), 16),
+          Number.parseInt(match[1].slice(4, 6), 16),
+        ];
+      };
+      const style = getComputedStyle(document.documentElement);
+      const surface0 = style.getPropertyValue("--surface-0").trim();
+      const output = document.createElement("canvas");
+      output.width = canvas.width;
+      output.height = canvas.height;
+      const context = output.getContext("2d");
+      if (context === null)
+        throw new Error("2d pixel evidence context unavailable");
+      context.fillStyle = surface0;
+      context.fillRect(0, 0, output.width, output.height);
+      context.drawImage(canvas, 0, 0);
+      return {
+        pixels: Array.from(
+          context.getImageData(0, 0, output.width, output.height).data,
+        ),
+        width: output.width,
+        height: output.height,
+        backgrounds: [
+          parseColor(surface0),
+          parseColor(style.getPropertyValue("--surface-1")),
+        ].filter((color): color is [number, number, number] => color !== null),
+      };
+    });
+  const pixels = new Uint8ClampedArray(image.pixels);
+  return {
+    totalPixels: image.width * image.height,
+    nonBackgroundPixels: countNonBackgroundPixels(pixels, image.backgrounds),
+  };
+}
+
 export interface MetricDelta {
   readonly uploadBytes: number;
   readonly descriptorRebuilds: number;

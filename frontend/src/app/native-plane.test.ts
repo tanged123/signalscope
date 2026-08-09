@@ -30,6 +30,8 @@ function bridge(): ScopeDesktopBridge {
         adapter: { vendor: "", device: "", description: "" },
         gpu: {},
         softwareRendering: false,
+        webGpuStatus: "enabled",
+        fallbackReason: null,
         gpuMode: "hardware" as const,
       }),
     ),

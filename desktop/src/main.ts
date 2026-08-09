@@ -3,6 +3,11 @@ import { app, BrowserWindow, dialog, ipcMain, protocol } from "electron";
 import { BackendProcess } from "./backend";
 import { registerDialogHandlers } from "./dialogs";
 import { parseLaunchPaths } from "./launch";
+import {
+  classifyElectronGpu,
+  selectActiveGpuDevice,
+  type GpuDeviceInfo,
+} from "./gpu";
 import { IPC, type DesktopGpuInfo, type NativeConnection } from "./types";
 import {
   appProtocolPrivileges,
@@ -36,15 +41,6 @@ let backend: BackendProcess | null = null;
 let stopping: Promise<void> | null = null;
 const queuedPaths = new Set<string>();
 
-interface GpuDeviceInfo {
-  readonly vendorId?: number;
-  readonly deviceId?: number;
-  readonly driverVersion?: string;
-  readonly driverVendor?: string;
-  readonly active?: boolean;
-  readonly description?: string;
-}
-
 interface CompleteGpuInfo {
   readonly gpuDevice?: readonly GpuDeviceInfo[];
   readonly auxAttributes?: Readonly<Record<string, unknown>>;
@@ -77,13 +73,13 @@ function sendQueuedPaths(): void {
 async function gpuInfo(): Promise<DesktopGpuInfo> {
   const status = app.getGPUFeatureStatus();
   const complete = (await app.getGPUInfo("complete")) as CompleteGpuInfo;
-  const softwareRendering = Object.values(status).some((value) =>
-    /software|swiftshader|llvmpipe|lavapipe|warp|disabled|unavailable/i.test(
-      value,
-    ),
-  );
   const devices = complete.gpuDevice ?? [];
-  const activeDevice = devices.find((device) => device.active) ?? devices[0];
+  const activeDevice = selectActiveGpuDevice(devices);
+  const classification = classifyElectronGpu(
+    status,
+    activeDevice,
+    gpuMode === "software",
+  );
   return {
     electron: process.versions.electron,
     chromium: process.versions.chrome,
@@ -105,8 +101,10 @@ async function gpuInfo(): Promise<DesktopGpuInfo> {
       })),
       auxAttributes: complete.auxAttributes ?? {},
     },
-    softwareRendering,
-    gpuMode: gpuMode === "software" ? "software" : "hardware",
+    softwareRendering: classification.softwareRendering,
+    webGpuStatus: classification.webGpuStatus,
+    fallbackReason: classification.fallbackReason,
+    gpuMode: classification.softwareRendering ? "software" : "hardware",
   };
 }
 

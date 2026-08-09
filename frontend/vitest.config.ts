@@ -12,7 +12,7 @@ export default defineConfig({
     exclude: [
       "tests/e2e/**",
       "tests/demo/**",
-      "tests/bench/**",
+      "tests/bench/**/*.spec.ts",
       "tests/gpu/**",
       "node_modules/**",
       "dist/**",

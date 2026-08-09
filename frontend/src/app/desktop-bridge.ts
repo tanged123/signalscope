@@ -22,6 +22,8 @@ export interface DesktopGpuInfo {
   readonly adapter: DesktopGpuAdapter;
   readonly gpu: Readonly<Record<string, unknown>>;
   readonly softwareRendering: boolean;
+  readonly webGpuStatus: string;
+  readonly fallbackReason: string | null;
   readonly gpuMode: "hardware" | "software";
 }
 
