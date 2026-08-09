@@ -70,6 +70,7 @@ live_host_deletion_check() {
 quality_checks() {
   shellcheck scripts/*.sh .github/hooks/pre-commit
   "$signalscope_scripts_dir/ci-policy.test.sh"
+  node "$signalscope_scripts_dir/check-electron-version.mjs"
   live_host_deletion_check
   node "$signalscope_scripts_dir/generate-monte-carlo-demo.mjs" --check
   actionlint

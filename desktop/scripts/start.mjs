@@ -1,9 +1,13 @@
 import { access, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { spawn } from "node:child_process";
-import electron from "electron";
+import {
+  desktopApplicationRoot,
+  normalizeElectronArguments,
+} from "../dist/launcher.js";
 
 const override = process.env.SIGNALSCOPE_ELECTRON_BIN;
+const electron = override ? null : (await import("electron")).default;
 const executable = override ?? electron;
 if (!isAbsolute(executable)) {
   throw new Error("SIGNALSCOPE_ELECTRON_BIN must be an absolute path");
@@ -15,11 +19,19 @@ try {
   throw new Error(`Electron executable is missing: ${executable}`);
 }
 
-const child = spawn(executable, [".", ...process.argv.slice(2)], {
-  cwd: new URL("../../", import.meta.url),
-  stdio: "inherit",
-  env: process.env,
-});
-child.on("exit", (code, signal) => {
-  process.exitCode = code ?? (signal === null ? 1 : 0);
+const desktopRoot = desktopApplicationRoot(import.meta.url);
+const child = spawn(
+  executable,
+  [desktopRoot, ...normalizeElectronArguments(process.argv.slice(2))],
+  {
+    cwd: desktopRoot,
+    stdio: "inherit",
+    env: process.env,
+  },
+);
+process.exitCode = await new Promise((resolveExit, rejectExit) => {
+  child.once("error", rejectExit);
+  child.once("exit", (code, signal) => {
+    resolveExit(code ?? (signal === null ? 1 : 1));
+  });
 });

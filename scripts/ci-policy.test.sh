@@ -4,6 +4,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 failures=0
 
+node "$script_dir/check-electron-version.test.mjs"
+
 expect_status() {
   local expected="$1"
   shift
