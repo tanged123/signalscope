@@ -20,7 +20,7 @@ Each named mode matches the GitHub Actions job with the same name:
   rust      cargo clippy plus the full cargo test suite.
   frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
             snapshot artifact checks.
-  e2e       Playwright desktop smoke tests.
+  e2e       Browser Playwright E2E plus Electron native E2E.
   bench     Rust plus bounded software benchmark; writes build/bench/report.json.
   build     Electron packages via ./scripts/build.sh native.
   appimage  Linux AppImage build through the Electron package wrapper.
@@ -53,11 +53,14 @@ check_format_read_only() {
   "$signalscope_scripts_dir/format.sh" --check
 }
 
-check_e2e() {
+check_browser_e2e() {
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
-  pnpm e2e
-  "$signalscope_scripts_dir/test.sh" gpu
+  SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed pnpm e2e
+}
+
+check_e2e() {
+  check_browser_e2e
   "$signalscope_scripts_dir/test.sh" native-e2e
 }
 
@@ -69,6 +72,7 @@ all)
   frontend_checks
   artifact_checks
   check_e2e
+  "$signalscope_scripts_dir/test.sh" gpu
   ;;
 format)
   check_format_read_only

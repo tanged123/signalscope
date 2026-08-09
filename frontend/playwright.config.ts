@@ -15,6 +15,34 @@ const softwareWebGpuLaunchOptions = {
   args: [...softwareWebGpuArgs],
 };
 
+export type PlaywrightServerMode = "managed" | "none";
+
+export function playwrightServerMode(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): PlaywrightServerMode {
+  const mode = environment.SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER ?? "managed";
+  if (mode !== "managed" && mode !== "none") {
+    throw new Error(
+      `SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER must be managed or none, got ${mode}`,
+    );
+  }
+  return mode;
+}
+
+export function playwrightWebServer(
+  mode: PlaywrightServerMode,
+): { command: string; url: string; reuseExistingServer: false } | undefined {
+  return mode === "managed"
+    ? {
+        command: "pnpm dev",
+        url: "http://127.0.0.1:4173",
+        reuseExistingServer: false,
+      }
+    : undefined;
+}
+
+const webServer = playwrightWebServer(playwrightServerMode());
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
@@ -95,15 +123,5 @@ export default defineConfig({
       use: { launchOptions: { args: [] } },
     },
   ],
-  ...(process.env.SIGNALSCOPE_DEMO === "1" ||
-  process.env.SIGNALSCOPE_BENCH === "1" ||
-  process.env.SIGNALSCOPE_PACKAGE_SMOKE === "1"
-    ? {}
-    : {
-        webServer: {
-          command: "pnpm dev",
-          url: "http://127.0.0.1:4173",
-          reuseExistingServer: !process.env.CI,
-        },
-      }),
+  ...(webServer === undefined ? {} : { webServer }),
 });

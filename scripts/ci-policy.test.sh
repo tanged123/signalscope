@@ -16,6 +16,15 @@ if ! grep -Fq 'native-dev.mjs' "$script_dir/run.sh"; then
   echo "run.sh native must call native-dev.mjs" >&2
   failures=$((failures + 1))
 fi
+native_e2e_body=$(sed -n '/^test_native_e2e()/,/^test_unit()/p' "$script_dir/test.sh")
+if grep -Eq 'frontend dev|wait_for_port|vite|native_e2e_vite_pid' <<<"$native_e2e_body"; then
+  echo "test_native_e2e must let Playwright own the Vite server" >&2
+  failures=$((failures + 1))
+fi
+if rg -n 'reuseExistingServer:[[:space:]]*true' "$script_dir/../frontend" >/dev/null; then
+  echo "Playwright must reject stale servers" >&2
+  failures=$((failures + 1))
+fi
 
 expect_status() {
   local expected="$1"

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import config from "../../playwright.config";
+import config, {
+  playwrightServerMode,
+  playwrightWebServer,
+} from "../../playwright.config";
 
 const softwareFlags = /swiftshader|use-webgpu-adapter/i;
 
@@ -37,5 +40,39 @@ describe("Playwright GPU project flags", () => {
     if (project === undefined)
       throw new Error("electron-hardware project missing");
     expect(argsFor(project)).toEqual([]);
+  });
+
+  it("assigns exactly one Playwright server in managed mode", () => {
+    expect(playwrightWebServer("managed")).toEqual({
+      command: "pnpm dev",
+      url: "http://127.0.0.1:4173",
+      reuseExistingServer: false,
+    });
+  });
+
+  it("does not configure a server in file or app mode", () => {
+    expect(playwrightWebServer("none")).toBeUndefined();
+  });
+
+  it("rejects an unknown server mode", () => {
+    expect(() =>
+      playwrightServerMode({
+        SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER: "reuse",
+      }),
+    ).toThrow(/SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER/);
+  });
+
+  it("does not infer ownership from CI, benchmark, demo, or package flags", () => {
+    const environment = {
+      SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER: "managed",
+      CI: "1",
+      SIGNALSCOPE_BENCH: "1",
+      SIGNALSCOPE_DEMO: "1",
+      SIGNALSCOPE_PACKAGE_SMOKE: "1",
+    };
+    expect(playwrightServerMode(environment)).toBe("managed");
+    expect(playwrightWebServer(playwrightServerMode(environment))).toEqual(
+      playwrightWebServer("managed"),
+    );
   });
 });

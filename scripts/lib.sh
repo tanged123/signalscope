@@ -31,6 +31,14 @@ wait_for_port() {
   return 1
 }
 
+run_gui_command() {
+  if [ "$(uname -s)" = Linux ] && [ -z "${DISPLAY:-}" ]; then
+    xvfb-run -a "$@"
+  else
+    "$@"
+  fi
+}
+
 # Check groups shared by ci.sh and test.sh so local test runs and CI gates
 # cannot drift apart.
 # Type checking runs once inside artifact_checks' build (tsc --noEmit &&

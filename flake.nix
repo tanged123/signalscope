@@ -63,6 +63,7 @@
             libsoup_3
             librsvg
             pango
+            xvfb-run
           ]
         );
       in

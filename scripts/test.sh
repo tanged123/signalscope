@@ -17,10 +17,10 @@ Usage: ./scripts/test.sh [quick|core|host|desktop|policy|unit|frontend|e2e|nativ
   unit      Run frontend unit tests, optionally filtered.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
-  e2e       Run Playwright desktop/mobile smoke tests and the GPU proof.
+  e2e       Run browser Playwright E2E only; use native-e2e for Electron.
   gpu       Run WebGPU software-adapter fidelity tests.
   bench     Run corpus, core, browser, or software-adapter benchmarks.
-  full      Run quick checks, then run desktop and browser e2e checks.
+  full      Run quick, desktop, browser E2E, GPU, and native E2E checks.
 EOF
 }
 
@@ -57,7 +57,8 @@ test_desktop() {
       packaged_host="$packaged_resource/bin/signalscope-host"
       ;;
     esac
-    SIGNALSCOPE_PACKAGED_BIN="$packaged_bin" \
+    SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=none \
+      SIGNALSCOPE_PACKAGED_BIN="$packaged_bin" \
       SIGNALSCOPE_PACKAGED_APP="$packaged_app" \
       SIGNALSCOPE_HOST_BIN="$packaged_host" \
       SIGNALSCOPE_RESOURCE_DIR="$packaged_resource" \
@@ -77,18 +78,9 @@ test_native_e2e() {
   "$signalscope_scripts_dir/build.sh" host
   pnpm --filter @signalscope/frontend build
   pnpm --filter @signalscope/desktop build
-  mkdir -p "$signalscope_root/build"
-  pnpm --filter @signalscope/frontend dev >"$signalscope_root/build/vite-native-e2e.log" 2>&1 &
-  native_e2e_vite_pid=$!
-  cleanup_native_e2e() {
-    if [ -n "${native_e2e_vite_pid:-}" ]; then
-      kill "$native_e2e_vite_pid" 2>/dev/null || true
-      wait "$native_e2e_vite_pid" 2>/dev/null || true
-    fi
-  }
-  trap cleanup_native_e2e EXIT
-  wait_for_port 4173
-  SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
+  run_gui_command env \
+    SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed \
+    SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
     NODE_ENV=development SIGNALSCOPE_GPU_MODE=software \
     pnpm --filter @signalscope/frontend exec playwright test --project=electron-native "$@"
 }
@@ -134,7 +126,8 @@ bench_e2e() {
     fi
     native_files=1000
     if [ "$tier" = dense10k ]; then native_files=10000; fi
-    SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
+    SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=none \
+      SIGNALSCOPE_HOST_BIN="$signalscope_root/target/debug/signalscope-host" \
       SIGNALSCOPE_BENCH=1 SIGNALSCOPE_BENCH_TIER="$tier" \
       SIGNALSCOPE_BENCH_CORPUS_DIR="$corpus_dir" \
       SIGNALSCOPE_BENCH_NATIVE_FILES="$native_files" NODE_ENV=development \
@@ -147,7 +140,8 @@ bench_software() {
   rm -f "$signalscope_root/build/bench/report/electron-hardware.json"
   rm -f "$signalscope_root"/build/bench/report/e2e_*.json
   bake_bench_smoke_artifact
-  SIGNALSCOPE_BENCH=1 pnpm --filter @signalscope/frontend exec playwright test \
+  SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed SIGNALSCOPE_BENCH=1 \
+    pnpm --filter @signalscope/frontend exec playwright test \
     --project=bench-software
 }
 
@@ -231,14 +225,13 @@ e2e)
   shift || true
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
-  pnpm e2e -- "$@"
-  bake_bench_smoke_artifact
-  pnpm --filter @signalscope/frontend exec playwright test --project=gpu
+  SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed pnpm e2e -- "$@"
   ;;
 gpu)
   shift || true
   bake_bench_smoke_artifact
-  pnpm --filter @signalscope/frontend exec playwright test --project=gpu "$@"
+  SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed \
+    pnpm --filter @signalscope/frontend exec playwright test --project=gpu "$@"
   ;;
 bench)
   bench_mode="${2:-all}"
@@ -272,9 +265,11 @@ full)
   test_desktop
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
-  pnpm e2e
+  SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed pnpm e2e
   bake_bench_smoke_artifact
-  pnpm --filter @signalscope/frontend exec playwright test --project=gpu
+  SIGNALSCOPE_PLAYWRIGHT_WEB_SERVER=managed \
+    pnpm --filter @signalscope/frontend exec playwright test --project=gpu
+  test_native_e2e
   ;;
 -h | --help | help)
   show_help
