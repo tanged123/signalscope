@@ -618,9 +618,8 @@ async fn export_file(State(state): State<AppState>, request: Request<Body>) -> R
         Ok(header) => header,
         Err(error) => return file_frame_error(error),
     };
-    let metadata_length = match usize::try_from(frame_header.metadata_length) {
-        Ok(length) => length,
-        Err(_) => return file_frame_error(FileBinaryError::Length),
+    let Ok(metadata_length) = usize::try_from(frame_header.metadata_length) else {
+        return file_frame_error(FileBinaryError::Length);
     };
     let mut metadata_bytes = vec![0_u8; metadata_length];
     if let Err(error) =
@@ -708,7 +707,8 @@ async fn stream_payload(
             *offset = 0;
         }
         let available = (current.len() - *offset) as u64;
-        let count = available.min(remaining) as usize;
+        let count = usize::try_from(available.min(remaining))
+            .map_err(|_| "file frame chunk length is invalid".to_owned())?;
         pending
             .write(&current[*offset..*offset + count])
             .await

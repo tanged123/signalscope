@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TileRequest } from "../generated/protocol";
 import { seal } from "./envelope";
 import { decodeFileFrame } from "./file-binary";
-import { NativeClient } from "./native-client";
+import { NativeClient, type NativeFileWriter } from "./native-client";
 
 const token = "A".repeat(43);
 const connection = {
@@ -103,5 +103,48 @@ describe("NativeClient", () => {
       code: "invalid_request",
       message: "bad input",
     });
+  });
+
+  it("streams native file frames through the Electron writer", async () => {
+    const chunks: Uint8Array[] = [];
+    const abortFileWrite = vi.fn(() => Promise.resolve());
+    const writer: NativeFileWriter = {
+      abortFileWrite,
+      beginFileWrite: vi.fn(() => Promise.resolve("write-1")),
+      finishFileWrite: vi.fn(() =>
+        Promise.resolve({
+          body: JSON.stringify(seal("/tmp/plot.png")),
+          status: 200,
+        }),
+      ),
+      writeFileChunk: vi.fn<NativeFileWriter["writeFileChunk"]>(
+        (_id, chunk) => {
+          chunks.push(chunk.slice());
+          return Promise.resolve();
+        },
+      ),
+    };
+    const client = new NativeClient(connection, undefined, writer);
+    await expect(
+      client.writeFile(
+        seal({
+          destination: "exact_path",
+          path: "/tmp/plot.png",
+          file_name: "",
+          kind: "png",
+        }),
+        new Uint8Array([1, 2]),
+      ),
+    ).resolves.toEqual(seal("/tmp/plot.png"));
+    const frame = new Uint8Array(
+      chunks.reduce((total, chunk) => total + chunk.length, 0),
+    );
+    let offset = 0;
+    for (const chunk of chunks) {
+      frame.set(chunk, offset);
+      offset += chunk.length;
+    }
+    expect(decodeFileFrame(frame).bytes).toEqual(new Uint8Array([1, 2]));
+    expect(abortFileWrite).not.toHaveBeenCalled();
   });
 });

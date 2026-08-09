@@ -14,6 +14,11 @@ export interface NativeConnection {
   readonly protocolVersion: number;
 }
 
+export interface NativeFileResponse {
+  readonly status: number;
+  readonly body: string;
+}
+
 export interface DesktopGpuInfo {
   readonly electron: string;
   readonly chromium: string;
@@ -35,6 +40,10 @@ export interface DesktopGpuAdapter {
 
 export interface ScopeDesktopBridge {
   connect(): Promise<NativeConnection>;
+  readonly beginFileWrite?: () => Promise<string>;
+  readonly writeFileChunk?: (id: string, chunk: Uint8Array) => Promise<void>;
+  readonly finishFileWrite?: (id: string) => Promise<NativeFileResponse>;
+  readonly abortFileWrite?: (id: string) => Promise<void>;
   pickSources(formats: readonly FormatDescriptor[]): Promise<string[]>;
   pickSourceFolder(): Promise<string | null>;
   pickSession(mode: SessionDialogMode): Promise<string | null>;

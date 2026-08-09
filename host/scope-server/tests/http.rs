@@ -48,7 +48,7 @@ fn chunked_body(bytes: &[u8], boundaries: &[usize]) -> Body {
     Body::from_stream(stream::iter(
         chunks
             .into_iter()
-            .map(|chunk| Ok::<Bytes, std::convert::Infallible>(chunk)),
+            .map(Ok::<Bytes, std::convert::Infallible>),
     ))
 }
 

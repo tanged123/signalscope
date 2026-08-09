@@ -3,6 +3,10 @@ import type { DragDropForward, ScopeDesktopBridge } from "./types";
 
 const IPC = Object.freeze({
   connect: "scope:connect",
+  beginFileWrite: "scope:begin-file-write",
+  writeFileChunk: "scope:write-file-chunk",
+  finishFileWrite: "scope:finish-file-write",
+  abortFileWrite: "scope:abort-file-write",
   pickSources: "scope:pick-sources",
   pickSourceFolder: "scope:pick-source-folder",
   pickSession: "scope:pick-session",
@@ -79,6 +83,11 @@ function installDropListeners(): void {
 const bridge: ScopeDesktopBridge = {
   connect: async () =>
     Object.freeze({ ...(await ipcRenderer.invoke(IPC.connect)) }),
+  beginFileWrite: () => ipcRenderer.invoke(IPC.beginFileWrite),
+  writeFileChunk: (id, chunk) =>
+    ipcRenderer.invoke(IPC.writeFileChunk, id, chunk),
+  finishFileWrite: (id) => ipcRenderer.invoke(IPC.finishFileWrite, id),
+  abortFileWrite: (id) => ipcRenderer.invoke(IPC.abortFileWrite, id),
   pickSources: (formats) => ipcRenderer.invoke(IPC.pickSources, formats),
   pickSourceFolder: () => ipcRenderer.invoke(IPC.pickSourceFolder),
   pickSession: (mode) => ipcRenderer.invoke(IPC.pickSession, mode),

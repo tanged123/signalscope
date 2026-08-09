@@ -236,18 +236,14 @@ fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let staged = temporary_path(path);
-    let mut file = match std::fs::OpenOptions::new()
+    let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&staged)
-    {
-        Ok(file) => file,
-        Err(error) => return Err(error),
-    };
+        .open(&staged)?;
     if let Err(error) = file
         .write_all(contents)
-        .and_then(|_| file.flush())
-        .and_then(|_| file.sync_all())
+        .and_then(|()| file.flush())
+        .and_then(|()| file.sync_all())
     {
         let _ = std::fs::remove_file(&staged);
         return Err(error);

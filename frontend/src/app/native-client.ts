@@ -1,5 +1,5 @@
 import type { FileWriteMetadata, TileRequest } from "../generated/protocol";
-import type { NativeConnection } from "./desktop-bridge";
+import type { NativeConnection, NativeFileResponse } from "./desktop-bridge";
 import type { Envelope } from "./envelope";
 import { createFileFrameStream } from "./file-binary";
 
@@ -10,6 +10,13 @@ interface NativeErrorBody {
 }
 
 type NativeRequestInit = RequestInit & { duplex?: "half" };
+
+export interface NativeFileWriter {
+  beginFileWrite(): Promise<string>;
+  writeFileChunk(id: string, chunk: Uint8Array): Promise<void>;
+  finishFileWrite(id: string): Promise<NativeFileResponse>;
+  abortFileWrite(id: string): Promise<void>;
+}
 
 export class NativeClientError extends Error {
   constructor(
@@ -57,13 +64,16 @@ function validateConnection(connection: NativeConnection): NativeConnection {
 export class NativeClient {
   private readonly connection: NativeConnection;
   private readonly fetchFn: typeof fetch;
+  private readonly fileWriter: NativeFileWriter | undefined;
 
   constructor(
     connection: NativeConnection,
     fetchFn: typeof fetch = (input, init) => fetch(input, init),
+    fileWriter?: NativeFileWriter,
   ) {
     this.connection = validateConnection(connection);
     this.fetchFn = fetchFn;
+    this.fileWriter = fileWriter;
   }
 
   async json<Req, Res>(
@@ -91,6 +101,26 @@ export class NativeClient {
     metadata: Envelope<FileWriteMetadata>,
     bytes: Uint8Array,
   ): Promise<Envelope<string>> {
+    if (this.fileWriter !== undefined) {
+      const id = await this.fileWriter.beginFileWrite();
+      try {
+        const reader = createFileFrameStream(metadata, bytes).getReader();
+        let next = await reader.read();
+        while (!next.done) {
+          await this.fileWriter.writeFileChunk(id, next.value);
+          next = await reader.read();
+        }
+        const response = await this.fileWriter.finishFileWrite(id);
+        return parseFileResponse(response);
+      } catch (error) {
+        try {
+          await this.fileWriter.abortFileWrite(id);
+        } catch {
+          // Preserve the original transport or server error.
+        }
+        throw error;
+      }
+    }
     const response = await this.fetchRequest("/v1/export/file", {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
@@ -125,4 +155,21 @@ export class NativeClient {
       error?.message ?? `native host returned HTTP ${String(response.status)}`,
     );
   }
+}
+
+function parseFileResponse(response: NativeFileResponse): Envelope<string> {
+  if (response.status >= 200 && response.status < 300) {
+    return JSON.parse(response.body) as Envelope<string>;
+  }
+  let error: NativeErrorBody | null = null;
+  try {
+    error = JSON.parse(response.body) as NativeErrorBody;
+  } catch {
+    // Preserve the HTTP status when the server did not return its envelope.
+  }
+  throw new NativeClientError(
+    response.status,
+    error?.code ?? "native_http_error",
+    error?.message ?? `native host returned HTTP ${String(response.status)}`,
+  );
 }

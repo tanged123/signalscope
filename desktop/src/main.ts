@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, protocol } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
 import { BackendProcess } from "./backend";
 import { registerDialogHandlers } from "./dialogs";
 import { parseLaunchPaths } from "./launch";
@@ -38,6 +38,25 @@ let mainWindow: BrowserWindow | null = null;
 let backend: BackendProcess | null = null;
 let stopping: Promise<void> | null = null;
 const queuedPaths = new Set<string>();
+const FILE_WRITE_CHUNK_BYTES = 64 * 1024;
+
+interface PendingFileWrite {
+  readonly request: Electron.ClientRequest;
+  readonly response: Promise<NativeFileResponse>;
+  failure: Error | null;
+  writeWaiter: {
+    readonly resolve: () => void;
+    readonly reject: (error: Error) => void;
+  } | null;
+}
+
+interface NativeFileResponse {
+  readonly status: number;
+  readonly body: string;
+}
+
+const pendingFileWrites = new Map<string, PendingFileWrite>();
+let nextFileWriteId = 0;
 
 interface CompleteGpuInfo {
   readonly gpuDevice?: readonly GpuDeviceInfo[];
@@ -128,6 +147,25 @@ async function start(): Promise<void> {
     { executable, configDir, cacheDir, resourceDir },
     isDevelopment ? developmentOrigin : null,
   );
+  ipcMain.handle(IPC.beginFileWrite, (event) => {
+    assertFileWriteCaller(event);
+    return beginFileWrite();
+  });
+  ipcMain.handle(
+    IPC.writeFileChunk,
+    async (event, id: unknown, chunk: unknown) => {
+      assertFileWriteCaller(event);
+      await writeFileChunk(id, chunk);
+    },
+  );
+  ipcMain.handle(IPC.finishFileWrite, async (event, id: unknown) => {
+    assertFileWriteCaller(event);
+    return finishFileWrite(id);
+  });
+  ipcMain.handle(IPC.abortFileWrite, (event, id: unknown) => {
+    assertFileWriteCaller(event);
+    abortFileWrite(id);
+  });
   ipcMain.on(IPC.rendererReady, sendQueuedPaths);
   ipcMain.handle(IPC.connect, (): NativeConnection => backend!.connection());
   ipcMain.handle(IPC.gpuInfo, (): Promise<DesktopGpuInfo> => gpuInfo());
@@ -139,6 +177,112 @@ async function start(): Promise<void> {
       : `app://signalscope/index.html${benchQuery}`,
     preloadPath: join(__dirname, "preload.js"),
   });
+}
+
+function assertFileWriteCaller(event: Electron.IpcMainInvokeEvent): void {
+  if (event.sender !== mainWindow?.webContents)
+    throw new Error("invalid file write caller");
+}
+
+function fileWriteId(): string {
+  nextFileWriteId += 1;
+  return String(nextFileWriteId);
+}
+
+function beginFileWrite(): string {
+  if (backend === null) throw new Error("native host is not running");
+  // Electron 43 rejects renderer ReadableStream uploads to the loopback HTTP/1
+  // server, so keep the request streamed through Chromium's main-process API.
+  const connection = backend.connection();
+  const request = net.request({
+    method: "POST",
+    url: `${connection.baseUrl}/v1/export/file`,
+  });
+  request.setHeader("Authorization", `Bearer ${connection.token}`);
+  request.setHeader("Content-Type", "application/octet-stream");
+  request.chunkedEncoding = true;
+
+  let resolveResponse!: (response: NativeFileResponse) => void;
+  let rejectResponse!: (error: Error) => void;
+  const response = new Promise<NativeFileResponse>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  const pending: PendingFileWrite = {
+    failure: null,
+    request,
+    response,
+    writeWaiter: null,
+  };
+  request.on("response", (incoming) => {
+    const chunks: Buffer[] = [];
+    incoming.on("data", (chunk: Buffer | string) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    incoming.on("end", () => {
+      resolveResponse({
+        body: Buffer.concat(chunks).toString("utf8"),
+        status: incoming.statusCode,
+      });
+    });
+    incoming.on("error", (error) => rejectResponse(error));
+  });
+  request.on("error", (error) => {
+    pending.failure = error;
+    pending.writeWaiter?.reject(error);
+    pending.writeWaiter = null;
+    rejectResponse(error);
+  });
+  const id = fileWriteId();
+  pendingFileWrites.set(id, pending);
+  return id;
+}
+
+function pendingFileWrite(id: unknown): PendingFileWrite {
+  if (typeof id !== "string") throw new Error("invalid file write id");
+  const pending = pendingFileWrites.get(id);
+  if (pending === undefined) throw new Error("unknown file write id");
+  return pending;
+}
+
+async function writeFileChunk(id: unknown, chunk: unknown): Promise<void> {
+  const pending = pendingFileWrite(id);
+  if (
+    !(chunk instanceof Uint8Array) ||
+    chunk.byteLength > FILE_WRITE_CHUNK_BYTES
+  )
+    throw new Error("invalid file write chunk");
+  if (pending.failure !== null) throw pending.failure;
+  const buffer = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  await new Promise<void>((resolve, reject) => {
+    pending.writeWaiter = { reject, resolve };
+    try {
+      pending.request.write(buffer, undefined, () => {
+        pending.writeWaiter = null;
+        resolve();
+      });
+    } catch (error) {
+      pending.writeWaiter = null;
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
+async function finishFileWrite(id: unknown): Promise<NativeFileResponse> {
+  const pending = pendingFileWrite(id);
+  try {
+    pending.request.end();
+    return await pending.response;
+  } finally {
+    pendingFileWrites.delete(String(id));
+  }
+}
+
+function abortFileWrite(id: unknown): void {
+  const pending = pendingFileWrite(id);
+  pendingFileWrites.delete(String(id));
+  pending.response.catch(() => undefined);
+  pending.request.abort();
 }
 
 function stopBackend(): Promise<void> {

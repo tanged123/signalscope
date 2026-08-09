@@ -8,7 +8,7 @@ const MAGIC = 0x57465353;
 export const FILE_FRAME_HEADER_BYTES = 24;
 export const FILE_FRAME_METADATA_LIMIT = 1024 * 1024;
 export const FILE_FRAME_PAYLOAD_LIMIT = 1024 * 1024 * 1024;
-const PAYLOAD_CHUNK_BYTES = 64 * 1024;
+const FRAME_CHUNK_BYTES = 64 * 1024;
 
 export interface FileFrameHeader {
   readonly metadataLength: number;
@@ -67,12 +67,16 @@ export function createFileFrameStream(
         return;
       }
       if (metadataOffset < encodedMetadata.length) {
-        controller.enqueue(encodedMetadata.subarray(metadataOffset));
-        metadataOffset = encodedMetadata.length;
+        const end = Math.min(
+          metadataOffset + FRAME_CHUNK_BYTES,
+          encodedMetadata.length,
+        );
+        controller.enqueue(encodedMetadata.subarray(metadataOffset, end));
+        metadataOffset = end;
         return;
       }
       if (payloadOffset < bytes.length) {
-        const end = Math.min(payloadOffset + PAYLOAD_CHUNK_BYTES, bytes.length);
+        const end = Math.min(payloadOffset + FRAME_CHUNK_BYTES, bytes.length);
         controller.enqueue(bytes.subarray(payloadOffset, end));
         payloadOffset = end;
         return;

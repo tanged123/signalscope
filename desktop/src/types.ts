@@ -5,6 +5,11 @@ export interface NativeConnection {
   readonly protocolVersion: number;
 }
 
+export interface NativeFileResponse {
+  readonly status: number;
+  readonly body: string;
+}
+
 export interface BackendPaths {
   readonly executable: string;
   readonly configDir: string;
@@ -48,6 +53,10 @@ export interface DesktopGpuAdapter {
 
 export interface ScopeDesktopBridge {
   connect(): Promise<NativeConnection>;
+  beginFileWrite(): Promise<string>;
+  writeFileChunk(id: string, chunk: Uint8Array): Promise<void>;
+  finishFileWrite(id: string): Promise<NativeFileResponse>;
+  abortFileWrite(id: string): Promise<void>;
   pickSources(formats: readonly FormatDescriptor[]): Promise<string[]>;
   pickSourceFolder(): Promise<string | null>;
   pickSession(mode: SessionDialogMode): Promise<string | null>;
@@ -65,6 +74,10 @@ export const IPC = Object.freeze({
   pickExportFile: "scope:pick-export-file",
   pickDirectory: "scope:pick-directory",
   gpuInfo: "scope:gpu-info",
+  beginFileWrite: "scope:begin-file-write",
+  writeFileChunk: "scope:write-file-chunk",
+  finishFileWrite: "scope:finish-file-write",
+  abortFileWrite: "scope:abort-file-write",
   dragDrop: "scope:drag-drop",
   rendererReady: "scope:renderer-ready",
 });

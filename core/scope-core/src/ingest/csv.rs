@@ -239,8 +239,9 @@ fn finish(headers: Vec<String>, mut columns: Vec<Vec<f64>>) -> Result<DecodedSou
 }
 
 fn detect_delimiter(probe: &str) -> u8 {
-    [b'\t', b',', b';', b'|']
-        .into_iter()
+    b"\t,;|"
+        .iter()
+        .copied()
         .max_by_key(|delimiter| probe.matches(char::from(*delimiter)).count())
         .filter(|delimiter| probe.as_bytes().contains(delimiter))
         .unwrap_or(b',')

@@ -44,7 +44,7 @@ import {
 } from "./data-plane";
 import type { ScopeDesktopBridge } from "./desktop-bridge";
 import { open, seal } from "./envelope";
-import { NativeClient } from "./native-client";
+import { NativeClient, type NativeFileWriter } from "./native-client";
 import { decodeTileResponse } from "./tile-binary";
 
 function response<T>(
@@ -294,7 +294,11 @@ export class NativePlane implements DataPlane {
 
   static async create(bridge: ScopeDesktopBridge): Promise<NativePlane> {
     const connection = await bridge.connect();
-    return new NativePlane(new NativeClient(connection), bridge);
+    const fileWriter = nativeFileWriter(bridge);
+    return new NativePlane(
+      new NativeClient(connection, undefined, fileWriter),
+      bridge,
+    );
   }
 
   private listFormats(): Promise<FormatDescriptor[]> {
@@ -341,4 +345,23 @@ export class NativePlane implements DataPlane {
       ),
     );
   }
+}
+
+function nativeFileWriter(
+  bridge: ScopeDesktopBridge,
+): NativeFileWriter | undefined {
+  if (
+    bridge.beginFileWrite === undefined ||
+    bridge.writeFileChunk === undefined ||
+    bridge.finishFileWrite === undefined ||
+    bridge.abortFileWrite === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    abortFileWrite: bridge.abortFileWrite.bind(bridge),
+    beginFileWrite: bridge.beginFileWrite.bind(bridge),
+    finishFileWrite: bridge.finishFileWrite.bind(bridge),
+    writeFileChunk: bridge.writeFileChunk.bind(bridge),
+  };
 }
