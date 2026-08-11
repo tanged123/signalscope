@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0"
+version = "2.0.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/tanged123/signalscope"
@@ -36,9 +36,9 @@ parquet = { version = "56", default-features = false, features = [
   "zstd",
 ] }
 toml = "0.9"
-scope-core = { path = "core/scope-core", version = "2.0.0" }
-scope-host = { path = "host/scope-host", version = "2.0.0" }
-scope-protocol = { path = "protocol", version = "2.0.0" }
+scope-core = { path = "core/scope-core", version = "2.0.1" }
+scope-host = { path = "host/scope-host", version = "2.0.1" }
+scope-protocol = { path = "protocol", version = "2.0.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

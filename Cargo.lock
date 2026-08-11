@@ -1478,7 +1478,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "scope-core"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "arrow-array",
  "arrow-cast",
@@ -1500,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "scope-host"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "scope-core",
  "scope-protocol",
@@ -1513,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "scope-protocol"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "scope-server"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "axum",
  "base64",
