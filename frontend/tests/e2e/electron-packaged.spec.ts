@@ -99,6 +99,36 @@ test("the unpacked Electron package starts outside the checkout", async ({}, tes
           })
           .catch((reason: unknown) => `error: ${String(reason)}`);
         console.log(`[diagnostic] bridge.connect(): ${bridgeState}`);
+        const gpuInfoState = await page
+          .evaluate(async () => {
+            const bridge = window.scopeDesktop;
+            if (bridge === undefined) return "bridge absent";
+            return Promise.race([
+              bridge
+                .gpuInfo()
+                .then((value) => `resolved: ${JSON.stringify(value)}`),
+              new Promise<string>((resolve) =>
+                setTimeout(() => resolve("unresolved after 5s"), 5000),
+              ),
+            ]);
+          })
+          .catch((reason: unknown) => `error: ${String(reason)}`);
+        console.log(`[diagnostic] gpuInfo(): ${gpuInfoState}`);
+        const adapterState = await page
+          .evaluate(async () =>
+            Promise.race([
+              navigator.gpu
+                .requestAdapter()
+                .then((adapter) =>
+                  adapter === null ? "adapter: null" : "adapter: present",
+                ),
+              new Promise<string>((resolve) =>
+                setTimeout(() => resolve("unresolved after 5s"), 5000),
+              ),
+            ]),
+          )
+          .catch((reason: unknown) => `error: ${String(reason)}`);
+        console.log(`[diagnostic] requestAdapter(): ${adapterState}`);
       };
       try {
         await expect(page).toHaveURL("app://signalscope/index.html");
