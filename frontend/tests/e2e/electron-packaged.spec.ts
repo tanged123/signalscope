@@ -10,7 +10,8 @@ const csvPath = fileURLToPath(
   new URL("fixtures/roundtrip.csv", import.meta.url),
 );
 
-test("the unpacked Electron package starts outside the checkout", async (_fixtures, testInfo) => {
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the object pattern
+test("the unpacked Electron package starts outside the checkout", async ({}, testInfo) => {
   test.setTimeout(120_000);
   const executablePath = process.env.SIGNALSCOPE_PACKAGED_BIN;
   if (executablePath === undefined) {
