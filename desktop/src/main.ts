@@ -25,13 +25,17 @@ if (gpuMode !== undefined && gpuMode !== "software") {
 }
 if (gpuMode === "software") {
   app.commandLine.appendSwitch("enable-unsafe-webgpu");
-  // Chromium 129+ gates software WebGPU behind this switch; without it
-  // Windows reports webgpu "unavailable_software" even with the adapter
-  // switches below.
-  app.commandLine.appendSwitch("enable-unsafe-swiftshader");
-  app.commandLine.appendSwitch("enable-features", "Vulkan");
-  app.commandLine.appendSwitch("use-angle", "swiftshader");
-  app.commandLine.appendSwitch("use-webgpu-adapter", "swiftshader");
+  if (process.platform === "win32") {
+    // Windows software WebGPU is Dawn's D3D WARP fallback. Forcing the
+    // SwiftShader switches below steers the GPU process off the D3D path
+    // and leaves no adapter at all (observed on GPU-less runners).
+    app.commandLine.appendSwitch("ignore-gpu-blocklist");
+  } else {
+    app.commandLine.appendSwitch("enable-unsafe-swiftshader");
+    app.commandLine.appendSwitch("enable-features", "Vulkan");
+    app.commandLine.appendSwitch("use-angle", "swiftshader");
+    app.commandLine.appendSwitch("use-webgpu-adapter", "swiftshader");
+  }
 }
 app.commandLine.appendSwitch("disable-features", "AutofillServerCommunication");
 app.enableSandbox();
