@@ -45,13 +45,31 @@ test("the unpacked Electron package starts outside the checkout", async () => {
       cwd: root,
       env,
     });
+    app
+      .process()
+      .stdout?.on("data", (chunk: Buffer) =>
+        console.log(`[electron-main] ${chunk.toString().trimEnd()}`),
+      );
+    app
+      .process()
+      .stderr?.on("data", (chunk: Buffer) =>
+        console.log(`[electron-main:err] ${chunk.toString().trimEnd()}`),
+      );
     try {
       const page = await app.firstWindow();
+      page.on("console", (message) =>
+        console.log(`[renderer:${message.type()}] ${message.text()}`),
+      );
+      page.on("pageerror", (error) =>
+        console.log(`[renderer:pageerror] ${error.message}`),
+      );
       await expect(page).toHaveURL("app://signalscope/index.html");
       await expect(page.locator("#app")).toBeVisible();
+      // 90s inner wait < 120s test timeout so a hang here fails as this
+      // locator assertion instead of an anonymous test timeout.
       await expect(page.locator(".status-aggregate")).toHaveText(
         /1 sources · 2 signals · [1-9\d,]+ pts/,
-        { timeout: 120_000 },
+        { timeout: 90_000 },
       );
       await expect(page.locator(".panel")).toHaveCount(1);
       await expect(

@@ -24,3 +24,11 @@ jobs:
           name: release-windows-x64
           path: desktop/release
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: package-smoke-diagnostics
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
