@@ -17,6 +17,10 @@ if ! grep -Fq 'native-dev.mjs' "$script_dir/run.sh"; then
   echo "run.sh native must call native-dev.mjs" >&2
   failures=$((failures + 1))
 fi
+if ! grep -Fq 'windows-run.mjs' "$script_dir/run.sh"; then
+  echo "run.sh windows must route through windows-run.mjs" >&2
+  failures=$((failures + 1))
+fi
 if ! grep -Fq 'guard_wsl_gui' "$script_dir/run.sh"; then
   echo "run.sh native must guard against unsupported WSLg presentation" >&2
   failures=$((failures + 1))
@@ -73,6 +77,7 @@ expect_status 1 check_ci_results '{"version":{"result":"cancelled"},"flake":{"re
 expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{}}'
 expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"result":"unknown"}}'
 expect_status 1 check_ci_results ''
+expect_status 1 node "$script_dir/windows-run.mjs" --wat
 expect_status 3 env WSL_DISTRO_NAME=PolicyTest SIGNALSCOPE_ALLOW_WSL_GUI= \
   bash -c "source '$script_dir/lib.sh'; guard_wsl_gui"
 expect_status 0 env WSL_DISTRO_NAME=PolicyTest SIGNALSCOPE_ALLOW_WSL_GUI=1 \
