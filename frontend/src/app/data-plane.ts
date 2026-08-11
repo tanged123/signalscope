@@ -1,3 +1,7 @@
+// Static rather than dynamic: Electron's protocol.handle on Windows serves
+// the lazy chunk but the renderer's dynamic import() never settles, hanging
+// boot forever (observed on the packaged Windows smoke).
+import { NativePlane } from "./native-plane";
 import {
   type BatchDetail,
   type BatchStatus,
@@ -338,9 +342,7 @@ export async function selectDataPlane(): Promise<DataPlane> {
   const bridge = window.scopeDesktop;
   if (bridge !== undefined) {
     // Temporary boot-stage diagnostics for the Windows package smoke hang.
-    console.error("signalscope-boot: importing native-plane chunk");
-    const { NativePlane } = await import("./native-plane");
-    console.error("signalscope-boot: native-plane chunk loaded");
+    console.error("signalscope-boot: creating native plane");
     const plane = await NativePlane.create(bridge);
     console.error("signalscope-boot: native plane connected");
     return plane;

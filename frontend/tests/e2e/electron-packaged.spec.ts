@@ -129,6 +129,21 @@ test("the unpacked Electron package starts outside the checkout", async ({}, tes
           )
           .catch((reason: unknown) => `error: ${String(reason)}`);
         console.log(`[diagnostic] requestAdapter(): ${adapterState}`);
+        const fallbackState = await page
+          .evaluate(async () =>
+            Promise.race([
+              navigator.gpu
+                .requestAdapter({ forceFallbackAdapter: true })
+                .then((adapter) =>
+                  adapter === null ? "fallback: null" : "fallback: present",
+                ),
+              new Promise<string>((resolve) =>
+                setTimeout(() => resolve("unresolved after 5s"), 5000),
+              ),
+            ]),
+          )
+          .catch((reason: unknown) => `error: ${String(reason)}`);
+        console.log(`[diagnostic] requestAdapter(fallback): ${fallbackState}`);
       };
       try {
         await expect(page).toHaveURL("app://signalscope/index.html");
