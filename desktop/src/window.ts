@@ -25,6 +25,8 @@ const CSP =
 export function registerAppProtocol(frontendRoot: string): void {
   const root = resolve(frontendRoot);
   protocol.handle("app", async (request) => {
+    // Temporary diagnostics for the Windows package smoke hang.
+    console.error(`app-protocol request: ${request.url}`);
     const url = new URL(request.url);
     let decoded: string;
     try {
@@ -46,6 +48,9 @@ export function registerAppProtocol(frontendRoot: string): void {
     }
     try {
       const body = await readFile(candidate);
+      console.error(
+        `app-protocol serving: ${relativePath} (${body.byteLength} bytes)`,
+      );
       return new Response(body, {
         headers: {
           "Content-Security-Policy": CSP,
