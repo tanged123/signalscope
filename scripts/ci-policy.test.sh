@@ -6,6 +6,7 @@ failures=0
 
 node "$script_dir/check-electron-version.test.mjs"
 node --test "$script_dir/process-supervisor.test.mjs"
+node --test "$script_dir/windows-run.test.mjs"
 
 if rg -n 'vite_pid|wait_for_port|trap cleanup|exec pnpm --filter @signalscope/desktop start' \
   "$script_dir/run.sh" >/dev/null; then
