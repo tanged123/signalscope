@@ -10,7 +10,7 @@ const csvPath = fileURLToPath(
   new URL("fixtures/roundtrip.csv", import.meta.url),
 );
 
-test("the unpacked Electron package starts outside the checkout", async () => {
+test("the unpacked Electron package starts outside the checkout", async (_fixtures, testInfo) => {
   test.setTimeout(120_000);
   const executablePath = process.env.SIGNALSCOPE_PACKAGED_BIN;
   if (executablePath === undefined) {
@@ -70,49 +70,84 @@ test("the unpacked Electron package starts outside the checkout", async () => {
       page.on("pageerror", (error) =>
         console.log(`[renderer:pageerror] ${error.message}`),
       );
-      await expect(page).toHaveURL("app://signalscope/index.html");
-      await expect(page.locator("#app")).toBeVisible();
-      // 90s inner wait < 120s test timeout so a hang here fails as this
-      // locator assertion instead of an anonymous test timeout.
-      await expect(page.locator(".status-aggregate")).toHaveText(
-        /1 sources · 2 signals · [1-9\d,]+ pts/,
-        { timeout: 90_000 },
-      );
-      await expect(page.locator(".panel")).toHaveCount(1);
-      await expect(
-        page.locator('.outline-series-row[data-path$="/alpha"]'),
-      ).toHaveCount(1);
-      await expect(page.locator(".panel-bindings .binding-chip")).toHaveText(
-        /alpha @\* · 1/,
-      );
-      expect(
-        await page.evaluate(async () => {
-          const bridge = window.scopeDesktop;
-          if (bridge === undefined) throw new Error("desktop bridge is absent");
-          const connection = await bridge.connect();
-          return {
-            bridge: typeof bridge,
-            connection,
-            node: typeof (globalThis as { process?: unknown }).process,
-            require: typeof (globalThis as { require?: unknown }).require,
-            gpu: typeof navigator.gpu,
-          };
-        }),
-      ).toMatchObject({
-        bridge: "object",
-        connection: {
-          transportVersion: 1,
-          baseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
-          protocolVersion: expect.any(Number),
-        },
-        node: "undefined",
-        require: "undefined",
-        gpu: "object",
-      });
-      if (process.env.SIGNALSCOPE_PACKAGE_PLATFORM === "linux") {
+      const dumpDiagnostics = async (): Promise<void> => {
+        await page
+          .screenshot({ path: testInfo.outputPath("failure.png") })
+          .catch(() => {});
+        const markup = await page
+          .evaluate(
+            () =>
+              document.querySelector("#app")?.innerHTML.slice(0, 3000) ??
+              "#app missing",
+          )
+          .catch((reason: unknown) => `unavailable: ${String(reason)}`);
+        console.log(`[diagnostic] #app innerHTML: ${markup}`);
+        const bridgeState = await page
+          .evaluate(async () => {
+            const bridge = window.scopeDesktop;
+            if (bridge === undefined) return "bridge absent";
+            return Promise.race([
+              bridge.connect().then((value) => JSON.stringify(value)),
+              new Promise<string>((resolve) =>
+                setTimeout(
+                  () => resolve("connect() unresolved after 5s"),
+                  5000,
+                ),
+              ),
+            ]);
+          })
+          .catch((reason: unknown) => `error: ${String(reason)}`);
+        console.log(`[diagnostic] bridge.connect(): ${bridgeState}`);
+      };
+      try {
+        await expect(page).toHaveURL("app://signalscope/index.html");
+        await expect(page.locator("#app")).toBeVisible();
+        // 90s inner wait < 120s test timeout so a hang here fails as this
+        // locator assertion instead of an anonymous test timeout.
+        await expect(page.locator(".status-aggregate")).toHaveText(
+          /1 sources · 2 signals · [1-9\d,]+ pts/,
+          { timeout: 90_000 },
+        );
+        await expect(page.locator(".panel")).toHaveCount(1);
+        await expect(
+          page.locator('.outline-series-row[data-path$="/alpha"]'),
+        ).toHaveCount(1);
+        await expect(page.locator(".panel-bindings .binding-chip")).toHaveText(
+          /alpha @\* · 1/,
+        );
         expect(
-          (await plotPixelEvidence(page)).nonBackgroundPixels,
-        ).toBeGreaterThan(0);
+          await page.evaluate(async () => {
+            const bridge = window.scopeDesktop;
+            if (bridge === undefined)
+              throw new Error("desktop bridge is absent");
+            const connection = await bridge.connect();
+            return {
+              bridge: typeof bridge,
+              connection,
+              node: typeof (globalThis as { process?: unknown }).process,
+              require: typeof (globalThis as { require?: unknown }).require,
+              gpu: typeof navigator.gpu,
+            };
+          }),
+        ).toMatchObject({
+          bridge: "object",
+          connection: {
+            transportVersion: 1,
+            baseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
+            protocolVersion: expect.any(Number),
+          },
+          node: "undefined",
+          require: "undefined",
+          gpu: "object",
+        });
+        if (process.env.SIGNALSCOPE_PACKAGE_PLATFORM === "linux") {
+          expect(
+            (await plotPixelEvidence(page)).nonBackgroundPixels,
+          ).toBeGreaterThan(0);
+        }
+      } catch (error) {
+        await dumpDiagnostics();
+        throw error;
       }
     } finally {
       await app.close();
