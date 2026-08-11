@@ -111,6 +111,27 @@ if rg -n 'bench e2e|electron-hardware' "$workflow_root/bench.yml" >/dev/null; th
   echo "scheduled benchmark must remain software/core only" >&2
   failures=$((failures + 1))
 fi
+windows_dev="$workflow_root/windows-dev.yml"
+if [ ! -f "$windows_dev" ]; then
+  echo "windows-dev.yml must exist for run.sh windows" >&2
+  failures=$((failures + 1))
+else
+  windows_dev_triggers=$(sed -n '/^on:/,/^permissions:/p' "$windows_dev")
+  if ! grep -q 'workflow_dispatch' <<<"$windows_dev_triggers" ||
+    rg -n 'push:|pull_request:|schedule:' <<<"$windows_dev_triggers" >/dev/null; then
+    echo "windows-dev.yml must trigger on workflow_dispatch only" >&2
+    failures=$((failures + 1))
+  fi
+  if ! grep -Fq './scripts/ci.sh windows' "$windows_dev"; then
+    echo "windows-dev.yml must build through ./scripts/ci.sh windows" >&2
+    failures=$((failures + 1))
+  fi
+  if ! grep -Fq 'name: release-windows-x64' "$windows_dev" ||
+    ! grep -Fq 'path: desktop/release' "$windows_dev"; then
+    echo "windows-dev.yml must upload desktop/release as release-windows-x64" >&2
+    failures=$((failures + 1))
+  fi
+fi
 if ! grep -Eq '!\[SignalScope interactive demo\]\(https://tanged123\.github\.io/signalscope/demo\.gif\?v=[0-9]+\.[0-9]+\.[0-9]+\)' "$readme"; then
   echo "README must embed the release-generated demo GIF" >&2
   failures=$((failures + 1))
