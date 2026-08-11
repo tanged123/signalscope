@@ -229,16 +229,13 @@ export class AppShell {
       baked !== undefined && baked !== ""
         ? parseBakedSession(baked)
         : undefined;
-    console.error("signalscope-boot: requesting native gpu info");
     const nativeGpuInfo = await globalThis.window.scopeDesktop
       ?.gpuInfo()
       .catch(() => undefined);
-    console.error("signalscope-boot: creating gpu runtime");
     const gpu = await GpuRuntime.create(
       globalThis.navigator.gpu,
       nativeGpuInfo,
     );
-    console.error("signalscope-boot: gpu runtime ready");
     if (!gpu.supported) {
       this.root.innerHTML = unsupportedHostMarkup(gpu.capability, gpu.reason);
       return;

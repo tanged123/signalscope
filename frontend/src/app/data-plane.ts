@@ -341,11 +341,7 @@ export class BakedPlane implements DataPlane {
 export async function selectDataPlane(): Promise<DataPlane> {
   const bridge = window.scopeDesktop;
   if (bridge !== undefined) {
-    // Temporary boot-stage diagnostics for the Windows package smoke hang.
-    console.error("signalscope-boot: creating native plane");
-    const plane = await NativePlane.create(bridge);
-    console.error("signalscope-boot: native plane connected");
-    return plane;
+    return NativePlane.create(bridge);
   }
   return BakedPlane.fromDocument();
 }
