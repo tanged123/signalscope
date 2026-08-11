@@ -39,6 +39,36 @@ run_gui_command() {
   fi
 }
 
+is_wsl() {
+  if [ -n "${WSL_DISTRO_NAME:-}" ]; then
+    return 0
+  fi
+  grep -qi microsoft /proc/version 2>/dev/null
+}
+
+# WSLg cannot present Chromium's GPU surface, and WSL has no hardware WebGPU.
+guard_wsl_gui() {
+  if [ "${SIGNALSCOPE_ALLOW_WSL_GUI:-}" = 1 ]; then
+    return 0
+  fi
+  if ! is_wsl; then
+    return 0
+  fi
+  cat >&2 <<'EOF'
+run.sh native is unsupported under WSL: WSLg cannot present the Electron
+WebGPU surface (microsoft/wslg#1456), and WSL has no hardware WebGPU.
+
+Use instead:
+  ./scripts/run.sh windows   build this branch in CI, then launch the real
+                             Windows package on this machine
+  ./scripts/run.sh web       then open http://127.0.0.1:4173 in your
+                             WINDOWS browser for hardware WebGPU
+
+Set SIGNALSCOPE_ALLOW_WSL_GUI=1 to bypass this guard.
+EOF
+  return 3
+}
+
 # Check groups shared by ci.sh and test.sh so local test runs and CI gates
 # cannot drift apart.
 # Type checking runs once inside artifact_checks' build (tsc --noEmit &&

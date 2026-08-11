@@ -16,6 +16,10 @@ if ! grep -Fq 'native-dev.mjs' "$script_dir/run.sh"; then
   echo "run.sh native must call native-dev.mjs" >&2
   failures=$((failures + 1))
 fi
+if ! grep -Fq 'guard_wsl_gui' "$script_dir/run.sh"; then
+  echo "run.sh native must guard against unsupported WSLg presentation" >&2
+  failures=$((failures + 1))
+fi
 native_e2e_body=$(sed -n '/^test_native_e2e()/,/^test_unit()/p' "$script_dir/test.sh")
 if grep -Eq 'frontend dev|wait_for_port|vite|native_e2e_vite_pid' <<<"$native_e2e_body"; then
   echo "test_native_e2e must let Playwright own the Vite server" >&2
@@ -68,6 +72,10 @@ expect_status 1 check_ci_results '{"version":{"result":"cancelled"},"flake":{"re
 expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{}}'
 expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"result":"unknown"}}'
 expect_status 1 check_ci_results ''
+expect_status 3 env WSL_DISTRO_NAME=PolicyTest SIGNALSCOPE_ALLOW_WSL_GUI= \
+  bash -c "source '$script_dir/lib.sh'; guard_wsl_gui"
+expect_status 0 env WSL_DISTRO_NAME=PolicyTest SIGNALSCOPE_ALLOW_WSL_GUI=1 \
+  bash -c "source '$script_dir/lib.sh'; guard_wsl_gui"
 
 readme="$script_dir/../README.md"
 if ! grep -q '^## Interactive demo$' "$readme"; then
