@@ -25,6 +25,10 @@ if (gpuMode !== undefined && gpuMode !== "software") {
 }
 if (gpuMode === "software") {
   app.commandLine.appendSwitch("enable-unsafe-webgpu");
+  // Chromium 129+ gates software WebGPU behind this switch; without it
+  // Windows reports webgpu "unavailable_software" even with the adapter
+  // switches below.
+  app.commandLine.appendSwitch("enable-unsafe-swiftshader");
   app.commandLine.appendSwitch("enable-features", "Vulkan");
   app.commandLine.appendSwitch("use-angle", "swiftshader");
   app.commandLine.appendSwitch("use-webgpu-adapter", "swiftshader");

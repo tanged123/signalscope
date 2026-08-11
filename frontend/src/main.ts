@@ -9,8 +9,14 @@ async function boot(): Promise<void> {
     throw new Error("SignalScope application root is missing");
   }
 
-  const app = new AppShell(root, await selectDataPlane());
+  // Temporary boot-stage diagnostics for the Windows package smoke hang.
+  console.error("signalscope-boot: selecting data plane");
+  const plane = await selectDataPlane();
+  console.error("signalscope-boot: plane ready");
+  const app = new AppShell(root, plane);
+  console.error("signalscope-boot: mounting");
   await app.mount();
+  console.error("signalscope-boot: mounted");
 }
 
 await boot().catch((error: unknown) => {
