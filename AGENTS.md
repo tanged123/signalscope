@@ -59,7 +59,8 @@ Canonical commands:
 ```text
 ./scripts/setup.sh                    locked frontend dependencies
 ./scripts/run.sh web                  browser development host
-./scripts/run.sh native               Electron development host
+./scripts/run.sh native               Electron development host (Linux/macOS)
+./scripts/run.sh windows              CI-built Windows package via WSL interop
 ./scripts/test.sh                     quick Rust + frontend checks
 ./scripts/test.sh core [filter…]         filtered Rust data-plane tests
 ./scripts/test.sh desktop [filter…]      filtered Electron desktop tests
@@ -85,6 +86,10 @@ Canonical commands:
 ./scripts/ci.sh all                   complete local quality gate
 ./scripts/ci.sh flake                 flake check (includes formatting)
 ```
+
+`run.sh native` fails early under WSL because WSLg cannot present the WebGPU
+surface; WSL developers use `run.sh windows` for the packaged app on hardware
+WebGPU, or open `run.sh web` / exported snapshots in the Windows browser.
 
 `quality_checks()` in `scripts/lib.sh` is the single source of truth for the
 deterministic quality gate. Extend that function and its matching `quality` job

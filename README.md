@@ -56,7 +56,13 @@ Run the native Electron workbench:
 
 ```bash
 ./scripts/run.sh native
+./scripts/run.sh windows
 ```
+
+`run.sh native` fails early under WSL because WSLg cannot present the WebGPU
+surface. WSL developers should use `run.sh windows` for the packaged app on
+hardware WebGPU, or open `run.sh web` and exported snapshots in the Windows
+browser.
 
 Press `O` or click **Open…**, choose **Files**, then select
 [`examples/demo_flight.csv`](examples/demo_flight.csv) to explore the ingest
@@ -146,6 +152,7 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/dev.sh            # enter the development shell
 ./scripts/run.sh web        # launch browser frontend
 ./scripts/run.sh native     # launch native Electron workbench
+./scripts/run.sh windows    # launch CI-built Windows package via WSL interop
 ./scripts/test.sh           # lightweight core + frontend checks
 ./scripts/test.sh full      # desktop + Playwright checks too
 ./scripts/build.sh web      # frontend + snapshot-template.html
