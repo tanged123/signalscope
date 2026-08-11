@@ -35,7 +35,14 @@ test("the unpacked Electron package starts outside the checkout", async () => {
     ),
   );
   env.NODE_ENV = "production";
-  if (process.env.SIGNALSCOPE_PACKAGE_PLATFORM === "linux")
+  // Linux and Windows CI runners have no GPU adapter; without software
+  // WebGPU the workbench cannot mount and only the unsupported-host screen
+  // renders. SwiftShader works on both platforms. Pixel evidence stays
+  // Linux-only below.
+  if (
+    process.env.SIGNALSCOPE_PACKAGE_PLATFORM === "linux" ||
+    process.env.SIGNALSCOPE_PACKAGE_PLATFORM === "win32"
+  )
     env.SIGNALSCOPE_GPU_MODE = "software";
   else delete env.SIGNALSCOPE_GPU_MODE;
   try {
