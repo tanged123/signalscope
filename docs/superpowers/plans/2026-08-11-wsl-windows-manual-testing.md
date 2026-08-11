@@ -194,7 +194,7 @@ expect_status 0 env WSL_DISTRO_NAME=PolicyTest SIGNALSCOPE_ALLOW_WSL_GUI=1 \
 ```
 
 Note: `expect_status` is defined around line 48 of the current file, which
-is *after* the run.sh section. Place these two `expect_status` calls after
+is _after_ the run.sh section. Place these two `expect_status` calls after
 its definition (next to the other `expect_status` uses), keeping the `grep`
 check in the run.sh section. Do not test the non-WSL negative case — it
 would be environment-dependent (this dev machine IS WSL).
@@ -437,10 +437,7 @@ test("pruneSelection keeps the current entry plus the two newest others", () => 
 });
 
 test("pruneSelection deletes nothing under the limit", () => {
-  assert.deepEqual(
-    pruneSelection([{ name: "cur", mtimeMs: 1 }], "cur"),
-    [],
-  );
+  assert.deepEqual(pruneSelection([{ name: "cur", mtimeMs: 1 }], "cur"), []);
 });
 ```
 
@@ -704,10 +701,17 @@ function windowsCacheRoot() {
     cwd: "/mnt/c",
   });
   const localAppData = (echoed.stdout ?? "").trim();
-  if (echoed.status !== 0 || localAppData === "" || localAppData.includes("%")) {
+  if (
+    echoed.status !== 0 ||
+    localAppData === "" ||
+    localAppData.includes("%")
+  ) {
     throw new Error("could not resolve %LOCALAPPDATA% through cmd.exe interop");
   }
-  const cacheRoot = join(run("wslpath", ["-u", localAppData]), "SignalScopeDev");
+  const cacheRoot = join(
+    run("wslpath", ["-u", localAppData]),
+    "SignalScopeDev",
+  );
   mkdirSync(cacheRoot, { recursive: true });
   return cacheRoot;
 }
