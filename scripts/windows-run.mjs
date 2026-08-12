@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -209,7 +210,12 @@ function stage(unpacked, sha) {
   for (const name of pruneSelection(entries, shortSha)) {
     rmSync(join(cacheRoot, name), { recursive: true, force: true });
   }
-  return join(stageDir, "win-unpacked", "signalscope.exe");
+  const executable = join(stageDir, "win-unpacked", "signalscope.exe");
+  // Artifact zips carry no unix permissions, and on a metadata-enabled
+  // drvfs mount the extracted exe lands non-executable, so WSL interop
+  // spawns fail with EACCES without this.
+  chmodSync(executable, 0o755);
+  return executable;
 }
 
 async function main() {
