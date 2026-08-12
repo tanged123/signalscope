@@ -312,7 +312,7 @@ export class ChartHost {
   render(request: ChartRenderRequest): number; // ms, like CanvasRenderer.render
   setRangesOnly(xRange: Range, yRange: readonly [number, number]): void; // axes-only fast path
   layout(): PlotLayout | null; // raw-time ranges, CSS-px rect
-  canvas(): HTMLCanvasElement | null; // for PNG capture
+  capture(): Promise<HTMLCanvasElement>; // PNG capture — binding recipe in the spike results doc
   resize(): void;
   dispose(): void;
 }
@@ -408,7 +408,28 @@ return this.chartHost.render(request);
 where `request` packages exactly what the old call consumed (`response`, `ranges.x`, `options.yRange`, `options.styles`, `options.emphasisIndices ?? []`, current palette). Non-time branches set `this.chartHostEl.hidden = true` and keep calling `renderPaths`. When `gpu === null` and mode is time: show `.panel-empty` with "WebGPU unavailable — time-series rendering disabled" and return 0.
 
 - [ ] **Step 4: Layout dispatch.** Add `private activeLayout(): PlotLayout | null` returning `this.state.mode === "time" ? (this.chartHost?.layout() ?? null) : this.renderer.lastLayout()`, and replace **every** `this.renderer.lastLayout()` read inside `panel.ts` with it (`PlotInteractionHost.layout`, `seriesHit`, `cursorAt`, `pinAt`, `removeAt`, `axisEditZone` callers, overlay draw). Gesture range applications (`applyXRange`/`applyYRange`) in time mode call `this.chartHost?.setRangesOnly(...)` **and** the existing state-update path (which schedules the async tile refresh) — the axes move this frame, data refines when tiles arrive, which is exactly today's cadence.
-- [ ] **Step 5: PNG capture.** `canvases()` currently returns `{ plot, overlay }`; in time mode the visible plot is the ChartGPU canvas — return `{ plot: this.chartHost?.canvas() ?? this.canvas, overlay: this.overlay }`. `composePanelPng` is unchanged (it just `drawImage`s both). Spike gate G9 already proved the capture works.
+- [ ] **Step 5: PNG capture.** The spike's G9 proved a naive `drawImage` of the chart canvas reads transparent black; the **binding recipe** is in `docs/superpowers/specs/2026-08-12-chartgpu-spike-results.md` (§ G9): force a fresh render, then in the **same-frame rAF** composite **all** ChartGPU canvases in DOM order. `ChartHost.capture()` implements it:
+
+```ts
+async capture(): Promise<HTMLCanvasElement> {
+  this.forceRender(); // re-pass current options (new object) so needsRender flips
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      this.chart.renderFrame(); // external mode: render inside THIS frame
+      const target = document.createElement("canvas");
+      const sources = Array.from(this.container.querySelectorAll("canvas"));
+      target.width = sources[0]?.width ?? 1;
+      target.height = sources[0]?.height ?? 1;
+      const ctx = target.getContext("2d")!;
+      for (const c of sources) ctx.drawImage(c, 0, 0);
+      resolve(target);
+    });
+  });
+}
+```
+
+PanelView gains `async capturePlot(): Promise<{ plot: HTMLCanvasElement; overlay: HTMLCanvasElement }>` — time mode awaits `chartHost.capture()` for `plot`; other modes return the existing `.plot-canvas`. `AppShell.buildPanelPng` awaits it before calling `composePanelPng` (which stays unchanged — it still just `drawImage`s plot then overlay). Add a `chart-host.test.ts` case: `capture()` resolves with a canvas whose dimensions match the first chart canvas, and `renderFrame` was called inside the rAF (assert via the fake chart).
+
 - [ ] **Step 6: Tests.** Extend `panel.test.ts`: time-mode render routes to the mocked ChartHost (assert the fake chart got options with N series); mode switch to `xy` hides `.chart-host` and calls `renderPaths`; `activeLayout` returns ChartHost layout in time mode and renderer layout in xy; gpu-null time panel shows the empty-state message. Run `./scripts/test.sh unit panel` until green.
 - [ ] **Step 7:** Run `./scripts/test.sh frontend` (lint/typecheck/all units). **Step 8: Commit** — `feat(render): time panels render through ChartHost`
 
