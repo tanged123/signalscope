@@ -175,7 +175,7 @@ six assumptions. These amendments override the corresponding text above.
    series highlights); the band renderer was already removed. Bundles
    plot as ordinary member strokes with emphasis. The `band`-series task
    is dropped; instead the emphasis/ghost contract (emphasis `alpha
-   +0.4` / `width +0.4`, non-emphasized dim to `0.25`, ghosts in `fg4`)
++0.4` / `width +0.4`, non-emphasized dim to `0.25`, ghosts in `fg4`)
    must be reproduced via per-series ChartGPU `lineStyle`.
 4. **XY / FFT / histogram panels stay, on Canvas2D.** They exist on
    `main`, render via the samples path (`renderPaths`), and deleting them

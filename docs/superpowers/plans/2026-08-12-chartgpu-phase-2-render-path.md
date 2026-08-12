@@ -24,11 +24,13 @@
 ### Task 1: Vendor ChartGPU + build wiring
 
 **Files:**
+
 - Create: `scripts/vendor-chartgpu.sh`
 - Create: `frontend/vendor/chartgpu/` (script output: upstream `src/`, `package.json`, `LICENSE`, `VENDORED_REV.txt`)
 - Modify: `frontend/vite.config.ts` (alias), `frontend/tsconfig.json` (exclude), `frontend/knip.json` (ignore), `frontend/scripts/check-snapshot.mjs` (budget), `flake.nix`/treefmt config (exclude `frontend/vendor/` from formatting)
 
 **Interfaces:**
+
 - Produces: `import { ChartGPU, createPipelineCache } from "@chartgpu/chartgpu"` resolving at build/dev/test time; re-runnable pin-update script.
 
 - [ ] **Step 1: Write `scripts/vendor-chartgpu.sh`**
@@ -71,7 +73,9 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   resolve: {
-    alias: { "@chartgpu/chartgpu": resolve(__dirname, "vendor/chartgpu/src/index.ts") },
+    alias: {
+      "@chartgpu/chartgpu": resolve(__dirname, "vendor/chartgpu/src/index.ts"),
+    },
   },
   build: { cssCodeSplit: false, target: "es2022" },
   server: { strictPort: true, proxy: { "/api": "http://127.0.0.1:8317" } },
@@ -99,12 +103,14 @@ git commit -m "feat(render): vendor ChartGPU at pinned rev with vite alias"
 ### Task 2: Types + shared GPU context + boot gate
 
 **Files:**
+
 - Create: `frontend/src/types/chartgpu.d.ts`
 - Create: `frontend/src/render/gpu-context.ts`
 - Modify: `frontend/src/main.ts`, `frontend/src/ui/app-shell.ts` (constructor param), `frontend/src/ui/workspace-view.ts` (thread through to panels)
 - Test: `frontend/src/render/gpu-context.test.ts`
 
 **Interfaces:**
+
 - Produces:
 
 ```ts
@@ -130,15 +136,24 @@ Then declare only the surface we use (adjust to what the grep shows — the shap
 
 ```ts
 declare module "@chartgpu/chartgpu" {
-  export interface XYArraysData { x: ArrayLike<number>; y: ArrayLike<number>; size?: number }
+  export interface XYArraysData {
+    x: ArrayLike<number>;
+    y: ArrayLike<number>;
+    size?: number;
+  }
   export interface LineSeriesConfig {
-    type: "line"; name?: string; data: XYArraysData;
+    type: "line";
+    name?: string;
+    data: XYArraysData;
     sampling?: "none" | "lttb" | "average" | "max" | "min";
     lineStyle?: { width?: number; opacity?: number; color?: string };
-    color?: string; visible?: boolean;
+    color?: string;
+    visible?: boolean;
   }
   export interface AxisOptions {
-    type: "value"; min?: number; max?: number;
+    type: "value";
+    min?: number;
+    max?: number;
     tickFormatter?: (value: number) => string | null;
   }
   export interface ChartGPUOptions {
@@ -147,9 +162,14 @@ declare module "@chartgpu/chartgpu" {
     renderMode?: "internal" | "external";
     tooltip?: { show: boolean };
     grid?: { left: number; right: number; top: number; bottom: number };
-    gridLines?: { show?: boolean; color?: string;
-      horizontal?: boolean | { count?: number }; vertical?: boolean | { count?: number } };
-    xAxis?: AxisOptions; yAxis?: AxisOptions;
+    gridLines?: {
+      show?: boolean;
+      color?: string;
+      horizontal?: boolean | { count?: number };
+      vertical?: boolean | { count?: number };
+    };
+    xAxis?: AxisOptions;
+    yAxis?: AxisOptions;
     series: readonly LineSeriesConfig[];
   }
   export interface ChartGPUInstance {
@@ -161,9 +181,17 @@ declare module "@chartgpu/chartgpu" {
     resize(): void;
     dispose(): void;
   }
-  export interface SharedGpuContext { adapter: GPUAdapter; device: GPUDevice; pipelineCache?: unknown }
+  export interface SharedGpuContext {
+    adapter: GPUAdapter;
+    device: GPUDevice;
+    pipelineCache?: unknown;
+  }
   export const ChartGPU: {
-    create(container: HTMLElement, options: ChartGPUOptions, context?: SharedGpuContext): Promise<ChartGPUInstance>;
+    create(
+      container: HTMLElement,
+      options: ChartGPUOptions,
+      context?: SharedGpuContext,
+    ): Promise<ChartGPUInstance>;
   };
   export function createPipelineCache(device: GPUDevice): unknown;
 }
@@ -196,15 +224,20 @@ it("drives registered hosts from one rAF loop", async () => {
 ### Task 3: M4 feed conversion (`m4-feed.ts`)
 
 **Files:**
+
 - Create: `frontend/src/render/m4-feed.ts`
 - Test: `frontend/src/render/m4-feed.test.ts`
 
 **Interfaces:**
+
 - Consumes: `BinColumns` and the `HAS_FIRST/HAS_LAST/HAS_MIN/HAS_MAX/HAS_GAP` flag bits from `frontend/src/app/bin-columns.ts` (import the real constants — do not redefine).
 - Produces:
 
 ```ts
-export interface SeriesFeed { x: Float64Array; y: Float64Array }
+export interface SeriesFeed {
+  x: Float64Array;
+  y: Float64Array;
+}
 /** M4 points per bin in plot-hit's vertex order: first -> min -> max -> last.
  *  Extrema carry the bin midpoint time. A HAS_GAP bin (or a bin with no
  *  finite payload) emits a single NaN point, breaking the polyline. All x
@@ -221,15 +254,19 @@ export function cachedFeed(columns: BinColumns, tRef: number): SeriesFeed;
 it("emits first,min,max,last per bin with midpoint extrema times", () => {
   // one bin: t0=10,t1=12, first=1,min=0,max=5,last=2, all flags set
   const feed = m4Feed(columns, 10);
-  expect([...feed.x]).toEqual([0, 1, 1, 2]);      // rebased: t0-10, mid-10, mid-10, t1-10
+  expect([...feed.x]).toEqual([0, 1, 1, 2]); // rebased: t0-10, mid-10, mid-10, t1-10
   expect([...feed.y]).toEqual([1, 0, 5, 2]);
 });
 
-it("breaks the polyline at HAS_GAP bins with a NaN point", () => { /* 3 bins, middle gap:
-  expect exactly one NaN in y between the two bins' points, and its x finite */ });
+it("breaks the polyline at HAS_GAP bins with a NaN point", () => {
+  /* 3 bins, middle gap:
+  expect exactly one NaN in y between the two bins' points, and its x finite */
+});
 
-it("skips vertices whose flag bit is absent", () => { /* bin with only HAS_MIN|HAS_MAX
-  emits 2 points, not 4 */ });
+it("skips vertices whose flag bit is absent", () => {
+  /* bin with only HAS_MIN|HAS_MAX
+  emits 2 points, not 4 */
+});
 
 it("cachedFeed returns the identical object for the identical columns", () => {
   expect(cachedFeed(columns, 10)).toBe(cachedFeed(columns, 10));
@@ -246,10 +283,12 @@ it("cachedFeed returns the identical object for the identical columns", () => {
 ### Task 4: `ChartHost`
 
 **Files:**
+
 - Create: `frontend/src/render/chart-host.ts`
 - Test: `frontend/src/render/chart-host.test.ts` (with `vi.mock("@chartgpu/chartgpu")`)
 
 **Interfaces:**
+
 - Consumes: `GpuContext` (Task 2), `m4-feed` (Task 3), `Palette`/`SeriesStroke` from `canvas-renderer.ts`, `PlotLayout`/`Range` from `plot-math.ts`, `ColumnarTileResponse` from `bin-columns.ts`.
 - Produces:
 
@@ -258,25 +297,29 @@ export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
 
 export interface ChartRenderRequest {
   response: ColumnarTileResponse;
-  xRange: Range;                       // raw time
+  xRange: Range; // raw time
   yRange: readonly [number, number];
-  styles: readonly SeriesStroke[];     // parallel to response series
+  styles: readonly SeriesStroke[]; // parallel to response series
   emphasisIndices: readonly number[];
   palette: Palette;
 }
 
 export class ChartHost {
-  static async create(container: HTMLElement, gpu: GpuContext): Promise<ChartHost>;
-  render(request: ChartRenderRequest): number;   // ms, like CanvasRenderer.render
+  static async create(
+    container: HTMLElement,
+    gpu: GpuContext,
+  ): Promise<ChartHost>;
+  render(request: ChartRenderRequest): number; // ms, like CanvasRenderer.render
   setRangesOnly(xRange: Range, yRange: readonly [number, number]): void; // axes-only fast path
-  layout(): PlotLayout | null;                    // raw-time ranges, CSS-px rect
-  canvas(): HTMLCanvasElement | null;             // for PNG capture
+  layout(): PlotLayout | null; // raw-time ranges, CSS-px rect
+  canvas(): HTMLCanvasElement | null; // for PNG capture
   resize(): void;
   dispose(): void;
 }
 ```
 
 **Behavioral contract (encode all of this in tests):**
+
 1. `tRef` = the response's minimum `t0` on first `render`, held stable while the series set (signal ids) is unchanged; re-based when the set changes. `layout()` always reports **raw** ranges.
 2. Series config per series: `{ type: "line", data: cachedFeed(columns, tRef), sampling: "none", color, lineStyle: { width, opacity } }`. Color: `style.hue === null` → `palette.fg4` (ghost), else `palette.series[style.hue % palette.series.length]`. Emphasis: if `emphasisIndices` non-empty — emphasized get `opacity: min(1, alpha + 0.4)`, `width: width + 0.4`; non-emphasized non-ghost get `opacity: 0.25`. Dash: ignored (accepted regression).
 3. **Identity stability:** consecutive `render` calls reuse the previous series element object when that series' `BinColumns` object, style, and emphasis outcome are all unchanged; otherwise a new element object. `setRangesOnly` re-passes the previous series array untouched and changes only `xAxis`/`yAxis` min/max (rebased by `tRef`).
@@ -291,15 +334,27 @@ vi.mock("@chartgpu/chartgpu", () => {
   const instances: FakeChart[] = [];
   class FakeChart {
     setOptionCalls: ChartGPUOptions[] = [];
-    setOption(o: ChartGPUOptions) { this.setOptionCalls.push(o); }
-    needsRender() { return false; }
+    setOption(o: ChartGPUOptions) {
+      this.setOptionCalls.push(o);
+    }
+    needsRender() {
+      return false;
+    }
     renderFrame() {}
     resize() {}
-    dispose() { this.disposed = true; }
+    dispose() {
+      this.disposed = true;
+    }
     disposed = false;
   }
   return {
-    ChartGPU: { create: vi.fn(async () => { const c = new FakeChart(); instances.push(c); return c; }) },
+    ChartGPU: {
+      create: vi.fn(async () => {
+        const c = new FakeChart();
+        instances.push(c);
+        return c;
+      }),
+    },
     createPipelineCache: vi.fn(() => ({})),
     __instances: instances,
   };
@@ -317,11 +372,13 @@ Tests (one per contract item): tRef rebase (`xAxis.min === xRange.min - tRef`), 
 ### Task 5: Panel integration
 
 **Files:**
+
 - Modify: `frontend/src/ui/panel.ts` — `panelMarkup()` (new layer), constructor (create ChartHost), `renderForMode` time branch (~line 1056), new `activeLayout()`, mode-switch visibility, `canvases()`
 - Modify: `frontend/src/ui/workspace-view.ts` (pass `gpu` into `PanelView`)
 - Test: `frontend/src/ui/panel.test.ts` (extend existing suite; ChartGPU stays mocked via the module mock)
 
 **Interfaces:**
+
 - Consumes: `ChartHost` (Task 4), `GpuContext | null` (Task 2).
 - Produces: time panels rendering via ChartHost; all other behavior byte-identical.
 
@@ -341,7 +398,10 @@ CSS (in `frontend/src/styles/app.css` next to the existing `.plot-wrap` rules): 
 
 ```ts
 this.chartHostEl.hidden = false;
-if (this.chartHost === null) { this.pendingChartRender = request; return 0; }
+if (this.chartHost === null) {
+  this.pendingChartRender = request;
+  return 0;
+}
 return this.chartHost.render(request);
 ```
 
@@ -357,6 +417,7 @@ where `request` packages exactly what the old call consumed (`response`, `ranges
 ### Task 6: Theme + palette sync
 
 **Files:**
+
 - Modify: `frontend/src/render/chart-host.ts` (palette in `ChartRenderRequest` already carries colors — add `gridLines`/background handling), `frontend/src/ui/panel.ts` (`invalidateTheme` path)
 - Test: extend `chart-host.test.ts`
 
@@ -371,6 +432,7 @@ where `request` packages exactly what the old call consumed (`response`, `ranges
 ### Task 7: Delete the Canvas2D time-stroke path
 
 **Files:**
+
 - Modify: `frontend/src/render/canvas-renderer.ts` — delete `render()`, `appendSeriesPath`, the `Path2D` cache, the >128-series batching, and every helper used only by them; keep `renderPaths()`, `beginFrame`, chrome drawing, `ticks`/`formatTicks`/`gutterWidth`, `lastLayout`
 - Modify: `frontend/src/render/canvas-renderer.test.ts` — delete `render()` cases; keep `renderPaths` + chrome + tick cases
 - Modify: `frontend/src/ui/panel.ts` — remove any residual `render()` references
@@ -387,6 +449,7 @@ where `request` packages exactly what the old call consumed (`response`, `ranges
 ### Task 8: E2E + bench on SwiftShader WebGPU
 
 **Files:**
+
 - Modify: `frontend/playwright.config.ts` (launch args for all projects)
 - Create: `frontend/tests/e2e/time-panel-gpu.spec.ts`
 - Modify: `frontend/tests/bench/bench.spec.ts` only if its assertions reference canvas 2D internals (read it first; floors stay as-is)
@@ -415,6 +478,7 @@ args: [
 ### Task 9: ADR, docs, version bump
 
 **Files:**
+
 - Create: `docs/adr/0039-chartgpu-time-series-renderer.md`
 - Modify: `docs/adr/README.md`, `README.md`, `docs/implementation-roadmap.md`
 - Modify: `AGENTS.md` + `CLAUDE.md` only if the render-path wording needs it (tile-pyramid invariants are unchanged — they stay)

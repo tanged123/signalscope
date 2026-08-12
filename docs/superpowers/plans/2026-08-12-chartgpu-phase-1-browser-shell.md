@@ -25,42 +25,42 @@
 
 Every Tauri command in `shell/src-tauri/src/lib.rs` (registered at lines 1897–1932) becomes `POST /api/<name>`. Request body: the same `Envelope<Req>` JSON the frontend already builds with `seal(...)`; commands whose Tauri form takes no `request` accept an empty body. Response: `Envelope<Res>` JSON, or `400` with a plain-text error string (the Tauri error type is already `String`).
 
-| Endpoint | Request → Response payload |
-|---|---|
-| `pick_sources` | ∅ → `Vec<String>` (rfd dialog) |
-| `pick_source_folder` | ∅ → `Option<String>` (rfd) |
-| `scan_sources` | `ScanSourcesRequest` → `ScanSourcesResponse` |
-| `ingest_batch` | `IngestBatchRequest` → `BatchJob` |
-| `batch_status` | `BatchJob` → `BatchStatus` |
-| `batch_detail` | `BatchDetailRequest` → `BatchDetail` |
-| `cancel_batch` | `BatchJob` → `()` |
-| `release_batch` | `BatchJob` → `()` |
-| `list_formats` | ∅ → `Vec<FormatDescriptor>` |
-| `introspect_container` | `IntrospectRequest` → `ContainerOutline` (spawn_blocking) |
-| `save_recipe` | `SaveRecipeRequest` → `SaveRecipeResponse` |
-| `restore_sources` | `RestoreSourcesRequest` → `BatchJob` |
-| `restore_reconcile` | `RestoreReconcileRequest` → `RestoreReconcileResponse` |
-| `list_sources` | ∅ → `Vec<SourceSummary>` |
-| `list_signals` | ∅ → `Vec<SignalSummary>` |
-| `query_tiles_bin` | `TileRequest` → **binary** `application/octet-stream` |
-| `query_samples` | `SampleRequest` → `SampleResponse` |
-| `create_derived` | `DerivedRequest` → `SignalSummary` |
-| `create_derived_bundle` | `CreateDerivedBundleRequest` → `DerivedBundleResponse` |
-| `remove_derived_bundle` | `RemoveDerivedBundleRequest` → `()` |
-| `remove_signal` | `RemoveSignalRequest` → `()` |
-| `save_session` | `SaveSessionRequest` → `String` |
-| `load_session` | `LoadSessionRequest` → `LoadedSession` |
-| `reset_session` | ∅ → `LoadedSession` |
-| `pick_session_path` | `PickSessionRequest` → `Option<String>` (rfd) |
-| `export_estimate` | `ExportEstimateRequest` → `ExportEstimate` |
-| `export_write` | `ExportWriteRequest` → `Option<String>` (rfd save dialog inside) |
-| `save_export_file` | `SaveExportFileRequest` → `Option<String>` (rfd) |
-| `pick_export_directory` | ∅ → `Option<String>` (rfd) |
-| `pick_recipe_directory` | ∅ → `Option<String>` (rfd) |
-| `effective_recipe_directory` | ∅ → `String` |
-| `save_export_file_to_directory` | `SaveExportFileToDirectoryRequest` → `String` |
-| `load_preferences` | ∅ → `Option<String>` |
-| `save_preferences` | `String` (raw prefs JSON, enveloped) → `()` |
+| Endpoint                        | Request → Response payload                                       |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `pick_sources`                  | ∅ → `Vec<String>` (rfd dialog)                                   |
+| `pick_source_folder`            | ∅ → `Option<String>` (rfd)                                       |
+| `scan_sources`                  | `ScanSourcesRequest` → `ScanSourcesResponse`                     |
+| `ingest_batch`                  | `IngestBatchRequest` → `BatchJob`                                |
+| `batch_status`                  | `BatchJob` → `BatchStatus`                                       |
+| `batch_detail`                  | `BatchDetailRequest` → `BatchDetail`                             |
+| `cancel_batch`                  | `BatchJob` → `()`                                                |
+| `release_batch`                 | `BatchJob` → `()`                                                |
+| `list_formats`                  | ∅ → `Vec<FormatDescriptor>`                                      |
+| `introspect_container`          | `IntrospectRequest` → `ContainerOutline` (spawn_blocking)        |
+| `save_recipe`                   | `SaveRecipeRequest` → `SaveRecipeResponse`                       |
+| `restore_sources`               | `RestoreSourcesRequest` → `BatchJob`                             |
+| `restore_reconcile`             | `RestoreReconcileRequest` → `RestoreReconcileResponse`           |
+| `list_sources`                  | ∅ → `Vec<SourceSummary>`                                         |
+| `list_signals`                  | ∅ → `Vec<SignalSummary>`                                         |
+| `query_tiles_bin`               | `TileRequest` → **binary** `application/octet-stream`            |
+| `query_samples`                 | `SampleRequest` → `SampleResponse`                               |
+| `create_derived`                | `DerivedRequest` → `SignalSummary`                               |
+| `create_derived_bundle`         | `CreateDerivedBundleRequest` → `DerivedBundleResponse`           |
+| `remove_derived_bundle`         | `RemoveDerivedBundleRequest` → `()`                              |
+| `remove_signal`                 | `RemoveSignalRequest` → `()`                                     |
+| `save_session`                  | `SaveSessionRequest` → `String`                                  |
+| `load_session`                  | `LoadSessionRequest` → `LoadedSession`                           |
+| `reset_session`                 | ∅ → `LoadedSession`                                              |
+| `pick_session_path`             | `PickSessionRequest` → `Option<String>` (rfd)                    |
+| `export_estimate`               | `ExportEstimateRequest` → `ExportEstimate`                       |
+| `export_write`                  | `ExportWriteRequest` → `Option<String>` (rfd save dialog inside) |
+| `save_export_file`              | `SaveExportFileRequest` → `Option<String>` (rfd)                 |
+| `pick_export_directory`         | ∅ → `Option<String>` (rfd)                                       |
+| `pick_recipe_directory`         | ∅ → `Option<String>` (rfd)                                       |
+| `effective_recipe_directory`    | ∅ → `String`                                                     |
+| `save_export_file_to_directory` | `SaveExportFileToDirectoryRequest` → `String`                    |
+| `load_preferences`              | ∅ → `Option<String>`                                             |
+| `save_preferences`              | `String` (raw prefs JSON, enveloped) → `()`                      |
 
 Plus new, unauthenticated: `GET /api/health` → `200 "ok"`.
 
@@ -69,6 +69,7 @@ Plus new, unauthenticated: `GET /api/health` → `200 "ok"`.
 ### Task 1: `scope-server` crate skeleton — router, auth, health
 
 **Files:**
+
 - Modify: `Cargo.toml` (workspace members: add `"server/scope-server"`; keep `"shell/src-tauri"` until Task 8)
 - Create: `server/scope-server/Cargo.toml`
 - Create: `server/scope-server/src/main.rs`
@@ -76,6 +77,7 @@ Plus new, unauthenticated: `GET /api/health` → `200 "ok"`.
 - Test: inline `#[cfg(test)]` in `auth.rs` + `server/scope-server/src/lib.rs` (make it a lib+bin crate so tests can build the router)
 
 **Interfaces:**
+
 - Produces: `scope_server::build_router(ctx: AppContext) -> axum::Router`, `scope_server::AppContext`, CLI flags `--port <u16>` (default 8317), `--frontend-dir <path>`, `--data-dir <path>`, `--no-auth`, `--no-open`.
 - Consumes: nothing from earlier tasks.
 
@@ -228,11 +230,13 @@ git commit -m "feat(server): scope-server skeleton with token auth and health"
 ### Task 2: Port host state (`DataState`, `RestoreGate`, `BatchJobs`) into `scope-server`
 
 **Files:**
+
 - Create: `server/scope-server/src/host.rs` (state + setup, moved from `shell/src-tauri/src/lib.rs`)
 - Modify: `server/scope-server/src/lib.rs` (AppContext gains the three states)
 - Test: `server/scope-server/src/host.rs` `#[cfg(test)]`
 
 **Interfaces:**
+
 - Consumes: `shell/src-tauri/src/lib.rs` lines 1835–1896 (`run()` setup) and its `DataState` definition — copy, do not re-derive.
 - Produces: `AppContext { state: Arc<Mutex<DataState>>, gate: Arc<RestoreGate>, jobs: Arc<BatchJobs>, token, data_dir, frontend_dir }` and `AppContext::new(data_dir, token, frontend_dir) -> Self` performing the same setup the Tauri `.setup()` closure performs (`BatchOptions { worker_count, budget, terminal_ttl: Duration::from_secs(300), cache_directory, recipe_directory, provider_registry }`).
 
@@ -263,11 +267,13 @@ async fn context_setup_creates_dirs_and_empty_store() {
 ### Task 3: All JSON command endpoints
 
 **Files:**
+
 - Create: `server/scope-server/src/api.rs`
 - Modify: `server/scope-server/src/lib.rs` (route table)
 - Test: `server/scope-server/src/api.rs` `#[cfg(test)]`
 
 **Interfaces:**
+
 - Consumes: `AppContext` from Task 2; command bodies from `shell/src-tauri/src/lib.rs`.
 - Produces: every non-dialog, non-binary endpoint from the inventory table.
 
@@ -346,10 +352,12 @@ Write them against the real router via `tower::ServiceExt::oneshot` as in Task 1
 ### Task 4: Binary tile endpoint
 
 **Files:**
+
 - Modify: `server/scope-server/src/api.rs`
 - Test: same file
 
 **Interfaces:**
+
 - Produces: `POST /api/query_tiles_bin` → `200`, `content-type: application/octet-stream`, body = exactly the bytes `scope_protocol::tile_binary::encode_tile_response` produced. **No length prefix, no base64, no JSON wrapper** — `frontend/src/app/tile-binary.ts` builds zero-copy typed-array views over the buffer and its alignment math assumes byte 0 is the magic (`0x4254_5353` LE).
 
 - [ ] **Step 1: Failing test**
@@ -375,10 +383,12 @@ async fn tiles_bin_starts_with_magic() {
 ### Task 5: Native dialogs via `rfd` + the seven picker endpoints
 
 **Files:**
+
 - Create: `server/scope-server/src/dialogs.rs`
 - Modify: `server/scope-server/src/api.rs`, `lib.rs`
 
 **Interfaces:**
+
 - Produces: `pick_sources`, `pick_source_folder`, `pick_session_path`, `pick_export_directory`, `pick_recipe_directory`, `export_write`, `save_export_file` — each calling `rfd::FileDialog` (sync API) inside `spawn_blocking`, mirroring the filters/titles the Tauri shell passes to `tauri_plugin_dialog`. `rfd` with default features uses the XDG desktop portal on Linux — no GTK dependency; the dialog appears on the user's desktop because the server runs there.
 - A `DialogProvider` trait with a `Native` impl and a `Scripted` test impl (returns canned paths) so endpoint tests never open real dialogs:
 
@@ -401,10 +411,12 @@ pub trait DialogProvider: Send + Sync + 'static {
 ### Task 6: Static frontend serving + launch flow
 
 **Files:**
+
 - Modify: `server/scope-server/src/lib.rs`, `src/auth.rs`, `src/main.rs`
 - Test: `lib.rs` `#[cfg(test)]`
 
 **Interfaces:**
+
 - Produces: authenticated static serving of `--frontend-dir` (default: `frontend/dist` if it exists relative to CWD, else exe-adjacent `frontend/`) via `tower_http::services::ServeDir` with `index.html` fallback; launch = print URL + `open::that` unless `--no-open`.
 
 - [ ] **Step 1:** Failing test: with `frontend_dir` pointing at a tempdir containing `index.html` ("hello"), an authenticated `GET /` returns the file; unauthenticated returns 401.
@@ -424,33 +436,41 @@ pub trait DialogProvider: Send + Sync + 'static {
 ### Task 7: Frontend `HttpPlane` + async plane selection
 
 **Files:**
+
 - Modify: `frontend/src/app/data-plane.ts`
 - Modify: `frontend/src/main.ts`
 - Modify: `frontend/vite.config.ts` (dev proxy)
 - Test: `frontend/src/app/data-plane.test.ts`
 
 **Interfaces:**
+
 - Produces: `export class HttpPlane implements DataPlane` (`sourceLabel = "native data plane"` — keep the label; UI copy must not change) and `export async function selectDataPlane(): Promise<DataPlane>`.
 - Consumes: `seal`/`open` from `frontend/src/app/envelope.ts`; `decodeTileResponse` from `tile-binary.ts`.
 
 - [ ] **Step 1: Write failing tests** in `data-plane.test.ts` (replace the 14 `TauriPlane` test blocks; keep every `BakedPlane` test untouched). Test via injected fetch:
 
 ```ts
-function fetchStub(handler: (url: string, init: RequestInit) => Response | Promise<Response>) {
+function fetchStub(
+  handler: (url: string, init: RequestInit) => Response | Promise<Response>,
+) {
   return handler as unknown as typeof fetch;
 }
 
 it("posts sealed envelopes and opens responses", async () => {
-  const plane = new HttpPlane(fetchStub(async (url, init) => {
-    expect(url).toBe("/api/list_signals");
-    expect(init.method).toBe("POST");
-    return new Response(JSON.stringify(seal([])), { status: 200 });
-  }));
+  const plane = new HttpPlane(
+    fetchStub(async (url, init) => {
+      expect(url).toBe("/api/list_signals");
+      expect(init.method).toBe("POST");
+      return new Response(JSON.stringify(seal([])), { status: 200 });
+    }),
+  );
   expect(await plane.listSignals()).toEqual([]);
 });
 
 it("throws the server's error text", async () => {
-  const plane = new HttpPlane(fetchStub(async () => new Response("boom", { status: 400 })));
+  const plane = new HttpPlane(
+    fetchStub(async () => new Response("boom", { status: 400 })),
+  );
   await expect(plane.listSignals()).rejects.toThrow("boom");
 });
 
@@ -470,7 +490,9 @@ it("querySamples maps null back to NaN", async () => {
 ```ts
 export class HttpPlane implements DataPlane {
   readonly sourceLabel = "native data plane";
-  constructor(private readonly fetchFn: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(
+    private readonly fetchFn: typeof fetch = globalThis.fetch.bind(globalThis),
+  ) {}
 
   private async post<Req, Res>(command: string, payload?: Req): Promise<Res> {
     const response = await this.fetchFn(`/api/${command}`, {
@@ -482,7 +504,10 @@ export class HttpPlane implements DataPlane {
     return open<Res>((await response.json()) as Envelope<Res>);
   }
 
-  private async postBinary<Req>(command: string, payload: Req): Promise<ArrayBuffer> {
+  private async postBinary<Req>(
+    command: string,
+    payload: Req,
+  ): Promise<ArrayBuffer> {
     const response = await this.fetchFn(`/api/${command}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -493,7 +518,10 @@ export class HttpPlane implements DataPlane {
   }
 
   async queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
-    return decodeTileResponse(await this.postBinary("query_tiles_bin", request), request.request_id);
+    return decodeTileResponse(
+      await this.postBinary("query_tiles_bin", request),
+      request.request_id,
+    );
   }
   // querySamples: post + the same null->NaN post-processing TauriPlane.querySamples does today (copy it).
   // listSignals/listSources: this.post("list_signals") / this.post("list_sources").
@@ -509,15 +537,17 @@ Selection (replaces the sync `selectDataPlane`):
 ```ts
 export async function selectDataPlane(): Promise<DataPlane> {
   if (document.getElementById("signalscope-baked-data") !== null) {
-    return BakedPlane.fromDocument();       // snapshots always win
+    return BakedPlane.fromDocument(); // snapshots always win
   }
   try {
-    const health = await fetch("/api/health", { signal: AbortSignal.timeout(1500) });
+    const health = await fetch("/api/health", {
+      signal: AbortSignal.timeout(1500),
+    });
     if (health.ok) return new HttpPlane();
   } catch {
     // no live host — fall through to the demo plane
   }
-  return BakedPlane.fromDocument();          // demo manifest fallback (run.sh web, e2e)
+  return BakedPlane.fromDocument(); // demo manifest fallback (run.sh web, e2e)
 }
 ```
 
@@ -539,6 +569,7 @@ server: { strictPort: true, proxy: { "/api": "http://127.0.0.1:8317" } },
 ### Task 8: Remove drag-drop forwarding + delete the Tauri shell
 
 **Files:**
+
 - Modify: `frontend/src/app/data-plane.ts` (remove `IngestPort.onDragDrop`, `DragDropForward` usage)
 - Modify: `frontend/src/ui/app-shell.ts` (remove the subscription at `mount()` ~line 575 and the `onDragDrop` handler ~line 1748)
 - Modify/Delete: `frontend/src/app/drop.ts` + `drop.test.ts` (delete `classifyDrop`/`expandDropPaths` if `rg -n "classifyDrop|expandDropPaths" frontend/src` shows no remaining callers — the intra-app signal-binding drag is DOM-based and untouched)
@@ -552,6 +583,7 @@ server: { strictPort: true, proxy: { "/api": "http://127.0.0.1:8317" } },
 - Modify: `flake.nix` (remove `cargo-tauri` and the `linuxTauriPackages` list — **keep `chromium`** and the Playwright env exports)
 
 **Interfaces:**
+
 - Consumes: Task 7 (HttpPlane exists, so deleting TauriPlane leaves two planes).
 - Produces: a repo with zero Tauri references outside docs history.
 
@@ -574,6 +606,7 @@ Expected: zero hits outside this plan/spec. `Cargo.lock` cleans itself on the ne
 ### Task 9: Scripts and CI surgery
 
 **Files:**
+
 - Modify: `scripts/run.sh` — modes become: `web` (unchanged: vite only, demo plane), `dev` (new: start `cargo run -p scope-server -- --no-auth --no-open` in the background, then vite with the `/api` proxy; trap EXIT to kill the server), `app` (new default: `./scripts/build.sh web` if `frontend/dist` missing, then `cargo run --release -p scope-server`)
 - Modify: `scripts/build.sh` — `native` mode replaced by `app`: `pnpm build` + `cargo build --release -p scope-server` + stage `build/app/` containing the binary and `frontend/dist/` (help text updated); delete `appimage`/`windows` modes
 - Delete: `scripts/build-appimage.sh`, `scripts/setup-appimage.sh`, `scripts/build-windows.sh`
@@ -593,6 +626,7 @@ Expected: zero hits outside this plan/spec. `Cargo.lock` cleans itself on the ne
 ### Task 10: Live-plane end-to-end proof
 
 **Files:**
+
 - Create: `scripts/server-smoke.sh`
 - Create: `frontend/tests/e2e/live-plane.spec.ts`
 - Modify: `scripts/test.sh` (append server smoke to the `e2e` mode)
@@ -624,6 +658,7 @@ Derive `$PROTO` from `protocol/schema/scope-protocol.json` with `node -e`. Kill 
 ### Task 11: ADR, docs, version bump
 
 **Files:**
+
 - Create: `docs/adr/0038-browser-only-host.md`
 - Modify: `docs/adr/README.md` (index), `README.md` (repo tree + run instructions), `AGENTS.md` (the 6 Tauri mentions become scope-server equivalents; the "future local HTTP plane" note becomes present tense), `docs/implementation-roadmap.md`
 - Modify: version manifests via script
