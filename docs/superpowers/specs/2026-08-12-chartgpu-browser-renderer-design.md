@@ -121,7 +121,7 @@ budget, vendor ChartGPU and add `setSeriesData` only — nothing else.
 
 - **Phase 0 — spike gate (throwaway, no production code).** Stock ChartGPU
   at the pinned rev, 1k series × ~16k-point columns in one chart in the
-  dictated Chromium. Pass/fail numbers written down *before* running:
+  dictated Chromium. Pass/fail numbers written down _before_ running:
   first-frame time, sustained pan/zoom FPS, full 1k-series `setOption`
   refeed latency, GPU/CPU memory, hairline appearance (>500k total segments
   forces 1-px lines), and an extrema-fidelity check (injected 1-sample
@@ -152,6 +152,77 @@ budget, vendor ChartGPU and add `setSeriesData` only — nothing else.
   schemas, pyramid gap/extrema invariants, transactional ingest,
   self-contained snapshots.
 
+## Amendments (2026-08-12, post-exploration, pre-plan)
+
+Codebase exploration (DataPlane/protocol, build/CI, render path) corrected
+six assumptions. These amendments override the corresponding text above.
+
+1. **HTTP, not WebSocket.** The only host→frontend push channel today is
+   Tauri drag-drop forwarding; ingest progress is polled. The browser
+   backend is therefore a plain HTTP POST RPC plane (`fetch` per command,
+   JSON envelopes; `query_tiles_bin` returns `application/octet-stream`
+   whose byte 0 is the tile-binary magic, which is exactly what
+   `decodeTileResponse` requires). No WebSocket, no framing, no
+   request-correlation machinery.
+2. **No new protocol message.** `query_tiles_bin` +
+   `Pyramid::query_with_target` already return budget-scaled,
+   extrema-preserving per-series columns for an arbitrary window. A
+   full-extent LOD column is a tile query whose window is the full time
+   extent. Phase 2 needs no protocol bump; `query_columns_bin` is dropped.
+   Bins carry first/min/max/last (M4), which converts directly to line
+   points in the same vertex order `plot-hit.ts` already walks.
+3. **Ensemble bands do not exist.** ADR 0028 was superseded (bundled
+   series highlights); the band renderer was already removed. Bundles
+   plot as ordinary member strokes with emphasis. The `band`-series task
+   is dropped; instead the emphasis/ghost contract (emphasis `alpha
+   +0.4` / `width +0.4`, non-emphasized dim to `0.25`, ghosts in `fg4`)
+   must be reproduced via per-series ChartGPU `lineStyle`.
+4. **XY / FFT / histogram panels stay, on Canvas2D.** They exist on
+   `main`, render via the samples path (`renderPaths`), and deleting them
+   would force a session-schema bump. This redo replaces only the
+   **time-series stroke path**. `CanvasRenderer` survives for the other
+   modes; ChartGPU owns axes/grid **for time panels only**. Mode switches
+   toggle visibility between the ChartGPU host and the 2D plot canvas.
+5. **Picking keeps `plot-hit.ts`.** The frontend still holds the decoded
+   bin columns, and the M4 feed order matches `plot-hit`'s vertex walk,
+   so the existing hit adapter stays correct. ChartGPU `hitTest` is not
+   used.
+6. **Window drag-drop is dropped in the browser shell.** HTML5 drop
+   yields file contents, not host paths, and the entire ingest/restore
+   pipeline is path-based (durable source identity, ADR 0027). Import
+   flows use native dialogs opened by `scope-server` via `rfd` (the
+   server runs on the user's desktop). Recorded in the browser-host ADR
+   as a deliberate regression; a content-upload path can return later.
+7. **ChartGPU is vendored as pinned source, not an npm/git dependency.**
+   Upstream ships no `dist/` and no `prepare` script, so a pnpm git dep
+   arrives unbuilt; its WGSL imports are Vite-native `?raw`. A
+   `./scripts/vendor-chartgpu.sh` wrapper copies pristine `src/` at the
+   pinned rev into `frontend/vendor/chartgpu/`; a Vite alias resolves the
+   import; our `tsc` project excludes it (a hand-written `.d.ts` types
+   the surface we use). No `package.json` dependency entry at all, so
+   `check-runtime-deps.mjs` stays untouched.
+8. **PlotLayout is the preserved contract.** Whoever renders a panel must
+   publish a `PlotLayout` (plot rect + ranges); for time panels the
+   ChartGPU host derives it deterministically from its configured `grid`
+   margins. Gestures drive `setZoomRange` (X) and axes-only `setOption`
+   (Y explicit min/max) — both documented O(1) hot paths.
+
+9. **Data flow: ChartGPU replaces the stroke sink, not the tile
+   pipeline.** `PanelView.renderData` already receives budget-scaled,
+   padded-window, extrema-preserving tile slices from the existing
+   `TileWindowCache` pipeline, and pans inside the padded window are
+   cache hits. Phase 2 therefore feeds ChartGPU whatever `renderData`
+   delivers (the windowed response), instead of a separate full-extent
+   feed: view ranges move via explicit axes-only `setOption` every
+   gesture frame (O(1)); series data refeeds only when the tile pipeline
+   would have re-rendered anyway (window-cache miss / new tiles). This
+   preserves today's progressive zoom refinement through pyramid levels,
+   which makes Phase 3 refinement largely moot. The Phase 0 spike gates
+   the refeed cost (1k series per cache miss) and the per-frame
+   axes-only `setOption` cost. `sampling: 'none'`, no `dataZoom` —
+   explicit `min`/`max` on both axes so panning past the data edge keeps
+   working.
+
 ## Testing
 
 - Phase 0 spike numbers become bench floors for the `mc1000` tier.
@@ -164,11 +235,11 @@ budget, vendor ChartGPU and add `setSeriesData` only — nothing else.
 
 ## Risks
 
-| Risk | Mitigation |
-| --- | --- |
-| 1k-series `setOption` refeed cost | Refeeds are rare by design; spike measures the worst case; fork trigger scoped to `setSeriesData` |
-| ChartGPU decimation drops narrow transients | Columns are pyramid-extrema-preserving; spike includes an injected-transient check; `sampling` mode chosen from spike results |
-| Hairline forcing above 500k segments | Accept (reasonable at 1k series) or `performance.lod: 'strict'` after spike |
-| No upstream `dist/`; building from source | Nix derivation off the pinned master rev (also the reason for pinning master) |
-| ChartGPU DOM overlays / z-order fights | Overlay canvas above everything with pointer events; tooltip/legend/slider disabled |
-| Browser-only feature regressions (drag-drop, menus) | Phase 1 parity checklist against ADR 0020–0024 behaviors; host owns FS |
+| Risk                                                | Mitigation                                                                                                                    |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 1k-series `setOption` refeed cost                   | Refeeds are rare by design; spike measures the worst case; fork trigger scoped to `setSeriesData`                             |
+| ChartGPU decimation drops narrow transients         | Columns are pyramid-extrema-preserving; spike includes an injected-transient check; `sampling` mode chosen from spike results |
+| Hairline forcing above 500k segments                | Accept (reasonable at 1k series) or `performance.lod: 'strict'` after spike                                                   |
+| No upstream `dist/`; building from source           | Nix derivation off the pinned master rev (also the reason for pinning master)                                                 |
+| ChartGPU DOM overlays / z-order fights              | Overlay canvas above everything with pointer events; tooltip/legend/slider disabled                                           |
+| Browser-only feature regressions (drag-drop, menus) | Phase 1 parity checklist against ADR 0020–0024 behaviors; host owns FS                                                        |
