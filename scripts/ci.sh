@@ -8,7 +8,7 @@ mode="${1:-all}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|bench|build|appimage|windows]
+Usage: ./scripts/ci.sh [all|flake|format|quality|rust|frontend|e2e|bench|build]
 
 Each named mode matches the GitHub Actions job with the same name:
 
@@ -22,9 +22,7 @@ Each named mode matches the GitHub Actions job with the same name:
             snapshot artifact checks.
   e2e       Playwright desktop smoke tests.
   bench     Full benchmark suite; writes build/bench/report.json.
-  build     Native Tauri bundles via ./scripts/build.sh native.
-  appimage  Ubuntu-only AppImage build; runs outside the Nix shell.
-  windows   Windows-only NSIS installer build; runs outside the Nix shell.
+  build     Browser host and frontend via ./scripts/build.sh app.
 
 `all` runs format, quality, rust, frontend, and e2e sequentially with Cargo
 capped at two jobs by default — the complete local quality gate.
@@ -39,12 +37,6 @@ case "$mode" in
 flake)
   exec nix flake check
   ;;
-appimage)
-  exec "$signalscope_scripts_dir/build-appimage.sh"
-  ;;
-windows)
-  exec "$signalscope_scripts_dir/build-windows.sh"
-  ;;
 esac
 
 ensure_dev_shell "$@"
@@ -57,6 +49,7 @@ check_e2e() {
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
   pnpm e2e
+  "$signalscope_scripts_dir/server-smoke.sh"
 }
 
 case "$mode" in
@@ -88,7 +81,7 @@ bench)
   "$signalscope_scripts_dir/test.sh" bench all
   ;;
 build)
-  exec "$signalscope_scripts_dir/build.sh" native
+  exec "$signalscope_scripts_dir/build.sh" app
   ;;
 *)
   echo "Unknown CI mode: $mode" >&2

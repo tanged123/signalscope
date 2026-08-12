@@ -48,6 +48,7 @@ export class PlotInteractionController {
   private policy: PlotInteractionPolicy | null = null;
   private box: InteractionBox | null = null;
   private dragging = false;
+  private wheelEndTimer: number | null = null;
 
   constructor(
     private readonly overlay: HTMLCanvasElement,
@@ -64,6 +65,13 @@ export class PlotInteractionController {
     return this.dragging;
   }
 
+  dispose(): void {
+    if (this.wheelEndTimer !== null) {
+      window.clearTimeout(this.wheelEndTimer);
+      this.wheelEndTimer = null;
+    }
+  }
+
   private bind(): void {
     this.overlay.addEventListener(
       "wheel",
@@ -77,6 +85,14 @@ export class PlotInteractionController {
         });
         if (!axes.x && !axes.y) return;
         event.preventDefault();
+        this.host.setGesture("wheel: zoom");
+        if (this.wheelEndTimer !== null) {
+          window.clearTimeout(this.wheelEndTimer);
+        }
+        this.wheelEndTimer = window.setTimeout(() => {
+          this.wheelEndTimer = null;
+          this.host.setGesture(null);
+        }, 1000);
         const factor = wheelZoomFactor(event.deltaY);
         if (axes.y) {
           const pivotY = invertY(

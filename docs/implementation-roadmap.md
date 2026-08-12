@@ -105,6 +105,14 @@ phase.
 
 The plotting performance overhaul ([implementation plan](superpowers/plans/2026-08-04-plotting-performance-overhaul.md)) now reports a 6.0 s mc1000 first plot for 1,000 inputs; core tile p95 is 14.2 ms cold and 14.6 ms warm. Browser frame p95 remains 66.5 ms and the longest stall 2.1 s on the benchmark runner, so both still exceed their 33 ms and 250 ms budgets.
 
+The August 2026 ChartGPU work replaced the Tauri shell with the loopback
+`scope-server` HTTP host ([ADR 0038](adr/0038-browser-only-host.md)) and moved
+time-series rendering to a pinned, vendored WebGPU renderer while retaining
+Canvas2D for XY, FFT, and histogram modes
+([ADR 0039](adr/0039-chartgpu-time-series-renderer.md)). The Phase 0 spike
+measured a 470 ms first frame, 8 ms frame p95, and 33 ms full-thousand-series
+refeed; PNG capture uses the same-frame composite recipe proven by the spike.
+
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18
 migrates explicit mapped references before deleting the map

@@ -47,8 +47,7 @@ version_root="$test_root/version"
 mkdir -p \
   "$version_root/core" \
   "$version_root/frontend/src/ui" \
-  "$version_root/scripts" \
-  "$version_root/shell/src-tauri"
+  "$version_root/scripts"
 cp "$script_dir/version.mjs" "$version_root/scripts/version.mjs"
 cat >"$version_root/Cargo.toml" <<'EOF'
 [workspace]
@@ -70,7 +69,6 @@ name = "core"
 version = "1.2.3"
 EOF
 printf '{"version":"1.2.3"}\n' >"$version_root/frontend/package.json"
-printf '{"version":"1.2.3"}\n' >"$version_root/shell/src-tauri/tauri.conf.json"
 printf 'showModeHelp("SignalScope 1.2.3")\n' >"$version_root/frontend/src/ui/app-shell.ts"
 cat >"$version_root/README.md" <<'EOF'
 [![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.2.2)](https://tanged123.github.io/signalscope/demo.html)
@@ -145,23 +143,11 @@ if grep -q "unbound variable" "$failed_push_output"; then
   failures=$((failures + 1))
 fi
 
-windows_asset_dir="$test_root/windows-assets"
-mkdir -p "$windows_asset_dir"
-: >"$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe"
-: >"$windows_asset_dir/signalscope-shell.exe"
-listed="$("$script_dir/release.sh" assets "$windows_asset_dir" | tr -d '\0')"
-if [ "$listed" != "$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe" ]; then
-  printf 'release assets must list the NSIS installer and nothing else, got: %s\n' "$listed" >&2
-  failures=$((failures + 1))
-fi
-
 # `publish` forwards whatever assets() discovers to `gh release create`. Stub gh
 # so that hand-off is covered without a token or network access.
 publish_dir="$test_root/publish-assets"
 mkdir -p "$publish_dir" "$stub_dir"
 : >"$publish_dir/signalscope_1.2.3_amd64.deb"
-: >"$publish_dir/SignalScope_1.2.3_x64-setup.exe"
-: >"$publish_dir/signalscope-shell.exe"
 : >"$publish_dir/latest.json"
 
 cat >"$stub_dir/gh" <<'STUB'
@@ -174,16 +160,10 @@ PATH="$stub_dir:$PATH" GH_TOKEN=test GH_STUB_ARGS="$test_root/gh-args" \
   "$script_dir/release.sh" publish v1.2.3 "$publish_dir"
 
 published="$(sed -n "s|^$publish_dir/||p" "$test_root/gh-args" | LC_ALL=C sort | tr '\n' ' ')"
-if [ "$published" != "SignalScope_1.2.3_x64-setup.exe signalscope_1.2.3_amd64.deb " ]; then
+if [ "$published" != "signalscope_1.2.3_amd64.deb " ]; then
   printf 'publish must forward only publishable assets, got: %s\n' "$published" >&2
   failures=$((failures + 1))
 fi
-
-# The Windows installer script must refuse to run anywhere but Windows.
-case "$(uname -s)" in
-MINGW* | MSYS* | CYGWIN*) ;;
-*) expect_status 1 "$script_dir/build-windows.sh" ;;
-esac
 
 if [ "$failures" -ne 0 ]; then
   exit 1

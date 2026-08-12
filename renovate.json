@@ -28,16 +28,6 @@
     {
       "matchManagers": ["nix"],
       "groupName": "nix flake inputs"
-    },
-    {
-      "matchPackageNames": [
-        "tauri",
-        "tauri-build",
-        "cargo-tauri",
-        "@tauri-apps/**"
-      ],
-      "matchUpdateTypes": ["major"],
-      "dependencyDashboardApproval": true
     }
   ]
 }

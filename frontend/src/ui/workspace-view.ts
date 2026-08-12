@@ -15,6 +15,7 @@ import {
   type PanelCallbacks,
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
+import type { GpuContext } from "../render/gpu-context";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -39,14 +40,23 @@ export class WorkspaceView {
     private readonly root: HTMLElement,
     private readonly model: WorkspaceModel,
     private readonly callbacks: WorkspaceCallbacks,
+    private gpu: GpuContext | null = null,
   ) {
     this.bindWorkspaceDrop();
+  }
+
+  setGpu(gpu: GpuContext, hasSignals: boolean): void {
+    if (this.gpu === gpu) return;
+    this.gpu = gpu;
+    for (const view of this.views.values()) view.setGpu(gpu);
+    if (this.views.size === 0) this.sync(hasSignals);
   }
 
   sync(hasSignals: boolean): void {
     const alive = new Set(this.model.panels().map((panel) => panel.id));
     for (const [id, view] of this.views) {
       if (!alive.has(id)) {
+        view.dispose();
         view.element.remove();
         this.views.delete(id);
       }
@@ -174,10 +184,10 @@ export class WorkspaceView {
     return this.views.get(id)?.plotWidth() ?? 0;
   }
 
-  panelCanvases(
+  async capturePanel(
     id: string,
-  ): { plot: HTMLCanvasElement; overlay: HTMLCanvasElement } | null {
-    return this.views.get(id)?.canvases() ?? null;
+  ): Promise<{ plot: HTMLCanvasElement; overlay: HTMLCanvasElement } | null> {
+    return (await this.views.get(id)?.capturePlot()) ?? null;
   }
 
   panelRect(id: string): DOMRect | null {
@@ -187,7 +197,7 @@ export class WorkspaceView {
   private view(id: string): PanelView {
     let view = this.views.get(id);
     if (view === undefined) {
-      view = new PanelView(id, this.callbacks);
+      view = new PanelView(id, this.callbacks, this.gpu);
       view.setCursorMode(this.cursorMode);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);

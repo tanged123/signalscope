@@ -1,6 +1,17 @@
 import { defineConfig } from "vitest/config";
+import { resolve } from "node:path";
+
+const frontendRoot = resolve(import.meta.dirname);
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@chartgpu/chartgpu": resolve(
+        frontendRoot,
+        "vendor/chartgpu/src/index.ts",
+      ),
+    },
+  },
   test: {
     coverage: {
       exclude: ["src/**/*.test.ts", "src/generated/**", "tests/**"],

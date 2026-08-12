@@ -101,9 +101,8 @@ function isApplePlatform(): boolean {
   const nav = globalThis.navigator as
     | (Navigator & { userAgentData?: { platform?: string } })
     | undefined;
-  // `userAgentData` is Chromium-only; the Tauri shell runs WebKit on macOS, so
-  // the user-agent string is the portable signal. `navigator.platform` is
-  // deprecated and unavailable here.
+  // `userAgentData` is Chromium-only, so the user-agent string is the portable
+  // fallback. `navigator.platform` is deprecated and unavailable here.
   const platform = nav?.userAgentData?.platform ?? nav?.userAgent ?? "";
   return /mac|iphone|ipad|ipod/i.test(platform);
 }

@@ -41,6 +41,9 @@ write)
   check_root="$(mktemp -d)"
   trap 'rm -rf -- "$check_root"' EXIT
   git ls-files --cached --others --exclude-standard -z |
+    while IFS= read -r -d '' path; do
+      [ -e "$path" ] && printf '%s\0' "$path"
+    done |
     tar --null --files-from=- -cf - |
     tar -xf - -C "$check_root"
   treefmt -C "$check_root" --walk filesystem --fail-on-change

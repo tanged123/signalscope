@@ -1,8 +1,8 @@
-import { expect, test } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 
 test.describe("desktop plot interactions", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
+    await gotoApp(page);
     await expect(page.locator(".panel").first()).toBeVisible();
   });
 

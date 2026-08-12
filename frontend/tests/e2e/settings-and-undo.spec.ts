@@ -1,7 +1,7 @@
-import { expect, test } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 
 test("ctrl+z undoes and ctrl+y redoes a panel split", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await expect(page.locator(".panel")).toHaveCount(1);
 
   await page.keyboard.press("n");
@@ -23,7 +23,7 @@ test("ctrl+z undoes and ctrl+y redoes a panel split", async ({ page }) => {
 test("ctrl+z in a text field edits text, not the workspace", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("n");
   await expect(page.locator(".panel")).toHaveCount(2);
 
@@ -35,7 +35,7 @@ test("ctrl+z in a text field edits text, not the workspace", async ({
 });
 
 test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("Control+Comma");
   const palette = page.locator(".palette");
   await expect(palette).toBeVisible();
@@ -63,7 +63,7 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
 });
 
 test("undo restores chrome and preserves panel focus", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("n");
   const panels = page.locator(".panel");
   await panels.nth(0).click();
@@ -81,7 +81,7 @@ test("undo restores chrome and preserves panel focus", async ({ page }) => {
 });
 
 test("a wheel burst is one undo step", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const readout = page.locator(".window-readout");
   const before = await readout.textContent();
   const overlay = page.locator(".overlay-canvas").first();
@@ -98,7 +98,7 @@ test("a wheel burst is one undo step", async ({ page }) => {
 });
 
 test("ctrl+= scales plot text and ctrl+0 resets", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("Control+Equal");
   await page.keyboard.press("Control+Equal");
 

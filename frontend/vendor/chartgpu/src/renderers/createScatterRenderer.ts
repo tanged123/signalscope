@@ -1,0 +1,930 @@
+import scatterWgsl from '../shaders/scatter.wgsl?raw';
+import type { ResolvedScatterSeriesConfig } from '../config/OptionResolver';
+import type { CartesianSeriesData } from '../config/types';
+import type { ContinuousScale } from '../utils/scales';
+import { computeClipAffineFromContinuousScale, resolveLogProjection } from './packedXAffine';
+import { parseCssColorToRgba01 } from '../utils/colors';
+import type { GridArea } from './createGridRenderer';
+import { createRenderPipeline, createUniformBuffer, writeUniformBuffer } from './rendererUtils';
+import { getPointCount, getX, getY, getSize, hasAnyPerPointSize } from '../data/cartesianData';
+import type { PipelineCache } from '../core/PipelineCache';
+import { resolveUploadPolicy } from '../data/seriesResidency';
+import { isYOnlyRewriteAgainstXStaging, packYOnlyChannel } from '../data/seriesRewriteDetect';
+import { resolveScatterDrawPolicy } from './scatterDrawPolicy';
+
+export interface ScatterRenderer {
+  prepare(
+    seriesConfig: ResolvedScatterSeriesConfig,
+    data: CartesianSeriesData,
+    xScale: ContinuousScale,
+    yScale: ContinuousScale,
+    gridArea?: GridArea,
+    /**
+     * When true (`performance.lod: 'strict'`), disable dense radius compaction
+     * and honor configured marker size.
+     */
+    forceStandardDraw?: boolean,
+    /**
+     * When false, fully-compact dense still shrinks radius but draws on the main
+     * MSAA pass (preserves z-order under standard main-pass line strokes).
+     * Default true. Coordinator sets false when any visible line series is present.
+     */
+    allowPostResolveDense?: boolean
+  ): void;
+  /**
+   * Drop cached instance geometry so the next `prepare` re-packs.
+   * Required when values mutate under a stable data array reference
+   * (update-transition interpolation — same rule as bar/area).
+   */
+  invalidateGeometry(): void;
+  /**
+   * Draw into the **main** MSAA pass. Dense-compact series with main sampleCount 4
+   * are deferred ({@link isDenseDeferred}) and must be drawn with {@link renderDense}
+   * into a sampleCount:1 load-pass on the resolved main texture.
+   */
+  render(passEncoder: GPURenderPassEncoder): void;
+  /**
+   * True when the last prepare selected **fully compact** denseCompact and deferred
+   * draws out of the 4× MSAA main pass (group 2 ≥250k fill cliff). Main-pass
+   * `render` is a no-op; draw via {@link renderDense}. Partial blends stay on main.
+   */
+  isDenseDeferred(): boolean;
+  /**
+   * Draw fully-compact dense const-radius markers into a **single-sample** pass
+   * (sampleCount 1) on the resolved main color. No-op when the last prepare did
+   * not defer (partial blend, sampleCount 1 main, forceStandard, or lines present).
+   */
+  renderDense(passEncoder: GPURenderPassEncoder): void;
+  dispose(): void;
+}
+
+export interface ScatterRendererOptions {
+  /**
+   * Must match the canvas context format used for the render pass color attachment.
+   * Usually this is `gpuContext.preferredFormat`.
+   *
+   * Defaults to `'bgra8unorm'` for backward compatibility.
+   */
+  readonly targetFormat?: GPUTextureFormat;
+  /**
+   * Multisample count for the render pipeline.
+   *
+   * Must match the render pass color attachment sampleCount.
+   * Defaults to 1 (no MSAA).
+   */
+  readonly sampleCount?: number;
+  /**
+   * Optional shared cache for shader modules + render pipelines.
+   */
+  readonly pipelineCache?: PipelineCache;
+}
+
+type Rgba = readonly [r: number, g: number, b: number, a: number];
+type DataPointLike = { readonly x: number; readonly y: number };
+
+const DEFAULT_TARGET_FORMAT: GPUTextureFormat = 'bgra8unorm';
+const DEFAULT_SCATTER_RADIUS_CSS_PX = 4;
+/** Per-instance radius layout: center.xy, radiusPx, pad */
+const INSTANCE_STRIDE_BYTES = 16;
+const INSTANCE_STRIDE_FLOATS = INSTANCE_STRIDE_BYTES / 4;
+/** Constant-radius dual-buffer: separate x and y channels (radius in VS uniform) */
+const CONST_CHANNEL_STRIDE_BYTES = 4;
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+const clampInt = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v | 0));
+
+const parseSeriesColorToRgba01 = (color: string): Rgba => parseCssColorToRgba01(color) ?? ([0, 0, 0, 1] as const);
+
+const nextPow2 = (v: number): number => {
+  if (!Number.isFinite(v) || v <= 0) return 1;
+  const n = Math.ceil(v);
+  return 2 ** Math.ceil(Math.log2(n));
+};
+
+const writeTransformMat4F32 = (out: Float32Array, ax: number, bx: number, ay: number, by: number): void => {
+  // Column-major mat4x4 for: clip = M * vec4(x, y, 0, 1)
+  out[0] = ax;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0; // col0
+  out[4] = 0;
+  out[5] = ay;
+  out[6] = 0;
+  out[7] = 0; // col1
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = 1;
+  out[11] = 0; // col2
+  out[12] = bx;
+  out[13] = by;
+  out[14] = 0;
+  out[15] = 1; // col3
+};
+
+const computePlotScissorDevicePx = (
+  gridArea: GridArea
+): {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+} => {
+  const { canvasWidth, canvasHeight, devicePixelRatio } = gridArea;
+
+  const plotLeftDevice = gridArea.left * devicePixelRatio;
+  const plotRightDevice = canvasWidth - gridArea.right * devicePixelRatio;
+  const plotTopDevice = gridArea.top * devicePixelRatio;
+  const plotBottomDevice = canvasHeight - gridArea.bottom * devicePixelRatio;
+
+  const scissorX = clampInt(Math.floor(plotLeftDevice), 0, Math.max(0, canvasWidth));
+  const scissorY = clampInt(Math.floor(plotTopDevice), 0, Math.max(0, canvasHeight));
+  const scissorR = clampInt(Math.ceil(plotRightDevice), 0, Math.max(0, canvasWidth));
+  const scissorB = clampInt(Math.ceil(plotBottomDevice), 0, Math.max(0, canvasHeight));
+  const scissorW = Math.max(0, scissorR - scissorX);
+  const scissorH = Math.max(0, scissorB - scissorY);
+
+  return { x: scissorX, y: scissorY, w: scissorW, h: scissorH };
+};
+
+export function createScatterRenderer(device: GPUDevice, options?: ScatterRendererOptions): ScatterRenderer {
+  let disposed = false;
+  const targetFormat = options?.targetFormat ?? DEFAULT_TARGET_FORMAT;
+  // Be resilient: coerce invalid values to 1 (no MSAA).
+  const sampleCountRaw = options?.sampleCount ?? 1;
+  const sampleCount = Number.isFinite(sampleCountRaw) ? Math.max(1, Math.floor(sampleCountRaw)) : 1;
+  const pipelineCache = options?.pipelineCache;
+
+  const bindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: 'uniform' },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: 'uniform' },
+      },
+    ],
+  });
+
+  // VSUniforms: mat4 (64) + viewport (8) + radius (4) + logBaseX (4) + logBaseY/logFlags/pad (12) = 96.
+  const vsUniformBuffer = createUniformBuffer(device, 96, {
+    label: 'scatterRenderer/vsUniforms',
+  });
+  const fsUniformBuffer = createUniformBuffer(device, 16, {
+    label: 'scatterRenderer/fsUniforms',
+  });
+
+  // Reused CPU-side staging for uniform writes (avoid per-frame allocations).
+  const vsUniformScratchBuffer = new ArrayBuffer(96);
+  const vsUniformScratchF32 = new Float32Array(vsUniformScratchBuffer);
+  const vsUniformScratchU32 = new Uint32Array(vsUniformScratchBuffer);
+  const fsUniformScratchF32 = new Float32Array(4);
+
+  const bindGroup = device.createBindGroup({
+    layout: bindGroupLayout,
+    entries: [
+      { binding: 0, resource: { buffer: vsUniformBuffer } },
+      { binding: 1, resource: { buffer: fsUniformBuffer } },
+    ],
+  });
+
+  const blendState = {
+    color: {
+      operation: 'add' as const,
+      srcFactor: 'src-alpha' as const,
+      dstFactor: 'one-minus-src-alpha' as const,
+    },
+    alpha: {
+      operation: 'add' as const,
+      srcFactor: 'one' as const,
+      dstFactor: 'one-minus-src-alpha' as const,
+    },
+  };
+
+  // Per-instance radius (variable symbolSize / per-point size).
+  const pipeline = createRenderPipeline(
+    device,
+    {
+      label: 'scatterRenderer/pipeline',
+      bindGroupLayouts: [bindGroupLayout],
+      vertex: {
+        code: scatterWgsl,
+        label: 'scatter.wgsl',
+        entryPoint: 'vsMain',
+        buffers: [
+          {
+            arrayStride: INSTANCE_STRIDE_BYTES,
+            stepMode: 'instance',
+            attributes: [
+              { shaderLocation: 0, format: 'float32x2', offset: 0 },
+              { shaderLocation: 1, format: 'float32', offset: 8 },
+            ],
+          },
+        ],
+      },
+      fragment: {
+        code: scatterWgsl,
+        label: 'scatter.wgsl',
+        formats: targetFormat,
+        blend: blendState,
+      },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      multisample: { count: sampleCount },
+    },
+    pipelineCache
+  );
+
+  // Constant radius dual-buffer: x and y in separate instance streams so equal-N
+  // y-only rewrites upload only N×4 y bytes (Option A).
+  const pipelineConstRadius = createRenderPipeline(
+    device,
+    {
+      label: 'scatterRenderer/pipelineConstRadiusSplit',
+      bindGroupLayouts: [bindGroupLayout],
+      vertex: {
+        code: scatterWgsl,
+        label: 'scatter.wgsl',
+        entryPoint: 'vsMainConstRadiusSplit',
+        buffers: [
+          {
+            arrayStride: CONST_CHANNEL_STRIDE_BYTES,
+            stepMode: 'instance',
+            attributes: [{ shaderLocation: 0, format: 'float32', offset: 0 }],
+          },
+          {
+            arrayStride: CONST_CHANNEL_STRIDE_BYTES,
+            stepMode: 'instance',
+            attributes: [{ shaderLocation: 1, format: 'float32', offset: 0 }],
+          },
+        ],
+      },
+      fragment: {
+        code: scatterWgsl,
+        label: 'scatter.wgsl',
+        formats: targetFormat,
+        blend: blendState,
+      },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      multisample: { count: sampleCount },
+    },
+    pipelineCache
+  );
+
+  // Fully-compact dense path: same dual-buffer layout but sampleCount **1**.
+  // Drawn in a post-resolve single-sample pass so 500k AA quads do not pay 4×
+  // MSAA overdraw. Skip allocation when main is already sampleCount 1 (unused).
+  // Analytic FS AA still softens edges without multisampling.
+  const pipelineConstRadiusDenseSS1 =
+    sampleCount > 1
+      ? createRenderPipeline(
+          device,
+          {
+            label: 'scatterRenderer/pipelineConstRadiusDenseSS1',
+            bindGroupLayouts: [bindGroupLayout],
+            vertex: {
+              code: scatterWgsl,
+              label: 'scatter.wgsl',
+              entryPoint: 'vsMainConstRadiusSplit',
+              buffers: [
+                {
+                  arrayStride: CONST_CHANNEL_STRIDE_BYTES,
+                  stepMode: 'instance',
+                  attributes: [{ shaderLocation: 0, format: 'float32', offset: 0 }],
+                },
+                {
+                  arrayStride: CONST_CHANNEL_STRIDE_BYTES,
+                  stepMode: 'instance',
+                  attributes: [{ shaderLocation: 1, format: 'float32', offset: 0 }],
+                },
+              ],
+            },
+            fragment: {
+              code: scatterWgsl,
+              label: 'scatter.wgsl',
+              formats: targetFormat,
+              blend: blendState,
+            },
+            primitive: { topology: 'triangle-list', cullMode: 'none' },
+            multisample: { count: 1 },
+          },
+          pipelineCache
+        )
+      : null;
+
+  /** Variable-radius interleaved instance buffer (x,y,r,pad). */
+  let instanceBuffer: GPUBuffer | null = null;
+  /** Const-radius dual buffers. */
+  let xInstanceBuffer: GPUBuffer | null = null;
+  let yInstanceBuffer: GPUBuffer | null = null;
+  let instanceCount = 0;
+  /** True when the last prepare used the constant-radius (dual-buffer) path. */
+  let useConstRadiusPipeline = false;
+  let lastConstRadiusDevicePx = 0;
+  /**
+   * When true, main-pass `render` is a no-op and draws go through `renderDense`
+   * (sampleCount:1 post-resolve). Only when denseCompact + main sampleCount > 1.
+   */
+  let deferDenseToPostResolve = false;
+  let cpuInstanceStagingBuffer = new ArrayBuffer(0);
+  let cpuInstanceStagingF32 = new Float32Array(cpuInstanceStagingBuffer);
+  let cpuXStagingBuffer = new ArrayBuffer(0);
+  let cpuXStagingF32 = new Float32Array(cpuXStagingBuffer);
+  let cpuYStagingBuffer = new ArrayBuffer(0);
+  let cpuYStagingF32 = new Float32Array(cpuYStagingBuffer);
+
+  // Geometry identity cache (issue 1.2): domain-space instances + size mode.
+  // Pure pan/zoom only updates VS/FS uniforms; skip instance writeBuffer.
+  let boundDataRef: CartesianSeriesData | null = null;
+  let boundSizeMode: 'const' | 'variable' | null = null;
+  /** Const-radius CSS size (layout signature). */
+  let boundConstRadiusCss: number | null = null;
+  /** DPR for variable-radius path (radius packed in device px). */
+  let boundDpr = Number.NaN;
+  /** Last const-radius dense point count (for y-only equal-N gate). */
+  let boundConstPointCount = 0;
+
+  let lastCanvasWidth = 0;
+  let lastCanvasHeight = 0;
+  let lastViewportPx: readonly [number, number] = [1, 1];
+  let lastScissor: {
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+  } | null = null;
+
+  const assertNotDisposed = (): void => {
+    if (disposed) throw new Error('ScatterRenderer is disposed.');
+  };
+
+  const ensureCpuInstanceCapacityFloats = (requiredFloats: number): void => {
+    if (requiredFloats <= cpuInstanceStagingF32.length) return;
+    const nextFloats = Math.max(8, nextPow2(requiredFloats));
+    cpuInstanceStagingBuffer = new ArrayBuffer(nextFloats * 4);
+    cpuInstanceStagingF32 = new Float32Array(cpuInstanceStagingBuffer);
+  };
+
+  const ensureCpuChannelCapacity = (requiredFloats: number): void => {
+    if (requiredFloats > cpuXStagingF32.length) {
+      const nextFloats = Math.max(8, nextPow2(requiredFloats));
+      cpuXStagingBuffer = new ArrayBuffer(nextFloats * 4);
+      cpuXStagingF32 = new Float32Array(cpuXStagingBuffer);
+    }
+    if (requiredFloats > cpuYStagingF32.length) {
+      const nextFloats = Math.max(8, nextPow2(requiredFloats));
+      cpuYStagingBuffer = new ArrayBuffer(nextFloats * 4);
+      cpuYStagingF32 = new Float32Array(cpuYStagingBuffer);
+    }
+  };
+
+  const ensureGpuChannelBuffers = (requiredBytes: number): void => {
+    const grownBytes = Math.max(Math.max(4, nextPow2(requiredBytes)), xInstanceBuffer ? xInstanceBuffer.size : 0);
+    if (!xInstanceBuffer || xInstanceBuffer.size < requiredBytes) {
+      if (xInstanceBuffer) {
+        try {
+          xInstanceBuffer.destroy();
+        } catch {
+          // best-effort
+        }
+      }
+      xInstanceBuffer = device.createBuffer({
+        label: 'scatterRenderer/xInstanceBuffer',
+        size: grownBytes,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      });
+    }
+    if (!yInstanceBuffer || yInstanceBuffer.size < requiredBytes) {
+      const yGrown = Math.max(Math.max(4, nextPow2(requiredBytes)), yInstanceBuffer ? yInstanceBuffer.size : 0);
+      if (yInstanceBuffer) {
+        try {
+          yInstanceBuffer.destroy();
+        } catch {
+          // best-effort
+        }
+      }
+      yInstanceBuffer = device.createBuffer({
+        label: 'scatterRenderer/yInstanceBuffer',
+        size: yGrown,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      });
+    }
+  };
+
+  const writeVsUniforms = (
+    ax: number,
+    bx: number,
+    ay: number,
+    by: number,
+    viewportW: number,
+    viewportH: number,
+    radiusDevicePx: number,
+    logFlags: number,
+    logBaseX: number,
+    logBaseY: number
+  ): void => {
+    const w = Number.isFinite(viewportW) && viewportW > 0 ? viewportW : 1;
+    const h = Number.isFinite(viewportH) && viewportH > 0 ? viewportH : 1;
+
+    writeTransformMat4F32(vsUniformScratchF32, ax, bx, ay, by);
+    vsUniformScratchF32[16] = w;
+    vsUniformScratchF32[17] = h;
+    vsUniformScratchF32[18] = radiusDevicePx;
+    vsUniformScratchF32[19] = logBaseX;
+    vsUniformScratchF32[20] = logBaseY;
+    vsUniformScratchU32[21] = logFlags >>> 0;
+    vsUniformScratchU32[22] = 0;
+    vsUniformScratchU32[23] = 0;
+    writeUniformBuffer(device, vsUniformBuffer, vsUniformScratchBuffer);
+
+    lastViewportPx = [w, h];
+  };
+
+  const prepare: ScatterRenderer['prepare'] = (
+    seriesConfig,
+    data,
+    xScale,
+    yScale,
+    gridArea,
+    forceStandardDraw,
+    allowPostResolveDense
+  ) => {
+    assertNotDisposed();
+
+    // Continuous scales: linear samples (0,1); log solves affine in log space.
+    const { a: ax, b: bx } = computeClipAffineFromContinuousScale(xScale);
+    const { a: ay, b: by } = computeClipAffineFromContinuousScale(yScale);
+    const { logFlags, logBaseX, logBaseY } = resolveLogProjection(xScale, yScale);
+
+    const dpr = gridArea?.devicePixelRatio ?? 1;
+    const hasValidDpr = dpr > 0 && Number.isFinite(dpr);
+
+    const seriesSymbolSize = seriesConfig.symbolSize;
+    // Scratch tuple for symbolSize function: reuse to avoid per-point allocations
+    const scratchTuple: [number, number, number | undefined] = [0, 0, undefined];
+
+    const constantSymbolSizeCss =
+      typeof seriesSymbolSize === 'number' && Number.isFinite(seriesSymbolSize)
+        ? seriesSymbolSize
+        : typeof seriesSymbolSize === 'function'
+          ? null
+          : DEFAULT_SCATTER_RADIUS_CSS_PX;
+
+    const getSeriesSizeCssPx =
+      typeof seriesSymbolSize === 'function'
+        ? (x: number, y: number, size: number | undefined): number => {
+            scratchTuple[0] = x;
+            scratchTuple[1] = y;
+            scratchTuple[2] = size;
+            const v = seriesSymbolSize(scratchTuple);
+            return typeof v === 'number' && Number.isFinite(v) ? v : DEFAULT_SCATTER_RADIUS_CSS_PX;
+          }
+        : constantSymbolSizeCss != null
+          ? (_x: number, _y: number, _size: number | undefined): number => constantSymbolSizeCss
+          : (_x: number, _y: number, _size: number | undefined): number => DEFAULT_SCATTER_RADIUS_CSS_PX;
+
+    const count = getPointCount(data);
+
+    // Constant series.symbolSize and no per-point size channel → xy-only instances
+    // (radius in VS uniform). Halves upload bandwidth for equal-N / dense scatter paths.
+    // Size detection matches getSize semantics: tuples [x,y,size], object.size,
+    // XYArraysData.size, and sparse size on later points (not only data[0]).
+    const constantRadiusDevicePx =
+      constantSymbolSizeCss != null ? (hasValidDpr ? constantSymbolSizeCss * dpr : constantSymbolSizeCss) : null;
+    const useConstRadius = constantRadiusDevicePx != null && constantRadiusDevicePx > 0 && !hasAnyPerPointSize(data);
+
+    useConstRadiusPipeline = useConstRadius;
+    lastConstRadiusDevicePx = useConstRadius ? constantRadiusDevicePx! : 0;
+
+    const viewportW = gridArea?.canvasWidth ?? lastViewportPx[0];
+    const viewportH = gridArea?.canvasHeight ?? lastViewportPx[1];
+    if (gridArea) {
+      lastCanvasWidth = gridArea.canvasWidth;
+      lastCanvasHeight = gridArea.canvasHeight;
+      lastScissor = computePlotScissorDevicePx(gridArea);
+    } else {
+      lastScissor = null;
+    }
+    // Dense-const draw policy (group 2 residual): shrink drawn radius when
+    // points-per-pixel is high. Upload path unchanged; sampling stays 'none'.
+    // Post-resolve SS1 only when fully compact + main is 4× MSAA + allowed
+    // (coordinator disables when visible lines would break scatter-under-lines z-order).
+    let drawRadiusDevicePx = lastConstRadiusDevicePx;
+    deferDenseToPostResolve = false;
+    if (useConstRadius && lastConstRadiusDevicePx > 0) {
+      const plotW = lastScissor?.w ?? viewportW;
+      const plotH = lastScissor?.h ?? viewportH;
+      const drawPol = resolveScatterDrawPolicy({
+        constRadius: true,
+        pointCount: count,
+        plotWidthDevicePx: plotW,
+        plotHeightDevicePx: plotH,
+        radiusDevicePx: lastConstRadiusDevicePx,
+        forceStandard: forceStandardDraw === true,
+      });
+      drawRadiusDevicePx = drawPol.effectiveRadiusDevicePx;
+      // Partial blends keep main 4×; only full compact pays SS1 defer.
+      // sampleCount 1 already draws in main (multi-chart antialias:false).
+      deferDenseToPostResolve = drawPol.fullyCompact && sampleCount > 1 && allowPostResolveDense !== false;
+    }
+    writeVsUniforms(ax, bx, ay, by, viewportW, viewportH, drawRadiusDevicePx, logFlags, logBaseX, logBaseY);
+
+    const [r, g, b, a] = parseSeriesColorToRgba01(seriesConfig.color);
+    fsUniformScratchF32[0] = r;
+    fsUniformScratchF32[1] = g;
+    fsUniformScratchF32[2] = b;
+    fsUniformScratchF32[3] = clamp01(a);
+    writeUniformBuffer(device, fsUniformBuffer, fsUniformScratchF32);
+
+    // Geometry identity skip: same data ref + size layout → uniforms only.
+    // Policy verb shared with line/DataStore via seriesResidency (issue 3.4 / 2.2).
+    const sizeMode: 'const' | 'variable' = useConstRadius ? 'const' : 'variable';
+    const hasGeometryBuffers = useConstRadius
+      ? xInstanceBuffer != null && yInstanceBuffer != null
+      : instanceBuffer != null;
+    const geometryHit =
+      boundDataRef === data &&
+      boundSizeMode === sizeMode &&
+      hasGeometryBuffers &&
+      (useConstRadius ? boundConstRadiusCss === constantSymbolSizeCss : boundDpr === dpr);
+
+    // Equal-N y-only: dense const-radius pack where x matches prior staging.
+    // Brownian (x moves) fails isYOnlyRewriteAgainstXStaging → fullRewrite.
+    const yOnlyCandidate =
+      useConstRadius &&
+      boundSizeMode === 'const' &&
+      hasGeometryBuffers &&
+      boundConstPointCount > 0 &&
+      count === boundConstPointCount &&
+      count === instanceCount &&
+      isYOnlyRewriteAgainstXStaging(data, cpuXStagingF32, boundConstPointCount);
+
+    const policy = resolveUploadPolicy({
+      residency: {
+        kind: 'privateInstance',
+        gpuBuffer: useConstRadius ? yInstanceBuffer : instanceBuffer,
+        pointCount: instanceCount,
+        contentVersion: 0,
+        lastRef: boundDataRef,
+      },
+      dataRef: data,
+      geometryCacheHit: geometryHit,
+      appendedThisFrame: false,
+      needsGrowth: false,
+      yOnlyRewrite: yOnlyCandidate,
+    });
+    if (policy === 'skip') {
+      return;
+    }
+
+    if (policy === 'yOnlyRewrite' && useConstRadius) {
+      // Option A: pack + write only y channel (N×4 bytes). X GPU buffer stays put.
+      // Non-finite y → fall through to full pack (sparse path; match full-rewrite
+      // gap semantics instead of drawing NaN clip centers).
+      ensureCpuChannelCapacity(count);
+      const yChanged = packYOnlyChannel(cpuYStagingF32, data, count);
+      if (yChanged !== null) {
+        if (yChanged && yInstanceBuffer && count > 0) {
+          device.queue.writeBuffer(yInstanceBuffer, 0, cpuYStagingBuffer, 0, count * CONST_CHANNEL_STRIDE_BYTES);
+        }
+        boundDataRef = data;
+        boundSizeMode = sizeMode;
+        boundConstRadiusCss = constantSymbolSizeCss;
+        boundDpr = dpr;
+        boundConstPointCount = count;
+        return;
+      }
+      // yChanged === null: non-finite y present — full dual-buffer rewrite below.
+    }
+
+    if (useConstRadius) {
+      // Full dual-buffer pack: dense when all points finite (enables y-only next
+      // frame); sparse/gapped packs only finite pairs and clears boundConstPointCount
+      // so y-only stays disabled until a dense full rewrite.
+      ensureCpuChannelCapacity(count);
+      const xs = cpuXStagingF32;
+      const ys = cpuYStagingF32;
+      let dense = true;
+      if (Array.isArray(data)) {
+        const arr = data as ReadonlyArray<readonly [number, number] | DataPointLike | null>;
+        for (let i = 0; i < count; i++) {
+          const p = arr[i];
+          if (p == null || typeof p !== 'object') {
+            dense = false;
+            break;
+          }
+          let x: number;
+          let y: number;
+          if (Array.isArray(p)) {
+            x = p[0] as number;
+            y = p[1] as number;
+          } else {
+            x = (p as DataPointLike).x;
+            y = (p as DataPointLike).y;
+          }
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            dense = false;
+            break;
+          }
+          xs[i] = x;
+          ys[i] = y;
+        }
+      } else if (data instanceof Float32Array) {
+        const n = Math.floor(data.length / 2);
+        if (n !== count) dense = false;
+        for (let i = 0; i < count && dense; i++) {
+          const x = data[i * 2]!;
+          const y = data[i * 2 + 1]!;
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            dense = false;
+            break;
+          }
+          xs[i] = x;
+          ys[i] = y;
+        }
+      } else if (
+        // Split XY columns. Float32Array channels can zero-copy
+        // writeBuffer when every value is finite (scanned once; non-finite
+        // falls through to the pack path below). Exclude internal ring /
+        // staging aliases (modular getX/getY).
+        typeof data === 'object' &&
+        data !== null &&
+        !Array.isArray(data) &&
+        'x' in data &&
+        'y' in data &&
+        !(data as { __ring?: boolean }).__ring &&
+        !(data as { __stagingRing?: boolean }).__stagingRing
+      ) {
+        const xCol = (data as { x: ArrayLike<number> }).x;
+        const yCol = (data as { y: ArrayLike<number> }).y;
+        if (
+          xCol instanceof Float32Array &&
+          yCol instanceof Float32Array &&
+          xCol.length >= count &&
+          yCol.length >= count
+        ) {
+          // Zero-copy contract: columns must be entirely finite (no NaN/±Inf).
+          // Brownian/suite paths always are; non-finite falls through to pack.
+          let f32Finite = true;
+          for (let i = 0; i < count; i++) {
+            if (!Number.isFinite(xCol[i] as number) || !Number.isFinite(yCol[i] as number)) {
+              f32Finite = false;
+              break;
+            }
+          }
+          if (f32Finite) {
+            // Zero-copy dense path: GPU channel buffers = column bytes.
+            // Still refresh cpuXStagingF32 (and y staging) so equal-N y-only
+            // detection compares against the x just uploaded — not a stale pack.
+            ensureCpuChannelCapacity(count);
+            cpuXStagingF32.set(xCol.subarray(0, count));
+            cpuYStagingF32.set(yCol.subarray(0, count));
+            instanceCount = count;
+            boundConstPointCount = count;
+            const requiredBytes = Math.max(4, count * CONST_CHANNEL_STRIDE_BYTES);
+            ensureGpuChannelBuffers(requiredBytes);
+            if (xInstanceBuffer && yInstanceBuffer && count > 0) {
+              const byteLen = count * CONST_CHANNEL_STRIDE_BYTES;
+              device.queue.writeBuffer(xInstanceBuffer, 0, xCol.buffer, xCol.byteOffset, byteLen);
+              device.queue.writeBuffer(yInstanceBuffer, 0, yCol.buffer, yCol.byteOffset, byteLen);
+            }
+            boundDataRef = data;
+            boundSizeMode = sizeMode;
+            boundConstRadiusCss = constantSymbolSizeCss;
+            boundDpr = dpr;
+            return;
+          }
+        }
+        for (let i = 0; i < count; i++) {
+          const x = xCol[i] as number;
+          const y = yCol[i] as number;
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            dense = false;
+            break;
+          }
+          xs[i] = x;
+          ys[i] = y;
+        }
+      } else {
+        for (let i = 0; i < count; i++) {
+          const x = getX(data, i);
+          const y = getY(data, i);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            dense = false;
+            break;
+          }
+          xs[i] = x;
+          ys[i] = y;
+        }
+      }
+
+      if (!dense) {
+        // Sparse / gapped: pack only finite pairs (y-only path disabled next frame).
+        let out = 0;
+        for (let i = 0; i < count; i++) {
+          const x = getX(data, i);
+          const y = getY(data, i);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+          xs[out] = x;
+          ys[out] = y;
+          out++;
+        }
+        instanceCount = out;
+        boundConstPointCount = 0; // disable y-only until a dense full rewrite
+      } else {
+        instanceCount = count;
+        boundConstPointCount = count;
+      }
+
+      const requiredBytes = Math.max(4, instanceCount * CONST_CHANNEL_STRIDE_BYTES);
+      ensureGpuChannelBuffers(requiredBytes);
+      if (xInstanceBuffer && yInstanceBuffer && instanceCount > 0) {
+        const byteLen = instanceCount * CONST_CHANNEL_STRIDE_BYTES;
+        device.queue.writeBuffer(xInstanceBuffer, 0, cpuXStagingBuffer, 0, byteLen);
+        device.queue.writeBuffer(yInstanceBuffer, 0, cpuYStagingBuffer, 0, byteLen);
+      }
+    } else {
+      ensureCpuInstanceCapacityFloats(count * INSTANCE_STRIDE_FLOATS);
+      const f32 = cpuInstanceStagingF32;
+      let outFloats = 0;
+      for (let i = 0; i < count; i++) {
+        const x = getX(data, i);
+        const y = getY(data, i);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+        // Per-point size from data overrides series.symbolSize
+        const pointSize = getSize(data, i);
+        const sizeCss = pointSize ?? getSeriesSizeCssPx(x, y, pointSize);
+        const radiusCss = Number.isFinite(sizeCss) ? Math.max(0, sizeCss) : DEFAULT_SCATTER_RADIUS_CSS_PX;
+        const radiusDevicePx = hasValidDpr ? radiusCss * dpr : radiusCss;
+        if (!(radiusDevicePx > 0)) continue;
+
+        f32[outFloats + 0] = x;
+        f32[outFloats + 1] = y;
+        f32[outFloats + 2] = radiusDevicePx;
+        f32[outFloats + 3] = 0; // pad
+        outFloats += INSTANCE_STRIDE_FLOATS;
+      }
+      instanceCount = outFloats / INSTANCE_STRIDE_FLOATS;
+      boundConstPointCount = 0;
+
+      const requiredBytes = Math.max(4, instanceCount * INSTANCE_STRIDE_BYTES);
+      if (!instanceBuffer || instanceBuffer.size < requiredBytes) {
+        const grownBytes = Math.max(Math.max(4, nextPow2(requiredBytes)), instanceBuffer ? instanceBuffer.size : 0);
+        if (instanceBuffer) {
+          try {
+            instanceBuffer.destroy();
+          } catch {
+            // best-effort
+          }
+        }
+        instanceBuffer = device.createBuffer({
+          label: 'scatterRenderer/instanceBuffer',
+          size: grownBytes,
+          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        });
+      }
+
+      if (instanceBuffer && instanceCount > 0) {
+        device.queue.writeBuffer(instanceBuffer, 0, cpuInstanceStagingBuffer, 0, instanceCount * INSTANCE_STRIDE_BYTES);
+      }
+    }
+
+    boundDataRef = data;
+    boundSizeMode = sizeMode;
+    boundConstRadiusCss = useConstRadius ? constantSymbolSizeCss : null;
+    boundDpr = dpr;
+  };
+
+  const invalidateGeometry: ScatterRenderer['invalidateGeometry'] = () => {
+    boundDataRef = null;
+    boundSizeMode = null;
+    boundConstRadiusCss = null;
+    boundDpr = Number.NaN;
+    boundConstPointCount = 0;
+  };
+
+  const isDenseDeferred: ScatterRenderer['isDenseDeferred'] = () => {
+    assertNotDisposed();
+    return (
+      deferDenseToPostResolve &&
+      useConstRadiusPipeline &&
+      instanceCount > 0 &&
+      xInstanceBuffer != null &&
+      yInstanceBuffer != null
+    );
+  };
+
+  const drawConstRadiusInstances = (
+    passEncoder: GPURenderPassEncoder,
+    pipeline: GPURenderPipeline,
+    options?: Readonly<{ manageScissor?: boolean }>
+  ): void => {
+    if (!xInstanceBuffer || !yInstanceBuffer || instanceCount === 0) return;
+
+    // Main-pass self-scissors; post-resolve dense path lets the coordinator set
+    // intro/plot scissor around the batch (mirrors dense hairline).
+    const manageScissor = options?.manageScissor !== false;
+    if (manageScissor && lastScissor && lastCanvasWidth > 0 && lastCanvasHeight > 0) {
+      passEncoder.setScissorRect(lastScissor.x, lastScissor.y, lastScissor.w, lastScissor.h);
+    }
+
+    passEncoder.setPipeline(pipeline);
+    passEncoder.setBindGroup(0, bindGroup);
+    passEncoder.setVertexBuffer(0, xInstanceBuffer);
+    passEncoder.setVertexBuffer(1, yInstanceBuffer);
+    passEncoder.draw(6, instanceCount);
+
+    if (manageScissor && lastScissor && lastCanvasWidth > 0 && lastCanvasHeight > 0) {
+      passEncoder.setScissorRect(0, 0, lastCanvasWidth, lastCanvasHeight);
+    }
+  };
+
+  const render: ScatterRenderer['render'] = (passEncoder) => {
+    assertNotDisposed();
+    if (instanceCount === 0) return;
+    // Dense-compact const-radius is deferred to the single-sample post-resolve pass.
+    if (deferDenseToPostResolve && useConstRadiusPipeline) return;
+
+    if (useConstRadiusPipeline) {
+      drawConstRadiusInstances(passEncoder, pipelineConstRadius);
+      return;
+    }
+
+    if (!instanceBuffer) return;
+    // Clip to plot area when available.
+    if (lastScissor && lastCanvasWidth > 0 && lastCanvasHeight > 0) {
+      passEncoder.setScissorRect(lastScissor.x, lastScissor.y, lastScissor.w, lastScissor.h);
+    }
+    passEncoder.setPipeline(pipeline);
+    passEncoder.setBindGroup(0, bindGroup);
+    passEncoder.setVertexBuffer(0, instanceBuffer);
+    passEncoder.draw(6, instanceCount);
+    if (lastScissor && lastCanvasWidth > 0 && lastCanvasHeight > 0) {
+      passEncoder.setScissorRect(0, 0, lastCanvasWidth, lastCanvasHeight);
+    }
+  };
+
+  const renderDense: ScatterRenderer['renderDense'] = (passEncoder) => {
+    assertNotDisposed();
+    if (!isDenseDeferred() || !pipelineConstRadiusDenseSS1) return;
+    drawConstRadiusInstances(passEncoder, pipelineConstRadiusDenseSS1, { manageScissor: false });
+  };
+
+  const dispose: ScatterRenderer['dispose'] = () => {
+    if (disposed) return;
+    disposed = true;
+
+    if (instanceBuffer) {
+      try {
+        instanceBuffer.destroy();
+      } catch {
+        // best-effort
+      }
+    }
+    instanceBuffer = null;
+    if (xInstanceBuffer) {
+      try {
+        xInstanceBuffer.destroy();
+      } catch {
+        // best-effort
+      }
+    }
+    xInstanceBuffer = null;
+    if (yInstanceBuffer) {
+      try {
+        yInstanceBuffer.destroy();
+      } catch {
+        // best-effort
+      }
+    }
+    yInstanceBuffer = null;
+    instanceCount = 0;
+
+    try {
+      vsUniformBuffer.destroy();
+    } catch {
+      // best-effort
+    }
+    try {
+      fsUniformBuffer.destroy();
+    } catch {
+      // best-effort
+    }
+
+    lastCanvasWidth = 0;
+    lastCanvasHeight = 0;
+    lastViewportPx = [1, 1];
+    lastScissor = null;
+    boundDataRef = null;
+    boundSizeMode = null;
+    boundConstRadiusCss = null;
+    boundDpr = Number.NaN;
+    boundConstPointCount = 0;
+    deferDenseToPostResolve = false;
+  };
+
+  return { prepare, invalidateGeometry, render, isDenseDeferred, renderDense, dispose };
+}

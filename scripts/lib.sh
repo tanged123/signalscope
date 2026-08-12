@@ -33,9 +33,8 @@ artifact_checks() {
 }
 
 rust_checks() {
-  local check_config='{"bundle":{"resources":[]}}'
-  TAURI_CONFIG="$check_config" cargo clippy --workspace --all-targets -- -D warnings
-  TAURI_CONFIG="$check_config" cargo test --workspace
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test --workspace
 }
 
 quality_checks() {

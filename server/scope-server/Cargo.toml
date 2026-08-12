@@ -1,0 +1,33 @@
+[package]
+name = "scope-server"
+version = "0.21.1"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+scope-core.workspace = true
+scope-protocol.workspace = true
+axum = "0.8"
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "signal",
+  "fs",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.15"
+dirs = "6"
+rand = "0.9"
+open = "5"
+base64 = "0.22"
+uuid.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[lints]
+workspace = true

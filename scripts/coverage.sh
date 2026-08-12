@@ -23,7 +23,6 @@ coverage_rust() {
   export LLVM_PROFDATA="${LLVM_PROFDATA:-$(command -v llvm-profdata)}"
   cargo llvm-cov \
     --workspace \
-    --exclude signalscope-shell \
     --lcov \
     --output-path "$coverage_dir/rust.lcov"
 }

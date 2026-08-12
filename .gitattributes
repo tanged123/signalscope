@@ -1,0 +1,2 @@
+# Keep the vendored ChartGPU source byte-for-byte compatible with its pinned revision.
+frontend/vendor/chartgpu/** -whitespace

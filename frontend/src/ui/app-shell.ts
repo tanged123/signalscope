@@ -8,11 +8,6 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
-import {
-  classifyDrop,
-  expandDropPaths,
-  unsupportedDropMessage,
-} from "../app/drop";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import {
   columnsValueAtTime,
@@ -56,7 +51,6 @@ import { persistWorkspace } from "../app/workspace-save";
 import { formatCursorTime, formatValue, zoomRange } from "../app/plot-math";
 import {
   type BatchStatus,
-  type DragDropForward,
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
@@ -94,6 +88,7 @@ import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
+import type { GpuContext } from "../render/gpu-context";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -211,7 +206,6 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
-  private dropUnsubscribe: (() => void) | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
@@ -242,10 +236,31 @@ export class AppShell {
   constructor(
     private readonly root: HTMLElement,
     private readonly plane: DataPlane,
+    private gpu: GpuContext | null = null,
   ) {}
 
+  setGpu(gpu: GpuContext): void {
+    if (this.gpu !== null) return;
+    this.gpu = gpu;
+    const warning = this.root.querySelector<HTMLElement>(".gpu-warning");
+    if (warning !== null) warning.hidden = true;
+    this.workspaceView?.setGpu(gpu, this.signals.length > 0);
+    void this.refreshTiles();
+  }
+
   async mount(): Promise<void> {
+    delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
+    if (this.gpu === null) {
+      const warning = required<HTMLElement>(this.root, ".gpu-warning");
+      warning.hidden = false;
+      required<HTMLButtonElement>(
+        warning,
+        ".gpu-warning-dismiss",
+      ).addEventListener("click", () => {
+        warning.hidden = true;
+      });
+    }
     await this.loadFormatHint();
     await this.loadPreferences();
     await this.restoreSession();
@@ -530,6 +545,7 @@ export class AppShell {
           this.afterLayoutChange();
         },
       },
+      this.gpu,
     );
     this.setsList = new SetsListView(required(this.root, ".tree-sets"), {
       onSetBind: (setId) => this.bindSetToPanel(setId),
@@ -568,14 +584,6 @@ export class AppShell {
       },
     });
     this.registerCommands();
-    this.dropUnsubscribe?.();
-    this.dropUnsubscribe = null;
-    const dragPort = this.plane.ingest;
-    if (dragPort !== null) {
-      this.dropUnsubscribe = dragPort.onDragDrop((event) => {
-        this.onDragDrop(event);
-      });
-    }
     this.commands.onRun = (id) => {
       this.usage.record(id);
     };
@@ -586,6 +594,7 @@ export class AppShell {
     this.bindControls();
     this.renderWindowReadout();
     await this.reloadSignals();
+    this.root.dataset.ready = "true";
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
       const panel = this.workspace.addPanelRow();
       for (const summary of this.signals.slice(0, 2)) {
@@ -1739,52 +1748,6 @@ export class AppShell {
     this.afterLayoutChange();
   }
 
-  private modalOpen(): boolean {
-    return (
-      this.palette?.isOpen() === true || this.exportDialog?.isOpen() === true
-    );
-  }
-
-  private onDragDrop(event: DragDropForward): void {
-    const overlay = required<HTMLElement>(this.root, ".drop-overlay");
-    if (event.kind === "enter") {
-      overlay.hidden = this.modalOpen();
-      return;
-    }
-    overlay.hidden = true;
-    if (event.kind === "leave" || this.modalOpen()) return;
-    void this.handleDrop(event.paths);
-  }
-
-  private async handleDrop(paths: string[]): Promise<void> {
-    const port = this.plane.ingest;
-    if (port === null || paths.length === 0) return;
-    const plan = classifyDrop(paths);
-    if (plan.kind === "rejected") {
-      this.reportError(new Error(plan.message));
-      return;
-    }
-    if (plan.kind === "workspace") {
-      await this.loadSession(plan.path);
-      return;
-    }
-    try {
-      const expansion = await expandDropPaths(port, plan.paths);
-      for (const failed of expansion.failures) {
-        this.reportError(new Error(`could not scan ${failed}`));
-      }
-      if (expansion.files.length === 0) {
-        if (expansion.failures.length === 0) {
-          this.reportError(new Error(await unsupportedDropMessage(port)));
-        }
-        return;
-      }
-      await this.ingestPaths(expansion.files);
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
-  }
-
   private openSources(): void {
     if (this.plane.ingest === null) return;
     void this.pickAndIngest("files");
@@ -1912,7 +1875,9 @@ export class AppShell {
       if (key !== null) {
         this.history.commit(historySnapshot(this.workspace.snapshot()), key);
       }
-      this.history.commit(historySnapshot(this.workspace.snapshot()));
+      if (this.historyGestureKey === null) {
+        this.history.commit(historySnapshot(this.workspace.snapshot()));
+      }
     }, 250);
   }
 
@@ -2240,7 +2205,7 @@ export class AppShell {
 
   private async buildPanelPng(panelId: string): Promise<Uint8Array | null> {
     const panel = this.workspace.panel(panelId);
-    const canvases = this.workspaceView?.panelCanvases(panelId) ?? null;
+    const canvases = (await this.workspaceView?.capturePanel(panelId)) ?? null;
     if (panel === undefined || canvases === null) return null;
     const styles = getComputedStyle(document.documentElement);
     const composed = composePanelPng(
@@ -3490,6 +3455,10 @@ export function shellMarkup(): string {
       <span class="workspace-name">Untitled</span>
       <span class="session-identity"></span>
     </div>
+    <div class="gpu-warning" hidden role="status">
+      WebGPU unavailable — time-series panels disabled; XY/FFT/histogram still work
+      <button class="gpu-warning-dismiss" type="button" aria-label="Dismiss WebGPU warning">✕</button>
+    </div>
 
     <div class="workspace-strip">
       <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
@@ -3568,7 +3537,6 @@ export function shellMarkup(): string {
       <span class="status-separator"></span>
       <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
     </footer>
-    <div class="drop-overlay" hidden>Drop files or a folder to load</div>
   </main>`;
 }
 

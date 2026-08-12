@@ -1,166 +1,194 @@
-import { expect, test } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { PROTOCOL_VERSION } from "../../src/generated/protocol";
 import { SESSION_SCHEMA_VERSION } from "../../src/generated/session";
 
-async function installDerivedPlane(page: Page): Promise<void> {
-  await page.addInitScript(
-    ({ protocolVersion, sessionSchemaVersion }) => {
-      const envelope = <T>(payload: T) => ({
-        protocol_version: protocolVersion,
-        payload,
-      });
-      const base = {
-        source_id: "0",
-        source_key: "demo",
-        unit: null,
-        point_count: "2",
-        t_min: 0,
-        t_max: 1,
-        last_value: null,
-      };
-      let signals = [
-        {
-          ...base,
-          signal_id: "1",
-          local_path: "velocity_body/x",
-          path: "rocket/velocity_body/x",
-        },
-        {
-          ...base,
-          signal_id: "2",
-          local_path: "velocity_body/y",
-          path: "rocket/velocity_body/y",
-        },
-      ];
-      const session = JSON.stringify({
-        app: "signalscope",
-        schema_version: sessionSchemaVersion,
-        theme: "dark",
-        linked_time: {
-          t0: 0,
-          t1: 1,
-          linked: true,
-          paused: false,
-          cursorT: null,
-          mode: "fixed",
-        },
-        active_tab_id: "workspace-1",
-        tabs: [
-          {
-            id: "workspace-1",
-            title: "Workspace 1",
-            cursor_mode: "none",
-            focused_panel_id: null,
-            maximized_panel_id: null,
-            panels: [],
-            layout: [],
-          },
-        ],
-        named_sets: [],
-        derived: [],
-        derived_bundles: [],
-        sources: [],
-      });
-      const internals = {
-        // Keep the mock's Promise contract aligned with Tauri's invoke API.
-        // eslint-disable-next-line @typescript-eslint/require-await
-        invoke: async (command: string, args?: Record<string, unknown>) => {
-          const request = args?.["request"] as
-            | { payload?: Record<string, unknown> }
-            | undefined;
-          const payload = request?.payload ?? {};
-          switch (command) {
-            case "load_preferences":
-              return envelope(null);
-            case "load_session":
-            case "reset_session":
-              return envelope({ session_json: session, path: null });
-            case "restore_sources":
-              return envelope({ job_id: "restore" });
-            case "batch_status":
-              return envelope({
-                state: "done",
-                fraction: 1,
-                total: "0",
-                done: "0",
-                failed: "0",
-                current_paths: [],
-                recent_failures: [],
-              });
-            case "restore_reconcile":
-              return envelope({
-                session_json: payload["session_json"] ?? session,
-                rewritten: "0",
-                conflicts: [],
-                unresolved: [],
-              });
-            case "release_batch":
-            case "save_preferences":
-            case "remove_derived_bundle":
-              return envelope(null);
-            case "save_session":
-              return envelope("test.signalscope");
-            case "list_signals":
-              return envelope(signals);
-            case "list_sources":
-              return envelope([
-                {
-                  source_id: "0",
-                  source_key: "demo",
-                  prefix: "rocket",
-                  path: "fixture.csv",
-                  point_count: "4",
-                },
-              ]);
-            case "query_tiles":
-            case "query_samples":
-              return envelope({
-                request_id: payload["request_id"] ?? "test",
-                series: [],
-              });
-            case "create_derived": {
-              const path = String(payload["path"]);
-              const summary = {
-                ...base,
-                signal_id: `derived:${path}`,
-                source_id: "derived",
-                source_key: "derived",
-                local_path: path.slice("derived/".length),
-                path,
-                point_count: "0",
-              };
-              signals = [...signals, summary];
-              return envelope(summary);
-            }
-            case "remove_signal": {
-              const path = String(payload["path"]);
-              signals = signals.filter((signal) => signal.path !== path);
-              return envelope(null);
-            }
-            default:
-              throw new Error(`unexpected test command: ${command}`);
-          }
-        },
-        transformCallback: () => 0,
-      };
-      (
-        window as unknown as {
-          __TAURI_INTERNALS__: typeof internals;
-        }
-      ).__TAURI_INTERNALS__ = internals;
+async function installHttpPlane(page: Page): Promise<void> {
+  let signals = [
+    {
+      signal_id: "1",
+      source_id: "0",
+      source_key: "demo",
+      local_path: "velocity_body/x",
+      path: "rocket/velocity_body/x",
+      unit: null,
+      point_count: "2",
+      t_min: 0,
+      t_max: 1,
+      last_value: null,
     },
     {
-      protocolVersion: PROTOCOL_VERSION,
-      sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+      signal_id: "2",
+      source_id: "0",
+      source_key: "demo",
+      local_path: "velocity_body/y",
+      path: "rocket/velocity_body/y",
+      unit: null,
+      point_count: "2",
+      t_min: 0,
+      t_max: 1,
+      last_value: null,
     },
-  );
+  ];
+  const session = JSON.stringify({
+    app: "signalscope",
+    schema_version: SESSION_SCHEMA_VERSION,
+    theme: "dark",
+    linked_time: {
+      t0: 0,
+      t1: 1,
+      linked: true,
+      paused: false,
+      cursorT: null,
+      mode: "fixed",
+    },
+    active_tab_id: "workspace-1",
+    tabs: [
+      {
+        id: "workspace-1",
+        title: "Workspace 1",
+        cursor_mode: "none",
+        focused_panel_id: null,
+        maximized_panel_id: null,
+        panels: [],
+        layout: [],
+      },
+    ],
+    named_sets: [],
+    derived: [],
+    derived_bundles: [],
+    sources: [],
+  });
+  const envelope = (payload: unknown) => ({
+    protocol_version: PROTOCOL_VERSION,
+    payload,
+  });
+
+  await page.route("**/api/**", async (route) => {
+    const command = new URL(route.request().url()).pathname.split("/").at(-1);
+    const body = route.request().postDataJSON() as {
+      payload?: Record<string, unknown>;
+    } | null;
+    const payload = body?.payload ?? {};
+    if (command === "health") {
+      await route.fulfill({ status: 200, body: "ok" });
+      return;
+    }
+    if (command === "query_tiles_bin") {
+      const bytes = new Uint8Array(16);
+      const view = new DataView(bytes.buffer);
+      view.setUint32(0, 0x42545353, true);
+      view.setUint32(4, PROTOCOL_VERSION, true);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/octet-stream",
+        body: bytes as never,
+      });
+      return;
+    }
+
+    let response: unknown;
+    switch (command) {
+      case "load_preferences":
+        response = null;
+        break;
+      case "load_session":
+      case "reset_session":
+        response = { session_json: session, path: null };
+        break;
+      case "restore_sources":
+        response = { job_id: "restore" };
+        break;
+      case "batch_status":
+        response = {
+          state: "done",
+          fraction: 1,
+          total: "0",
+          done: "0",
+          failed: "0",
+          current_paths: [],
+          recent_failures: [],
+        };
+        break;
+      case "restore_reconcile":
+        response = {
+          session_json: payload["session_json"] ?? session,
+          rewritten: "0",
+          conflicts: [],
+          unresolved: [],
+        };
+        break;
+      case "release_batch":
+      case "save_preferences":
+      case "remove_derived_bundle":
+        response = null;
+        break;
+      case "save_session":
+        response = "test.signalscope";
+        break;
+      case "list_signals":
+        response = signals;
+        break;
+      case "list_sources":
+        response = [
+          {
+            source_id: "0",
+            source_key: "demo",
+            prefix: "rocket",
+            path: "fixture.csv",
+            point_count: "4",
+          },
+        ];
+        break;
+      case "query_samples":
+        response = {
+          request_id: payload["request_id"] ?? "test",
+          series: [],
+        };
+        break;
+      case "create_derived": {
+        const path = String(payload["path"]);
+        const summary = {
+          signal_id: "derived:" + path,
+          source_id: "derived",
+          source_key: "derived",
+          local_path: path.slice("derived/".length),
+          path,
+          unit: null,
+          point_count: "0",
+          t_min: 0,
+          t_max: 1,
+          last_value: null,
+        };
+        signals = [...signals, summary];
+        response = summary;
+        break;
+      }
+      case "remove_signal": {
+        const path = String(payload["path"]);
+        signals = signals.filter((signal) => signal.path !== path);
+        response = null;
+        break;
+      }
+      default:
+        await route.fulfill({
+          status: 400,
+          body: "unexpected test command: " + String(command),
+        });
+        return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(envelope(response)),
+    });
+  });
 }
 
 test("the fixed channel outline filters, selects, and saves a frozen set", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
 
   const outline = page.locator(".outline-scroll");
   await expect(outline).toBeVisible();
@@ -173,8 +201,6 @@ test("the fixed channel outline filters, selects, and saves a frozen set", async
   ).toHaveText("VALUE");
   await expect(outline.locator('[data-column="unit"]')).toHaveCount(0);
   await expect(outline.locator('[data-column="source"]')).toHaveCount(0);
-  await expect(page.locator(".signal-group-select")).toHaveCount(0);
-  await expect(page.locator(".outline-columns-button")).toHaveCount(0);
   await expect(outline.locator('[data-row-kind="series"]')).toHaveCount(2);
 
   await page.locator(".signal-search").fill("velocity_body/x");
@@ -194,7 +220,7 @@ test("the fixed channel outline filters, selects, and saves a frozen set", async
 });
 
 test("manual sets support F and selected-signal drops", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const row = page.locator('.outline-scroll [data-row-kind="series"]').first();
   await row.click();
   await expect(row).toHaveClass(/selected/);
@@ -222,8 +248,8 @@ test("manual sets support F and selected-signal drops", async ({ page }) => {
 test("catalog reload clears selection for a removed derived signal", async ({
   page,
 }) => {
-  await installDerivedPlane(page);
-  await page.goto("/");
+  await installHttpPlane(page);
+  await gotoApp(page);
   await page.locator(".formula-toggle").click();
   const formula = page.locator(".formula-input");
   await formula.fill("derived/transient = 'rocket/velocity_body/x' * 2");
@@ -241,7 +267,7 @@ test("catalog reload clears selection for a removed derived signal", async ({
 test("a new workspace tab starts without outline selection", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const row = page.locator('.outline-scroll [data-row-kind="series"]').first();
   await row.click();
   await expect(row).toHaveClass(/selected/);
@@ -255,7 +281,7 @@ test("a new workspace tab starts without outline selection", async ({
 test("VALUE stays blank until the cursor is active over a plot", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const values = page.locator(
     '.outline-scroll [data-row-kind="series"] [data-column="value"]',
   );

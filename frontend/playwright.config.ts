@@ -24,9 +24,15 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173",
     headless: true,
     trace: "retain-on-failure",
-    ...(executablePath === undefined
-      ? {}
-      : { launchOptions: { executablePath } }),
+    launchOptions: {
+      args: [
+        "--enable-unsafe-webgpu",
+        "--enable-features=Vulkan",
+        "--use-angle=swiftshader",
+        "--use-webgpu-adapter=swiftshader",
+      ],
+      ...(executablePath === undefined ? {} : { executablePath }),
+    },
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },

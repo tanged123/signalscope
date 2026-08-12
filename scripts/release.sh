@@ -13,8 +13,8 @@ Usage: ./scripts/release.sh [version|tag|publish|assets]
   assets <dir>            List publishable release assets in a staged directory.
 
 'tag' is strict: it refuses an existing tag and never overwrites release
-history. 'publish' expects .deb, .rpm, .AppImage, .dmg, or *-setup.exe files in
-the staged asset directory and uses GH_TOKEN for GitHub authentication.
+history. 'publish' expects a Linux app bundle in the staged asset directory
+and uses GH_TOKEN for GitHub authentication.
 EOF
 }
 
@@ -54,8 +54,8 @@ assets() {
   fi
 
   find "$asset_dir" -type f \
-    \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' \
-    -o -name '*-setup.exe' \) -print0 | sort -z
+    \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.tar.gz' \) \
+    -print0 | sort -z
 }
 
 publish() {

@@ -276,6 +276,7 @@ describe("panel series", () => {
         const view = Object.create(PanelView.prototype) as unknown as {
           callbacks: PanelCallbacks;
           renderer: { lastLayout(): PlotLayout };
+          chartHost: { layout(): PlotLayout } | null;
           lastState: RenderPanelState;
           preparedPlot: PreparedPlot;
           hitAdapter: PreparedPlot["hitAdapter"];
@@ -288,6 +289,8 @@ describe("panel series", () => {
         const series = visible("run_01/temp");
         view.callbacks = callbacks;
         view.renderer = { lastLayout: () => gestureLayout };
+        view.chartHost =
+          mode === "time" ? { layout: () => gestureLayout } : null;
         view.lastState = { ...xyState("run_01/temp", [series]), mode };
         view.preparedPlot = {
           annotationAt: () => null,

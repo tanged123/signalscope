@@ -61,6 +61,9 @@ costs ~33 ms — cheap enough that windowed refeeds on tile-cache misses
 (and with it the `setSeriesData` fork trigger) is very unlikely to be
 needed.
 
+The implementation decision and its accepted tradeoffs are recorded in
+[ADR 0039](../../adr/0039-chartgpu-time-series-renderer.md).
+
 ## Observations
 
 - At 1,000 series the multi-series hairline policy engages as documented;

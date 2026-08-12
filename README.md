@@ -3,12 +3,17 @@
 [![SignalScope CI](https://github.com/tanged123/signalscope/actions/workflows/ci.yml/badge.svg)](https://github.com/tanged123/signalscope/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/tanged123/signalscope/graph/badge.svg?token=ypwd3hmX9u)](https://codecov.io/gh/tanged123/signalscope)
 
-**A native, high-performance time-series analysis workbench with portable interactive HTML snapshots.**
+**A high-performance local browser workbench with portable interactive HTML snapshots.**
 
-SignalScope combines a Rust data plane for logs larger than memory with one TypeScript/canvas presentation plane that runs in two hosts:
+SignalScope combines a Rust data plane for logs larger than memory with one
+TypeScript presentation plane that runs in a browser host and in snapshots:
 
-- The native Tauri workbench streams and memory-maps source data.
+- The localhost browser host streams and memory-maps source data.
 - A self-contained HTML snapshot uses the same renderer against embedded, size-budgeted tiles.
+
+Time-series panels use the vendored ChartGPU WebGPU renderer; XY, FFT, and
+histogram panels retain their Canvas2D paths. A WebGPU-capable Chromium is
+required for time-series rendering, including in exported snapshots.
 
 The repository currently includes the Phase 1 data plane and workbench fundamentals:
 CSV and JSON-channel MCAP ingestion, persistent min/max pyramid caches, native
@@ -38,10 +43,10 @@ Run the lightweight local quality gate:
 ./scripts/test.sh
 ```
 
-Run the native shell:
+Run the local browser host:
 
 ```bash
-./scripts/run.sh native
+./scripts/run.sh dev
 ```
 
 Press `O` or click **Open…**, choose **Files**, then select
@@ -109,15 +114,18 @@ core/
 protocol/            single schema source plus generated Rust and TypeScript
 frontend/
   src/app/           host-neutral application and DataPlane implementations
-  src/render/        deterministic canvas renderer
+  src/render/        deterministic ChartGPU and Canvas2D renderers
   src/ui/            workbench chrome and design tokens
-shell/src-tauri/     thin native host and IPC commands
+server/scope-server/ localhost HTTP host, dialogs, and protocol commands
 docs/adr/            accepted architecture decisions
 ```
 
 ## Architecture
 
-The frontend depends only on the versioned `DataPlane` contract. `TauriPlane` invokes the native Rust plane; `BakedPlane` reads the same response shapes from a snapshot data slot. The renderer therefore has no host-specific branch.
+The frontend depends only on the versioned `DataPlane` contract. `HttpPlane`
+calls the localhost Rust server; `BakedPlane` reads the same response shapes
+from a snapshot data slot. ChartGPU consumes the existing bounded tile
+pipeline, so the renderer has no host-specific branch.
 
 See [the ADR index](docs/adr/README.md) for the decisions behind the two-host product shape, layer boundaries, tile pyramid, protocol, session schema, linked-time model, and snapshot injection mechanism.
 
@@ -129,14 +137,11 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/setup.sh          # install locked frontend dependencies
 ./scripts/dev.sh            # enter the development shell
 ./scripts/run.sh web        # launch browser frontend
-./scripts/run.sh native     # launch native Tauri workbench
+./scripts/run.sh dev        # launch browser host and Vite
 ./scripts/test.sh           # lightweight core + frontend checks
-./scripts/test.sh full      # Tauri compile + Playwright checks too
+./scripts/test.sh full      # browser host + Playwright checks too
 ./scripts/build.sh web      # frontend + snapshot-template.html
-./scripts/build.sh native   # native bundle + shared frontend
-./scripts/setup-appimage.sh # install AppImage dependencies on Ubuntu
-./scripts/build.sh appimage # portable Linux AppImage (Ubuntu/FHS only)
-./scripts/build.sh windows  # Windows NSIS installer (Git Bash only)
+./scripts/build.sh app      # browser host binary + shared frontend
 ./scripts/coverage.sh       # Rust + merged Vitest/Playwright frontend LCOV
 ./scripts/version.sh check  # verify synchronized release manifests
 ./scripts/release.sh version # validate release metadata
@@ -146,9 +151,7 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/ci.sh rust        # reproduce one named GitHub Actions job
 nix fmt                     # format the workspace
 
-Windows installer builds require CMake in addition to Git Bash. Linux builds
-use the pinned Nix shell, which supplies HDF5; AppImage builds additionally
-require libhdf5-dev.
+Linux builds use the pinned Nix shell, which supplies HDF5.
 ```
 
 `./scripts/ci.sh quality` is implemented by `quality_checks()` in

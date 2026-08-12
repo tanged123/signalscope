@@ -56,8 +56,9 @@ import {
   COLOR_SLOTS,
   type PathRenderOptions,
   type PlotPath,
-  type RenderOptions,
 } from "../render/canvas-renderer";
+import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
+import type { GpuContext } from "../render/gpu-context";
 import {
   marker,
   OverlayRenderer,
@@ -555,7 +556,12 @@ export class PanelView {
   private readonly renderer: CanvasRenderer;
   private readonly canvas: HTMLCanvasElement;
   private readonly overlay: HTMLCanvasElement;
+  private readonly chartHostElement: HTMLElement;
   private readonly overlayRenderer: OverlayRenderer;
+  private chartHost: ChartHost | null = null;
+  private chartHostReady: Promise<ChartHost | null> | null = null;
+  private pendingChartRender: ChartRenderRequest | null = null;
+  private disposed = false;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
   private lastState: RenderPanelState | null = null;
@@ -601,6 +607,7 @@ export class PanelView {
   constructor(
     private readonly id: string,
     private readonly callbacks: PanelCallbacks,
+    private gpu: GpuContext | null = null,
   ) {
     this.element = document.createElement("article");
     this.element.className = "panel";
@@ -608,16 +615,22 @@ export class PanelView {
     this.element.tabIndex = 0;
     this.element.innerHTML = panelMarkup();
     this.canvas = required<HTMLCanvasElement>(this.element, ".plot-canvas");
+    this.chartHostElement = required<HTMLElement>(this.element, ".chart-host");
     this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
     this.renderer = new CanvasRenderer(this.canvas);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
+    if (gpu !== null) this.initializeChartHost(gpu);
     this.bind();
     this.interactions = new PlotInteractionController(this.overlay, {
-      layout: () => this.renderer.lastLayout(),
+      layout: () => this.activeLayout(),
       applyXRange: (min, max) => {
         this.applyXRange(min, max);
       },
       applyYRange: (min, max) => {
+        const layout = this.activeLayout();
+        if (this.lastState?.mode === "time" && layout !== null) {
+          this.chartHost?.setRangesOnly(layout.xRange, [min, max]);
+        }
         this.callbacks.onYRange(this.id, [min, max]);
       },
       fitView: () => {
@@ -634,7 +647,7 @@ export class PanelView {
         this.drawOverlay();
       },
       axisEditZone: (x, y) => {
-        const layout = this.renderer.lastLayout();
+        const layout = this.activeLayout();
         const state = this.lastState;
         return layout === null || state === null
           ? null
@@ -651,8 +664,43 @@ export class PanelView {
       },
     });
     new ResizeObserver(() => {
+      this.chartHost?.resize();
       this.callbacks.onResized(this.id);
     }).observe(this.canvas);
+  }
+
+  setGpu(gpu: GpuContext): void {
+    if (this.gpu !== null || this.disposed) return;
+    this.gpu = gpu;
+    this.lastStateKey = null;
+    if (this.lastInputState !== null) {
+      this.update(
+        this.lastInputState,
+        this.element.classList.contains("maximized"),
+      );
+    }
+    this.initializeChartHost(gpu);
+  }
+
+  private initializeChartHost(gpu: GpuContext): void {
+    this.chartHostReady = ChartHost.create(this.chartHostElement, gpu)
+      .then((host) => {
+        if (this.disposed) {
+          host.dispose();
+          return null;
+        }
+        this.chartHost = host;
+        if (this.pendingChartRender !== null) {
+          host.render(this.pendingChartRender);
+          this.pendingChartRender = null;
+          this.drawOverlay();
+        }
+        return host;
+      })
+      .catch(() => {
+        this.chartHostElement.hidden = true;
+        return null;
+      });
   }
 
   private bind(): void {
@@ -817,7 +865,7 @@ export class PanelView {
     });
     this.overlay.addEventListener("pointermove", (event) => {
       if (this.interactions.isDragging()) return;
-      const layout = this.renderer.lastLayout();
+      const layout = this.activeLayout();
       const inside =
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
       const cursor =
@@ -939,6 +987,9 @@ export class PanelView {
     } else if (rendered.mode === "xy" && rendered.x_signal === null) {
       empty.hidden = false;
       empty.textContent = "Drop a signal on the strip below to set the X axis.";
+    } else if (rendered.mode === "time" && this.gpu === null) {
+      empty.hidden = false;
+      empty.textContent = "WebGPU unavailable — time-series rendering disabled";
     } else {
       // In fft/histogram, renderSpectra/renderHistogram own the empty state.
       empty.hidden = true;
@@ -999,11 +1050,23 @@ export class PanelView {
     samples: SampleResponse | null,
     window: { t0: number; t1: number },
   ): number {
-    if (state.mode === "xy") return this.renderXy(state, samples, window);
-    if (state.mode === "fft") return this.renderSpectra(state, samples, window);
+    if (state.mode === "xy") {
+      this.chartHostElement.hidden = true;
+      return this.renderXy(state, samples, window);
+    }
+    if (state.mode === "fft") {
+      this.chartHostElement.hidden = true;
+      return this.renderSpectra(state, samples, window);
+    }
     if (state.mode === "histogram") {
+      this.chartHostElement.hidden = true;
       return this.renderHistogram(state, samples, window);
     }
+    if (this.gpu === null) {
+      this.chartHostElement.hidden = true;
+      return 0;
+    }
+    this.chartHostElement.hidden = false;
     if (tiles === null || state.series.length === 0) return 0;
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
@@ -1031,29 +1094,36 @@ export class PanelView {
       seriesKey,
     );
     if (ranges === null) return 0;
-    const options: RenderOptions = {
+    const styles = shown.map((tile) => {
+      const series = bySeries.get(tile.signalPath);
+      return {
+        hue: series?.hue ?? null,
+        dash: series?.dash ?? "solid",
+        width: series?.width ?? 1.4,
+        alpha: series?.opacity ?? 1,
+      };
+    });
+    const emphasisIndices =
+      this.emphasizePaths === null
+        ? []
+        : shown.flatMap((tile, index) =>
+            this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
+          );
+    const request: ChartRenderRequest = {
+      response,
+      xRange: ranges.x,
+      yRange: [ranges.y.min, ranges.y.max],
       xLabel: state.x_label ?? "time (s)",
       yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
-      yRange: [ranges.y.min, ranges.y.max],
-      axisStyle: state.axis_style,
-      styles: shown.map((tile) => {
-        const series = bySeries.get(tile.signalPath);
-        return {
-          hue: series?.hue ?? null,
-          dash: series?.dash ?? "solid",
-          width: series?.width ?? 1.4,
-          alpha: series?.opacity ?? 1,
-        };
-      }),
-      ...(this.emphasizePaths !== null
-        ? {
-            emphasisIndices: shown.flatMap((tile, index) =>
-              this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
-            ),
-          }
-        : {}),
+      styles,
+      emphasisIndices,
+      palette: this.renderer.paletteColors(),
     };
-    return this.renderer.render(response, ranges.x, options);
+    if (this.chartHost === null) {
+      this.pendingChartRender = request;
+      return 0;
+    }
+    return this.chartHost.render(request);
   }
 
   private renderXy(
@@ -1423,6 +1493,15 @@ export class PanelView {
   invalidateTheme(): void {
     this.renderer.invalidateTheme();
     this.overlayRenderer.invalidateTheme();
+    if (this.lastState !== null && this.lastWindow !== null) {
+      this.renderForMode(
+        this.lastState,
+        this.lastTiles,
+        this.lastSamples,
+        this.lastWindow,
+      );
+      this.drawOverlay(this.resolvedAnnotations(this.lastState));
+    }
   }
 
   setCursor(cursorT: number | null): void {
@@ -1455,8 +1534,31 @@ export class PanelView {
     return this.canvas.clientWidth;
   }
 
-  canvases(): { plot: HTMLCanvasElement; overlay: HTMLCanvasElement } {
-    return { plot: this.canvas, overlay: this.overlay };
+  async capturePlot(): Promise<{
+    plot: HTMLCanvasElement;
+    overlay: HTMLCanvasElement;
+  }> {
+    const host = this.chartHost ?? (await this.chartHostReady);
+    return {
+      plot:
+        this.lastState?.mode === "time" && host !== null
+          ? await host.capture()
+          : this.canvas,
+      overlay: this.overlay,
+    };
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.interactions.dispose();
+    this.chartHost?.dispose();
+    this.chartHost = null;
+  }
+
+  private activeLayout(): PlotLayout | null {
+    return this.lastState?.mode === "time"
+      ? (this.chartHost?.layout() ?? null)
+      : this.renderer.lastLayout();
   }
 
   panelRect(): DOMRect {
@@ -1501,7 +1603,7 @@ export class PanelView {
     offsetY: number,
     threshold: number,
   ): { path: string; distance: number } | null {
-    const layout = this.renderer.lastLayout();
+    const layout = this.activeLayout();
     return layout === null || this.hitAdapter === null
       ? null
       : this.hitAdapter.seriesAt(layout, offsetX, offsetY, threshold);
@@ -1603,7 +1705,7 @@ export class PanelView {
 
   /** Removes the annotation under the pixel; true when one was removed. */
   private removeAt(offsetX: number, offsetY: number, radius: number): boolean {
-    const layout = this.renderer.lastLayout();
+    const layout = this.activeLayout();
     const state = this.lastState;
     const prepared = this.preparedPlot;
     if (layout === null || state === null || prepared === null) return false;
@@ -1625,7 +1727,7 @@ export class PanelView {
 
   /** Pins the nearest plotted vertex under the pixel, when one is in range. */
   private pinAt(offsetX: number, offsetY: number, radius: number): boolean {
-    const layout = this.renderer.lastLayout();
+    const layout = this.activeLayout();
     if (layout === null) return false;
     const hit = this.preparedPlot?.annotationAt(
       layout,
@@ -1684,7 +1786,7 @@ export class PanelView {
               : [{ ...point, ghost: entry.hue === null }];
           })
         : [];
-    this.overlayRenderer.draw(this.renderer.lastLayout(), {
+    this.overlayRenderer.draw(this.activeLayout(), {
       cursorT: state?.mode === "xy" ? null : cursorT,
       cursorMode: this.cursorMode,
       cursorPoints:
@@ -1717,7 +1819,7 @@ export class PanelView {
       }));
     }
     if (mode === "histogram") {
-      const layout = this.renderer.lastLayout();
+      const layout = this.activeLayout();
       if (layout === null) return [];
       const cursor = this.preparedPlot?.cursorAt(
         layout,
@@ -1757,6 +1859,13 @@ export class PanelView {
    * panel-local value range everywhere else.
    */
   private applyXRange(min: number, max: number): void {
+    const layout = this.activeLayout();
+    if (this.lastState?.mode === "time" && layout !== null) {
+      this.chartHost?.setRangesOnly({ min, max }, [
+        layout.yRange.min,
+        layout.yRange.max,
+      ]);
+    }
     if (this.preparedPlot?.interaction.xAxis === "linked-time") {
       this.callbacks.onTimeWindow(this.id, min, max);
     } else {
@@ -2892,6 +3001,7 @@ function panelMarkup(): string {
     </div>
     <div class="plot-wrap">
       <canvas class="plot-canvas" aria-label="Time-series plot"></canvas>
+      <div class="chart-host" hidden></div>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
       <div class="panel-empty" hidden></div>
       <div class="xy-drop-strip" hidden>

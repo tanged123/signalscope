@@ -1,0 +1,3643 @@
+import { GPUContext } from './core/GPUContext';
+import { createRenderCoordinator } from './core/createRenderCoordinator';
+import type { RenderCoordinator, RenderCoordinatorCallbacks } from './core/createRenderCoordinator';
+import { resolveOptionsForChart } from './config/OptionResolver';
+import type { ResolvedChartGPUOptions, ResolvedPieSeriesConfig } from './config/OptionResolver';
+import type {
+  CartesianSeriesData,
+  ChartGPUOptions,
+  DataPoint,
+  DataPointTuple,
+  OHLCDataPoint,
+  OHLCDataPointTuple,
+  PieCenter,
+  PieRadius,
+  RenderMode,
+} from './config/types';
+import { createDataZoomSlider } from './components/createDataZoomSlider';
+import type { DataZoomSlider } from './components/createDataZoomSlider';
+import { createZoomResetButton } from './components/createZoomResetButton';
+import type { ZoomResetButton } from './components/createZoomResetButton';
+import type { ZoomRange, ZoomState } from './interaction/createZoomState';
+import {
+  computeCandlestickBodyWidthRange,
+  findCandlestick,
+  type FinanceOhlcHitSeriesConfig,
+} from './interaction/findCandlestick';
+import { findNearestPoint } from './interaction/findNearestPoint';
+import type { NearestPointMatch } from './interaction/findNearestPoint';
+import { findPieSlice } from './interaction/findPieSlice';
+import { createAxisScale } from './utils/scales';
+import type { LinearScale } from './utils/scales';
+import { checkWebGPUSupport } from './utils/checkWebGPU';
+import type { PipelineCache } from './core/PipelineCache';
+export type { PipelineCache, PipelineCacheStats } from './core/PipelineCache';
+import type {
+  PerformanceMetrics,
+  PerformanceCapabilities,
+  ExactFPS,
+  Milliseconds,
+  Bytes,
+  FrameTimeStats,
+  GPUTimingStats,
+  MemoryStats,
+  FrameDropStats,
+} from './config/types';
+import {
+  appendIntoRingXY,
+  computeRawBoundsFromCartesianData,
+  createRingXYColumns,
+  dropPrefixXY,
+  getPointCount as getCartesianPointCount,
+  getSize as getCartesianSize,
+  getX as getCartesianX,
+  getY as getCartesianY,
+  isRingXYColumns,
+  isStagingRingView,
+  stagingRingViewToRingXYColumns,
+  type RingXYColumns,
+  type StagingRingView,
+} from './data/cartesianData';
+import { normalizeMaxPoints, planMaxPointsWindow, resolveEffectiveMaxPointsForAppend } from './data/maxPointsWindow';
+import {
+  getBandLength,
+  getBandPoint,
+  getBandX,
+  appendBandIntoXYYColumns,
+  asBandXYYArrays,
+  bandBounds,
+  bandDataToMutableXYY,
+  extendBoundsWithBandData,
+  isBandShapedPayload,
+} from './data/bandData';
+import {
+  appendErrorBarIntoHlcColumns,
+  asErrorBarHlcArrays,
+  errorBarBounds,
+  errorBarDataToMutableHlc,
+  extendBoundsWithErrorBarData,
+  getErrorBarLength,
+  getErrorBarPoint,
+  isErrorBarShapedPayload,
+  type MutableErrorBarHlcColumns,
+} from './data/errorBarData';
+import type { BandSeriesData, ErrorBarSeriesData } from './config/types';
+import { pointerClientToLayoutCss } from './core/renderCoordinator/utils/canvasUtils';
+import { findErrorBarAtPointer } from './interaction/findErrorBar';
+import { findImpulseAtPointer } from './interaction/findImpulse';
+import type { ResolvedErrorBarSeriesConfig, ResolvedImpulseSeriesConfig } from './config/OptionResolver';
+import { impulseBounds } from './data/impulseGeometry';
+
+// --- Instance registry for auto-dispose on page unload (CGPU-OOM-139) ---
+const activeInstances = new Set<{ dispose(): void; disposed: boolean }>();
+let unloadListenersRegistered = false;
+
+function disposeAllInstances(): void {
+  // Snapshot to avoid mutation during iteration
+  const instances = [...activeInstances];
+  for (const inst of instances) {
+    try {
+      inst.dispose();
+    } catch {
+      // Best-effort cleanup during page teardown — swallow errors
+    }
+  }
+}
+
+function handlePageHide(event: PageTransitionEvent): void {
+  if (event.persisted) return;
+  disposeAllInstances();
+}
+
+function ensureUnloadListeners(): void {
+  if (unloadListenersRegistered) return;
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  unloadListenersRegistered = true;
+
+  window.addEventListener('pagehide', handlePageHide);
+}
+
+/** @internal — exposed for test cleanup only. Not part of the public API. */
+export function _resetInstanceRegistryForTesting(): void {
+  activeInstances.clear();
+  if (typeof window !== 'undefined' && unloadListenersRegistered) {
+    window.removeEventListener('pagehide', handlePageHide);
+    unloadListenersRegistered = false;
+  }
+}
+
+/**
+ * Circular buffer size for frame timestamps (120 frames = 2 seconds at 60fps).
+ */
+const FRAME_BUFFER_SIZE = 120;
+
+/**
+ * Expected frame time at 60fps (16.67ms).
+ */
+const EXPECTED_FRAME_TIME_MS = 1000 / 60;
+
+/**
+ * Frame drop threshold multiplier (1.5x expected frame time).
+ */
+const FRAME_DROP_THRESHOLD_MULTIPLIER = 1.5;
+
+/**
+ * Source kind for zoom range changes.
+ *
+ * Used to distinguish zoom change sources:
+ * - `'user'`: Direct user interaction (pan, pinch, wheel, slider)
+ * - `'auto-scroll'`: Automatic zoom adjustment from streaming data with auto-scroll enabled
+ * - `'api'`: Programmatic zoom via `setZoomRange(..., source)` calls
+ */
+export type ZoomChangeSourceKind = 'user' | 'auto-scroll' | 'api';
+
+/**
+ * Hit-test match for a chart element.
+ */
+export type ChartGPUHitTestMatch = Readonly<{
+  readonly kind: 'cartesian' | 'candlestick' | 'ohlc' | 'pie' | 'errorBar' | 'impulse' | 'pointCloud3d' | 'surface3d';
+  readonly seriesIndex: number;
+  readonly dataIndex: number;
+  /**
+   * - cartesian: [x, y]
+   * - candlestick / ohlc: still reported as [timestamp, close] at the ChartGPU wrapper (see hitTest)
+   * - pie: [slice index proxy via value] (see pie hit path)
+   * - errorBar: [x, y] center (see also high/low on TooltipParams)
+   * - impulse: [x, y] tip (see also baseline on TooltipParams)
+   * - pointCloud3d: [x, y, z]
+   * - surface3d: [x, y, z] world hit (height along Y)
+   */
+  readonly value: readonly [number, number] | readonly [number, number, number];
+  /** Point-cloud colormap/scalar channel when present (3D only). */
+  readonly valueChannel?: number;
+  /** surface3d cell column index. */
+  readonly i?: number;
+  /** surface3d cell row index. */
+  readonly j?: number;
+  /** surface3d height (same as value[1] under Y-up). */
+  readonly height?: number;
+}>;
+
+/**
+ * Result of a hit-test operation on a chart.
+ */
+export type ChartGPUHitTestResult = Readonly<{
+  readonly isInGrid: boolean;
+  readonly canvasX: number;
+  readonly canvasY: number;
+  readonly gridX: number;
+  readonly gridY: number;
+  readonly match: ChartGPUHitTestMatch | null;
+}>;
+
+export interface ChartGPUInstance {
+  readonly options: Readonly<ChartGPUOptions>;
+  readonly disposed: boolean;
+  setOption(options: ChartGPUOptions): void;
+  /**
+   * 3D only (`coordinateSystem: 'cartesian3d'`): re-fit camera to data AABB.
+   * No-op on 2D charts.
+   */
+  resetCamera?(): void;
+  /**
+   * 3D only: partial camera update (eye/target/type/fov/…).
+   * No-op on 2D charts.
+   */
+  setCamera?(partial: import('./config/types').Chart3DCameraOptions): void;
+  /**
+   * 3D only: current resolved camera pose. Returns `null` on 2D charts.
+   */
+  getCamera?(): import('./core/3d/camera').ResolvedCamera | null;
+  /**
+   * 3D only: streaming / partial update for a `surface3d` series (resolved index).
+   * Modes: `replaceY`, `appendColumns` (+scrollX), `appendRows` (+scrollZ).
+   * No-op on 2D charts.
+   */
+  updateSurface3D?(seriesIndex: number, update: import('./config/types').Surface3DUpdate): void;
+  /**
+   * 2D only: streaming / partial update for a `heatmap` series (resolved index).
+   * Modes: `replaceZ`, `appendColumns` (+scrollX), `appendRows` (+scrollY).
+   * Full field is row-major `z[j * columns + i]`; appendColumns strips are column-major
+   * `z[c * rows + r]`. No-op / omitted on 3D charts (use updateSurface3D for surfaces).
+   */
+  updateHeatmap?(seriesIndex: number, update: import('./config/types').HeatmapUpdate): void;
+  /**
+   * @internal Test/debug: how many times the hit-test columnar store was fully rebuilt.
+   */
+  getHitTestStoreRebuildCount(): number;
+  /**
+   * @internal Test/debug: retained point count in the ChartGPU hit-test store for a series.
+   * Used to assert dual-store windowing (device auto-window / maxPoints) matches GPU policy.
+   */
+  getHitTestSeriesPointCount(seriesIndex: number): number;
+  /**
+   * Appends new points to a cartesian series at runtime (streaming).
+   *
+   * Accepts multiple formats for efficient data append without per-point object allocations:
+   * - `DataPoint[]`: Traditional array of point objects/tuples (existing behavior)
+   * - `XYArraysData`: Separate x/y/size arrays (`{x: ArrayLike<number>, y: ArrayLike<number>, size?: ArrayLike<number>}`)
+   * - `InterleavedXYData`: Typed array with [x0,y0,x1,y1,...] layout (e.g. `Float32Array`)
+   * - `OHLCDataPoint[]`: For candlestick and ohlc series
+   *
+   * Point count is derived via `getPointCount()` from `cartesianData.ts`:
+   * - `XYArraysData`: min(x.length, y.length)
+   * - `InterleavedXYData`: floor(length / 2), ignoring trailing odd element
+   * - `DataView` is unsupported and throws an error
+   *
+   * Optional `options.maxPoints` is an **opt-in per call** fixed-capacity ring
+   * (not sticky series state — omit it later and growth is unbounded again). Policy
+   * matches DataStore / coordinator (`planMaxPointsWindow`):
+   * - if the new batch alone is ≥ `maxPoints`, keep only that batch’s tail
+   *   (strict replace; previous points discarded);
+   * - else fill up to `maxPoints`, then drop oldest points on each overflow
+   *   (GPU uses modular ring writes — O(append), no full retained-window rewrite).
+   * Peak retained length is **`maxPoints`**. Prefer this over sliding-window
+   * full `setOption`.
+   *
+   * When both `maxPoints` is set and `tooltip.show === false`, the ChartGPU
+   * hit-test columnar store is not updated on append (dual-store relief for
+   * high-rate FIFO). Re-enabling tooltips via `setOption({ tooltip: { show: true } })`
+   * (or calling `hitTest` after that) resyncs from the coordinator ring/raw.
+   * With tooltip on, hit-test uses the same ring policy as the GPU path.
+   *
+   * Pie series are non-cartesian and are not supported by streaming append.
+   */
+  appendData(
+    seriesIndex: number,
+    newPoints: CartesianSeriesData | OHLCDataPoint[],
+    options?: Readonly<{ maxPoints?: number }>
+  ): void;
+  resize(): void;
+  dispose(): void;
+  on(eventName: 'crosshairMove', callback: ChartGPUCrosshairMoveCallback): void;
+  on(eventName: 'zoomRangeChange', callback: ChartGPUZoomRangeChangeCallback): void;
+  on(eventName: 'deviceLost', callback: ChartGPUDeviceLostCallback): void;
+  on(eventName: 'dataAppend', callback: ChartGPUDataAppendCallback): void;
+  on(eventName: ChartGPUEventName, callback: ChartGPUEventCallback): void;
+  off(eventName: 'crosshairMove', callback: ChartGPUCrosshairMoveCallback): void;
+  off(eventName: 'zoomRangeChange', callback: ChartGPUZoomRangeChangeCallback): void;
+  off(eventName: 'deviceLost', callback: ChartGPUDeviceLostCallback): void;
+  off(eventName: 'dataAppend', callback: ChartGPUDataAppendCallback): void;
+  off(eventName: ChartGPUEventName, callback: ChartGPUEventCallback): void;
+  /**
+   * Gets the current “interaction x” in domain units (or `null` when inactive).
+   *
+   * This is derived from pointer movement inside the plot grid and can also be driven
+   * externally via `setInteractionX(...)` (e.g. chart sync).
+   */
+  getInteractionX(): number | null;
+  /**
+   * Drives the chart’s crosshair + tooltip from a domain-space x value.
+   *
+   * Passing `null` clears the interaction (hides crosshair/tooltip).
+   */
+  setInteractionX(x: number | null, source?: unknown): void;
+  /**
+   * Alias for `setInteractionX(...)` for chart sync semantics.
+   */
+  setCrosshairX(x: number | null, source?: unknown): void;
+  /**
+   * Subscribes to interaction x changes (domain units).
+   *
+   * Returns an unsubscribe function.
+   */
+  onInteractionXChange(callback: (x: number | null, source?: unknown) => void): () => void;
+  /**
+   * Returns the current percent-space zoom window (or `null` when zoom is disabled).
+   */
+  getZoomRange(): Readonly<{ start: number; end: number }> | null;
+  /**
+   * Sets the percent-space zoom window.
+   *
+   * No-op when zoom is disabled.
+   */
+  setZoomRange(start: number, end: number, source?: unknown): void;
+  /**
+   * Gets the latest performance metrics.
+   * Returns exact FPS and detailed frame statistics.
+   *
+   * @returns Current performance metrics, or null if not available
+   */
+  getPerformanceMetrics(): Readonly<PerformanceMetrics> | null;
+  /**
+   * Gets the performance capabilities of the current environment.
+   * Indicates which performance features are supported.
+   *
+   * @returns Performance capabilities, or null if not initialized
+   */
+  getPerformanceCapabilities(): Readonly<PerformanceCapabilities> | null;
+  /**
+   * Registers a callback to be notified of performance metric updates.
+   * Callback is invoked every frame with the latest metrics.
+   *
+   * @param callback - Function to call with updated metrics
+   * @returns Unsubscribe function to remove the callback
+   */
+  onPerformanceUpdate(callback: (metrics: Readonly<PerformanceMetrics>) => void): () => void;
+  /**
+   * Performs hit-testing on a pointer or mouse event.
+   *
+   * Returns coordinates and matched chart element (if any).
+   * Accepts both `PointerEvent` (for hover/click) and `MouseEvent` (for contextmenu/right-click).
+   *
+   * @param e - Pointer or mouse event to test
+   * @returns Hit-test result with coordinates and optional match
+   */
+  hitTest(e: PointerEvent | MouseEvent): ChartGPUHitTestResult;
+  /**
+   * Gets the current render mode ('auto' | 'external').
+   */
+  getRenderMode(): RenderMode;
+  /**
+   * Sets the render mode. In 'auto' mode, ChartGPU schedules renders automatically.
+   * In 'external' mode, the application must call renderFrame() on each frame.
+   */
+  setRenderMode(mode: RenderMode): void;
+  /**
+   * Renders a single frame (external mode only).
+   *
+   * In 'auto' mode, this is a no-op and logs a warning in development.
+   * In 'external' mode, executes a render if the chart is dirty.
+   *
+   * **GPU submit is deferred** to a microtask after this returns so multi-chart
+   * dashboards that share one `GPUDevice` can coalesce N encodes into one
+   * `queue.submit`. If you need queue visibility before
+   * `device.queue.onSubmittedWorkDone()`, await one microtask first:
+   * `chart.renderFrame(); await Promise.resolve(); await device.queue.onSubmittedWorkDone();`
+   *
+   * @returns true if a frame was rendered, false if the chart was already clean
+   */
+  renderFrame(): boolean;
+  /**
+   * Checks if the chart needs rendering (has pending changes).
+   *
+   * @returns true if the chart is dirty and needs a render
+   */
+  needsRender(): boolean;
+}
+
+// Type-only alias so callsites can write `ChartGPU[]` for chart instances (while `ChartGPU` the value
+// remains the creation API exported from `src/index.ts`).
+export type ChartGPU = ChartGPUInstance;
+
+export type ChartGPUEventName =
+  | 'click'
+  | 'mouseover'
+  | 'mouseout'
+  | 'crosshairMove'
+  | 'zoomRangeChange'
+  | 'deviceLost'
+  | 'dataAppend';
+
+export type ChartGPUEventPayload = Readonly<{
+  readonly seriesIndex: number | null;
+  readonly dataIndex: number | null;
+  readonly value: readonly [number, number] | null;
+  readonly seriesName: string | null;
+  readonly event: PointerEvent;
+}>;
+
+export type ChartGPUDeviceLostPayload = Readonly<{
+  readonly reason: GPUDeviceLostReason;
+  readonly message: string;
+}>;
+
+export type ChartGPUCrosshairMovePayload = Readonly<{
+  readonly x: number | null;
+  readonly source?: unknown;
+}>;
+
+export type ChartGPUZoomRangeChangePayload = Readonly<{
+  readonly start: number;
+  readonly end: number;
+  readonly source?: unknown;
+  readonly sourceKind?: ZoomChangeSourceKind;
+}>;
+
+export type ChartGPUDataAppendPayload = Readonly<{
+  readonly seriesIndex: number;
+  readonly count: number;
+  readonly xExtent: { readonly min: number; readonly max: number };
+}>;
+
+export type ChartGPUEventCallback = (payload: ChartGPUEventPayload) => void;
+
+export type ChartGPUCrosshairMoveCallback = (payload: ChartGPUCrosshairMovePayload) => void;
+
+export type ChartGPUZoomRangeChangeCallback = (payload: ChartGPUZoomRangeChangePayload) => void;
+
+export type ChartGPUDeviceLostCallback = (payload: ChartGPUDeviceLostPayload) => void;
+
+export type ChartGPUDataAppendCallback = (payload: ChartGPUDataAppendPayload) => void;
+
+type AnyChartGPUEventCallback =
+  | ChartGPUEventCallback
+  | ChartGPUCrosshairMoveCallback
+  | ChartGPUZoomRangeChangeCallback
+  | ChartGPUDeviceLostCallback
+  | ChartGPUDataAppendCallback;
+
+type ListenerRegistry = Readonly<Record<ChartGPUEventName, Set<AnyChartGPUEventCallback>>>;
+
+// Pipeline cache types are defined in `src/core/PipelineCache.ts` and re-exported near the top
+// of this file so public API uses a single canonical definition.
+
+/**
+ * Context for creating a ChartGPU instance with shared WebGPU device and adapter.
+ * Use this to share a single GPU device across multiple chart instances for improved resource efficiency.
+ *
+ * Optionally provide a `pipelineCache` to share compiled pipelines across charts, reducing
+ * shader compilation overhead during initialization.
+ */
+export type ChartGPUCreateContext = Readonly<{
+  readonly device: GPUDevice;
+  readonly adapter: GPUAdapter;
+  /**
+   * Optional pipeline cache for sharing compiled pipelines across charts.
+   * Must be created for the same GPUDevice as the context.
+   *
+   * @example
+   * ```ts
+   * const cache = createPipelineCache(device);
+   * const chart1 = await ChartGPU.create(container1, options, { adapter, device, pipelineCache: cache });
+   * const chart2 = await ChartGPU.create(container2, options, { adapter, device, pipelineCache: cache });
+   * ```
+   */
+  readonly pipelineCache?: PipelineCache;
+}>;
+
+type TapCandidate = {
+  readonly pointerId: number;
+  readonly startClientX: number;
+  readonly startClientY: number;
+  readonly startTimeMs: number;
+};
+
+const DEFAULT_TAP_MAX_DISTANCE_CSS_PX = 6;
+const DEFAULT_TAP_MAX_TIME_MS = 500;
+
+type Bounds = Readonly<{
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+}>;
+
+/**
+ * Mutable columnar store for cartesian series data in the hit-test runtime.
+ * Supports efficient append without per-point DataPoint object allocations.
+ *
+ * Note: size array is aligned with x/y arrays (same length), with undefined for points without size values.
+ */
+type MutableXYColumns = {
+  x: number[];
+  y: number[];
+  size?: (number | undefined)[];
+};
+
+const isTupleDataPoint = (p: DataPoint): p is DataPointTuple => Array.isArray(p);
+const isTupleOHLCDataPoint = (p: OHLCDataPoint): p is OHLCDataPointTuple => Array.isArray(p);
+
+const getPointXY = (p: DataPoint): { readonly x: number; readonly y: number } => {
+  if (isTupleDataPoint(p)) return { x: p[0], y: p[1] };
+  return { x: p.x, y: p.y };
+};
+
+/**
+ * Converts CartesianSeriesData to MutableXYColumns for the runtime hit-test store.
+ * Extracts x, y, and optional size values into separate mutable arrays.
+ * Size array is aligned with x/y arrays (same length), with undefined for points without size values.
+ */
+const cartesianDataToMutableColumns = (data: CartesianSeriesData): MutableXYColumns => {
+  const n = getCartesianPointCount(data);
+  if (n === 0) return { x: [], y: [] };
+
+  const x: number[] = new Array(n);
+  const y: number[] = new Array(n);
+  const sizeValues: (number | undefined)[] = [];
+  let hasSizeValues = false;
+
+  for (let i = 0; i < n; i++) {
+    x[i] = getCartesianX(data, i);
+    y[i] = getCartesianY(data, i);
+    const size = getCartesianSize(data, i);
+    sizeValues[i] = size;
+    if (size !== undefined) {
+      hasSizeValues = true;
+    }
+  }
+
+  return hasSizeValues ? { x, y, size: sizeValues } : { x, y };
+};
+
+const getOHLCTimestamp = (p: OHLCDataPoint): number => (isTupleOHLCDataPoint(p) ? p[0] : p.timestamp);
+const getOHLCClose = (p: OHLCDataPoint): number => (isTupleOHLCDataPoint(p) ? p[2] : p.close);
+
+const hasSliderDataZoom = (options: ChartGPUOptions): boolean =>
+  options.dataZoom?.some((z) => z?.type === 'slider') ?? false;
+const hasInsideDataZoom = (options: ChartGPUOptions): boolean =>
+  options.dataZoom?.some((z) => z?.type === 'inside') ?? false;
+
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+
+type InteractionScalesCache = {
+  rectWidthCss: number;
+  rectHeightCss: number;
+  plotWidthCss: number;
+  plotHeightCss: number;
+  xDomainMin: number;
+  xDomainMax: number;
+  yDomainMin: number;
+  yDomainMax: number;
+  xScale: LinearScale;
+  yScale: LinearScale;
+};
+
+/**
+ * Extends bounds with new CartesianSeriesData (any format).
+ * Optimized to avoid per-point type checks for typed arrays.
+ */
+const extendBoundsWithCartesianData = (bounds: Bounds | null, data: CartesianSeriesData): Bounds | null => {
+  const n = getCartesianPointCount(data);
+  if (n === 0) return bounds;
+
+  let b = bounds;
+  if (!b) {
+    // No existing bounds - compute from scratch (already optimized)
+    return computeRawBoundsFromCartesianData(data);
+  }
+
+  let xMin = b.xMin;
+  let xMax = b.xMax;
+  let yMin = b.yMin;
+  let yMax = b.yMax;
+
+  // Hoist type detection outside loop to avoid per-point type checks
+  // NOTE: Format detection logic is duplicated in 2 places and must stay in sync:
+  // 1. extendBoundsWithCartesianData (here) - for bounds updates
+  // 2. appendData method - for columnar store appends (also computes xExtent inline)
+  const isXYArrays = typeof data === 'object' && data !== null && !Array.isArray(data) && 'x' in data && 'y' in data;
+
+  const isInterleaved = typeof data === 'object' && data !== null && !Array.isArray(data) && ArrayBuffer.isView(data);
+
+  if (isXYArrays) {
+    // Fast path for XYArraysData
+    const xyData = data as { x: ArrayLike<number>; y: ArrayLike<number> };
+    for (let i = 0; i < n; i++) {
+      const x = xyData.x[i]!;
+      const y = xyData.y[i]!;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+      if (y < yMin) yMin = y;
+      if (y > yMax) yMax = y;
+    }
+  } else if (isInterleaved) {
+    // Fast path for InterleavedXYData
+    const arr = data as Float32Array | Float64Array;
+    for (let i = 0; i < n; i++) {
+      const x = arr[i * 2]!;
+      const y = arr[i * 2 + 1]!;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+      if (y < yMin) yMin = y;
+      if (y > yMax) yMax = y;
+    }
+  } else {
+    // Array<DataPoint> path: use helper functions
+    for (let i = 0; i < n; i++) {
+      const x = getCartesianX(data, i);
+      const y = getCartesianY(data, i);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+      if (y < yMin) yMin = y;
+      if (y > yMax) yMax = y;
+    }
+  }
+
+  // Keep bounds usable for downstream scale derivation.
+  if (xMin === xMax) xMax = xMin + 1;
+  if (yMin === yMax) yMax = yMin + 1;
+
+  return { xMin, xMax, yMin, yMax };
+};
+
+const extendBoundsWithOHLCDataPoints = (bounds: Bounds | null, points: ReadonlyArray<OHLCDataPoint>): Bounds | null => {
+  if (points.length === 0) return bounds;
+
+  let xMin = bounds?.xMin ?? Number.POSITIVE_INFINITY;
+  let xMax = bounds?.xMax ?? Number.NEGATIVE_INFINITY;
+  let yMin = bounds?.yMin ?? Number.POSITIVE_INFINITY;
+  let yMax = bounds?.yMax ?? Number.NEGATIVE_INFINITY;
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]!;
+    const timestamp = getOHLCTimestamp(p);
+    const low = isTupleOHLCDataPoint(p) ? p[3] : p.low;
+    const high = isTupleOHLCDataPoint(p) ? p[4] : p.high;
+
+    if (!Number.isFinite(timestamp) || !Number.isFinite(low) || !Number.isFinite(high)) continue;
+    if (timestamp < xMin) xMin = timestamp;
+    if (timestamp > xMax) xMax = timestamp;
+    if (low < yMin) yMin = low;
+    if (high > yMax) yMax = high;
+  }
+
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+    return bounds;
+  }
+
+  // Keep bounds usable for downstream scale derivation.
+  if (xMin === xMax) xMax = xMin + 1;
+  if (yMin === yMax) yMax = yMin + 1;
+
+  return { xMin, xMax, yMin, yMax };
+};
+
+const computeGlobalBounds = (
+  series: ResolvedChartGPUOptions['series'],
+  runtimeRawBoundsByIndex?: ReadonlyArray<Bounds | null> | null
+): Bounds => {
+  let xMin = Number.POSITIVE_INFINITY;
+  let xMax = Number.NEGATIVE_INFINITY;
+  let yMin = Number.POSITIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+
+  for (let s = 0; s < series.length; s++) {
+    const seriesConfig = series[s]!;
+    // Pie series are non-cartesian; they don't participate in x/y bounds.
+    if (seriesConfig.type === 'pie') continue;
+
+    // Prefer the chart-owned runtime bounds (kept up to date by appendData()).
+    const runtimeBoundsCandidate = runtimeRawBoundsByIndex?.[s] ?? null;
+    if (runtimeBoundsCandidate) {
+      const b = runtimeBoundsCandidate;
+      if (Number.isFinite(b.xMin) && Number.isFinite(b.xMax) && Number.isFinite(b.yMin) && Number.isFinite(b.yMax)) {
+        if (b.xMin < xMin) xMin = b.xMin;
+        if (b.xMax > xMax) xMax = b.xMax;
+        if (b.yMin < yMin) yMin = b.yMin;
+        if (b.yMax > yMax) yMax = b.yMax;
+        continue;
+      }
+    }
+
+    // Prefer resolver-provided bounds when available (avoids O(n) scans on initial setOption()).
+    // (Resolved series types include `rawBounds` for cartesian series; keep this defensive.)
+    const rawBoundsCandidate = (seriesConfig as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null;
+    if (rawBoundsCandidate) {
+      const b = rawBoundsCandidate;
+      if (Number.isFinite(b.xMin) && Number.isFinite(b.xMax) && Number.isFinite(b.yMin) && Number.isFinite(b.yMax)) {
+        if (b.xMin < xMin) xMin = b.xMin;
+        if (b.xMax > xMax) xMax = b.xMax;
+        if (b.yMin < yMin) yMin = b.yMin;
+        if (b.yMax > yMax) yMax = b.yMax;
+        continue;
+      }
+    }
+
+    if (seriesConfig.type === 'candlestick' || seriesConfig.type === 'ohlc') {
+      // Fallback scan when resolver-provided bounds aren't present.
+      const data = seriesConfig.data as ReadonlyArray<OHLCDataPoint>;
+      for (let i = 0; i < data.length; i++) {
+        const p = data[i]!;
+        const timestamp = getOHLCTimestamp(p);
+        const low = isTupleOHLCDataPoint(p) ? p[3] : p.low;
+        const high = isTupleOHLCDataPoint(p) ? p[4] : p.high;
+
+        if (!Number.isFinite(timestamp) || !Number.isFinite(low) || !Number.isFinite(high)) continue;
+        if (timestamp < xMin) xMin = timestamp;
+        if (timestamp > xMax) xMax = timestamp;
+        if (low < yMin) yMin = low;
+        if (high > yMax) yMax = high;
+      }
+      continue;
+    }
+
+    if (seriesConfig.type === 'band') {
+      const bb = bandBounds((seriesConfig.rawData ?? seriesConfig.data) as BandSeriesData);
+      if (!bb) continue;
+      if (bb.xMin < xMin) xMin = bb.xMin;
+      if (bb.xMax > xMax) xMax = bb.xMax;
+      if (bb.yMin < yMin) yMin = bb.yMin;
+      if (bb.yMax > yMax) yMax = bb.yMax;
+      continue;
+    }
+
+    if (seriesConfig.type === 'errorBar') {
+      const direction =
+        (seriesConfig as { direction?: 'vertical' | 'horizontal' }).direction === 'horizontal'
+          ? 'horizontal'
+          : 'vertical';
+      const eb = errorBarBounds((seriesConfig.rawData ?? seriesConfig.data) as ErrorBarSeriesData, direction);
+      if (!eb) continue;
+      if (eb.xMin < xMin) xMin = eb.xMin;
+      if (eb.xMax > xMax) xMax = eb.xMax;
+      if (eb.yMin < yMin) yMin = eb.yMin;
+      if (eb.yMax > yMax) yMax = eb.yMax;
+      continue;
+    }
+
+    if (seriesConfig.type === 'impulse') {
+      const baseline =
+        typeof (seriesConfig as { baseline?: number }).baseline === 'number' &&
+        Number.isFinite((seriesConfig as { baseline?: number }).baseline)
+          ? ((seriesConfig as { baseline: number }).baseline as number)
+          : 0;
+      const ib = impulseBounds((seriesConfig.rawData ?? seriesConfig.data) as CartesianSeriesData, baseline);
+      if (!ib) continue;
+      if (ib.xMin < xMin) xMin = ib.xMin;
+      if (ib.xMax > xMax) xMax = ib.xMax;
+      if (ib.yMin < yMin) yMin = ib.yMin;
+      if (ib.yMax > yMax) yMax = ib.yMax;
+      continue;
+    }
+
+    const b = computeRawBoundsFromCartesianData(seriesConfig.data as CartesianSeriesData);
+    if (!b) continue;
+    if (b.xMin < xMin) xMin = b.xMin;
+    if (b.xMax > xMax) xMax = b.xMax;
+    if (b.yMin < yMin) yMin = b.yMin;
+    if (b.yMax > yMax) yMax = b.yMax;
+  }
+
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+    return { xMin: 0, xMax: 1, yMin: 0, yMax: 1 };
+  }
+
+  if (xMin === xMax) xMax = xMin + 1;
+  if (yMin === yMax) yMax = yMin + 1;
+
+  return { xMin, xMax, yMin, yMax };
+};
+
+const normalizeDomain = (
+  minCandidate: number,
+  maxCandidate: number
+): { readonly min: number; readonly max: number } => {
+  let min = minCandidate;
+  let max = maxCandidate;
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    min = 0;
+    max = 1;
+  }
+
+  if (min === max) {
+    max = min + 1;
+  } else if (min > max) {
+    const t = min;
+    min = max;
+    max = t;
+  }
+
+  return { min, max };
+};
+
+type CartesianHitTestMatch = Readonly<{
+  kind: 'cartesian';
+  match: NearestPointMatch;
+}>;
+
+type PieHitTestMatch = Readonly<{
+  kind: 'pie';
+  seriesIndex: number;
+  dataIndex: number;
+  sliceValue: number;
+}>;
+
+type CandlestickHitTestMatch = Readonly<{
+  kind: 'candlestick' | 'ohlc';
+  seriesIndex: number;
+  dataIndex: number;
+  point: OHLCDataPoint;
+}>;
+
+type ErrorBarHitTestMatch = Readonly<{
+  kind: 'errorBar';
+  seriesIndex: number;
+  dataIndex: number;
+  point: { readonly x: number; readonly y: number; readonly high: number; readonly low: number };
+}>;
+
+type ImpulseHitTestMatch = Readonly<{
+  kind: 'impulse';
+  seriesIndex: number;
+  dataIndex: number;
+  point: { readonly x: number; readonly y: number; readonly baseline: number };
+}>;
+
+type HitTestMatch =
+  | CartesianHitTestMatch
+  | PieHitTestMatch
+  | CandlestickHitTestMatch
+  | ErrorBarHitTestMatch
+  | ImpulseHitTestMatch;
+
+const parseNumberOrPercent = (value: number | string, basis: number): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+
+  const s = value.trim();
+  if (s.length === 0) return null;
+
+  if (s.endsWith('%')) {
+    const pct = Number.parseFloat(s.slice(0, -1));
+    if (!Number.isFinite(pct)) return null;
+    return (pct / 100) * basis;
+  }
+
+  // Be permissive: allow numeric strings like "120" even though the public type primarily documents percent strings.
+  const n = Number.parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+};
+
+const resolvePieCenterPlotCss = (
+  center: PieCenter | undefined,
+  plotWidthCss: number,
+  plotHeightCss: number
+): { readonly x: number; readonly y: number } => {
+  const xRaw = center?.[0] ?? '50%';
+  const yRaw = center?.[1] ?? '50%';
+
+  const x = parseNumberOrPercent(xRaw, plotWidthCss);
+  const y = parseNumberOrPercent(yRaw, plotHeightCss);
+
+  return {
+    x: Number.isFinite(x) ? x! : plotWidthCss * 0.5,
+    y: Number.isFinite(y) ? y! : plotHeightCss * 0.5,
+  };
+};
+
+const isPieRadiusTuple = (radius: PieRadius): radius is readonly [inner: number | string, outer: number | string] =>
+  Array.isArray(radius);
+
+const resolvePieRadiiCss = (
+  radius: PieRadius | undefined,
+  maxRadiusCss: number
+): { readonly inner: number; readonly outer: number } => {
+  // Default similar to common chart libs (mirrors `createPieRenderer.ts` and coordinator helpers).
+  if (radius == null) return { inner: 0, outer: maxRadiusCss * 0.7 };
+
+  if (isPieRadiusTuple(radius)) {
+    const inner = parseNumberOrPercent(radius[0], maxRadiusCss);
+    const outer = parseNumberOrPercent(radius[1], maxRadiusCss);
+    const innerCss = Math.max(0, Number.isFinite(inner) ? inner! : 0);
+    const outerCss = Math.max(innerCss, Number.isFinite(outer) ? outer! : maxRadiusCss * 0.7);
+    return { inner: innerCss, outer: Math.min(maxRadiusCss, outerCss) };
+  }
+
+  const outer = parseNumberOrPercent(radius, maxRadiusCss);
+  const outerCss = Math.max(0, Number.isFinite(outer) ? outer! : maxRadiusCss * 0.7);
+  return { inner: 0, outer: Math.min(maxRadiusCss, outerCss) };
+};
+
+/**
+ * Creates a ChartGPU instance with default WebGPU initialization.
+ */
+export async function createChartGPU(container: HTMLElement, options: ChartGPUOptions): Promise<ChartGPUInstance>;
+
+/**
+ * Creates a ChartGPU instance with a shared WebGPU device and adapter.
+ * Use this overload to share a single GPU device across multiple chart instances.
+ *
+ * @param container - HTML container element for the chart
+ * @param options - Chart configuration options
+ * @param context - Shared GPU context with device and adapter
+ */
+export async function createChartGPU(
+  container: HTMLElement,
+  options: ChartGPUOptions,
+  context: ChartGPUCreateContext
+): Promise<ChartGPUInstance>;
+
+export async function createChartGPU(
+  container: HTMLElement,
+  options: ChartGPUOptions,
+  context?: ChartGPUCreateContext
+): Promise<ChartGPUInstance> {
+  // 3D modality: fully separate create path (depth + camera coordinator).
+  if (options.coordinateSystem === 'cartesian3d') {
+    const { createChartGPU3D } = await import('./createChartGPU3D');
+    return createChartGPU3D(container, options, context, (inst) => {
+      activeInstances.add(inst);
+      ensureUnloadListeners();
+    });
+  }
+
+  // Check WebGPU support before creating canvas or any resources.
+  // When the caller injects an adapter+device, avoid requesting another adapter during the
+  // support check (shared device mode).
+  if (!context) {
+    const supportCheck = await checkWebGPUSupport();
+    if (!supportCheck.supported) {
+      const reason = supportCheck.reason || 'Unknown reason';
+      throw new Error(
+        `ChartGPU: WebGPU is not available.\n` +
+          `Reason: ${reason}\n` +
+          `Browser support: Chrome/Edge 113+, Safari 18+, Firefox not yet supported.\n` +
+          `Resources:\n` +
+          `  - MDN WebGPU API: https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API\n` +
+          `  - Browser compatibility: https://caniuse.com/webgpu\n` +
+          `  - WebGPU specification: https://www.w3.org/TR/webgpu/\n` +
+          `  - Check your system: https://webgpureport.org/`
+      );
+    }
+  } else {
+    // Minimal sanity checks: the injected device path still requires WebGPU globals for canvas format negotiation.
+    if (typeof navigator === 'undefined' || !navigator.gpu) {
+      throw new Error('ChartGPU: Shared device mode requires WebGPU globals (navigator.gpu) to be available.');
+    }
+  }
+
+  // Fail fast: pipeline cache (if provided) must be created for the same GPUDevice this chart will use.
+  if (context?.pipelineCache && context.pipelineCache.device !== context.device) {
+    throw new Error(
+      'ChartGPU: pipelineCache.device must match the GPUDevice in the creation context. ' +
+        'Create the pipeline cache with the same device: createPipelineCache(device).'
+    );
+  }
+
+  const canvas = document.createElement('canvas');
+
+  // Ensure the canvas participates in layout and can size via the container.
+  canvas.style.display = 'block';
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+
+  // Append before awaiting so it appears immediately and has measurable size.
+  container.appendChild(canvas);
+
+  const isSharedDevice = !!context;
+
+  let disposed = false;
+  let renderMode: RenderMode = options.renderMode ?? 'auto';
+  let isRendering = false;
+  let deviceIsLost = false;
+  let gpuContext: GPUContext | null = null;
+  let coordinator: RenderCoordinator | null = null;
+  let coordinatorTargetFormat: GPUTextureFormat | null = null;
+  let unsubscribeCoordinatorInteractionXChange: (() => void) | null = null;
+  let unsubscribeCoordinatorZoomRangeChange: (() => void) | null = null;
+
+  // For chart-sync loop prevention: when `setZoomRange(..., source)` is called, we "arm" the next
+  // coordinator zoom-change notification with the provided source token so downstream listeners
+  // can skip rebroadcast.
+  let pendingZoomSource: unknown = undefined;
+  let pendingZoomSourceArmed = false;
+
+  let dataZoomSliderHost: HTMLDivElement | null = null;
+  let dataZoomSlider: DataZoomSlider | null = null;
+  let zoomResetButton: ZoomResetButton | null = null;
+
+  let currentOptions: ChartGPUOptions = options;
+  let resolvedOptions: ResolvedChartGPUOptions = resolveOptionsForChart(currentOptions);
+  /**
+   * Create-time DPR policy (issue #155 / create-only contract).
+   * - Finite > 0: freeze this explicit DPR for buffer sizing + GPUContext layout on every resize
+   *   (setOption cannot change it; dispose/recreate to change).
+   * - null: track live `window.devicePixelRatio` on each resize (page zoom).
+   * Captured once so buffer DPR never drifts from overlay DPR after setOption.
+   */
+  const createTimeExplicitDpr: number | null = (() => {
+    const dprOpt = options.devicePixelRatio;
+    return typeof dprOpt === 'number' && Number.isFinite(dprOpt) && dprOpt > 0 ? dprOpt : null;
+  })();
+  /**
+   * Snapshot of user series element refs after the last resolve. Used with
+   * `canReuseEntireUserSeriesArray` so `series[i] = {...}` under a stable outer
+   * array does not silently reuse stale resolved series.
+   */
+  let lastUserSeriesElements: ReadonlyArray<unknown> | null = currentOptions.series
+    ? currentOptions.series.slice()
+    : null;
+
+  // When true, hit-test columns were skipped under dual-store relief and must be
+  // rebuilt from the coordinator before hitTest / after tooltip re-enable.
+  let hitTestStoreNeedsResync = false;
+  /** Counts full columnar rebuilds of the ChartGPU hit-test store (test/debug). */
+  let hitTestStoreRebuildCount = 0;
+
+  // Chart-owned runtime series store for hit-testing only (cartesian only).
+  // - `runtimeRawDataByIndex[i]` is MutableXYColumns, RingXYColumns (FIFO), or OHLC[].
+  // - `runtimeRawBoundsByIndex[i]` is incrementally updated to keep scale/bounds derivation cheap.
+  // - `runtimeHitTestSourceByIndex[i]` tracks the raw data reference used to build the store so
+  //   axes-only / presentation-only setOption can skip O(n) column copies.
+  // - After tooltip resync from coordinator, source is set to HIT_TEST_OWNED_TOKEN so a later
+  //   presentation-only setOption reuses owned columns (append history) instead of rebuilding
+  //   from seed `s.rawData ?? s.data` (issue 1.2). True seed identity still used on normal path.
+  const HIT_TEST_OWNED_TOKEN = Symbol('chartgpu.hitTestOwned');
+  let runtimeRawDataByIndex: Array<MutableXYColumns | RingXYColumns | OHLCDataPoint[]> = new Array(
+    resolvedOptions.series.length
+  )
+    .fill(null)
+    .map(() => ({ x: [], y: [] }));
+  let runtimeRawBoundsByIndex: Array<Bounds | null> = new Array(resolvedOptions.series.length).fill(null);
+  let runtimeHitTestSourceByIndex: Array<unknown | null> = new Array(resolvedOptions.series.length).fill(null);
+  /**
+   * Options `rawData ?? data` identity observed on the last hit-test init/resync.
+   * Used with HIT_TEST_OWNED_TOKEN: same options ref → presentation-only reuse of
+   * owned columns; different options ref → series data replace rebuilds from seed.
+   */
+  let runtimeHitTestOptionsRawByIndex: Array<unknown | null> = new Array(resolvedOptions.series.length).fill(null);
+  /** Tracks resolver rawBoundsMode so axes explicit→auto can refresh bounds. */
+  let runtimeHitTestBoundsModeByIndex: Array<string | null> = new Array(resolvedOptions.series.length).fill(null);
+  let runtimeHitTestSeriesCache: ResolvedChartGPUOptions['series'] | null = null;
+  let runtimeHitTestSeriesVersion = 0;
+
+  /**
+   * Rebuilds ChartGPU hit-test columns from coordinator runtime data after
+   * dual-store skip (tooltip-off + maxPoints). Always resizes to current series
+   * count. Chronological clone for OHLC / ring so subsequent tooltip-on appends
+   * stay consistent.
+   */
+  const resyncHitTestStoreFromCoordinator = (): void => {
+    if (!coordinator || !hitTestStoreNeedsResync) return;
+    const n = resolvedOptions.series.length;
+    const nextData: Array<MutableXYColumns | RingXYColumns | OHLCDataPoint[]> = new Array(n);
+    const nextBounds: Array<Bounds | null> = new Array(n);
+    const nextSource: Array<unknown | null> = new Array(n);
+    const nextModes: Array<string | null> = new Array(n).fill(null);
+    const nextOptionsRaw: Array<unknown | null> = new Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const s = resolvedOptions.series[i]!;
+      const optionsRaw =
+        s.type === 'pie' || s.type === 'heatmap'
+          ? null
+          : (((s as unknown as { rawData?: unknown }).rawData ?? s.data) as unknown);
+      if (s.type === 'pie' || s.type === 'heatmap') {
+        nextData[i] = { x: [], y: [] };
+        nextBounds[i] =
+          s.type === 'heatmap' ? ((s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null) : null;
+        nextSource[i] = null;
+        nextModes[i] = null;
+        nextOptionsRaw[i] = null;
+        continue;
+      }
+      const raw = coordinator.getRuntimeSeriesData(i);
+      const bounds = coordinator.getRuntimeSeriesBounds(i);
+      if (raw == null) {
+        // New series or coordinator not yet seeded — fall back to options data.
+        if (s.type === 'candlestick' || s.type === 'ohlc') {
+          const ohlc = (s.data as ReadonlyArray<OHLCDataPoint>) ?? [];
+          nextData[i] = ohlc.length === 0 ? [] : ohlc.slice();
+          nextBounds[i] = (s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null;
+        } else if (s.type === 'band') {
+          const band = (s.data as BandSeriesData) ?? { x: [], y: [], y1: [] };
+          nextData[i] = asBandXYYArrays(bandDataToMutableXYY(band)) as unknown as MutableXYColumns;
+          nextBounds[i] = (s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? bandBounds(band) ?? null;
+        } else if (s.type === 'errorBar') {
+          const eb = (s.data as ErrorBarSeriesData) ?? { x: [], y: [], high: [], low: [] };
+          nextData[i] = asErrorBarHlcArrays(errorBarDataToMutableHlc(eb)) as unknown as MutableXYColumns;
+          const direction =
+            (s as { direction?: 'vertical' | 'horizontal' }).direction === 'horizontal' ? 'horizontal' : 'vertical';
+          nextBounds[i] =
+            (s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? errorBarBounds(eb, direction) ?? null;
+        } else {
+          const cart = (s.data as CartesianSeriesData) ?? [];
+          nextData[i] = cartesianDataToMutableColumns(cart);
+          nextBounds[i] = computeRawBoundsFromCartesianData(cart) as Bounds | null;
+        }
+        nextSource[i] = HIT_TEST_OWNED_TOKEN;
+        nextOptionsRaw[i] = optionsRaw;
+        continue;
+      }
+      if (s.type === 'candlestick' || s.type === 'ohlc') {
+        const ohlc = raw as ReadonlyArray<OHLCDataPoint>;
+        nextData[i] = ohlc.length === 0 ? [] : ohlc.slice();
+      } else if (s.type === 'band') {
+        nextData[i] = asBandXYYArrays(bandDataToMutableXYY(raw as BandSeriesData)) as unknown as MutableXYColumns;
+      } else if (s.type === 'errorBar') {
+        nextData[i] = asErrorBarHlcArrays(
+          errorBarDataToMutableHlc(raw as ErrorBarSeriesData)
+        ) as unknown as MutableXYColumns;
+      } else if (isRingXYColumns(raw)) {
+        // Private ring copy (chronological at start=0) for O(append) hit-test.
+        // Preserve per-point size when coordinator ring has a size channel (issue 1.4).
+        const src = raw as RingXYColumns;
+        const withSize = src.size != null;
+        const ring = createRingXYColumns(src.capacity, withSize);
+        for (let k = 0; k < src.count; k++) {
+          ring.x[k] = getCartesianX(src as unknown as CartesianSeriesData, k);
+          ring.y[k] = getCartesianY(src as unknown as CartesianSeriesData, k);
+          if (ring.size) {
+            const sz = getCartesianSize(src as unknown as CartesianSeriesData, k);
+            ring.size[k] = typeof sz === 'number' && Number.isFinite(sz) ? sz : Number.NaN;
+          }
+        }
+        ring.start = 0;
+        ring.count = src.count;
+        nextData[i] = ring;
+      } else if (isStagingRingView(raw)) {
+        // Thin-path FIFO: rebuild into a private ring so tooltip-on appends keep
+        // modular capacity (not a large linear store after long staging sessions).
+        nextData[i] = stagingRingViewToRingXYColumns(raw as StagingRingView);
+      } else {
+        nextData[i] = cartesianDataToMutableColumns(raw as CartesianSeriesData);
+      }
+      if (bounds) {
+        nextBounds[i] = bounds as Bounds;
+      } else if (s.type === 'band') {
+        // Dual-Y envelope — never cartesian scan (would drop y1 extrema).
+        nextBounds[i] =
+          bandBounds(nextData[i] as unknown as BandSeriesData) ??
+          (s as unknown as { rawBounds?: Bounds | null }).rawBounds ??
+          null;
+      } else if (s.type === 'errorBar') {
+        const direction =
+          (s as { direction?: 'vertical' | 'horizontal' }).direction === 'horizontal' ? 'horizontal' : 'vertical';
+        nextBounds[i] =
+          errorBarBounds(nextData[i] as unknown as ErrorBarSeriesData, direction) ??
+          (s as unknown as { rawBounds?: Bounds | null }).rawBounds ??
+          null;
+      } else if (s.type === 'candlestick' || s.type === 'ohlc') {
+        nextBounds[i] =
+          extendBoundsWithOHLCDataPoints(null, nextData[i] as ReadonlyArray<OHLCDataPoint>) ??
+          (s as unknown as { rawBounds?: Bounds | null }).rawBounds ??
+          null;
+      } else {
+        nextBounds[i] = computeRawBoundsFromCartesianData(
+          nextData[i] as unknown as CartesianSeriesData
+        ) as Bounds | null;
+      }
+      // Owned runtime after resync — not seed identity (breaks tooltip-off stale seed)
+      // but also not null (null would rebuild from seed on next setOption).
+      nextSource[i] = HIT_TEST_OWNED_TOKEN;
+      nextOptionsRaw[i] = optionsRaw;
+      nextModes[i] = (s as unknown as { rawBoundsMode?: string }).rawBoundsMode ?? null;
+    }
+
+    runtimeRawDataByIndex = nextData;
+    runtimeRawBoundsByIndex = nextBounds;
+    runtimeHitTestSourceByIndex = nextSource;
+    runtimeHitTestOptionsRawByIndex = nextOptionsRaw;
+    runtimeHitTestBoundsModeByIndex = nextModes;
+    hitTestStoreNeedsResync = false;
+    runtimeHitTestSeriesCache = null;
+    runtimeHitTestSeriesVersion++;
+    cachedGlobalBounds = computeGlobalBounds(resolvedOptions.series, runtimeRawBoundsByIndex);
+    interactionScalesCache = null;
+  };
+
+  const initRuntimeHitTestStoreFromResolvedOptions = (): void => {
+    // Tooltip re-enable after dual-store skip: prefer coordinator snapshot over
+    // seed series data (which never saw FIFO appends). Resync already resizes
+    // to resolvedOptions.series.length (handles series add/remove in same call).
+    if (hitTestStoreNeedsResync && resolvedOptions.tooltip?.show !== false && coordinator) {
+      resyncHitTestStoreFromCoordinator();
+      runtimeHitTestSeriesCache = null;
+      runtimeHitTestSeriesVersion++;
+      return;
+    }
+    hitTestStoreRebuildCount++;
+
+    const nextCount = resolvedOptions.series.length;
+    const prevData = runtimeRawDataByIndex;
+    const prevBounds = runtimeRawBoundsByIndex;
+    const prevSource = runtimeHitTestSourceByIndex;
+    const prevCount = prevData.length;
+
+    const nextData: Array<MutableXYColumns | RingXYColumns | OHLCDataPoint[]> = new Array(nextCount);
+    const nextBounds: Array<Bounds | null> = new Array(nextCount);
+    const nextSource: Array<unknown | null> = new Array(nextCount);
+    const nextModes: Array<string | null> = new Array(nextCount);
+    const nextOptionsRaw: Array<unknown | null> = new Array(nextCount);
+    const prevModes = runtimeHitTestBoundsModeByIndex;
+    const prevOptionsRaw = runtimeHitTestOptionsRawByIndex;
+
+    for (let i = 0; i < nextCount; i++) {
+      const s = resolvedOptions.series[i]!;
+      const mode = (s as unknown as { rawBoundsMode?: string }).rawBoundsMode ?? null;
+      if (s.type === 'pie' || s.type === 'heatmap') {
+        // Pie / heatmap don't use the cartesian runtime store
+        nextData[i] = { x: [], y: [] };
+        nextBounds[i] =
+          s.type === 'heatmap' ? ((s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null) : null;
+        nextSource[i] = null;
+        nextModes[i] = null;
+        nextOptionsRaw[i] = null;
+        continue;
+      }
+
+      if (s.type === 'errorBar') {
+        const raw = ((s as unknown as { rawData?: ErrorBarSeriesData }).rawData ?? s.data) as ErrorBarSeriesData;
+        const rawBounds = (s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null;
+        const direction =
+          (s as { direction?: 'vertical' | 'horizontal' }).direction === 'horizontal' ? 'horizontal' : 'vertical';
+        const prevOwned = i < prevCount ? prevData[i] : null;
+        const prevIsOwnedToken = i < prevCount && prevSource[i] === HIT_TEST_OWNED_TOKEN;
+        const optionsRawUnchanged = i < prevCount && prevOptionsRaw[i] === raw;
+        const prevHasHlc =
+          prevOwned != null &&
+          typeof prevOwned === 'object' &&
+          !Array.isArray(prevOwned) &&
+          'high' in (prevOwned as object) &&
+          'low' in (prevOwned as object);
+        const reuseOwnedHistory = prevIsOwnedToken && prevHasHlc && optionsRawUnchanged && !hitTestStoreNeedsResync;
+        const reuseSeedIdentity = i < prevCount && prevSource[i] === raw && prevHasHlc && !hitTestStoreNeedsResync;
+        if (reuseOwnedHistory || reuseSeedIdentity) {
+          nextData[i] = prevData[i]!;
+          nextSource[i] = prevIsOwnedToken ? HIT_TEST_OWNED_TOKEN : raw;
+          nextOptionsRaw[i] = raw;
+          const modeChanged = mode != null && prevModes[i] != null && mode !== prevModes[i];
+          if (modeChanged) {
+            nextBounds[i] =
+              errorBarBounds(prevData[i] as unknown as ErrorBarSeriesData, direction) ?? rawBounds ?? null;
+          } else {
+            nextBounds[i] = prevBounds[i] ?? rawBounds ?? null;
+          }
+          nextModes[i] = mode;
+          continue;
+        }
+        nextData[i] = asErrorBarHlcArrays(errorBarDataToMutableHlc(raw)) as unknown as MutableXYColumns;
+        nextBounds[i] = rawBounds ?? errorBarBounds(raw, direction) ?? null;
+        nextSource[i] = raw;
+        nextOptionsRaw[i] = raw;
+        nextModes[i] = mode;
+        continue;
+      }
+
+      if (s.type === 'band') {
+        const raw = ((s as unknown as { rawData?: BandSeriesData }).rawData ?? s.data) as BandSeriesData;
+        const rawBounds = (s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null;
+        const prevOwned = i < prevCount ? prevData[i] : null;
+        const prevIsOwnedToken = i < prevCount && prevSource[i] === HIT_TEST_OWNED_TOKEN;
+        const optionsRawUnchanged = i < prevCount && prevOptionsRaw[i] === raw;
+        const prevHasY1 =
+          prevOwned != null &&
+          typeof prevOwned === 'object' &&
+          !Array.isArray(prevOwned) &&
+          'y1' in (prevOwned as object);
+        const reuseOwnedHistory = prevIsOwnedToken && prevHasY1 && optionsRawUnchanged && !hitTestStoreNeedsResync;
+        const reuseSeedIdentity = i < prevCount && prevSource[i] === raw && prevHasY1 && !hitTestStoreNeedsResync;
+        if (reuseOwnedHistory || reuseSeedIdentity) {
+          nextData[i] = prevData[i]!;
+          nextSource[i] = prevIsOwnedToken ? HIT_TEST_OWNED_TOKEN : raw;
+          nextOptionsRaw[i] = raw;
+          const modeChanged = mode != null && prevModes[i] != null && mode !== prevModes[i];
+          if (modeChanged) {
+            nextBounds[i] =
+              bandBounds(
+                asBandXYYArrays(
+                  prevData[i] as unknown as {
+                    x: ArrayLike<number>;
+                    y: ArrayLike<number>;
+                    y1: ArrayLike<number>;
+                  }
+                )
+              ) ??
+              rawBounds ??
+              prevBounds[i] ??
+              null;
+          } else {
+            nextBounds[i] = prevBounds[i] ?? rawBounds ?? null;
+          }
+        } else {
+          const cols = bandDataToMutableXYY(raw);
+          nextData[i] = asBandXYYArrays(cols) as unknown as MutableXYColumns;
+          nextBounds[i] = rawBounds ?? bandBounds(raw) ?? null;
+          nextSource[i] = raw;
+          nextOptionsRaw[i] = raw;
+        }
+        nextModes[i] = mode;
+        continue;
+      }
+
+      if (s.type === 'candlestick' || s.type === 'ohlc') {
+        const raw = ((s as unknown as { rawData?: ReadonlyArray<OHLCDataPoint> }).rawData ??
+          s.data) as ReadonlyArray<OHLCDataPoint>;
+        const rawBounds = (s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null;
+        // Reuse owned slice when the source OHLC array identity is unchanged.
+        if (i < prevCount && prevSource[i] === raw && prevData[i] != null && Array.isArray(prevData[i])) {
+          nextData[i] = prevData[i]!;
+          // Prefer runtime bounds (may include appendData extensions) over resolver
+          // bounds of the original seed array.
+          nextBounds[i] = prevBounds[i] ?? rawBounds ?? null;
+          nextSource[i] = raw;
+          nextOptionsRaw[i] = raw;
+        } else if (
+          i < prevCount &&
+          prevSource[i] === HIT_TEST_OWNED_TOKEN &&
+          prevOptionsRaw[i] === raw &&
+          prevData[i] != null &&
+          Array.isArray(prevData[i])
+        ) {
+          nextData[i] = prevData[i]!;
+          nextBounds[i] = prevBounds[i] ?? rawBounds ?? null;
+          nextSource[i] = HIT_TEST_OWNED_TOKEN;
+          nextOptionsRaw[i] = raw;
+        } else {
+          nextData[i] = raw.length === 0 ? [] : raw.slice();
+          nextBounds[i] = rawBounds;
+          nextSource[i] = raw;
+          nextOptionsRaw[i] = raw;
+        }
+        nextModes[i] = mode;
+        continue;
+      }
+
+      const raw = ((s as unknown as { rawData?: CartesianSeriesData }).rawData ?? s.data) as CartesianSeriesData;
+      const rawBounds = (s as unknown as { rawBounds?: Bounds | null }).rawBounds ?? null;
+      // Axes-only / presentation-only setOption keeps the same raw data ref —
+      // reuse the existing mutable columns (O(1)).
+      // Owned token (post-tooltip-resync): reuse prevData when options data identity
+      // is unchanged (presentation-only). New options data ref → series replace.
+      // Do not reuse when dual-store skip left columns stale (handled above).
+      const prevOwned = i < prevCount ? prevData[i] : null;
+      const prevIsOwnedToken = i < prevCount && prevSource[i] === HIT_TEST_OWNED_TOKEN;
+      const optionsRawUnchanged = i < prevCount && prevOptionsRaw[i] === raw;
+      const reuseOwnedHistory =
+        prevIsOwnedToken &&
+        prevOwned != null &&
+        !Array.isArray(prevOwned) &&
+        optionsRawUnchanged &&
+        !hitTestStoreNeedsResync;
+      const reuseSeedIdentity =
+        i < prevCount &&
+        prevSource[i] === raw &&
+        prevData[i] != null &&
+        !Array.isArray(prevData[i]) &&
+        !hitTestStoreNeedsResync;
+      if (reuseOwnedHistory || reuseSeedIdentity) {
+        nextData[i] = prevData[i]!;
+        nextSource[i] = prevIsOwnedToken ? HIT_TEST_OWNED_TOKEN : raw;
+        nextOptionsRaw[i] = raw;
+        const modeChanged = mode != null && prevModes[i] != null && mode !== prevModes[i];
+        if (modeChanged) {
+          // Axes explicit→auto (or reverse): recompute from owned columns so
+          // synthetic extents cannot stick; also covers append-extended data.
+          nextBounds[i] =
+            (computeRawBoundsFromCartesianData(prevData[i] as unknown as CartesianSeriesData) as Bounds | null) ??
+            rawBounds ??
+            prevBounds[i] ??
+            null;
+        } else {
+          // Prefer runtime bounds (may include appendData extensions) over resolver
+          // bounds of the original seed array.
+          nextBounds[i] = prevBounds[i] ?? rawBounds ?? null;
+        }
+      } else {
+        nextData[i] = cartesianDataToMutableColumns(raw);
+        nextBounds[i] = rawBounds ?? (computeRawBoundsFromCartesianData(raw) as Bounds | null);
+        nextSource[i] = raw;
+        nextOptionsRaw[i] = raw;
+      }
+      nextModes[i] = mode;
+    }
+
+    runtimeRawDataByIndex = nextData;
+    runtimeRawBoundsByIndex = nextBounds;
+    runtimeHitTestSourceByIndex = nextSource;
+    runtimeHitTestOptionsRawByIndex = nextOptionsRaw;
+    runtimeHitTestBoundsModeByIndex = nextModes;
+
+    // Always rebuild the series view wrapper so presentation fields (colors, etc.)
+    // refresh; column copies above are already O(1) when data identity is stable.
+    runtimeHitTestSeriesCache = null;
+    runtimeHitTestSeriesVersion++;
+  };
+
+  const getRuntimeHitTestSeries = (): ResolvedChartGPUOptions['series'] => {
+    if (runtimeHitTestSeriesCache) return runtimeHitTestSeriesCache;
+    // Replace series `data` with chart-owned runtime data (pie / heatmap unchanged).
+    runtimeHitTestSeriesCache = resolvedOptions.series.map((s, i) => {
+      if (s.type === 'pie' || s.type === 'heatmap') return s;
+      if (s.type === 'candlestick' || s.type === 'ohlc') {
+        return {
+          ...s,
+          data: runtimeRawDataByIndex[i] ?? (s.data as ReadonlyArray<OHLCDataPoint>),
+        };
+      }
+      if (s.type === 'band') {
+        const runtimeData = runtimeRawDataByIndex[i];
+        // Prefer owned Xyy columns; never fall back to XY-only columns missing y1.
+        if (
+          runtimeData != null &&
+          typeof runtimeData === 'object' &&
+          !Array.isArray(runtimeData) &&
+          'y1' in (runtimeData as object)
+        ) {
+          return { ...s, data: runtimeData as unknown as BandSeriesData };
+        }
+        return { ...s, data: (s.rawData ?? s.data) as BandSeriesData };
+      }
+      if (s.type === 'errorBar') {
+        const runtimeData = runtimeRawDataByIndex[i];
+        if (
+          runtimeData != null &&
+          typeof runtimeData === 'object' &&
+          !Array.isArray(runtimeData) &&
+          'high' in (runtimeData as object) &&
+          'low' in (runtimeData as object)
+        ) {
+          return { ...s, data: runtimeData as unknown as ErrorBarSeriesData };
+        }
+        return { ...s, data: (s.rawData ?? s.data) as ErrorBarSeriesData };
+      }
+      // Cartesian series: MutableXYColumns or RingXYColumns.
+      const runtimeData = runtimeRawDataByIndex[i] as MutableXYColumns | RingXYColumns;
+      return { ...s, data: runtimeData as CartesianSeriesData };
+    }) as ResolvedChartGPUOptions['series'];
+    return runtimeHitTestSeriesCache;
+  };
+
+  initRuntimeHitTestStoreFromResolvedOptions();
+
+  // Cache global bounds and interaction scales; avoids O(N) data scans per pointer move.
+  let cachedGlobalBounds: Bounds = computeGlobalBounds(resolvedOptions.series, runtimeRawBoundsByIndex);
+  let interactionScalesCache: InteractionScalesCache | null = null;
+
+  const listeners: ListenerRegistry = {
+    click: new Set<ChartGPUEventCallback>(),
+    mouseover: new Set<ChartGPUEventCallback>(),
+    mouseout: new Set<ChartGPUEventCallback>(),
+    crosshairMove: new Set<ChartGPUCrosshairMoveCallback>(),
+    zoomRangeChange: new Set<ChartGPUZoomRangeChangeCallback>(),
+    deviceLost: new Set<ChartGPUDeviceLostCallback>(),
+    dataAppend: new Set<ChartGPUDataAppendCallback>(),
+  };
+
+  // AC-6: Boolean flag for zero-overhead check (faster than Set.size property access in hot path)
+  let hasDataAppendListeners = false;
+
+  let tapCandidate: TapCandidate | null = null;
+  let suppressNextLostPointerCaptureId: number | null = null;
+
+  let hovered: HitTestMatch | null = null;
+
+  // Prevent spamming console.warn for repeated misuse.
+  const warnedPieAppendSeries = new Set<number>();
+
+  let scheduledRaf: number | null = null;
+  let lastConfigured: {
+    width: number;
+    height: number;
+    format: GPUTextureFormat;
+  } | null = null;
+  let isDirty = true;
+
+  // Performance tracking state
+  const frameTimestamps = new Float64Array(FRAME_BUFFER_SIZE);
+  let frameTimestampIndex = 0;
+  let frameTimestampCount = 0;
+  let totalFrames = 0;
+  let totalDroppedFrames = 0;
+  let consecutiveDroppedFrames = 0;
+  let lastDropTimestamp = 0;
+  const startTime = performance.now();
+  let lastFrameTime = 0;
+  let lastCPUTime = 0;
+  const performanceUpdateCallbacks = new Set<(metrics: Readonly<PerformanceMetrics>) => void>();
+
+  const hasHoverListeners = (): boolean => listeners.mouseover.size > 0 || listeners.mouseout.size > 0;
+  const hasClickListeners = (): boolean => listeners.click.size > 0;
+
+  const cancelPendingFrame = (): void => {
+    if (scheduledRaf === null) return;
+    cancelAnimationFrame(scheduledRaf);
+    scheduledRaf = null;
+  };
+
+  const resetPerfMetricsInternal = (): void => {
+    lastFrameTime = 0;
+    totalDroppedFrames = 0;
+    consecutiveDroppedFrames = 0;
+    lastDropTimestamp = 0;
+    frameTimestampIndex = 0;
+    frameTimestampCount = 0;
+  };
+
+  const doFrame = (trackFrameDrops: boolean): void => {
+    if (disposed) return;
+    if (deviceIsLost) return;
+    if (isRendering) return;
+    isRendering = true;
+    const frameStartTime = performance.now();
+
+    try {
+      frameTimestamps[frameTimestampIndex] = frameStartTime;
+      frameTimestampIndex = (frameTimestampIndex + 1) % FRAME_BUFFER_SIZE;
+      if (frameTimestampCount < FRAME_BUFFER_SIZE) frameTimestampCount++;
+      totalFrames++;
+
+      if (trackFrameDrops) {
+        if (lastFrameTime > 0) {
+          const deltaTime = frameStartTime - lastFrameTime;
+          if (deltaTime > EXPECTED_FRAME_TIME_MS * FRAME_DROP_THRESHOLD_MULTIPLIER) {
+            totalDroppedFrames++;
+            consecutiveDroppedFrames++;
+            lastDropTimestamp = frameStartTime;
+          } else {
+            consecutiveDroppedFrames = 0;
+          }
+        }
+        lastFrameTime = frameStartTime;
+      }
+
+      resizeInternal(false);
+      if (!coordinator || !gpuContext?.device) return;
+
+      if (isDirty) {
+        isDirty = false;
+        try {
+          coordinator.render();
+        } catch {
+          isDirty = true;
+        }
+      }
+
+      lastCPUTime = performance.now() - frameStartTime;
+      const metrics = calculatePerformanceMetrics();
+      for (const callback of performanceUpdateCallbacks) {
+        try {
+          callback(metrics);
+        } catch (error) {
+          console.error('Error in performance update callback:', error);
+        }
+      }
+    } finally {
+      isRendering = false;
+    }
+  };
+
+  const requestRender = (): void => {
+    if (disposed) return;
+    isDirty = true;
+    if (renderMode === 'external') return;
+    if (scheduledRaf !== null) return;
+    scheduledRaf = requestAnimationFrame(() => {
+      scheduledRaf = null;
+      if (disposed) return;
+      doFrame(true);
+    });
+  };
+
+  const unbindCoordinatorInteractionXChange = (): void => {
+    if (!unsubscribeCoordinatorInteractionXChange) return;
+    try {
+      unsubscribeCoordinatorInteractionXChange();
+    } finally {
+      unsubscribeCoordinatorInteractionXChange = null;
+    }
+  };
+
+  const unbindCoordinatorZoomRangeChange = (): void => {
+    if (!unsubscribeCoordinatorZoomRangeChange) return;
+    try {
+      unsubscribeCoordinatorZoomRangeChange();
+    } finally {
+      unsubscribeCoordinatorZoomRangeChange = null;
+    }
+  };
+
+  const disposeDataZoomSlider = (): void => {
+    dataZoomSlider?.dispose();
+    dataZoomSlider = null;
+  };
+
+  const disposeDataZoomSliderHost = (): void => {
+    dataZoomSliderHost?.remove();
+    dataZoomSliderHost = null;
+  };
+
+  const disposeDataZoomUi = (): void => {
+    disposeDataZoomSlider();
+    disposeDataZoomSliderHost();
+  };
+
+  const DATA_ZOOM_SLIDER_HEIGHT_CSS_PX = 32;
+  const DATA_ZOOM_SLIDER_MARGIN_TOP_CSS_PX = 8;
+  const DATA_ZOOM_SLIDER_RESERVE_CSS_PX = DATA_ZOOM_SLIDER_HEIGHT_CSS_PX + DATA_ZOOM_SLIDER_MARGIN_TOP_CSS_PX;
+
+  const ensureDataZoomSliderHost = (): HTMLDivElement => {
+    if (dataZoomSliderHost) return dataZoomSliderHost;
+
+    // Ensure the host's absolute positioning is anchored to the chart container.
+    // If the container is already positioned, avoid overwriting user styles.
+    try {
+      const pos = window.getComputedStyle(container).position;
+      if (pos === 'static') container.style.position = 'relative';
+    } catch {
+      // best-effort
+    }
+
+    const host = document.createElement('div');
+    host.style.position = 'absolute';
+    host.style.left = '0';
+    host.style.right = '0';
+    host.style.bottom = '0';
+    host.style.height = `${DATA_ZOOM_SLIDER_RESERVE_CSS_PX}px`;
+    host.style.paddingTop = `${DATA_ZOOM_SLIDER_MARGIN_TOP_CSS_PX}px`;
+    host.style.boxSizing = 'border-box';
+    host.style.pointerEvents = 'auto';
+    host.style.zIndex = '5';
+    container.appendChild(host);
+    dataZoomSliderHost = host;
+    return host;
+  };
+
+  const computeZoomInOutAnchorRatio = (range: ZoomRange, center: number): number => {
+    const span = range.end - range.start;
+    if (!Number.isFinite(span) || span === 0) return 0.5;
+    return clamp((center - range.start) / span, 0, 1);
+  };
+
+  const createCoordinatorZoomStateLike = (): ZoomState => {
+    const getRange: ZoomState['getRange'] = () => coordinator?.getZoomRange() ?? { start: 0, end: 100 };
+    const setRange: ZoomState['setRange'] = (start, end) => {
+      coordinator?.setZoomRange(start, end);
+    };
+    const zoomIn: ZoomState['zoomIn'] = (center, factor) => {
+      if (!Number.isFinite(center) || !Number.isFinite(factor) || factor <= 1) return;
+      const r = coordinator?.getZoomRange();
+      if (!r) return;
+      const c = clamp(center, 0, 100);
+      const ratio = computeZoomInOutAnchorRatio(r, c);
+      const span = r.end - r.start;
+      const nextSpan = span / factor;
+      const nextStart = c - ratio * nextSpan;
+      coordinator?.setZoomRange(nextStart, nextStart + nextSpan);
+    };
+    const zoomOut: ZoomState['zoomOut'] = (center, factor) => {
+      if (!Number.isFinite(center) || !Number.isFinite(factor) || factor <= 1) return;
+      const r = coordinator?.getZoomRange();
+      if (!r) return;
+      const c = clamp(center, 0, 100);
+      const ratio = computeZoomInOutAnchorRatio(r, c);
+      const span = r.end - r.start;
+      const nextSpan = span * factor;
+      const nextStart = c - ratio * nextSpan;
+      coordinator?.setZoomRange(nextStart, nextStart + nextSpan);
+    };
+    const pan: ZoomState['pan'] = (delta) => {
+      if (!Number.isFinite(delta)) return;
+      const r = coordinator?.getZoomRange();
+      if (!r) return;
+      coordinator?.setZoomRange(r.start + delta, r.end + delta);
+    };
+    const onChange: ZoomState['onChange'] = (callback) => coordinator?.onZoomRangeChange(callback) ?? (() => {});
+
+    return { getRange, setRange, zoomIn, zoomOut, pan, onChange };
+  };
+
+  const syncDataZoomUi = (): void => {
+    const shouldHaveSlider = hasSliderDataZoom(currentOptions);
+    if (!shouldHaveSlider) {
+      disposeDataZoomUi();
+      return;
+    }
+
+    // Slider requires a coordinator-backed zoom state.
+    if (!coordinator) return;
+    if (!coordinator.getZoomRange()) return;
+
+    const host = ensureDataZoomSliderHost();
+    if (!dataZoomSlider) {
+      dataZoomSlider = createDataZoomSlider(host, createCoordinatorZoomStateLike(), {
+        height: DATA_ZOOM_SLIDER_HEIGHT_CSS_PX,
+        marginTop: 0, // host provides vertical spacing
+      });
+    }
+    dataZoomSlider.update(resolvedOptions.theme);
+  };
+
+  const disposeZoomResetButton = (): void => {
+    zoomResetButton?.dispose();
+    zoomResetButton = null;
+  };
+
+  const syncZoomResetButton = (): void => {
+    const shouldHaveButton = hasInsideDataZoom(currentOptions);
+    if (!shouldHaveButton) {
+      disposeZoomResetButton();
+      return;
+    }
+
+    // Button requires a coordinator-backed zoom state.
+    if (!coordinator) return;
+    if (!coordinator.getZoomRange()) return;
+
+    if (!zoomResetButton) {
+      zoomResetButton = createZoomResetButton(container, createCoordinatorZoomStateLike(), resolvedOptions.theme);
+    } else {
+      zoomResetButton.update(resolvedOptions.theme);
+    }
+  };
+
+  // Reusable event payloads to avoid allocations in hot paths (pointer/zoom/dataAppend interactions).
+  // Internal mutable versions; cast to readonly when emitting (safe since payload is passed by reference
+  // and consumers receive readonly types, preventing external mutation).
+  const crosshairMovePayload = {
+    x: null as number | null,
+    source: undefined as unknown,
+  };
+  const zoomRangeChangePayload = {
+    start: 0,
+    end: 100,
+    source: undefined as unknown,
+    sourceKind: undefined as ZoomChangeSourceKind | undefined,
+  };
+  const dataAppendPayload = {
+    seriesIndex: 0,
+    count: 0,
+    xExtent: { min: 0, max: 0 },
+  };
+
+  const bindCoordinatorInteractionXChange = (): void => {
+    unbindCoordinatorInteractionXChange();
+    if (disposed) return;
+    if (!coordinator) return;
+
+    unsubscribeCoordinatorInteractionXChange = coordinator.onInteractionXChange((x, source) => {
+      crosshairMovePayload.x = x;
+      crosshairMovePayload.source = source;
+      emit('crosshairMove', crosshairMovePayload as ChartGPUCrosshairMovePayload);
+    });
+  };
+
+  const bindCoordinatorZoomRangeChange = (): void => {
+    unbindCoordinatorZoomRangeChange();
+    if (disposed) return;
+    if (!coordinator) return;
+
+    unsubscribeCoordinatorZoomRangeChange = coordinator.onZoomRangeChange((range, sourceKind) => {
+      // If setZoomRange armed the next change, classify it as 'api'. If a source token was provided,
+      // forward it so chart sync can avoid feedback loops.
+      const wasApiArmed = pendingZoomSourceArmed;
+      const pendingSource = pendingZoomSource;
+      pendingZoomSourceArmed = false;
+      pendingZoomSource = undefined;
+
+      const source = pendingSource !== undefined ? pendingSource : undefined;
+
+      // Classify zoom change source:
+      // - Use coordinator's sourceKind if provided (e.g., 'user', 'auto-scroll')
+      // - If no sourceKind but this was armed by setZoomRange, classify as 'api'
+      // - Otherwise, leave sourceKind undefined (not classified)
+      const classifiedSourceKind = sourceKind ?? (wasApiArmed ? 'api' : undefined);
+
+      zoomRangeChangePayload.start = range.start;
+      zoomRangeChangePayload.end = range.end;
+      zoomRangeChangePayload.source = source;
+      zoomRangeChangePayload.sourceKind = classifiedSourceKind;
+      emit('zoomRangeChange', zoomRangeChangePayload as ChartGPUZoomRangeChangePayload);
+    });
+  };
+
+  const recreateCoordinator = (): void => {
+    if (disposed) return;
+    if (!gpuContext || !gpuContext.initialized) return;
+
+    const prevZoomRange = coordinator?.getZoomRange() ?? null;
+
+    unbindCoordinatorInteractionXChange();
+    unbindCoordinatorZoomRangeChange();
+    // Coordinator recreation invalidates zoom subscriptions; recreate the slider and reset button if present.
+    disposeDataZoomSlider();
+    disposeZoomResetButton();
+    coordinator?.dispose();
+
+    // Clear any pending zoom source tokens to avoid stale tokens after recreation.
+    pendingZoomSourceArmed = false;
+    pendingZoomSource = undefined;
+
+    const coordinatorCallbacks: RenderCoordinatorCallbacks = {
+      onRequestRender: requestRender,
+      pipelineCache: context?.pipelineCache,
+    };
+    // Overlay DPR must follow create-time policy, not setOption-mutated resolvedOptions.
+    // explicit freeze vs live window — same contract as resolveResizeDpr / createTimeExplicitDpr.
+    coordinator = createRenderCoordinator(
+      gpuContext,
+      {
+        ...resolvedOptions,
+        devicePixelRatio: createTimeExplicitDpr ?? undefined,
+      },
+      coordinatorCallbacks
+    );
+    coordinatorTargetFormat = gpuContext.preferredFormat;
+    bindCoordinatorInteractionXChange();
+    bindCoordinatorZoomRangeChange();
+
+    if (prevZoomRange) coordinator.setZoomRange(prevZoomRange.start, prevZoomRange.end);
+    syncDataZoomUi();
+    syncZoomResetButton();
+  };
+
+  const resolveResizeDpr = (): number => {
+    // Create-time explicit DPR is sticky (setOption must not change buffer/overlay policy).
+    if (createTimeExplicitDpr != null) return createTimeExplicitDpr;
+    // Omitted at create: re-read live window.devicePixelRatio (page zoom).
+    return (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
+  };
+
+  const resizeInternal = (shouldRequestRenderAfterChanges: boolean): void => {
+    if (disposed) return;
+
+    // Layout CSS pixels (clientWidth/Height), not getBoundingClientRect().
+    // Under CSS zoom / parent scale, getBoundingClientRect returns *visual* size while
+    // clientWidth/Height stay at layout size. Multiplying visual size by DPR under-sizes
+    // the WebGPU buffer (e.g. CSS zoom 0.3 → buffer at 0.3× correct size).
+    const cssWidth = canvas.clientWidth;
+    const cssHeight = canvas.clientHeight;
+
+    const dpr = resolveResizeDpr();
+
+    // Keep GPUContext / computeGridArea on the same DPR used for the backing store.
+    if (gpuContext) {
+      gpuContext.setDevicePixelRatio(dpr);
+    }
+
+    const maxDimension = gpuContext?.device?.limits.maxTextureDimension2D ?? 8192;
+    // Zero layout (display:none / pre-layout) → clamp to 1 device pixel; do not invent 1 CSS px × dpr.
+    const width = Math.min(maxDimension, Math.max(1, Math.round(cssWidth * dpr)));
+    const height = Math.min(maxDimension, Math.max(1, Math.round(cssHeight * dpr)));
+
+    const sizeChanged = canvas.width !== width || canvas.height !== height;
+    if (sizeChanged) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    const device = gpuContext?.device;
+    const canvasContext = gpuContext?.canvasContext;
+    const preferredFormat = gpuContext?.preferredFormat;
+
+    let didConfigure = false;
+    if (device && canvasContext && preferredFormat) {
+      const shouldConfigure =
+        sizeChanged ||
+        !lastConfigured ||
+        lastConfigured.width !== canvas.width ||
+        lastConfigured.height !== canvas.height ||
+        lastConfigured.format !== preferredFormat;
+
+      if (shouldConfigure) {
+        canvasContext.configure({
+          device,
+          format: preferredFormat,
+          alphaMode: 'opaque',
+        });
+        lastConfigured = {
+          width: canvas.width,
+          height: canvas.height,
+          format: preferredFormat,
+        };
+        didConfigure = true;
+
+        // Requirement: if the target format changes, recreate coordinator/pipelines.
+        if (coordinator && coordinatorTargetFormat !== preferredFormat) {
+          recreateCoordinator();
+        }
+      }
+    }
+
+    if (shouldRequestRenderAfterChanges && (sizeChanged || didConfigure)) {
+      // Requirement: resize() requests a render after size/config changes.
+      requestRender();
+    }
+  };
+
+  const resize = (): void => resizeInternal(true);
+
+  /**
+   * Y scale for a named axis id (multi-axis hit-test).
+   * Primary axis reuses the cached primary yScale; secondary axes use axis min/max
+   * when set, else the **union of runtime bounds of all series bound to that axis**
+   * (not a single series' envelope), matching coordinator interaction scales intent.
+   */
+  const resolveYScaleForAxisId = (axisId: string, primaryYScale: LinearScale, plotHeightCss: number): LinearScale => {
+    const primaryYId = resolvedOptions.yAxes[0]?.id ?? 'y';
+    if (axisId === primaryYId) return primaryYScale;
+
+    const yAxisCfg = resolvedOptions.yAxes.find((a) => (a.id ?? 'y') === axisId) ??
+      resolvedOptions.yAxes[0] ?? { type: 'value' as const };
+
+    let yMin = Number.POSITIVE_INFINITY;
+    let yMax = Number.NEGATIVE_INFINITY;
+    const hitSeries = getRuntimeHitTestSeries();
+    for (let i = 0; i < hitSeries.length; i++) {
+      const s = hitSeries[i]!;
+      if (s.visible === false) continue;
+      const sAxis = (s as { yAxis?: string }).yAxis || 'y';
+      if (sAxis !== axisId) continue;
+      const b = runtimeRawBoundsByIndex[i] ?? (s as { rawBounds?: Bounds | null }).rawBounds ?? null;
+      if (!b) continue;
+      if (Number.isFinite(b.yMin) && b.yMin < yMin) yMin = b.yMin;
+      if (Number.isFinite(b.yMax) && b.yMax > yMax) yMax = b.yMax;
+    }
+    if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+      yMin = cachedGlobalBounds.yMin;
+      yMax = cachedGlobalBounds.yMax;
+    }
+    if (typeof yAxisCfg.min === 'number' && Number.isFinite(yAxisCfg.min)) yMin = yAxisCfg.min;
+    if (typeof yAxisCfg.max === 'number' && Number.isFinite(yAxisCfg.max)) yMax = yAxisCfg.max;
+    const d = normalizeDomain(yMin, yMax);
+    return createAxisScale(yAxisCfg).domain(d.min, d.max).range(plotHeightCss, 0);
+  };
+
+  /**
+   * Error-bar stem/cap hit under grid CSS coords. Shared by pointer events and public hitTest.
+   * Prefer later series indices; multi-axis yScale from {@link resolveYScaleForAxisId}.
+   */
+  const findErrorBarHitAtGrid = (
+    gridX: number,
+    gridY: number,
+    xScale: LinearScale,
+    primaryYScale: LinearScale,
+    plotWidthCss: number,
+    plotHeightCss: number
+  ): ErrorBarHitTestMatch | null => {
+    const hitSeries = getRuntimeHitTestSeries();
+    for (let i = hitSeries.length - 1; i >= 0; i--) {
+      const s = hitSeries[i]!;
+      if (s.type !== 'errorBar' || s.visible === false) continue;
+      const eb = s as ResolvedErrorBarSeriesConfig;
+      const axisId = eb.yAxis || 'y';
+      const yScaleSeries = resolveYScaleForAxisId(axisId, primaryYScale, plotHeightCss);
+      const m = findErrorBarAtPointer([{ seriesIndex: i, series: eb }], gridX, gridY, xScale, yScaleSeries, {
+        width: plotWidthCss,
+        height: plotHeightCss,
+      });
+      if (!m) continue;
+      return {
+        kind: 'errorBar',
+        seriesIndex: m.seriesIndex,
+        dataIndex: m.dataIndex,
+        point: m.point,
+      };
+    }
+    return null;
+  };
+
+  const findImpulseHitAtGrid = (
+    gridX: number,
+    gridY: number,
+    xScale: LinearScale,
+    primaryYScale: LinearScale,
+    plotWidthCss: number,
+    plotHeightCss: number
+  ): ImpulseHitTestMatch | null => {
+    const hitSeries = getRuntimeHitTestSeries();
+    for (let i = hitSeries.length - 1; i >= 0; i--) {
+      const s = hitSeries[i]!;
+      if (s.type !== 'impulse' || s.visible === false) continue;
+      const imp = s as ResolvedImpulseSeriesConfig;
+      const axisId = imp.yAxis || 'y';
+      const yScaleSeries = resolveYScaleForAxisId(axisId, primaryYScale, plotHeightCss);
+      const m = findImpulseAtPointer([{ seriesIndex: i, series: imp }], gridX, gridY, xScale, yScaleSeries, {
+        width: plotWidthCss,
+        height: plotHeightCss,
+      });
+      if (!m) continue;
+      return {
+        kind: 'impulse',
+        seriesIndex: m.seriesIndex,
+        dataIndex: m.dataIndex,
+        point: { x: m.x, y: m.y, baseline: m.baseline },
+      };
+    }
+    return null;
+  };
+
+  const getNearestPointFromPointerEvent = (
+    e: PointerEvent
+  ): { readonly match: HitTestMatch | null; readonly isInGrid: boolean } => {
+    // Map visual pointer → layout CSS (clientWidth) so grid margins stay consistent under CSS zoom.
+    const layout = pointerClientToLayoutCss(canvas, e.clientX, e.clientY);
+    if (!layout) return { match: null, isInGrid: false };
+
+    const x = layout.x;
+    const y = layout.y;
+
+    const plotLeftCss = resolvedOptions.grid.left;
+    const plotTopCss = resolvedOptions.grid.top;
+    const plotWidthCss = layout.layoutWidth - resolvedOptions.grid.left - resolvedOptions.grid.right;
+    const plotHeightCss = layout.layoutHeight - resolvedOptions.grid.top - resolvedOptions.grid.bottom;
+    if (!(plotWidthCss > 0) || !(plotHeightCss > 0)) return { match: null, isInGrid: false };
+
+    const gridX = x - plotLeftCss;
+    const gridY = y - plotTopCss;
+
+    const isInGrid = gridX >= 0 && gridX <= plotWidthCss && gridY >= 0 && gridY <= plotHeightCss;
+
+    if (!isInGrid) return { match: null, isInGrid: false };
+
+    const xMin = resolvedOptions.xAxis.min ?? cachedGlobalBounds.xMin;
+    const xMax = resolvedOptions.xAxis.max ?? cachedGlobalBounds.xMax;
+    const yMin = resolvedOptions.yAxes[0]?.min ?? cachedGlobalBounds.yMin;
+    const yMax = resolvedOptions.yAxes[0]?.max ?? cachedGlobalBounds.yMax;
+
+    // Make hit-testing zoom-aware (mirror coordinator percent->domain mapping).
+    const baseXDomain = normalizeDomain(xMin, xMax);
+    const zoomRange = coordinator?.getZoomRange() ?? null;
+    const xDomain = (() => {
+      if (!zoomRange) return baseXDomain;
+      const span = baseXDomain.max - baseXDomain.min;
+      if (!Number.isFinite(span) || span === 0) return baseXDomain;
+      const start = zoomRange.start;
+      const end = zoomRange.end;
+      const zMin = baseXDomain.min + (start / 100) * span;
+      const zMax = baseXDomain.min + (end / 100) * span;
+      return normalizeDomain(zMin, zMax);
+    })();
+    const yDomain = normalizeDomain(yMin, yMax);
+
+    // Cache hit-testing scales for identical (layout size, grid, axis domain) inputs.
+    const canReuseScales =
+      interactionScalesCache !== null &&
+      interactionScalesCache.rectWidthCss === layout.layoutWidth &&
+      interactionScalesCache.rectHeightCss === layout.layoutHeight &&
+      interactionScalesCache.plotWidthCss === plotWidthCss &&
+      interactionScalesCache.plotHeightCss === plotHeightCss &&
+      interactionScalesCache.xDomainMin === xDomain.min &&
+      interactionScalesCache.xDomainMax === xDomain.max &&
+      interactionScalesCache.yDomainMin === yDomain.min &&
+      interactionScalesCache.yDomainMax === yDomain.max;
+
+    if (!canReuseScales) {
+      // IMPORTANT: grid-local CSS px ranges (0..plotWidth/Height), for interaction hit-testing.
+      const xScale = createAxisScale(resolvedOptions.xAxis).domain(xDomain.min, xDomain.max).range(0, plotWidthCss);
+      const yAxis0 = resolvedOptions.yAxes[0] ?? { type: 'value' as const };
+      const yScale = createAxisScale(yAxis0).domain(yDomain.min, yDomain.max).range(plotHeightCss, 0);
+      interactionScalesCache = {
+        rectWidthCss: layout.layoutWidth,
+        rectHeightCss: layout.layoutHeight,
+        plotWidthCss,
+        plotHeightCss,
+        xDomainMin: xDomain.min,
+        xDomainMax: xDomain.max,
+        yDomainMin: yDomain.min,
+        yDomainMax: yDomain.max,
+        xScale,
+        yScale,
+      };
+    }
+
+    // At this point, the cache must exist (either reused or created above).
+    const scales = interactionScalesCache!;
+
+    // Story 4.14: pie slice hit-testing (grid-local CSS px).
+    const pieMatch = (() => {
+      const maxRadiusCss = 0.5 * Math.min(plotWidthCss, plotHeightCss);
+      if (!(maxRadiusCss > 0)) return null;
+
+      // Prefer later series indices (deterministic and mirrors the coordinator tooltip logic).
+      for (let i = resolvedOptions.series.length - 1; i >= 0; i--) {
+        const s = resolvedOptions.series[i];
+        if (s.type !== 'pie') continue;
+
+        // Skip invisible series.
+        if (s.visible === false) continue;
+
+        const pieSeries = s as ResolvedPieSeriesConfig;
+        const center = resolvePieCenterPlotCss(pieSeries.center, plotWidthCss, plotHeightCss);
+        const radii = resolvePieRadiiCss(pieSeries.radius, maxRadiusCss);
+        const m = findPieSlice(gridX, gridY, { seriesIndex: i, series: pieSeries }, center, radii);
+        if (!m) continue;
+
+        const v = m.slice.value;
+        return {
+          kind: 'pie' as const,
+          seriesIndex: m.seriesIndex,
+          dataIndex: m.dataIndex,
+          sliceValue: typeof v === 'number' && Number.isFinite(v) ? v : 0,
+        };
+      }
+      return null;
+    })();
+
+    if (pieMatch) return { match: pieMatch, isInGrid: true };
+
+    // Finance OHLC body/stem hit-testing (grid-local CSS px), prefer later series indices.
+    for (let i = resolvedOptions.series.length - 1; i >= 0; i--) {
+      const s = resolvedOptions.series[i];
+      if (!(s.type === 'candlestick' || s.type === 'ohlc')) continue;
+
+      // Skip invisible series.
+      if (s.visible === false) continue;
+
+      const seriesCfg = s as FinanceOhlcHitSeriesConfig;
+      const barWidthRange = computeCandlestickBodyWidthRange(seriesCfg, seriesCfg.data, scales.xScale, plotWidthCss);
+      const m = findCandlestick([seriesCfg], gridX, gridY, scales.xScale, scales.yScale, barWidthRange, {
+        yHitMode: s.type === 'ohlc' ? 'lowHigh' : 'openClose',
+      });
+      if (!m) continue;
+
+      return {
+        match: {
+          kind: s.type === 'ohlc' ? 'ohlc' : 'candlestick',
+          seriesIndex: i,
+          dataIndex: m.dataIndex,
+          point: m.point,
+        },
+        isInGrid: true,
+      };
+    }
+
+    // Error bars (stem + caps) — shared helper used by public hitTest too.
+    {
+      const ebHit = findErrorBarHitAtGrid(gridX, gridY, scales.xScale, scales.yScale, plotWidthCss, plotHeightCss);
+      if (ebHit) return { match: ebHit, isInGrid: true };
+    }
+
+    // Impulse stems — prefer discrete stems over distant line samples when overlapping.
+    {
+      const impHit = findImpulseHitAtGrid(gridX, gridY, scales.xScale, scales.yScale, plotWidthCss, plotHeightCss);
+      if (impHit) return { match: impHit, isInGrid: true };
+    }
+
+    const cartesianMatch = findNearestPoint(getRuntimeHitTestSeries(), gridX, gridY, scales.xScale, scales.yScale);
+
+    return {
+      match: cartesianMatch ? ({ kind: 'cartesian', match: cartesianMatch } as const) : null,
+      isInGrid: true,
+    };
+  };
+
+  const calculateExactFPS = (): ExactFPS => {
+    if (frameTimestampCount < 2) {
+      return 0 as ExactFPS;
+    }
+
+    const startIndex = (frameTimestampIndex - frameTimestampCount + FRAME_BUFFER_SIZE) % FRAME_BUFFER_SIZE;
+
+    let totalDelta = 0;
+    for (let i = 1; i < frameTimestampCount; i++) {
+      const prevIndex = (startIndex + i - 1) % FRAME_BUFFER_SIZE;
+      const currIndex = (startIndex + i) % FRAME_BUFFER_SIZE;
+      const delta = frameTimestamps[currIndex] - frameTimestamps[prevIndex];
+      totalDelta += delta;
+    }
+
+    const avgFrameTime = totalDelta / (frameTimestampCount - 1);
+    const fps = avgFrameTime > 0 ? 1000 / avgFrameTime : 0;
+
+    return fps as ExactFPS;
+  };
+
+  const calculateFrameTimeStats = (): FrameTimeStats => {
+    if (frameTimestampCount < 2) {
+      return {
+        min: 0 as Milliseconds,
+        max: 0 as Milliseconds,
+        avg: 0 as Milliseconds,
+        p50: 0 as Milliseconds,
+        p95: 0 as Milliseconds,
+        p99: 0 as Milliseconds,
+      };
+    }
+
+    const startIndex = (frameTimestampIndex - frameTimestampCount + FRAME_BUFFER_SIZE) % FRAME_BUFFER_SIZE;
+
+    const deltas = new Array<number>(frameTimestampCount - 1);
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    let sum = 0;
+
+    for (let i = 1; i < frameTimestampCount; i++) {
+      const prevIndex = (startIndex + i - 1) % FRAME_BUFFER_SIZE;
+      const currIndex = (startIndex + i) % FRAME_BUFFER_SIZE;
+      const delta = frameTimestamps[currIndex] - frameTimestamps[prevIndex];
+      deltas[i - 1] = delta;
+
+      if (delta < min) min = delta;
+      if (delta > max) max = delta;
+      sum += delta;
+    }
+
+    const avg = sum / deltas.length;
+
+    // Sort for percentile calculations
+    deltas.sort((a, b) => a - b);
+
+    const p50Index = Math.floor(deltas.length * 0.5);
+    const p95Index = Math.floor(deltas.length * 0.95);
+    const p99Index = Math.floor(deltas.length * 0.99);
+
+    return {
+      min: min as Milliseconds,
+      max: max as Milliseconds,
+      avg: avg as Milliseconds,
+      p50: deltas[p50Index] as Milliseconds,
+      p95: deltas[p95Index] as Milliseconds,
+      p99: deltas[p99Index] as Milliseconds,
+    };
+  };
+
+  const calculatePerformanceMetrics = (): PerformanceMetrics => {
+    const fps = calculateExactFPS();
+    const frameTimeStats = calculateFrameTimeStats();
+
+    const gpuTiming: GPUTimingStats = {
+      enabled: false, // GPU timing not yet implemented for main thread
+      cpuTime: lastCPUTime as Milliseconds,
+      gpuTime: 0 as Milliseconds,
+    };
+
+    const memory: MemoryStats = {
+      used: 0 as Bytes,
+      peak: 0 as Bytes,
+      allocated: 0 as Bytes,
+    };
+
+    const frameDrops: FrameDropStats =
+      renderMode === 'external'
+        ? {
+            totalDrops: 0,
+            consecutiveDrops: 0,
+            lastDropTimestamp: 0 as Milliseconds,
+          }
+        : {
+            totalDrops: totalDroppedFrames,
+            consecutiveDrops: consecutiveDroppedFrames,
+            lastDropTimestamp: lastDropTimestamp as Milliseconds,
+          };
+
+    const elapsedTime = performance.now() - startTime;
+
+    return {
+      fps,
+      frameTimeStats,
+      gpuTiming,
+      memory,
+      frameDrops,
+      totalFrames,
+      elapsedTime: elapsedTime as Milliseconds,
+    };
+  };
+
+  const buildPayload = (match: HitTestMatch | null, event: PointerEvent): ChartGPUEventPayload => {
+    if (!match) {
+      return {
+        seriesIndex: null,
+        dataIndex: null,
+        value: null,
+        seriesName: null,
+        event,
+      };
+    }
+
+    const seriesIndex = match.kind === 'cartesian' ? match.match.seriesIndex : match.seriesIndex;
+    const dataIndex = match.kind === 'cartesian' ? match.match.dataIndex : match.dataIndex;
+
+    const series = resolvedOptions.series[seriesIndex];
+    const seriesNameRaw = series?.name ?? null;
+    const seriesName = seriesNameRaw && seriesNameRaw.trim().length > 0 ? seriesNameRaw : null;
+
+    if (match.kind === 'pie') {
+      // Pie series are non-cartesian; expose slice value in y so consumers can read a numeric.
+      return {
+        seriesIndex,
+        dataIndex,
+        value: [0, match.sliceValue],
+        seriesName,
+        event,
+      };
+    }
+
+    if (match.kind === 'candlestick' || match.kind === 'ohlc') {
+      const timestamp = getOHLCTimestamp(match.point);
+      const close = getOHLCClose(match.point);
+      return {
+        seriesIndex,
+        dataIndex,
+        value: [timestamp, close],
+        seriesName,
+        event,
+      };
+    }
+
+    if (match.kind === 'errorBar') {
+      return {
+        seriesIndex,
+        dataIndex,
+        value: [match.point.x, match.point.y],
+        seriesName,
+        event,
+      };
+    }
+
+    if (match.kind === 'impulse') {
+      return {
+        seriesIndex,
+        dataIndex,
+        value: [match.point.x, match.point.y],
+        seriesName,
+        event,
+      };
+    }
+
+    // Remaining: cartesian nearest-point hit.
+    if (match.kind !== 'cartesian') {
+      return {
+        seriesIndex,
+        dataIndex,
+        value: null,
+        seriesName,
+        event,
+      };
+    }
+
+    const { x, y } = getPointXY(match.match.point);
+    return {
+      seriesIndex,
+      dataIndex,
+      value: [x, y],
+      seriesName,
+      event,
+    };
+  };
+
+  const emit = (
+    eventName: ChartGPUEventName,
+    payload:
+      | ChartGPUEventPayload
+      | ChartGPUCrosshairMovePayload
+      | ChartGPUZoomRangeChangePayload
+      | ChartGPUDeviceLostPayload
+      | ChartGPUDataAppendPayload
+  ): void => {
+    if (disposed) return;
+    for (const cb of listeners[eventName]) (cb as (p: typeof payload) => void)(payload);
+  };
+
+  const setHovered = (next: HitTestMatch | null, event: PointerEvent): void => {
+    const prev = hovered;
+    hovered = next;
+
+    if (prev === null && next === null) return;
+
+    if (prev === null && next !== null) {
+      emit('mouseover', buildPayload(next, event));
+      return;
+    }
+
+    if (prev !== null && next === null) {
+      emit('mouseout', buildPayload(prev, event));
+      return;
+    }
+
+    if (prev === null || next === null) return;
+
+    const prevSeriesIndex = prev.kind === 'cartesian' ? prev.match.seriesIndex : prev.seriesIndex;
+    const prevDataIndex = prev.kind === 'cartesian' ? prev.match.dataIndex : prev.dataIndex;
+    const nextSeriesIndex = next.kind === 'cartesian' ? next.match.seriesIndex : next.seriesIndex;
+    const nextDataIndex = next.kind === 'cartesian' ? next.match.dataIndex : next.dataIndex;
+
+    const samePoint = prevSeriesIndex === nextSeriesIndex && prevDataIndex === nextDataIndex;
+    if (samePoint) return;
+
+    emit('mouseout', buildPayload(prev, event));
+    emit('mouseover', buildPayload(next, event));
+  };
+
+  const clearTapCandidateIfMatches = (e: PointerEvent): void => {
+    if (!tapCandidate) return;
+    if (!e.isPrimary) return;
+    if (e.pointerId !== tapCandidate.pointerId) return;
+    tapCandidate = null;
+  };
+
+  const onPointerMove = (e: PointerEvent): void => {
+    if (disposed) return;
+    if (!hasHoverListeners()) return;
+    const { match, isInGrid } = getNearestPointFromPointerEvent(e);
+    if (!isInGrid) {
+      setHovered(null, e);
+      return;
+    }
+    setHovered(match, e);
+  };
+
+  const onPointerLeave = (e: PointerEvent): void => {
+    if (disposed) return;
+    if (!hasHoverListeners() && !tapCandidate) return;
+    clearTapCandidateIfMatches(e);
+    setHovered(null, e);
+  };
+
+  const onPointerCancel = (e: PointerEvent): void => {
+    if (disposed) return;
+    if (!hasHoverListeners() && !tapCandidate) return;
+    clearTapCandidateIfMatches(e);
+    setHovered(null, e);
+  };
+
+  const onLostPointerCapture = (e: PointerEvent): void => {
+    if (disposed) return;
+    if (!hasHoverListeners() && !tapCandidate && suppressNextLostPointerCaptureId !== e.pointerId) return;
+    if (suppressNextLostPointerCaptureId === e.pointerId) {
+      suppressNextLostPointerCaptureId = null;
+      return;
+    }
+    clearTapCandidateIfMatches(e);
+    setHovered(null, e);
+  };
+
+  const onPointerDown = (e: PointerEvent): void => {
+    if (disposed) return;
+    if (!hasClickListeners()) return;
+    if (!e.isPrimary) return;
+
+    // For mouse, only allow left button.
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    tapCandidate = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startTimeMs: e.timeStamp,
+    };
+
+    // Optional pointer capture improves reliability for touch/pen.
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // best-effort
+    }
+  };
+
+  const onPointerUp = (e: PointerEvent): void => {
+    if (disposed) return;
+    if (!hasClickListeners()) return;
+    if (!e.isPrimary) return;
+    if (!tapCandidate || e.pointerId !== tapCandidate.pointerId) return;
+
+    const dt = e.timeStamp - tapCandidate.startTimeMs;
+    const dx = e.clientX - tapCandidate.startClientX;
+    const dy = e.clientY - tapCandidate.startClientY;
+    const distSq = dx * dx + dy * dy;
+
+    tapCandidate = null;
+
+    // Release capture if we have it; suppress the resulting lostpointercapture.
+    try {
+      if (canvas.hasPointerCapture(e.pointerId)) {
+        suppressNextLostPointerCaptureId = e.pointerId;
+        canvas.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // best-effort
+    }
+
+    const maxDist = DEFAULT_TAP_MAX_DISTANCE_CSS_PX;
+    const isTap = dt <= DEFAULT_TAP_MAX_TIME_MS && distSq <= maxDist * maxDist;
+    if (!isTap) return;
+
+    const { match } = getNearestPointFromPointerEvent(e);
+    emit('click', buildPayload(match, e));
+  };
+
+  canvas.addEventListener('pointermove', onPointerMove, { passive: true });
+  canvas.addEventListener('pointerleave', onPointerLeave, { passive: true });
+  canvas.addEventListener('pointercancel', onPointerCancel, { passive: true });
+  canvas.addEventListener('lostpointercapture', onLostPointerCapture, {
+    passive: true,
+  });
+  canvas.addEventListener('pointerdown', onPointerDown, { passive: true });
+  canvas.addEventListener('pointerup', onPointerUp, { passive: true });
+
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+
+    try {
+      // Requirement: dispose order: cancel RAF, coordinator.dispose(), gpuContext.destroy(), remove canvas.
+      cancelPendingFrame();
+      disposeDataZoomUi();
+      disposeZoomResetButton();
+      unbindCoordinatorInteractionXChange();
+      unbindCoordinatorZoomRangeChange();
+      coordinator?.dispose();
+      coordinator = null;
+      coordinatorTargetFormat = null;
+      gpuContext?.destroy();
+    } finally {
+      tapCandidate = null;
+      suppressNextLostPointerCaptureId = null;
+      hovered = null;
+      interactionScalesCache = null;
+      pendingZoomSourceArmed = false;
+      pendingZoomSource = undefined;
+
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
+      canvas.removeEventListener('pointercancel', onPointerCancel);
+      canvas.removeEventListener('lostpointercapture', onLostPointerCapture);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointerup', onPointerUp);
+
+      listeners.click.clear();
+      listeners.mouseover.clear();
+      listeners.mouseout.clear();
+      listeners.crosshairMove.clear();
+      listeners.zoomRangeChange.clear();
+      listeners.deviceLost.clear();
+      listeners.dataAppend.clear();
+      hasDataAppendListeners = false;
+
+      gpuContext = null;
+      canvas.remove();
+
+      // Remove from global instance registry (CGPU-OOM-139)
+      // Note: `instance` is declared after `dispose` but is initialized before
+      // `dispose()` can ever be called, so the closure reference is safe.
+      activeInstances.delete(instance);
+    }
+  };
+
+  const instance: ChartGPUInstance = {
+    get options() {
+      return currentOptions;
+    },
+    get disposed() {
+      return disposed;
+    },
+    /**
+     * Number of times the ChartGPU hit-test columnar store was fully rebuilt.
+     * Used in tests to prove tooltip-off setOption dual-store skip.
+     * @internal
+     */
+    getHitTestStoreRebuildCount() {
+      return hitTestStoreRebuildCount;
+    },
+    getHitTestSeriesPointCount(seriesIndex) {
+      if (!Number.isFinite(seriesIndex) || seriesIndex < 0 || seriesIndex >= runtimeRawDataByIndex.length) {
+        return 0;
+      }
+      const owned = runtimeRawDataByIndex[seriesIndex];
+      if (owned == null) return 0;
+      if (isRingXYColumns(owned)) return owned.count;
+      if (Array.isArray(owned)) return owned.length;
+      if (typeof owned === 'object' && 'x' in owned && Array.isArray((owned as MutableXYColumns).x)) {
+        return (owned as MutableXYColumns).x.length;
+      }
+      return 0;
+    },
+    setOption(nextOptions) {
+      if (disposed) return;
+      // Capture prior user options before overwrite so axes-only paths can reuse
+      // the entire resolved series array when series **elements** are identity-stable
+      // (group 1 harness: same storedSeries objects + expanding yMin/yMax).
+      // Treat series array + each series config as immutable for this fast path;
+      // replace the element or array when data/style/visibility changes.
+      const previousUserOptions = currentOptions;
+      const previousElements = lastUserSeriesElements;
+      currentOptions = nextOptions;
+      // P1-7: pass previous resolve so unchanged series skip re-sample / bounds scan.
+      resolvedOptions = resolveOptionsForChart(nextOptions, {
+        previousResolved: resolvedOptions,
+        previousUserOptions,
+        lastUserSeriesElements: previousElements,
+      });
+      // Refresh element snapshot after every resolve (hit or miss).
+      lastUserSeriesElements = nextOptions.series ? nextOptions.series.slice() : null;
+      coordinator?.setOptions(resolvedOptions);
+
+      // Dual-store relief on full rewrite: when tooltips are off, skip O(n)
+      // hit-test columnar rebuild every setOption on full-rewrite frames.
+      // Resync on tooltip re-enable / hitTest() — same contract as maxPoints append.
+      //
+      // Contract: skipped store is rebuilt on hitTest() or tooltip show:true via
+      // coordinator snapshot; must not double-apply in-flight append batches
+      // (resync-before-append ordering in appendData).
+      const maintainHitTestStore = resolvedOptions.tooltip?.show !== false;
+      if (!maintainHitTestStore) {
+        hitTestStoreNeedsResync = true;
+      } else {
+        initRuntimeHitTestStoreFromResolvedOptions();
+      }
+
+      // Prefer resolver rawBounds when hit-test columns are skipped/stale.
+      cachedGlobalBounds = computeGlobalBounds(
+        resolvedOptions.series,
+        maintainHitTestStore ? runtimeRawBoundsByIndex : null
+      );
+      interactionScalesCache = null;
+      syncDataZoomUi();
+      syncZoomResetButton();
+
+      // Requirement: setOption triggers a render (and thus series parsing/extent/scales update inside render).
+      requestRender();
+    },
+    appendData(seriesIndex, newPoints, options) {
+      if (disposed) return;
+      if (!Number.isFinite(seriesIndex)) return;
+      if (seriesIndex < 0 || seriesIndex >= resolvedOptions.series.length) return;
+
+      const s = resolvedOptions.series[seriesIndex]!;
+      if (s.type === 'pie' || s.type === 'heatmap') {
+        if (!warnedPieAppendSeries.has(seriesIndex)) {
+          warnedPieAppendSeries.add(seriesIndex);
+          console.warn(
+            `ChartGPU.appendData(${seriesIndex}, ...): ${s.type} series are not supported by streaming append. ` +
+              (s.type === 'heatmap'
+                ? 'Use updateHeatmap(...) for replaceZ / appendColumns / appendRows (or equal-size setOption z replace).'
+                : 'Use setOption(...) to replace pie data.')
+          );
+        }
+        return;
+      }
+
+      // Early validation: compute append count in a format-aware way.
+      // Disambiguate by series type (avoid heuristics on the data payload).
+      let pointCount = 0;
+      if (s.type === 'candlestick' || s.type === 'ohlc') {
+        if (!Array.isArray(newPoints)) return;
+        pointCount = newPoints.length;
+      } else if (s.type === 'band') {
+        if (!isBandShapedPayload(newPoints)) {
+          console.warn(
+            `ChartGPU.appendData(${seriesIndex}, ...): band series requires Xyy payloads ` +
+              `({x,y,y1}, [x,y,y1] tuples/objects, or interleaved stride-3). Skipping batch.`
+          );
+          return;
+        }
+        pointCount = getBandLength(newPoints as BandSeriesData);
+      } else if (s.type === 'errorBar') {
+        if (!isErrorBarShapedPayload(newPoints)) {
+          console.warn(
+            `ChartGPU.appendData(${seriesIndex}, ...): errorBar series requires HLC or relative-error payloads ` +
+              `({x,y,high,low}, {x,y,yError}, tuples/objects). Skipping batch.`
+          );
+          return;
+        }
+        pointCount = getErrorBarLength(newPoints as ErrorBarSeriesData);
+      } else {
+        pointCount = getCartesianPointCount(newPoints as CartesianSeriesData);
+      }
+      if (pointCount === 0) return;
+
+      const callerMaxPoints = normalizeMaxPoints(options?.maxPoints);
+
+      // Dual-store relief: when tooltip is off, skip ChartGPU hit-test columnar
+      // growth on every append (FIFO `maxPoints` *and* unbounded LTTB/compression
+      // streaming). Matches setOption's tooltip-off policy. Coordinator still
+      // owns GPU buffers + domain. hitTest() / re-enable tooltip resync from
+      // coordinator (hitTestStoreNeedsResync). Multi-chart + series compression
+      // suites use tooltip:false — dual O(n) columnar growth was a primary
+      // steady-state tax as raw N grew each frame.
+      //
+      // IMPORTANT: resync BEFORE coordinator.appendData for this batch. Resync
+      // flushes pending coordinator batches; if we appended first, the snapshot
+      // would already include this batch and the local apply below would double
+      // it. Order: resync prior state → queue this batch on coordinator → apply
+      // once locally when maintaining the hit-test store.
+      const maintainHitTestStore = resolvedOptions.tooltip?.show !== false;
+      if (!maintainHitTestStore) {
+        hitTestStoreNeedsResync = true;
+      } else if (hitTestStoreNeedsResync) {
+        resyncHitTestStoreFromCoordinator();
+      }
+
+      // Device auto-window: when unbounded append would exceed storage binding,
+      // DataStore rings at deviceMaxPoints — hit-test must use the same cap
+      // (issue 1.1). Prefer tighter of caller maxPoints and device budget.
+      const prevHitLenForCap = (() => {
+        if (!maintainHitTestStore) return 0;
+        const owned = runtimeRawDataByIndex[seriesIndex];
+        if (s.type === 'candlestick' || s.type === 'ohlc') {
+          return Array.isArray(owned) ? owned.length : 0;
+        }
+        if (isRingXYColumns(owned)) return owned.count;
+        if (owned && typeof owned === 'object' && 'x' in owned && Array.isArray((owned as MutableXYColumns).x)) {
+          return (owned as MutableXYColumns).x.length;
+        }
+        return 0;
+      })();
+      const deviceLimits = gpuContext?.device?.limits ?? null;
+      const maxPoints = resolveEffectiveMaxPointsForAppend(callerMaxPoints, prevHitLenForCap, pointCount, deviceLimits);
+
+      // Forward to coordinator (GPU buffers + render-state updates), then keep
+      // ChartGPU's hit-testing runtime store in sync when tooltips / hit-test
+      // history are used. Both layers use planMaxPointsWindow with the same
+      // effective max (caller or device auto-window).
+      coordinator?.appendData(seriesIndex, newPoints, maxPoints != null ? { maxPoints } : undefined);
+
+      // Track xExtent during append (avoids separate iteration when listeners present)
+      let appendXMin = Number.POSITIVE_INFINITY;
+      let appendXMax = Number.NEGATIVE_INFINITY;
+
+      if (maintainHitTestStore && (s.type === 'candlestick' || s.type === 'ohlc')) {
+        // Handle candlestick series with OHLC data points.
+        const existing = runtimeRawDataByIndex[seriesIndex];
+        const owned = (Array.isArray(existing) ? existing : []) as OHLCDataPoint[];
+        const ohlcPoints = newPoints as OHLCDataPoint[];
+
+        // Track xExtent during push if listeners present
+        if (hasDataAppendListeners) {
+          for (let i = 0; i < pointCount; i++) {
+            const x = getOHLCTimestamp(ohlcPoints[i]!);
+            if (Number.isFinite(x)) {
+              if (x < appendXMin) appendXMin = x;
+              if (x > appendXMax) appendXMax = x;
+            }
+          }
+        }
+
+        const planOhlc = planMaxPointsWindow(owned.length, pointCount, maxPoints);
+        if (planOhlc.dropPrevCount > 0) {
+          owned.splice(0, planOhlc.dropPrevCount);
+        }
+        if (planOhlc.keepNewCount > 0) {
+          const start = planOhlc.newSrcOffset;
+          const end = start + planOhlc.keepNewCount;
+          for (let i = start; i < end; i++) {
+            owned.push(ohlcPoints[i]!);
+          }
+        }
+        if (!planOhlc.didWindow) {
+          runtimeRawBoundsByIndex[seriesIndex] = extendBoundsWithOHLCDataPoints(
+            runtimeRawBoundsByIndex[seriesIndex],
+            ohlcPoints
+          );
+        } else {
+          runtimeRawBoundsByIndex[seriesIndex] = extendBoundsWithOHLCDataPoints(null, owned);
+        }
+        runtimeRawDataByIndex[seriesIndex] = owned;
+      } else if (maintainHitTestStore && s.type === 'band') {
+        type BandCols = { x: number[]; y: number[]; y1: number[] };
+        let cols = runtimeRawDataByIndex[seriesIndex] as BandCols | null;
+        if (!cols || !('y1' in (cols as object))) {
+          const seed =
+            (s as { rawData?: BandSeriesData; data: BandSeriesData }).rawData ??
+            ((s as { data: BandSeriesData }).data as BandSeriesData);
+          const n = getBandLength(seed);
+          const x: number[] = new Array(n);
+          const y: number[] = new Array(n);
+          const y1: number[] = new Array(n);
+          for (let j = 0; j < n; j++) {
+            const p = getBandPoint(seed, j);
+            x[j] = p ? p.x : Number.NaN;
+            y[j] = p ? p.y : Number.NaN;
+            y1[j] = p ? p.y1 : Number.NaN;
+          }
+          cols = { x, y, y1 };
+        } else {
+          cols = {
+            x: Array.isArray(cols.x) ? cols.x : Array.from(cols.x as ArrayLike<number>),
+            y: Array.isArray(cols.y) ? cols.y : Array.from(cols.y as ArrayLike<number>),
+            y1: Array.isArray(cols.y1) ? cols.y1 : Array.from(cols.y1 as ArrayLike<number>),
+          };
+        }
+        const bandAppend = newPoints as BandSeriesData;
+        if (hasDataAppendListeners) {
+          for (let i = 0; i < pointCount; i++) {
+            const p = getBandPoint(bandAppend, i);
+            if (p && Number.isFinite(p.x)) {
+              if (p.x < appendXMin) appendXMin = p.x;
+              if (p.x > appendXMax) appendXMax = p.x;
+            }
+          }
+        }
+        const plan = planMaxPointsWindow(cols.x.length, pointCount, maxPoints);
+        if (plan.dropPrevCount > 0) {
+          cols.x.splice(0, plan.dropPrevCount);
+          cols.y.splice(0, plan.dropPrevCount);
+          cols.y1.splice(0, plan.dropPrevCount);
+        }
+        appendBandIntoXYYColumns(cols, bandAppend, {
+          newSrcOffset: plan.newSrcOffset,
+          keepNewCount: plan.keepNewCount,
+        });
+        if (!plan.didWindow) {
+          runtimeRawBoundsByIndex[seriesIndex] = extendBoundsWithBandData(
+            runtimeRawBoundsByIndex[seriesIndex],
+            bandAppend
+          );
+        } else {
+          runtimeRawBoundsByIndex[seriesIndex] = bandBounds(asBandXYYArrays(cols));
+        }
+        runtimeRawDataByIndex[seriesIndex] = asBandXYYArrays(cols) as unknown as MutableXYColumns;
+      } else if (maintainHitTestStore && s.type === 'errorBar') {
+        let cols = runtimeRawDataByIndex[seriesIndex] as MutableErrorBarHlcColumns | null;
+        const direction =
+          (s as { direction?: 'vertical' | 'horizontal' }).direction === 'horizontal' ? 'horizontal' : 'vertical';
+        if (!cols || !('high' in (cols as object)) || !('low' in (cols as object))) {
+          const seed =
+            (s as { rawData?: ErrorBarSeriesData; data: ErrorBarSeriesData }).rawData ??
+            ((s as { data: ErrorBarSeriesData }).data as ErrorBarSeriesData);
+          cols = errorBarDataToMutableHlc(seed);
+        } else {
+          cols = {
+            x: Array.isArray(cols.x) ? cols.x : Array.from(cols.x as ArrayLike<number>),
+            y: Array.isArray(cols.y) ? cols.y : Array.from(cols.y as ArrayLike<number>),
+            high: Array.isArray(cols.high) ? cols.high : Array.from(cols.high as ArrayLike<number>),
+            low: Array.isArray(cols.low) ? cols.low : Array.from(cols.low as ArrayLike<number>),
+          };
+        }
+        const ebAppend = newPoints as ErrorBarSeriesData;
+        if (hasDataAppendListeners) {
+          for (let i = 0; i < pointCount; i++) {
+            const p = getErrorBarPoint(ebAppend, i);
+            if (p && Number.isFinite(p.x)) {
+              if (p.x < appendXMin) appendXMin = p.x;
+              if (p.x > appendXMax) appendXMax = p.x;
+            }
+          }
+        }
+        const plan = planMaxPointsWindow(cols.x.length, pointCount, maxPoints);
+        if (plan.dropPrevCount > 0) {
+          cols.x.splice(0, plan.dropPrevCount);
+          cols.y.splice(0, plan.dropPrevCount);
+          cols.high.splice(0, plan.dropPrevCount);
+          cols.low.splice(0, plan.dropPrevCount);
+        }
+        appendErrorBarIntoHlcColumns(cols, ebAppend, {
+          newSrcOffset: plan.newSrcOffset,
+          keepNewCount: plan.keepNewCount,
+        });
+        if (!plan.didWindow) {
+          runtimeRawBoundsByIndex[seriesIndex] = extendBoundsWithErrorBarData(
+            runtimeRawBoundsByIndex[seriesIndex],
+            ebAppend,
+            direction
+          );
+        } else {
+          runtimeRawBoundsByIndex[seriesIndex] = errorBarBounds(asErrorBarHlcArrays(cols), direction);
+        }
+        runtimeRawDataByIndex[seriesIndex] = asErrorBarHlcArrays(cols) as unknown as MutableXYColumns;
+      } else if (maintainHitTestStore) {
+        // Handle other cartesian series (line, area, bar, scatter) with columnar append.
+        // Prefer RingXY when maxPoints is set (matches coordinator O(append) policy).
+        let owned = runtimeRawDataByIndex[seriesIndex] as MutableXYColumns | RingXYColumns;
+        const appendData = newPoints as CartesianSeriesData;
+
+        if (maxPoints != null) {
+          // Promote linear hit-test store to ring (Issue 15). Preserve size channel.
+          if (!isRingXYColumns(owned)) {
+            const linear = owned as MutableXYColumns;
+            const hasSize =
+              linear.size != null && linear.size.some((v) => v !== undefined && Number.isFinite(v as number));
+            const ring = createRingXYColumns(maxPoints, hasSize);
+            const seedCount = Math.min(linear.x.length, maxPoints);
+            const seedStart = Math.max(0, linear.x.length - seedCount);
+            for (let i = 0; i < seedCount; i++) {
+              ring.x[i] = linear.x[seedStart + i]!;
+              ring.y[i] = linear.y[seedStart + i]!;
+              if (ring.size && linear.size) {
+                const sv = linear.size[seedStart + i];
+                ring.size[i] = typeof sv === 'number' && Number.isFinite(sv) ? sv : Number.NaN;
+              }
+            }
+            ring.count = seedCount;
+            ring.start = 0;
+            owned = ring;
+            runtimeRawDataByIndex[seriesIndex] = ring;
+          } else if (owned.capacity !== maxPoints) {
+            // Capacity change: demote to linear chronological then re-promote.
+            const prev = owned;
+            const linear: MutableXYColumns = { x: [], y: [] };
+            const prevHasSize = prev.size != null;
+            if (prevHasSize) linear.size = [];
+            for (let i = 0; i < prev.count; i++) {
+              linear.x.push(getCartesianX(prev as unknown as CartesianSeriesData, i));
+              linear.y.push(getCartesianY(prev as unknown as CartesianSeriesData, i));
+              if (prevHasSize && linear.size) {
+                const sv = getCartesianSize(prev as unknown as CartesianSeriesData, i);
+                linear.size.push(sv);
+              }
+            }
+            const ring = createRingXYColumns(maxPoints, prevHasSize);
+            const seedCount = Math.min(linear.x.length, maxPoints);
+            const seedStart = Math.max(0, linear.x.length - seedCount);
+            for (let i = 0; i < seedCount; i++) {
+              ring.x[i] = linear.x[seedStart + i]!;
+              ring.y[i] = linear.y[seedStart + i]!;
+              if (ring.size && linear.size) {
+                const sv = linear.size[seedStart + i];
+                ring.size[i] = typeof sv === 'number' && Number.isFinite(sv) ? sv : Number.NaN;
+              }
+            }
+            ring.count = seedCount;
+            ring.start = 0;
+            owned = ring;
+            runtimeRawDataByIndex[seriesIndex] = ring;
+          }
+
+          const plan = planMaxPointsWindow((owned as RingXYColumns).count, pointCount, maxPoints);
+          appendIntoRingXY(
+            owned as RingXYColumns,
+            appendData,
+            plan.newSrcOffset,
+            plan.keepNewCount,
+            plan.dropPrevCount
+          );
+          if (hasDataAppendListeners) {
+            const end = plan.newSrcOffset + plan.keepNewCount;
+            for (let i = plan.newSrcOffset; i < end; i++) {
+              const x = getCartesianX(appendData, i);
+              if (Number.isFinite(x)) {
+                if (x < appendXMin) appendXMin = x;
+                if (x > appendXMax) appendXMax = x;
+              }
+            }
+          }
+          if (!plan.didWindow) {
+            runtimeRawBoundsByIndex[seriesIndex] = extendBoundsWithCartesianData(
+              runtimeRawBoundsByIndex[seriesIndex],
+              appendData
+            );
+          } else {
+            // Match coordinator appendFlush: O(1) endpoint x + extend y from the
+            // new batch only. Full O(n) rescan of a ~16M device ring every wrap
+            // freezes main-thread streaming (tooltip dual-store path).
+            const ring = owned as RingXYColumns;
+            const prevB = runtimeRawBoundsByIndex[seriesIndex];
+            const x0 = getCartesianX(ring as unknown as CartesianSeriesData, 0);
+            const x1 = getCartesianX(ring as unknown as CartesianSeriesData, Math.max(0, ring.count - 1));
+            let yMin = prevB?.yMin ?? Number.POSITIVE_INFINITY;
+            let yMax = prevB?.yMax ?? Number.NEGATIVE_INFINITY;
+            const end = plan.newSrcOffset + plan.keepNewCount;
+            for (let i = plan.newSrcOffset; i < end; i++) {
+              const y = getCartesianY(appendData, i);
+              if (Number.isFinite(y)) {
+                if (y < yMin) yMin = y;
+                if (y > yMax) yMax = y;
+              }
+            }
+            if (Number.isFinite(x0) && Number.isFinite(x1) && Number.isFinite(yMin) && Number.isFinite(yMax)) {
+              let xMin = x0;
+              let xMax = x1;
+              if (xMin === xMax) xMax = xMin + 1;
+              if (yMin === yMax) yMax = yMin + 1;
+              runtimeRawBoundsByIndex[seriesIndex] = { xMin, xMax, yMin, yMax };
+            } else {
+              runtimeRawBoundsByIndex[seriesIndex] = computeRawBoundsFromCartesianData(
+                ring as unknown as CartesianSeriesData
+              );
+            }
+          }
+        } else {
+          // Unbounded: demote ring → linear if needed, then grow arrays.
+          if (isRingXYColumns(owned)) {
+            const prev = owned;
+            const linear: MutableXYColumns = { x: [], y: [] };
+            for (let i = 0; i < prev.count; i++) {
+              linear.x.push(getCartesianX(prev as unknown as CartesianSeriesData, i));
+              linear.y.push(getCartesianY(prev as unknown as CartesianSeriesData, i));
+            }
+            owned = linear;
+            runtimeRawDataByIndex[seriesIndex] = linear;
+          }
+          const linear = owned as MutableXYColumns;
+
+          // Hoist type detection outside loops to avoid per-point type checks
+          // Check format once, then use specialized fast paths
+          // NOTE: Format detection logic is duplicated in 2 places and must stay in sync:
+          // 1. extendBoundsWithCartesianData - for bounds updates
+          // 2. appendData method (here) - for columnar store appends (also computes xExtent inline)
+          const isXYArrays =
+            typeof appendData === 'object' &&
+            appendData !== null &&
+            !Array.isArray(appendData) &&
+            'x' in appendData &&
+            'y' in appendData;
+
+          const isInterleaved =
+            typeof appendData === 'object' &&
+            appendData !== null &&
+            !Array.isArray(appendData) &&
+            ArrayBuffer.isView(appendData);
+
+          const plan = planMaxPointsWindow(linear.x.length, pointCount, maxPoints);
+          if (plan.dropPrevCount > 0) {
+            dropPrefixXY(linear.x, linear.y, plan.dropPrevCount, linear.size);
+          }
+
+          // Track if any appended point has a size value
+          let hasAnySizeValue = false;
+          const sizesToAppend: (number | undefined)[] = new Array(plan.keepNewCount);
+          const rawLenBefore = linear.x.length;
+
+          if (isXYArrays) {
+            // Fast path for XYArraysData: direct array access without type checks
+            const xyData = appendData as {
+              x: ArrayLike<number>;
+              y: ArrayLike<number>;
+              size?: ArrayLike<number>;
+            };
+
+            const end = plan.newSrcOffset + plan.keepNewCount;
+            for (let i = plan.newSrcOffset; i < end; i++) {
+              const x = xyData.x[i]!;
+              linear.x.push(x);
+              linear.y.push(xyData.y[i]!);
+
+              // Track xExtent during iteration (avoids second O(n) pass)
+              if (hasDataAppendListeners && Number.isFinite(x)) {
+                if (x < appendXMin) appendXMin = x;
+                if (x > appendXMax) appendXMax = x;
+              }
+            }
+
+            // Handle size array if present
+            if (xyData.size) {
+              hasAnySizeValue = true;
+              for (let j = 0; j < plan.keepNewCount; j++) {
+                sizesToAppend[j] = xyData.size[plan.newSrcOffset + j];
+              }
+            }
+          } else if (isInterleaved) {
+            // Fast path for InterleavedXYData: direct typed array access
+            const arr = appendData as Float32Array | Float64Array;
+
+            const end = plan.newSrcOffset + plan.keepNewCount;
+            for (let i = plan.newSrcOffset; i < end; i++) {
+              const x = arr[i * 2]!;
+              linear.x.push(x);
+              linear.y.push(arr[i * 2 + 1]!);
+
+              // Track xExtent during iteration
+              if (hasDataAppendListeners && Number.isFinite(x)) {
+                if (x < appendXMin) appendXMin = x;
+                if (x > appendXMax) appendXMax = x;
+              }
+            }
+            // InterleavedXYData doesn't support size
+          } else {
+            // Array<DataPoint> path: use helper functions
+            const end = plan.newSrcOffset + plan.keepNewCount;
+            for (let i = plan.newSrcOffset; i < end; i++) {
+              const x = getCartesianX(appendData, i);
+              linear.x.push(x);
+              linear.y.push(getCartesianY(appendData, i));
+              const size = getCartesianSize(appendData, i);
+              sizesToAppend[i - plan.newSrcOffset] = size;
+              if (size !== undefined) hasAnySizeValue = true;
+
+              // Track xExtent during iteration
+              if (hasDataAppendListeners && Number.isFinite(x)) {
+                if (x < appendXMin) appendXMin = x;
+                if (x > appendXMax) appendXMax = x;
+              }
+            }
+          }
+
+          // Handle size array alignment: ensure size array indices match x/y array indices
+          // If we've ever had a size array, keep it aligned by appending `undefined` when missing.
+          if (linear.size || hasAnySizeValue) {
+            if (!linear.size) {
+              // Backfill undefined for existing points that didn't have size values
+              linear.size = new Array(rawLenBefore);
+            }
+            // Append size values (including undefined for points without size)
+            linear.size.push(...sizesToAppend);
+          }
+
+          if (!plan.didWindow) {
+            runtimeRawBoundsByIndex[seriesIndex] = extendBoundsWithCartesianData(
+              runtimeRawBoundsByIndex[seriesIndex],
+              appendData
+            );
+          } else {
+            // Prefix drop / strict replace can invalidate prior extrema — rescan.
+            runtimeRawBoundsByIndex[seriesIndex] = computeRawBoundsFromCartesianData(
+              linear as unknown as CartesianSeriesData
+            );
+          }
+        }
+      } else if (hasDataAppendListeners) {
+        // Hit-test store skipped; still compute xExtent for dataAppend listeners.
+        if (s.type === 'candlestick' || s.type === 'ohlc') {
+          const ohlcPoints = newPoints as OHLCDataPoint[];
+          for (let i = 0; i < pointCount; i++) {
+            const x = getOHLCTimestamp(ohlcPoints[i]!);
+            if (Number.isFinite(x)) {
+              if (x < appendXMin) appendXMin = x;
+              if (x > appendXMax) appendXMax = x;
+            }
+          }
+        } else if (s.type === 'band') {
+          const bandAppend = newPoints as BandSeriesData;
+          for (let i = 0; i < pointCount; i++) {
+            const x = getBandX(bandAppend, i);
+            if (Number.isFinite(x)) {
+              if (x < appendXMin) appendXMin = x;
+              if (x > appendXMax) appendXMax = x;
+            }
+          }
+        } else if (s.type === 'errorBar') {
+          const ebAppend = newPoints as ErrorBarSeriesData;
+          for (let i = 0; i < pointCount; i++) {
+            const p = getErrorBarPoint(ebAppend, i);
+            if (p && Number.isFinite(p.x)) {
+              if (p.x < appendXMin) appendXMin = p.x;
+              if (p.x > appendXMax) appendXMax = p.x;
+            }
+          }
+        } else {
+          const appendData = newPoints as CartesianSeriesData;
+          for (let i = 0; i < pointCount; i++) {
+            const x = getCartesianX(appendData, i);
+            if (Number.isFinite(x)) {
+              if (x < appendXMin) appendXMin = x;
+              if (x > appendXMax) appendXMax = x;
+            }
+          }
+        }
+      }
+
+      if (maintainHitTestStore) {
+        cachedGlobalBounds = computeGlobalBounds(resolvedOptions.series, runtimeRawBoundsByIndex);
+
+        runtimeHitTestSeriesCache = null;
+        runtimeHitTestSeriesVersion++;
+        interactionScalesCache = null;
+      }
+
+      // Ensure a render is scheduled (coalesced) like setOption does.
+      requestRender();
+
+      // AC-6: Only emit if listeners are registered (zero-overhead when unused).
+      // xExtent was already computed during the append iteration above (no separate O(n) pass).
+      if (hasDataAppendListeners) {
+        // Normalize xExtent: return zero extent if no finite values found
+        if (!Number.isFinite(appendXMin) || !Number.isFinite(appendXMax)) {
+          appendXMin = 0;
+          appendXMax = 0;
+        }
+
+        // Update reusable payload and emit
+        dataAppendPayload.seriesIndex = seriesIndex;
+        dataAppendPayload.count = pointCount;
+        dataAppendPayload.xExtent.min = appendXMin;
+        dataAppendPayload.xExtent.max = appendXMax;
+        emit('dataAppend', dataAppendPayload as ChartGPUDataAppendPayload);
+      }
+    },
+    updateHeatmap(seriesIndex, update) {
+      if (disposed) return;
+      if (!Number.isFinite(seriesIndex)) return;
+      if (seriesIndex < 0 || seriesIndex >= resolvedOptions.series.length) return;
+      if (!coordinator) return;
+      const ok = coordinator.updateHeatmap(seriesIndex, update);
+      if (!ok) return;
+      // Stream field (z / xStart / dims) is coordinator-owned. Only refresh chart-level
+      // rawBounds so axis auto / global bounds track scrolled grid extent.
+      const s = resolvedOptions.series[seriesIndex];
+      if (s?.type === 'heatmap') {
+        const b = coordinator.getRuntimeSeriesBounds(seriesIndex);
+        if (b) {
+          const nextSeries = resolvedOptions.series.slice();
+          nextSeries[seriesIndex] = { ...s, rawBounds: b } as typeof s;
+          resolvedOptions = { ...resolvedOptions, series: nextSeries };
+          cachedGlobalBounds = computeGlobalBounds(resolvedOptions.series, null);
+          interactionScalesCache = null;
+        }
+      }
+      requestRender();
+    },
+    renderFrame() {
+      if (disposed) return false;
+      if (deviceIsLost) return false;
+
+      // Warn if called in auto mode
+      if (renderMode === 'auto') {
+        console.warn(
+          'renderFrame() called in auto mode - this is a no-op. Set renderMode to "external" to use manual rendering.'
+        );
+        return false;
+      }
+
+      // Already rendering - prevent reentrancy
+      if (isRendering) return false;
+
+      if (!coordinator || !gpuContext?.device) return false;
+      if (!isDirty) return false;
+
+      try {
+        doFrame(false);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    needsRender: () => (disposed ? false : isDirty),
+    getRenderMode: () => renderMode,
+    setRenderMode(mode: RenderMode) {
+      if (disposed) return;
+      if (mode !== 'auto' && mode !== 'external') {
+        console.warn(`setRenderMode(): invalid mode '${String(mode)}', ignoring.`);
+        return;
+      }
+      if (renderMode === mode) return;
+
+      resetPerfMetricsInternal();
+      renderMode = mode;
+      if (mode === 'external') cancelPendingFrame();
+      else if (isDirty) requestRender();
+    },
+    resize,
+    dispose,
+    on(eventName, callback) {
+      if (disposed) return;
+      listeners[eventName].add(callback as AnyChartGPUEventCallback);
+      // Update hot-path flag for dataAppend event
+      if (eventName === 'dataAppend') hasDataAppendListeners = true;
+    },
+    off(eventName, callback) {
+      listeners[eventName].delete(callback as AnyChartGPUEventCallback);
+      // Update hot-path flag for dataAppend event
+      if (eventName === 'dataAppend') hasDataAppendListeners = listeners.dataAppend.size > 0;
+    },
+    getInteractionX() {
+      if (disposed) return null;
+      return coordinator?.getInteractionX() ?? null;
+    },
+    setInteractionX(x, source) {
+      if (disposed) return;
+      coordinator?.setInteractionX(x, source);
+    },
+    setCrosshairX(x, source) {
+      if (disposed) return;
+      coordinator?.setInteractionX(x, source);
+    },
+    onInteractionXChange(callback) {
+      if (disposed) return () => {};
+      return coordinator?.onInteractionXChange(callback) ?? (() => {});
+    },
+    getZoomRange() {
+      if (disposed) return null;
+      return coordinator?.getZoomRange() ?? null;
+    },
+    setZoomRange(start, end, source) {
+      if (disposed) return;
+      if (!coordinator) return;
+
+      // If data zoom is disabled, coordinator returns null and setZoomRange is a no-op.
+      const before = coordinator.getZoomRange();
+      if (!before) return;
+
+      // Mark the next coordinator zoom-range notification as originating from this API call.
+      // If a `source` token is provided, it will be forwarded to zoom listeners (loop prevention).
+      pendingZoomSourceArmed = true;
+      pendingZoomSource = source;
+
+      coordinator.setZoomRange(start, end);
+
+      // If range did not change, clear the pending token to avoid incorrectly tagging the next user zoom.
+      const after = coordinator.getZoomRange();
+      if (!after || (after.start === before.start && after.end === before.end)) {
+        pendingZoomSourceArmed = false;
+        pendingZoomSource = undefined;
+      }
+    },
+    getPerformanceMetrics() {
+      if (disposed) return null;
+      return calculatePerformanceMetrics();
+    },
+    getPerformanceCapabilities() {
+      if (disposed) return null;
+      return {
+        gpuTimingSupported: false, // Not yet implemented for main thread
+        highResTimerSupported: typeof performance !== 'undefined' && typeof performance.now === 'function',
+        performanceMetricsSupported: true,
+      };
+    },
+    onPerformanceUpdate(callback) {
+      if (disposed) return () => {};
+      performanceUpdateCallbacks.add(callback);
+      return () => {
+        performanceUpdateCallbacks.delete(callback);
+      };
+    },
+    hitTest(e) {
+      // Resync hit-test columns if dual-store skip left them stale.
+      if (hitTestStoreNeedsResync) {
+        resyncHitTestStoreFromCoordinator();
+      }
+
+      // Visual pointer → layout CSS so plot margins (layout) match under CSS zoom.
+      const layout = pointerClientToLayoutCss(canvas, e.clientX, e.clientY);
+      const canvasX = layout?.x ?? 0;
+      const canvasY = layout?.y ?? 0;
+
+      // Default result for cases where rect is invalid or disposed
+      if (disposed || !layout) {
+        return {
+          isInGrid: false,
+          canvasX,
+          canvasY,
+          gridX: 0,
+          gridY: 0,
+          match: null,
+        };
+      }
+
+      const plotLeftCss = resolvedOptions.grid.left;
+      const plotTopCss = resolvedOptions.grid.top;
+      const plotWidthCss = layout.layoutWidth - resolvedOptions.grid.left - resolvedOptions.grid.right;
+      const plotHeightCss = layout.layoutHeight - resolvedOptions.grid.top - resolvedOptions.grid.bottom;
+
+      const gridX = canvasX - plotLeftCss;
+      const gridY = canvasY - plotTopCss;
+
+      // If plot dimensions are invalid, return coords but no match
+      if (!(plotWidthCss > 0) || !(plotHeightCss > 0)) {
+        return {
+          isInGrid: false,
+          canvasX,
+          canvasY,
+          gridX,
+          gridY,
+          match: null,
+        };
+      }
+
+      const isInGrid = gridX >= 0 && gridX <= plotWidthCss && gridY >= 0 && gridY <= plotHeightCss;
+
+      // If outside grid, return early
+      if (!isInGrid) {
+        return {
+          isInGrid: false,
+          canvasX,
+          canvasY,
+          gridX,
+          gridY,
+          match: null,
+        };
+      }
+
+      // Compute domain and scales for hit-testing
+      const xMin = resolvedOptions.xAxis.min ?? cachedGlobalBounds.xMin;
+      const xMax = resolvedOptions.xAxis.max ?? cachedGlobalBounds.xMax;
+      const yMin = resolvedOptions.yAxes[0]?.min ?? cachedGlobalBounds.yMin;
+      const yMax = resolvedOptions.yAxes[0]?.max ?? cachedGlobalBounds.yMax;
+
+      const baseXDomain = normalizeDomain(xMin, xMax);
+      const zoomRange = coordinator?.getZoomRange() ?? null;
+      const xDomain = (() => {
+        if (!zoomRange) return baseXDomain;
+        const span = baseXDomain.max - baseXDomain.min;
+        if (!Number.isFinite(span) || span === 0) return baseXDomain;
+        const start = zoomRange.start;
+        const end = zoomRange.end;
+        const zMin = baseXDomain.min + (start / 100) * span;
+        const zMax = baseXDomain.min + (end / 100) * span;
+        return normalizeDomain(zMin, zMax);
+      })();
+      const yDomain = normalizeDomain(yMin, yMax);
+
+      // Reuse or rebuild interaction scales cache (keyed on layout CSS size, not visual rect).
+      const canReuseScales =
+        interactionScalesCache !== null &&
+        interactionScalesCache.rectWidthCss === layout.layoutWidth &&
+        interactionScalesCache.rectHeightCss === layout.layoutHeight &&
+        interactionScalesCache.plotWidthCss === plotWidthCss &&
+        interactionScalesCache.plotHeightCss === plotHeightCss &&
+        interactionScalesCache.xDomainMin === xDomain.min &&
+        interactionScalesCache.xDomainMax === xDomain.max &&
+        interactionScalesCache.yDomainMin === yDomain.min &&
+        interactionScalesCache.yDomainMax === yDomain.max;
+
+      if (!canReuseScales) {
+        const xScale = createAxisScale(resolvedOptions.xAxis).domain(xDomain.min, xDomain.max).range(0, plotWidthCss);
+        const yAxis0 = resolvedOptions.yAxes[0] ?? { type: 'value' as const };
+        const yScale = createAxisScale(yAxis0).domain(yDomain.min, yDomain.max).range(plotHeightCss, 0);
+        interactionScalesCache = {
+          rectWidthCss: layout.layoutWidth,
+          rectHeightCss: layout.layoutHeight,
+          plotWidthCss,
+          plotHeightCss,
+          xDomainMin: xDomain.min,
+          xDomainMax: xDomain.max,
+          yDomainMin: yDomain.min,
+          yDomainMax: yDomain.max,
+          xScale,
+          yScale,
+        };
+      }
+
+      const scales = interactionScalesCache!;
+
+      // Pie slice hit-testing
+      const pieMatch = (() => {
+        const maxRadiusCss = 0.5 * Math.min(plotWidthCss, plotHeightCss);
+        if (!(maxRadiusCss > 0)) return null;
+
+        for (let i = resolvedOptions.series.length - 1; i >= 0; i--) {
+          const s = resolvedOptions.series[i];
+          if (s.type !== 'pie') continue;
+
+          // Skip invisible series
+          if (s.visible === false) continue;
+
+          const pieSeries = s as ResolvedPieSeriesConfig;
+          const center = resolvePieCenterPlotCss(pieSeries.center, plotWidthCss, plotHeightCss);
+          const radii = resolvePieRadiiCss(pieSeries.radius, maxRadiusCss);
+          const m = findPieSlice(gridX, gridY, { seriesIndex: i, series: pieSeries }, center, radii);
+          if (!m) continue;
+
+          const v = m.slice.value;
+          return {
+            kind: 'pie' as const,
+            seriesIndex: m.seriesIndex,
+            dataIndex: m.dataIndex,
+            sliceValue: typeof v === 'number' && Number.isFinite(v) ? v : 0,
+          };
+        }
+        return null;
+      })();
+
+      if (pieMatch) {
+        return {
+          isInGrid: true,
+          canvasX,
+          canvasY,
+          gridX,
+          gridY,
+          match: {
+            kind: 'pie',
+            seriesIndex: pieMatch.seriesIndex,
+            dataIndex: pieMatch.dataIndex,
+            value: [0, pieMatch.sliceValue],
+          },
+        };
+      }
+
+      // Finance OHLC body/stem hit-testing
+      for (let i = resolvedOptions.series.length - 1; i >= 0; i--) {
+        const s = resolvedOptions.series[i];
+        if (!(s.type === 'candlestick' || s.type === 'ohlc')) continue;
+
+        // Skip invisible series
+        if (s.visible === false) continue;
+
+        const seriesCfg = s as FinanceOhlcHitSeriesConfig;
+        const barWidthRange = computeCandlestickBodyWidthRange(seriesCfg, seriesCfg.data, scales.xScale, plotWidthCss);
+        const m = findCandlestick([seriesCfg], gridX, gridY, scales.xScale, scales.yScale, barWidthRange, {
+          yHitMode: s.type === 'ohlc' ? 'lowHigh' : 'openClose',
+        });
+        if (!m) continue;
+
+        const timestamp = getOHLCTimestamp(m.point);
+        const close = getOHLCClose(m.point);
+
+        return {
+          isInGrid: true,
+          canvasX,
+          canvasY,
+          gridX,
+          gridY,
+          match: {
+            kind: s.type === 'ohlc' ? 'ohlc' : 'candlestick',
+            seriesIndex: i,
+            dataIndex: m.dataIndex,
+            value: [timestamp, close],
+          },
+        };
+      }
+
+      // Error bars (stem + caps) — same multi-axis path as pointer events (Issue 1).
+      {
+        const ebHit = findErrorBarHitAtGrid(gridX, gridY, scales.xScale, scales.yScale, plotWidthCss, plotHeightCss);
+        if (ebHit) {
+          return {
+            isInGrid: true,
+            canvasX,
+            canvasY,
+            gridX,
+            gridY,
+            match: {
+              kind: 'errorBar',
+              seriesIndex: ebHit.seriesIndex,
+              dataIndex: ebHit.dataIndex,
+              value: [ebHit.point.x, ebHit.point.y],
+            },
+          };
+        }
+      }
+
+      // Impulse stems
+      {
+        const impHit = findImpulseHitAtGrid(gridX, gridY, scales.xScale, scales.yScale, plotWidthCss, plotHeightCss);
+        if (impHit) {
+          return {
+            isInGrid: true,
+            canvasX,
+            canvasY,
+            gridX,
+            gridY,
+            match: {
+              kind: 'impulse',
+              seriesIndex: impHit.seriesIndex,
+              dataIndex: impHit.dataIndex,
+              value: [impHit.point.x, impHit.point.y],
+            },
+          };
+        }
+      }
+
+      // Cartesian nearest-point hit-testing
+      const cartesianMatch = findNearestPoint(getRuntimeHitTestSeries(), gridX, gridY, scales.xScale, scales.yScale);
+
+      if (cartesianMatch) {
+        const { x, y } = getPointXY(cartesianMatch.point);
+        return {
+          isInGrid: true,
+          canvasX,
+          canvasY,
+          gridX,
+          gridY,
+          match: {
+            kind: 'cartesian',
+            seriesIndex: cartesianMatch.seriesIndex,
+            dataIndex: cartesianMatch.dataIndex,
+            value: [x, y],
+          },
+        };
+      }
+
+      // Inside grid but no match
+      return {
+        isInGrid: true,
+        canvasX,
+        canvasY,
+        gridX,
+        gridY,
+        match: null,
+      };
+    },
+  };
+
+  try {
+    // Establish initial canvas backing size before WebGPU initialization.
+    resizeInternal(false);
+
+    // Try to create GPU context; wrap errors with detailed WebGPU unavailability message
+    try {
+      // Use shared device/adapter if provided in context parameter.
+      // Optional devicePixelRatio overrides window.devicePixelRatio (multi-chart 1×).
+      const dprOpt = options.devicePixelRatio;
+      const dprOverride = typeof dprOpt === 'number' && Number.isFinite(dprOpt) && dprOpt > 0 ? dprOpt : undefined;
+      const gpuContextOptions = context
+        ? {
+            device: context.device,
+            adapter: context.adapter,
+            ...(dprOverride != null ? { devicePixelRatio: dprOverride } : {}),
+          }
+        : dprOverride != null
+          ? { devicePixelRatio: dprOverride }
+          : undefined;
+      gpuContext = await GPUContext.create(canvas, gpuContextOptions);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `ChartGPU: WebGPU is not available.\n` +
+          `Reason: ${errorMessage}\n` +
+          `Browser support: Chrome/Edge 113+, Safari 18+, Firefox not yet supported.\n` +
+          `Resources:\n` +
+          `  - MDN WebGPU API: https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API\n` +
+          `  - Browser compatibility: https://caniuse.com/webgpu\n` +
+          `  - WebGPU specification: https://www.w3.org/TR/webgpu/\n` +
+          `  - Check your system: https://webgpureport.org/`
+      );
+    }
+
+    gpuContext.device?.lost.then((info) => {
+      deviceIsLost = true;
+      if (disposed) return;
+      if (info.reason !== 'destroyed') {
+        console.warn('WebGPU device lost:', info);
+      }
+
+      // AC-6 (CGPU-SHARED-DEVICE): Emit deviceLost event only for shared (injected) devices.
+      // - Shared devices: Application manages device lifecycle; emit event for recovery coordination.
+      // - Owned devices: ChartGPU manages device internally; no event needed (dispose handles cleanup).
+      // Note: 'destroyed' reason indicates intentional destruction, not a loss event.
+      if (isSharedDevice && info.reason !== 'destroyed') {
+        emit('deviceLost', { reason: info.reason, message: info.message });
+      }
+      // Requirement: device loss routes through the same dispose path regardless of ownership.
+      dispose();
+    });
+
+    // Ensure canvas configuration matches the final measured size/format.
+    resizeInternal(false);
+
+    // Requirement: after GPUContext is initialized, create RenderCoordinator with resolved options.
+    recreateCoordinator();
+
+    // Mount data-zoom UI (if configured).
+    syncDataZoomUi();
+    syncZoomResetButton();
+
+    // Kick an initial render.
+    if (renderMode === 'auto') requestRender();
+
+    activeInstances.add(instance);
+    ensureUnloadListeners();
+    return instance;
+  } catch (error) {
+    instance.dispose();
+    throw error;
+  }
+}
+
+export const ChartGPU = {
+  create: createChartGPU,
+};
