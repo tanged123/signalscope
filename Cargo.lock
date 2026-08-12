@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "scope-server"
-version = "0.21.1"
+version = "1.0.0"
 dependencies = [
  "axum",
  "base64",

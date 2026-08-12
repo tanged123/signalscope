@@ -1,6 +1,6 @@
 [package]
 name = "scope-server"
-version = "0.21.1"
+version.workspace = true
 edition = "2024"
 license = "MIT"
 publish = false
