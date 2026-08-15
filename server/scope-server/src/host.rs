@@ -422,27 +422,34 @@ pub(crate) fn introspect_container(
 
 pub(crate) fn write_recipe_file(destination: &Path, contents: &str) -> Result<(), String> {
     static NEXT_RECIPE_ID: AtomicU64 = AtomicU64::new(0);
-    let suffix = NEXT_RECIPE_ID.fetch_add(1, Ordering::Relaxed);
-    let temporary = destination.with_extension(format!("toml.{suffix}.tmp"));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|error| error.to_string())?;
-    let result = file
-        .write_all(contents.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|error| error.to_string());
-    drop(file);
-    if let Err(error) = result {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error);
+    for _ in 0..1000 {
+        let suffix = NEXT_RECIPE_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary = destination.with_extension(format!("toml.{suffix}.tmp"));
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        let result = file
+            .write_all(contents.as_bytes())
+            .and_then(|()| file.sync_all())
+            .map_err(|error| error.to_string());
+        drop(file);
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error);
+        }
+        if let Err(error) = std::fs::rename(&temporary, destination) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error.to_string());
+        }
+        return Ok(());
     }
-    if let Err(error) = std::fs::rename(&temporary, destination) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error.to_string());
-    }
-    Ok(())
+    Err("could not create a temporary recipe file after 1000 attempts".into())
 }
 
 pub(crate) fn sidecar_destination(source: &Path) -> Result<PathBuf, String> {
@@ -873,6 +880,26 @@ pub(crate) fn signal_summaries(data: &DataState) -> Vec<SignalSummary> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recipe_write_walks_past_stale_temp_files() {
+        let dir = std::env::temp_dir().join(format!("scope-recipe-retry-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let destination = dir.join("data.csv.scope.toml");
+        for suffix in 0..32u64 {
+            std::fs::write(
+                dir.join(format!("data.csv.scope.toml.{suffix}.tmp")),
+                "stale",
+            )
+            .unwrap();
+        }
+        super::write_recipe_file(&destination, "recipe = true").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&destination).unwrap(),
+            "recipe = true"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn context_setup_creates_dirs_and_empty_store() {
         let dir = std::env::temp_dir().join(format!("scope-host-{}", std::process::id()));
