@@ -1075,8 +1075,12 @@ export class PanelView {
       this.chartHostElement.hidden = true;
       return 0;
     }
+    if (state.series.length === 0) {
+      this.chartHostElement.hidden = true;
+      return 0;
+    }
     this.chartHostElement.hidden = false;
-    if (tiles === null || state.series.length === 0) return 0;
+    if (tiles === null) return 0;
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
     );
