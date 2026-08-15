@@ -124,6 +124,9 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.press("Enter");
     await expect(title).toHaveText("Body velocity");
 
+    await expect(panel.locator(".panel-axis-toggle")).toBeHidden();
+    await panel.locator('[data-mode="fft"]').click();
+    await expect(panel.locator(".panel-axis-toggle")).toBeVisible();
     await panel.locator(".panel-axis-toggle").click();
     await expect(panel.locator(".panel-axis-toggle")).toHaveText(
       "axes: inline",
