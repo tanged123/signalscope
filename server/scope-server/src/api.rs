@@ -899,6 +899,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unknown_api_path_is_404() {
+        let router = crate::build_router(crate::AppContext::for_tests(None));
+        let response = router
+            .oneshot(
+                axum::http::Request::post("/api/no_such_endpoint")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn query_samples_rejects_wrong_protocol_version() {
         let router = crate::build_router(crate::AppContext::for_tests(None));
         let response = router

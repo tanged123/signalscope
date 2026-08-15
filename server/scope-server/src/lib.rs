@@ -140,6 +140,7 @@ pub fn build_router(ctx: AppContext) -> Router {
         .route("/save_export_file", post(api::save_export_file))
         .route("/pick_export_directory", post(api::pick_export_directory))
         .route("/pick_recipe_directory", post(api::pick_recipe_directory))
+        .fallback(|| async { axum::http::StatusCode::NOT_FOUND })
         .layer(axum::middleware::from_fn_with_state(
             ctx.clone(),
             auth::require_auth,
