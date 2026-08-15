@@ -247,7 +247,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers().get("content-type").unwrap(), "font/woff2");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "font/woff2"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }
