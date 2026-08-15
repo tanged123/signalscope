@@ -24,6 +24,7 @@ app)
   cargo build --release -p scope-server
   mkdir -p build/app
   cp target/release/scope-server build/app/scope-server
+  rm -rf build/app/frontend
   cp -R frontend/dist build/app/frontend
   tar -C build/app -czf build/app/signalscope-linux.tar.gz scope-server frontend
   ;;
