@@ -77,6 +77,10 @@ impl RestoreGate {
             });
     }
 
+    pub(crate) fn clear(&self) {
+        self.0.store(0, Ordering::Release);
+    }
+
     pub(crate) fn save_allowed(&self, autosave: bool) -> Result<(), String> {
         (!autosave || self.0.load(Ordering::Acquire) == 0)
             .then_some(())
@@ -898,6 +902,17 @@ mod tests {
             "recipe = true"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn restore_gate_clear_unblocks_autosave_after_abandoned_restore() {
+        let gate = super::RestoreGate::default();
+        gate.begin();
+        assert!(gate.save_allowed(true).is_err());
+        gate.clear();
+        assert!(gate.save_allowed(true).is_ok());
+        gate.begin();
+        assert!(gate.save_allowed(true).is_err());
     }
 
     #[tokio::test]

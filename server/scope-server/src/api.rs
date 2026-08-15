@@ -408,6 +408,7 @@ pub async fn restore_sources(
         .lock()
         .map_err(|error| err(error.to_string()))?
         .reset();
+    ctx.gate.clear();
     ctx.gate.begin();
     let job = ctx.jobs.submit(
         records.iter().map(|record| record.path.clone()).collect(),
@@ -718,6 +719,7 @@ pub async fn reset_session(State(ctx): State<AppContext>) -> Result<impl IntoRes
         .lock()
         .map_err(|error| err(error.to_string()))?
         .reset();
+    ctx.gate.clear();
     Ok(Json(Envelope::new(LoadedSession {
         session_json: serde_json::to_string(&session).map_err(|error| err(error.to_string()))?,
         path: None,
