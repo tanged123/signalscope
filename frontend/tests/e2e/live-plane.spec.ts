@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "./fixtures";
 
@@ -11,6 +11,14 @@ let server: ChildProcess | undefined;
 let dataDirectory: string | undefined;
 
 test.beforeAll(async () => {
+  // Building can take arbitrarily long on a stale target dir; keep it out of
+  // the 30-second health window and let its output reach the CI log.
+  test.setTimeout(300_000);
+  execFileSync("cargo", ["build", "-p", "scope-server"], {
+    cwd: repositoryRoot,
+    stdio: "inherit",
+    timeout: 270_000,
+  });
   dataDirectory = mkdtempSync(join(tmpdir(), "signalscope-live-"));
   server = spawn(
     "cargo",
@@ -26,14 +34,14 @@ test.beforeAll(async () => {
       "--data-dir",
       dataDirectory,
     ],
-    { cwd: repositoryRoot, stdio: "ignore" },
+    { cwd: repositoryRoot, stdio: ["ignore", "ignore", "inherit"] },
   );
   for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
       const response = await fetch(`${serverUrl}/api/health`);
       if (response.ok) return;
     } catch {
-      // The debug server is compiling or binding.
+      // The server is still binding.
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }

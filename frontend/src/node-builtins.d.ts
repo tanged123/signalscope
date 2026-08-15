@@ -30,9 +30,19 @@ declare module "node:child_process" {
   export interface ChildProcess {
     kill(signal?: string): boolean;
   }
+  type Stdio = "ignore" | "inherit";
   export function spawn(
     command: string,
     args?: readonly string[],
-    options?: { cwd?: string; stdio?: "ignore" },
+    options?: { cwd?: string; stdio?: Stdio | readonly Stdio[] },
   ): ChildProcess;
+  export function execFileSync(
+    command: string,
+    args?: readonly string[],
+    options?: {
+      cwd?: string;
+      stdio?: Stdio | readonly Stdio[];
+      timeout?: number;
+    },
+  ): Uint8Array;
 }

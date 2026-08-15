@@ -22,6 +22,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Build before starting the health window: a stale binary must not spend the
+# poll budget compiling (and --quiet would hide that it ever was).
+cargo build --release -p scope-server
+
 cargo run --quiet --release -p scope-server -- \
   --no-auth --no-open --port 43117 --data-dir "$data_dir" &
 server_pid=$!
@@ -34,7 +38,10 @@ for _ in $(seq 1 60); do
   fi
   sleep 0.5
 done
-[ "$ready" -eq 1 ]
+if [ "$ready" -ne 1 ]; then
+  echo "server-smoke: scope-server not healthy on port 43117 within 30s" >&2
+  exit 1
+fi
 
 protocol=$(node -e '
 const fs = require("node:fs");
@@ -68,4 +75,7 @@ process.stdout.write(JSON.stringify({
 magic=$(curl -fsS -X POST -H 'content-type: application/json' \
   -d "$request" http://127.0.0.1:43117/api/query_tiles_bin |
   od -An -tx1 -N4 | tr -d ' \n')
-[ "$magic" = "53535442" ]
+if [ "$magic" != "53535442" ]; then
+  echo "server-smoke: query_tiles_bin magic mismatch: got '$magic'" >&2
+  exit 1
+fi
