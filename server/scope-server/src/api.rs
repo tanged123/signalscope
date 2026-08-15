@@ -232,7 +232,26 @@ fn normalized_export_save_path(mut path: PathBuf, extension: &str) -> PathBuf {
 }
 
 fn write_export_file(path: &Path, contents: &str) -> Result<(), std::io::Error> {
-    std::fs::write(path, contents)
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
+    let file_name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("export"))
+        .to_string_lossy();
+    let staged = path.with_file_name(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        NEXT_STAGING_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    if let Err(error) = std::fs::write(&staged, contents) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(&staged, path) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub async fn scan_sources(
@@ -910,6 +929,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn export_write_replaces_via_rename_not_truncation() {
+        let dir = std::env::temp_dir().join(format!("scope-export-stage-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("report.html");
+        std::fs::write(&path, "old export").unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
+
+        super::write_export_file(&path, "new export").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new export");
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["report.html".to_string()]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
