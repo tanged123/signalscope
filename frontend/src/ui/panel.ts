@@ -99,6 +99,13 @@ function colorIndexForHue(hue: number | null): number {
   return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
 }
 
+export function effectiveAxisStyle(
+  mode: RenderPanelState["mode"],
+  style: AxisStyle,
+): AxisStyle {
+  return mode === "time" ? "gutter" : style;
+}
+
 export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
 
 export interface PanelCallbacks {
@@ -653,7 +660,7 @@ export class PanelView {
           ? null
           : axisEditZone(
               layout,
-              state.axis_style,
+              effectiveAxisStyle(state.mode, state.axis_style),
               x,
               y,
               state.mode === "xy" && this.hasColorbar,
@@ -970,6 +977,7 @@ export class PanelView {
     );
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
+    axisToggle.hidden = rendered.mode === "time";
     const aspectToggle = required<HTMLButtonElement>(
       this.element,
       ".panel-aspect-toggle",

@@ -20,6 +20,7 @@ import {
   PanelView,
   bindingChipEntries,
   focusChips,
+  effectiveAxisStyle,
   legendTokenLabel,
   matrixLegendRows,
   parseSetPayload,
@@ -61,6 +62,19 @@ function localPathFor(path: string): string | null {
 }
 
 const xyCallbacks = { localPathFor, sourceKeyFor };
+
+describe("effectiveAxisStyle", () => {
+  it("forces gutter for time mode where ChartGPU always draws gutter axes", () => {
+    expect(effectiveAxisStyle("time", "inline")).toBe("gutter");
+    expect(effectiveAxisStyle("time", "gutter")).toBe("gutter");
+  });
+
+  it("passes the stored style through for Canvas2D modes", () => {
+    expect(effectiveAxisStyle("xy", "inline")).toBe("inline");
+    expect(effectiveAxisStyle("fft", "gutter")).toBe("gutter");
+    expect(effectiveAxisStyle("histogram", "inline")).toBe("inline");
+  });
+});
 
 const gestureLayout: PlotLayout = {
   plot: { x: 0, y: 0, width: 100, height: 100 },
