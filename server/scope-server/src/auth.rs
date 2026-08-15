@@ -18,7 +18,7 @@ pub async fn require_auth(
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    if authorized(&ctx, request.headers(), None) {
+    if authorized(&ctx, request.headers()) {
         next.run(request).await
     } else {
         StatusCode::UNAUTHORIZED.into_response()
@@ -49,7 +49,7 @@ async fn page(
             .insert(header::SET_COOKIE, value.parse().expect("valid cookie"));
         return response;
     }
-    if authorized(&ctx, &headers, None) {
+    if authorized(&ctx, &headers) {
         frontend_response(&ctx, "/").await
     } else {
         StatusCode::UNAUTHORIZED.into_response()
@@ -61,7 +61,7 @@ async fn static_asset(
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
 ) -> Response {
-    if !authorized(&ctx, &headers, None) {
+    if !authorized(&ctx, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     frontend_response(&ctx, uri.path()).await
@@ -98,19 +98,23 @@ async fn frontend_response(ctx: &AppContext, request_path: &str) -> Response {
     let content_type = match request_path.rsplit('.').next() {
         Some("css") => "text/css; charset=utf-8",
         Some("js") => "text/javascript; charset=utf-8",
-        Some("json") => "application/json",
+        Some("json" | "map") => "application/json",
         Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("wasm") => "application/wasm",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
         _ => "text/html; charset=utf-8",
     };
     ([(header::CONTENT_TYPE, content_type)], Body::from(bytes)).into_response()
 }
 
-fn authorized(ctx: &AppContext, headers: &HeaderMap, query_token: Option<&str>) -> bool {
+fn authorized(ctx: &AppContext, headers: &HeaderMap) -> bool {
     let Some(expected) = ctx.token.as_deref() else {
         return true;
     };
-    query_token == Some(expected)
-        || bearer_token(headers).is_some_and(|token| token == expected)
+    bearer_token(headers).is_some_and(|token| token == expected)
         || cookie_token(headers).is_some_and(|token| token == expected)
 }
 
@@ -223,6 +227,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn static_assets_get_correct_content_types() {
+        let dir = std::env::temp_dir().join(format!("scope-mime-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("fonts")).unwrap();
+        std::fs::write(dir.join("fonts/mono.woff2"), b"font-bytes").unwrap();
+        let mut context = crate::AppContext::for_tests(None);
+        context.frontend_dir = Some(dir.clone());
+
+        let response = crate::build_router(context)
+            .oneshot(
+                Request::get("/fonts/mono.woff2")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers().get("content-type").unwrap(), "font/woff2");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
