@@ -697,8 +697,17 @@ export class PanelView {
         }
         return host;
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        console.error("ChartGPU initialization failed", error);
+        this.gpu = null;
         this.chartHostElement.hidden = true;
+        if (this.lastInputState !== null) {
+          this.lastStateKey = null;
+          this.update(
+            this.lastInputState,
+            this.element.classList.contains("maximized"),
+          );
+        }
         return null;
       });
   }
