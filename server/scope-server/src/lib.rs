@@ -32,6 +32,7 @@ pub struct AppContext {
 }
 
 impl AppContext {
+    #[allow(clippy::duration_suboptimal_units)]
     pub fn new(data_dir: PathBuf, token: Option<String>, frontend_dir: Option<PathBuf>) -> Self {
         let _ = std::fs::create_dir_all(&data_dir);
         let preferences_path = data_dir.join("preferences.json");
@@ -71,7 +72,8 @@ impl AppContext {
         let jobs = BatchJobs::new(BatchOptions {
             worker_count: workers,
             budget: Arc::new(budget),
-            terminal_ttl: std::time::Duration::from_mins(5),
+            // `from_mins` is newer than the workspace MSRV.
+            terminal_ttl: std::time::Duration::from_secs(5 * 60),
             cache_directory: Some(root),
             recipe_directory,
             provider_registry: Arc::new(ProviderRegistry::builtin()),
