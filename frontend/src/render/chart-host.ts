@@ -6,7 +6,7 @@ import {
 } from "@chartgpu/chartgpu";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
-import { formatTicks } from "./canvas-renderer";
+import { formatTicks, hueIndex } from "./canvas-renderer";
 import type { Palette, SeriesStroke } from "./canvas-renderer";
 import { cachedFeed } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
@@ -108,8 +108,7 @@ export class ChartHost {
       const ghost = hue === null;
       const color = ghost
         ? request.palette.fg4
-        : (request.palette.series[hue % request.palette.series.length] ??
-          request.palette.fg4);
+        : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
       const opacity =
         request.emphasisIndices.length > 0 && !isEmphasized && !ghost
           ? 0.25

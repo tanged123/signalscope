@@ -142,6 +142,19 @@ describe("ChartHost", () => {
     expect(Array.from(series[0]?.data.x ?? [])).toEqual([0, 1, 1, 2]);
   });
 
+  it("maps hue to the same palette slot as the Canvas2D renderers", async () => {
+    const host = await hostFixture();
+    const data = response(["signal-1", "signal-2"]);
+
+    host.render(request(data, [stroke(1), stroke(2)]));
+
+    const series = state.charts.at(-1)?.options.series as Array<{
+      color: string;
+    }>;
+    expect(series[0]?.color).toBe(palette.series[0]);
+    expect(series[1]?.color).toBe(palette.series[1]);
+  });
+
   it("uses ghost and emphasis styling without changing series identity unnecessarily", async () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);

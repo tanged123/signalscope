@@ -86,7 +86,7 @@ export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
 
-function hueIndex(hue: number): number {
+export function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
 }
 
