@@ -119,7 +119,8 @@ export class ChartHost {
         ? MIN_CHARTGPU_GHOST_WIDTH
         : MIN_CHARTGPU_LINE_WIDTH;
       const width =
-        Math.max(style.width, minimumWidth) + (isEmphasized ? 0.4 : 0);
+        (Math.max(style.width, minimumWidth) + (isEmphasized ? 0.4 : 0)) *
+        request.palette.lineWidthScale;
       const element: LineSeriesConfig = {
         type: "line",
         name: tile.signalPath,

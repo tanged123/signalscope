@@ -61,3 +61,10 @@ open. The session keeps its `theme` field: `BakedPlane` has no preferences
 port, so a snapshot must carry the theme it was exported with. Preferences are
 authoritative for the running application; a theme change writes both, and
 loading or resetting a workspace no longer changes the user's theme.
+
+## 2026-08-16 amendment: plot line width
+
+Schema 5 adds `plot_line_width_scale`, a global appearance preference with a
+default of 1 and a supported range of 0.5-2 in quarter steps. It scales final
+data-series strokes without changing per-series session overrides. Grid, axis,
+annotation, and chrome strokes are unaffected.

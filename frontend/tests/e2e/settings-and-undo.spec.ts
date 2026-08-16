@@ -39,7 +39,7 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
   await page.keyboard.press("Control+Comma");
   const palette = page.locator(".palette");
   await expect(palette).toBeVisible();
-  await expect(palette.locator(".palette-row")).toHaveCount(6);
+  await expect(palette.locator(".palette-row")).toHaveCount(7);
 
   const plotFont = palette
     .locator(".palette-row", { hasText: "Plot font" })
@@ -59,7 +59,22 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
   await expect(uiSize.locator(".palette-hint")).toHaveText("14px");
   await expect(page.locator(":root")).toHaveCSS("font-size", "14px");
 
+  const lineWidth = palette.locator(".palette-row", {
+    hasText: "Plot line width",
+  });
+  await expect(lineWidth.locator(".palette-hint")).toHaveText("100%");
+  await page.locator(".palette-input").press("ArrowDown");
+  await page.locator(".palette-input").press("ArrowDown");
+  await page.locator(".palette-input").press("ArrowRight");
+  await expect(lineWidth.locator(".palette-hint")).toHaveText("125%");
+
   await page.keyboard.press("Escape");
+
+  await page.keyboard.press("Control+Shift+P");
+  await page.locator(".palette-input").fill("Plot line width: reset");
+  await page.locator(".palette-input").press("Enter");
+  await page.keyboard.press("Control+Comma");
+  await expect(lineWidth.locator(".palette-hint")).toHaveText("100%");
 });
 
 test("undo restores chrome and preserves panel focus", async ({ page }) => {

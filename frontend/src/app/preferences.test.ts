@@ -16,12 +16,13 @@ import {
 describe("preferences", () => {
   it("defaults match the spec", () => {
     const prefs = defaultPreferences();
-    expect(prefs.schema_version).toBe(4);
+    expect(prefs.schema_version).toBe(5);
     expect(prefs.theme).toBe("dark");
     expect(prefs.ui_font_family).toBe("inter");
     expect(prefs.plot_font_family).toBe("jetbrains");
     expect(prefs.ui_font_size).toBe(13);
     expect(prefs.plot_font_size).toBe(9);
+    expect(prefs.plot_line_width_scale).toBe(1);
     expect(prefs.cache_max_bytes).toBe("21474836480");
   });
 
@@ -75,6 +76,28 @@ describe("preferences", () => {
     expect(parsed?.ui_font_size).toBe(UI_FONT_SIZE.max);
   });
 
+  it("migrates and repairs the global plot line width scale", () => {
+    const migrated = parsePreferences(
+      JSON.stringify({ ...defaultPreferences(), schema_version: 4 }),
+    );
+    const repaired = parsePreferences(
+      JSON.stringify({
+        ...defaultPreferences(),
+        plot_line_width_scale: 0.63,
+      }),
+    );
+    const clamped = parsePreferences(
+      JSON.stringify({
+        ...defaultPreferences(),
+        plot_line_width_scale: 99,
+      }),
+    );
+
+    expect(migrated?.plot_line_width_scale).toBe(1);
+    expect(repaired?.plot_line_width_scale).toBe(0.75);
+    expect(clamped?.plot_line_width_scale).toBe(2);
+  });
+
   it("applies css variables and the root font size", () => {
     const set = new Map<string, string>();
     const target = {
@@ -91,6 +114,7 @@ describe("preferences", () => {
     expect(set.get("--font-ui")).toBe(fontStack("inter"));
     expect(set.get("--font-plot")).toBe(fontStack("dejavu"));
     expect(set.get("--plot-font-size")).toBe("9");
+    expect(set.get("--plot-line-width-scale")).toBe("1");
     expect(target.style.fontSize).toBe("13px");
   });
 

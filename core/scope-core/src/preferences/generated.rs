@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: u32 = 4;
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 5;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -75,6 +75,7 @@ pub struct Preferences {
     pub plot_font_family: FontFamily,
     pub ui_font_size: f64,
     pub plot_font_size: f64,
+    pub plot_line_width_scale: f64,
     #[serde(default)]
     pub cache_root: Option<String>,
     #[serde(with = "u64_string")]

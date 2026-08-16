@@ -11,6 +11,12 @@ export const PLOT_FONT_SIZE = {
   default: 9,
   step: 0.5,
 } as const;
+export const PLOT_LINE_WIDTH_SCALE = {
+  min: 0.5,
+  max: 2,
+  default: 1,
+  step: 0.25,
+} as const;
 
 export const FONT_FAMILIES: readonly FontFamily[] = [
   "inter",
@@ -55,6 +61,7 @@ export function defaultPreferences(): Preferences {
     plot_font_family: "jetbrains",
     ui_font_size: UI_FONT_SIZE.default,
     plot_font_size: PLOT_FONT_SIZE.default,
+    plot_line_width_scale: PLOT_LINE_WIDTH_SCALE.default,
     cache_root: null,
     cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
     ingest_working_bytes: null,
@@ -74,6 +81,14 @@ export function clampPlotFontSize(value: number): number {
     Math.max(PLOT_FONT_SIZE.min, value),
   );
   return Math.round(clamped * 2) / 2;
+}
+
+export function clampPlotLineWidthScale(value: number): number {
+  const clamped = Math.min(
+    PLOT_LINE_WIDTH_SCALE.max,
+    Math.max(PLOT_LINE_WIDTH_SCALE.min, value),
+  );
+  return Math.round(clamped * 4) / 4;
 }
 
 /**
@@ -97,7 +112,8 @@ export function parsePreferences(json: string): Preferences | null {
     value.schema_version !== 1 &&
     value.schema_version !== 2 &&
     value.schema_version !== 3 &&
-    value.schema_version !== 4
+    value.schema_version !== 4 &&
+    value.schema_version !== 5
   )
     return null;
   const defaults = defaultPreferences();
@@ -123,6 +139,9 @@ export function parsePreferences(json: string): Preferences | null {
     ),
     plot_font_size: clampPlotFontSize(
       size(value.plot_font_size, defaults.plot_font_size),
+    ),
+    plot_line_width_scale: clampPlotLineWidthScale(
+      size(value.plot_line_width_scale, defaults.plot_line_width_scale),
     ),
     cache_root:
       typeof value.cache_root === "string" && value.cache_root.length > 0
@@ -163,5 +182,9 @@ export function applyPreferences(
   target.style.setProperty("--font-ui", fontStack(prefs.ui_font_family));
   target.style.setProperty("--font-plot", fontStack(prefs.plot_font_family));
   target.style.setProperty("--plot-font-size", String(prefs.plot_font_size));
+  target.style.setProperty(
+    "--plot-line-width-scale",
+    String(prefs.plot_line_width_scale),
+  );
   target.style.fontSize = `${String(prefs.ui_font_size)}px`;
 }

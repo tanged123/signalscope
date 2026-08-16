@@ -101,6 +101,7 @@
     JetBrains Mono, "DejaVu Sans", ui-monospace, "SF Mono", Menlo, monospace;
   --font-plot: "JetBrains Mono", ui-monospace, "SF Mono", "Menlo", monospace;
   --plot-font-size: 9;
+  --plot-line-width-scale: 1;
   --tree-row-height: 22px;
   --dur-quick: 80ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);

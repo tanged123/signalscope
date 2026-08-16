@@ -27,6 +27,7 @@ export interface Palette {
   sequential: string[];
   fontPlot: string;
   fontSize: number;
+  lineWidthScale: number;
 }
 
 export interface SeriesStroke {
@@ -129,6 +130,13 @@ function equalisedRanges(
 function plotFontSize(styles: CSSStyleDeclaration): number {
   const parsed = Number.parseFloat(styles.getPropertyValue("--plot-font-size"));
   return Number.isFinite(parsed) ? parsed : 9;
+}
+
+function plotLineWidthScale(styles: CSSStyleDeclaration): number {
+  const parsed = Number.parseFloat(
+    styles.getPropertyValue("--plot-line-width-scale"),
+  );
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
 export function tickFont(palette: {
@@ -370,7 +378,8 @@ export class CanvasRenderer {
         : path.hue === null
           ? colors.fg4
           : (colors.series[hueIndex(path.hue)] ?? colors.fg2);
-    context.lineWidth = path.dimmed === true ? 1.2 : path.width;
+    context.lineWidth =
+      (path.dimmed === true ? 1.2 : path.width) * colors.lineWidthScale;
     context.setLineDash(dashPattern(path.dash));
     context.beginPath();
     let penDown = false;
@@ -451,7 +460,7 @@ export class CanvasRenderer {
       previousY = py;
       previousFinite = finite;
     }
-    context.lineWidth = path.width;
+    context.lineWidth = path.width * colors.lineWidthScale;
     context.setLineDash(dashPattern(path.dash));
     context.lineCap = "round";
     for (let step = 0; step <= RAMP_STEPS; step += 1) {
@@ -565,6 +574,7 @@ export class CanvasRenderer {
         styles.getPropertyValue("--font-mono").trim() ||
         FALLBACK_MONO,
       fontSize: plotFontSize(styles),
+      lineWidthScale: plotLineWidthScale(styles),
     };
     return this.palette;
   }

@@ -998,3 +998,46 @@ describe("recipe directory settings entries", () => {
     });
   });
 });
+
+describe("appearance settings entries", () => {
+  interface AppearanceProbe {
+    prefs: ReturnType<typeof defaultPreferences>;
+    updatePreferences(patch: Record<string, unknown>): void;
+    toggleTheme(): void;
+    recipeDirectoryEntries(): [];
+    settingsEntries(): Array<{
+      title: string;
+      hint: string;
+      adjust?: (direction: -1 | 1) => void;
+    }>;
+  }
+
+  function appearanceProbe(): AppearanceProbe {
+    const probe = Object.create(AppShell.prototype) as AppearanceProbe;
+    probe.prefs = defaultPreferences();
+    probe.updatePreferences = (patch) => {
+      Object.assign(probe.prefs, patch);
+    };
+    probe.toggleTheme = vi.fn();
+    probe.recipeDirectoryEntries = () => [];
+    return probe;
+  }
+
+  it("adjusts global plot line width in quarter steps", () => {
+    const probe = appearanceProbe();
+    const entry = probe
+      .settingsEntries()
+      .find(({ title }) => title === "Plot line width");
+
+    expect(entry?.hint).toBe("100%");
+    entry?.adjust?.(1);
+    expect(probe.prefs.plot_line_width_scale).toBe(1.25);
+    expect(
+      probe.settingsEntries().find(({ title }) => title === "Plot line width")
+        ?.hint,
+    ).toBe("125%");
+    probe.prefs.plot_line_width_scale = 1;
+    entry?.adjust?.(-1);
+    expect(probe.prefs.plot_line_width_scale).toBe(0.75);
+  });
+});

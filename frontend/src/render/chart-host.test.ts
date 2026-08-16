@@ -55,6 +55,7 @@ const palette: Palette = {
   sequential: ["#000000", "#ffffff"],
   fontPlot: "JetBrains Mono",
   fontSize: 11,
+  lineWidthScale: 1,
 };
 
 function response(signalIds = ["signal-1"]): ColumnarTileResponse {
@@ -173,6 +174,30 @@ describe("ChartHost", () => {
     expect(series.map(({ lineStyle }) => lineStyle.width)).toEqual([
       2, 1.5, 2.6, 2.4,
     ]);
+  });
+
+  it("scales compensated ChartGPU widths globally", async () => {
+    const host = await hostFixture();
+    const data = response(["normal", "ghost", "wide", "emphasized"]);
+    const styles = [
+      { ...stroke(1), width: 1.4 },
+      { ...stroke(null), width: 1 },
+      { ...stroke(1), width: 2.6 },
+      { ...stroke(1), width: 1.4 },
+    ];
+
+    host.render({
+      ...request(data, styles, [3]),
+      palette: { ...palette, lineWidthScale: 1.5 },
+    });
+
+    const series = state.charts.at(-1)?.options.series as Array<{
+      lineStyle: { width: number };
+    }>;
+    const widths = series.map(({ lineStyle }) => lineStyle.width);
+    [3, 2.25, 3.9, 3.6].forEach((expected, index) => {
+      expect(widths[index]).toBeCloseTo(expected);
+    });
   });
 
   it("uses ghost and emphasis styling without changing series identity unnecessarily", async () => {

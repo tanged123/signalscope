@@ -170,6 +170,7 @@ const TEST_PALETTE: Palette = {
   sequential: ["#000000", "#ffffff"],
   fontPlot: '"JetBrains Mono", monospace',
   fontSize: 9,
+  lineWidthScale: 1,
 };
 
 describe("ticks", () => {
@@ -377,6 +378,35 @@ describe("render", () => {
       1,
     );
     expect(renderer.lastLayout()?.xRange).toEqual({ min: 0, max: 2 });
+  });
+
+  it("scales data-series widths without scaling plot furniture", () => {
+    const { context, calls } = recordingContext();
+    const renderer = new CanvasRenderer(fakeCanvas(600, 300, context));
+    renderer.setPalette({ ...TEST_PALETTE, lineWidthScale: 1.5 });
+
+    renderer.renderPaths(
+      [
+        {
+          points: [0, 0, 1, 1],
+          hue: 1,
+          dash: "solid",
+          width: 1.4,
+          alpha: 1,
+        },
+      ],
+      {
+        xLabel: "x",
+        yLabel: "y",
+        xRange: [0, 1],
+        yRange: [0, 1],
+      },
+    );
+
+    const widths = calls
+      .filter((call) => call.op === "=lineWidth")
+      .map((call) => Number(call.args[0]));
+    expect(widths.some((width) => Math.abs(width - 2.1) < 1e-9)).toBe(true);
   });
 
   it("renders ghost paths neutrally even when color values are present", () => {

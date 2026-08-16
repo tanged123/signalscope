@@ -26,6 +26,7 @@ impl Default for Preferences {
             plot_font_family: FontFamily::Jetbrains,
             ui_font_size: 13.0,
             plot_font_size: 9.0,
+            plot_line_width_scale: 1.0,
             cache_root: None,
             cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
             ingest_working_bytes: None,
@@ -124,11 +125,11 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
     from_json(&std::fs::read_to_string(path)?)
 }
 
-/// Migration ladder (ADR 0005 pattern): v3 is current; each future bump adds
+/// Migration ladder (ADR 0005 pattern): v5 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION | 1 | 2 | 3 => Ok(repair_current(value)),
+        PREFERENCES_SCHEMA_VERSION | 1 | 2 | 3 | 4 => Ok(repair_current(value)),
         version => Err(PreferencesError::UnsupportedVersion(version)),
     }
 }
@@ -142,18 +143,14 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
         Some("jetbrains") => FontFamily::Jetbrains,
         _ => fallback,
     };
-    let size = |name: &str, fallback: f64, min: f64, max: f64, half_steps: bool| {
+    let size = |name: &str, fallback: f64, min: f64, max: f64, step: f64| {
         let value = value
             .get(name)
             .and_then(serde_json::Value::as_f64)
             .filter(|candidate| candidate.is_finite())
             .unwrap_or(fallback)
             .clamp(min, max);
-        if half_steps {
-            (value * 2.0).round() / 2.0
-        } else {
-            value.round()
-        }
+        (value / step).round() * step
     };
     Preferences {
         schema_version: PREFERENCES_SCHEMA_VERSION,
@@ -163,8 +160,15 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
         },
         ui_font_family: family("ui_font_family", defaults.ui_font_family),
         plot_font_family: family("plot_font_family", defaults.plot_font_family),
-        ui_font_size: size("ui_font_size", defaults.ui_font_size, 10.0, 20.0, false),
-        plot_font_size: size("plot_font_size", defaults.plot_font_size, 6.0, 16.0, true),
+        ui_font_size: size("ui_font_size", defaults.ui_font_size, 10.0, 20.0, 1.0),
+        plot_font_size: size("plot_font_size", defaults.plot_font_size, 6.0, 16.0, 0.5),
+        plot_line_width_scale: size(
+            "plot_line_width_scale",
+            defaults.plot_line_width_scale,
+            0.5,
+            2.0,
+            0.25,
+        ),
         cache_root: value
             .get("cache_root")
             .and_then(serde_json::Value::as_str)
@@ -322,6 +326,33 @@ mod tests {
             from_json(&stored.to_string()).expect("parses v4").theme,
             Theme::Light
         );
+    }
+
+    #[test]
+    fn older_preferences_gain_the_default_plot_line_width_scale() {
+        let stored = serde_json::json!({
+            "schema_version": 4,
+            "theme": "dark",
+            "ui_font_family": "inter",
+            "plot_font_family": "jetbrains",
+            "ui_font_size": 13.0,
+            "plot_font_size": 9.0,
+            "cache_max_bytes": 1_024_u64,
+        });
+        let restored = from_json(&stored.to_string()).expect("migrates from v4");
+        let value = serde_json::to_value(restored).expect("serializes preferences");
+        assert_eq!(value["plot_line_width_scale"], 1.0);
+    }
+
+    #[test]
+    fn repairs_plot_line_width_scale_to_quarter_steps() {
+        let stored = serde_json::json!({
+            "schema_version": 4,
+            "plot_line_width_scale": 0.63,
+        });
+        let restored = from_json(&stored.to_string()).expect("repairs preferences");
+        let value = serde_json::to_value(restored).expect("serializes preferences");
+        assert_eq!(value["plot_line_width_scale"], 0.75);
     }
 
     #[test]

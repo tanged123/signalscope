@@ -28,6 +28,7 @@ import {
 } from "../app/ingest";
 import {
   applyPreferences,
+  clampPlotLineWidthScale,
   clampPlotFontSize,
   clampUiFontSize,
   defaultPreferences,
@@ -35,6 +36,7 @@ import {
   fontLabel,
   parsePreferences,
   PLOT_FONT_SIZE,
+  PLOT_LINE_WIDTH_SCALE,
   UI_FONT_SIZE,
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
@@ -984,6 +986,41 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "increase-plot-line-width",
+      title: "Plot line width: increase",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_line_width_scale:
+            this.prefs.plot_line_width_scale + PLOT_LINE_WIDTH_SCALE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "decrease-plot-line-width",
+      title: "Plot line width: decrease",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_line_width_scale:
+            this.prefs.plot_line_width_scale - PLOT_LINE_WIDTH_SCALE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "reset-plot-line-width",
+      title: "Plot line width: reset",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_line_width_scale: PLOT_LINE_WIDTH_SCALE.default,
+        });
+      },
+    });
+    this.commands.register({
       id: "toggle-formula",
       title: "Toggle derived formula editor",
       keys: "e",
@@ -1265,6 +1302,24 @@ export class AppShell {
       sizeEntry("UI font size", "ui_font_size", UI_FONT_SIZE.step),
       sizeEntry("Plot font size", "plot_font_size", PLOT_FONT_SIZE.step),
       {
+        title: "Plot line width",
+        hint: `${String(Math.round(this.prefs.plot_line_width_scale * 100))}%`,
+        keepOpen: true,
+        run: () => {
+          this.updatePreferences({
+            plot_line_width_scale:
+              this.prefs.plot_line_width_scale + PLOT_LINE_WIDTH_SCALE.step,
+          });
+        },
+        adjust: (direction) => {
+          this.updatePreferences({
+            plot_line_width_scale:
+              this.prefs.plot_line_width_scale +
+              direction * PLOT_LINE_WIDTH_SCALE.step,
+          });
+        },
+      },
+      {
         title: "Reset appearance to defaults",
         hint: "",
         keepOpen: true,
@@ -1275,6 +1330,7 @@ export class AppShell {
             plot_font_family: defaults.plot_font_family,
             ui_font_size: defaults.ui_font_size,
             plot_font_size: defaults.plot_font_size,
+            plot_line_width_scale: defaults.plot_line_width_scale,
           });
         },
       },
@@ -2019,6 +2075,9 @@ export class AppShell {
     this.prefs = { ...this.prefs, ...patch };
     this.prefs.ui_font_size = clampUiFontSize(this.prefs.ui_font_size);
     this.prefs.plot_font_size = clampPlotFontSize(this.prefs.plot_font_size);
+    this.prefs.plot_line_width_scale = clampPlotLineWidthScale(
+      this.prefs.plot_line_width_scale,
+    );
     applyPreferences(this.prefs, document.documentElement);
     this.workspaceView?.invalidateTheme();
     this.renderTiles();
