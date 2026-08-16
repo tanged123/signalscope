@@ -155,6 +155,26 @@ describe("ChartHost", () => {
     expect(series[1]?.color).toBe(palette.series[1]);
   });
 
+  it("compensates thin ChartGPU strokes without flattening wider styles", async () => {
+    const host = await hostFixture();
+    const data = response(["normal", "ghost", "wide", "emphasized"]);
+    const styles = [
+      { ...stroke(1), width: 1.4 },
+      { ...stroke(null), width: 1 },
+      { ...stroke(1), width: 2.6 },
+      { ...stroke(1), width: 1.4 },
+    ];
+
+    host.render(request(data, styles, [3]));
+
+    const series = state.charts.at(-1)?.options.series as Array<{
+      lineStyle: { width: number };
+    }>;
+    expect(series.map(({ lineStyle }) => lineStyle.width)).toEqual([
+      2, 1.5, 2.6, 2.4,
+    ]);
+  });
+
   it("uses ghost and emphasis styling without changing series identity unnecessarily", async () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);
@@ -172,7 +192,7 @@ describe("ChartHost", () => {
     expect(firstStyles[0]?.color).toBe(palette.fg4);
     expect(firstStyles[0]?.lineStyle.opacity).toBe(1);
     expect(firstStyles[1]?.lineStyle.opacity).toBe(1);
-    expect(firstStyles[1]?.lineStyle.width).toBe(1.9);
+    expect(firstStyles[1]?.lineStyle.width).toBe(2.4);
 
     host.render(request(data, styles, [1]));
     const second = state.charts.at(-1)?.options.series as unknown[];

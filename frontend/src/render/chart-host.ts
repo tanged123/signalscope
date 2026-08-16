@@ -12,6 +12,8 @@ import { cachedFeed } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
 
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
+const MIN_CHARTGPU_LINE_WIDTH = 2;
+const MIN_CHARTGPU_GHOST_WIDTH = 1.5;
 
 export interface ChartRenderRequest {
   response: ColumnarTileResponse;
@@ -113,6 +115,11 @@ export class ChartHost {
         request.emphasisIndices.length > 0 && !isEmphasized && !ghost
           ? 0.25
           : Math.min(1, style.alpha + (isEmphasized ? 0.4 : 0));
+      const minimumWidth = ghost
+        ? MIN_CHARTGPU_GHOST_WIDTH
+        : MIN_CHARTGPU_LINE_WIDTH;
+      const width =
+        Math.max(style.width, minimumWidth) + (isEmphasized ? 0.4 : 0);
       const element: LineSeriesConfig = {
         type: "line",
         name: tile.signalPath,
@@ -121,7 +128,7 @@ export class ChartHost {
         color,
         lineStyle: {
           color,
-          width: style.width + (isEmphasized ? 0.4 : 0),
+          width,
           opacity,
         },
       };
