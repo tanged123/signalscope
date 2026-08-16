@@ -614,12 +614,6 @@ pub async fn query_tiles_bin(
     let state = Arc::clone(&ctx.state);
     let bytes = tokio::task::spawn_blocking(move || {
         let data = state.lock().map_err(|error| error.to_string())?;
-        let per_series = request.max_total_bins.map(|budget| {
-            budget
-                .checked_div(u32::try_from(request.signal_ids.len().max(1)).unwrap_or(u32::MAX))
-                .unwrap_or(0)
-                .max(64)
-        });
         let mut owned = Vec::with_capacity(request.signal_ids.len());
         for raw_id in &request.signal_ids {
             let signal_id = SignalId(*raw_id);
@@ -631,12 +625,7 @@ pub async fn query_tiles_bin(
                 .pyramids
                 .get(&signal_id)
                 .ok_or_else(|| format!("pyramid is unavailable for signal id: {raw_id}"))?;
-            let query = pyramid.query_with_target(
-                request.window.t0,
-                request.window.t1,
-                request.pixel_width,
-                per_series,
-            );
+            let query = pyramid.query_raw(request.window.t0, request.window.t1);
             owned.push((
                 *raw_id,
                 signal.path.clone(),
@@ -995,14 +984,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tiles_bin_starts_with_magic() {
-        let router = crate::build_router(crate::AppContext::for_tests(None));
+    async fn query_tiles_bin_returns_raw_window_samples() {
+        let ctx = crate::AppContext::for_tests(None);
+        let (signal_id, expected_path) = {
+            let mut data = ctx.state.lock().unwrap();
+            let source = data
+                .store
+                .register_source(
+                    "/tmp/raw-query.csv",
+                    scope_core::store::SourceKey(uuid::Uuid::new_v4()),
+                    "raw-query",
+                )
+                .unwrap();
+            let time = (0..10_000).map(f64::from).collect::<Vec<_>>();
+            let signal_id = data
+                .store
+                .insert_signal(source, "value", None, time.clone(), time.clone())
+                .unwrap();
+            data.pyramids.insert(
+                signal_id,
+                scope_core::pyramid::Pyramid::from_samples(&time, &time),
+            );
+            (signal_id, "raw-query/value".to_owned())
+        };
+        let router = crate::build_router(ctx);
         let request = Envelope::new(TileRequest {
-            request_id: "empty".into(),
-            signal_ids: Vec::new(),
-            window: scope_protocol::TimeWindow { t0: 0.0, t1: 1.0 },
-            pixel_width: 100,
-            max_total_bins: Some(1000),
+            request_id: "raw".into(),
+            signal_ids: vec![signal_id.0],
+            window: scope_protocol::TimeWindow {
+                t0: 2_000.0,
+                t1: 7_999.0,
+            },
+            pixel_width: 1,
+            max_total_bins: Some(1),
         });
         let response = router
             .oneshot(
@@ -1019,10 +1033,16 @@ mod tests {
             "application/octet-stream"
         );
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        assert_eq!(
-            &body[..4],
-            &scope_protocol::tile_binary::TILE_BINARY_MAGIC.to_le_bytes()
-        );
+        let decoded = scope_protocol::tile_binary::decode_tile_response(&body).unwrap();
+        assert_eq!(decoded.len(), 1);
+        let series = &decoded[0];
+        assert_eq!(series.signal_id, signal_id.0);
+        assert_eq!(series.signal_path, expected_path);
+        assert_eq!(series.level, 0);
+        assert_eq!(series.bin_count, 6_002);
+        assert_eq!(series.t0.first(), Some(&1_999.0));
+        assert_eq!(series.t1.last(), Some(&8_000.0));
+        assert!(series.sample_count.iter().all(|count| *count == 1));
     }
 
     #[tokio::test]
