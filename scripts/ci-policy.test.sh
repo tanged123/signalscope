@@ -4,6 +4,19 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 failures=0
 
+setup_script="$script_dir/setup.sh"
+setup_action="$script_dir/../.github/actions/setup/action.yml"
+
+# shellcheck disable=SC2016
+if ! grep -Fq '"$signalscope_scripts_dir/chartgpu-submodule.sh" init' "$setup_script"; then
+  echo "local setup must initialize the ChartGPU submodule" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'run: ./scripts/chartgpu-submodule.sh init' "$setup_action"; then
+  echo "the shared CI setup action must initialize ChartGPU" >&2
+  failures=$((failures + 1))
+fi
+
 expect_status() {
   local expected="$1"
   shift

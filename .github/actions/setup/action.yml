@@ -25,6 +25,8 @@ runs:
         name: tanged123
         authToken: ${{ inputs.cachix-auth-token }}
         skipPush: ${{ inputs.cachix-auth-token == '' }}
+    - run: ./scripts/chartgpu-submodule.sh init
+      shell: bash
     - if: inputs.cargo-cache-key != ''
       uses: ./.github/actions/cargo-cache
       with:
