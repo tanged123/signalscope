@@ -11,7 +11,7 @@ TypeScript presentation plane that runs in a browser host and in snapshots:
 - The localhost browser host streams and memory-maps source data.
 - A self-contained HTML snapshot uses the same renderer against embedded, size-budgeted tiles.
 
-Time-series panels use the vendored ChartGPU WebGPU renderer; XY, FFT, and
+Time-series panels use the pinned ChartGPU submodule WebGPU renderer; XY, FFT, and
 histogram panels retain their Canvas2D paths. A WebGPU-capable Chromium is
 required for time-series rendering, including in exported snapshots.
 
@@ -134,7 +134,7 @@ See [the ADR index](docs/adr/README.md) for the decisions behind the two-host pr
 All CI tools are provided by the pinned Nix flake.
 
 ```bash
-./scripts/setup.sh          # install locked frontend dependencies
+./scripts/setup.sh          # initialize ChartGPU and install locked dependencies
 ./scripts/dev.sh            # enter the development shell
 ./scripts/run.sh web        # launch browser frontend
 ./scripts/run.sh dev        # launch browser host and Vite

@@ -243,3 +243,10 @@ six assumptions. These amendments override the corresponding text above.
 | No upstream `dist/`; building from source           | Nix derivation off the pinned master rev (also the reason for pinning master)                                                 |
 | ChartGPU DOM overlays / z-order fights              | Overlay canvas above everything with pointer events; tooltip/legend/slider disabled                                           |
 | Browser-only feature regressions (drag-drop, menus) | Phase 1 parity checklist against ADR 0020–0024 behaviors; host owns FS                                                        |
+
+## Amendment (2026-08-16, source delivery)
+
+ADR 0040 supersedes amendment 7's copied-source mechanism. ChartGPU remains at
+the same pinned revision and path, but `frontend/vendor/chartgpu` is a Git
+submodule initialized by repository setup and CI. The Vite/Vitest source aliases
+and offline snapshot bundle are unchanged.
