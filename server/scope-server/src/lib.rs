@@ -32,7 +32,6 @@ pub struct AppContext {
 }
 
 impl AppContext {
-    #[allow(clippy::duration_suboptimal_units)]
     pub fn new(data_dir: PathBuf, token: Option<String>, frontend_dir: Option<PathBuf>) -> Self {
         let _ = std::fs::create_dir_all(&data_dir);
         let preferences_path = data_dir.join("preferences.json");
@@ -69,11 +68,14 @@ impl AppContext {
             .map(PathBuf::from)
             .or_else(|| Some(data_dir.join("recipes")));
         let workers = std::thread::available_parallelism().map_or(1, usize::from);
+        // Clippy prefers `from_mins` here, but that constructor is newer than
+        // the workspace MSRV.
+        #[allow(clippy::duration_suboptimal_units)]
+        let terminal_ttl = std::time::Duration::from_secs(5 * 60);
         let jobs = BatchJobs::new(BatchOptions {
             worker_count: workers,
             budget: Arc::new(budget),
-            // `from_mins` is newer than the workspace MSRV.
-            terminal_ttl: std::time::Duration::from_secs(5 * 60),
+            terminal_ttl,
             cache_directory: Some(root),
             recipe_directory,
             provider_registry: Arc::new(ProviderRegistry::builtin()),
