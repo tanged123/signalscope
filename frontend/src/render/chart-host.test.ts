@@ -172,7 +172,7 @@ describe("ChartHost", () => {
       lineStyle: { width: number };
     }>;
     expect(series.map(({ lineStyle }) => lineStyle.width)).toEqual([
-      2, 1.5, 2.6, 2.4,
+      4, 3, 5.2, 4.8,
     ]);
   });
 
@@ -195,7 +195,7 @@ describe("ChartHost", () => {
       lineStyle: { width: number };
     }>;
     const widths = series.map(({ lineStyle }) => lineStyle.width);
-    [3, 2.25, 3.9, 3.6].forEach((expected, index) => {
+    [6, 4.5, 7.8, 7.2].forEach((expected, index) => {
       expect(widths[index]).toBeCloseTo(expected);
     });
   });
@@ -217,7 +217,7 @@ describe("ChartHost", () => {
     expect(firstStyles[0]?.color).toBe(palette.fg4);
     expect(firstStyles[0]?.lineStyle.opacity).toBe(1);
     expect(firstStyles[1]?.lineStyle.opacity).toBe(1);
-    expect(firstStyles[1]?.lineStyle.width).toBe(2.4);
+    expect(firstStyles[1]?.lineStyle.width).toBe(4.8);
 
     host.render(request(data, styles, [1]));
     const second = state.charts.at(-1)?.options.series as unknown[];

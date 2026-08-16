@@ -406,7 +406,7 @@ describe("render", () => {
     const widths = calls
       .filter((call) => call.op === "=lineWidth")
       .map((call) => Number(call.args[0]));
-    expect(widths.some((width) => Math.abs(width - 2.1) < 1e-9)).toBe(true);
+    expect(widths.some((width) => Math.abs(width - 4.2) < 1e-9)).toBe(true);
   });
 
   it("renders ghost paths neutrally even when color values are present", () => {

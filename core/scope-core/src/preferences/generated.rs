@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: u32 = 5;
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 6;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};

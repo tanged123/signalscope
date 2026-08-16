@@ -125,11 +125,16 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
     from_json(&std::fs::read_to_string(path)?)
 }
 
-/// Migration ladder (ADR 0005 pattern): v5 is current; each future bump adds
+/// Migration ladder (ADR 0005 pattern): v6 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION | 1 | 2 | 3 | 4 => Ok(repair_current(value)),
+        PREFERENCES_SCHEMA_VERSION => Ok(repair_current(value)),
+        1..=5 => {
+            let mut preferences = repair_current(value);
+            preferences.plot_line_width_scale = Preferences::default().plot_line_width_scale;
+            Ok(preferences)
+        }
         version => Err(PreferencesError::UnsupportedVersion(version)),
     }
 }
@@ -345,9 +350,20 @@ mod tests {
     }
 
     #[test]
-    fn repairs_plot_line_width_scale_to_quarter_steps() {
+    fn schema_five_plot_line_width_resets_to_the_new_baseline() {
         let stored = serde_json::json!({
-            "schema_version": 4,
+            "schema_version": 5,
+            "plot_line_width_scale": 0.5,
+        });
+        let restored = from_json(&stored.to_string()).expect("migrates preferences");
+        let value = serde_json::to_value(restored).expect("serializes preferences");
+        assert_eq!(value["plot_line_width_scale"], 1.0);
+    }
+
+    #[test]
+    fn current_plot_line_width_repairs_to_quarter_steps() {
+        let stored = serde_json::json!({
+            "schema_version": 6,
             "plot_line_width_scale": 0.63,
         });
         let restored = from_json(&stored.to_string()).expect("repairs preferences");

@@ -14,6 +14,7 @@ import type { GpuContext } from "./gpu-context";
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
 const MIN_CHARTGPU_LINE_WIDTH = 2;
 const MIN_CHARTGPU_GHOST_WIDTH = 1.5;
+const PLOT_LINE_WIDTH_BASELINE = 2;
 
 export interface ChartRenderRequest {
   response: ColumnarTileResponse;
@@ -120,6 +121,7 @@ export class ChartHost {
         : MIN_CHARTGPU_LINE_WIDTH;
       const width =
         (Math.max(style.width, minimumWidth) + (isEmphasized ? 0.4 : 0)) *
+        PLOT_LINE_WIDTH_BASELINE *
         request.palette.lineWidthScale;
       const element: LineSeriesConfig = {
         type: "line",

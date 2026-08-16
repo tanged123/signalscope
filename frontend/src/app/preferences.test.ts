@@ -16,7 +16,7 @@ import {
 describe("preferences", () => {
   it("defaults match the spec", () => {
     const prefs = defaultPreferences();
-    expect(prefs.schema_version).toBe(5);
+    expect(prefs.schema_version).toBe(6);
     expect(prefs.theme).toBe("dark");
     expect(prefs.ui_font_family).toBe("inter");
     expect(prefs.plot_font_family).toBe("jetbrains");
@@ -76,19 +76,25 @@ describe("preferences", () => {
     expect(parsed?.ui_font_size).toBe(UI_FONT_SIZE.max);
   });
 
-  it("migrates and repairs the global plot line width scale", () => {
+  it("resets legacy plot line widths and repairs current values", () => {
     const migrated = parsePreferences(
-      JSON.stringify({ ...defaultPreferences(), schema_version: 4 }),
+      JSON.stringify({
+        ...defaultPreferences(),
+        schema_version: 5,
+        plot_line_width_scale: 0.5,
+      }),
     );
     const repaired = parsePreferences(
       JSON.stringify({
         ...defaultPreferences(),
+        schema_version: 6,
         plot_line_width_scale: 0.63,
       }),
     );
     const clamped = parsePreferences(
       JSON.stringify({
         ...defaultPreferences(),
+        schema_version: 6,
         plot_line_width_scale: 99,
       }),
     );

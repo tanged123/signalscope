@@ -67,6 +67,7 @@ export interface PathRenderOptions {
 
 /** Sample dots appear only when vertices are sparser than this pixel gap. */
 const MARKER_PIXEL_GAP = 7;
+const PLOT_LINE_WIDTH_BASELINE = 2;
 /** Spec F2: 64px right gutter — 12px bar, ticks, labels, and slack. */
 const COLORBAR_GUTTER = 64;
 
@@ -379,7 +380,9 @@ export class CanvasRenderer {
           ? colors.fg4
           : (colors.series[hueIndex(path.hue)] ?? colors.fg2);
     context.lineWidth =
-      (path.dimmed === true ? 1.2 : path.width) * colors.lineWidthScale;
+      (path.dimmed === true ? 1.2 : path.width) *
+      PLOT_LINE_WIDTH_BASELINE *
+      colors.lineWidthScale;
     context.setLineDash(dashPattern(path.dash));
     context.beginPath();
     let penDown = false;
@@ -460,7 +463,8 @@ export class CanvasRenderer {
       previousY = py;
       previousFinite = finite;
     }
-    context.lineWidth = path.width * colors.lineWidthScale;
+    context.lineWidth =
+      path.width * PLOT_LINE_WIDTH_BASELINE * colors.lineWidthScale;
     context.setLineDash(dashPattern(path.dash));
     context.lineCap = "round";
     for (let step = 0; step <= RAMP_STEPS; step += 1) {

@@ -113,7 +113,8 @@ export function parsePreferences(json: string): Preferences | null {
     value.schema_version !== 2 &&
     value.schema_version !== 3 &&
     value.schema_version !== 4 &&
-    value.schema_version !== 5
+    value.schema_version !== 5 &&
+    value.schema_version !== 6
   )
     return null;
   const defaults = defaultPreferences();
@@ -141,7 +142,9 @@ export function parsePreferences(json: string): Preferences | null {
       size(value.plot_font_size, defaults.plot_font_size),
     ),
     plot_line_width_scale: clampPlotLineWidthScale(
-      size(value.plot_line_width_scale, defaults.plot_line_width_scale),
+      value.schema_version === PREFERENCES_SCHEMA_VERSION
+        ? size(value.plot_line_width_scale, defaults.plot_line_width_scale)
+        : defaults.plot_line_width_scale,
     ),
     cache_root:
       typeof value.cache_root === "string" && value.cache_root.length > 0
