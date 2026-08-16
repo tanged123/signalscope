@@ -54,12 +54,12 @@ expect_status 1 "$checkout/scripts/chartgpu-submodule.sh" check
 uninitialized_output="$test_root/uninitialized-output"
 "$checkout/scripts/chartgpu-submodule.sh" check >"$uninitialized_output" 2>&1 || true
 grep -Fq "run ./scripts/chartgpu-submodule.sh init" "$uninitialized_output"
-env GIT_ALLOW_PROTOCOL=file "$checkout/scripts/chartgpu-submodule.sh" init
+env GIT_ALLOW_PROTOCOL=file "$checkout/scripts/chartgpu-submodule.sh" init >/dev/null
 [ "$(git -C "$checkout/frontend/vendor/chartgpu" rev-parse HEAD)" = "$first_revision" ]
 "$checkout/scripts/chartgpu-submodule.sh" check
 
 env GIT_ALLOW_PROTOCOL=file \
-  "$checkout/scripts/chartgpu-submodule.sh" update "$second_revision"
+  "$checkout/scripts/chartgpu-submodule.sh" update "$second_revision" >/dev/null
 [ "$(git -C "$checkout/frontend/vendor/chartgpu" rev-parse HEAD)" = "$second_revision" ]
 expect_status 1 "$checkout/scripts/chartgpu-submodule.sh" check
 mismatch_output="$test_root/mismatch-output"
@@ -71,7 +71,7 @@ git -C "$checkout" diff --quiet -- frontend/vendor/chartgpu && {
   exit 1
 }
 
-env GIT_ALLOW_PROTOCOL=file "$checkout/scripts/chartgpu-submodule.sh" init
+env GIT_ALLOW_PROTOCOL=file "$checkout/scripts/chartgpu-submodule.sh" init >/dev/null
 "$checkout/scripts/chartgpu-submodule.sh" check
 
 echo "ChartGPU submodule tests passed."
