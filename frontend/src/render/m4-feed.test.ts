@@ -88,7 +88,7 @@ describe("m4Feed", () => {
     expect([...feed.y].filter(Number.isNaN)).toHaveLength(1);
   });
 
-  it("keeps finite extrema before breaking a gapped bin", () => {
+  it("breaks before and after finite extrema in a gapped bin", () => {
     const feed = m4Feed(
       columns([
         {
@@ -104,7 +104,7 @@ describe("m4Feed", () => {
       ]),
       0,
     );
-    expect([...feed.y]).toEqual([1, 0, 5, 2, Number.NaN]);
+    expect([...feed.y]).toEqual([Number.NaN, 1, 0, 5, 2, Number.NaN]);
   });
 
   it("allocates aggregate extrema and gap vertices exactly", () => {
@@ -126,14 +126,20 @@ describe("m4Feed", () => {
       0,
     );
 
-    expect(feed).toMatchObject({
-      x: expect.any(Float64Array),
-      y: expect.any(Float64Array),
-    });
-    expect(feed.x).toHaveLength(8);
+    expect(feed.x).toHaveLength(9);
     expect(feed.x.buffer.byteLength).toBe(feed.x.byteLength);
     expect(feed.y.buffer.byteLength).toBe(feed.y.byteLength);
-    expect([...feed.y]).toEqual([1, 0, 5, 2, Number.NaN, 3, 4, Number.NaN]);
+    expect([...feed.y]).toEqual([
+      Number.NaN,
+      1,
+      0,
+      5,
+      2,
+      Number.NaN,
+      3,
+      4,
+      Number.NaN,
+    ]);
   });
 
   it("skips vertices whose flag is absent", () => {

@@ -83,9 +83,10 @@ export class ChartHost {
   render(request: ChartRenderRequest): number {
     const started = performance.now();
     const ids = request.response.series.map((series) => series.signalId);
-    if (!sameStrings(ids, this.seriesIds)) {
+    const nextTRef = minimumTime(request.response);
+    if (!sameStrings(ids, this.seriesIds) || nextTRef !== this.tRef) {
       this.seriesIds = ids;
-      this.tRef = minimumTime(request.response);
+      this.tRef = nextTRef;
       this.elements = [];
     }
     const emphasis = new Set(request.emphasisIndices);

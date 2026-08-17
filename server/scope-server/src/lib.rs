@@ -5,9 +5,12 @@ pub mod host;
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use std::{path::PathBuf, sync::Arc};
+
+const EXPORT_BODY_LIMIT: usize = 256 * 1024 * 1024;
 
 use dialogs::{DialogProvider, Native, Scripted};
 use host::{DataState, RestoreGate};
@@ -103,6 +106,14 @@ impl AppContext {
 }
 
 pub fn build_router(ctx: AppContext) -> Router {
+    let export_routes = Router::new()
+        .route(
+            "/save_export_file_to_directory",
+            post(api::save_export_file_to_directory),
+        )
+        .route("/export_write", post(api::export_write))
+        .route("/save_export_file", post(api::save_export_file))
+        .layer(DefaultBodyLimit::max(EXPORT_BODY_LIMIT));
     let api = Router::new()
         .route("/list_formats", post(api::list_formats))
         .route("/scan_sources", post(api::scan_sources))
@@ -127,10 +138,6 @@ pub fn build_router(ctx: AppContext) -> Router {
         .route("/load_session", post(api::load_session))
         .route("/reset_session", post(api::reset_session))
         .route("/export_estimate", post(api::export_estimate))
-        .route(
-            "/save_export_file_to_directory",
-            post(api::save_export_file_to_directory),
-        )
         .route("/load_preferences", post(api::load_preferences))
         .route("/save_preferences", post(api::save_preferences))
         .route(
@@ -140,10 +147,9 @@ pub fn build_router(ctx: AppContext) -> Router {
         .route("/pick_sources", post(api::pick_sources))
         .route("/pick_source_folder", post(api::pick_source_folder))
         .route("/pick_session_path", post(api::pick_session_path))
-        .route("/export_write", post(api::export_write))
-        .route("/save_export_file", post(api::save_export_file))
         .route("/pick_export_directory", post(api::pick_export_directory))
         .route("/pick_recipe_directory", post(api::pick_recipe_directory))
+        .merge(export_routes)
         .fallback(|| async { axum::http::StatusCode::NOT_FOUND })
         .layer(axum::middleware::from_fn_with_state(
             ctx.clone(),

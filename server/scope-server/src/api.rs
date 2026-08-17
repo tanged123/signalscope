@@ -1042,6 +1042,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_export_file_to_directory_accepts_bodies_over_two_megabytes() {
+        let router = crate::build_router(crate::AppContext::for_tests(None));
+        let directory =
+            std::env::temp_dir().join(format!("scope-export-body-limit-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let bytes = vec![b'x'; 2 * 1024 * 1024];
+        let data_base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let request = Envelope::new(SaveExportFileToDirectoryRequest {
+            directory: directory.display().to_string(),
+            file_name: "large.csv".into(),
+            kind: ExportFileKind::Csv,
+            data_base64,
+        });
+        let response = router
+            .oneshot(
+                Request::post("/api/save_export_file_to_directory")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let path = directory.join("large.csv");
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), bytes.len() as u64);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
     async fn save_and_load_preferences_round_trip() {
         let dir = std::env::temp_dir().join(format!("scope-preferences-{}", std::process::id()));
         let ctx = crate::AppContext::new(dir.clone(), None, None);

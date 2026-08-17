@@ -143,6 +143,28 @@ describe("ChartHost", () => {
     expect(Array.from(series[0]?.data.x ?? [])).toEqual([0]);
   });
 
+  it("rebases the time reference when a window moves far away", async () => {
+    const host = await hostFixture();
+    host.render(request());
+
+    const moved = response();
+    const bins = moved.series[0]?.bins;
+    if (bins === undefined) throw new Error("missing test bins");
+    bins.t0[0] = 1_000_000;
+    bins.t1[0] = 1_000_000;
+    host.render({
+      ...request(moved),
+      xRange: { min: 1_000_000, max: 1_000_002 },
+    });
+
+    const options = state.charts.at(-1)?.options ?? {};
+    const xAxis = options.xAxis as { min: number; max: number };
+    const series = options.series as Array<{ data: { x: ArrayLike<number> } }>;
+    expect(xAxis.min).toBe(0);
+    expect(xAxis.max).toBe(2);
+    expect(Array.from(series[0]?.data.x ?? [])).toEqual([0]);
+  });
+
   it("maps hue to the same palette slot as the Canvas2D renderers", async () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);

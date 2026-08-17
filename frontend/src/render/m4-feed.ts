@@ -16,6 +16,11 @@ export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
   const x = new Float64Array(vertexCount(columns));
   const y = new Float64Array(x.length);
   let length = 0;
+  const appendGap = (time: number): void => {
+    x[length] = time - tRef;
+    y[length] = Number.NaN;
+    length += 1;
+  };
   const append = (time: number, value: number): void => {
     if (!Number.isFinite(value)) return;
     x[length] = time - tRef;
@@ -27,49 +32,36 @@ export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
     const flags = columns.flags[index] as number;
     const midpoint =
       ((columns.t0[index] as number) + (columns.t1[index] as number)) / 2;
+    if (columns.finiteCount[index] === 0) {
+      appendGap(midpoint);
+      continue;
+    }
+    const hasGap = (flags & HAS_GAP) !== 0;
+    if (hasGap) appendGap(midpoint);
     const start = length;
     if (
       columns.sampleCount[index] === 1 &&
       columns.t0[index] === columns.t1[index]
     ) {
-      const value = columns.first[index] as number;
-      if (Number.isFinite(value)) {
-        append(columns.t0[index] as number, value);
-      } else {
-        x[length] = midpoint - tRef;
-        y[length] = Number.NaN;
-        length += 1;
-      }
-      continue;
-    }
-    if (columns.finiteCount[index] === 0) {
-      x[length] = midpoint - tRef;
-      y[length] = Number.NaN;
-      length += 1;
-      continue;
-    }
-    if ((flags & HAS_FIRST) !== 0) {
       append(columns.t0[index] as number, columns.first[index] as number);
-    }
-    if ((flags & HAS_MIN) !== 0) {
-      append(midpoint, columns.min[index] as number);
-    }
-    if ((flags & HAS_MAX) !== 0) {
-      append(midpoint, columns.max[index] as number);
-    }
-    if ((flags & HAS_LAST) !== 0) {
-      append(columns.t1[index] as number, columns.last[index] as number);
+    } else {
+      if ((flags & HAS_FIRST) !== 0) {
+        append(columns.t0[index] as number, columns.first[index] as number);
+      }
+      if ((flags & HAS_MIN) !== 0) {
+        append(midpoint, columns.min[index] as number);
+      }
+      if ((flags & HAS_MAX) !== 0) {
+        append(midpoint, columns.max[index] as number);
+      }
+      if ((flags & HAS_LAST) !== 0) {
+        append(columns.t1[index] as number, columns.last[index] as number);
+      }
     }
     if (length === start) {
-      x[length] = midpoint - tRef;
-      y[length] = Number.NaN;
-      length += 1;
+      appendGap(midpoint);
     }
-    if ((flags & HAS_GAP) !== 0) {
-      x[length] = midpoint - tRef;
-      y[length] = Number.NaN;
-      length += 1;
-    }
+    if (hasGap) appendGap(midpoint);
   }
   return { x: x.subarray(0, length), y: y.subarray(0, length) };
 }
@@ -81,8 +73,13 @@ function vertexCount(columns: BinColumns): number {
     const singleton =
       columns.sampleCount[index] === 1 &&
       columns.t0[index] === columns.t1[index];
-    if (singleton || columns.finiteCount[index] === 0) {
+    const hasGap = (flags & HAS_GAP) !== 0;
+    if (columns.finiteCount[index] === 0) {
       count += 1;
+      continue;
+    }
+    if (singleton) {
+      count += 1 + (hasGap ? 2 : 0);
       continue;
     }
     const finite =
@@ -101,7 +98,7 @@ function vertexCount(columns: BinColumns): number {
         ? 1
         : 0);
     count += finite === 0 ? 1 : finite;
-    if ((flags & HAS_GAP) !== 0) count += 1;
+    if (hasGap) count += 2;
   }
   return count;
 }

@@ -12,7 +12,10 @@ import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
 import type { SampleResponse } from "../generated/protocol";
-import { binColumnsFromWire } from "../app/bin-columns";
+import {
+  binColumnsFromWire,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
 import type { PanelMode, SeriesRef } from "../generated/session";
 import { SampleWindowCache } from "../app/sample-window-cache";
 import { TileWindowCache } from "../app/tile-window-cache";
@@ -134,7 +137,7 @@ describe("tile refresh cache", () => {
       panelSignalIds(): { ids: string[]; missing: string[] };
       effectiveWindow(): { t0: number; t1: number };
       renderTiles(): void;
-      reportError(error: unknown): void;
+      reportError: ReturnType<typeof vi.fn>;
       refreshToken: number;
       refreshTilesPass(): Promise<void>;
     };
@@ -157,7 +160,8 @@ describe("tile refresh cache", () => {
     await shell.refreshTilesPass();
 
     expect(queryTiles).toHaveBeenCalledOnce();
-    expect(shell.reportError).not.toHaveBeenCalled();
+    const { reportError } = shell;
+    expect(reportError).not.toHaveBeenCalled();
   });
 });
 
@@ -178,7 +182,7 @@ describe("render errors", () => {
       tilesByPanel: Map<string, ColumnarTileResponse>;
       samplesByPanel: Map<string, SampleResponse>;
       missingByPanel: Map<string, string[]>;
-      reportError(error: unknown): void;
+      reportError: ReturnType<typeof vi.fn>;
       renderTiles(): void;
     };
     shell.root = document.createElement("div");
@@ -194,7 +198,8 @@ describe("render errors", () => {
 
     expect(() => shell.renderTiles()).not.toThrow();
     expect(renderData).toHaveBeenCalledOnce();
-    expect(shell.reportError).toHaveBeenCalledWith(error);
+    const { reportError } = shell;
+    expect(reportError).toHaveBeenCalledWith(error);
   });
 });
 
