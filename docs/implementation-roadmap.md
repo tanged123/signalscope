@@ -124,6 +124,12 @@ cache levels remain for explicit reduced-fidelity exports and follow-up work;
 HTML and CSV preview, standard, high, and full controls remain governed by
 ADRs 0024 and 0025. The approved [design spec](superpowers/specs/2026-08-16-full-resolution-rendering-design.md) names measured follow-ups: compact raw-sample binary transport and eventual pyramid removal after export consumers no longer need coarse levels.
 
+The first measured follow-up landed as
+[ADR 0042](adr/0042-padded-render-feed.md): the renderer consumes the padded
+tile response so an in-pad pan reuses resident vertices instead of rebuilding
+them, and presentation math bounds itself by the visible window. Compact
+raw-sample binary transport and eventual pyramid removal remain open.
+
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18
 migrates explicit mapped references before deleting the map
