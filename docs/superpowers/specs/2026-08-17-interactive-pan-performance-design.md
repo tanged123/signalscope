@@ -78,6 +78,14 @@ vertical axis policy returns an already-settled range without invoking the
 extent computation. A pan that does not change the vertical range performs
 no vertical scanning.
 
+Series element reuse compares whether any series is emphasized, not only
+whether the series in hand is. A series' opacity depends on the former, so
+under stable identity a cleared hover would otherwise return the dimmed
+element and leave every non-emphasized series faded. The defect exists today
+and is masked only because per-gesture slicing rebuilds every element
+regardless; making identity stable turns it into a visible regression, so it
+is closed before the feed changes.
+
 Nearest-vertex hit testing gains the same binary-search bracketing that
 nearest-segment hit testing already uses. Today it scans every bin of
 every series and relies on the slice for its bound; once it receives
@@ -102,9 +110,10 @@ regardless. The change stops a round trip through double precision; it
 does not lower fidelity.
 
 The bulk-copy path requires that the renderer applies no horizontal offset
-of its own. If it does, the feed still halves allocation and conversion
-work but does not reach the bulk copy. The implementation verifies which
-case holds and records the result.
+of its own. It applies one only when the horizontal axis is declared as a
+time axis, and this renderer declares a value axis, so the offset is zero
+and the bulk copy is reached. The axis type therefore becomes load-bearing
+for this decision and must not be changed casually.
 
 ## What does not change
 
