@@ -137,10 +137,10 @@ describe("ChartHost", () => {
 
     const options = state.charts.at(-1)?.options ?? {};
     const xAxis = options.xAxis as { min: number; max: number };
-    const series = options.series as Array<{ data: { x: ArrayLike<number> } }>;
+    const series = options.series as Array<{ data: Float32Array }>;
     expect(xAxis.min).toBe(0);
     expect(xAxis.max).toBe(2);
-    expect(Array.from(series[0]?.data.x ?? [])).toEqual([0]);
+    expect(series[0]?.data[0]).toBe(0);
   });
 
   it("rebases time from the earliest first bin without scanning every bin", async () => {
@@ -201,10 +201,10 @@ describe("ChartHost", () => {
 
     const options = state.charts.at(-1)?.options ?? {};
     const xAxis = options.xAxis as { min: number; max: number };
-    const series = options.series as Array<{ data: { x: ArrayLike<number> } }>;
+    const series = options.series as Array<{ data: Float32Array }>;
     expect(xAxis.min).toBe(0);
     expect(xAxis.max).toBe(2);
-    expect(Array.from(series[0]?.data.x ?? [])).toEqual([0]);
+    expect(series[0]?.data[0]).toBe(0);
   });
 
   it("restores opacity when emphasis clears on an unchanged response", async () => {

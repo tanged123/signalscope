@@ -7,25 +7,26 @@ import {
   type BinColumns,
 } from "../app/bin-columns";
 
-export interface SeriesFeed {
-  x: Float64Array;
-  y: Float64Array;
-}
+/**
+ * Interleaved `[x0, y0, x1, y1, ...]` in single precision: the layout
+ * ChartGPU bulk-copies into its staging buffer instead of packing element by
+ * element. `x` is `time - tRef`; `y` is `NaN` at a gap.
+ */
+export type SeriesFeed = Float32Array;
 
 export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
-  const x = new Float64Array(vertexCount(columns));
-  const y = new Float64Array(x.length);
+  const feed = new Float32Array(vertexCount(columns) * 2);
   let length = 0;
   const appendGap = (time: number): void => {
-    x[length] = time - tRef;
-    y[length] = Number.NaN;
-    length += 1;
+    feed[length] = time - tRef;
+    feed[length + 1] = Number.NaN;
+    length += 2;
   };
   const append = (time: number, value: number): void => {
     if (!Number.isFinite(value)) return;
-    x[length] = time - tRef;
-    y[length] = value;
-    length += 1;
+    feed[length] = time - tRef;
+    feed[length + 1] = value;
+    length += 2;
   };
 
   for (let index = 0; index < columns.count; index += 1) {
@@ -63,7 +64,7 @@ export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
     }
     if (hasGap) appendGap(midpoint);
   }
-  return { x: x.subarray(0, length), y: y.subarray(0, length) };
+  return feed.subarray(0, length);
 }
 
 function vertexCount(columns: BinColumns): number {

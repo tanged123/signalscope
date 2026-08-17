@@ -31,6 +31,35 @@ function columns(
   );
 }
 
+function points(feed: Float32Array): [number, number][] {
+  const out: [number, number][] = [];
+  for (let index = 0; index < feed.length; index += 2) {
+    out.push([feed[index] as number, feed[index + 1] as number]);
+  }
+  return out;
+}
+
+describe("interleaved layout", () => {
+  it("packs x and y as consecutive pairs with gaps preserved", () => {
+    const feed = m4Feed(
+      columns([
+        { t0: 10, t1: 10, first: 2, min: 2, max: 2, last: 2 },
+        { t0: 11, t1: 11, finiteCount: 0, gap: true },
+        { t0: 12, t1: 12, first: 3, min: 3, max: 3, last: 3 },
+      ]),
+      10,
+    );
+
+    expect(feed).toBeInstanceOf(Float32Array);
+    const pairs = points(feed);
+    expect(pairs).toHaveLength(3);
+    expect(pairs[0]).toEqual([0, 2]);
+    expect(pairs[1]?.[0]).toBe(1);
+    expect(pairs[1]?.[1]).toBeNaN();
+    expect(pairs[2]).toEqual([2, 3]);
+  });
+});
+
 describe("m4Feed", () => {
   it("emits one point for each singleton raw bin", () => {
     const feed = m4Feed(
@@ -40,8 +69,8 @@ describe("m4Feed", () => {
       ]),
       10,
     );
-    expect([...feed.x]).toEqual([0, 1]);
-    expect([...feed.y]).toEqual([2, 3]);
+    expect(points(feed).map(([x]) => x)).toEqual([0, 1]);
+    expect(points(feed).map(([, y]) => y)).toEqual([2, 3]);
   });
 
   it("allocates only the emitted capacity for singleton raw bins", () => {
@@ -53,9 +82,8 @@ describe("m4Feed", () => {
       10,
     );
 
-    expect(feed.x).toHaveLength(2);
-    expect(feed.x.buffer.byteLength).toBe(feed.x.byteLength);
-    expect(feed.y.buffer.byteLength).toBe(feed.y.byteLength);
+    expect(points(feed)).toHaveLength(2);
+    expect(feed.buffer.byteLength).toBe(feed.byteLength);
   });
 
   it("emits one gap vertex for a missing singleton raw bin", () => {
@@ -63,8 +91,8 @@ describe("m4Feed", () => {
       columns([{ t0: 10, t1: 10, gap: true, finiteCount: 0 }]),
       10,
     );
-    expect([...feed.x]).toEqual([0]);
-    expect(Number.isNaN(feed.y[0])).toBe(true);
+    expect(points(feed).map(([x]) => x)).toEqual([0]);
+    expect(points(feed)[0]?.[1]).toBeNaN();
   });
 
   it("emits first, min, max, and last with midpoint extrema times", () => {
@@ -72,8 +100,8 @@ describe("m4Feed", () => {
       columns([{ t0: 10, t1: 12, first: 1, min: 0, max: 5, last: 2 }]),
       10,
     );
-    expect([...feed.x]).toEqual([0, 1, 1, 2]);
-    expect([...feed.y]).toEqual([1, 0, 5, 2]);
+    expect(points(feed).map(([x]) => x)).toEqual([0, 1, 1, 2]);
+    expect(points(feed).map(([, y]) => y)).toEqual([1, 0, 5, 2]);
   });
 
   it("breaks the polyline at a gap bin", () => {
@@ -85,7 +113,11 @@ describe("m4Feed", () => {
       ]),
       0,
     );
-    expect([...feed.y].filter(Number.isNaN)).toHaveLength(1);
+    expect(
+      points(feed)
+        .map(([, y]) => y)
+        .filter(Number.isNaN),
+    ).toHaveLength(1);
   });
 
   it("breaks before and after finite extrema in a gapped bin", () => {
@@ -104,7 +136,14 @@ describe("m4Feed", () => {
       ]),
       0,
     );
-    expect([...feed.y]).toEqual([Number.NaN, 1, 0, 5, 2, Number.NaN]);
+    expect(points(feed).map(([, y]) => y)).toEqual([
+      Number.NaN,
+      1,
+      0,
+      5,
+      2,
+      Number.NaN,
+    ]);
   });
 
   it("allocates aggregate extrema and gap vertices exactly", () => {
@@ -126,10 +165,9 @@ describe("m4Feed", () => {
       0,
     );
 
-    expect(feed.x).toHaveLength(9);
-    expect(feed.x.buffer.byteLength).toBe(feed.x.byteLength);
-    expect(feed.y.buffer.byteLength).toBe(feed.y.byteLength);
-    expect([...feed.y]).toEqual([
+    expect(points(feed)).toHaveLength(9);
+    expect(feed.buffer.byteLength).toBe(feed.byteLength);
+    expect(points(feed).map(([, y]) => y)).toEqual([
       Number.NaN,
       1,
       0,
@@ -144,8 +182,8 @@ describe("m4Feed", () => {
 
   it("skips vertices whose flag is absent", () => {
     const feed = m4Feed(columns([{ t0: 10, t1: 12, min: 0, max: 5 }]), 10);
-    expect([...feed.x]).toEqual([1, 1]);
-    expect([...feed.y]).toEqual([0, 5]);
+    expect(points(feed).map(([x]) => x)).toEqual([1, 1]);
+    expect(points(feed).map(([, y]) => y)).toEqual([0, 5]);
   });
 
   it("caches feeds by columns identity and reference time", () => {

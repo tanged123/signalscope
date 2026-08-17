@@ -26,7 +26,7 @@ declare module "@chartgpu/chartgpu" {
   export interface LineSeriesConfig {
     type: "line";
     name?: string;
-    data: XYArraysData;
+    data: XYArraysData | ArrayBufferView;
     sampling?: "none" | "lttb" | "average" | "max" | "min";
     lineStyle?: { width?: number; opacity?: number; color?: string };
     color?: string;
