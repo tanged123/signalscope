@@ -143,6 +143,48 @@ describe("ChartHost", () => {
     expect(Array.from(series[0]?.data.x ?? [])).toEqual([0]);
   });
 
+  it("rebases time from the earliest first bin without scanning every bin", async () => {
+    const host = await hostFixture();
+    const series = (signalId: string, starts: number[]) => ({
+      signalId,
+      signalPath: signalId,
+      unit: null,
+      level: 0,
+      bins: binColumnsFromWire(
+        starts.map((t0) => ({
+          t0,
+          t1: t0,
+          first: 1,
+          last: 1,
+          min: 1,
+          max: 1,
+          sum: 1,
+          sum_sq: 1,
+          finite_count: "1",
+          sample_count: "1",
+          has_gap: false,
+        })),
+      ),
+    });
+
+    host.render({
+      ...request(),
+      response: {
+        requestId: "rebase",
+        series: [series("late", [40, 50, 60]), series("early", [25, 35, 45])],
+      },
+      styles: [stroke(0), stroke(1)],
+      xRange: { min: 25, max: 60 },
+    });
+
+    const xAxis = (state.charts.at(-1)?.options ?? {}).xAxis as {
+      min: number;
+      max: number;
+    };
+    expect(xAxis.min).toBe(0);
+    expect(xAxis.max).toBe(35);
+  });
+
   it("rebases the time reference when a window moves far away", async () => {
     const host = await hostFixture();
     host.render(request());

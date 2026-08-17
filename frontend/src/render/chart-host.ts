@@ -299,9 +299,8 @@ function sameStyle(left: SeriesStroke, right: SeriesStroke): boolean {
 function minimumTime(response: ColumnarTileResponse): number {
   let minimum = Number.POSITIVE_INFINITY;
   for (const series of response.series) {
-    for (let index = 0; index < series.bins.count; index += 1) {
-      minimum = Math.min(minimum, series.bins.t0[index] as number);
-    }
+    if (series.bins.count === 0) continue;
+    minimum = Math.min(minimum, series.bins.t0[0] as number);
   }
   return Number.isFinite(minimum) ? minimum : 0;
 }
