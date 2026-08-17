@@ -69,15 +69,15 @@ function response(signalIds = ["signal-1"]): ColumnarTileResponse {
       bins: binColumnsFromWire([
         {
           t0: 10,
-          t1: 12,
+          t1: 10,
           first: index + 1,
           last: index + 2,
           min: index,
           max: index + 3,
           sum: index + 2,
           sum_sq: 0,
-          finite_count: "2",
-          sample_count: "2",
+          finite_count: "1",
+          sample_count: "1",
           has_gap: false,
         },
       ]),
@@ -140,7 +140,7 @@ describe("ChartHost", () => {
     const series = options.series as Array<{ data: { x: ArrayLike<number> } }>;
     expect(xAxis.min).toBe(0);
     expect(xAxis.max).toBe(2);
-    expect(Array.from(series[0]?.data.x ?? [])).toEqual([0, 1, 1, 2]);
+    expect(Array.from(series[0]?.data.x ?? [])).toEqual([0]);
   });
 
   it("maps hue to the same palette slot as the Canvas2D renderers", async () => {

@@ -28,6 +28,20 @@ export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
     const midpoint =
       ((columns.t0[index] as number) + (columns.t1[index] as number)) / 2;
     const start = length;
+    if (
+      columns.sampleCount[index] === 1 &&
+      columns.t0[index] === columns.t1[index]
+    ) {
+      const value = columns.first[index] as number;
+      if (Number.isFinite(value)) {
+        append(columns.t0[index] as number, value);
+      } else {
+        x[length] = midpoint - tRef;
+        y[length] = Number.NaN;
+        length += 1;
+      }
+      continue;
+    }
     if (columns.finiteCount[index] === 0) {
       x[length] = midpoint - tRef;
       y[length] = Number.NaN;

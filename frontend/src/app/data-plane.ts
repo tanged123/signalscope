@@ -33,7 +33,7 @@ import {
   type ColumnarTileResponse,
 } from "./bin-columns";
 import { open, seal, type Envelope } from "./envelope";
-import { queryPyramidRange } from "./pyramid-query";
+import { queryRawPyramidRange } from "./pyramid-query";
 import { binsToSamples, sampleWindow } from "./samples";
 import { decodeTileResponse } from "./tile-binary";
 
@@ -411,24 +411,10 @@ export class BakedPlane implements DataPlane {
       series: this.payload.signals
         .filter((signal) => requested.has(signal.summary.signal_id))
         .map((signal) => {
-          // 64-bin floor per ADR 0036 makes `max_total_bins` a soft cap; keep
-          // in sync with the shell's `query_tiles_bin`.
-          const perSeries =
-            request.max_total_bins === null
-              ? undefined
-              : Math.max(
-                  64,
-                  Math.floor(
-                    request.max_total_bins /
-                      Math.max(1, request.signal_ids.length),
-                  ),
-                );
-          const range = queryPyramidRange(
+          const range = queryRawPyramidRange(
             signal.levels,
             request.window.t0,
             request.window.t1,
-            request.pixel_width,
-            perSeries,
           );
           const bins = this.columnsFor(
             signal,

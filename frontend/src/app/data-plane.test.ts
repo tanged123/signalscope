@@ -74,6 +74,65 @@ describe("BakedPlane.querySamples", () => {
   });
 });
 
+describe("BakedPlane.queryTiles", () => {
+  it("returns every raw level-zero bin in the window despite tile budgets", async () => {
+    const summary: SignalSummary = {
+      signal_id: "7",
+      source_id: "3",
+      source_key: "00000000-0000-0000-0000-000000000003",
+      local_path: "speed",
+      path: "vehicle/speed",
+      unit: "m/s",
+      point_count: "100",
+      t_min: 0,
+      t_max: 99,
+      last_value: null,
+    };
+    const levelZero = Array.from({ length: 100 }, (_, time) => bin(time, time));
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          {
+            summary,
+            levels: [
+              levelZero,
+              [
+                {
+                  t0: 0,
+                  t1: 99,
+                  first: 0,
+                  last: 99,
+                  min: 0,
+                  max: 99,
+                  sum: 4950,
+                  sum_sq: 328350,
+                  finite_count: "100",
+                  sample_count: "100",
+                  has_gap: false,
+                },
+              ],
+            ],
+          },
+        ],
+      }),
+    );
+
+    const response = await plane.queryTiles({
+      request_id: "tiles-1",
+      signal_ids: ["7"],
+      window: { t0: 20, t1: 79 },
+      pixel_width: 1,
+      max_total_bins: 1,
+    });
+
+    expect(response.series[0]?.level).toBe(0);
+    expect(response.series[0]?.bins.count).toBe(62);
+    expect(response.series[0]?.bins.t0[0]).toBe(19);
+    expect(response.series[0]?.bins.t0[61]).toBe(80);
+  });
+});
+
 function httpPlane(
   routes: Record<
     string,

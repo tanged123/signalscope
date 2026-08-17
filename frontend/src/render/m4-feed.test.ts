@@ -32,6 +32,27 @@ function columns(
 }
 
 describe("m4Feed", () => {
+  it("emits one point for each singleton raw bin", () => {
+    const feed = m4Feed(
+      columns([
+        { t0: 10, t1: 10, first: 2, min: 2, max: 2, last: 2 },
+        { t0: 11, t1: 11, first: 3, min: 3, max: 3, last: 3 },
+      ]),
+      10,
+    );
+    expect([...feed.x]).toEqual([0, 1]);
+    expect([...feed.y]).toEqual([2, 3]);
+  });
+
+  it("emits one gap vertex for a missing singleton raw bin", () => {
+    const feed = m4Feed(
+      columns([{ t0: 10, t1: 10, gap: true, finiteCount: 0 }]),
+      10,
+    );
+    expect([...feed.x]).toEqual([0]);
+    expect(Number.isNaN(feed.y[0])).toBe(true);
+  });
+
   it("emits first, min, max, and last with midpoint extrema times", () => {
     const feed = m4Feed(
       columns([{ t0: 10, t1: 12, first: 1, min: 0, max: 5, last: 2 }]),
