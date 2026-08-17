@@ -34,7 +34,7 @@ import {
 } from "./bin-columns";
 import { open, seal, type Envelope } from "./envelope";
 import { queryRawPyramidRange } from "./pyramid-query";
-import { binsToSamples, sampleWindowFull } from "./samples";
+import { binsToSamples, sampleWindow, sampleWindowFull } from "./samples";
 import { decodeTileResponse } from "./tile-binary";
 
 export interface IngestPort {
@@ -465,12 +465,21 @@ export class BakedPlane implements DataPlane {
         .filter((signal) => requested.has(signal.summary.signal_id))
         .map((signal) => {
           const raw = this.rawFor(signal);
-          const slice = sampleWindowFull(
-            raw.time,
-            raw.values,
-            request.window.t0,
-            request.window.t1,
-          );
+          const slice =
+            request.max_points === 0
+              ? sampleWindowFull(
+                  raw.time,
+                  raw.values,
+                  request.window.t0,
+                  request.window.t1,
+                )
+              : sampleWindow(
+                  raw.time,
+                  raw.values,
+                  request.window.t0,
+                  request.window.t1,
+                  request.max_points,
+                );
           return {
             signal_id: signal.summary.signal_id,
             signal_path: signal.summary.path,

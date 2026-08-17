@@ -544,8 +544,17 @@ pub async fn query_samples(
                 .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
             let (time, values) =
                 host::windowed_slice(signal, request.window.t0, request.window.t1)?;
-            let slice =
-                compute::sample_window_full(&time, &values, request.window.t0, request.window.t1);
+            let slice = if request.max_points == 0 {
+                compute::sample_window_full(&time, &values, request.window.t0, request.window.t1)
+            } else {
+                compute::sample_window(
+                    &time,
+                    &values,
+                    request.window.t0,
+                    request.window.t1,
+                    request.max_points,
+                )
+            };
             series.push(SampleSeries {
                 signal_id: raw_id,
                 signal_path: signal.path.clone(),
@@ -955,6 +964,67 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert!(String::from_utf8_lossy(&body).contains("protocol version"));
+    }
+
+    #[tokio::test]
+    async fn query_samples_keeps_zero_uncapped_and_positive_values_bounded() {
+        let ctx = crate::AppContext::for_tests(None);
+        let signal_id = {
+            let mut data = ctx.state.lock().unwrap();
+            let source = data
+                .store
+                .register_source(
+                    "/tmp/sample-query.csv",
+                    scope_core::store::SourceKey(uuid::Uuid::new_v4()),
+                    "sample-query",
+                )
+                .unwrap();
+            let time = (0..100).map(f64::from).collect::<Vec<_>>();
+            data.store
+                .insert_signal(source, "value", None, time.clone(), time)
+                .unwrap()
+        };
+        let router = crate::build_router(ctx);
+
+        let request = |max_points| {
+            Envelope::new(SampleRequest {
+                request_id: "samples".into(),
+                signal_ids: vec![signal_id.0],
+                window: scope_protocol::TimeWindow { t0: 20.0, t1: 79.0 },
+                max_points,
+            })
+        };
+
+        let uncapped = router
+            .clone()
+            .oneshot(
+                Request::post("/api/query_samples")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request(0)).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(uncapped.status(), StatusCode::OK);
+        let body = uncapped.into_body().collect().await.unwrap().to_bytes();
+        let uncapped: Envelope<SampleResponse> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(uncapped.payload.series[0].time.len(), 62);
+        assert_eq!(uncapped.payload.series[0].stride, 1);
+
+        let bounded = router
+            .oneshot(
+                Request::post("/api/query_samples")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request(10)).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(bounded.status(), StatusCode::OK);
+        let body = bounded.into_body().collect().await.unwrap().to_bytes();
+        let bounded: Envelope<SampleResponse> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(bounded.payload.series[0].time.len(), 10);
+        assert_eq!(bounded.payload.series[0].stride, 7);
     }
 
     #[tokio::test]

@@ -53,7 +53,7 @@ describe("BakedPlane.querySamples", () => {
       request_id: "samples-1",
       signal_ids: ["7"],
       window: { t0: 20, t1: 79 },
-      max_points: 1,
+      max_points: 0,
     });
 
     expect(response.request_id).toBe("samples-1");
@@ -62,6 +62,44 @@ describe("BakedPlane.querySamples", () => {
     expect(response.series[0]?.time[61]).toBe(80);
     expect(response.series[0]?.stride).toBe(1);
     expect(Number.isNaN(response.series[0]?.values[31])).toBe(true);
+  });
+
+  it("keeps positive max_points as an explicit export cap", async () => {
+    const summary: SignalSummary = {
+      signal_id: "7",
+      source_id: "3",
+      source_key: "00000000-0000-0000-0000-000000000003",
+      local_path: "speed",
+      path: "vehicle/speed",
+      unit: "m/s",
+      point_count: "100",
+      t_min: 0,
+      t_max: 99,
+      last_value: null,
+    };
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          {
+            summary,
+            levels: [Array.from({ length: 100 }, (_, time) => bin(time, time))],
+          },
+        ],
+      }),
+    );
+
+    const response = await plane.querySamples({
+      request_id: "samples-export-1",
+      signal_ids: ["7"],
+      window: { t0: 20, t1: 79 },
+      max_points: 10,
+    });
+
+    expect(response.series[0]?.time).toEqual([
+      19, 26, 33, 40, 47, 54, 61, 68, 75, 80,
+    ]);
+    expect(response.series[0]?.stride).toBe(7);
   });
 
   it("reports finite last values for both generated demo signals", async () => {
