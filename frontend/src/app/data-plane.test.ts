@@ -250,6 +250,85 @@ describe("BakedPlane.queryTiles", () => {
     expect(response.series[0]?.bins.t0[0]).toBe(19);
     expect(response.series[0]?.bins.t0[61]).toBe(80);
   });
+
+  it("returns requested signals in request order", async () => {
+    const summary = (signalId: string, path: string): SignalSummary => ({
+      signal_id: signalId,
+      source_id: "3",
+      source_key: `00000000-0000-0000-0000-00000000000${signalId}`,
+      local_path: path,
+      path: `vehicle/${path}`,
+      unit: "m/s",
+      point_count: "3",
+      t_min: 0,
+      t_max: 2,
+      last_value: null,
+    });
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          {
+            summary: summary("7", "speed"),
+            levels: [Array.from({ length: 3 }, (_, time) => bin(time, time))],
+          },
+          {
+            summary: summary("8", "rpm"),
+            levels: [Array.from({ length: 3 }, (_, time) => bin(time, time))],
+          },
+        ],
+      }),
+    );
+
+    const response = await plane.queryTiles({
+      request_id: "tiles-order-1",
+      signal_ids: ["8", "7"],
+      window: { t0: 0, t1: 2 },
+      pixel_width: 10,
+      max_total_bins: 10,
+    });
+
+    expect(response.series.map((series) => series.signalId)).toEqual([
+      "8",
+      "7",
+    ]);
+  });
+
+  it("rejects unknown signal IDs", async () => {
+    const summary: SignalSummary = {
+      signal_id: "7",
+      source_id: "3",
+      source_key: "00000000-0000-0000-0000-000000000003",
+      local_path: "speed",
+      path: "vehicle/speed",
+      unit: "m/s",
+      point_count: "3",
+      t_min: 0,
+      t_max: 2,
+      last_value: null,
+    };
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          {
+            summary,
+            levels: [Array.from({ length: 3 }, (_, time) => bin(time, time))],
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      plane.queryTiles({
+        request_id: "tiles-unknown-1",
+        signal_ids: ["missing"],
+        window: { t0: 0, t1: 2 },
+        pixel_width: 10,
+        max_total_bins: 10,
+      }),
+    ).rejects.toThrow("unknown signal id: missing");
+  });
 });
 
 function httpPlane(

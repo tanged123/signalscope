@@ -405,12 +405,20 @@ export class BakedPlane implements DataPlane {
   }
 
   queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
-    const requested = new Set(request.signal_ids);
-    return Promise.resolve({
-      requestId: request.request_id,
-      series: this.payload.signals
-        .filter((signal) => requested.has(signal.summary.signal_id))
-        .map((signal) => {
+    return Promise.resolve().then(() => {
+      const signals = new Map(
+        this.payload.signals.map((signal) => [
+          signal.summary.signal_id,
+          signal,
+        ]),
+      );
+      return {
+        requestId: request.request_id,
+        series: request.signal_ids.map((signalId) => {
+          const signal = signals.get(signalId);
+          if (signal === undefined) {
+            throw new Error(`unknown signal id: ${signalId}`);
+          }
           const range = queryRawPyramidRange(
             signal.levels,
             request.window.t0,
@@ -430,6 +438,7 @@ export class BakedPlane implements DataPlane {
             bins,
           };
         }),
+      };
     });
   }
 

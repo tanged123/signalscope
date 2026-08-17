@@ -11,6 +11,8 @@ import type { DataPlane } from "../app/data-plane";
 import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
+import type { SampleResponse } from "../generated/protocol";
+import { binColumnsFromWire } from "../app/bin-columns";
 import type { PanelMode, SeriesRef } from "../generated/session";
 import { SampleWindowCache } from "../app/sample-window-cache";
 import { TileWindowCache } from "../app/tile-window-cache";
@@ -89,6 +91,110 @@ describe("sample refresh requests", () => {
         max_points: 0,
       }),
     );
+  });
+});
+
+describe("tile refresh cache", () => {
+  it("reuses a dense raw window without a second plane query", async () => {
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve({
+        requestId: "tiles",
+        series: [
+          {
+            signalId: "1",
+            signalPath: "run/value",
+            unit: null,
+            level: 0,
+            bins: binColumnsFromWire(
+              Array.from({ length: 12 }, (_, index) => ({
+                t0: index,
+                t1: index,
+                first: index,
+                last: index,
+                min: index,
+                max: index,
+                sum: index,
+                sum_sq: index * index,
+                finite_count: "1",
+                sample_count: "1",
+                has_gap: false,
+              })),
+            ),
+          },
+        ],
+      }),
+    );
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      workspace: { panels(): { id: string; mode: "time" }[] };
+      workspaceView: null;
+      plane: Pick<DataPlane, "queryTiles">;
+      tileWindowCache: TileWindowCache;
+      sampleWindowCache: SampleWindowCache;
+      panelSignalIds(): { ids: string[]; missing: string[] };
+      effectiveWindow(): { t0: number; t1: number };
+      renderTiles(): void;
+      reportError(error: unknown): void;
+      refreshToken: number;
+      refreshTilesPass(): Promise<void>;
+    };
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<div class="workspace"></div>';
+    shell.workspace = {
+      panels: () => [{ id: "panel-1", mode: "time" }],
+    };
+    shell.workspaceView = null;
+    shell.plane = { queryTiles };
+    shell.tileWindowCache = new TileWindowCache();
+    shell.sampleWindowCache = new SampleWindowCache();
+    shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
+    shell.effectiveWindow = vi.fn(() => ({ t0: 0, t1: 5 }));
+    shell.renderTiles = vi.fn();
+    shell.reportError = vi.fn();
+    shell.refreshToken = 0;
+
+    await shell.refreshTilesPass();
+    await shell.refreshTilesPass();
+
+    expect(queryTiles).toHaveBeenCalledOnce();
+    expect(shell.reportError).not.toHaveBeenCalled();
+  });
+});
+
+describe("render errors", () => {
+  it.each([
+    ["ChartGPU render", new Error("ChartGPU render failed")],
+    ["FFT allocation", new RangeError("FFT allocation failed")],
+  ])("reports synchronous %s errors without retrying", (_label, error) => {
+    const renderData = vi.fn(() => {
+      throw error;
+    });
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      workspace: { linkedTime(): { t0: number; t1: number } };
+      workspaceView: {
+        renderData: typeof renderData;
+      };
+      tilesByPanel: Map<string, ColumnarTileResponse>;
+      samplesByPanel: Map<string, SampleResponse>;
+      missingByPanel: Map<string, string[]>;
+      reportError(error: unknown): void;
+      renderTiles(): void;
+    };
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<span class="render-ms"></span>';
+    shell.workspace = {
+      linkedTime: () => ({ t0: 0, t1: 1 }),
+    };
+    shell.workspaceView = { renderData };
+    shell.tilesByPanel = new Map();
+    shell.samplesByPanel = new Map();
+    shell.missingByPanel = new Map();
+    shell.reportError = vi.fn();
+
+    expect(() => shell.renderTiles()).not.toThrow();
+    expect(renderData).toHaveBeenCalledOnce();
+    expect(shell.reportError).toHaveBeenCalledWith(error);
   });
 });
 

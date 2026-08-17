@@ -2800,20 +2800,25 @@ export class AppShell {
   }
 
   private renderTiles(): void {
-    const state = this.workspace.linkedTime();
-    const elapsed =
-      this.workspaceView?.renderData(
-        this.tilesByPanel,
-        this.samplesByPanel,
-        (panelId) => {
-          const panel = this.workspace.panel(panelId);
-          return panel === undefined
-            ? { t0: state.t0, t1: state.t1 }
-            : this.effectiveWindow(panel);
-        },
-        (panelId) => this.missingByPanel.get(panelId) ?? [],
-      ) ?? 0;
-    required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
+    try {
+      const state = this.workspace.linkedTime();
+      const elapsed =
+        this.workspaceView?.renderData(
+          this.tilesByPanel,
+          this.samplesByPanel,
+          (panelId) => {
+            const panel = this.workspace.panel(panelId);
+            return panel === undefined
+              ? { t0: state.t0, t1: state.t1 }
+              : this.effectiveWindow(panel);
+          },
+          (panelId) => this.missingByPanel.get(panelId) ?? [],
+        ) ?? 0;
+      required(this.root, ".render-ms").textContent =
+        `${elapsed.toFixed(1)} ms`;
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
   }
 
   private applyTimeWindow(panelId: string, t0: number, t1: number): void {

@@ -44,6 +44,20 @@ describe("m4Feed", () => {
     expect([...feed.y]).toEqual([2, 3]);
   });
 
+  it("allocates only the emitted capacity for singleton raw bins", () => {
+    const feed = m4Feed(
+      columns([
+        { t0: 10, t1: 10, first: 2, min: 2, max: 2, last: 2 },
+        { t0: 11, t1: 11, first: 3, min: 3, max: 3, last: 3 },
+      ]),
+      10,
+    );
+
+    expect(feed.x).toHaveLength(2);
+    expect(feed.x.buffer.byteLength).toBe(feed.x.byteLength);
+    expect(feed.y.buffer.byteLength).toBe(feed.y.byteLength);
+  });
+
   it("emits one gap vertex for a missing singleton raw bin", () => {
     const feed = m4Feed(
       columns([{ t0: 10, t1: 10, gap: true, finiteCount: 0 }]),
@@ -91,6 +105,35 @@ describe("m4Feed", () => {
       0,
     );
     expect([...feed.y]).toEqual([1, 0, 5, 2, Number.NaN]);
+  });
+
+  it("allocates aggregate extrema and gap vertices exactly", () => {
+    const feed = m4Feed(
+      columns([
+        {
+          t0: 0,
+          t1: 2,
+          first: 1,
+          min: 0,
+          max: 5,
+          last: 2,
+          gap: true,
+          finiteCount: 4,
+        },
+        { t0: 3, t1: 5, min: 3, max: 4 },
+        { t0: 6, t1: 7, gap: true, finiteCount: 0 },
+      ]),
+      0,
+    );
+
+    expect(feed).toMatchObject({
+      x: expect.any(Float64Array),
+      y: expect.any(Float64Array),
+    });
+    expect(feed.x).toHaveLength(8);
+    expect(feed.x.buffer.byteLength).toBe(feed.x.byteLength);
+    expect(feed.y.buffer.byteLength).toBe(feed.y.byteLength);
+    expect([...feed.y]).toEqual([1, 0, 5, 2, Number.NaN, 3, 4, Number.NaN]);
   });
 
   it("skips vertices whose flag is absent", () => {

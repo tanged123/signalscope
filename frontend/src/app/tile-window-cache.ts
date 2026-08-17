@@ -69,7 +69,6 @@ export class TileWindowCache {
       const end = pastLastOverlapping(tile.bins.t0, t1);
       const sliceStart = Math.max(0, start - 1);
       const sliceEnd = Math.min(tile.bins.count, end + 1);
-      if (sliceEnd - sliceStart > 4 * pixelWidth + 2) return null;
       series.push({
         ...tile,
         bins: sliceColumns(tile.bins, sliceStart, sliceEnd),

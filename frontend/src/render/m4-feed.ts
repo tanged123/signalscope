@@ -13,8 +13,8 @@ export interface SeriesFeed {
 }
 
 export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
-  const x = new Float64Array(columns.count * 5);
-  const y = new Float64Array(columns.count * 5);
+  const x = new Float64Array(vertexCount(columns));
+  const y = new Float64Array(x.length);
   let length = 0;
   const append = (time: number, value: number): void => {
     if (!Number.isFinite(value)) return;
@@ -72,6 +72,38 @@ export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
     }
   }
   return { x: x.subarray(0, length), y: y.subarray(0, length) };
+}
+
+function vertexCount(columns: BinColumns): number {
+  let count = 0;
+  for (let index = 0; index < columns.count; index += 1) {
+    const flags = columns.flags[index] as number;
+    const singleton =
+      columns.sampleCount[index] === 1 &&
+      columns.t0[index] === columns.t1[index];
+    if (singleton || columns.finiteCount[index] === 0) {
+      count += 1;
+      continue;
+    }
+    const finite =
+      ((flags & HAS_FIRST) !== 0 &&
+      Number.isFinite(columns.first[index] as number)
+        ? 1
+        : 0) +
+      ((flags & HAS_MIN) !== 0 && Number.isFinite(columns.min[index] as number)
+        ? 1
+        : 0) +
+      ((flags & HAS_MAX) !== 0 && Number.isFinite(columns.max[index] as number)
+        ? 1
+        : 0) +
+      ((flags & HAS_LAST) !== 0 &&
+      Number.isFinite(columns.last[index] as number)
+        ? 1
+        : 0);
+    count += finite === 0 ? 1 : finite;
+    if ((flags & HAS_GAP) !== 0) count += 1;
+  }
+  return count;
 }
 
 const feedCache = new WeakMap<BinColumns, { tRef: number; feed: SeriesFeed }>();

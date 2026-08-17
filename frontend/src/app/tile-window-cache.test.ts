@@ -19,7 +19,7 @@ function bin(index: number): EnvelopeBin {
   };
 }
 
-function entry(count = 20): CachedPanelTiles {
+function entry(count = 20, level = 2): CachedPanelTiles {
   const bins = binColumnsFromWire(
     Array.from({ length: count }, (_, index) => bin(index)),
   );
@@ -31,7 +31,7 @@ function entry(count = 20): CachedPanelTiles {
           signalId: "7",
           signalPath: "run/value",
           unit: "V",
-          level: 2,
+          level,
           bins,
         },
       ],
@@ -90,15 +90,27 @@ test("slice returns a zero-copy padded-window view", () => {
   );
 });
 
-test("slice rejects mismatched keys, uncovered windows, and over-dense views", () => {
+test("slice rejects mismatched keys and uncovered windows", () => {
   const cache = new TileWindowCache();
   cache.store("panel", entry());
   expect(cache.slice("panel", "8", 10, 5, 10)).toBeNull();
   expect(cache.slice("panel", "7", 10, -1, 10)).toBeNull();
-  expect(cache.slice("panel", "7", 2, 5, 10)).toBeNull();
   expect(cache.get("missing")).toBeNull();
   cache.invalidate("panel");
   expect(cache.get("panel")).toBeNull();
+});
+
+test("slice reuses dense raw windows without a density rejection", () => {
+  const cache = new TileWindowCache();
+  const cached = { ...entry(20, 0), pixelWidth: 2 };
+  cache.store("panel", cached);
+
+  const sliced = cache.slice("panel", "7", 2, 0, 19);
+
+  expect(sliced?.series[0]?.bins.count).toBe(20);
+  expect(sliced?.series[0]?.bins.t0.buffer).toBe(
+    cached.response.series[0]?.bins.t0.buffer,
+  );
 });
 
 test("sliceColumns preserves typed-array views", () => {
