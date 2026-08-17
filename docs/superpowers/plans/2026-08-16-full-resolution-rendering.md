@@ -12,7 +12,7 @@
 
 - No live-rendering operation may silently fall back to reduced data after allocation, transport, rendering, or transform failure.
 - `HttpPlane` must return full-resolution live windows. `BakedPlane` must add no further reduction beyond the user's exported fidelity and must match `HttpPlane` for full-fidelity snapshots.
-- Keep protocol schema fields stable in this baseline; live-rendering `pixel_width`, `max_total_bins`, and `max_points` remain accepted compatibility fields but cannot reduce output.
+- Keep protocol schema fields stable in this baseline. Live `pixel_width` and `max_total_bins` are inert, and live sample requests use `max_points: 0`; positive `max_points` remains the explicit CSV export cap.
 - Preserve preview, standard, high, and full fidelity for explicit HTML and CSV exports; export fidelity must not affect live rendering.
 - Histogram aggregation remains intrinsic plot computation; FFT consumes the full fetched window and has no artificial 16,384-sample ceiling.
 - Keep the pyramid and coarse cache levels temporarily; no live workbench presentation path may consume a coarse level. Reduced-fidelity snapshots may consume only their explicitly exported level.
@@ -203,13 +203,13 @@ git commit -m "feat(render): feed raw time samples"
 
 - Produces: `compute::sample_window_full(time, values, t0, t1) -> SampleSlice` with `stride == 1`.
 - Produces: `sampleWindowFull(time, values, t0, t1) -> SampleSlice` mirroring Rust.
-- Guarantees: XY issues one full-extent request; FFT and histogram issue one full visible-window request; `max_points` is accepted but ignored by both hosts.
+- Guarantees: XY issues one full-extent request; FFT and histogram issue one full visible-window request; `max_points: 0` selects uncapped output in both hosts.
 
 - [ ] **Step 1: Write failing full-window tests**
 
-Add Rust and TypeScript tests with 100 samples, window `20..79`, and compatibility cap `1`; assert 62 neighbour-inclusive samples and `stride == 1`.
+Add Rust and TypeScript tests with 100 samples and window `20..79`; assert the full-window helper returns 62 neighbour-inclusive samples with `stride == 1`.
 
-Change `BakedPlane.querySamples` coverage to assert that `max_points: 1` does not reduce the response.
+Change `BakedPlane.querySamples` coverage to assert that `max_points: 0` does not reduce the response.
 
 Replace the sample-cap tests in `app-shell.test.ts` with a refresh request test asserting:
 
@@ -237,9 +237,9 @@ Expected: FAIL because full-window helpers are absent, both planes stride to the
 
 - [ ] **Step 3: Implement contiguous sample windows**
 
-Extract the shared neighbour-inclusive `start..end` calculation in Rust, then implement `sample_window_full` by copying `time[start..end]` and `values[start..end]` with `stride: 1`. Make `query_samples` call it and ignore `request.max_points`.
+Extract the shared neighbour-inclusive `start..end` calculation in Rust, then implement `sample_window_full` by copying `time[start..end]` and `values[start..end]` with `stride: 1`. Make `query_samples` call it when `request.max_points == 0`; retain `sample_window` for positive explicit export caps.
 
-Mirror this as `sampleWindowFull` in TypeScript and make `BakedPlane.querySamples` call it while ignoring `request.max_points`.
+Mirror this as `sampleWindowFull` in TypeScript and make `BakedPlane.querySamples` call it for `max_points == 0`; retain `sampleWindow` for positive explicit export caps.
 
 Remove `SAMPLE_CAP`, `SAMPLE_MODE_CAP`, `SAMPLE_POINT_BUDGET`, `sampleCapFor`, and `sampleCapForPanel`. Panel requests send `max_points: 0` as the retained compatibility value. Remove `cap` from `SampleWindowCache.key` because it no longer changes response identity. XY requests only `sampleWindow(panel)` once and no longer calls `mergeSampleResponses` in the refresh path.
 
@@ -313,6 +313,9 @@ rg -n "csvMaxPoints|ExportFidelity|data-fidelity|max_points" \
 Expected: fidelity and CSV point ceilings occur only in explicit export code;
 the live refresh path added in Task 3 sends `max_points: 0`.
 
+Assert in both hosts that `max_points: 0` is uncapped while a positive value
+retains the existing bounded CSV export response.
+
 - [ ] **Step 3: Record the no-change verification**
 
 Append Task 4's commands and evidence to the SDD report. This task
@@ -344,9 +347,11 @@ Record the following decisions and consequences:
 - Supersedes: live presentation reduction decisions in ADRs 0036, 0037, and 0039
 
 Every live presentation query returns source-resolution samples. Time tiles
-use logical level zero and sample queries use stride one. Live reduction
-controls remain protocol compatibility fields but are inert. Explicit HTML
-and CSV export fidelity remains user selected under ADRs 0024 and 0025.
+use logical level zero and sample queries use stride one. Live tile reduction
+controls remain compatibility fields but are inert; live sample requests use
+zero as the uncapped sentinel. Positive sample caps remain reserved for
+explicit CSV export fidelity under ADRs 0024 and 0025. Explicit HTML and CSV
+export fidelity remains user selected.
 Resource exhaustion during live rendering is an error, never a trigger for
 automatic reduction. Pyramid construction remains temporarily for a measured
 follow-up cleanup.

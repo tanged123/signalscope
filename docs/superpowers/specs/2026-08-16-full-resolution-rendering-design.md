@@ -29,6 +29,10 @@ per-mode, per-series, and per-panel point budgets are removed. XY continues to
 request its full trajectory extent because out-of-window trajectory dimming is
 part of its interaction contract.
 
+Live sample requests use `max_points = 0` to select this uncapped behavior.
+Positive `max_points` values remain reserved for explicit CSV export fidelity
+and retain the existing bounded, strided response.
+
 `HttpPlane` and `BakedPlane` apply the same full-resolution rendering
 semantics when their available data contains level zero. Window caches and
 padded-window request reuse remain because they avoid repeated I/O without
