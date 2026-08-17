@@ -966,6 +966,7 @@ mod tests {
         assert!(String::from_utf8_lossy(&body).contains("protocol version"));
     }
 
+    #[allow(clippy::float_cmp)]
     #[tokio::test]
     async fn query_samples_keeps_zero_uncapped_and_positive_values_bounded() {
         let ctx = crate::AppContext::for_tests(None);
