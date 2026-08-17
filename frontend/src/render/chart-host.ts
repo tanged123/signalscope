@@ -45,6 +45,7 @@ export class ChartHost {
   private elements: SeriesElement[] = [];
   private options: ChartGPUOptions | null = null;
   private lastLayout: PlotLayout | null = null;
+  private lastLabels: { x: string; y: string } | null = null;
 
   private constructor(
     private readonly container: HTMLElement,
@@ -86,10 +87,12 @@ export class ChartHost {
     const started = performance.now();
     const ids = request.response.series.map((series) => series.signalId);
     const nextTRef = minimumTime(request.response);
+    let rebuilt = false;
     if (!sameStrings(ids, this.seriesIds) || nextTRef !== this.tRef) {
       this.seriesIds = ids;
       this.tRef = nextTRef;
       this.elements = [];
+      rebuilt = true;
     }
     const emphasis = new Set(request.emphasisIndices);
     const emphasisActive = request.emphasisIndices.length > 0;
@@ -112,6 +115,7 @@ export class ChartHost {
       ) {
         return previous.element;
       }
+      rebuilt = true;
       const hue = style.hue;
       const ghost = hue === null;
       const color = ghost
@@ -151,6 +155,15 @@ export class ChartHost {
       return element;
     });
     this.elements.length = series.length;
+    const labelsChanged =
+      this.lastLabels === null ||
+      this.lastLabels.x !== request.xLabel ||
+      this.lastLabels.y !== request.yLabel;
+    if (!rebuilt && !labelsChanged && this.options !== null) {
+      this.setRangesOnly(request.xRange, request.yRange);
+      return performance.now() - started;
+    }
+    this.lastLabels = { x: request.xLabel, y: request.yLabel };
     const options = this.makeOptions(request, series);
     this.options = options;
     this.chart.setOption(options);

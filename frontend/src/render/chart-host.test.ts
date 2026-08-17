@@ -324,6 +324,38 @@ describe("ChartHost", () => {
     });
   });
 
+  it("reuses the resolved series array when only the ranges changed", async () => {
+    const host = await hostFixture();
+    const data = response(["signal-1"]);
+    const seriesOf = () => (state.charts.at(-1)?.options ?? {}).series;
+
+    host.render(request(data));
+    const first = seriesOf();
+
+    host.render({ ...request(data), xRange: { min: 11, max: 13 } });
+
+    expect(seriesOf()).toBe(first);
+    const xAxis = (state.charts.at(-1)?.options ?? {}).xAxis as { min: number };
+    expect(xAxis.min).toBe(1);
+  });
+
+  it("rebuilds the options when a label changed", async () => {
+    const host = await hostFixture();
+    const data = response(["signal-1"]);
+    const seriesOf = () => (state.charts.at(-1)?.options ?? {}).series;
+
+    host.render(request(data));
+    const first = seriesOf();
+
+    host.render({ ...request(data), yLabel: "amps" });
+
+    expect(seriesOf()).not.toBe(first);
+    const yAxis = (state.charts.at(-1)?.options ?? {}).yAxis as {
+      name: string;
+    };
+    expect(yAxis.name).toBe("amps");
+  });
+
   it("restyles series and grid lines when the palette changes", async () => {
     const host = await hostFixture();
     host.render(request());
