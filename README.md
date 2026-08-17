@@ -9,7 +9,7 @@ SignalScope combines a Rust data plane for logs larger than memory with one
 TypeScript presentation plane that runs in a browser host and in snapshots:
 
 - The localhost browser host streams and memory-maps source data.
-- A self-contained HTML snapshot uses the same renderer against embedded, size-budgeted tiles.
+- A self-contained HTML snapshot uses the same renderer against embedded tiles selected by explicit export fidelity.
 
 Time-series panels use the pinned ChartGPU submodule WebGPU renderer; XY, FFT, and
 histogram panels retain their Canvas2D paths. A WebGPU-capable Chromium is
@@ -124,8 +124,9 @@ docs/adr/            accepted architecture decisions
 
 The frontend depends only on the versioned `DataPlane` contract. `HttpPlane`
 calls the localhost Rust server; `BakedPlane` reads the same response shapes
-from a snapshot data slot. ChartGPU consumes the existing bounded tile
-pipeline, so the renderer has no host-specific branch.
+from a snapshot data slot. Live panels consume full-resolution data from both
+hosts, while explicit HTML and CSV exports retain their independent fidelity
+controls; the renderer has no host-specific branch.
 
 See [the ADR index](docs/adr/README.md) for the decisions behind the two-host product shape, layer boundaries, tile pyramid, protocol, session schema, linked-time model, and snapshot injection mechanism.
 

@@ -42,5 +42,6 @@ Accepted decisions:
 38. [Browser-only host](0038-browser-only-host.md)
 39. [ChartGPU time-series renderer](0039-chartgpu-time-series-renderer.md)
 40. [ChartGPU submodule delivery](0040-chartgpu-submodule-delivery.md)
+41. [Full-resolution presentation baseline](0041-full-resolution-presentation-baseline.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.
