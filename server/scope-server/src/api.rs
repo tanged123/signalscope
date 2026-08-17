@@ -1010,6 +1010,12 @@ mod tests {
         let uncapped: Envelope<SampleResponse> = serde_json::from_slice(&body).unwrap();
         assert_eq!(uncapped.payload.series[0].time.len(), 62);
         assert_eq!(uncapped.payload.series[0].stride, 1);
+        assert_eq!(uncapped.payload.series[0].time.first(), Some(&19.0));
+        assert_eq!(uncapped.payload.series[0].values.first(), Some(&19.0));
+        assert_eq!(uncapped.payload.series[0].time[31], 50.0);
+        assert_eq!(uncapped.payload.series[0].values[31], 50.0);
+        assert_eq!(uncapped.payload.series[0].time.last(), Some(&80.0));
+        assert_eq!(uncapped.payload.series[0].values.last(), Some(&80.0));
 
         let bounded = router
             .oneshot(
@@ -1023,7 +1029,14 @@ mod tests {
         assert_eq!(bounded.status(), StatusCode::OK);
         let body = bounded.into_body().collect().await.unwrap().to_bytes();
         let bounded: Envelope<SampleResponse> = serde_json::from_slice(&body).unwrap();
-        assert_eq!(bounded.payload.series[0].time.len(), 10);
+        assert_eq!(
+            bounded.payload.series[0].time,
+            vec![19.0, 26.0, 33.0, 40.0, 47.0, 54.0, 61.0, 68.0, 75.0, 80.0]
+        );
+        assert_eq!(
+            bounded.payload.series[0].values,
+            vec![19.0, 26.0, 33.0, 40.0, 47.0, 54.0, 61.0, 68.0, 75.0, 80.0]
+        );
         assert_eq!(bounded.payload.series[0].stride, 7);
     }
 

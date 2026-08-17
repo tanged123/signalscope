@@ -457,39 +457,43 @@ export class BakedPlane implements DataPlane {
     return sliceColumns(columns, start, end);
   }
 
-  querySamples(request: SampleRequest): Promise<SampleResponse> {
-    const requested = new Set(request.signal_ids);
-    return Promise.resolve({
+  async querySamples(request: SampleRequest): Promise<SampleResponse> {
+    const signals = new Map(
+      this.payload.signals.map((signal) => [signal.summary.signal_id, signal]),
+    );
+    return {
       request_id: request.request_id,
-      series: this.payload.signals
-        .filter((signal) => requested.has(signal.summary.signal_id))
-        .map((signal) => {
-          const raw = this.rawFor(signal);
-          const slice =
-            request.max_points === 0
-              ? sampleWindowFull(
-                  raw.time,
-                  raw.values,
-                  request.window.t0,
-                  request.window.t1,
-                )
-              : sampleWindow(
-                  raw.time,
-                  raw.values,
-                  request.window.t0,
-                  request.window.t1,
-                  request.max_points,
-                );
-          return {
-            signal_id: signal.summary.signal_id,
-            signal_path: signal.summary.path,
-            unit: signal.summary.unit,
-            time: slice.time,
-            values: slice.values,
-            stride: slice.stride,
-          };
-        }),
-    });
+      series: request.signal_ids.map((signalId) => {
+        const signal = signals.get(signalId);
+        if (signal === undefined) {
+          throw new Error(`unknown signal id: ${signalId}`);
+        }
+        const raw = this.rawFor(signal);
+        const slice =
+          request.max_points === 0
+            ? sampleWindowFull(
+                raw.time,
+                raw.values,
+                request.window.t0,
+                request.window.t1,
+              )
+            : sampleWindow(
+                raw.time,
+                raw.values,
+                request.window.t0,
+                request.window.t1,
+                request.max_points,
+              );
+        return {
+          signal_id: signal.summary.signal_id,
+          signal_path: signal.summary.path,
+          unit: signal.summary.unit,
+          time: slice.time,
+          values: slice.values,
+          stride: slice.stride,
+        };
+      }),
+    };
   }
 
   /** ADR 0015: the finest baked level stands in for raw samples. */

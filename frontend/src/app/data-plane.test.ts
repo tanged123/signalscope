@@ -102,6 +102,83 @@ describe("BakedPlane.querySamples", () => {
     expect(response.series[0]?.stride).toBe(7);
   });
 
+  it("returns requested signals in request order", async () => {
+    const summary = (signalId: string, path: string): SignalSummary => ({
+      signal_id: signalId,
+      source_id: "3",
+      source_key: `00000000-0000-0000-0000-00000000000${signalId}`,
+      local_path: path,
+      path: `vehicle/${path}`,
+      unit: "m/s",
+      point_count: "3",
+      t_min: 0,
+      t_max: 2,
+      last_value: null,
+    });
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          {
+            summary: summary("7", "speed"),
+            levels: [Array.from({ length: 3 }, (_, time) => bin(time, time))],
+          },
+          {
+            summary: summary("8", "rpm"),
+            levels: [Array.from({ length: 3 }, (_, time) => bin(time, time))],
+          },
+        ],
+      }),
+    );
+
+    const response = await plane.querySamples({
+      request_id: "samples-order-1",
+      signal_ids: ["8", "7"],
+      window: { t0: 0, t1: 2 },
+      max_points: 0,
+    });
+
+    expect(response.series.map((series) => series.signal_id)).toEqual([
+      "8",
+      "7",
+    ]);
+  });
+
+  it("rejects unknown signal IDs", async () => {
+    const summary: SignalSummary = {
+      signal_id: "7",
+      source_id: "3",
+      source_key: "00000000-0000-0000-0000-000000000003",
+      local_path: "speed",
+      path: "vehicle/speed",
+      unit: "m/s",
+      point_count: "3",
+      t_min: 0,
+      t_max: 2,
+      last_value: null,
+    };
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          {
+            summary,
+            levels: [Array.from({ length: 3 }, (_, time) => bin(time, time))],
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      plane.querySamples({
+        request_id: "samples-unknown-1",
+        signal_ids: ["missing"],
+        window: { t0: 0, t1: 2 },
+        max_points: 0,
+      }),
+    ).rejects.toThrow("unknown signal id: missing");
+  });
+
   it("reports finite last values for both generated demo signals", async () => {
     const plane = BakedPlane.fromDocument({
       querySelector: () => null,
