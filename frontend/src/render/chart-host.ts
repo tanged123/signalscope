@@ -31,6 +31,8 @@ interface SeriesElement {
   columns: object;
   style: SeriesStroke;
   emphasis: boolean;
+  /** Opacity depends on whether any series is emphasized, not only this one. */
+  emphasisActive: boolean;
   palette: Palette;
   element: LineSeriesConfig;
 }
@@ -90,6 +92,7 @@ export class ChartHost {
       this.elements = [];
     }
     const emphasis = new Set(request.emphasisIndices);
+    const emphasisActive = request.emphasisIndices.length > 0;
     const series = request.response.series.map((tile, index) => {
       const style = request.styles[index] ?? {
         hue: null,
@@ -104,6 +107,7 @@ export class ChartHost {
         previous.columns === tile.bins &&
         sameStyle(previous.style, style) &&
         previous.emphasis === isEmphasized &&
+        previous.emphasisActive === emphasisActive &&
         previous.palette === request.palette
       ) {
         return previous.element;
@@ -114,7 +118,7 @@ export class ChartHost {
         ? request.palette.fg4
         : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
       const opacity =
-        request.emphasisIndices.length > 0 && !isEmphasized && !ghost
+        emphasisActive && !isEmphasized && !ghost
           ? 0.25
           : Math.min(1, style.alpha + (isEmphasized ? 0.4 : 0));
       const minimumWidth = ghost
@@ -140,6 +144,7 @@ export class ChartHost {
         columns: tile.bins,
         style,
         emphasis: isEmphasized,
+        emphasisActive,
         palette: request.palette,
         element,
       };

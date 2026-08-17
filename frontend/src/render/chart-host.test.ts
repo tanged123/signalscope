@@ -207,6 +207,25 @@ describe("ChartHost", () => {
     expect(Array.from(series[0]?.data.x ?? [])).toEqual([0]);
   });
 
+  it("restores opacity when emphasis clears on an unchanged response", async () => {
+    const host = await hostFixture();
+    const data = response(["signal-1", "signal-2"]);
+    const styles = [stroke(0), stroke(1)];
+    const opacityOf = (index: number) =>
+      (
+        (state.charts.at(-1)?.options ?? {}).series as Array<{
+          lineStyle: { opacity: number };
+        }>
+      )[index]?.lineStyle.opacity;
+
+    host.render(request(data, styles, [0]));
+    expect(opacityOf(0)).toBeCloseTo(1);
+    expect(opacityOf(1)).toBeCloseTo(0.25);
+
+    host.render(request(data, styles, []));
+    expect(opacityOf(1)).toBeCloseTo(1);
+  });
+
   it("maps hue to the same palette slot as the Canvas2D renderers", async () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);

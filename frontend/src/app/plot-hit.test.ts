@@ -74,7 +74,7 @@ test("returns the same vertex from padded columns as from trimmed columns", () =
         if (typeof property === "string" && /^\d+$/.test(property)) {
           paddedReads += 1;
         }
-        return Reflect.get(target, property, target);
+        return Reflect.get(target, property, target) as unknown;
       },
     });
   const countedColumns = {
@@ -88,7 +88,7 @@ test("returns the same vertex from padded columns as from trimmed columns", () =
         if (typeof property === "string" && /^\d+$/.test(property)) {
           paddedReads += 1;
         }
-        return Reflect.get(target, property, target);
+        return Reflect.get(target, property, target) as unknown;
       },
     }),
   } as BinColumns;
