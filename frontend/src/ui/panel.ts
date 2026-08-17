@@ -1468,17 +1468,22 @@ export class PanelView {
     window: { t0: number; t1: number },
     seriesKey = "",
   ): { x: Range; y: Range } | null {
-    const automatic = plot.autoRanges();
+    let cached: ReturnType<PreparedPlot["autoRanges"]> | null = null;
+    const automatic = (): ReturnType<PreparedPlot["autoRanges"]> =>
+      (cached ??= plot.autoRanges());
     const stickyY = plot.interaction.stickyAutoY
-      ? this.yAxis.resolve(seriesKey, () => automatic.y, state.y_range)
-      : automatic.y;
+      ? this.yAxis.resolve(seriesKey, () => automatic().y, state.y_range)
+      : automatic().y;
     return resolveRanges(
       plot.interaction,
       {
         x: state.x_range,
         y: plot.interaction.stickyAutoY ? null : state.y_range,
       },
-      { x: automatic.x, y: stickyY },
+      {
+        x: plot.interaction.xAxis === "linked-time" ? null : automatic().x,
+        y: stickyY,
+      },
       window,
     );
   }

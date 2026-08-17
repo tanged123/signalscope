@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isUsableYRange, YAxisPolicy } from "./y-axis";
 
 const automatic: readonly [number, number] = [-50, 120];
@@ -68,5 +68,27 @@ describe("YAxisPolicy", () => {
       ),
     ).toEqual([-100, 300]);
     expect(calls).toBe(0);
+  });
+
+  it("does not recompute the automatic range once a sticky range exists", () => {
+    const policy = new YAxisPolicy();
+    const compute = vi.fn(() => automatic);
+
+    expect(policy.resolve("a", compute, null)).toEqual([-50, 120]);
+    expect(compute).toHaveBeenCalledTimes(1);
+
+    expect(policy.resolve("a", compute, null)).toEqual([-50, 120]);
+    expect(policy.resolve("a", compute, null)).toEqual([-50, 120]);
+    expect(compute).toHaveBeenCalledTimes(1);
+  });
+
+  it("recomputes after the series key changes", () => {
+    const policy = new YAxisPolicy();
+    const compute = vi.fn(() => automatic);
+
+    policy.resolve("a", compute, null);
+    policy.resolve("b", compute, null);
+
+    expect(compute).toHaveBeenCalledTimes(2);
   });
 });

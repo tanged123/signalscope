@@ -164,6 +164,8 @@ export interface HistogramPlotInput {
   })[];
 }
 
+type SeriesExtent = { min: number; max: number } | null;
+
 const POLICIES: Record<PanelMode, PlotInteractionPolicy> = {
   time: {
     xAxis: "linked-time",
@@ -208,9 +210,11 @@ export function policyFor(mode: PanelMode): PlotInteractionPolicy {
 }
 
 export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
-  const extents = input.series.map((series) =>
-    columnsYExtent(series.bins, input.window),
-  );
+  let extents: SeriesExtent[] | null = null;
+  const seriesExtents = (): SeriesExtent[] =>
+    (extents ??= input.series.map((series) =>
+      columnsYExtent(series.bins, input.window),
+    ));
   const resolve = (annotation: Annotation): ResolvedAnnotation | null => {
     if (annotation.domain !== "time") return null;
     const series = input.series.find(
@@ -241,7 +245,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
     autoRanges() {
       let min = Number.POSITIVE_INFINITY;
       let max = Number.NEGATIVE_INFINITY;
-      for (const extent of extents) {
+      for (const extent of seriesExtents()) {
         if (extent === null) continue;
         min = Math.min(min, extent.min);
         max = Math.max(max, extent.max);
