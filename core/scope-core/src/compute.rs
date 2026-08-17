@@ -178,6 +178,10 @@ pub fn sample_window(
 ///
 /// `max_points` remains on the wire for protocol compatibility, but callers
 /// use this helper when a sample-mode panel needs the full window.
+///
+/// # Panics
+///
+/// Panics when `time` and `values` have different lengths.
 #[must_use]
 pub fn sample_window_full(time: &[f64], values: &[f64], t0: f64, t1: f64) -> SampleSlice {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
