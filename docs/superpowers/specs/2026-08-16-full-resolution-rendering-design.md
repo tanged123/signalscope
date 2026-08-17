@@ -5,11 +5,10 @@
 
 ## Decision
 
-SignalScope will present full-resolution source samples in every live panel,
-CSV export, and HTML snapshot. Display width, series count, export fidelity,
-and memory budgets must not select coarser pyramid levels or stride across
-samples. Operations that exceed available resources fail visibly; they do not
-silently fall back to reduced data.
+SignalScope will present full-resolution source samples in every live panel.
+Display width, series count, and memory budgets must not select coarser
+pyramid levels or stride across samples. Operations that exceed available
+resources fail visibly; they do not silently fall back to reduced data.
 
 This establishes correctness at native resolution before further performance
 work. Histogram bins and FFT output remain mathematical products of their
@@ -30,38 +29,42 @@ per-mode, per-series, and per-panel point budgets are removed. XY continues to
 request its full trajectory extent because out-of-window trajectory dimming is
 part of its interaction contract.
 
-`HttpPlane` and `BakedPlane` apply the same full-resolution semantics. Window
-caches and padded-window request reuse remain because they avoid repeated I/O
-without reducing samples.
+`HttpPlane` and `BakedPlane` apply the same full-resolution rendering
+semantics when their available data contains level zero. Window caches and
+padded-window request reuse remain because they avoid repeated I/O without
+reducing samples.
 
 ## Export
 
-HTML snapshots always bake level zero for every selected signal. Visible and
-all-loaded remain range choices; preview, standard, and high fidelity choices
-are removed from the user interface and all export execution uses full
-fidelity. CSV exports likewise contain every row in the selected window.
+Export is an explicit user operation and retains its independent fidelity
+controls. HTML snapshots and CSV exports continue to offer preview, standard,
+high, and full fidelity alongside visible and all-loaded range choices. Full
+fidelity selects level zero; reduced export fidelity occurs only when the user
+chooses it and never changes live rendering resolution.
 
-Snapshots may become very large. Existing size estimates and warnings remain,
-but there is no automatic reduction or size-based fallback.
+Existing export estimates, warnings, and size budgets remain unchanged.
 
 ## Transitional architecture
 
 The ingest pyramid and its coarse cached levels remain in this change to keep
-the first implementation focused and reversible. Coarse levels have no
-presentation consumer after this change. A later measured cleanup may replace
-the redundant level-zero envelope transport with a compact binary raw-sample
-format and remove unused pyramid construction.
+the first implementation focused and reversible. Coarse levels have no live
+workbench presentation consumer after this change; explicit reduced-fidelity
+snapshots continue to consume the level chosen during export. A later measured
+cleanup may replace the redundant live level-zero envelope transport with a
+compact binary raw-sample format.
 
-The implementation adds an ADR that supersedes the reduction decisions in
-ADRs 0024, 0025, 0036, 0037, and the density-preservation portion of ADR 0039.
-The underlying gap, exact identifier, transport-version, and host-parity
+The implementation adds an ADR that supersedes the live presentation
+reduction decisions in ADRs 0036, 0037, and the density-preservation portion
+of ADR 0039. ADRs 0024 and 0025 remain authoritative for explicit exports. The
+underlying gap, exact identifier, transport-version, and host-parity
 invariants remain unchanged.
 
 ## Failure behavior
 
-Allocation, transport, ChartGPU, transform, and export failures are reported
-through the existing error surfaces. The application must not catch these
-failures and retry with reduced data.
+Allocation, transport, ChartGPU, and transform failures are reported through
+the existing error surfaces. Live rendering must not catch these failures and
+retry with reduced data. Explicit export behavior retains its existing
+user-selected fidelity and size handling.
 
 ## Verification
 
@@ -75,10 +78,11 @@ Tests prove that:
   one;
 - XY, FFT, and histogram receive uncapped source responses;
 - FFT input is not limited to 16,384 samples;
-- snapshot and CSV plans always select full resolution;
+- snapshot and CSV fidelity choices remain explicit and independent of live
+  rendering;
 - the live and baked planes remain behaviorally aligned.
 
 The completed change runs focused Rust and frontend suites, formatting, the
 cross-layer quality gate, and the full benchmark/e2e gate. Resource exhaustion
-in the raw mc1000 or wide100m scenarios is recorded as a result rather than
-hidden by LOD.
+while live-rendering the raw mc1000 or wide100m scenarios is recorded as a
+result rather than hidden by LOD.

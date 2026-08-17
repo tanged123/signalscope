@@ -2,19 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make every live panel, CSV export, and HTML snapshot consume full-resolution source samples without pyramid LOD, stride sampling, or fidelity reduction.
+**Goal:** Make every live panel consume full-resolution source samples without pyramid LOD or stride sampling while preserving explicit export fidelity controls.
 
-**Architecture:** Keep the current tile and sample protocol shapes for this baseline, but make their reduction controls inert: time queries always return logical pyramid level zero and sample queries always return contiguous stride-one windows. Keep pyramid construction temporarily, collapse singleton level-zero bins to one ChartGPU vertex, force snapshot planning to level zero, and remove fidelity selection from the export UI.
+**Architecture:** Keep the current tile and sample protocol shapes for this baseline, but make their live-rendering reduction controls inert: time queries always return logical pyramid level zero and sample queries always return contiguous stride-one windows. Keep pyramid construction temporarily and collapse singleton level-zero bins to one ChartGPU vertex. Snapshot and CSV fidelity remain separate, explicit user choices.
 
 **Tech Stack:** Rust (`scope-core`, `scope-server`), TypeScript/Vitest, ChartGPU/WebGPU, Playwright, generated SignalScope protocol types.
 
 ## Global Constraints
 
-- No operation may silently fall back to reduced data after allocation, transport, rendering, transform, or export failure.
-- `HttpPlane` and `BakedPlane` must return the same full-resolution windows.
-- Keep protocol schema fields stable in this baseline; `pixel_width`, `max_total_bins`, `max_points`, and `fidelity` remain accepted compatibility fields but cannot reduce output.
+- No live-rendering operation may silently fall back to reduced data after allocation, transport, rendering, or transform failure.
+- `HttpPlane` must return full-resolution live windows. `BakedPlane` must add no further reduction beyond the user's exported fidelity and must match `HttpPlane` for full-fidelity snapshots.
+- Keep protocol schema fields stable in this baseline; live-rendering `pixel_width`, `max_total_bins`, and `max_points` remain accepted compatibility fields but cannot reduce output.
+- Preserve preview, standard, high, and full fidelity for explicit HTML and CSV exports; export fidelity must not affect live rendering.
 - Histogram aggregation remains intrinsic plot computation; FFT consumes the full fetched window and has no artificial 16,384-sample ceiling.
-- Keep the pyramid and coarse cache levels temporarily; no presentation path may consume a coarse level.
+- Keep the pyramid and coarse cache levels temporarily; no live workbench presentation path may consume a coarse level. Reduced-fidelity snapshots may consume only their explicitly exported level.
 - Use repository scripts for formatting, tests, builds, benchmarks, and versioning.
 - Add an accepted ADR because this supersedes accepted LOD decisions.
 - Do not run GUI/e2e until all implementation tasks are complete.
@@ -268,41 +269,23 @@ git add core/scope-core/src/compute.rs server/scope-server/src/api.rs \
 git commit -m "feat(panels): consume uncapped samples"
 ```
 
-### Task 4: Full-resolution snapshots and CSV exports
+### Task 4: Preserve explicit export fidelity
 
 **Files:**
 
-- Modify: `core/scope-core/src/snapshot.rs`
-- Modify: `core/scope-core/src/bin/scope-bake.rs`
-- Modify: `server/scope-server/src/api.rs`
-- Modify: `frontend/src/ui/export-dialog.ts`
-- Modify: `frontend/src/ui/export-dialog.test.ts`
-- Modify: `frontend/src/ui/app-shell.ts`
-- Modify: `frontend/src/ui/app-shell.test.ts`
-- Modify: `scripts/export.sh`
-- Modify: `scripts/test.sh`
+- Verify: `core/scope-core/src/snapshot.rs`
+- Verify: `core/scope-core/src/bin/scope-bake.rs`
+- Verify: `frontend/src/ui/export-dialog.ts`
+- Verify: `frontend/src/ui/export-dialog.test.ts`
+- Verify: `scripts/export.sh`
 
 **Interfaces:**
 
-- Guarantees: `snapshot::plan` and `plan_selected` always start every signal at logical level zero regardless of `ExportFidelity`.
-- Guarantees: the export dialog exposes range but no fidelity choice and submits `fidelity: "full"`.
-- Guarantees: CSV requests use the full sample path and report stride one.
+- Guarantees: explicit HTML and CSV exports retain preview, standard, high, and full fidelity.
+- Guarantees: `ExportFidelity::Full` selects logical level zero while reduced choices remain user initiated.
+- Guarantees: export fidelity does not alter live panel requests.
 
-- [ ] **Step 1: Write failing export tests**
-
-Replace snapshot fidelity-selection tests with a table over every `ExportFidelity` asserting:
-
-```rust
-assert!(plan.signals.iter().all(|signal| signal.finest_level() == 0));
-assert_eq!(plan.series_decimated, 0);
-assert_eq!(plan.coarsest_ratio, 1);
-```
-
-Add an export-dialog test asserting no `[data-fidelity]` buttons exist and that HTML and CSV submissions pass `"full"`.
-
-Update `scope-bake` argument tests so omitted fidelity remains full and `--fidelity preview|standard|high` returns `only full fidelity is supported`.
-
-- [ ] **Step 2: Run focused tests and verify RED**
+- [ ] **Step 1: Run focused export regression tests**
 
 Run:
 
@@ -312,39 +295,29 @@ Run:
 ./scripts/test.sh unit export-dialog app-shell csv-export
 ```
 
-Expected: FAIL because reduced fidelities still select coarse levels and the UI still exposes four choices.
+Expected: PASS. Confirm the existing tests cover all four named fidelities,
+full level-zero planning, reduced export planning, CSV stride reporting, and
+the four export-dialog buttons. Do not change production or test files when
+these contracts already pass.
 
-- [ ] **Step 3: Force full snapshot planning**
-
-Make `signal_plan` retain the compatibility fidelity argument as `_fidelity` and create exactly one `LevelPlan` at index zero. Preserve range clipping. BakedPlane uses only embedded level zero after Task 2, so snapshots must not carry unused coarse levels.
-
-Make `scope-bake` accept omitted fidelity or `--fidelity full`; reject the other three values. Update `scripts/export.sh` usage accordingly and remove reduced fidelity arguments from `scripts/test.sh`.
-
-- [ ] **Step 4: Remove export fidelity controls**
-
-Replace the fidelity radio group with static `full resolution` copy. Keep internal delegate signatures stable, initialize fidelity to `"full"`, never mutate it, load only full CSV estimates, and select only the full estimate row for size reporting. Ensure every `exportSnapshot` and CSV path passes `"full"`.
-
-- [ ] **Step 5: Verify GREEN**
+- [ ] **Step 2: Check live/export separation**
 
 Run:
 
 ```bash
-./scripts/test.sh core snapshot
-./scripts/test.sh core export_controls
-./scripts/test.sh unit export-dialog app-shell csv-export
+rg -n "csvMaxPoints|ExportFidelity|data-fidelity|max_points" \
+  frontend/src/ui/app-shell.ts frontend/src/ui/export-dialog.ts \
+  core/scope-core/src/snapshot.rs
 ```
 
-Expected: PASS.
+Expected: fidelity and CSV point ceilings occur only in explicit export code;
+the live refresh path added in Task 3 sends `max_points: 0`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Record the no-change verification**
 
-```bash
-git add core/scope-core/src/snapshot.rs core/scope-core/src/bin/scope-bake.rs \
-  server/scope-server/src/api.rs frontend/src/ui/export-dialog.ts \
-  frontend/src/ui/export-dialog.test.ts frontend/src/ui/app-shell.ts \
-  frontend/src/ui/app-shell.test.ts scripts/export.sh scripts/test.sh
-git commit -m "feat(export): require full-resolution data"
-```
+Append Task 4's commands and evidence to the SDD report. This task
+intentionally creates no source commit because existing export behavior is the
+requirement.
 
 ### Task 5: Architecture record and product documentation
 
@@ -357,7 +330,7 @@ git commit -m "feat(export): require full-resolution data"
 
 **Interfaces:**
 
-- Records: ADR 0041 supersedes the reduction portions of ADRs 0024, 0025, 0036, 0037, and 0039 without rewriting accepted history.
+- Records: ADR 0041 supersedes the live-rendering reduction portions of ADRs 0036, 0037, and 0039 without rewriting accepted history; ADRs 0024 and 0025 remain authoritative for explicit export fidelity.
 
 - [ ] **Step 1: Write ADR 0041**
 
@@ -368,21 +341,22 @@ Record the following decisions and consequences:
 
 - Status: Accepted
 - Date: 2026-08-16
-- Supersedes: reduction decisions in ADRs 0024, 0025, 0036, 0037, and 0039
+- Supersedes: live presentation reduction decisions in ADRs 0036, 0037, and 0039
 
-Every live and baked presentation query returns source-resolution samples.
-Time tiles use logical level zero; sample queries use stride one; exports
-always bake level zero. Reduction controls remain protocol compatibility
-fields but are inert. Resource exhaustion is an error, never a trigger for
+Every live presentation query returns source-resolution samples. Time tiles
+use logical level zero and sample queries use stride one. Live reduction
+controls remain protocol compatibility fields but are inert. Explicit HTML
+and CSV export fidelity remains user selected under ADRs 0024 and 0025.
+Resource exhaustion during live rendering is an error, never a trigger for
 automatic reduction. Pyramid construction remains temporarily for a measured
 follow-up cleanup.
 ```
 
-Include consequences: larger transfers/snapshots, potentially failed raw benchmark scenarios, exact host parity, and removal of fidelity UI.
+Include consequences: larger live transfers, potentially failed raw benchmark scenarios, exact host parity, and unchanged explicit export fidelity UI.
 
 - [ ] **Step 2: Update adjacent documentation**
 
-Add ADR 0041 to the ADR index. Update README export and rendering descriptions to say full resolution. Add a roadmap entry linking this baseline to the approved design spec and noting that compact raw binary transport/pyramid removal are measured follow-ups.
+Add ADR 0041 to the ADR index. Update README live-rendering descriptions to say full resolution while retaining its export-fidelity documentation. Add a roadmap entry linking this baseline to the approved design spec and noting that compact raw binary transport/pyramid removal are measured follow-ups.
 
 - [ ] **Step 3: Check documentation and commit**
 
