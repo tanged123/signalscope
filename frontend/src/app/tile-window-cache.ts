@@ -1,4 +1,4 @@
-import { sliceColumns, type ColumnarTileResponse } from "./bin-columns";
+import type { ColumnarTileResponse } from "./bin-columns";
 
 export interface CachedPanelTiles {
   response: ColumnarTileResponse;
@@ -46,7 +46,11 @@ export class TileWindowCache {
     return this.entries.get(panelId) ?? null;
   }
 
-  slice(
+  /**
+   * Returns the padded response for a covered viewport by reference. The
+   * presentation layer bounds itself by the visible window instead.
+   */
+  hit(
     panelId: string,
     idsKey: string,
     pixelWidth: number,
@@ -63,18 +67,7 @@ export class TileWindowCache {
     ) {
       return null;
     }
-    const series = [];
-    for (const tile of entry.response.series) {
-      const start = firstOverlapping(tile.bins.t1, t0);
-      const end = pastLastOverlapping(tile.bins.t0, t1);
-      const sliceStart = Math.max(0, start - 1);
-      const sliceEnd = Math.min(tile.bins.count, end + 1);
-      series.push({
-        ...tile,
-        bins: sliceColumns(tile.bins, sliceStart, sliceEnd),
-      });
-    }
-    return { ...entry.response, series };
+    return entry.response;
   }
 
   store(panelId: string, entry: CachedPanelTiles): void {
@@ -85,26 +78,4 @@ export class TileWindowCache {
     if (panelId === undefined) this.entries.clear();
     else this.entries.delete(panelId);
   }
-}
-
-function firstOverlapping(t1: ArrayLike<number>, t0: number): number {
-  let low = 0;
-  let high = t1.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if ((t1[middle] as number) < t0) low = middle + 1;
-    else high = middle;
-  }
-  return low;
-}
-
-function pastLastOverlapping(t0: ArrayLike<number>, t1: number): number {
-  let low = 0;
-  let high = t0.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if ((t0[middle] as number) <= t1) low = middle + 1;
-    else high = middle;
-  }
-  return low;
 }

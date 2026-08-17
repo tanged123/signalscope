@@ -2652,7 +2652,7 @@ export class AppShell {
             const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
             const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
             const idsKey = [...ids].sort().join("\u0000");
-            const cached = this.tileWindowCache.slice(
+            const cached = this.tileWindowCache.hit(
               panel.id,
               idsKey,
               pixelWidth,
@@ -2684,16 +2684,7 @@ export class AppShell {
               pixelWidth,
               idsKey,
             });
-            nextTiles.set(
-              panel.id,
-              this.tileWindowCache.slice(
-                panel.id,
-                idsKey,
-                pixelWidth,
-                window.t0,
-                window.t1,
-              ) ?? response,
-            );
+            nextTiles.set(panel.id, response);
           } else {
             const contextWindow = this.sampleWindow(panel);
             const cacheKey = SampleWindowCache.key({
