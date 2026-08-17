@@ -156,12 +156,26 @@ export function nearestVertex(
   py: number,
   threshold: number,
 ): VertexHit | null {
-  // Ranked on squared distance — two vertices per bin over every visible bin
-  // on each pointer move — then the winner's true distance is reported once.
+  // Ranked on squared distance — two vertices per bin over the bins the
+  // cursor neighborhood can reach — then the winner's true distance is
+  // reported once. The bracket keeps the scan independent of how much
+  // padded data sits outside the view.
   let best: { path: string; time: number; value: number } | null = null;
   let bestSquared = threshold * threshold;
+  const minTime = Math.min(
+    invertX(layout, px - threshold),
+    invertX(layout, px + threshold),
+  );
+  const maxTime = Math.max(
+    invertX(layout, px - threshold),
+    invertX(layout, px + threshold),
+  );
   for (const entry of series) {
-    for (let index = 0; index < entry.bins.count; index += 1) {
+    const start = firstCenterAtOrAfter(entry.bins, minTime);
+    const end = firstCenterAfter(entry.bins, maxTime);
+    const firstIndex = Math.max(0, start - 1);
+    const lastIndex = Math.min(entry.bins.count, end + 1);
+    for (let index = firstIndex; index < lastIndex; index += 1) {
       const flags = entry.bins.flags[index] as number;
       const points = [
         [entry.bins.t0[index] as number, entry.bins.first[index] as number],
