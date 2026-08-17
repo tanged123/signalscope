@@ -29,14 +29,31 @@ import {
 } from "./app-shell";
 
 describe("sample refresh requests", () => {
+  interface RefreshProbe {
+    root: HTMLElement;
+    workspace: {
+      panels(): { id: string; mode: "xy" | "fft" | "histogram" }[];
+    };
+    plane: Pick<DataPlane, "querySamples">;
+    sampleWindowCache: SampleWindowCache;
+    tileWindowCache: TileWindowCache;
+    panelSignalIds(): { ids: string[]; missing: string[] };
+    effectiveWindow(): { t0: number; t1: number };
+    sampleWindow(): { t0: number; t1: number };
+    renderTiles(): void;
+    reportError(error: unknown): void;
+    refreshToken: number;
+    refreshTilesPass(): Promise<void>;
+  }
+
   function refreshProbe(
     mode: "xy" | "fft" | "histogram",
     sampleWindow: { t0: number; t1: number },
   ) {
-    const querySamples = vi.fn(() =>
+    const querySamples = vi.fn<DataPlane["querySamples"]>(() =>
       Promise.resolve({ request_id: "samples", series: [] }),
     );
-    const shell = Object.create(AppShell.prototype) as any;
+    const shell = Object.create(AppShell.prototype) as RefreshProbe;
     shell.root = document.createElement("div");
     shell.root.innerHTML = '<div class="workspace"></div>';
     shell.workspace = {
