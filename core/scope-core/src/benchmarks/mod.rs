@@ -255,7 +255,7 @@ fn bench_mc_cold_open() {
     let mut series = 0_u32;
     for ((_, local_path), pyramid) in pyramids.iter() {
         if local_path == "response" {
-            let query = pyramid.query(0.0, 1000.0, 1920);
+            let query = pyramid.query_raw(0.0, 1000.0);
             assert!(!query.bins.is_empty());
             series += 1;
         }
@@ -367,7 +367,7 @@ fn bench_huge_cold_build() {
     for id in &summary.signals {
         let pyramid = Pyramid::from_signal(store.signal(*id).unwrap());
         bins += pyramid.stored_bin_count();
-        let query = pyramid.query(0.0, 12_500.0, 1920);
+        let query = pyramid.query_raw(0.0, 12_500.0);
         assert!(!query.bins.is_empty());
     }
     let seconds = started.elapsed().as_secs_f64();
@@ -457,7 +457,7 @@ fn bench_tile_latency() {
         .map(|&(t0, t1)| {
             let started = Instant::now();
             for pyramid in &ensemble {
-                let query = pyramid.query(t0, t1, 1920);
+                let query = pyramid.query_raw(t0, t1);
                 std::hint::black_box(query.bins.len());
             }
             started.elapsed().as_secs_f64() * 1000.0
@@ -528,7 +528,7 @@ fn bench_warm_tile_latency() {
         .map(|&(t0, t1)| {
             let started = Instant::now();
             for pyramid in &ensemble {
-                std::hint::black_box(pyramid.query(t0, t1, 1920).bins.len());
+                std::hint::black_box(pyramid.query_raw(t0, t1).bins.len());
             }
             started.elapsed().as_secs_f64() * 1000.0
         })
@@ -573,13 +573,12 @@ fn bench_tile_wire_cost() {
     assert_eq!(jobs.join(id).unwrap().state, BatchState::Done);
 
     let pyramids = sink.pyramids.lock().unwrap();
-    let per_series = 250_000_u32 / 1000;
     let queried: Vec<(String, u32, BinLevel)> = pyramids
         .iter()
         .filter(|((_, local_path), _)| local_path == "response")
         .enumerate()
         .map(|(index, (_, pyramid))| {
-            let query = pyramid.query_with_target(0.0, 1000.0, 1920, Some(per_series));
+            let query = pyramid.query_raw(0.0, 1000.0);
             (format!("run_{index:04}/response"), query.level, query.bins)
         })
         .collect();
@@ -621,6 +620,7 @@ fn bench_tile_wire_cost() {
         serde_json::json!({
             "bench": "tile_wire_cost",
             "series": 1000,
+            "level": 0,
             "bins": response.series.iter().map(|s| s.bins.len()).sum::<usize>(),
             "json_bytes": json.len(),
             "json_encode_ms": json_encode_ms,
@@ -683,7 +683,7 @@ fn bench_wide_tile_latency() {
         .map(|&(t0, t1)| {
             let started = Instant::now();
             for pyramid in &pyramids {
-                let query = pyramid.query(t0, t1, 1920);
+                let query = pyramid.query_raw(t0, t1);
                 std::hint::black_box(query.bins.len());
             }
             started.elapsed().as_secs_f64() * 1000.0
