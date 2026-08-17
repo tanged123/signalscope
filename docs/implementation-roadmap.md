@@ -114,13 +114,15 @@ measured a 470 ms first frame, 8 ms frame p95, and 33 ms full-thousand-series
 refeed; PNG capture uses the same-frame composite recipe proven by the spike.
 
 The full-resolution presentation baseline ([ADR 0041](adr/0041-full-resolution-presentation-baseline.md)) now keeps every live panel at native
-resolution across `HttpPlane` and `BakedPlane`. Legacy density and sample
+resolution across `HttpPlane` and baked snapshots containing level zero/full-
+fidelity data. Explicitly reduced-fidelity baked snapshots render their
+user-selected level without additional reduction. Legacy density and sample
 budget fields are inert for live requests, while explicit export limits still
 select the requested fidelity. Larger live transfers or resource failures are
 visible instead of triggering silent LOD fallback. The pyramid and coarse
 cache levels remain for explicit reduced-fidelity exports and follow-up work;
 HTML and CSV preview, standard, high, and full controls remain governed by
-ADRs 0024 and 0025.
+ADRs 0024 and 0025. The approved [design spec](superpowers/specs/2026-08-16-full-resolution-rendering-design.md) names measured follow-ups: compact raw-sample binary transport and eventual pyramid removal after export consumers no longer need coarse levels.
 
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18

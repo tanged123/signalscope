@@ -22,10 +22,17 @@ do not select reduced data.
 Histogram aggregation remains the plot's mathematical operation, and FFT
 consumes its complete selected window without an artificial input ceiling.
 
-`HttpPlane` and `BakedPlane` implement the same live behavior. Allocation,
-transport, renderer, or transform failures surface through existing error
-paths; live rendering does not silently retry with reduced data. The larger
-raw transfers and their resource costs are therefore visible to users.
+Live sample panels send `max_points: 0` for an uncapped request. Positive
+`max_points` values remain explicit CSV export caps and are honored only in
+that export path.
+
+`HttpPlane` and `BakedPlane` implement the same full-resolution behavior when
+the baked snapshot contains level zero/full-fidelity data. Explicitly
+reduced-fidelity baked snapshots render their user-selected level without
+additional reduction. Allocation, transport, renderer, or transform failures
+surface through existing error paths; live rendering does not silently retry
+with reduced data. The larger raw transfers and their resource costs are
+therefore visible to users.
 
 Explicit HTML and CSV exports remain governed by ADRs 0024 and 0025. Their
 preview, standard, high, and full fidelity choices, range controls, estimates,
