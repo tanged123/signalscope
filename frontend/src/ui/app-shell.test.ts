@@ -12,6 +12,8 @@ import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
 import type { PanelMode, SeriesRef } from "../generated/session";
+import { SampleWindowCache } from "../app/sample-window-cache";
+import { TileWindowCache } from "../app/tile-window-cache";
 import {
   AppShell,
   arrivalModeFor,
@@ -21,57 +23,55 @@ import {
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
-  SAMPLE_CAP,
-  sampleCapFor,
-  sampleCapForPanel,
   formatHint,
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
 
-describe("sampleCapFor", () => {
-  it("gives sample-mode panels more headroom than the legacy cap", () => {
-    expect(sampleCapFor("xy")).toBe(32_768);
-    expect(sampleCapFor("fft")).toBe(32_768);
-    expect(sampleCapFor("histogram")).toBe(32_768);
-  });
+describe("sample refresh requests", () => {
+  function refreshProbe(
+    mode: "xy" | "fft" | "histogram",
+    sampleWindow: { t0: number; t1: number },
+  ) {
+    const querySamples = vi.fn(() =>
+      Promise.resolve({ request_id: "samples", series: [] }),
+    );
+    const shell = Object.create(AppShell.prototype) as any;
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<div class="workspace"></div>';
+    shell.workspace = {
+      panels: () => [{ id: "panel-1", mode }],
+    };
+    shell.plane = { querySamples };
+    shell.sampleWindowCache = new SampleWindowCache();
+    shell.tileWindowCache = new TileWindowCache();
+    shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
+    shell.effectiveWindow = vi.fn(() => ({ t0: 20, t1: 79 }));
+    shell.sampleWindow = vi.fn(() => sampleWindow);
+    shell.renderTiles = vi.fn();
+    shell.reportError = vi.fn();
+    shell.refreshToken = 0;
+    return { shell, querySamples };
+  }
 
-  it("leaves time panels on the tile path", () => {
-    expect(sampleCapFor("time")).toBe(SAMPLE_CAP);
-  });
-});
-
-describe("sampleCapForPanel", () => {
-  it("gives a few series the full per-mode cap", () => {
-    expect(sampleCapForPanel("xy", 1)).toBe(32_768);
-    expect(sampleCapForPanel("histogram", 15)).toBe(32_768);
-  });
-
-  it("shares a fixed point budget once a panel carries many series", () => {
-    expect(sampleCapForPanel("histogram", 40)).toBe(12_500);
-    expect(sampleCapForPanel("histogram", 1_000)).toBe(500);
-  });
-
-  it("halves an XY panel's share because it merges two requests", () => {
-    // XY issues context + detail; both land in one merged response.
-    expect(sampleCapForPanel("xy", 40)).toBe(6_250);
-    expect(sampleCapForPanel("xy", 1_000)).toBe(250);
-  });
-
-  it("holds the budget instead of flooring at the legacy cap", () => {
-    // 1000 series x 8192 would be 8.2M points against a 500k budget.
-    expect(sampleCapForPanel("fft", 1_000)).toBe(500);
-    expect(sampleCapForPanel("fft", 100_000) * 100_000).toBeLessThanOrEqual(
-      500_000,
+  it("sends zero max_points for FFT sample refreshes", async () => {
+    const { shell, querySamples } = refreshProbe("fft", { t0: 20, t1: 79 });
+    await shell.refreshTilesPass();
+    expect(querySamples).toHaveBeenCalledWith(
+      expect.objectContaining({ max_points: 0 }),
     );
   });
 
-  it("never returns zero, however many series a panel holds", () => {
-    expect(sampleCapForPanel("fft", 10_000_000)).toBe(1);
-  });
-
-  it("treats a zero series count as one rather than dividing by zero", () => {
-    expect(sampleCapForPanel("xy", 0)).toBe(32_768);
+  it("issues one full-extent XY request", async () => {
+    const { shell, querySamples } = refreshProbe("xy", { t0: 0, t1: 99 });
+    await shell.refreshTilesPass();
+    expect(querySamples).toHaveBeenCalledTimes(1);
+    expect(querySamples).toHaveBeenCalledWith(
+      expect.objectContaining({
+        window: { t0: 0, t1: 99 },
+        max_points: 0,
+      }),
+    );
   });
 });
 

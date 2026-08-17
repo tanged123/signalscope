@@ -41,7 +41,6 @@ import {
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
-import { mergeSampleResponses } from "../app/samples";
 import { SampleWindowCache } from "../app/sample-window-cache";
 import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
@@ -95,34 +94,6 @@ import type { GpuContext } from "../render/gpu-context";
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
-/** Point cap for time panels, which use the tile path instead. */
-export const SAMPLE_CAP = 8192;
-const SAMPLE_MODE_CAP = 32_768;
-const SAMPLE_POINT_BUDGET = 500_000;
-
-export function sampleCapFor(mode: PanelMode): number {
-  return mode === "time" ? SAMPLE_CAP : SAMPLE_MODE_CAP;
-}
-
-/**
- * The per-series cap once a panel's series count is taken into account.
- *
- * `SAMPLE_POINT_BUDGET` bounds the panel's *merged* response, so the share is
- * divided by the number of requests that merge into it — XY issues two
- * (context plus detail) and `mergeSampleResponses` concatenates them. There is
- * no floor: a floor would let a 1000-series panel request 8.2M points against
- * a 500k budget, which is the budget not existing.
- */
-export function sampleCapForPanel(
-  mode: PanelMode,
-  seriesCount: number,
-): number {
-  const requests = mode === "xy" ? 2 : 1;
-  const share = Math.floor(
-    SAMPLE_POINT_BUDGET / (Math.max(1, seriesCount) * requests),
-  );
-  return Math.max(1, Math.min(sampleCapFor(mode), share));
-}
 const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
@@ -2725,42 +2696,24 @@ export class AppShell {
             );
           } else {
             const contextWindow = this.sampleWindow(panel);
-            const cap = sampleCapForPanel(panel.mode, ids.length);
             const cacheKey = SampleWindowCache.key({
               ids,
               mode: panel.mode,
-              window: panel.mode === "xy" ? window : contextWindow,
-              cap,
+              window: contextWindow,
             });
             const cached = this.sampleWindowCache.get(panel.id, cacheKey);
             if (cached !== null) {
               nextSamples.set(panel.id, cached);
               return;
             }
-            const contextRequest = {
+            const response = await this.plane.querySamples({
               request_id: crypto.randomUUID(),
               signal_ids: ids,
               window: contextWindow,
-              max_points: cap,
-            };
-            let merged: SampleResponse;
-            if (panel.mode === "xy") {
-              const detailRequest = {
-                request_id: crypto.randomUUID(),
-                signal_ids: ids,
-                window,
-                max_points: cap,
-              };
-              const [context, detail] = await Promise.all([
-                this.plane.querySamples(contextRequest),
-                this.plane.querySamples(detailRequest),
-              ]);
-              merged = mergeSampleResponses(context, detail);
-            } else {
-              merged = await this.plane.querySamples(contextRequest);
-            }
-            this.sampleWindowCache.store(panel.id, cacheKey, merged);
-            nextSamples.set(panel.id, merged);
+              max_points: 0,
+            });
+            this.sampleWindowCache.store(panel.id, cacheKey, response);
+            nextSamples.set(panel.id, response);
           }
         } catch (error: unknown) {
           this.reportError(error);

@@ -544,13 +544,8 @@ pub async fn query_samples(
                 .ok_or_else(|| format!("unknown signal id: {raw_id}"))?;
             let (time, values) =
                 host::windowed_slice(signal, request.window.t0, request.window.t1)?;
-            let slice = compute::sample_window(
-                &time,
-                &values,
-                request.window.t0,
-                request.window.t1,
-                request.max_points,
-            );
+            let slice =
+                compute::sample_window_full(&time, &values, request.window.t0, request.window.t1);
             series.push(SampleSeries {
                 signal_id: raw_id,
                 signal_path: signal.path.clone(),

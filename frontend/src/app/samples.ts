@@ -34,6 +34,21 @@ function upperBound(sorted: readonly number[], value: number): number {
   return low;
 }
 
+function sampleWindowBounds(
+  time: readonly number[],
+  t0: number,
+  t1: number,
+): [number, number] | null {
+  const first = time[0];
+  const last = time[time.length - 1];
+  if (first === undefined || last === undefined || t1 < first || t0 > last) {
+    return null;
+  }
+  const start = Math.max(0, lowerBound(time, t0) - 1);
+  const end = Math.min(time.length, upperBound(time, t1) + 1);
+  return start < end ? [start, end] : null;
+}
+
 /**
  * Mirror of `scope_core::compute::sample_window`. The index arithmetic is
  * protocol surface: `protocol/testdata/sample-conformance.json` locks this
@@ -46,14 +61,11 @@ export function sampleWindow(
   t1: number,
   maxPoints: number,
 ): SampleSlice {
-  const first = time[0];
-  const last = time[time.length - 1];
-  if (first === undefined || last === undefined || t1 < first || t0 > last) {
+  const bounds = sampleWindowBounds(time, t0, t1);
+  if (bounds === null) {
     return { time: [], values: [], stride: 1 };
   }
-  const start = Math.max(0, lowerBound(time, t0) - 1);
-  const end = Math.min(time.length, upperBound(time, t1) + 1);
-  if (start >= end) return { time: [], values: [], stride: 1 };
+  const [start, end] = bounds;
   const span = end - start;
   const cap = Math.max(1, Math.trunc(maxPoints));
   const stride = Math.max(1, Math.ceil(span / cap));
@@ -69,6 +81,23 @@ export function sampleWindow(
     pickedValues.push(values[end - 1] ?? Number.NaN);
   }
   return { time: pickedTime, values: pickedValues, stride };
+}
+
+/** Mirror of `scope_core::compute::sample_window_full`. */
+export function sampleWindowFull(
+  time: readonly number[],
+  values: readonly number[],
+  t0: number,
+  t1: number,
+): SampleSlice {
+  const bounds = sampleWindowBounds(time, t0, t1);
+  if (bounds === null) return { time: [], values: [], stride: 1 };
+  const [start, end] = bounds;
+  return {
+    time: time.slice(start, end),
+    values: values.slice(start, end),
+    stride: 1,
+  };
 }
 
 /**
@@ -127,8 +156,8 @@ export function mergeSampleResponses(
       time.push(sampleTime);
       values.push(coarse.values[index] ?? Number.NaN);
     });
-    // Appended rather than argument-spread: `fine` can hold SAMPLE_CAP
-    // elements, which spreading would push onto the call stack.
+    // Append rather than spread: a full response can be large enough to
+    // overflow the call stack.
     for (let index = 0; index < fine.time.length; index += 1) {
       time.push(fine.time[index] ?? Number.NaN);
       values.push(fine.values[index] ?? Number.NaN);

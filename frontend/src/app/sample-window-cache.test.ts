@@ -12,7 +12,6 @@ const key = (over: Partial<Parameters<typeof SampleWindowCache.key>[0]> = {}) =>
     ids: ["1", "2"],
     mode: "xy",
     window: { t0: 0, t1: 10 },
-    cap: 8192,
     ...over,
   });
 
@@ -29,12 +28,17 @@ describe("SampleWindowCache", () => {
     expect(cache.get("panel", key({ ids: ["2", "1"] }))?.request_id).toBe("a");
   });
 
-  it("misses on a different mode, window, or cap", () => {
+  it("misses on a different mode or window", () => {
     const cache = new SampleWindowCache();
     cache.store("panel", key(), response("a"));
     expect(cache.get("panel", key({ mode: "fft" }))).toBeNull();
     expect(cache.get("panel", key({ window: { t0: 0, t1: 11 } }))).toBeNull();
-    expect(cache.get("panel", key({ cap: 32768 }))).toBeNull();
+  });
+
+  it("does not include the compatibility cap in the key", () => {
+    const cache = new SampleWindowCache();
+    cache.store("panel", key(), response("a"));
+    expect(cache.get("panel", key())?.request_id).toBe("a");
   });
 
   it("retains entries for other panels when one is invalidated", () => {

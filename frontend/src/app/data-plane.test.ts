@@ -20,7 +20,7 @@ function bin(time: number, value: number | null): EnvelopeBin {
 }
 
 describe("BakedPlane.querySamples", () => {
-  it("returns a capped level-zero slice with gaps intact", async () => {
+  it("returns the full neighbour-inclusive level-zero slice with gaps intact", async () => {
     const summary: SignalSummary = {
       signal_id: "7",
       source_id: "3",
@@ -28,7 +28,7 @@ describe("BakedPlane.querySamples", () => {
       local_path: "speed",
       path: "vehicle/speed",
       unit: "m/s",
-      point_count: "5",
+      point_count: "100",
       t_min: 0,
       t_max: 4,
       last_value: null,
@@ -40,7 +40,9 @@ describe("BakedPlane.querySamples", () => {
           {
             summary,
             levels: [
-              [bin(0, 0), bin(1, 1), bin(2, null), bin(3, 3), bin(4, 4)],
+              Array.from({ length: 100 }, (_, time) =>
+                bin(time, time === 50 ? null : time),
+              ),
             ],
           },
         ],
@@ -50,14 +52,16 @@ describe("BakedPlane.querySamples", () => {
     const response = await plane.querySamples({
       request_id: "samples-1",
       signal_ids: ["7"],
-      window: { t0: 1, t1: 3 },
-      max_points: 3,
+      window: { t0: 20, t1: 79 },
+      max_points: 1,
     });
 
     expect(response.request_id).toBe("samples-1");
-    expect(response.series[0]?.time).toEqual([0, 2, 4]);
-    expect(response.series[0]?.stride).toBe(2);
-    expect(Number.isNaN(response.series[0]?.values[1])).toBe(true);
+    expect(response.series[0]?.time).toHaveLength(62);
+    expect(response.series[0]?.time[0]).toBe(19);
+    expect(response.series[0]?.time[61]).toBe(80);
+    expect(response.series[0]?.stride).toBe(1);
+    expect(Number.isNaN(response.series[0]?.values[31])).toBe(true);
   });
 
   it("reports finite last values for both generated demo signals", async () => {

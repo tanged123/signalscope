@@ -13,12 +13,11 @@ export interface Spectrum {
 }
 
 const MIN_SIZE = 64;
-const MAX_SIZE = 16_384;
 const FLOOR_DB = -120;
 
 function largestPowerOfTwoAtMost(value: number): number {
   let size = MIN_SIZE;
-  while (size * 2 <= value && size * 2 <= MAX_SIZE) size *= 2;
+  while (size * 2 <= value) size *= 2;
   return size;
 }
 

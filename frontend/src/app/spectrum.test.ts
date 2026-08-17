@@ -60,8 +60,8 @@ describe("spectrum", () => {
     expect(result?.size).toBe(8192);
   });
 
-  it("uses a transform larger than the legacy 4096 cap when samples allow", () => {
-    const count = 40_000;
+  it("uses every available power-of-two sample when the window holds 32,768", () => {
+    const count = 32_768;
     const time = Array.from({ length: count }, (_, index) => index / 1000);
     const values = time.map((t) => Math.sin(2 * Math.PI * 50 * t));
     const result = spectrum(
@@ -70,6 +70,6 @@ describe("spectrum", () => {
       time[count - 1] ?? 0,
     );
     expect(result).not.toBeNull();
-    expect(result?.size).toBe(16_384);
+    expect(result?.size).toBe(32_768);
   });
 });

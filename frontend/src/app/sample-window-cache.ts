@@ -5,7 +5,7 @@ import type { SampleResponse } from "../generated/protocol";
  * Sample-mode panels re-query on every `afterLayoutChange`, and a mode switch
  * is one, so tabbing xy -> fft -> histogram -> xy re-fetched the same window
  * four times. One entry per panel is enough to make the round trip free
- * without holding several copies of a capped response per panel.
+ * without holding several copies of a full response per panel.
  */
 export class SampleWindowCache {
   private readonly entries = new Map<
@@ -17,14 +17,12 @@ export class SampleWindowCache {
     ids: readonly string[];
     mode: string;
     window: { t0: number; t1: number };
-    cap: number;
   }): string {
     return [
       [...parts.ids].sort().join(","),
       parts.mode,
       parts.window.t0,
       parts.window.t1,
-      parts.cap,
     ]
       .map(String)
       .join("\u0000");
