@@ -1,69 +1,9 @@
 import type { EnvelopeBin } from "../generated/protocol";
 
-export interface PyramidQueryResult {
-  level: number;
-  bins: EnvelopeBin[];
-}
-
 export interface PyramidQueryRange {
   level: number;
   start: number;
   end: number;
-}
-
-/**
- * Level selection identical to `scope_core::pyramid::Pyramid::query`: the
- * finest level whose overlapping bin count fits twice the pixel budget,
- * falling back to the coarsest. Guarded against drift by
- * `protocol/testdata/pyramid-conformance.json`, which the Rust
- * implementation generates and both hosts assert against.
- */
-export function queryPyramid(
-  levels: readonly EnvelopeBin[][],
-  t0: number,
-  t1: number,
-  pixelWidth: number,
-  maxBins?: number,
-): PyramidQueryResult {
-  const range = queryPyramidRange(levels, t0, t1, pixelWidth, maxBins);
-  return {
-    level: range.level,
-    bins: (levels[range.level] ?? []).slice(range.start, range.end),
-  };
-}
-
-export function queryPyramidRange(
-  levels: readonly EnvelopeBin[][],
-  t0: number,
-  t1: number,
-  pixelWidth: number,
-  maxBins?: number,
-): PyramidQueryRange {
-  const raw = levels[0] ?? [];
-  if (
-    raw.length === 0 ||
-    t1 < (raw[0] as EnvelopeBin).t0 ||
-    t0 > (raw[raw.length - 1] as EnvelopeBin).t1
-  ) {
-    return { level: 0, start: 0, end: 0 };
-  }
-  const target = Math.min(
-    Math.max(1, Math.floor(pixelWidth)) * 2,
-    maxBins === undefined ? Number.POSITIVE_INFINITY : Math.max(1, maxBins),
-  );
-  for (let index = 0; index < levels.length; index += 1) {
-    const level = levels[index] ?? [];
-    const start = firstOverlapping(level, t0);
-    const end = pastLastOverlapping(level, t1);
-    if (end - start <= target || index === levels.length - 1) {
-      return {
-        level: index,
-        start: Math.max(0, start - 1),
-        end: Math.min(level.length, end + 1),
-      };
-    }
-  }
-  return { level: 0, start: 0, end: 0 };
 }
 
 export function queryRawPyramidRange(
