@@ -93,6 +93,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: e2e
       - run: ./scripts/ci.sh e2e
 
   coverage:

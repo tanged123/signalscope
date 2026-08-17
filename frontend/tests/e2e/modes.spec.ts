@@ -1,7 +1,7 @@
 import type { Locator } from "@playwright/test";
 import { expect, gotoApp, test } from "./fixtures";
 
-async function trajectoryPoints(
+async function readTrajectoryPoints(
   panel: Locator,
   count: number,
   horizontalOnly = false,
@@ -82,6 +82,20 @@ async function trajectoryPoints(
     return [{ x: 100, y: 267 }];
   }
   return canvasPoints;
+}
+
+async function trajectoryPoints(
+  panel: Locator,
+  count: number,
+  horizontalOnly = false,
+): Promise<{ x: number; y: number }[]> {
+  const deadline = Date.now() + 5_000;
+  let points = await readTrajectoryPoints(panel, count, horizontalOnly);
+  while (points.length === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    points = await readTrajectoryPoints(panel, count, horizontalOnly);
+  }
+  return points;
 }
 
 async function histogramBinStart(

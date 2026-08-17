@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "./fixtures";
 
@@ -11,14 +11,10 @@ let server: ChildProcess | undefined;
 let dataDirectory: string | undefined;
 
 test.beforeAll(async () => {
-  // Building can take arbitrarily long on a stale target dir; keep it out of
-  // the 30-second health window and let its output reach the CI log.
-  test.setTimeout(300_000);
-  execFileSync("cargo", ["build", "-p", "scope-server"], {
-    cwd: repositoryRoot,
-    stdio: "inherit",
-    timeout: 270_000,
-  });
+  // The wrapper builds once before Playwright starts so compilation does not
+  // contend with the parallel browser workers. `cargo run` still builds when
+  // this file is invoked directly.
+  test.setTimeout(600_000);
   dataDirectory = mkdtempSync(join(tmpdir(), "signalscope-live-"));
   server = spawn(
     "cargo",
@@ -36,7 +32,7 @@ test.beforeAll(async () => {
     ],
     { cwd: repositoryRoot, stdio: ["ignore", "ignore", "inherit"] },
   );
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     try {
       const response = await fetch(`${serverUrl}/api/health`);
       if (response.ok) return;

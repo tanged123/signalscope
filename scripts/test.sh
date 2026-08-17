@@ -116,6 +116,7 @@ frontend)
 e2e)
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
+  build_e2e_server
   pnpm e2e
   "$signalscope_scripts_dir/server-smoke.sh"
   ;;
@@ -147,6 +148,7 @@ full)
   cargo test -p scope-server
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
+  build_e2e_server
   pnpm e2e
   "$signalscope_scripts_dir/server-smoke.sh"
   ;;

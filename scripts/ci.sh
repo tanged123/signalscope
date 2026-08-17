@@ -48,6 +48,7 @@ check_format_read_only() {
 check_e2e() {
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
+  build_e2e_server
   pnpm e2e
   "$signalscope_scripts_dir/server-smoke.sh"
 }

@@ -15,11 +15,17 @@ test("time panels use ChartGPU with WebGPU enabled", async ({ page }) => {
   expect(bounds).not.toBeNull();
   await page.mouse.move((bounds?.x ?? 0) + 220, (bounds?.y ?? 0) + 120);
   await page.mouse.wheel(0, 500);
-  await page.waitForTimeout(100);
-  const after = (await chart.screenshot()) as unknown as Uint8Array;
-  const same =
-    before.length === after.length &&
-    before.every((byte, index) => byte === after[index]);
-  expect(same).toBe(false);
+  await expect
+    .poll(
+      async () => {
+        const after = (await chart.screenshot()) as unknown as Uint8Array;
+        return (
+          before.length === after.length &&
+          before.every((byte, index) => byte === after[index])
+        );
+      },
+      { timeout: 5_000 },
+    )
+    .toBe(false);
   await expect(page.locator(".render-ms").first()).not.toHaveText("— ms");
 });
