@@ -17,6 +17,12 @@ if ! grep -Fq 'run: ./scripts/chartgpu-submodule.sh init' "$setup_action"; then
   failures=$((failures + 1))
 fi
 
+coverage_script="$script_dir/coverage.sh"
+if ! grep -Fq '  build_e2e_server' "$coverage_script"; then
+  echo "frontend coverage must build scope-server before Playwright" >&2
+  failures=$((failures + 1))
+fi
+
 expect_status() {
   local expected="$1"
   shift

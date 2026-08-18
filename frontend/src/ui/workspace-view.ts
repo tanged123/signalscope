@@ -83,6 +83,7 @@ export class WorkspaceView {
       view.element.style.removeProperty("flex");
       rowElement.appendChild(view.element);
       this.root.append(this.maximizedPanelBar(maximized), rowElement);
+      view.mount();
       this.refreshPanelStates();
       return;
     }
@@ -100,6 +101,7 @@ export class WorkspaceView {
         rowElement.appendChild(view.element);
       });
       this.root.appendChild(rowElement);
+      for (const cell of row.panels) this.views.get(cell.panel_id)?.mount();
     });
     this.refreshPanelStates();
   }

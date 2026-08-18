@@ -626,7 +626,6 @@ export class PanelView {
     this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
     this.renderer = new CanvasRenderer(this.canvas);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
-    if (gpu !== null) this.initializeChartHost(gpu);
     this.bind();
     this.interactions = new PlotInteractionController(this.overlay, {
       layout: () => this.activeLayout(),
@@ -686,7 +685,19 @@ export class PanelView {
         this.element.classList.contains("maximized"),
       );
     }
-    this.initializeChartHost(gpu);
+    this.mount();
+  }
+
+  mount(): void {
+    if (
+      this.gpu === null ||
+      this.disposed ||
+      this.chartHostReady !== null ||
+      !this.element.isConnected
+    ) {
+      return;
+    }
+    this.initializeChartHost(this.gpu);
   }
 
   private initializeChartHost(gpu: GpuContext): void {

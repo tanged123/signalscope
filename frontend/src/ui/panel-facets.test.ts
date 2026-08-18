@@ -6,6 +6,8 @@ import { Catalog } from "../app/catalog";
 import { resolvePanel } from "../app/resolution";
 import type { SignalSummary } from "../generated/protocol";
 import type { PanelState } from "../generated/session";
+import { ChartHost } from "../render/chart-host";
+import type { GpuContext } from "../render/gpu-context";
 import { PanelView, type PanelCallbacks } from "./panel";
 
 function signal(source: string, channel: string): SignalSummary {
@@ -133,6 +135,26 @@ afterEach(() => {
 });
 
 describe("PanelView panel chrome", () => {
+  it("waits for a mounted panel before creating ChartGPU", () => {
+    const create = vi
+      .spyOn(ChartHost, "create")
+      .mockResolvedValue({} as ChartHost);
+    const view = new PanelView(
+      "panel",
+      callbacks(Catalog.build([])),
+      {} as GpuContext,
+    );
+
+    expect(create).not.toHaveBeenCalled();
+    document.body.appendChild(view.element);
+    view.mount();
+
+    expect(create).toHaveBeenCalledWith(
+      view.element.querySelector(".chart-host"),
+      expect.anything(),
+    );
+  });
+
   it("renders the legend and focus strip below a header without roster tokens", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),
