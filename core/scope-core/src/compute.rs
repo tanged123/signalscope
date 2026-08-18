@@ -77,7 +77,7 @@ pub fn movmean(values: &[f64], window: usize) -> Vec<f64> {
 /// Linearly interpolates `values` at `query`, returning NaN outside the
 /// sample range rather than holding the endpoints flat.
 ///
-/// This mirrors `lerpSample` in `frontend/src/app/xy.ts` exactly;
+/// This mirrors `lerpSample` in `frontend/src/app/samples.ts` exactly;
 /// `protocol/testdata/lerp-conformance.json` locks the two together.
 #[must_use]
 #[allow(clippy::float_cmp)]

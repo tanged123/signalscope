@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { policyFor, type PlotInteractionPolicy } from "./plot-capabilities";
+import { TIME_POLICY, type PlotInteractionPolicy } from "./plot-capabilities";
 import {
   allowsFit,
   boxZoomAxes,
@@ -12,28 +12,14 @@ import {
 function policy(
   overrides: Partial<PlotInteractionPolicy>,
 ): PlotInteractionPolicy {
-  return { ...policyFor("time"), ...overrides };
+  return { ...TIME_POLICY, ...overrides };
 }
 
 describe("resolveRanges", () => {
-  it("uses stored histogram ranges instead of its automatic edge span", () => {
-    expect(
-      resolveRanges(
-        policyFor("histogram"),
-        { x: [2, 4], y: [1, 3] },
-        { x: [0, 10], y: [0, 8] },
-        { t0: 20, t1: 30 },
-      ),
-    ).toEqual({
-      x: { min: 2, max: 4 },
-      y: { min: 1, max: 3 },
-    });
-  });
-
   it("uses the linked window for a linked-time x axis", () => {
     expect(
       resolveRanges(
-        policyFor("time"),
+        TIME_POLICY,
         { x: [2, 4], y: [-2, 2] },
         { x: [0, 10], y: [-8, 8] },
         { t0: 20, t1: 30 },
@@ -44,32 +30,18 @@ describe("resolveRanges", () => {
     });
   });
 
-  it("re-reads a supplied automatic range when no stored range exists", () => {
-    expect(
-      resolveRanges(
-        policyFor("xy"),
-        { x: null, y: null },
-        { x: [1, 5], y: [2, 8] },
-        { t0: 20, t1: 30 },
-      ),
-    ).toEqual({
-      x: { min: 1, max: 5 },
-      y: { min: 2, max: 8 },
-    });
-  });
-
   it("returns null when either required range is unavailable", () => {
     expect(
       resolveRanges(
-        policyFor("histogram"),
+        TIME_POLICY,
         { x: null, y: null },
-        { x: null, y: [0, 8] },
+        { x: [0, 10], y: null },
         { t0: 20, t1: 30 },
       ),
     ).toBeNull();
     expect(
       resolveRanges(
-        policyFor("histogram"),
+        TIME_POLICY,
         { x: null, y: null },
         { x: [0, 10], y: null },
         { t0: 20, t1: 30 },
@@ -134,7 +106,7 @@ describe("gesture policy", () => {
   });
 
   it("recognizes desktop pan bindings, box zoom, unsupported buttons, and fit", () => {
-    const full = policyFor("time");
+    const full = TIME_POLICY;
     expect(dragIntent(full, 0, { ctrl: true, meta: false })).toBe("pan");
     expect(dragIntent(full, 0, { ctrl: false, meta: true })).toBe("pan");
     expect(dragIntent(full, 1, { ctrl: false, meta: false })).toBe("pan");
@@ -143,15 +115,5 @@ describe("gesture policy", () => {
     expect(dragIntent(full, 3, { ctrl: false, meta: false })).toBe("none");
     expect(allowsFit(full)).toBe(true);
     expect(allowsFit(policy({ fit: false }))).toBe(false);
-  });
-
-  it("keeps histogram viewport controls enabled", () => {
-    const histogram = policyFor("histogram");
-    expect(panAxes(histogram)).toEqual({ x: true, y: true });
-    expect(wheelAxes(histogram, { shift: false, alt: false })).toEqual({
-      x: true,
-      y: true,
-    });
-    expect(boxZoomAxes(histogram, "xy")).toEqual({ x: true, y: true });
   });
 });

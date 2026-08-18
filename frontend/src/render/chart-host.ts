@@ -6,8 +6,8 @@ import {
 } from "@chartgpu/chartgpu";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
-import { formatTicks, hueIndex } from "./canvas-renderer";
-import type { Palette, SeriesStroke } from "./canvas-renderer";
+import { formatTicks, hueIndex } from "./plot-theme";
+import type { Palette, SeriesStroke } from "./plot-theme";
 import { cachedFeed } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
 

@@ -209,12 +209,6 @@ pub fn reconcile(
                     rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
                 }
             }
-            if let Some(reference) = &mut panel.x_ref {
-                rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
-            }
-            if let Some(reference) = &mut panel.color_ref {
-                rewrite_ref(&next.sources, reference, aliases, &mut rewritten);
-            }
             for annotation in &mut panel.annotations {
                 rewrite(&mut annotation.series_path, aliases, &mut rewritten);
             }
@@ -283,9 +277,9 @@ fn rewrite_ref(
 mod tests {
     use super::*;
     use crate::session::{
-        Annotation, AnnotationDomain, AxisStyle, Binding, BindingKind, ColorAxis, DerivedSignal,
-        FocusEntry, FocusKind, GhostMode, NamedSet, NamedSetKind, PanelMode, PanelState,
-        SeriesOverride, SeriesRef, Session, SplitDimension, StyleDimension,
+        Annotation, AnnotationDomain, AxisStyle, Binding, BindingKind, DerivedSignal, FocusEntry,
+        FocusKind, GhostMode, NamedSet, NamedSetKind, PanelMode, PanelState, SeriesOverride,
+        SeriesRef, Session, SplitDimension, StyleDimension,
     };
 
     fn record_without_recipe() -> SourceRecord {
@@ -422,9 +416,6 @@ mod tests {
             title: "A".into(),
             mode: PanelMode::Time,
             axis_style: AxisStyle::Gutter,
-            x_ref: Some(reference.clone()),
-            color_axis: ColorAxis::Signal,
-            color_ref: Some(reference.clone()),
             bindings: vec![Binding {
                 kind: BindingKind::Pick,
                 selector: None,
@@ -453,7 +444,6 @@ mod tests {
             x_range: None,
             x_label: None,
             y_label: None,
-            c_label: None,
             time_window: None,
             annotations: vec![Annotation {
                 id: "ann".into(),
@@ -464,7 +454,6 @@ mod tests {
                 label: "x".into(),
             }],
             show_stats: false,
-            axis_equal: false,
         });
         session
     }
@@ -478,17 +467,9 @@ mod tests {
         ]);
 
         let outcome = reconcile(&mut session, &aliases, &BTreeSet::new()).unwrap();
-        assert_eq!(outcome.rewritten, 7);
+        assert_eq!(outcome.rewritten, 5);
         let panel = &session.tabs[0].panels[0];
         assert_eq!(panel.bindings[0].refs[0].source_key, key(2).0.to_string());
-        assert_eq!(
-            panel.x_ref.as_ref().unwrap().source_key,
-            key(2).0.to_string()
-        );
-        assert_eq!(
-            panel.color_ref.as_ref().unwrap().source_key,
-            key(2).0.to_string()
-        );
         assert_eq!(
             panel.overrides[0].target_ref.as_ref().unwrap().source_key,
             key(2).0.to_string()

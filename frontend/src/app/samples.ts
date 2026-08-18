@@ -10,6 +10,41 @@ export interface SampleSlice {
   stride: number;
 }
 
+/**
+ * Linear sample of `values` at `query`, NaN outside the signal's coverage.
+ *
+ * The prototype held the endpoint value flat past each end. This returns NaN
+ * instead so the stroke lifts when a plot extends past a signal's data range:
+ * a fabricated segment, and the pyramid's gap invariants already commit this
+ * codebase to breaking strokes rather than bridging absent data.
+ */
+export function lerpSample(
+  time: readonly number[],
+  values: readonly number[],
+  query: number,
+): number {
+  const count = time.length;
+  if (count === 0) return Number.NaN;
+  if (query < (time[0] ?? 0) || query > (time[count - 1] ?? 0)) {
+    return Number.NaN;
+  }
+  let low = 0;
+  let high = count - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((time[mid] ?? 0) < query) low = mid + 1;
+    else high = mid;
+  }
+  if ((time[low] ?? 0) === query) return values[low] ?? Number.NaN;
+  const previous = Math.max(0, low - 1);
+  const span = (time[low] ?? 0) - (time[previous] ?? 0);
+  if (span === 0) return values[low] ?? Number.NaN;
+  const alpha = (query - (time[previous] ?? 0)) / span;
+  const before = values[previous] ?? Number.NaN;
+  const after = values[low] ?? Number.NaN;
+  return before + (after - before) * alpha;
+}
+
 /** Index of the first entry not less than `value` in a sorted array. */
 function lowerBound(sorted: readonly number[], value: number): number {
   let low = 0;
@@ -122,7 +157,7 @@ export function binsToSamples(bins: readonly EnvelopeBin[]): {
  * Combines a coarse full-extent response with a detailed visible-window
  * response. Detail replaces the overlapping context interval so timestamps
  * are not double-rendered, while context remains on either side for the
- * dimmed XY trajectory.
+ * dimmed plot.
  */
 export function mergeSampleResponses(
   context: SampleResponse,

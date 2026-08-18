@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { binColumnsFromWire } from "../app/bin-columns";
 import type { ColumnarTileResponse } from "../app/bin-columns";
-import type { Palette, SeriesStroke } from "./canvas-renderer";
+import type { Palette, SeriesStroke } from "./plot-theme";
 import type { GpuContext } from "./gpu-context";
 
 const state = vi.hoisted(() => ({
@@ -52,7 +52,6 @@ const palette: Palette = {
   fg4: "#505050",
   grid: "#202020",
   series: ["#e65050", "#50a0e6"],
-  sequential: ["#000000", "#ffffff"],
   fontPlot: "JetBrains Mono",
   fontSize: 11,
   lineWidthScale: 1,
@@ -226,7 +225,7 @@ describe("ChartHost", () => {
     expect(opacityOf(1)).toBeCloseTo(1);
   });
 
-  it("maps hue to the same palette slot as the Canvas2D renderers", async () => {
+  it("maps hue to the same palette slot as the plot renderer", async () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);
 

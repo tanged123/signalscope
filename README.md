@@ -11,9 +11,9 @@ TypeScript presentation plane that runs in a browser host and in snapshots:
 - The localhost browser host streams and memory-maps source data.
 - A self-contained HTML snapshot uses the same renderer against embedded tiles selected by explicit export fidelity.
 
-Time-series panels use the pinned ChartGPU submodule WebGPU renderer; XY, FFT, and
-histogram panels retain their Canvas2D paths. A WebGPU-capable Chromium is
-required for time-series rendering, including in exported snapshots.
+Time-series panels use the pinned ChartGPU submodule WebGPU renderer. A
+WebGPU-capable Chromium is required for rendering, including in exported
+snapshots.
 
 The repository currently includes the Phase 1 data plane and workbench fundamentals:
 CSV and JSON-channel MCAP ingestion, persistent min/max pyramid caches, native
@@ -52,7 +52,7 @@ Run the local browser host:
 Press `O` or click **Open…**, choose **Files**, then select
 [`examples/demo_flight.csv`](examples/demo_flight.csv) to explore the ingest
 and plotting workflow. The demo contains 16 signals spanning smooth and signed
-telemetry, paired XY position, angular values, steps and setpoints, boolean and
+telemetry, paired position, angular values, steps and setpoints, boolean and
 discrete state, high-frequency vibration, thermal drift, and intentional GPS
 gaps. Plot nine or more together to exercise the colour-plus-dash identities.
 
@@ -109,12 +109,12 @@ core/
     store/            signal/source registry and backing-store boundary
     ingest/           streaming decoders behind one trait
     pyramid/          multi-resolution min/max envelope tiles
-    compute/          transforms and XY resampling primitives
+    compute/          transforms and sample-window primitives
     session/          versioned session schema and migrations
 protocol/            single schema source plus generated Rust and TypeScript
 frontend/
   src/app/           host-neutral application and DataPlane implementations
-  src/render/        deterministic ChartGPU and Canvas2D renderers
+  src/render/        deterministic ChartGPU renderer and overlays
   src/ui/            workbench chrome and design tokens
 server/scope-server/ localhost HTTP host, dialogs, and protocol commands
 docs/adr/            accepted architecture decisions

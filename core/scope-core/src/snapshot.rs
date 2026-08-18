@@ -7,9 +7,7 @@ use std::{
 
 use crate::pyramid::Pyramid;
 use crate::series_ref::path_from_ref;
-use crate::session::{
-    BindingKind, LinkedTime, NamedSetKind, PanelMode, PanelState, SeriesRef, Session,
-};
+use crate::session::{BindingKind, LinkedTime, NamedSetKind, PanelState, SeriesRef, Session};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{
     BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
@@ -74,7 +72,7 @@ pub enum SnapshotError {
 }
 
 fn effective_window(panel: &PanelState, linked: &LinkedTime) -> (f64, f64) {
-    if linked.linked && panel.mode == PanelMode::Time {
+    if linked.linked {
         return (linked.t0, linked.t1);
     }
     match panel.time_window {
@@ -118,22 +116,6 @@ fn panel_signal_ids(
                     }
                 }
             }
-        }
-    }
-    if panel.mode == PanelMode::Xy {
-        if let Some(signal) = panel
-            .x_ref
-            .as_ref()
-            .and_then(|reference| signal_from_ref(session, store, reference))
-        {
-            ids.insert(signal.id);
-        }
-        if let Some(signal) = panel
-            .color_ref
-            .as_ref()
-            .and_then(|reference| signal_from_ref(session, store, reference))
-        {
-            ids.insert(signal.id);
         }
     }
     ids
@@ -367,15 +349,13 @@ fn signal_plan<'a>(
     source_key: SourceKey,
     pyramid: &'a Pyramid,
     window: Option<(f64, f64)>,
-    needs_raw: bool,
     fidelity: ExportFidelity,
 ) -> SignalPlan<'a> {
-    // Sample-domain panels outrank fidelity because reconstructed envelope bins
-    // are not valid XY, FFT, or histogram inputs. Otherwise the target is only
-    // a ceiling: sparse signals stay raw, while Full explicitly selects level 0.
-    let finest = match (needs_raw, ceiling(fidelity)) {
-        (true, _) | (false, None) => 0,
-        (false, Some(limit)) => (0..pyramid.level_count())
+    // The target is only a ceiling: sparse signals stay raw, while Full
+    // explicitly selects level 0.
+    let finest = match ceiling(fidelity) {
+        None => 0,
+        Some(limit) => (0..pyramid.level_count())
             .find(|index| {
                 pyramid
                     .level_window_count(*index, window)
@@ -460,15 +440,6 @@ pub fn plan_selected<'a>(
     fidelity: ExportFidelity,
 ) -> Result<ExportPlan<'a>, SnapshotError> {
     let selected_sources = selection.source_keys.iter().collect::<BTreeSet<_>>();
-    let mut needs_raw = BTreeSet::new();
-    for tab in &session.tabs {
-        for panel in &tab.panels {
-            if panel.mode != PanelMode::Time {
-                needs_raw.extend(panel_signal_ids(session, store, panel));
-            }
-        }
-    }
-
     if range == ExportRange::All {
         let plan = export_plan(
             store
@@ -486,7 +457,6 @@ pub fn plan_selected<'a>(
                         source_key(store, signal)?,
                         pyramid,
                         None,
-                        needs_raw.contains(&signal.id),
                         fidelity,
                     ))
                 })
@@ -526,7 +496,6 @@ pub fn plan_selected<'a>(
                     source_key(store, signal)?,
                     pyramid,
                     Some((t0, t1)),
-                    needs_raw.contains(&id),
                     fidelity,
                 ))
             })
@@ -705,9 +674,6 @@ mod tests {
             title: "Panel".to_owned(),
             mode,
             axis_style: AxisStyle::Gutter,
-            x_ref: None,
-            color_axis: crate::session::ColorAxis::None,
-            color_ref: None,
             bindings: vec![Binding {
                 kind: BindingKind::Pick,
                 selector: None,
@@ -729,11 +695,9 @@ mod tests {
             x_range: None,
             x_label: None,
             y_label: None,
-            c_label: None,
             time_window: None,
             annotations: Vec::new(),
             show_stats: false,
-            axis_equal: false,
         }
     }
 
@@ -920,52 +884,6 @@ mod tests {
     }
 
     #[test]
-    fn sample_mode_resolves_query_sets_before_raw_planning() {
-        let (store, pyramids) =
-            store_with(&[("alpha", 100_000), ("beta", 100_000), ("ignored", 100_000)]);
-        let mut panel = panel("panel-1", PanelMode::Histogram, &[]);
-        panel.bindings = vec![
-            Binding {
-                kind: BindingKind::Query,
-                selector: Some("alpha".into()),
-                refs: Vec::new(),
-                set_id: None,
-            },
-            Binding {
-                kind: BindingKind::Set,
-                selector: None,
-                refs: Vec::new(),
-                set_id: Some("saved-query".into()),
-            },
-        ];
-        let mut session = session_with(vec![panel]);
-        session.named_sets.push(NamedSet {
-            id: "saved-query".into(),
-            name: "Saved query".into(),
-            kind: NamedSetKind::Query,
-            selector: Some("beta".into()),
-            refs: Vec::new(),
-        });
-
-        let export = plan(
-            &session,
-            &store,
-            &pyramids,
-            ExportRange::All,
-            ExportFidelity::Preview,
-        )
-        .expect("plan");
-        let levels = export
-            .signals
-            .iter()
-            .map(|entry| (entry.signal.path.as_str(), entry.finest_level()))
-            .collect::<BTreeMap<_, _>>();
-        assert_eq!(levels["alpha"], 0);
-        assert_eq!(levels["beta"], 0);
-        assert!(levels["ignored"] > 0);
-    }
-
-    #[test]
     fn visible_scope_decimates_dense_time_signals() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
         let mut session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
@@ -1016,25 +934,6 @@ mod tests {
     }
 
     #[test]
-    fn sample_mode_panels_force_level_zero_at_preview() {
-        let (store, pyramids) = store_with(&[("a", 100_000)]);
-        for mode in [PanelMode::Xy, PanelMode::Fft] {
-            let session = session_with(vec![panel("panel-1", mode, &["a"])]);
-            let export = plan(
-                &session,
-                &store,
-                &pyramids,
-                ExportRange::Visible,
-                ExportFidelity::Preview,
-            )
-            .expect("plan");
-            assert_eq!(export.signals[0].finest_level(), 0);
-            assert_eq!(export.series_decimated, 0);
-            assert_eq!(export.coarsest_ratio, 1);
-        }
-    }
-
-    #[test]
     fn fidelity_ceiling_is_monotone() {
         let (store, pyramids) = store_with(&[("a", 100_000)]);
         let session = session_with(vec![panel("panel-1", PanelMode::Time, &["a"])]);
@@ -1056,40 +955,6 @@ mod tests {
         })
         .collect();
         assert!(bins.windows(2).all(|pair| pair[0] <= pair[1]));
-    }
-
-    #[test]
-    fn xy_panels_pull_x_and_color_signals() {
-        let (store, pyramids) = store_with(&[("x", 10), ("y", 10), ("c", 10), ("ignored", 10)]);
-        let mut xy = panel("panel-xy", PanelMode::Xy, &["y"]);
-        xy.x_ref = Some(SeriesRef {
-            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
-            channel: "x".into(),
-        });
-        xy.color_ref = Some(SeriesRef {
-            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
-            channel: "c".into(),
-        });
-        let mut time = panel("panel-time", PanelMode::Time, &["ignored"]);
-        time.x_ref = Some(SeriesRef {
-            source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
-            channel: "x".into(),
-        });
-        let session = session_with(vec![xy, time]);
-        let export = plan(
-            &session,
-            &store,
-            &pyramids,
-            ExportRange::Visible,
-            ExportFidelity::Standard,
-        )
-        .expect("plan");
-        let paths: Vec<&str> = export
-            .signals
-            .iter()
-            .map(|entry| entry.signal.path.as_str())
-            .collect();
-        assert_eq!(paths, ["x", "y", "c", "ignored"]);
     }
 
     #[test]

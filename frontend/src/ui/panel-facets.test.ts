@@ -31,9 +31,6 @@ function state(): PanelState {
     title: "Panel",
     mode: "time",
     axis_style: "gutter",
-    x_ref: null,
-    color_axis: "none",
-    color_ref: null,
     bindings: [{ kind: "query", selector: "*", refs: [], set_id: null }],
     color_by: "source",
     overrides: [],
@@ -44,11 +41,9 @@ function state(): PanelState {
     x_range: null,
     x_label: null,
     y_label: null,
-    c_label: null,
     time_window: null,
     annotations: [],
     show_stats: false,
-    axis_equal: false,
   };
 }
 
@@ -59,7 +54,6 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onSplitRight: vi.fn(),
     onSplitDown: vi.fn(),
     onMaximize: vi.fn(),
-    onSelectMode: vi.fn(),
     onDropSignals: vi.fn(),
     onDropSet: vi.fn(),
     onFocusToggle: vi.fn(),
@@ -74,9 +68,6 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     catalog: () => catalog,
     namedSets: () => [],
     resolveSeries: (panel) => resolvePanel(catalog, panel, []),
-    onSetXSignal: vi.fn(),
-    onSetColorSignal: vi.fn(),
-    onClearXSignal: vi.fn(),
     onToggleSeries: vi.fn(),
     onResized: vi.fn(),
     onGesture: vi.fn(),
@@ -90,7 +81,6 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onFitView: vi.fn(),
     onToggleStats: vi.fn(),
     onToggleAxisStyle: vi.fn(),
-    onToggleAxisEqual: vi.fn(),
     onRenameTitle: vi.fn(),
     onEditAxisLabel: vi.fn(),
     onSetColorBy: vi.fn(),
@@ -203,9 +193,7 @@ describe("PanelView panel chrome", () => {
 
     expect(view.element.querySelector(".panel-split-by")).toBeNull();
     expect(view.element.querySelector(".facet-grid")).toBeNull();
-    expect(
-      view.element.querySelector<HTMLCanvasElement>(".plot-canvas")?.hidden,
-    ).toBe(false);
+    expect(view.element.querySelector(".plot-canvas")).toBeNull();
   });
 
   it("does not intercept Tab or Enter from descendant controls", () => {

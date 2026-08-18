@@ -144,9 +144,7 @@ function isAnnotation(value: unknown): boolean {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.series_path === "string" &&
-    (value.domain === "time" ||
-      value.domain === "frequency" ||
-      value.domain === "distribution") &&
+    value.domain === "time" &&
     typeof value.anchor === "number" &&
     typeof value.pinned_value === "number" &&
     typeof value.label === "string"
@@ -191,11 +189,8 @@ function isPanel(value: unknown): boolean {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.title === "string" &&
-    ["time", "xy", "fft", "histogram"].includes(String(value.mode)) &&
+    value.mode === "time" &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
-    isNullable(value.x_ref, isSeriesRef) &&
-    ["none", "time", "signal"].includes(String(value.color_axis)) &&
-    isNullable(value.color_ref, isSeriesRef) &&
     Array.isArray(value.bindings) &&
     value.bindings.every(isBinding) &&
     ["focus", "source", "channel", "set", "attr"].includes(
@@ -211,7 +206,6 @@ function isPanel(value: unknown): boolean {
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&
     isNullable(value.y_label, stringOrNull) &&
-    isNullable(value.c_label, stringOrNull) &&
     isNullable(value.time_window, isNumberPair) &&
     Array.isArray(value.annotations) &&
     value.annotations.every(isAnnotation) &&

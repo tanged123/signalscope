@@ -174,7 +174,7 @@ export interface PreferencesTarget {
 
 /**
  * Pushes preferences into the style system: font-family tokens, the plot
- * font size token the canvas renderers read, and the root font-size that
+ * font size token the plot renderer reads, and the root font-size that
  * drives every rem-based UI font size.
  */
 export function applyPreferences(

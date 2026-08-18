@@ -1,7 +1,6 @@
 import { formatCombo } from "../app/commands";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { WorkspaceModel } from "../app/workspace";
-import type { SampleResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
@@ -126,7 +125,6 @@ export class WorkspaceView {
 
   renderData(
     tilesByPanel: ReadonlyMap<string, ColumnarTileResponse>,
-    samplesByPanel: ReadonlyMap<string, SampleResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
   ): number {
@@ -140,7 +138,6 @@ export class WorkspaceView {
           ?.renderData(
             panel,
             tilesByPanel.get(panel.id) ?? null,
-            samplesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
           ) ?? 0;
@@ -173,11 +170,11 @@ export class WorkspaceView {
     this.views.get(id)?.resetYAxis();
   }
 
-  canEditAxis(id: string, axis: "x" | "y" | "c"): boolean {
+  canEditAxis(id: string, axis: "x" | "y"): boolean {
     return this.views.get(id)?.canEditAxis(axis) ?? false;
   }
 
-  beginAxisEdit(id: string, axis: "x" | "y" | "c"): void {
+  beginAxisEdit(id: string, axis: "x" | "y"): void {
     this.views.get(id)?.beginAxisEdit(axis);
   }
 

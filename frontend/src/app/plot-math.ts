@@ -5,7 +5,7 @@ export interface Range {
   max: number;
 }
 
-export interface PlotRect {
+interface PlotRect {
   x: number;
   y: number;
   width: number;

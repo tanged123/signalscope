@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 21;
+pub const SESSION_SCHEMA_VERSION: u32 = 22;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -33,9 +33,6 @@ pub enum CursorMode {
 #[serde(rename_all = "lowercase")]
 pub enum PanelMode {
     Time,
-    Xy,
-    Fft,
-    Histogram,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -57,8 +54,6 @@ pub enum DashStyle {
 #[serde(rename_all = "lowercase")]
 pub enum AnnotationDomain {
     Time,
-    Frequency,
-    Distribution,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -163,15 +158,6 @@ pub enum SplitDimension {
     Channel,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ColorAxis {
-    #[default]
-    None,
-    Time,
-    Signal,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NamedSetKind {
@@ -205,11 +191,6 @@ pub struct PanelState {
     pub title: String,
     pub mode: PanelMode,
     pub axis_style: AxisStyle,
-    #[serde(default)]
-    pub x_ref: Option<SeriesRef>,
-    pub color_axis: ColorAxis,
-    #[serde(default)]
-    pub color_ref: Option<SeriesRef>,
     pub bindings: Vec<Binding>,
     pub color_by: StyleDimension,
     pub overrides: Vec<SeriesOverride>,
@@ -225,12 +206,9 @@ pub struct PanelState {
     #[serde(default)]
     pub y_label: Option<String>,
     #[serde(default)]
-    pub c_label: Option<String>,
-    #[serde(default)]
     pub time_window: Option<[f64; 2]>,
     pub annotations: Vec<Annotation>,
     pub show_stats: bool,
-    pub axis_equal: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

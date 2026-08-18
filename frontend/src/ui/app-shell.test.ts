@@ -11,13 +11,11 @@ import type { DataPlane } from "../app/data-plane";
 import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
-import type { SampleResponse } from "../generated/protocol";
 import {
   binColumnsFromWire,
   type ColumnarTileResponse,
 } from "../app/bin-columns";
-import type { PanelMode, SeriesRef } from "../generated/session";
-import { SampleWindowCache } from "../app/sample-window-cache";
+import type { SeriesRef } from "../generated/session";
 import { TileWindowCache } from "../app/tile-window-cache";
 import {
   AppShell,
@@ -37,63 +35,45 @@ describe("sample refresh requests", () => {
   interface RefreshProbe {
     root: HTMLElement;
     workspace: {
-      panels(): { id: string; mode: "xy" | "fft" | "histogram" }[];
+      panels(): { id: string; mode: "time" }[];
     };
-    plane: Pick<DataPlane, "querySamples">;
-    sampleWindowCache: SampleWindowCache;
+    plane: Pick<DataPlane, "queryTiles" | "querySamples">;
     tileWindowCache: TileWindowCache;
     panelSignalIds(): { ids: string[]; missing: string[] };
     effectiveWindow(): { t0: number; t1: number };
-    sampleWindow(): { t0: number; t1: number };
     renderTiles(): void;
     reportError(error: unknown): void;
     refreshToken: number;
     refreshTilesPass(): Promise<void>;
   }
 
-  function refreshProbe(
-    mode: "xy" | "fft" | "histogram",
-    sampleWindow: { t0: number; t1: number },
-  ) {
+  function refreshProbe() {
     const querySamples = vi.fn<DataPlane["querySamples"]>(() =>
       Promise.resolve({ request_id: "samples", series: [] }),
+    );
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve({ requestId: "tiles", series: [] }),
     );
     const shell = Object.create(AppShell.prototype) as RefreshProbe;
     shell.root = document.createElement("div");
     shell.root.innerHTML = '<div class="workspace"></div>';
     shell.workspace = {
-      panels: () => [{ id: "panel-1", mode }],
+      panels: () => [{ id: "panel-1", mode: "time" }],
     };
-    shell.plane = { querySamples };
-    shell.sampleWindowCache = new SampleWindowCache();
+    shell.plane = { queryTiles, querySamples };
     shell.tileWindowCache = new TileWindowCache();
     shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
     shell.effectiveWindow = vi.fn(() => ({ t0: 20, t1: 79 }));
-    shell.sampleWindow = vi.fn(() => sampleWindow);
     shell.renderTiles = vi.fn();
     shell.reportError = vi.fn();
     shell.refreshToken = 0;
     return { shell, querySamples };
   }
 
-  it("sends zero max_points for FFT sample refreshes", async () => {
-    const { shell, querySamples } = refreshProbe("fft", { t0: 20, t1: 79 });
+  it("does not issue an uncapped sample request for live refresh", async () => {
+    const { shell, querySamples } = refreshProbe();
     await shell.refreshTilesPass();
-    expect(querySamples).toHaveBeenCalledWith(
-      expect.objectContaining({ max_points: 0 }),
-    );
-  });
-
-  it("issues one full-extent XY request", async () => {
-    const { shell, querySamples } = refreshProbe("xy", { t0: 0, t1: 99 });
-    await shell.refreshTilesPass();
-    expect(querySamples).toHaveBeenCalledTimes(1);
-    expect(querySamples).toHaveBeenCalledWith(
-      expect.objectContaining({
-        window: { t0: 0, t1: 99 },
-        max_points: 0,
-      }),
-    );
+    expect(querySamples).not.toHaveBeenCalled();
   });
 });
 
@@ -133,7 +113,6 @@ describe("tile refresh cache", () => {
       workspaceView: null;
       plane: Pick<DataPlane, "queryTiles">;
       tileWindowCache: TileWindowCache;
-      sampleWindowCache: SampleWindowCache;
       panelSignalIds(): { ids: string[]; missing: string[] };
       effectiveWindow(): { t0: number; t1: number };
       renderTiles(): void;
@@ -149,7 +128,6 @@ describe("tile refresh cache", () => {
     shell.workspaceView = null;
     shell.plane = { queryTiles };
     shell.tileWindowCache = new TileWindowCache();
-    shell.sampleWindowCache = new SampleWindowCache();
     shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
     shell.effectiveWindow = vi.fn(() => ({ t0: 0, t1: 5 }));
     shell.renderTiles = vi.fn();
@@ -166,41 +144,39 @@ describe("tile refresh cache", () => {
 });
 
 describe("render errors", () => {
-  it.each([
-    ["ChartGPU render", new Error("ChartGPU render failed")],
-    ["FFT allocation", new RangeError("FFT allocation failed")],
-  ])("reports synchronous %s errors without retrying", (_label, error) => {
-    const renderData = vi.fn(() => {
-      throw error;
-    });
-    const shell = Object.create(AppShell.prototype) as {
-      root: HTMLElement;
-      workspace: { linkedTime(): { t0: number; t1: number } };
-      workspaceView: {
-        renderData: typeof renderData;
+  it.each([["ChartGPU render", new Error("ChartGPU render failed")]])(
+    "reports synchronous %s errors without retrying",
+    (_label, error) => {
+      const renderData = vi.fn(() => {
+        throw error;
+      });
+      const shell = Object.create(AppShell.prototype) as {
+        root: HTMLElement;
+        workspace: { linkedTime(): { t0: number; t1: number } };
+        workspaceView: {
+          renderData: typeof renderData;
+        };
+        tilesByPanel: Map<string, ColumnarTileResponse>;
+        missingByPanel: Map<string, string[]>;
+        reportError: ReturnType<typeof vi.fn>;
+        renderTiles(): void;
       };
-      tilesByPanel: Map<string, ColumnarTileResponse>;
-      samplesByPanel: Map<string, SampleResponse>;
-      missingByPanel: Map<string, string[]>;
-      reportError: ReturnType<typeof vi.fn>;
-      renderTiles(): void;
-    };
-    shell.root = document.createElement("div");
-    shell.root.innerHTML = '<span class="render-ms"></span>';
-    shell.workspace = {
-      linkedTime: () => ({ t0: 0, t1: 1 }),
-    };
-    shell.workspaceView = { renderData };
-    shell.tilesByPanel = new Map();
-    shell.samplesByPanel = new Map();
-    shell.missingByPanel = new Map();
-    shell.reportError = vi.fn();
+      shell.root = document.createElement("div");
+      shell.root.innerHTML = '<span class="render-ms"></span>';
+      shell.workspace = {
+        linkedTime: () => ({ t0: 0, t1: 1 }),
+      };
+      shell.workspaceView = { renderData };
+      shell.tilesByPanel = new Map();
+      shell.missingByPanel = new Map();
+      shell.reportError = vi.fn();
 
-    expect(() => shell.renderTiles()).not.toThrow();
-    expect(renderData).toHaveBeenCalledOnce();
-    const { reportError } = shell;
-    expect(reportError).toHaveBeenCalledWith(error);
-  });
+      expect(() => shell.renderTiles()).not.toThrow();
+      expect(renderData).toHaveBeenCalledOnce();
+      const { reportError } = shell;
+      expect(reportError).toHaveBeenCalledWith(error);
+    },
+  );
 });
 
 it("arrival mode focuses small additions and ghosts large additions", () => {
@@ -260,11 +236,6 @@ it("labels itemized cursor rows with the source-local channel", () => {
 
   expect(row?.label).toBe("run_07/temperature");
 });
-
-interface ShellProbe {
-  workspace: WorkspaceModel;
-  transitionPanelMode(panelId: string, mode: PanelMode): void;
-}
 
 describe("recipe-required ingest failures", () => {
   function ingestProbe(
@@ -837,55 +808,6 @@ describe("source dock rail", () => {
   });
 });
 
-describe("panel mode transitions", () => {
-  it("preserves an XY x signal without adding it to time-mode series", () => {
-    const workspace = new WorkspaceModel();
-    const panel = workspace.addPanelRow();
-    for (let index = 0; index < 8; index += 1) {
-      workspace.addSeriesRef(panel.id, {
-        source_key: "run_01",
-        channel: `s${String(index)}`,
-      });
-    }
-    workspace.addSeriesRef(panel.id, {
-      source_key: "run_01",
-      channel: "time",
-    });
-    workspace.setXRef(panel.id, { source_key: "run_01", channel: "time" });
-    workspace.setMode(panel.id, "xy");
-
-    const shell = Object.create(AppShell.prototype) as ShellProbe;
-    shell.workspace = workspace;
-    shell.transitionPanelMode(panel.id, "time");
-
-    expect(workspace.panel(panel.id)?.x_ref).toEqual({
-      source_key: "run_01",
-      channel: "time",
-    });
-    expect(workspace.panel(panel.id)?.bindings[0]?.refs).toHaveLength(8);
-    expect(
-      workspace
-        .panel(panel.id)
-        ?.bindings.flatMap((binding) => binding.refs)
-        .some((ref) => ref.source_key === "run_01" && ref.channel === "time"),
-    ).toBe(false);
-
-    shell.transitionPanelMode(panel.id, "xy");
-
-    expect(workspace.panel(panel.id)?.x_ref).toEqual({
-      source_key: "run_01",
-      channel: "time",
-    });
-    expect(workspace.panel(panel.id)?.bindings[0]?.refs).toHaveLength(8);
-    expect(
-      workspace
-        .panel(panel.id)
-        ?.bindings.flatMap((binding) => binding.refs)
-        .some((ref) => ref.source_key === "run_01" && ref.channel === "time"),
-    ).toBe(false);
-  });
-});
-
 describe("renderBatchProgress", () => {
   it("renders byte-weighted progress and the current file", () => {
     const progress = document.createElement("div");
@@ -990,7 +912,6 @@ describe("workspace theme persistence", () => {
       autosaveTimer: number | null;
       workspacePath: string | null;
       tilesByPanel: Map<string, unknown>;
-      samplesByPanel: Map<string, unknown>;
       missingByPanel: Map<string, unknown>;
       workspaceView: null;
       reloadSignals: ReturnType<typeof vi.fn>;
@@ -1007,7 +928,6 @@ describe("workspace theme persistence", () => {
     shell.autosaveTimer = null;
     shell.workspacePath = null;
     shell.tilesByPanel = new Map();
-    shell.samplesByPanel = new Map();
     shell.missingByPanel = new Map();
     shell.workspaceView = null;
     shell.reloadSignals = vi.fn(() => Promise.resolve());

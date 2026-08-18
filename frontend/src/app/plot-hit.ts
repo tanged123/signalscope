@@ -125,7 +125,7 @@ function firstCenterAfter(bins: BinColumns, time: number): number {
   return low;
 }
 
-export function segmentHit(
+function segmentHit(
   first: { x: number; y: number },
   second: { x: number; y: number },
   px: number,

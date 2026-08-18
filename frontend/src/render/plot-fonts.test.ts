@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { labelFont, tickFont } from "./canvas-renderer";
+import { labelFont, tickFont } from "./plot-theme";
 
 const palette = { fontPlot: '"DejaVu Sans", sans-serif', fontSize: 11 };
 

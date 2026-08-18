@@ -1,5 +1,5 @@
 import type { ExportFidelity, SampleSeries } from "../generated/protocol";
-import { lerpSample } from "./xy";
+import { lerpSample } from "./samples";
 
 export interface CsvExport {
   text: string;

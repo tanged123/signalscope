@@ -44,5 +44,6 @@ Accepted decisions:
 40. [ChartGPU submodule delivery](0040-chartgpu-submodule-delivery.md)
 41. [Full-resolution presentation baseline](0041-full-resolution-presentation-baseline.md)
 42. [Padded render feed and windowed presentation math](0042-padded-render-feed.md)
+43. [Time-only presentation and a single plotter](0043-time-only-presentation.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

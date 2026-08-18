@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import fixtureJson from "../../../protocol/testdata/lerp-conformance.json";
-import { lerpSample } from "./xy";
+import { lerpSample } from "./samples";
 
 interface LerpFixture {
   time: number[];
