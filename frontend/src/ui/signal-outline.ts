@@ -106,6 +106,11 @@ export class SignalOutlineView {
   }
 
   private render(): void {
+    const active = document.activeElement;
+    const focusedKey =
+      active instanceof HTMLElement && this.listElement.contains(active)
+        ? active.closest<HTMLElement>("[data-key]")?.dataset.key
+        : undefined;
     const header = this.headerElement();
     const spacer = document.createElement("div");
     spacer.className = "signal-outline-spacer";
@@ -130,6 +135,11 @@ export class SignalOutlineView {
       spacer.appendChild(windowElement);
     }
     this.listElement.replaceChildren(header, spacer);
+    if (focusedKey !== undefined) {
+      [...this.listElement.querySelectorAll<HTMLElement>("[data-key]")]
+        .find((element) => element.dataset.key === focusedKey)
+        ?.focus();
+    }
   }
 
   private headerElement(): HTMLElement {
