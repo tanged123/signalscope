@@ -1121,6 +1121,19 @@ button {
   display: none;
 }
 
+.gpu-warning-reload {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  padding: 2px 6px;
+  color: var(--fg-2);
+}
+
+.gpu-warning-reload:hover,
+.gpu-warning-reload:focus-visible {
+  border-color: var(--amber-7);
+  color: var(--amber-7);
+}
+
 .panel-split-actions {
   display: flex;
   overflow: hidden;

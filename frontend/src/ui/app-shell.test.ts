@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as M4Feed from "../render/m4-feed";
 
 const prepareResponseFeeds = vi.hoisted(() => vi.fn());
 
 vi.mock("../render/m4-feed", async () => ({
-  ...(await vi.importActual<typeof import("../render/m4-feed")>(
-    "../render/m4-feed",
-  )),
+  ...(await vi.importActual<typeof M4Feed>("../render/m4-feed")),
   prepareResponseFeeds,
 }));
 
@@ -25,6 +24,7 @@ import {
   type ColumnarTileResponse,
 } from "../app/bin-columns";
 import type { SeriesRef } from "../generated/session";
+import type { GpuContext, GpuFailure } from "../render/gpu-context";
 import { TileWindowCache } from "../app/tile-window-cache";
 import {
   AppShell,
@@ -86,11 +86,14 @@ type RefreshShell = {
   workspaceView: null;
   plane: Pick<DataPlane, "queryTiles">;
   tileWindowCache: TileWindowCache;
-  panelSignalIds(): { ids: string[]; missing: string[] };
-  resolvedFor(): { visible: boolean }[];
-  effectiveWindow(): { t0: number; t1: number };
-  renderTiles(): void;
-  reportError(error: unknown): void;
+  panelSignalIds: (panel: { id: string }) => {
+    ids: string[];
+    missing: string[];
+  };
+  resolvedFor: () => { visible: boolean }[];
+  effectiveWindow: () => { t0: number; t1: number };
+  renderTiles: () => void;
+  reportError: (error: unknown) => void;
   refreshToken: number;
   refreshPromise: Promise<void> | null;
   refreshQueued: boolean;
@@ -170,6 +173,95 @@ describe("sample refresh requests", () => {
     const { shell, querySamples } = refreshProbe();
     await shell.refreshTilesPass(0);
     expect(querySamples).not.toHaveBeenCalled();
+  });
+});
+
+describe("GPU failure handling", () => {
+  it("releases panels and offers reload after device loss", () => {
+    const root = document.createElement("div");
+    root.innerHTML = shellMarkup();
+    let failure: ((value: GpuFailure) => void) | undefined;
+    const workspaceView = {
+      setGpu: vi.fn(),
+      releaseGpu: vi.fn(),
+    };
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      gpu: GpuContext | null;
+      signals: SignalSummary[];
+      workspaceView: typeof workspaceView;
+      bindGpuWarning(): void;
+      refreshTiles(): Promise<void>;
+      setGpu(gpu: GpuContext): void;
+    };
+    shell.root = root;
+    shell.gpu = null;
+    shell.signals = [];
+    shell.workspaceView = workspaceView;
+    shell.refreshTiles = vi.fn(() => Promise.resolve());
+    const gpu = {
+      onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
+        failure = callback;
+        return vi.fn();
+      }),
+    } as unknown as GpuContext;
+
+    const reload = vi.fn();
+    vi.stubGlobal("window", { location: { reload } });
+    shell.bindGpuWarning();
+    shell.setGpu(gpu);
+    failure?.({ kind: "device-lost", message: "adapter reset" });
+
+    const warning = root.querySelector<HTMLElement>(".gpu-warning");
+    expect(workspaceView.releaseGpu).toHaveBeenCalledOnce();
+    expect(warning?.textContent).toContain(
+      "WebGPU device lost — reload SignalScope",
+    );
+    expect(warning?.hidden).toBe(false);
+    expect(
+      root.querySelector<HTMLButtonElement>(".gpu-warning-dismiss")?.hidden,
+    ).toBe(true);
+    root.querySelector<HTMLButtonElement>(".gpu-warning-reload")?.click();
+    expect(reload).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
+  it("reports uncaptured GPU errors without releasing the workspace", () => {
+    const root = document.createElement("div");
+    root.innerHTML = shellMarkup();
+    let failure: ((value: GpuFailure) => void) | undefined;
+    const workspaceView = {
+      setGpu: vi.fn(),
+      releaseGpu: vi.fn(),
+    };
+    const reportError = vi.fn();
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      gpu: GpuContext | null;
+      signals: SignalSummary[];
+      workspaceView: typeof workspaceView;
+      reportError(error: unknown): void;
+      refreshTiles(): Promise<void>;
+      setGpu(gpu: GpuContext): void;
+    };
+    shell.root = root;
+    shell.gpu = null;
+    shell.signals = [];
+    shell.workspaceView = workspaceView;
+    shell.reportError = reportError;
+    shell.refreshTiles = vi.fn(() => Promise.resolve());
+    const gpu = {
+      onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
+        failure = callback;
+        return vi.fn();
+      }),
+    } as unknown as GpuContext;
+
+    shell.setGpu(gpu);
+    failure?.({ kind: "uncaptured-error", message: "shader failed" });
+
+    expect(reportError).toHaveBeenCalledWith("shader failed");
+    expect(workspaceView.releaseGpu).not.toHaveBeenCalled();
   });
 });
 

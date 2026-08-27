@@ -86,7 +86,9 @@ describe("queryAdaptivePyramidRange", () => {
 
     expect(range.level).toBeGreaterThan(0);
     const pixelSpan = (203 - 0) / 20;
-    for (const selected of levels[range.level]!.slice(range.start, range.end)) {
+    const selectedLevel = levels[range.level];
+    if (selectedLevel === undefined) throw new Error("missing selected level");
+    for (const selected of selectedLevel.slice(range.start, range.end)) {
       expect(selected.t1 - selected.t0).toBeLessThanOrEqual(pixelSpan);
     }
   });

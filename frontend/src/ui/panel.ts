@@ -485,6 +485,7 @@ export class PanelView {
   private chartHost: ChartHost | null = null;
   private chartHostReady: Promise<ChartHost | null> | null = null;
   private pendingChartRender: ChartRenderRequest | null = null;
+  private chartHostGeneration = 0;
   private disposed = false;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
@@ -595,9 +596,14 @@ export class PanelView {
   }
 
   private initializeChartHost(gpu: GpuContext): void {
+    const generation = this.chartHostGeneration;
     this.chartHostReady = ChartHost.create(this.chartHostElement, gpu)
       .then((host) => {
-        if (this.disposed) {
+        if (
+          this.disposed ||
+          generation !== this.chartHostGeneration ||
+          this.gpu !== gpu
+        ) {
           host.dispose();
           return null;
         }
@@ -610,6 +616,13 @@ export class PanelView {
         return host;
       })
       .catch((error: unknown) => {
+        if (
+          this.disposed ||
+          generation !== this.chartHostGeneration ||
+          this.gpu !== gpu
+        ) {
+          return null;
+        }
         console.error("ChartGPU initialization failed", error);
         this.gpu = null;
         this.chartHostElement.hidden = true;
@@ -1016,9 +1029,17 @@ export class PanelView {
 
   dispose(): void {
     this.disposed = true;
+    this.releaseGpu();
     this.interactions.dispose();
+  }
+
+  releaseGpu(): void {
+    this.chartHostGeneration += 1;
     this.chartHost?.dispose();
     this.chartHost = null;
+    this.chartHostReady = null;
+    this.gpu = null;
+    this.chartHostElement.hidden = true;
   }
 
   private activeLayout(): PlotLayout | null {

@@ -6,6 +6,7 @@ import type { FocusEntry, PanelState } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
+import type { GpuContext } from "../render/gpu-context";
 
 import {
   MAX_SERIES_PER_PANEL,
@@ -73,6 +74,36 @@ describe("panel markup", () => {
     expect(panel.element.querySelectorAll(".mode-pill")).toHaveLength(0);
     expect(panel.element.querySelector(".xy-drop-strip")).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it("releases its chart host without disposing the panel", () => {
+    const dispose = vi.fn();
+    const chartHostElement = document.createElement("div");
+    const view = Object.create(PanelView.prototype) as {
+      gpu: GpuContext | null;
+      chartHost: { dispose(): void } | null;
+      chartHostReady: Promise<{ dispose(): void } | null> | null;
+      pendingChartRender: object | null;
+      chartHostElement: HTMLElement;
+      disposed: boolean;
+      releaseGpu(): void;
+    };
+    view.gpu = {} as GpuContext;
+    view.chartHost = { dispose };
+    view.chartHostReady = Promise.resolve(view.chartHost);
+    view.pendingChartRender = {};
+    view.chartHostElement = chartHostElement;
+    view.disposed = false;
+
+    view.releaseGpu();
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(view.gpu).toBeNull();
+    expect(view.chartHost).toBeNull();
+    expect(view.chartHostReady).toBeNull();
+    expect(view.pendingChartRender).not.toBeNull();
+    expect(chartHostElement.hidden).toBe(true);
+    expect(view.disposed).toBe(false);
   });
 });
 

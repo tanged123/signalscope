@@ -87,7 +87,7 @@ import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
-import type { GpuContext } from "../render/gpu-context";
+import type { GpuContext, GpuFailure } from "../render/gpu-context";
 import { prepareResponseFeeds } from "../render/m4-feed";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
@@ -211,15 +211,42 @@ export class AppShell {
   setGpu(gpu: GpuContext): void {
     if (this.gpu !== null) return;
     this.gpu = gpu;
+    gpu.onFailure((failure) => {
+      this.handleGpuFailure(failure);
+    });
     const warning = this.root.querySelector<HTMLElement>(".gpu-warning");
     if (warning !== null) warning.hidden = true;
     this.workspaceView?.setGpu(gpu, this.signals.length > 0);
     void this.refreshTiles();
   }
 
+  private handleGpuFailure(failure: GpuFailure): void {
+    if (failure.kind === "uncaptured-error") {
+      this.reportError(failure.message);
+      return;
+    }
+    this.workspaceView?.releaseGpu();
+    const warning = required<HTMLElement>(this.root, ".gpu-warning");
+    required<HTMLElement>(warning, ".gpu-warning-message").textContent =
+      "WebGPU device lost — reload SignalScope";
+    required<HTMLButtonElement>(warning, ".gpu-warning-dismiss").hidden = true;
+    required<HTMLButtonElement>(warning, ".gpu-warning-reload").hidden = false;
+    warning.hidden = false;
+  }
+
+  private bindGpuWarning(): void {
+    required<HTMLButtonElement>(
+      this.root,
+      ".gpu-warning-reload",
+    ).addEventListener("click", () => {
+      window.location.reload();
+    });
+  }
+
   async mount(): Promise<void> {
     delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
+    this.bindGpuWarning();
     if (this.gpu === null) {
       const warning = required<HTMLElement>(this.root, ".gpu-warning");
       warning.hidden = false;
@@ -3268,8 +3295,9 @@ export function shellMarkup(): string {
       <span class="session-identity"></span>
     </div>
     <div class="gpu-warning" hidden role="status">
-      WebGPU unavailable — time-series panels disabled
+      <span class="gpu-warning-message">WebGPU unavailable — time-series panels disabled</span>
       <button class="gpu-warning-dismiss" type="button" aria-label="Dismiss WebGPU warning">✕</button>
+      <button class="gpu-warning-reload" type="button" hidden>Reload SignalScope</button>
     </div>
 
     <div class="workspace-strip">

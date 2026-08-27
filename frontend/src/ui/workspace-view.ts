@@ -56,6 +56,11 @@ export class WorkspaceView {
     if (this.views.size === 0) this.sync(hasSignals, this.seriesCounts);
   }
 
+  releaseGpu(): void {
+    for (const view of this.views.values()) view.releaseGpu();
+    this.gpu = null;
+  }
+
   sync(hasSignals: boolean, seriesCounts: ReadonlyMap<string, number>): void {
     this.seriesCounts = seriesCounts;
     const allPanels = this.model.tabs().flatMap((tab) => tab.panels);
