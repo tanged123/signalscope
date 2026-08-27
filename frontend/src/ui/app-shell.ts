@@ -249,7 +249,18 @@ export class AppShell {
           this.afterLayoutChange();
         },
         onClose: (id) => {
+          const tab = this.workspace.tabs().find((entry) => entry.id === id);
+          const panelIds = tab?.panels.map((panel) => panel.id) ?? [];
+          const canClose = this.workspace.tabs().length > 1;
           this.workspace.closeTab(id);
+          if (
+            canClose &&
+            !this.workspace.tabs().some((entry) => entry.id === id)
+          ) {
+            for (const panelId of panelIds) {
+              this.tileWindowCache.invalidate(panelId);
+            }
+          }
           this.afterLayoutChange();
         },
       },
@@ -262,7 +273,9 @@ export class AppShell {
           this.workspace.focusPanel(id);
         },
         onClose: (id) => {
+          const panelExisted = this.workspace.panel(id) !== undefined;
           this.workspace.closePanel(id);
+          if (panelExisted) this.tileWindowCache.invalidate(id);
           this.afterLayoutChange();
         },
         onSplitRight: (id) => {
@@ -1836,7 +1849,10 @@ export class AppShell {
       this.workspace.tabs(),
       this.workspace.activeTabId(),
     );
-    this.workspaceView?.sync(this.signals.length > 0);
+    this.workspaceView?.sync(
+      this.signals.length > 0,
+      this.visibleSeriesCounts(),
+    );
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
     this.syncCursorMode();
     void this.refreshTiles();
@@ -2159,7 +2175,10 @@ export class AppShell {
       this.workspace.tabs(),
       this.workspace.activeTabId(),
     );
-    this.workspaceView?.sync(this.signals.length > 0);
+    this.workspaceView?.sync(
+      this.signals.length > 0,
+      this.visibleSeriesCounts(),
+    );
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
   }
 
@@ -2614,6 +2633,19 @@ export class AppShell {
     );
     this.resolutionCache.set(panel.id, { key, resolved });
     return resolved;
+  }
+
+  private visibleSeriesCounts(): ReadonlyMap<string, number> {
+    const counts = new Map<string, number>();
+    for (const tab of this.workspace.tabs()) {
+      for (const panel of tab.panels) {
+        counts.set(
+          panel.id,
+          this.resolvedFor(panel).filter((series) => series.visible).length,
+        );
+      }
+    }
+    return counts;
   }
 
   private isDerivedPath(path: string): boolean {
