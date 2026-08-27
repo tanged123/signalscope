@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { binColumnsFromWire, type BinColumns } from "../app/bin-columns";
-import { cachedFeed, m4Feed } from "./m4-feed";
+import type { ColumnarTileResponse } from "../app/bin-columns";
+import {
+  cachedFeed,
+  m4Feed,
+  prepareResponseFeeds,
+  responseTimeReference,
+} from "./m4-feed";
 
 function columns(
   values: {
@@ -104,6 +110,29 @@ describe("m4Feed", () => {
     expect(points(feed).map(([, y]) => y)).toEqual([1, 0, 5, 2]);
   });
 
+  it("omits extrema already represented by endpoints", () => {
+    const feed = m4Feed(
+      columns([{ t0: 10, t1: 12, first: 1, min: 1, max: 5, last: 5 }]),
+      10,
+    );
+    expect(points(feed)).toEqual([
+      [0, 1],
+      [2, 5],
+    ]);
+  });
+
+  it("emits equal midpoint extrema once", () => {
+    const feed = m4Feed(
+      columns([{ t0: 0, t1: 2, first: 1, min: 0, max: 0, last: 1 }]),
+      0,
+    );
+    expect(points(feed)).toEqual([
+      [0, 1],
+      [1, 0],
+      [2, 1],
+    ]);
+  });
+
   it("breaks the polyline at a gap bin", () => {
     const feed = m4Feed(
       columns([
@@ -192,5 +221,26 @@ describe("m4Feed", () => {
     expect(cachedFeed(left, 0)).toBe(cachedFeed(left, 0));
     expect(cachedFeed(left, 0)).not.toBe(cachedFeed(right, 0));
     expect(cachedFeed(left, 1)).not.toBe(cachedFeed(left, 0));
+  });
+
+  it("prewarms the same feed ChartHost consumes", () => {
+    const response: ColumnarTileResponse = {
+      requestId: "prewarm",
+      series: [
+        {
+          signalId: "7",
+          signalPath: "run/value",
+          unit: "V",
+          level: 2,
+          bins: columns([
+            { t0: 10, t1: 12, first: 1, min: 0, max: 5, last: 2 },
+          ]),
+        },
+      ],
+    };
+    prepareResponseFeeds(response);
+    const reference = responseTimeReference(response);
+    const prepared = cachedFeed(response.series[0]!.bins, reference);
+    expect(prepared).toBe(cachedFeed(response.series[0]!.bins, reference));
   });
 });

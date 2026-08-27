@@ -8,7 +8,7 @@ import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
 import { formatTicks, hueIndex } from "./plot-theme";
 import type { Palette, SeriesStroke } from "./plot-theme";
-import { cachedFeed } from "./m4-feed";
+import { cachedFeed, responseTimeReference } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
 
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
@@ -86,7 +86,7 @@ export class ChartHost {
   render(request: ChartRenderRequest): number {
     const started = performance.now();
     const ids = request.response.series.map((series) => series.signalId);
-    const nextTRef = minimumTime(request.response);
+    const nextTRef = responseTimeReference(request.response);
     let rebuilt = false;
     if (!sameStrings(ids, this.seriesIds) || nextTRef !== this.tRef) {
       this.seriesIds = ids;
@@ -312,13 +312,4 @@ function sameStyle(left: SeriesStroke, right: SeriesStroke): boolean {
     left.width === right.width &&
     left.alpha === right.alpha
   );
-}
-
-function minimumTime(response: ColumnarTileResponse): number {
-  let minimum = Number.POSITIVE_INFINITY;
-  for (const series of response.series) {
-    if (series.bins.count === 0) continue;
-    minimum = Math.min(minimum, series.bins.t0[0] as number);
-  }
-  return Number.isFinite(minimum) ? minimum : 0;
 }
