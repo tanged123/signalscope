@@ -25,6 +25,7 @@ coverage_rust() {
     --workspace \
     --lcov \
     --output-path "$coverage_dir/rust.lcov"
+  cargo llvm-cov clean
 }
 
 coverage_frontend() {

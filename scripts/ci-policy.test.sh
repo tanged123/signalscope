@@ -43,6 +43,10 @@ if ! grep -Fq 'workers: process.env.CI ? 1 : undefined' "$playwright_config"; th
 fi
 
 coverage_script="$script_dir/coverage.sh"
+if ! grep -Fxq '  cargo llvm-cov clean' "$coverage_script"; then
+  echo "coverage must release Rust instrumentation before frontend WebGPU tests" >&2
+  failures=$((failures + 1))
+fi
 if ! grep -Fq '  build_e2e_server' "$coverage_script"; then
   echo "frontend coverage must build scope-server before Playwright" >&2
   failures=$((failures + 1))
