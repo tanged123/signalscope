@@ -9,6 +9,7 @@ import {
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
+import { MAX_RESIDENT_SERIES } from "../app/render-limits";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
@@ -87,11 +88,11 @@ import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import type { GpuContext } from "../render/gpu-context";
+import { prepareResponseFeeds } from "../render/m4-feed";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
-const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
@@ -2466,6 +2467,7 @@ export class AppShell {
 
   private refreshTiles(): Promise<void> {
     this.refreshQueued = true;
+    this.refreshToken += 1;
     if (this.refreshPromise !== null) {
       return this.refreshPromise;
     }
@@ -2473,7 +2475,7 @@ export class AppShell {
       try {
         while (this.hasQueuedRefresh()) {
           this.refreshQueued = false;
-          await this.refreshTilesPass();
+          await this.refreshTilesPass(this.refreshToken);
         }
       } finally {
         this.refreshPromise = null;
@@ -2486,60 +2488,99 @@ export class AppShell {
     return this.refreshQueued;
   }
 
-  private async refreshTilesPass(): Promise<void> {
-    const refreshToken = ++this.refreshToken;
+  private async refreshTilesPass(refreshToken: number): Promise<void> {
+    const panels = this.workspace.panels();
+    const visibleSeries = panels.reduce(
+      (total, panel) =>
+        total +
+        this.resolvedFor(panel).filter((series) => series.visible).length,
+      0,
+    );
+    if (visibleSeries > MAX_RESIDENT_SERIES) {
+      this.reportError(
+        `series limit exceeded: ${String(visibleSeries)} visible; maximum ${String(MAX_RESIDENT_SERIES)}`,
+      );
+      return;
+    }
     const width = Math.max(
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
     );
+    const devicePixelRatio = Number.isFinite(window.devicePixelRatio)
+      ? window.devicePixelRatio
+      : 1;
     const nextTiles = new Map<string, ColumnarTileResponse>();
     const nextMissing = new Map<string, string[]>();
+    const replacements = new Map<
+      string,
+      {
+        response: ColumnarTileResponse;
+        window: { t0: number; t1: number };
+        pixelWidth: number;
+        requestedDevicePixels: number;
+        idsKey: string;
+      }
+    >();
     await Promise.all(
-      this.workspace.panels().map(async (panel) => {
+      panels.map(async (panel) => {
         const { ids, missing } = this.panelSignalIds(panel);
         nextMissing.set(panel.id, missing);
         if (ids.length === 0) return;
         const window = this.effectiveWindow(panel);
+        const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+        const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
+        const devicePixelWidth = Math.max(
+          1,
+          Math.ceil(pixelWidth * devicePixelRatio),
+        );
+        const idsKey = [...ids].sort().join("\u0000");
+        const lookup = this.tileWindowCache.lookup(
+          panel.id,
+          idsKey,
+          window,
+          devicePixelWidth,
+        );
+        if (lookup.kind === "current") {
+          nextTiles.set(panel.id, lookup.response);
+          return;
+        }
+        const fallback = lookup.kind === "stale" ? lookup.response : null;
+        const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+        const requestedDevicePixels = TileWindowCache.requestPixelWidth(
+          pixelWidth,
+          devicePixelRatio,
+          window,
+          paddedWindow,
+        );
         try {
-          const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-          const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
-          const idsKey = [...ids].sort().join("\u0000");
-          const cached = this.tileWindowCache.hit(
-            panel.id,
-            idsKey,
-            pixelWidth,
-            window.t0,
-            window.t1,
-          );
-          if (cached !== null) {
-            nextTiles.set(panel.id, cached);
-            return;
-          }
-          const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
           const response = await this.plane.queryTiles({
             request_id: crypto.randomUUID(),
             signal_ids: ids,
             window: paddedWindow,
-            pixel_width: TileWindowCache.requestPixelWidth(
-              pixelWidth,
-              window,
-              paddedWindow,
-            ),
-            max_total_bins: TILE_BIN_BUDGET,
+            pixel_width: requestedDevicePixels,
+            max_total_bins: null,
           });
-          this.tileWindowCache.store(panel.id, {
+          if (refreshToken !== this.refreshToken) return;
+          replacements.set(panel.id, {
             response,
             window: paddedWindow,
             pixelWidth,
+            requestedDevicePixels,
             idsKey,
           });
           nextTiles.set(panel.id, response);
         } catch (error: unknown) {
+          if (refreshToken !== this.refreshToken) return;
           this.reportError(error);
+          if (fallback !== null) nextTiles.set(panel.id, fallback);
         }
       }),
     );
     if (refreshToken !== this.refreshToken) return;
+    for (const [panelId, replacement] of replacements) {
+      prepareResponseFeeds(replacement.response);
+      this.tileWindowCache.store(panelId, replacement);
+    }
     this.tilesByPanel = nextTiles;
     this.missingByPanel = nextMissing;
     this.renderTiles();
