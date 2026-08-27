@@ -6,6 +6,9 @@ const coverage = process.env.SIGNALSCOPE_COVERAGE === "1";
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
+  // GitHub's SwiftShader WebGPU adapter is not available to two browser
+  // processes reliably; local hardware remains parallel.
+  workers: process.env.CI ? 1 : undefined,
   metadata: {
     coverage,
   },

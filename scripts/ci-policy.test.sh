@@ -10,6 +10,7 @@ ci_workflow="$script_dir/../.github/workflows/ci.yml"
 flake="$script_dir/../flake.nix"
 lib_script="$script_dir/lib.sh"
 live_plane_test="$script_dir/../frontend/tests/e2e/live-plane.spec.ts"
+playwright_config="$script_dir/../frontend/playwright.config.ts"
 
 # shellcheck disable=SC2016
 if ! grep -Fq '"$signalscope_scripts_dir/chartgpu-submodule.sh" init' "$setup_script"; then
@@ -34,6 +35,10 @@ if ! grep -Fq 'cargo build --release -p scope-server' "$lib_script"; then
 fi
 if ! grep -Fq '"target", "release", "scope-server"' "$live_plane_test"; then
   echo "live-plane E2E must run the prebuilt release server" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'workers: process.env.CI ? 1 : undefined' "$playwright_config"; then
+  echo "CI Playwright tests must serialize SwiftShader WebGPU access" >&2
   failures=$((failures + 1))
 fi
 
