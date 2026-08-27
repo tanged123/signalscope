@@ -3297,7 +3297,7 @@ export function shellMarkup(): string {
     <div class="gpu-warning" hidden role="status">
       <span class="gpu-warning-message">WebGPU unavailable — time-series panels disabled</span>
       <button class="gpu-warning-dismiss" type="button" aria-label="Dismiss WebGPU warning">✕</button>
-      <button class="gpu-warning-reload" type="button" hidden>Reload SignalScope</button>
+      <button class="gpu-warning-reload" type="button" aria-label="Reload SignalScope" hidden>Reload</button>
     </div>
 
     <div class="workspace-strip">
