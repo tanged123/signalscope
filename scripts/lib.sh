@@ -33,13 +33,13 @@ artifact_checks() {
 }
 
 rust_checks() {
-  local check_config='{"bundle":{"resources":[]}}'
-  TAURI_CONFIG="$check_config" cargo clippy --workspace --all-targets -- -D warnings
-  TAURI_CONFIG="$check_config" cargo test --workspace
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test --workspace
 }
 
 quality_checks() {
   shellcheck scripts/*.sh .github/hooks/pre-commit
+  "$signalscope_scripts_dir/chartgpu-submodule.test.sh"
   "$signalscope_scripts_dir/ci-policy.test.sh"
   node "$signalscope_scripts_dir/generate-monte-carlo-demo.mjs" --check
   actionlint
@@ -81,4 +81,8 @@ bake_bench_smoke_artifact() {
     echo "baked smoke snapshot is $bytes bytes (limit $max_bytes)" >&2
     return 1
   fi
+}
+
+build_e2e_server() {
+  cargo build --release -p scope-server
 }

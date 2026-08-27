@@ -7,26 +7,26 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|shell|unit|frontend|e2e|bench|full]
+Usage: ./scripts/test.sh [quick|core|server|unit|frontend|e2e|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
-  shell     Test the Tauri shell, optionally filtered.
+  server    Test the browser host server, optionally filtered.
   unit      Run frontend unit tests, optionally filtered.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
   e2e       Run Playwright desktop and mobile-review smoke tests.
   bench     Run corpus, core, and Playwright performance benchmarks.
-  full      Run quick checks, compile/test the Tauri shell, then run e2e.
+  full      Run quick checks, test the browser host, then run e2e.
 EOF
 }
 
 test_core() {
-  cargo test --workspace --exclude signalscope-shell -- "$@"
+  cargo test --workspace --exclude scope-server -- "$@"
 }
 
-test_shell() {
-  cargo test -p signalscope-shell -- "$@"
+test_server() {
+  cargo test -p scope-server -- "$@"
 }
 
 test_unit() {
@@ -102,9 +102,9 @@ core)
   shift || true
   test_core "$@"
   ;;
-shell)
+server)
   shift || true
-  test_shell "$@"
+  test_server "$@"
   ;;
 unit)
   shift || true
@@ -116,7 +116,9 @@ frontend)
 e2e)
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
+  build_e2e_server
   pnpm e2e
+  "$signalscope_scripts_dir/server-smoke.sh"
   ;;
 bench)
   bench_mode="${2:-all}"
@@ -143,10 +145,12 @@ bench)
 full)
   test_core
   test_frontend
-  cargo test -p signalscope-shell
+  cargo test -p scope-server
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
+  build_e2e_server
   pnpm e2e
+  "$signalscope_scripts_dir/server-smoke.sh"
   ;;
 -h | --help | help)
   show_help

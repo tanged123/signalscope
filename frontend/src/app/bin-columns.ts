@@ -21,7 +21,7 @@ export interface BinColumns {
   readonly flags: Uint8Array;
 }
 
-export interface ColumnarTile {
+interface ColumnarTile {
   signalId: string;
   signalPath: string;
   unit: string | null;

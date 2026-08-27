@@ -6,7 +6,8 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const snapshotPath = resolve(scriptDirectory, "../dist/snapshot-template.html");
 const snapshot = await readFile(snapshotPath, "utf8");
 const details = await stat(snapshotPath);
-const maximumBytes = 750_000;
+// raised once for the bundled ChartGPU renderer (ADR 0039)
+const maximumBytes = 1_500_000;
 
 const failures = [];
 if (!snapshot.includes('id="signalscope-baked-data"')) {

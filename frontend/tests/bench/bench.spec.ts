@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "../e2e/fixtures";
-import { interact, startFrameProbe, stopFrameProbe } from "./measure";
+import { interact, panInPad, startFrameProbe, stopFrameProbe } from "./measure";
 
 const artifact = new URL("../../../build/bench/mc1000.html", import.meta.url);
 const reportDir = new URL("../../../build/bench/report/", import.meta.url);
@@ -17,7 +17,7 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
 
   const started = Date.now();
   await page.goto(artifact.href);
-  await expect(page.locator(".plot-canvas").first()).toBeVisible({
+  await expect(page.locator(".chart-host canvas").first()).toBeVisible({
     timeout: 120_000,
   });
   await expect(page.locator(".render-ms")).not.toHaveText("— ms", {
@@ -61,6 +61,57 @@ test("mc1000 snapshot first plot and pan/zoom stay interactive", async ({
   );
 
   expect(firstPlotMs, "first plot").toBeLessThanOrEqual(10_000);
+  expect(stats.frames, "frame probe collected samples").toBeGreaterThan(100);
+  expect(stats.p95Ms, "frame interval p95").toBeLessThanOrEqual(33);
+  expect(
+    Math.max(stats.maxMs, stats.longestTaskMs),
+    "longest stall",
+  ).toBeLessThanOrEqual(250);
+});
+
+test("mc1000 in-pad pan stays interactive", async ({ page }) => {
+  test.setTimeout(240_000);
+  expect(
+    existsSync(fileURLToPath(artifact)),
+    "bake first: ./scripts/test.sh bench e2e",
+  ).toBe(true);
+
+  await page.goto(artifact.href);
+  await expect(page.locator(".chart-host canvas").first()).toBeVisible({
+    timeout: 120_000,
+  });
+  await expect(page.locator(".render-ms")).not.toHaveText("— ms", {
+    timeout: 120_000,
+  });
+
+  await startFrameProbe(page);
+  await panInPad(page);
+  const stats = await stopFrameProbe(page);
+
+  mkdirSync(fileURLToPath(reportDir), { recursive: true });
+  writeFileSync(
+    new URL("e2e_mc1000_pan.json", reportDir),
+    JSON.stringify(
+      {
+        bench: "e2e_mc1000_pan",
+        frame_p95_ms: stats.p95Ms,
+        frame_max_ms: stats.maxMs,
+        frames: stats.frames,
+        long_tasks: stats.longTasks,
+        longest_task_ms: stats.longestTaskMs,
+        floor_frame_p95_ms: 33,
+        floor_frames: 100,
+        floor_stall_ms: 250,
+        pass:
+          stats.frames > 100 &&
+          stats.p95Ms <= 33 &&
+          Math.max(stats.maxMs, stats.longestTaskMs) <= 250,
+      },
+      null,
+      2,
+    ),
+  );
+
   expect(stats.frames, "frame probe collected samples").toBeGreaterThan(100);
   expect(stats.p95Ms, "frame interval p95").toBeLessThanOrEqual(33);
   expect(

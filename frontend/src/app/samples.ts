@@ -10,6 +10,41 @@ export interface SampleSlice {
   stride: number;
 }
 
+/**
+ * Linear sample of `values` at `query`, NaN outside the signal's coverage.
+ *
+ * The prototype held the endpoint value flat past each end. This returns NaN
+ * instead so the stroke lifts when a plot extends past a signal's data range:
+ * a fabricated segment, and the pyramid's gap invariants already commit this
+ * codebase to breaking strokes rather than bridging absent data.
+ */
+export function lerpSample(
+  time: readonly number[],
+  values: readonly number[],
+  query: number,
+): number {
+  const count = time.length;
+  if (count === 0) return Number.NaN;
+  if (query < (time[0] ?? 0) || query > (time[count - 1] ?? 0)) {
+    return Number.NaN;
+  }
+  let low = 0;
+  let high = count - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((time[mid] ?? 0) < query) low = mid + 1;
+    else high = mid;
+  }
+  if ((time[low] ?? 0) === query) return values[low] ?? Number.NaN;
+  const previous = Math.max(0, low - 1);
+  const span = (time[low] ?? 0) - (time[previous] ?? 0);
+  if (span === 0) return values[low] ?? Number.NaN;
+  const alpha = (query - (time[previous] ?? 0)) / span;
+  const before = values[previous] ?? Number.NaN;
+  const after = values[low] ?? Number.NaN;
+  return before + (after - before) * alpha;
+}
+
 /** Index of the first entry not less than `value` in a sorted array. */
 function lowerBound(sorted: readonly number[], value: number): number {
   let low = 0;
@@ -34,6 +69,21 @@ function upperBound(sorted: readonly number[], value: number): number {
   return low;
 }
 
+function sampleWindowBounds(
+  time: readonly number[],
+  t0: number,
+  t1: number,
+): [number, number] | null {
+  const first = time[0];
+  const last = time[time.length - 1];
+  if (first === undefined || last === undefined || t1 < first || t0 > last) {
+    return null;
+  }
+  const start = Math.max(0, lowerBound(time, t0) - 1);
+  const end = Math.min(time.length, upperBound(time, t1) + 1);
+  return start < end ? [start, end] : null;
+}
+
 /**
  * Mirror of `scope_core::compute::sample_window`. The index arithmetic is
  * protocol surface: `protocol/testdata/sample-conformance.json` locks this
@@ -46,14 +96,11 @@ export function sampleWindow(
   t1: number,
   maxPoints: number,
 ): SampleSlice {
-  const first = time[0];
-  const last = time[time.length - 1];
-  if (first === undefined || last === undefined || t1 < first || t0 > last) {
+  const bounds = sampleWindowBounds(time, t0, t1);
+  if (bounds === null) {
     return { time: [], values: [], stride: 1 };
   }
-  const start = Math.max(0, lowerBound(time, t0) - 1);
-  const end = Math.min(time.length, upperBound(time, t1) + 1);
-  if (start >= end) return { time: [], values: [], stride: 1 };
+  const [start, end] = bounds;
   const span = end - start;
   const cap = Math.max(1, Math.trunc(maxPoints));
   const stride = Math.max(1, Math.ceil(span / cap));
@@ -69,6 +116,23 @@ export function sampleWindow(
     pickedValues.push(values[end - 1] ?? Number.NaN);
   }
   return { time: pickedTime, values: pickedValues, stride };
+}
+
+/** Mirror of `scope_core::compute::sample_window_full`. */
+export function sampleWindowFull(
+  time: readonly number[],
+  values: readonly number[],
+  t0: number,
+  t1: number,
+): SampleSlice {
+  const bounds = sampleWindowBounds(time, t0, t1);
+  if (bounds === null) return { time: [], values: [], stride: 1 };
+  const [start, end] = bounds;
+  return {
+    time: time.slice(start, end),
+    values: values.slice(start, end),
+    stride: 1,
+  };
 }
 
 /**
@@ -93,7 +157,7 @@ export function binsToSamples(bins: readonly EnvelopeBin[]): {
  * Combines a coarse full-extent response with a detailed visible-window
  * response. Detail replaces the overlapping context interval so timestamps
  * are not double-rendered, while context remains on either side for the
- * dimmed XY trajectory.
+ * dimmed plot.
  */
 export function mergeSampleResponses(
   context: SampleResponse,
@@ -127,8 +191,8 @@ export function mergeSampleResponses(
       time.push(sampleTime);
       values.push(coarse.values[index] ?? Number.NaN);
     });
-    // Appended rather than argument-spread: `fine` can hold SAMPLE_CAP
-    // elements, which spreading would push onto the call stack.
+    // Append rather than spread: a full response can be large enough to
+    // overflow the call stack.
     for (let index = 0; index < fine.time.length; index += 1) {
       time.push(fine.time[index] ?? Number.NaN);
       values.push(fine.values[index] ?? Number.NaN);

@@ -76,22 +76,6 @@
   --series-6: #4dbeee;
   --series-7: #a2142f;
   --series-8: #0072bd;
-  --seq-01: #011959;
-  --seq-02: #0d3260;
-  --seq-03: #114560;
-  --seq-04: #185562;
-  --seq-05: #26635f;
-  --seq-06: #3c6d56;
-  --seq-07: #577647;
-  --seq-08: #737e38;
-  --seq-09: #91862d;
-  --seq-10: #b38e2f;
-  --seq-11: #d29343;
-  --seq-12: #ed9a62;
-  --seq-13: #fba689;
-  --seq-14: #fdb2af;
-  --seq-15: #fcbfd4;
-  --seq-16: #fbccfa;
   /* Reserved for live streaming sources; loaded files do not show status dots. */
   --status-connected: #00cc66;
   --status-disconnected: #999999;
@@ -101,6 +85,7 @@
     JetBrains Mono, "DejaVu Sans", ui-monospace, "SF Mono", Menlo, monospace;
   --font-plot: "JetBrains Mono", ui-monospace, "SF Mono", "Menlo", monospace;
   --plot-font-size: 9;
+  --plot-line-width-scale: 1;
   --tree-row-height: 22px;
   --dur-quick: 80ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);

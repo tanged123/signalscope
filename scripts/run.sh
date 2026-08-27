@@ -7,22 +7,36 @@ ensure_dev_shell "$@"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/run.sh [native|web]
+Usage: ./scripts/run.sh [app|dev|web]
 
-  native  Launch the Tauri workbench (default).
+  app     Launch the built browser host (default).
+  dev     Launch scope-server and Vite with the /api proxy.
   web     Launch the shared frontend in a browser at http://127.0.0.1:4173.
-
-Native compilation is capped at two jobs by default. Override with:
-  CARGO_BUILD_JOBS=4 ./scripts/run.sh native
 EOF
 }
 
-mode="${1:-native}"
+mode="${1:-app}"
 case "$mode" in
-native)
+app)
   shift || true
-  cd shell/src-tauri
-  exec cargo tauri dev "$@"
+  if [ ! -d frontend/dist ]; then
+    "$signalscope_scripts_dir/build.sh" web
+  fi
+  exec cargo run --release -p scope-server "$@"
+  ;;
+dev)
+  shift || true
+  server_pid=""
+  cleanup() {
+    if [ -n "$server_pid" ]; then
+      kill "$server_pid" 2>/dev/null || true
+      wait "$server_pid" 2>/dev/null || true
+    fi
+  }
+  trap cleanup EXIT INT TERM
+  cargo run -p scope-server -- --no-auth --no-open &
+  server_pid=$!
+  pnpm dev "$@"
   ;;
 web)
   shift || true

@@ -51,3 +51,11 @@ libm differences cannot make the committed JSON nondeterministic.
 - Expression evaluation is unaffected and stays native per ADR 0008. The
   distinction is authored code versus bounded derived views of what is
   already on screen.
+
+## Amendment (2026-08-18, export-only)
+
+The live presentation consumers of windowed sample requests — XY, spectrum,
+and histogram panels — were removed by
+[ADR 0043](0043-time-only-presentation.md). Sample queries remain only for
+comma-separated value export, which is bounded by its user-selected
+fidelity under ADR 0025. No live path issues an uncapped sample request.

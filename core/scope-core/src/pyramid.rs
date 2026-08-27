@@ -428,6 +428,14 @@ impl Pyramid {
     }
 
     #[must_use]
+    pub fn query_raw(&self, t0: f64, t1: f64) -> PyramidQuery {
+        PyramidQuery {
+            level: 0,
+            bins: self.level_window(0, Some((t0, t1))).unwrap_or_default(),
+        }
+    }
+
+    #[must_use]
     pub fn query_with_target(
         &self,
         t0: f64,
@@ -849,6 +857,23 @@ mod tests {
 
         assert!(query.bins.len() <= 402);
         assert!(query.level > 0);
+    }
+
+    #[test]
+    fn raw_query_returns_every_window_sample_at_level_zero() {
+        let time = (0..10_000).map(f64::from).collect::<Vec<_>>();
+        let pyramid = Pyramid::from_samples(&time, &time);
+        let query = pyramid.query_raw(2_000.0, 7_999.0);
+
+        assert_eq!(query.level, 0);
+        assert_eq!(query.bins.len(), 6_002); // one neighbour on each edge
+        assert!(
+            query
+                .bins
+                .to_wire_vec()
+                .iter()
+                .all(|bin| bin.sample_count == 1)
+        );
     }
 
     #[test]

@@ -4,44 +4,29 @@ set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-mode="${1:-native}"
+mode="${1:-app}"
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/build.sh [native|appimage|windows|web] [additional arguments]
+Usage: ./scripts/build.sh [app|web] [additional arguments]
 
-  native  Build supported Tauri bundles and shared snapshot frontend (default).
-          Linux builds .deb and .rpm packages; other platforms use their defaults.
-  appimage
-          Build the Linux AppImage in an Ubuntu/FHS environment. Run
-          ./scripts/setup-appimage.sh once before using this mode.
-  windows
-          Build the Windows NSIS installer. Runs outside the Nix shell using
-          Git Bash and the runner-provided Rust, Node, and npm toolchain.
+  app     Build the browser frontend and scope-server release binary (default).
   web     Build only the browser frontend and snapshot-template.html.
 EOF
 }
 
-if [ "$mode" = "appimage" ]; then
-  shift || true
-  exec "$signalscope_scripts_dir/build-appimage.sh" "$@"
-fi
-
-if [ "$mode" = "windows" ]; then
-  shift || true
-  exec "$signalscope_scripts_dir/build-windows.sh" "$@"
-fi
-
 ensure_dev_shell "$@"
 
 case "$mode" in
-native)
+app)
   shift || true
-  cd shell/src-tauri
-  if [ "$(uname -s)" = "Linux" ]; then
-    exec cargo tauri build --bundles deb,rpm "$@"
-  fi
-  exec cargo tauri build "$@"
+  pnpm --filter @signalscope/frontend build "$@"
+  cargo build --release -p scope-server
+  mkdir -p build/app
+  cp target/release/scope-server build/app/scope-server
+  rm -rf build/app/frontend
+  cp -R frontend/dist build/app/frontend
+  tar -C build/app -czf build/app/signalscope-linux.tar.gz scope-server frontend
   ;;
 web)
   shift || true

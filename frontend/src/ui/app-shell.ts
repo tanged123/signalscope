@@ -8,11 +8,6 @@ import {
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
-import {
-  classifyDrop,
-  expandDropPaths,
-  unsupportedDropMessage,
-} from "../app/drop";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import {
   columnsValueAtTime,
@@ -33,6 +28,7 @@ import {
 } from "../app/ingest";
 import {
   applyPreferences,
+  clampPlotLineWidthScale,
   clampPlotFontSize,
   clampUiFontSize,
   defaultPreferences,
@@ -40,12 +36,11 @@ import {
   fontLabel,
   parsePreferences,
   PLOT_FONT_SIZE,
+  PLOT_LINE_WIDTH_SCALE,
   UI_FONT_SIZE,
 } from "../app/preferences";
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
-import { mergeSampleResponses } from "../app/samples";
-import { SampleWindowCache } from "../app/sample-window-cache";
 import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
 import { resolvePanel, type ResolvedSeries } from "../app/resolution";
@@ -56,19 +51,16 @@ import { persistWorkspace } from "../app/workspace-save";
 import { formatCursorTime, formatValue, zoomRange } from "../app/plot-math";
 import {
   type BatchStatus,
-  type DragDropForward,
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
   type FormatDescriptor,
-  type SampleResponse,
   type SampleSeries,
   type SignalSummary,
   type SourceSummary,
 } from "../generated/protocol";
 import type {
   CursorMode,
-  PanelMode,
   PanelState,
   SeriesRef,
   Session,
@@ -94,38 +86,11 @@ import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
+import type { GpuContext } from "../render/gpu-context";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
-/** Point cap for time panels, which use the tile path instead. */
-export const SAMPLE_CAP = 8192;
-const SAMPLE_MODE_CAP = 32_768;
-const SAMPLE_POINT_BUDGET = 500_000;
-
-export function sampleCapFor(mode: PanelMode): number {
-  return mode === "time" ? SAMPLE_CAP : SAMPLE_MODE_CAP;
-}
-
-/**
- * The per-series cap once a panel's series count is taken into account.
- *
- * `SAMPLE_POINT_BUDGET` bounds the panel's *merged* response, so the share is
- * divided by the number of requests that merge into it — XY issues two
- * (context plus detail) and `mergeSampleResponses` concatenates them. There is
- * no floor: a floor would let a 1000-series panel request 8.2M points against
- * a 500k budget, which is the budget not existing.
- */
-export function sampleCapForPanel(
-  mode: PanelMode,
-  seriesCount: number,
-): number {
-  const requests = mode === "xy" ? 2 : 1;
-  const share = Math.floor(
-    SAMPLE_POINT_BUDGET / (Math.max(1, seriesCount) * requests),
-  );
-  return Math.max(1, Math.min(sampleCapFor(mode), share));
-}
 const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
@@ -193,7 +158,6 @@ export class AppShell {
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
   private readonly tileWindowCache = new TileWindowCache();
-  private readonly sampleWindowCache = new SampleWindowCache();
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
@@ -211,12 +175,10 @@ export class AppShell {
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
   private exportDialog: ExportDialog | null = null;
-  private dropUnsubscribe: (() => void) | null = null;
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
-  private samplesByPanel = new Map<string, SampleResponse>();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -242,10 +204,31 @@ export class AppShell {
   constructor(
     private readonly root: HTMLElement,
     private readonly plane: DataPlane,
+    private gpu: GpuContext | null = null,
   ) {}
 
+  setGpu(gpu: GpuContext): void {
+    if (this.gpu !== null) return;
+    this.gpu = gpu;
+    const warning = this.root.querySelector<HTMLElement>(".gpu-warning");
+    if (warning !== null) warning.hidden = true;
+    this.workspaceView?.setGpu(gpu, this.signals.length > 0);
+    void this.refreshTiles();
+  }
+
   async mount(): Promise<void> {
+    delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
+    if (this.gpu === null) {
+      const warning = required<HTMLElement>(this.root, ".gpu-warning");
+      warning.hidden = false;
+      required<HTMLButtonElement>(
+        warning,
+        ".gpu-warning-dismiss",
+      ).addEventListener("click", () => {
+        warning.hidden = true;
+      });
+    }
     await this.loadFormatHint();
     await this.loadPreferences();
     await this.restoreSession();
@@ -292,12 +275,6 @@ export class AppShell {
         onMaximize: (id) => {
           this.workspace.toggleMaximize(id);
           this.afterLayoutChange();
-        },
-        onSelectMode: (id, mode) => {
-          this.transitionPanelMode(id, mode);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          void this.refreshTiles();
         },
         onDropSignals: (id, paths) => {
           this.plotSignals(paths, id);
@@ -378,26 +355,6 @@ export class AppShell {
         catalog: () => this.catalog,
         namedSets: () => this.workspace.namedSets(),
         resolveSeries: (state) => this.resolvedFor(state),
-        onSetXSignal: (id, path) => {
-          this.workspace.setMode(id, "xy");
-          const ref = this.catalog.refFromPath(path);
-          if (ref === undefined) return;
-          this.workspace.setXRef(id, ref);
-          this.workspace.focusPanel(id);
-          this.afterLayoutChange();
-        },
-        onSetColorSignal: (id, path) => {
-          this.workspace.setColorRef(
-            id,
-            path === null ? null : (this.catalog.refFromPath(path) ?? null),
-          );
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          void this.refreshTiles();
-        },
-        onClearXSignal: (id) => {
-          this.clearXSignal(id);
-        },
         onToggleSeries: (id, ref) => {
           this.workspace.toggleSeriesVisible(id, ref);
           this.commitHistory();
@@ -468,12 +425,6 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onToggleAxisEqual: (id) => {
-          this.workspace.toggleAxisEqual(id);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          this.renderTiles();
-        },
         onRenameTitle: (id, title) => {
           this.workspace.renamePanel(id, title);
           this.afterLayoutChange();
@@ -530,6 +481,7 @@ export class AppShell {
           this.afterLayoutChange();
         },
       },
+      this.gpu,
     );
     this.setsList = new SetsListView(required(this.root, ".tree-sets"), {
       onSetBind: (setId) => this.bindSetToPanel(setId),
@@ -568,14 +520,6 @@ export class AppShell {
       },
     });
     this.registerCommands();
-    this.dropUnsubscribe?.();
-    this.dropUnsubscribe = null;
-    const dragPort = this.plane.ingest;
-    if (dragPort !== null) {
-      this.dropUnsubscribe = dragPort.onDragDrop((event) => {
-        this.onDragDrop(event);
-      });
-    }
     this.commands.onRun = (id) => {
       this.usage.record(id);
     };
@@ -586,6 +530,7 @@ export class AppShell {
     this.bindControls();
     this.renderWindowReadout();
     await this.reloadSignals();
+    this.root.dataset.ready = "true";
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
       const panel = this.workspace.addPanelRow();
       for (const summary of this.signals.slice(0, 2)) {
@@ -748,28 +693,6 @@ export class AppShell {
         this.renderTiles();
       },
     });
-    for (const [mode, text] of [
-      [
-        "XY",
-        "XY: drag box-zoom · wheel zoom · right-drag pan · dbl-click fit · click datatip · drop on the amber strip to set X",
-      ],
-      [
-        "FFT",
-        "FFT: computed over the visible time window · wheel/box zoom the frequency and dB axes · dbl-click fit",
-      ],
-      [
-        "histogram",
-        "Histogram: counts of the visible time window · bins rebin as the window moves · dbl-click fit",
-      ],
-    ] as const) {
-      this.commands.register({
-        id: `help-${mode.toLowerCase()}-gestures`,
-        title: `Help: ${mode} mode gestures`,
-        run: () => {
-          this.showModeHelp(text);
-        },
-      });
-    }
     this.registerFocusedPanelCommand(
       "zoom-in-time",
       "Panel: zoom in (time)",
@@ -798,41 +721,6 @@ export class AppShell {
       },
     );
     this.registerFocusedPanelCommand(
-      "panel-switch-xy",
-      "Panel: switch to XY mode",
-      (id) => {
-        this.transitionPanelMode(id, "xy");
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-clear-x-signal",
-      "Panel: clear X signal",
-      (id) => {
-        this.clearXSignal(id);
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-switch-fft",
-      "Panel: switch to FFT mode",
-      (id) => {
-        this.transitionPanelMode(id, "fft");
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-switch-histogram",
-      "Panel: switch to histogram mode",
-      (id) => {
-        this.transitionPanelMode(id, "histogram");
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "panel-clear-color-signal",
-      "Panel: clear color signal (c:)",
-      (id) => {
-        this.workspace.setColorRef(id, null);
-      },
-    );
-    this.registerFocusedPanelCommand(
       "clear-annotations",
       "Panel: clear annotations",
       (id) => {
@@ -857,17 +745,9 @@ export class AppShell {
         this.workspace.toggleAxisStyle(id);
       },
     );
-    this.registerFocusedPanelCommand(
-      "panel.toggle-axis-equal",
-      "Toggle equal axis scaling",
-      (id) => {
-        this.workspace.toggleAxisEqual(id);
-      },
-    );
     for (const [axis, title] of [
       ["x", "Panel: edit X axis label"],
       ["y", "Panel: edit Y axis label"],
-      ["c", "Panel: edit color axis label"],
     ] as const) {
       this.registerFocusedPanelCommand(
         `edit-${axis}-axis-label`,
@@ -975,6 +855,41 @@ export class AppShell {
       },
     });
     this.commands.register({
+      id: "increase-plot-line-width",
+      title: "Plot line width: increase",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_line_width_scale:
+            this.prefs.plot_line_width_scale + PLOT_LINE_WIDTH_SCALE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "decrease-plot-line-width",
+      title: "Plot line width: decrease",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_line_width_scale:
+            this.prefs.plot_line_width_scale - PLOT_LINE_WIDTH_SCALE.step,
+        });
+      },
+    });
+    this.commands.register({
+      id: "reset-plot-line-width",
+      title: "Plot line width: reset",
+      section: "view",
+      group: "display",
+      run: () => {
+        this.updatePreferences({
+          plot_line_width_scale: PLOT_LINE_WIDTH_SCALE.default,
+        });
+      },
+    });
+    this.commands.register({
       id: "toggle-formula",
       title: "Toggle derived formula editor",
       keys: "e",
@@ -1030,7 +945,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 0.21.1");
+        this.showModeHelp("SignalScope 1.1.8");
       },
     });
     this.commands.register({
@@ -1130,12 +1045,6 @@ export class AppShell {
         run: () => undefined,
       });
     }
-  }
-
-  /** Moves between panel domains without dropping the assigned XY x series. */
-  private transitionPanelMode(panelId: string, mode: PanelMode): void {
-    this.workspace.setMode(panelId, mode);
-    if (mode === "xy") this.workspace.promoteSeriesToX(panelId);
   }
 
   /** Registers a command that acts on the focused panel and refreshes. */
@@ -1256,6 +1165,24 @@ export class AppShell {
       sizeEntry("UI font size", "ui_font_size", UI_FONT_SIZE.step),
       sizeEntry("Plot font size", "plot_font_size", PLOT_FONT_SIZE.step),
       {
+        title: "Plot line width",
+        hint: `${String(Math.round(this.prefs.plot_line_width_scale * 100))}%`,
+        keepOpen: true,
+        run: () => {
+          this.updatePreferences({
+            plot_line_width_scale:
+              this.prefs.plot_line_width_scale + PLOT_LINE_WIDTH_SCALE.step,
+          });
+        },
+        adjust: (direction) => {
+          this.updatePreferences({
+            plot_line_width_scale:
+              this.prefs.plot_line_width_scale +
+              direction * PLOT_LINE_WIDTH_SCALE.step,
+          });
+        },
+      },
+      {
         title: "Reset appearance to defaults",
         hint: "",
         keepOpen: true,
@@ -1266,6 +1193,7 @@ export class AppShell {
             plot_font_family: defaults.plot_font_family,
             ui_font_size: defaults.ui_font_size,
             plot_font_size: defaults.plot_font_size,
+            plot_line_width_scale: defaults.plot_line_width_scale,
           });
         },
       },
@@ -1292,43 +1220,7 @@ export class AppShell {
         this.commands.run(command.id);
       },
     }));
-    const focused = this.workspace.focusedPanelId();
-    const xSignals =
-      focused === null
-        ? []
-        : this.signals.map((summary) => ({
-            title: `Panel: set X signal… ${summary.path}`,
-            hint: "then pick from tree",
-            run: () => {
-              this.workspace.setMode(focused, "xy");
-              const ref = this.catalog.refFromPath(summary.path);
-              if (ref !== undefined) this.workspace.setXRef(focused, ref);
-              this.afterLayoutChange();
-            },
-          }));
-    const colorSignals =
-      focused === null
-        ? []
-        : [
-            {
-              title: "Panel: set color signal (c:)… time",
-              hint: "colour by time",
-              run: () => {
-                this.workspace.setColorByTime(focused);
-                this.afterLayoutChange();
-              },
-            },
-            ...this.signals.map((summary) => ({
-              title: `Panel: set color signal (c:)… ${summary.path}`,
-              hint: "signal",
-              run: () => {
-                const ref = this.catalog.refFromPath(summary.path);
-                if (ref !== undefined) this.workspace.setColorRef(focused, ref);
-                this.afterLayoutChange();
-              },
-            })),
-          ];
-    return [...commands, ...xSignals, ...colorSignals];
+    return commands;
   }
 
   private signalPaletteEntries(query: string, limit: number): PaletteEntry[] {
@@ -1739,52 +1631,6 @@ export class AppShell {
     this.afterLayoutChange();
   }
 
-  private modalOpen(): boolean {
-    return (
-      this.palette?.isOpen() === true || this.exportDialog?.isOpen() === true
-    );
-  }
-
-  private onDragDrop(event: DragDropForward): void {
-    const overlay = required<HTMLElement>(this.root, ".drop-overlay");
-    if (event.kind === "enter") {
-      overlay.hidden = this.modalOpen();
-      return;
-    }
-    overlay.hidden = true;
-    if (event.kind === "leave" || this.modalOpen()) return;
-    void this.handleDrop(event.paths);
-  }
-
-  private async handleDrop(paths: string[]): Promise<void> {
-    const port = this.plane.ingest;
-    if (port === null || paths.length === 0) return;
-    const plan = classifyDrop(paths);
-    if (plan.kind === "rejected") {
-      this.reportError(new Error(plan.message));
-      return;
-    }
-    if (plan.kind === "workspace") {
-      await this.loadSession(plan.path);
-      return;
-    }
-    try {
-      const expansion = await expandDropPaths(port, plan.paths);
-      for (const failed of expansion.failures) {
-        this.reportError(new Error(`could not scan ${failed}`));
-      }
-      if (expansion.files.length === 0) {
-        if (expansion.failures.length === 0) {
-          this.reportError(new Error(await unsupportedDropMessage(port)));
-        }
-        return;
-      }
-      await this.ingestPaths(expansion.files);
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
-  }
-
   private openSources(): void {
     if (this.plane.ingest === null) return;
     void this.pickAndIngest("files");
@@ -1912,7 +1758,9 @@ export class AppShell {
       if (key !== null) {
         this.history.commit(historySnapshot(this.workspace.snapshot()), key);
       }
-      this.history.commit(historySnapshot(this.workspace.snapshot()));
+      if (this.historyGestureKey === null) {
+        this.history.commit(historySnapshot(this.workspace.snapshot()));
+      }
     }, 250);
   }
 
@@ -2054,6 +1902,9 @@ export class AppShell {
     this.prefs = { ...this.prefs, ...patch };
     this.prefs.ui_font_size = clampUiFontSize(this.prefs.ui_font_size);
     this.prefs.plot_font_size = clampPlotFontSize(this.prefs.plot_font_size);
+    this.prefs.plot_line_width_scale = clampPlotLineWidthScale(
+      this.prefs.plot_line_width_scale,
+    );
     applyPreferences(this.prefs, document.documentElement);
     this.workspaceView?.invalidateTheme();
     this.renderTiles();
@@ -2240,7 +2091,7 @@ export class AppShell {
 
   private async buildPanelPng(panelId: string): Promise<Uint8Array | null> {
     const panel = this.workspace.panel(panelId);
-    const canvases = this.workspaceView?.panelCanvases(panelId) ?? null;
+    const canvases = (await this.workspaceView?.capturePanel(panelId)) ?? null;
     if (panel === undefined || canvases === null) return null;
     const styles = getComputedStyle(document.documentElement);
     const composed = composePanelPng(
@@ -2350,7 +2201,6 @@ export class AppShell {
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
       this.tilesByPanel.clear();
-      this.samplesByPanel.clear();
       this.missingByPanel.clear();
       clearIngestProgress(this.root);
       this.workspace.setTheme(this.prefs.theme);
@@ -2598,7 +2448,6 @@ export class AppShell {
     this.catalog = Catalog.build(this.signals);
     this.catalogRevision += 1;
     this.tileWindowCache.invalidate();
-    this.sampleWindowCache.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2644,7 +2493,6 @@ export class AppShell {
       Math.round(required(this.root, ".workspace").clientWidth),
     );
     const nextTiles = new Map<string, ColumnarTileResponse>();
-    const nextSamples = new Map<string, SampleResponse>();
     const nextMissing = new Map<string, string[]>();
     await Promise.all(
       this.workspace.panels().map(async (panel) => {
@@ -2653,91 +2501,39 @@ export class AppShell {
         if (ids.length === 0) return;
         const window = this.effectiveWindow(panel);
         try {
-          if (panel.mode === "time") {
-            const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-            const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
-            const idsKey = [...ids].sort().join("\u0000");
-            const cached = this.tileWindowCache.slice(
-              panel.id,
-              idsKey,
-              pixelWidth,
-              window.t0,
-              window.t1,
-            );
-            if (cached !== null) {
-              nextTiles.set(panel.id, cached);
-              return;
-            }
-            const paddedWindow = TileWindowCache.padWindow(
-              window.t0,
-              window.t1,
-            );
-            const response = await this.plane.queryTiles({
-              request_id: crypto.randomUUID(),
-              signal_ids: ids,
-              window: paddedWindow,
-              pixel_width: TileWindowCache.requestPixelWidth(
-                pixelWidth,
-                window,
-                paddedWindow,
-              ),
-              max_total_bins: TILE_BIN_BUDGET,
-            });
-            this.tileWindowCache.store(panel.id, {
-              response,
-              window: paddedWindow,
-              pixelWidth,
-              idsKey,
-            });
-            nextTiles.set(
-              panel.id,
-              this.tileWindowCache.slice(
-                panel.id,
-                idsKey,
-                pixelWidth,
-                window.t0,
-                window.t1,
-              ) ?? response,
-            );
-          } else {
-            const contextWindow = this.sampleWindow(panel);
-            const cap = sampleCapForPanel(panel.mode, ids.length);
-            const cacheKey = SampleWindowCache.key({
-              ids,
-              mode: panel.mode,
-              window: panel.mode === "xy" ? window : contextWindow,
-              cap,
-            });
-            const cached = this.sampleWindowCache.get(panel.id, cacheKey);
-            if (cached !== null) {
-              nextSamples.set(panel.id, cached);
-              return;
-            }
-            const contextRequest = {
-              request_id: crypto.randomUUID(),
-              signal_ids: ids,
-              window: contextWindow,
-              max_points: cap,
-            };
-            let merged: SampleResponse;
-            if (panel.mode === "xy") {
-              const detailRequest = {
-                request_id: crypto.randomUUID(),
-                signal_ids: ids,
-                window,
-                max_points: cap,
-              };
-              const [context, detail] = await Promise.all([
-                this.plane.querySamples(contextRequest),
-                this.plane.querySamples(detailRequest),
-              ]);
-              merged = mergeSampleResponses(context, detail);
-            } else {
-              merged = await this.plane.querySamples(contextRequest);
-            }
-            this.sampleWindowCache.store(panel.id, cacheKey, merged);
-            nextSamples.set(panel.id, merged);
+          const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+          const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
+          const idsKey = [...ids].sort().join("\u0000");
+          const cached = this.tileWindowCache.hit(
+            panel.id,
+            idsKey,
+            pixelWidth,
+            window.t0,
+            window.t1,
+          );
+          if (cached !== null) {
+            nextTiles.set(panel.id, cached);
+            return;
           }
+          const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+          const response = await this.plane.queryTiles({
+            request_id: crypto.randomUUID(),
+            signal_ids: ids,
+            window: paddedWindow,
+            pixel_width: TileWindowCache.requestPixelWidth(
+              pixelWidth,
+              window,
+              paddedWindow,
+            ),
+            max_total_bins: TILE_BIN_BUDGET,
+          });
+          this.tileWindowCache.store(panel.id, {
+            response,
+            window: paddedWindow,
+            pixelWidth,
+            idsKey,
+          });
+          nextTiles.set(panel.id, response);
         } catch (error: unknown) {
           this.reportError(error);
         }
@@ -2745,46 +2541,17 @@ export class AppShell {
     );
     if (refreshToken !== this.refreshToken) return;
     this.tilesByPanel = nextTiles;
-    this.samplesByPanel = nextSamples;
     this.missingByPanel = nextMissing;
     this.renderTiles();
   }
 
-  /**
-   * Signal ids a panel needs: its series, plus the XY x signal and the
-   * colour channel, which are axes rather than plotted series.
-   */
+  /** Signal ids a panel needs for its plotted series. */
   private panelSignalIds(panel: PanelState): {
     ids: string[];
     missing: string[];
   } {
     const resolved = this.resolvedFor(panel);
     const paths = resolved.map((series) => series.path);
-    if (panel.mode === "xy") {
-      const x = panel.x_ref === null ? null : this.catalog.get(panel.x_ref);
-      if (x !== null && x !== undefined) {
-        paths.unshift(x.path);
-        for (const series of resolved) {
-          const paired = this.catalog.get({
-            source_key: series.ref.source_key,
-            channel: x.channel,
-          });
-          if (paired !== undefined) paths.push(paired.path);
-        }
-      }
-      const color =
-        panel.color_ref === null ? null : this.catalog.get(panel.color_ref);
-      if (color !== null && color !== undefined) {
-        paths.push(color.path);
-        for (const series of resolved) {
-          const paired = this.catalog.get({
-            source_key: series.ref.source_key,
-            channel: color.channel,
-          });
-          if (paired !== undefined) paths.push(paired.path);
-        }
-      }
-    }
     const ids: string[] = [];
     const missing: string[] = [];
     for (const path of new Set(paths)) {
@@ -2823,27 +2590,31 @@ export class AppShell {
   }
 
   private renderTiles(): void {
-    const state = this.workspace.linkedTime();
-    const elapsed =
-      this.workspaceView?.renderData(
-        this.tilesByPanel,
-        this.samplesByPanel,
-        (panelId) => {
-          const panel = this.workspace.panel(panelId);
-          return panel === undefined
-            ? { t0: state.t0, t1: state.t1 }
-            : this.effectiveWindow(panel);
-        },
-        (panelId) => this.missingByPanel.get(panelId) ?? [],
-      ) ?? 0;
-    required(this.root, ".render-ms").textContent = `${elapsed.toFixed(1)} ms`;
+    try {
+      const state = this.workspace.linkedTime();
+      const elapsed =
+        this.workspaceView?.renderData(
+          this.tilesByPanel,
+          (panelId) => {
+            const panel = this.workspace.panel(panelId);
+            return panel === undefined
+              ? { t0: state.t0, t1: state.t1 }
+              : this.effectiveWindow(panel);
+          },
+          (panelId) => this.missingByPanel.get(panelId) ?? [],
+        ) ?? 0;
+      required(this.root, ".render-ms").textContent =
+        `${elapsed.toFixed(1)} ms`;
+    } catch (error: unknown) {
+      this.reportError(error);
+    }
   }
 
   private applyTimeWindow(panelId: string, t0: number, t1: number): void {
     if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return;
-    if (this.workspace.linkedTime().linked && panel.mode === "time") {
+    if (this.workspace.linkedTime().linked) {
       this.workspace.setLinkedWindow(t0, t1);
       this.renderWindowReadout();
     } else {
@@ -2869,28 +2640,13 @@ export class AppShell {
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
     const state = this.workspace.linkedTime();
-    if (state.linked && panel.mode === "time") {
+    if (state.linked) {
       return { t0: state.t0, t1: state.t1 };
     }
     const local = panel.time_window;
     return local === null
       ? { t0: state.t0, t1: state.t1 }
       : { t0: local[0], t1: local[1] };
-  }
-
-  /**
-   * The window a panel's samples are fetched over. XY panels fetch the full
-   * data extent because the spec dims the out-of-window trajectory rather
-   * than clipping it; FFT and histogram compute over the visible window.
-   */
-  private sampleWindow(panel: PanelState): { t0: number; t1: number } {
-    if (panel.mode !== "xy") return this.effectiveWindow(panel);
-    const paths = this.resolvedFor(panel).map((series) => series.path);
-    if (panel.x_ref !== null) {
-      const x = this.catalog.get(panel.x_ref);
-      if (x !== undefined) paths.push(x.path);
-    }
-    return this.timeExtent(paths) ?? this.effectiveWindow(panel);
   }
 
   private scheduleRefresh(delay = 50): void {
@@ -2904,16 +2660,6 @@ export class AppShell {
   private fitPanelView(panelId: string): void {
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return;
-    if (panel.mode !== "time") {
-      // Non-time panels have no time axis to fit: clearing both ranges
-      // returns them to autoscale, which the renderer recomputes.
-      this.workspace.clearPanelXRange(panelId);
-      this.workspace.clearPanelYRange(panelId);
-      this.workspaceView?.resetYAxis(panelId);
-      this.commitHistory();
-      this.renderTiles();
-      return;
-    }
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
     const extent = this.timeExtent(
@@ -2929,33 +2675,6 @@ export class AppShell {
     this.commitHistory();
   }
 
-  /** Removes the assigned X signal while leaving an empty XY axis slot. */
-  private clearXSignal(panelId: string): void {
-    const panel = this.workspace.panel(panelId);
-    const ref = panel?.x_ref;
-    const path =
-      ref === null || ref === undefined ? null : this.catalog.get(ref)?.path;
-    if (
-      panel === undefined ||
-      ref === null ||
-      ref === undefined ||
-      path === undefined ||
-      path === null
-    )
-      return;
-    this.workspace.setXRef(panelId, null);
-    this.workspace.removeSeriesRef(panelId, ref, path);
-    if (
-      panel.color_ref !== null &&
-      panel.color_ref.source_key === ref.source_key &&
-      panel.color_ref.channel === ref.channel
-    ) {
-      this.workspace.setColorRef(panelId, null);
-    }
-    this.workspace.clearPanelXRange(panelId);
-    this.afterLayoutChange();
-  }
-
   private setCursor(
     panelId: string,
     cursor: PlotCursor | null,
@@ -2963,20 +2682,7 @@ export class AppShell {
   ): void {
     const mode = this.workspace.cursorMode();
     if (mode === "none") cursor = null;
-    const panel = this.workspace.panel(panelId);
-    const localDomain = panel?.mode === "fft" || panel?.mode === "histogram";
-    if (cursor?.link === "local" || (cursor === null && localDomain)) {
-      this.workspaceView?.setLocalCursor(panelId, cursor?.x ?? null);
-      if (cursor === null) this.renderCursorTime();
-      else this.renderCursorTime(cursor.heading);
-      this.renderTooltip(
-        panelId,
-        mode === "track" ? cursor : null,
-        mode === "track" ? client : null,
-      );
-      return;
-    }
-    const cursorT = cursor?.link === "time" ? cursor.x : null;
+    const cursorT = cursor?.x ?? null;
     this.workspace.setCursorT(cursorT);
     const state = this.workspace.linkedTime();
     this.workspaceView?.setCursor(state.cursorT);
@@ -3185,9 +2891,7 @@ export class AppShell {
     const linked = !state.linked;
     if (!linked) {
       for (const panel of this.workspace.panels()) {
-        if (panel.mode === "time") {
-          this.workspace.setPanelTimeWindow(panel.id, [state.t0, state.t1]);
-        }
+        this.workspace.setPanelTimeWindow(panel.id, [state.t0, state.t1]);
       }
     }
     this.workspace.setLinked(linked);
@@ -3490,6 +3194,10 @@ export function shellMarkup(): string {
       <span class="workspace-name">Untitled</span>
       <span class="session-identity"></span>
     </div>
+    <div class="gpu-warning" hidden role="status">
+      WebGPU unavailable — time-series panels disabled
+      <button class="gpu-warning-dismiss" type="button" aria-label="Dismiss WebGPU warning">✕</button>
+    </div>
 
     <div class="workspace-strip">
       <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
@@ -3568,7 +3276,6 @@ export function shellMarkup(): string {
       <span class="status-separator"></span>
       <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
     </footer>
-    <div class="drop-overlay" hidden>Drop files or a folder to load</div>
   </main>`;
 }
 

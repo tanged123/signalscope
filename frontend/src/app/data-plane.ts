@@ -1,42 +1,23 @@
 import {
   type BatchDetail,
-  type BatchDetailRequest,
   type BatchJob,
   type BatchStatus,
   type ContainerOutline,
-  type CreateDerivedBundleRequest,
   type DerivedBundleResponse,
-  type DerivedRequest,
-  type DragDropForward,
   type EnvelopeBin,
   type ExportEstimate,
-  type ExportEstimateRequest,
   type ExportFidelity,
   type ExportFileKind,
   type ExportRange,
   type ExportSelection,
-  type ExportWriteRequest,
   type FormatDescriptor,
-  type IngestBatchRequest,
-  type IntrospectRequest,
   type LoadedSession,
-  type LoadSessionRequest,
-  type PickSessionRequest,
-  type RemoveSignalRequest,
-  type RemoveDerivedBundleRequest,
-  type RestoreReconcileRequest,
   type RestoreReconcileResponse,
-  type RestoreSourcesRequest,
   type RecipeDestination,
-  type SaveRecipeRequest,
   type SaveRecipeResponse,
   type SampleRequest,
   type SampleResponse,
-  type SaveSessionRequest,
-  type ScanSourcesRequest,
   type ScanSourcesResponse,
-  type SaveExportFileRequest,
-  type SaveExportFileToDirectoryRequest,
   type SessionDialogMode,
   type SignalSummary,
   type SnapshotManifest,
@@ -52,8 +33,8 @@ import {
   type ColumnarTileResponse,
 } from "./bin-columns";
 import { open, seal, type Envelope } from "./envelope";
-import { queryPyramidRange } from "./pyramid-query";
-import { binsToSamples, sampleWindow } from "./samples";
+import { queryRawPyramidRange } from "./pyramid-query";
+import { binsToSamples, sampleWindow, sampleWindowFull } from "./samples";
 import { decodeTileResponse } from "./tile-binary";
 
 export interface IngestPort {
@@ -76,8 +57,6 @@ export interface IngestPort {
     recipeToml: string,
     destination: RecipeDestination,
   ): Promise<SaveRecipeResponse>;
-  /** Forwarded window drag-drop events. Returns an unsubscribe. */
-  onDragDrop(handler: (event: DragDropForward) => void): () => void;
 }
 
 export interface DerivedPort {
@@ -152,18 +131,7 @@ export interface DataPlane {
 
 type BakedManifest = Envelope<SnapshotManifest>;
 
-interface TauriInternals {
-  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
-  transformCallback<T>(callback: (payload: T) => void): number;
-}
-
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: TauriInternals;
-  }
-}
-
-export class TauriPlane implements DataPlane {
+export class HttpPlane implements DataPlane {
   readonly sourceLabel = "native data plane";
 
   readonly ingest: IngestPort;
@@ -178,295 +146,153 @@ export class TauriPlane implements DataPlane {
   readonly exporter: ExportPort;
 
   constructor(
-    private readonly invoke: TauriInternals["invoke"],
-    private readonly transformCallback: TauriInternals["transformCallback"],
+    private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
   ) {
     this.ingest = {
-      pickSources: async () =>
-        open(await this.invoke<Envelope<string[]>>("pick_sources")),
+      pickSources: async () => this.post<string[]>("pick_sources"),
       pickSourceFolder: async () =>
-        open(await this.invoke<Envelope<string | null>>("pick_source_folder")),
+        this.post<string | null>("pick_source_folder"),
       scanSources: async (path: string, recursive: boolean) =>
-        open(
-          await this.invoke<Envelope<ScanSourcesResponse>>("scan_sources", {
-            request: seal<ScanSourcesRequest>({ path, recursive }),
-          }),
-        ),
+        this.post<ScanSourcesResponse>("scan_sources", { path, recursive }),
       startBatch: async (paths: string[]) =>
-        open(
-          await this.invoke<Envelope<BatchJob>>("ingest_batch", {
-            request: seal<IngestBatchRequest>({ paths }),
-          }),
-        ).job_id,
+        (await this.post<BatchJob>("ingest_batch", { paths })).job_id,
       batchStatus: async (jobId: string) =>
-        open(
-          await this.invoke<Envelope<BatchStatus>>("batch_status", {
-            request: seal<BatchJob>({ job_id: jobId }),
-          }),
-        ),
+        this.post<BatchStatus>("batch_status", { job_id: jobId }),
       batchDetail: async (jobId: string, offset: number, limit: number) =>
-        open(
-          await this.invoke<Envelope<BatchDetail>>("batch_detail", {
-            request: seal<BatchDetailRequest>({
-              job_id: jobId,
-              offset,
-              limit,
-            }),
-          }),
-        ),
+        this.post<BatchDetail>("batch_detail", {
+          job_id: jobId,
+          offset,
+          limit,
+        }),
       cancelBatch: async (jobId: string) => {
-        open(
-          await this.invoke<Envelope<null>>("cancel_batch", {
-            request: seal<BatchJob>({ job_id: jobId }),
-          }),
-        );
+        await this.post<null>("cancel_batch", { job_id: jobId });
       },
       releaseBatch: async (jobId: string) => {
-        open(
-          await this.invoke<Envelope<null>>("release_batch", {
-            request: seal<BatchJob>({ job_id: jobId }),
-          }),
-        );
+        await this.post<null>("release_batch", { job_id: jobId });
       },
-      listFormats: async () =>
-        open(await this.invoke<Envelope<FormatDescriptor[]>>("list_formats")),
+      listFormats: async () => this.post<FormatDescriptor[]>("list_formats"),
       introspect: async (path: string) =>
-        open(
-          await this.invoke<Envelope<ContainerOutline>>(
-            "introspect_container",
-            {
-              request: seal<IntrospectRequest>({ path }),
-            },
-          ),
-        ),
+        this.post<ContainerOutline>("introspect_container", { path }),
       saveRecipe: async (
         path: string,
         recipeToml: string,
         destination: RecipeDestination,
       ) =>
-        open(
-          await this.invoke<Envelope<SaveRecipeResponse>>("save_recipe", {
-            request: seal<SaveRecipeRequest>({
-              path,
-              recipe_toml: recipeToml,
-              destination,
-            }),
-          }),
-        ),
-      onDragDrop: (handler) => {
-        let eventId: number | null = null;
-        let disposed = false;
-        const unlisten = () => {
-          if (eventId === null) return;
-          void this.invoke("plugin:event|unlisten", {
-            event: "scope://drag-drop",
-            eventId,
-          });
-          eventId = null;
-        };
-        void this.invoke<number>("plugin:event|listen", {
-          event: "scope://drag-drop",
-          target: { kind: "Any" },
-          handler: this.transformCallback(
-            (raw: { payload: Envelope<DragDropForward> }) => {
-              handler(open(raw.payload));
-            },
-          ),
-        })
-          .then((id) => {
-            eventId = id;
-            if (disposed) unlisten();
-          })
-          .catch((error: unknown) => {
-            console.error("drag-drop listener registration failed", error);
-          });
-        return () => {
-          disposed = true;
-          unlisten();
-        };
-      },
+        this.post<SaveRecipeResponse>("save_recipe", {
+          path,
+          recipe_toml: recipeToml,
+          destination,
+        }),
     };
     this.derived = {
       create: async (path: string, expr: string) =>
-        open(
-          await this.invoke<Envelope<SignalSummary>>("create_derived", {
-            request: seal<DerivedRequest>({ path, expr }),
-          }),
-        ),
+        this.post<SignalSummary>("create_derived", { path, expr }),
       remove: async (path: string) => {
-        open(
-          await this.invoke<Envelope<null>>("remove_signal", {
-            request: seal<RemoveSignalRequest>({ path }),
-          }),
-        );
+        await this.post<null>("remove_signal", { path });
       },
       createBundle: async (name: string, expr: string) =>
-        open(
-          await this.invoke<Envelope<DerivedBundleResponse>>(
-            "create_derived_bundle",
-            {
-              request: seal<CreateDerivedBundleRequest>({ name, expr }),
-            },
-          ),
-        ),
+        this.post<DerivedBundleResponse>("create_derived_bundle", {
+          name,
+          expr,
+        }),
       removeBundle: async (name: string) => {
-        open(
-          await this.invoke<Envelope<null>>("remove_derived_bundle", {
-            request: seal<RemoveDerivedBundleRequest>({ name }),
-          }),
-        );
+        await this.post<null>("remove_derived_bundle", { name });
       },
     };
     this.session = {
       save: async (sessionJson: string, path: string | null) =>
-        open(
-          await this.invoke<Envelope<string>>("save_session", {
-            request: seal<SaveSessionRequest>({
-              session_json: sessionJson,
-              path,
-            }),
-          }),
-        ),
+        this.post<string>("save_session", { session_json: sessionJson, path }),
       load: async (path: string | null) =>
-        open(
-          await this.invoke<Envelope<LoadedSession>>("load_session", {
-            request: seal<LoadSessionRequest>({ path }),
-          }),
-        ),
-      reset: async () =>
-        open(await this.invoke<Envelope<LoadedSession>>("reset_session")),
+        this.post<LoadedSession>("load_session", { path }),
+      reset: async () => this.post<LoadedSession>("reset_session"),
       pick: async (mode: SessionDialogMode) =>
-        open(
-          await this.invoke<Envelope<string | null>>("pick_session_path", {
-            request: seal<PickSessionRequest>({ mode }),
-          }),
-        ),
+        this.post<string | null>("pick_session_path", { mode }),
     };
     this.restore = {
       start: async (sessionJson: string) =>
-        open(
-          await this.invoke<Envelope<BatchJob>>("restore_sources", {
-            request: seal<RestoreSourcesRequest>({
-              session_json: sessionJson,
-            }),
-          }),
+        (
+          await this.post<BatchJob>("restore_sources", {
+            session_json: sessionJson,
+          })
         ).job_id,
       reconcile: async (sessionJson: string, jobId: string) =>
-        open(
-          await this.invoke<Envelope<RestoreReconcileResponse>>(
-            "restore_reconcile",
-            {
-              request: seal<RestoreReconcileRequest>({
-                session_json: sessionJson,
-                job_id: jobId,
-              }),
-            },
-          ),
-        ),
+        this.post<RestoreReconcileResponse>("restore_reconcile", {
+          session_json: sessionJson,
+          job_id: jobId,
+        }),
     };
     this.preferences = {
-      load: async () =>
-        open(await this.invoke<Envelope<string | null>>("load_preferences")),
+      load: async () => this.post<string | null>("load_preferences"),
       save: async (preferencesJson: string) => {
-        open(
-          await this.invoke<Envelope<null>>("save_preferences", {
-            request: seal(preferencesJson),
-          }),
-        );
+        await this.post<null>("save_preferences", preferencesJson);
       },
       effectiveRecipeDirectory: async () =>
-        open(await this.invoke<Envelope<string>>("effective_recipe_directory")),
+        this.post<string>("effective_recipe_directory"),
       pickRecipeDirectory: async () =>
-        open(
-          await this.invoke<Envelope<string | null>>("pick_recipe_directory"),
-        ),
+        this.post<string | null>("pick_recipe_directory"),
     };
     this.exporter = {
       estimate: async (sessionJson: string, selection: ExportSelection) =>
-        open(
-          await this.invoke<Envelope<ExportEstimate>>("export_estimate", {
-            request: seal<ExportEstimateRequest>({
-              session_json: sessionJson,
-              selection,
-            }),
-          }),
-        ),
+        this.post<ExportEstimate>("export_estimate", {
+          session_json: sessionJson,
+          selection,
+        }),
       writeHtml: async (
         sessionJson: string,
         range: ExportRange,
         fidelity: ExportFidelity,
         selection: ExportSelection,
       ) =>
-        open(
-          await this.invoke<Envelope<string | null>>("export_write", {
-            request: seal<ExportWriteRequest>({
-              session_json: sessionJson,
-              range,
-              fidelity,
-              selection,
-            }),
-          }),
-        ),
+        this.post<string | null>("export_write", {
+          session_json: sessionJson,
+          range,
+          fidelity,
+          selection,
+        }),
       saveFile: async (
         fileName: string,
         kind: ExportFileKind,
         dataBase64: string,
       ) =>
-        open(
-          await this.invoke<Envelope<string | null>>("save_export_file", {
-            request: seal<SaveExportFileRequest>({
-              file_name: fileName,
-              kind,
-              data_base64: dataBase64,
-            }),
-          }),
-        ),
+        this.post<string | null>("save_export_file", {
+          file_name: fileName,
+          kind,
+          data_base64: dataBase64,
+        }),
       pickDirectory: async () =>
-        open(
-          await this.invoke<Envelope<string | null>>("pick_export_directory"),
-        ),
+        this.post<string | null>("pick_export_directory"),
       saveFileToDirectory: async (
         directory: string,
         fileName: string,
         kind: ExportFileKind,
         dataBase64: string,
       ) =>
-        open(
-          await this.invoke<Envelope<string>>("save_export_file_to_directory", {
-            request: seal<SaveExportFileToDirectoryRequest>({
-              directory,
-              file_name: fileName,
-              kind,
-              data_base64: dataBase64,
-            }),
-          }),
-        ),
+        this.post<string>("save_export_file_to_directory", {
+          directory,
+          file_name: fileName,
+          kind,
+          data_base64: dataBase64,
+        }),
     };
   }
 
   async listSignals(): Promise<SignalSummary[]> {
-    return open(await this.invoke<Envelope<SignalSummary[]>>("list_signals"));
+    return this.post<SignalSummary[]>("list_signals");
   }
 
   async listSources(): Promise<SourceSummary[]> {
-    return open(await this.invoke<Envelope<SourceSummary[]>>("list_sources"));
+    return this.post<SourceSummary[]>("list_sources");
   }
 
   async queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
     return decodeTileResponse(
-      await this.invoke<ArrayBuffer>("query_tiles_bin", {
-        request: seal(request),
-      }),
+      await this.postBinary("query_tiles_bin", request),
       request.request_id,
     );
   }
 
   async querySamples(request: SampleRequest): Promise<SampleResponse> {
-    const response = open(
-      await this.invoke<Envelope<SampleResponse>>("query_samples", {
-        request: seal(request),
-      }),
-    );
+    const response = await this.post<SampleResponse>("query_samples", request);
     return {
       ...response,
       series: response.series.map((series) => ({
@@ -480,6 +306,33 @@ export class TauriPlane implements DataPlane {
         ),
       })),
     };
+  }
+
+  private async post<T>(path: string, payload?: unknown): Promise<T> {
+    const response = await this.fetcher(`/api/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: payload === undefined ? null : JSON.stringify(seal(payload)),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return open((await response.json()) as Envelope<T>);
+  }
+
+  private async postBinary(
+    path: string,
+    payload: unknown,
+  ): Promise<ArrayBuffer> {
+    const response = await this.fetcher(`/api/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(seal(payload)),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.arrayBuffer();
   }
 }
 
@@ -552,30 +405,24 @@ export class BakedPlane implements DataPlane {
   }
 
   queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
-    const requested = new Set(request.signal_ids);
-    return Promise.resolve({
-      requestId: request.request_id,
-      series: this.payload.signals
-        .filter((signal) => requested.has(signal.summary.signal_id))
-        .map((signal) => {
-          // 64-bin floor per ADR 0036 makes `max_total_bins` a soft cap; keep
-          // in sync with the shell's `query_tiles_bin`.
-          const perSeries =
-            request.max_total_bins === null
-              ? undefined
-              : Math.max(
-                  64,
-                  Math.floor(
-                    request.max_total_bins /
-                      Math.max(1, request.signal_ids.length),
-                  ),
-                );
-          const range = queryPyramidRange(
+    return Promise.resolve().then(() => {
+      const signals = new Map(
+        this.payload.signals.map((signal) => [
+          signal.summary.signal_id,
+          signal,
+        ]),
+      );
+      return {
+        requestId: request.request_id,
+        series: request.signal_ids.map((signalId) => {
+          const signal = signals.get(signalId);
+          if (signal === undefined) {
+            throw new Error(`unknown signal id: ${signalId}`);
+          }
+          const range = queryRawPyramidRange(
             signal.levels,
             request.window.t0,
             request.window.t1,
-            request.pixel_width,
-            perSeries,
           );
           const bins = this.columnsFor(
             signal,
@@ -591,6 +438,7 @@ export class BakedPlane implements DataPlane {
             bins,
           };
         }),
+      };
     });
   }
 
@@ -619,20 +467,36 @@ export class BakedPlane implements DataPlane {
   }
 
   querySamples(request: SampleRequest): Promise<SampleResponse> {
-    const requested = new Set(request.signal_ids);
-    return Promise.resolve({
-      request_id: request.request_id,
-      series: this.payload.signals
-        .filter((signal) => requested.has(signal.summary.signal_id))
-        .map((signal) => {
+    return Promise.resolve().then(() => {
+      const signals = new Map(
+        this.payload.signals.map((signal) => [
+          signal.summary.signal_id,
+          signal,
+        ]),
+      );
+      return {
+        request_id: request.request_id,
+        series: request.signal_ids.map((signalId) => {
+          const signal = signals.get(signalId);
+          if (signal === undefined) {
+            throw new Error(`unknown signal id: ${signalId}`);
+          }
           const raw = this.rawFor(signal);
-          const slice = sampleWindow(
-            raw.time,
-            raw.values,
-            request.window.t0,
-            request.window.t1,
-            request.max_points,
-          );
+          const slice =
+            request.max_points === 0
+              ? sampleWindowFull(
+                  raw.time,
+                  raw.values,
+                  request.window.t0,
+                  request.window.t1,
+                )
+              : sampleWindow(
+                  raw.time,
+                  raw.values,
+                  request.window.t0,
+                  request.window.t1,
+                  request.max_points,
+                );
           return {
             signal_id: signal.summary.signal_id,
             signal_path: signal.summary.path,
@@ -642,6 +506,7 @@ export class BakedPlane implements DataPlane {
             stride: slice.stride,
           };
         }),
+      };
     });
   }
 
@@ -660,14 +525,22 @@ export class BakedPlane implements DataPlane {
   }
 }
 
-export function selectDataPlane(): DataPlane {
-  const internals = window.__TAURI_INTERNALS__;
-  return internals === undefined
-    ? BakedPlane.fromDocument()
-    : new TauriPlane(
-        internals.invoke.bind(internals),
-        internals.transformCallback.bind(internals),
-      );
+export async function selectDataPlane(): Promise<DataPlane> {
+  const bakedSlot = document.querySelector<HTMLScriptElement>(
+    "#signalscope-baked-data",
+  );
+  if (bakedSlot !== null && bakedSlot.textContent.trim() !== "null") {
+    return BakedPlane.fromDocument();
+  }
+  try {
+    const response = await fetch("/api/health", {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (response.ok) return new HttpPlane();
+  } catch {
+    // A static export may be opened without its development server.
+  }
+  return BakedPlane.fromDocument();
 }
 
 function createDemoManifest(): BakedManifest {

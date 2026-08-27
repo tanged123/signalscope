@@ -6,6 +6,9 @@ const coverage = process.env.SIGNALSCOPE_COVERAGE === "1";
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
+  // GitHub's SwiftShader WebGPU adapter is not available to two browser
+  // processes reliably; local hardware remains parallel.
+  workers: process.env.CI ? 1 : undefined,
   metadata: {
     coverage,
   },
@@ -24,9 +27,15 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173",
     headless: true,
     trace: "retain-on-failure",
-    ...(executablePath === undefined
-      ? {}
-      : { launchOptions: { executablePath } }),
+    launchOptions: {
+      args: [
+        "--enable-unsafe-webgpu",
+        "--enable-features=Vulkan",
+        "--use-angle=swiftshader",
+        "--use-webgpu-adapter=swiftshader",
+      ],
+      ...(executablePath === undefined ? {} : { executablePath }),
+    },
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },

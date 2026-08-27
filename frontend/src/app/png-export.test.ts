@@ -9,9 +9,6 @@ function panel(id: string, title: string): PanelState {
     title,
     mode: "time",
     axis_style: "gutter",
-    x_ref: null,
-    color_axis: "none",
-    color_ref: null,
     bindings: [],
     color_by: "source",
     overrides: [],
@@ -22,11 +19,9 @@ function panel(id: string, title: string): PanelState {
     x_range: null,
     x_label: null,
     y_label: null,
-    c_label: null,
     time_window: null,
     annotations: [],
     show_stats: false,
-    axis_equal: false,
   };
 }
 

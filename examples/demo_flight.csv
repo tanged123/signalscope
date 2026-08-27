@@ -1,5 +1,5 @@
 # Synthetic launch telemetry for trying SignalScope.
-# Time is seconds; the remaining 16 columns exercise smooth, angular, XY,
+# Time is seconds; the remaining 16 columns exercise smooth, angular, paired,
 # stepped, boolean, discrete-state, high-frequency, drifting, and gapped data.
 time_s,altitude_m,velocity_body/x_mps,velocity_body/y_mps,accel_z_mps2,battery_v,attitude/roll_deg,attitude/pitch_deg,navigation/position_east_m,navigation/position_north_m,guidance/target_altitude_m,control/throttle_pct,events/engine_on,flight/mode_code,vibration/accel_x_g,thermal/avionics_c,sensor/gps_altitude_m
 0.0,0.0,0.0,0.0,9.81,28.00,0.0,0.0,0.0,0.0,100,0,0,0,0.00,24.0,0.2

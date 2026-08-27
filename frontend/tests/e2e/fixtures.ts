@@ -1,4 +1,4 @@
-import { expect, test as base } from "@playwright/test";
+import { expect, test as base, type Page } from "@playwright/test";
 
 interface CoverageFixtures {
   collectCoverage: undefined;
@@ -31,5 +31,12 @@ export const test = base.extend<CoverageFixtures>({
     { auto: true },
   ],
 });
+
+export async function gotoApp(page: Page): Promise<void> {
+  await page.goto("/");
+  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true", {
+    timeout: 20_000,
+  });
+}
 
 export { expect };

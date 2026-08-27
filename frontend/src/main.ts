@@ -1,6 +1,7 @@
 import "./styles/app.css";
 
 import { selectDataPlane } from "./app/data-plane";
+import { acquireGpuContext } from "./render/gpu-context";
 import { AppShell } from "./ui/app-shell";
 
 async function boot(): Promise<void> {
@@ -9,8 +10,12 @@ async function boot(): Promise<void> {
     throw new Error("SignalScope application root is missing");
   }
 
-  const app = new AppShell(root, selectDataPlane());
+  const planePromise = selectDataPlane();
+  const gpuPromise = acquireGpuContext();
+  const app = new AppShell(root, await planePromise);
   await app.mount();
+  const gpu = await gpuPromise;
+  if (gpu !== null) app.setGpu(gpu);
 }
 
 void boot().catch((error: unknown) => {

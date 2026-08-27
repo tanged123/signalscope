@@ -11,7 +11,12 @@ import type { DataPlane } from "../app/data-plane";
 import type { SignalSummary } from "../generated/protocol";
 import type { BatchStatus } from "../generated/protocol";
 import type { SourceSummary } from "../generated/protocol";
-import type { PanelMode, SeriesRef } from "../generated/session";
+import {
+  binColumnsFromWire,
+  type ColumnarTileResponse,
+} from "../app/bin-columns";
+import type { SeriesRef } from "../generated/session";
+import { TileWindowCache } from "../app/tile-window-cache";
 import {
   AppShell,
   arrivalModeFor,
@@ -21,58 +26,157 @@ import {
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
-  SAMPLE_CAP,
-  sampleCapFor,
-  sampleCapForPanel,
   formatHint,
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
 
-describe("sampleCapFor", () => {
-  it("gives sample-mode panels more headroom than the legacy cap", () => {
-    expect(sampleCapFor("xy")).toBe(32_768);
-    expect(sampleCapFor("fft")).toBe(32_768);
-    expect(sampleCapFor("histogram")).toBe(32_768);
-  });
+describe("sample refresh requests", () => {
+  interface RefreshProbe {
+    root: HTMLElement;
+    workspace: {
+      panels(): { id: string; mode: "time" }[];
+    };
+    plane: Pick<DataPlane, "queryTiles" | "querySamples">;
+    tileWindowCache: TileWindowCache;
+    panelSignalIds(): { ids: string[]; missing: string[] };
+    effectiveWindow(): { t0: number; t1: number };
+    renderTiles(): void;
+    reportError(error: unknown): void;
+    refreshToken: number;
+    refreshTilesPass(): Promise<void>;
+  }
 
-  it("leaves time panels on the tile path", () => {
-    expect(sampleCapFor("time")).toBe(SAMPLE_CAP);
+  function refreshProbe() {
+    const querySamples = vi.fn<DataPlane["querySamples"]>(() =>
+      Promise.resolve({ request_id: "samples", series: [] }),
+    );
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve({ requestId: "tiles", series: [] }),
+    );
+    const shell = Object.create(AppShell.prototype) as RefreshProbe;
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<div class="workspace"></div>';
+    shell.workspace = {
+      panels: () => [{ id: "panel-1", mode: "time" }],
+    };
+    shell.plane = { queryTiles, querySamples };
+    shell.tileWindowCache = new TileWindowCache();
+    shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
+    shell.effectiveWindow = vi.fn(() => ({ t0: 20, t1: 79 }));
+    shell.renderTiles = vi.fn();
+    shell.reportError = vi.fn();
+    shell.refreshToken = 0;
+    return { shell, querySamples };
+  }
+
+  it("does not issue an uncapped sample request for live refresh", async () => {
+    const { shell, querySamples } = refreshProbe();
+    await shell.refreshTilesPass();
+    expect(querySamples).not.toHaveBeenCalled();
   });
 });
 
-describe("sampleCapForPanel", () => {
-  it("gives a few series the full per-mode cap", () => {
-    expect(sampleCapForPanel("xy", 1)).toBe(32_768);
-    expect(sampleCapForPanel("histogram", 15)).toBe(32_768);
-  });
-
-  it("shares a fixed point budget once a panel carries many series", () => {
-    expect(sampleCapForPanel("histogram", 40)).toBe(12_500);
-    expect(sampleCapForPanel("histogram", 1_000)).toBe(500);
-  });
-
-  it("halves an XY panel's share because it merges two requests", () => {
-    // XY issues context + detail; both land in one merged response.
-    expect(sampleCapForPanel("xy", 40)).toBe(6_250);
-    expect(sampleCapForPanel("xy", 1_000)).toBe(250);
-  });
-
-  it("holds the budget instead of flooring at the legacy cap", () => {
-    // 1000 series x 8192 would be 8.2M points against a 500k budget.
-    expect(sampleCapForPanel("fft", 1_000)).toBe(500);
-    expect(sampleCapForPanel("fft", 100_000) * 100_000).toBeLessThanOrEqual(
-      500_000,
+describe("tile refresh cache", () => {
+  it("reuses a dense raw window without a second plane query", async () => {
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve({
+        requestId: "tiles",
+        series: [
+          {
+            signalId: "1",
+            signalPath: "run/value",
+            unit: null,
+            level: 0,
+            bins: binColumnsFromWire(
+              Array.from({ length: 12 }, (_, index) => ({
+                t0: index,
+                t1: index,
+                first: index,
+                last: index,
+                min: index,
+                max: index,
+                sum: index,
+                sum_sq: index * index,
+                finite_count: "1",
+                sample_count: "1",
+                has_gap: false,
+              })),
+            ),
+          },
+        ],
+      }),
     );
-  });
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      workspace: { panels(): { id: string; mode: "time" }[] };
+      workspaceView: null;
+      plane: Pick<DataPlane, "queryTiles">;
+      tileWindowCache: TileWindowCache;
+      panelSignalIds(): { ids: string[]; missing: string[] };
+      effectiveWindow(): { t0: number; t1: number };
+      renderTiles(): void;
+      reportError: ReturnType<typeof vi.fn>;
+      refreshToken: number;
+      refreshTilesPass(): Promise<void>;
+    };
+    shell.root = document.createElement("div");
+    shell.root.innerHTML = '<div class="workspace"></div>';
+    shell.workspace = {
+      panels: () => [{ id: "panel-1", mode: "time" }],
+    };
+    shell.workspaceView = null;
+    shell.plane = { queryTiles };
+    shell.tileWindowCache = new TileWindowCache();
+    shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
+    shell.effectiveWindow = vi.fn(() => ({ t0: 0, t1: 5 }));
+    shell.renderTiles = vi.fn();
+    shell.reportError = vi.fn();
+    shell.refreshToken = 0;
 
-  it("never returns zero, however many series a panel holds", () => {
-    expect(sampleCapForPanel("fft", 10_000_000)).toBe(1);
-  });
+    await shell.refreshTilesPass();
+    await shell.refreshTilesPass();
 
-  it("treats a zero series count as one rather than dividing by zero", () => {
-    expect(sampleCapForPanel("xy", 0)).toBe(32_768);
+    expect(queryTiles).toHaveBeenCalledOnce();
+    const { reportError } = shell;
+    expect(reportError).not.toHaveBeenCalled();
   });
+});
+
+describe("render errors", () => {
+  it.each([["ChartGPU render", new Error("ChartGPU render failed")]])(
+    "reports synchronous %s errors without retrying",
+    (_label, error) => {
+      const renderData = vi.fn(() => {
+        throw error;
+      });
+      const shell = Object.create(AppShell.prototype) as {
+        root: HTMLElement;
+        workspace: { linkedTime(): { t0: number; t1: number } };
+        workspaceView: {
+          renderData: typeof renderData;
+        };
+        tilesByPanel: Map<string, ColumnarTileResponse>;
+        missingByPanel: Map<string, string[]>;
+        reportError: ReturnType<typeof vi.fn>;
+        renderTiles(): void;
+      };
+      shell.root = document.createElement("div");
+      shell.root.innerHTML = '<span class="render-ms"></span>';
+      shell.workspace = {
+        linkedTime: () => ({ t0: 0, t1: 1 }),
+      };
+      shell.workspaceView = { renderData };
+      shell.tilesByPanel = new Map();
+      shell.missingByPanel = new Map();
+      shell.reportError = vi.fn();
+
+      expect(() => shell.renderTiles()).not.toThrow();
+      expect(renderData).toHaveBeenCalledOnce();
+      const { reportError } = shell;
+      expect(reportError).toHaveBeenCalledWith(error);
+    },
+  );
 });
 
 it("arrival mode focuses small additions and ghosts large additions", () => {
@@ -131,102 +235,6 @@ it("labels itemized cursor rows with the source-local channel", () => {
   );
 
   expect(row?.label).toBe("run_07/temperature");
-});
-
-interface ShellProbe {
-  workspace: WorkspaceModel;
-  transitionPanelMode(panelId: string, mode: PanelMode): void;
-}
-
-interface DropProbe {
-  root: HTMLElement;
-  plane: { ingest: unknown };
-  palette: { isOpen(): boolean } | null;
-  exportDialog: { isOpen(): boolean } | null;
-  loadSession: ReturnType<typeof vi.fn>;
-  ingestPaths: ReturnType<typeof vi.fn>;
-  reportError: ReturnType<typeof vi.fn>;
-  onDragDrop(event: { kind: string; paths: string[] }): void;
-  handleDrop(paths: string[]): Promise<void>;
-}
-
-function dropProbe(ingest: unknown, modalOpen = false): DropProbe {
-  const probe = Object.create(AppShell.prototype) as DropProbe;
-  probe.root = document.createElement("div");
-  probe.root.innerHTML = `<div class="drop-overlay" hidden></div>`;
-  probe.plane = { ingest };
-  probe.palette = { isOpen: () => modalOpen };
-  probe.exportDialog = null;
-  probe.loadSession = vi.fn(() => Promise.resolve());
-  probe.ingestPaths = vi.fn(() => Promise.resolve());
-  probe.reportError = vi.fn();
-  return probe;
-}
-
-const scanIngest = (files: string[]) => ({
-  scanSources: () =>
-    Promise.resolve({
-      files,
-      total_bytes: "0",
-      format_counts: [],
-    }),
-  listFormats: () =>
-    Promise.resolve([
-      { id: "csv", label: "Delimited text", extensions: ["csv"] },
-    ]),
-});
-
-describe("drag-drop routing", () => {
-  it("shows the overlay on enter and hides it on leave", () => {
-    const probe = dropProbe(scanIngest([]));
-    const overlay = probe.root.querySelector(".drop-overlay");
-    probe.onDragDrop({ kind: "enter", paths: [] });
-    expect(overlay?.hasAttribute("hidden")).toBe(false);
-    probe.onDragDrop({ kind: "leave", paths: [] });
-    expect(overlay?.hasAttribute("hidden")).toBe(true);
-  });
-
-  it("ignores drops and keeps the overlay hidden while a modal is open", () => {
-    const probe = dropProbe(scanIngest(["/a.csv"]), true);
-    probe.onDragDrop({ kind: "enter", paths: [] });
-    expect(
-      probe.root.querySelector(".drop-overlay")?.hasAttribute("hidden"),
-    ).toBe(true);
-    probe.onDragDrop({ kind: "drop", paths: ["/a.csv"] });
-    expect(probe.ingestPaths).not.toHaveBeenCalled();
-  });
-
-  it("opens a dropped workspace file through loadSession", async () => {
-    const probe = dropProbe(scanIngest([]));
-    await probe.handleDrop(["/w/flight.signalscope"]);
-    expect(probe.loadSession).toHaveBeenCalledWith("/w/flight.signalscope");
-    expect(probe.ingestPaths).not.toHaveBeenCalled();
-  });
-
-  it("expands data drops into the batch ingest path", async () => {
-    const probe = dropProbe(scanIngest(["/runs/a.csv", "/runs/b.csv"]));
-    await probe.handleDrop(["/runs"]);
-    expect(probe.ingestPaths).toHaveBeenCalledWith([
-      "/runs/a.csv",
-      "/runs/b.csv",
-    ]);
-  });
-
-  it("rejects mixed drops and reports the reason", async () => {
-    const probe = dropProbe(scanIngest([]));
-    await probe.handleDrop(["/w/a.signalscope", "/d/a.csv"]);
-    expect(probe.reportError).toHaveBeenCalled();
-    expect(probe.loadSession).not.toHaveBeenCalled();
-    expect(probe.ingestPaths).not.toHaveBeenCalled();
-  });
-
-  it("reports the supported formats when a drop expands to nothing", async () => {
-    const probe = dropProbe(scanIngest([]));
-    await probe.handleDrop(["/empty"]);
-    expect(probe.ingestPaths).not.toHaveBeenCalled();
-    const error = (probe.reportError.mock.calls as unknown[][])[0]?.[0];
-    expect(String(error)).toContain(".csv");
-  });
 });
 
 describe("recipe-required ingest failures", () => {
@@ -800,55 +808,6 @@ describe("source dock rail", () => {
   });
 });
 
-describe("panel mode transitions", () => {
-  it("preserves an XY x signal without adding it to time-mode series", () => {
-    const workspace = new WorkspaceModel();
-    const panel = workspace.addPanelRow();
-    for (let index = 0; index < 8; index += 1) {
-      workspace.addSeriesRef(panel.id, {
-        source_key: "run_01",
-        channel: `s${String(index)}`,
-      });
-    }
-    workspace.addSeriesRef(panel.id, {
-      source_key: "run_01",
-      channel: "time",
-    });
-    workspace.setXRef(panel.id, { source_key: "run_01", channel: "time" });
-    workspace.setMode(panel.id, "xy");
-
-    const shell = Object.create(AppShell.prototype) as ShellProbe;
-    shell.workspace = workspace;
-    shell.transitionPanelMode(panel.id, "time");
-
-    expect(workspace.panel(panel.id)?.x_ref).toEqual({
-      source_key: "run_01",
-      channel: "time",
-    });
-    expect(workspace.panel(panel.id)?.bindings[0]?.refs).toHaveLength(8);
-    expect(
-      workspace
-        .panel(panel.id)
-        ?.bindings.flatMap((binding) => binding.refs)
-        .some((ref) => ref.source_key === "run_01" && ref.channel === "time"),
-    ).toBe(false);
-
-    shell.transitionPanelMode(panel.id, "xy");
-
-    expect(workspace.panel(panel.id)?.x_ref).toEqual({
-      source_key: "run_01",
-      channel: "time",
-    });
-    expect(workspace.panel(panel.id)?.bindings[0]?.refs).toHaveLength(8);
-    expect(
-      workspace
-        .panel(panel.id)
-        ?.bindings.flatMap((binding) => binding.refs)
-        .some((ref) => ref.source_key === "run_01" && ref.channel === "time"),
-    ).toBe(false);
-  });
-});
-
 describe("renderBatchProgress", () => {
   it("renders byte-weighted progress and the current file", () => {
     const progress = document.createElement("div");
@@ -953,7 +912,6 @@ describe("workspace theme persistence", () => {
       autosaveTimer: number | null;
       workspacePath: string | null;
       tilesByPanel: Map<string, unknown>;
-      samplesByPanel: Map<string, unknown>;
       missingByPanel: Map<string, unknown>;
       workspaceView: null;
       reloadSignals: ReturnType<typeof vi.fn>;
@@ -970,7 +928,6 @@ describe("workspace theme persistence", () => {
     shell.autosaveTimer = null;
     shell.workspacePath = null;
     shell.tilesByPanel = new Map();
-    shell.samplesByPanel = new Map();
     shell.missingByPanel = new Map();
     shell.workspaceView = null;
     shell.reloadSignals = vi.fn(() => Promise.resolve());
@@ -1087,5 +1044,48 @@ describe("recipe directory settings entries", () => {
     expect(probe.updatePreferences).toHaveBeenCalledWith({
       recipe_directory: null,
     });
+  });
+});
+
+describe("appearance settings entries", () => {
+  interface AppearanceProbe {
+    prefs: ReturnType<typeof defaultPreferences>;
+    updatePreferences(patch: Record<string, unknown>): void;
+    toggleTheme(): void;
+    recipeDirectoryEntries(): [];
+    settingsEntries(): Array<{
+      title: string;
+      hint: string;
+      adjust?: (direction: -1 | 1) => void;
+    }>;
+  }
+
+  function appearanceProbe(): AppearanceProbe {
+    const probe = Object.create(AppShell.prototype) as AppearanceProbe;
+    probe.prefs = defaultPreferences();
+    probe.updatePreferences = (patch) => {
+      Object.assign(probe.prefs, patch);
+    };
+    probe.toggleTheme = vi.fn();
+    probe.recipeDirectoryEntries = () => [];
+    return probe;
+  }
+
+  it("adjusts global plot line width in quarter steps", () => {
+    const probe = appearanceProbe();
+    const entry = probe
+      .settingsEntries()
+      .find(({ title }) => title === "Plot line width");
+
+    expect(entry?.hint).toBe("100%");
+    entry?.adjust?.(1);
+    expect(probe.prefs.plot_line_width_scale).toBe(1.25);
+    expect(
+      probe.settingsEntries().find(({ title }) => title === "Plot line width")
+        ?.hint,
+    ).toBe("125%");
+    probe.prefs.plot_line_width_scale = 1;
+    entry?.adjust?.(-1);
+    expect(probe.prefs.plot_line_width_scale).toBe(0.75);
   });
 });

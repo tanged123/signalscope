@@ -22,14 +22,6 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * A signal's short display name: the last two path segments, which keeps the
- * group that disambiguates same-named signals without the full path.
- */
-export function signalLabel(path: string): string {
-  return path.split("/").slice(-2).join("/");
-}
-
-/**
  * Pointer-capture drag scaffold: on pointerdown, captures the pointer and
  * calls `begin` for per-drag state; its `onMove`/`onEnd` run until
  * pointerup or pointercancel, then listeners detach.

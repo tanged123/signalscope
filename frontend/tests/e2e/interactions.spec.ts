@@ -1,8 +1,8 @@
-import { expect, test } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 
 test.describe("desktop plot interactions", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
+    await gotoApp(page);
     await expect(page.locator(".panel").first()).toBeVisible();
   });
 
@@ -123,11 +123,6 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.type("Body velocity");
     await page.keyboard.press("Enter");
     await expect(title).toHaveText("Body velocity");
-
-    await panel.locator(".panel-axis-toggle").click();
-    await expect(panel.locator(".panel-axis-toggle")).toHaveText(
-      "axes: inline",
-    );
 
     await panel.locator(".color-rule-token").click();
     const rules = panel.locator(".rules-popover");

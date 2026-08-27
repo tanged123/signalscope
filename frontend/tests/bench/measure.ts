@@ -87,3 +87,24 @@ export async function interact(page: Page): Promise<void> {
     await page.waitForTimeout(80);
   }
 }
+
+/**
+ * A sustained horizontal drag in small steps. Every step stays well inside
+ * one padded window, so the gesture exercises the cache-hit render path
+ * rather than the fetch a pad exit triggers.
+ */
+export async function panInPad(page: Page): Promise<void> {
+  const canvas = page.locator(".overlay-canvas").first();
+  await canvas.hover({ position: { x: 640, y: 200 } });
+  await page.mouse.move(640, 200);
+  await page.mouse.down();
+  // Progressive, not oscillating: 24 steps of 10 css px walk the window
+  // 240 px to the left, far enough to be a real pan and comfortably inside
+  // a pad that is two to four times the visible span.
+  for (let index = 1; index <= 24; index += 1) {
+    await page.mouse.move(640 - index * 10, 200, { steps: 4 });
+    await page.waitForTimeout(60);
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(120);
+}

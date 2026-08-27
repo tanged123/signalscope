@@ -1,7 +1,6 @@
 import { formatCombo } from "../app/commands";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { WorkspaceModel } from "../app/workspace";
-import type { SampleResponse } from "../generated/protocol";
 import { bindPointerDrag } from "./dom";
 import {
   PANEL_DRAG_TYPE,
@@ -15,6 +14,7 @@ import {
   type PanelCallbacks,
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
+import type { GpuContext } from "../render/gpu-context";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -39,14 +39,23 @@ export class WorkspaceView {
     private readonly root: HTMLElement,
     private readonly model: WorkspaceModel,
     private readonly callbacks: WorkspaceCallbacks,
+    private gpu: GpuContext | null = null,
   ) {
     this.bindWorkspaceDrop();
+  }
+
+  setGpu(gpu: GpuContext, hasSignals: boolean): void {
+    if (this.gpu === gpu) return;
+    this.gpu = gpu;
+    for (const view of this.views.values()) view.setGpu(gpu);
+    if (this.views.size === 0) this.sync(hasSignals);
   }
 
   sync(hasSignals: boolean): void {
     const alive = new Set(this.model.panels().map((panel) => panel.id));
     for (const [id, view] of this.views) {
       if (!alive.has(id)) {
+        view.dispose();
         view.element.remove();
         this.views.delete(id);
       }
@@ -73,6 +82,7 @@ export class WorkspaceView {
       view.element.style.removeProperty("flex");
       rowElement.appendChild(view.element);
       this.root.append(this.maximizedPanelBar(maximized), rowElement);
+      view.mount();
       this.refreshPanelStates();
       return;
     }
@@ -90,6 +100,7 @@ export class WorkspaceView {
         rowElement.appendChild(view.element);
       });
       this.root.appendChild(rowElement);
+      for (const cell of row.panels) this.views.get(cell.panel_id)?.mount();
     });
     this.refreshPanelStates();
   }
@@ -114,7 +125,6 @@ export class WorkspaceView {
 
   renderData(
     tilesByPanel: ReadonlyMap<string, ColumnarTileResponse>,
-    samplesByPanel: ReadonlyMap<string, SampleResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
   ): number {
@@ -128,7 +138,6 @@ export class WorkspaceView {
           ?.renderData(
             panel,
             tilesByPanel.get(panel.id) ?? null,
-            samplesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
           ) ?? 0;
@@ -161,11 +170,11 @@ export class WorkspaceView {
     this.views.get(id)?.resetYAxis();
   }
 
-  canEditAxis(id: string, axis: "x" | "y" | "c"): boolean {
+  canEditAxis(id: string, axis: "x" | "y"): boolean {
     return this.views.get(id)?.canEditAxis(axis) ?? false;
   }
 
-  beginAxisEdit(id: string, axis: "x" | "y" | "c"): void {
+  beginAxisEdit(id: string, axis: "x" | "y"): void {
     this.views.get(id)?.beginAxisEdit(axis);
   }
 
@@ -174,10 +183,10 @@ export class WorkspaceView {
     return this.views.get(id)?.plotWidth() ?? 0;
   }
 
-  panelCanvases(
+  async capturePanel(
     id: string,
-  ): { plot: HTMLCanvasElement; overlay: HTMLCanvasElement } | null {
-    return this.views.get(id)?.canvases() ?? null;
+  ): Promise<{ plot: HTMLCanvasElement; overlay: HTMLCanvasElement } | null> {
+    return (await this.views.get(id)?.capturePlot()) ?? null;
   }
 
   panelRect(id: string): DOMRect | null {
@@ -187,7 +196,7 @@ export class WorkspaceView {
   private view(id: string): PanelView {
     let view = this.views.get(id);
     if (view === undefined) {
-      view = new PanelView(id, this.callbacks);
+      view = new PanelView(id, this.callbacks, this.gpu);
       view.setCursorMode(this.cursorMode);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);

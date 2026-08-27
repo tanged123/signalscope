@@ -1,10 +1,10 @@
-import { expect, test } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 import type { PanelView as PanelViewClass } from "../../src/ui/panel";
 import type { FormulaBar as FormulaBarClass } from "../../src/ui/formula-bar";
 import type { Catalog as CatalogClass } from "../../src/app/catalog";
 
 test("panel lifecycle exposes unified directional splits", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await expect(page.locator(".panel")).toHaveCount(1);
 
   await page.keyboard.press("n");
@@ -27,7 +27,7 @@ test("panel lifecycle exposes unified directional splits", async ({ page }) => {
 test("maximize fills the workspace and split restores the layout", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("n");
 
   const workspace = page.locator(".workspace");
@@ -75,7 +75,7 @@ test("maximize fills the workspace and split restores the layout", async ({
 });
 
 test("workspace tabs keep independent panel layouts", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await expect(page.locator(".workspace-tab")).toHaveCount(1);
   await expect(page.locator(".panel")).toHaveCount(1);
 
@@ -119,7 +119,7 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
 test("overflowing workspace tabs keep their controls clear", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   for (let index = 0; index < 10; index += 1) {
     await page.locator(".workspace-tab-add").click();
   }
@@ -134,7 +134,7 @@ test("overflowing workspace tabs keep their controls clear", async ({
 test("command palette runs workspace-scoped panel commands", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("ControlOrMeta+Shift+p");
   await expect(page.locator(".palette-input")).toBeFocused();
   await page.locator(".palette-input").fill("split current panel right");
@@ -144,7 +144,7 @@ test("command palette runs workspace-scoped panel commands", async ({
 });
 
 test("command palette edits focused-panel axis labels", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const panel = page.locator(".panel").first();
   for (const [query, label] of [
     ["edit X axis label", "X axis name"],
@@ -161,7 +161,7 @@ test("command palette edits focused-panel axis labels", async ({ page }) => {
 test("panel matrix legend keeps rosters virtual and exposes rules", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     const modulePath = "/src/ui/panel.ts";
     const { PanelView } = (await import(/* @vite-ignore */ modulePath)) as {
@@ -200,7 +200,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onSplitRight: () => {},
       onSplitDown: () => {},
       onMaximize: () => {},
-      onSelectMode: () => {},
       onDropSignals: () => {},
       onDropSet: () => {},
       onFocusToggle: () => {},
@@ -234,9 +233,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
             focused: true,
             overridden: false,
           })),
-      onSetXSignal: () => {},
-      onSetColorSignal: () => {},
-      onClearXSignal: () => {},
       onToggleSeries: () => {},
       onResized: () => {},
       onGesture: () => {},
@@ -250,7 +246,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onFitView: () => {},
       onToggleStats: () => {},
       onToggleAxisStyle: () => {},
-      onToggleAxisEqual: () => {},
       onRenameTitle: () => {},
       onEditAxisLabel: () => {},
       onSetSeriesStyle: () => {},
@@ -266,9 +261,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         title: "Many series",
         mode: "time",
         axis_style: "gutter",
-        x_ref: null,
-        color_axis: "none",
-        color_ref: null,
         bindings: [
           {
             kind: "pick" as const,
@@ -289,11 +281,9 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         x_range: null,
         x_label: null,
         y_label: null,
-        c_label: null,
         time_window: null,
         annotations: [],
         show_stats: false,
-        axis_equal: false,
       },
       false,
     );
@@ -325,7 +315,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
 });
 
 test("dismissing a failed ingest banner clears it", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     const modulePath = "/src/ui/app-shell.ts";
     const { renderBatchProgress } = (await import(
@@ -376,170 +366,10 @@ test("dismissing a failed ingest banner clears it", async ({ page }) => {
   await expect(progress.locator(".ingest-failures")).toHaveCount(0);
 });
 
-test("xy panels expose an equal-aspect toggle that other modes hide", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    const modulePath = "/src/ui/panel.ts";
-    const { PanelView } = (await import(/* @vite-ignore */ modulePath)) as {
-      PanelView: typeof PanelViewClass;
-    };
-    const catalogModulePath = "/src/app/catalog.ts";
-    const catalogModule: unknown = await import(
-      /* @vite-ignore */ catalogModulePath
-    );
-    const { Catalog } = catalogModule as { Catalog: typeof CatalogClass };
-    const host = document.createElement("div");
-    host.id = "aspect-probe";
-    host.style.width = "900px";
-    host.style.height = "320px";
-    host.style.display = "flex";
-    document.body.replaceChildren(host);
-    const summaries = ["command", "response"].map((channel) => ({
-      signal_id: `id:run_01/${channel}`,
-      source_id: "source:run_01",
-      source_key: "run_01",
-      local_path: channel,
-      path: `run_01/${channel}`,
-      unit: null,
-      point_count: "2",
-      t_min: 0,
-      t_max: 1,
-      last_value: null,
-    }));
-    const catalog = Catalog.build(summaries);
-    const state = (mode: "xy" | "time", axisEqual: boolean) => ({
-      id: "aspect-probe-panel",
-      title: "trajectory",
-      mode,
-      axis_style: "gutter" as const,
-      x_ref: { source_key: "run_01", channel: "command" },
-      color_axis: "none" as const,
-      color_ref: null,
-      bindings: [
-        {
-          kind: "pick" as const,
-          selector: null,
-          refs: [{ source_key: "run_01", channel: "response" }],
-          set_id: null,
-        },
-      ],
-      color_by: "source" as const,
-      overrides: [],
-      focus: [],
-      ghost_mode: "all" as const,
-      split_by: "none" as const,
-      y_range: null,
-      x_range: null,
-      x_label: null,
-      y_label: null,
-      c_label: null,
-      time_window: null,
-      annotations: [],
-      show_stats: false,
-      axis_equal: axisEqual,
-    });
-    const view = new PanelView("aspect-probe-panel", {
-      onFocus: () => {},
-      onClose: () => {},
-      onSplitRight: () => {},
-      onSplitDown: () => {},
-      onMaximize: () => {},
-      onSelectMode: () => {},
-      onDropSignals: () => {},
-      onDropSet: () => {},
-      onFocusToggle: () => {},
-      onClearFocus: () => {},
-      onMuteSelector: () => {},
-      onMuteSeries: () => {},
-      onRemoveBinding: () => {},
-      onToggleGhostMode: () => {},
-      onSetColorBy: () => {},
-      onRemoveOverride: () => {},
-      onClearOverrides: () => {},
-      localPathFor: () => null,
-      sourceKeyFor: () => null,
-      pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
-      catalog: () => catalog,
-      namedSets: () => [],
-      resolveSeries: (panelState) =>
-        panelState.bindings
-          .flatMap((binding) => binding.refs)
-          .map((ref) => ({
-            ref,
-            path: `${ref.source_key}/${ref.channel}`,
-            display: "focus" as const,
-            hue: 1,
-            dash: "solid" as const,
-            width: 1.4,
-            opacity: 1,
-            visible: true,
-            focused: true,
-            overridden: false,
-          })),
-      onSetXSignal: () => {},
-      onSetColorSignal: () => {},
-      onClearXSignal: () => {},
-      onToggleSeries: () => {},
-      onResized: () => {},
-      onGesture: () => {},
-      onCursor: () => {},
-      onTimeWindow: () => {},
-      onYRange: () => {},
-      onXRange: () => {},
-      onPinAnnotation: () => {},
-      onRemoveAnnotation: () => {},
-      onEditAnnotationLabel: () => {},
-      onFitView: () => {},
-      onToggleStats: () => {},
-      onToggleAxisStyle: () => {},
-      // The shell flips the model and re-renders; mirror that here so the
-      // pressed state reflects a real round trip rather than a local toggle.
-      onToggleAxisEqual: (id) => {
-        host.dataset.axisEqualToggled = id;
-        view.update(state("xy", true), false);
-      },
-      onRenameTitle: () => {},
-      onEditAxisLabel: () => {},
-      onSetSeriesStyle: () => {},
-      onRemoveSeries: () => {},
-      onQuickTransform: () => {},
-    });
-    host.appendChild(view.element);
-    Object.assign(globalThis, {
-      __aspectProbe: (mode: "xy" | "time") => {
-        view.update(state(mode, false), false);
-      },
-    });
-    view.update(state("xy", false), false);
-  });
-
-  const panel = page.locator("#aspect-probe .panel");
-  const toggle = panel.locator(".panel-aspect-toggle");
-  await expect(toggle).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-  await toggle.click();
-  await expect(page.locator("#aspect-probe")).toHaveAttribute(
-    "data-axis-equal-toggled",
-    "aspect-probe-panel",
-  );
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-
-  // Equal aspect is meaningless off the xy plane, so the control goes away.
-  await page.evaluate(() => {
-    (
-      globalThis as unknown as { __aspectProbe: (mode: string) => void }
-    ).__aspectProbe("time");
-  });
-  await expect(toggle).toBeHidden();
-});
-
 test("formula component creates and recalls accepted formulas", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     const modulePath = "/src/ui/formula-bar.ts";
     const { FormulaBar, formulaBarMarkup } = (await import(
@@ -669,7 +499,7 @@ test("formula component creates and recalls accepted formulas", async ({
 test("formula help teaches real paths once and remains available", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     localStorage.removeItem("signalscope.formulaHelpSeen");
     const modulePath = "/src/ui/formula-bar.ts";
@@ -767,7 +597,7 @@ test("formula help teaches real paths once and remains available", async ({
 test("formula editor hides when the data plane cannot derive", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await expect(page.locator(".formula-bar")).toBeHidden();
   await expect(page.locator(".formula-toggle")).toBeHidden();
 });
@@ -775,7 +605,7 @@ test("formula editor hides when the data plane cannot derive", async ({
 test("signal tree toggles and collapses through its resize edge", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const tree = page.locator(".signal-tree");
   const workspace = page.locator(".workspace");
   const toggle = page.locator(".tree-toggle");
@@ -820,7 +650,7 @@ test("signal tree toggles and collapses through its resize edge", async ({
 });
 
 test("outline filters, sets, and drag-to-plot", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await expect(page.locator(".tree-sets")).toContainText(
     "Saved sets appear here",
   );
@@ -880,7 +710,7 @@ test("outline filters, sets, and drag-to-plot", async ({ page }) => {
 });
 
 test("selector filter binds and saves a live set", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const search = page.locator(".signal-search");
   await search.fill("velocity_body/* @ rocket");
   await expect(page.locator(".search-count")).toContainText(
@@ -928,7 +758,7 @@ test("selector filter binds and saves a live set", async ({ page }) => {
 });
 
 test("legend strip stays bounded", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const panel = page.locator(".panel").first();
   const strip = panel.locator(".panel-legend-strip");
   await expect(strip).toBeVisible();
@@ -940,7 +770,7 @@ test("legend strip stays bounded", async ({ page }) => {
 });
 
 test("seam drag resizes panel rows", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("n");
 
   const first = page.locator(".panel").first();

@@ -3,7 +3,7 @@ import type {
   ExportDialog as ExportDialogInstance,
 } from "../../src/ui/export-dialog";
 import type { ExportEstimateEntry } from "../../src/generated/protocol";
-import { expect, test } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 
 type ExportDialogConstructor = new (
   root: HTMLElement,
@@ -13,7 +13,7 @@ type ExportDialogConstructor = new (
 test("shared presentation plane renders the demo workspace", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
 
   await expect(page.getByText("SIGNALSCOPE")).toBeVisible();
   await expect(page.locator(".menu-bar")).toHaveCount(0);
@@ -33,8 +33,12 @@ test("shared presentation plane renders the demo workspace", async ({
   for (const name of await page.locator(".binding-chip").allTextContents()) {
     expect(name.trim()).not.toBe("");
   }
-  await expect(page.locator(".plot-canvas").first()).toBeVisible();
-  await expect(page.locator(".render-ms")).not.toHaveText("— ms");
+  await expect(page.locator(".chart-host canvas").first()).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.locator(".render-ms")).not.toHaveText("— ms", {
+    timeout: 20_000,
+  });
   await expect(page.locator(".session-identity")).toHaveText(
     /— [1-9]\d* sources · [1-9]\d* signals/,
   );
@@ -52,7 +56,7 @@ test("shared presentation plane renders the demo workspace", async ({
 });
 
 test("theme is a pure token swap", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("t");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.reload();
@@ -63,7 +67,7 @@ test("theme is a pure token swap", async ({ page }) => {
 test("application menu mirrors commands and marks planned work", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   const openFolderKeys = await page.evaluate<string>(() =>
     /mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘⌥O" : "Ctrl+Alt+O",
   );
@@ -136,7 +140,7 @@ test("application menu mirrors commands and marks planned work", async ({
 });
 
 test("tabbing out of the application menu dismisses it", async ({ page }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.locator(".menu-button").click();
   const menu = page.locator(".app-menu");
   await expect(menu).toBeVisible();
@@ -155,7 +159,7 @@ test("tabbing out of the application menu dismisses it", async ({ page }) => {
 test("export dialog is modal and restores focus after a document Escape", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     const moduleUrl = "/src/ui/export-dialog.ts";
     const { ExportDialog } = (await import(moduleUrl)) as {
@@ -201,7 +205,7 @@ test("export dialog is modal and restores focus after a document Escape", async 
 test("export dialog exposes range, fidelity, and reduction consequences", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     const moduleUrl = "/src/ui/export-dialog.ts";
     const { ExportDialog } = (await import(moduleUrl)) as {
@@ -268,7 +272,7 @@ test("export dialog exposes range, fidelity, and reduction consequences", async 
 test("export source choices scroll without moving actions off screen", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     const moduleUrl = "/src/ui/export-dialog.ts";
     const { ExportDialog } = (await import(moduleUrl)) as {
@@ -311,7 +315,7 @@ test("export source choices scroll without moving actions off screen", async ({
 test("PNG export defaults to the focused panel and can select all panels", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.evaluate(async () => {
     const moduleUrl = "/src/ui/export-dialog.ts";
     const { ExportDialog } = (await import(moduleUrl)) as {
@@ -344,7 +348,7 @@ test("PNG export defaults to the focused panel and can select all panels", async
 test("the palette disables commands the current build cannot run", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.keyboard.press("ControlOrMeta+Shift+p");
   await page.locator(".palette-input").fill("Open…");
   // The browser plane has no ingest host, so the command lists but cannot run.
@@ -356,7 +360,7 @@ test("the palette disables commands the current build cannot run", async ({
 test("application shortcuts remain active while search has focus", async ({
   page,
 }) => {
-  await page.goto("/");
+  await gotoApp(page);
   await page.locator(".signal-search").focus();
   await page.keyboard.press("ControlOrMeta+Shift+p");
   await expect(page.locator(".palette-input")).toBeVisible();

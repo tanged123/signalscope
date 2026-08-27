@@ -5,7 +5,7 @@ import {
   type PlotLayout,
 } from "../app/plot-math";
 import type { CursorMode as SessionCursorMode } from "../generated/session";
-import { SERIES_TOKENS } from "./canvas-renderer";
+import { SERIES_TOKENS } from "./plot-theme";
 import { CanvasSurface } from "./surface";
 
 /** Badge plate geometry, shared by the measure and annotation overlays. */

@@ -67,3 +67,13 @@ and `source_paths`. Both are required arrays, so the v9-to-v10 migration
 initializes each as empty rather than relying on `#[serde(default)]`. Sessions
 still contain no samples: a derived signal is restored by re-evaluating its
 expression after its sources are re-ingested.
+
+## Amendment (2026-08-18, ladder reset)
+
+Schema version 22 removes the non-time panel modes and their fields. The
+migration ladder was reset rather than extended: every rung is deleted and
+any version other than the current one is rejected through
+`UnsupportedVersion`. Sessions and snapshots written by earlier versions no
+longer load. This is a single deliberate break accepted for that change and
+does not relax the rule for future bumps, which continue to require a rung
+and a migration test. See [ADR 0043](0043-time-only-presentation.md).

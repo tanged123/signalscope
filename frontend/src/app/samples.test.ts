@@ -2,7 +2,12 @@ import fixtureJson from "../../../protocol/testdata/sample-conformance.json";
 import { describe, expect, it } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
 import type { SampleResponse } from "../generated/protocol";
-import { binsToSamples, mergeSampleResponses, sampleWindow } from "./samples";
+import {
+  binsToSamples,
+  mergeSampleResponses,
+  sampleWindow,
+  sampleWindowFull,
+} from "./samples";
 
 interface Fixture {
   time: number[];
@@ -49,6 +54,20 @@ describe("sampleWindow", () => {
         stride: 1,
       });
     }
+  });
+});
+
+describe("sampleWindowFull", () => {
+  it("returns all neighbour-inclusive samples regardless of the compatibility cap", () => {
+    const time = Array.from({ length: 100 }, (_, index) => index);
+    const slice = sampleWindowFull(time, time, 20, 79);
+
+    expect(slice.stride).toBe(1);
+    expect(slice.time).toHaveLength(62);
+    expect(slice.time).toEqual(
+      Array.from({ length: 62 }, (_, index) => index + 19),
+    );
+    expect(slice.values).toEqual(slice.time);
   });
 });
 

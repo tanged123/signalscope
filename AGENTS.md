@@ -58,22 +58,19 @@ Canonical commands:
 
 ```text
 ./scripts/setup.sh                    locked frontend dependencies
-./scripts/run.sh web                  browser development host
-./scripts/run.sh native               Tauri development host
+./scripts/run.sh web                  browser demo host
+./scripts/run.sh dev                  browser host plus Vite development host
 ./scripts/test.sh                     quick Rust + frontend checks
 ./scripts/test.sh core [filter…]         filtered Rust data-plane tests
-./scripts/test.sh shell [filter…]        filtered Tauri shell tests
+./scripts/test.sh server [filter…]       filtered browser host tests
 ./scripts/test.sh unit [filter…]         filtered frontend unit tests
 ./scripts/test.sh frontend|e2e|full
 ./scripts/format.sh                   apply treefmt formatting in place
 ./scripts/format.sh --check           check an isolated copy; writes nothing
-./scripts/build.sh web|native         frontend or native bundles
-./scripts/build.sh windows            Windows NSIS installer (Git Bash only)
+./scripts/build.sh web|app             frontend or browser host bundles
 ./scripts/export.sh                   bake a self-contained HTML snapshot
 ./scripts/demo.sh                     bake, record, and encode the demo artifacts
 ./scripts/demo.sh publish <dir>       force-push staged demo artifacts to gh-pages
-./scripts/setup-appimage.sh           Ubuntu AppImage system dependencies
-./scripts/build.sh appimage           Ubuntu/FHS AppImage build
 ./scripts/coverage.sh                 Rust + frontend LCOV
 ./scripts/version.sh get|check        release manifest inspection
 ./scripts/version.sh set 0.1.1        synchronize a release version
@@ -82,7 +79,7 @@ Canonical commands:
 ./scripts/release.sh tag                create and push an annotated release tag
 ./scripts/release.sh publish <tag> <dir> publish staged release assets
 ./scripts/release.sh assets <dir>       list publishable release assets
-./scripts/ci.sh format|quality|rust|frontend|e2e|build|appimage|windows
+./scripts/ci.sh format|quality|rust|frontend|e2e|build
 ./scripts/ci.sh all                   complete local quality gate
 ./scripts/ci.sh flake                 flake check (includes formatting)
 ```
@@ -103,13 +100,8 @@ commit can still carry unformatted content. Run `./scripts/format.sh` before
 staging rather than relying on the hook.
 
 Run `./scripts/setup.sh` before frontend work when dependencies are absent.
-The Nix flake supplies the normal pinned toolchain. AppImage packaging is the
-intentional exception: run it outside the Nix shell on Ubuntu/FHS using the
-two AppImage scripts. Do not “fix” that path by reintroducing the known Nix
-`linuxdeploy` GTK schema mismatch. Windows packaging is the second intentional
-exception: run `./scripts/build.sh windows` from Git Bash on Windows, where the
-script sources its Tauri CLI and pnpm from npm because Nix is unavailable.
-Windows is build-only — every quality gate stays on Linux.
+The Nix flake supplies the normal pinned toolchain. The browser host runs on
+the loopback interface and serves the built frontend from `scope-server`.
 
 Every workflow shell command must call an appropriate script. Keep setup,
 formatting, linting, tests, coverage, builds, artifact checks, and release
@@ -142,21 +134,23 @@ target version.
 
 ## Product and architecture invariants
 
-SignalScope is native software with a portable export, not a web app:
+SignalScope is a local browser workbench with a portable export:
 
-- One TypeScript/canvas presentation plane runs in both the Tauri webview and
-  the self-contained HTML snapshot.
-- The native host uses `TauriPlane`; snapshots use `BakedPlane`; both implement
+- One TypeScript/canvas presentation plane runs in the browser host and the
+  self-contained HTML snapshot.
+- The live host uses `HttpPlane`; snapshots use `BakedPlane`; both implement
   the same versioned `DataPlane` contract. UI and renderer code must not branch
   on host identity.
-- Rust owns ingest, storage, pyramids, compute, persistence, and IPC-facing
-  data. The Tauri shell stays thin: windows, dialogs, and protocol wiring.
+- Rust owns ingest, storage, pyramids, compute, persistence, and HTTP-facing
+  data. The browser host stays thin: routing, dialogs, and protocol wiring.
 - `scope-core::{store, ingest, pyramid, compute, session}` remain separable
   modules. Do not make core modules depend on shell or frontend state.
 - Frontend code consumes protocol tiles/views, never raw native arrays or
-  source-format details. Keep a future local HTTP/WebSocket plane possible.
+  source-format details. `HttpPlane` is the live transport; keep the protocol
+  boundary open to future local transport variants without coupling UI code to
+  them.
 
-The dependency direction is inward: ingest/pyramid/compute use store; shell
+The dependency direction is inward: ingest/pyramid/compute use store; server
 uses protocol and core crates; frontend uses generated protocol types. An
 architectural change requires a new or amended ADR; accepted ADRs are not
 silently rewritten.

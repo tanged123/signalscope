@@ -32,7 +32,6 @@ function fakePort(statuses: BatchStatus[]): FakePort {
     listFormats: () => Promise.resolve([]),
     introspect: () => Promise.reject(new Error("not used in ingest tests")),
     saveRecipe: () => Promise.reject(new Error("not used in ingest tests")),
-    onDragDrop: () => () => undefined,
   };
 }
 

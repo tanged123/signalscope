@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 20,
+  "schema_version": 22,
   "theme": "dark",
   "linked_time": {
     "t0": 0,
@@ -24,9 +24,6 @@
           "title": "ensemble response",
           "mode": "time",
           "axis_style": "gutter",
-          "x_ref": null,
-          "color_axis": "none",
-          "color_ref": null,
           "bindings": [
             {
               "kind": "query",
@@ -44,7 +41,6 @@
           "x_range": null,
           "x_label": null,
           "y_label": null,
-          "c_label": null,
           "time_window": null,
           "annotations": [],
           "show_stats": false
@@ -54,9 +50,6 @@
           "title": "command and temperature",
           "mode": "time",
           "axis_style": "gutter",
-          "x_ref": null,
-          "color_axis": "none",
-          "color_ref": null,
           "bindings": [
             {
               "kind": "query",
@@ -80,7 +73,6 @@
           "x_range": null,
           "x_label": null,
           "y_label": null,
-          "c_label": null,
           "time_window": null,
           "annotations": [],
           "show_stats": false

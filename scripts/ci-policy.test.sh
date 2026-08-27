@@ -4,6 +4,54 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 failures=0
 
+setup_script="$script_dir/setup.sh"
+setup_action="$script_dir/../.github/actions/setup/action.yml"
+ci_workflow="$script_dir/../.github/workflows/ci.yml"
+flake="$script_dir/../flake.nix"
+lib_script="$script_dir/lib.sh"
+live_plane_test="$script_dir/../frontend/tests/e2e/live-plane.spec.ts"
+playwright_config="$script_dir/../frontend/playwright.config.ts"
+
+# shellcheck disable=SC2016
+if ! grep -Fq '"$signalscope_scripts_dir/chartgpu-submodule.sh" init' "$setup_script"; then
+  echo "local setup must initialize the ChartGPU submodule" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'run: ./scripts/chartgpu-submodule.sh init' "$setup_action"; then
+  echo "the shared CI setup action must initialize ChartGPU" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq "if [ -z \"''\${CI:-}\" ]; then" "$flake"; then
+  echo "the Nix shell must cap local builds without capping CI" >&2
+  failures=$((failures + 1))
+fi
+if grep -Fq 'cargo-cache-key: coverage' "$ci_workflow"; then
+  echo "coverage must not cache its instrumented Cargo target" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'cargo build --release -p scope-server' "$lib_script"; then
+  echo "E2E setup must build the release server used by every smoke test" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq '"target", "release", "scope-server"' "$live_plane_test"; then
+  echo "live-plane E2E must run the prebuilt release server" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'workers: process.env.CI ? 1 : undefined' "$playwright_config"; then
+  echo "CI Playwright tests must serialize SwiftShader WebGPU access" >&2
+  failures=$((failures + 1))
+fi
+
+coverage_script="$script_dir/coverage.sh"
+if ! grep -Fxq '  cargo llvm-cov clean' "$coverage_script"; then
+  echo "coverage must release Rust instrumentation before frontend WebGPU tests" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq '  build_e2e_server' "$coverage_script"; then
+  echo "frontend coverage must build scope-server before Playwright" >&2
+  failures=$((failures + 1))
+fi
+
 expect_status() {
   local expected="$1"
   shift
@@ -47,8 +95,7 @@ version_root="$test_root/version"
 mkdir -p \
   "$version_root/core" \
   "$version_root/frontend/src/ui" \
-  "$version_root/scripts" \
-  "$version_root/shell/src-tauri"
+  "$version_root/scripts"
 cp "$script_dir/version.mjs" "$version_root/scripts/version.mjs"
 cat >"$version_root/Cargo.toml" <<'EOF'
 [workspace]
@@ -70,7 +117,6 @@ name = "core"
 version = "1.2.3"
 EOF
 printf '{"version":"1.2.3"}\n' >"$version_root/frontend/package.json"
-printf '{"version":"1.2.3"}\n' >"$version_root/shell/src-tauri/tauri.conf.json"
 printf 'showModeHelp("SignalScope 1.2.3")\n' >"$version_root/frontend/src/ui/app-shell.ts"
 cat >"$version_root/README.md" <<'EOF'
 [![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.2.2)](https://tanged123.github.io/signalscope/demo.html)
@@ -145,23 +191,11 @@ if grep -q "unbound variable" "$failed_push_output"; then
   failures=$((failures + 1))
 fi
 
-windows_asset_dir="$test_root/windows-assets"
-mkdir -p "$windows_asset_dir"
-: >"$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe"
-: >"$windows_asset_dir/signalscope-shell.exe"
-listed="$("$script_dir/release.sh" assets "$windows_asset_dir" | tr -d '\0')"
-if [ "$listed" != "$windows_asset_dir/SignalScope_0.3.3_x64-setup.exe" ]; then
-  printf 'release assets must list the NSIS installer and nothing else, got: %s\n' "$listed" >&2
-  failures=$((failures + 1))
-fi
-
 # `publish` forwards whatever assets() discovers to `gh release create`. Stub gh
 # so that hand-off is covered without a token or network access.
 publish_dir="$test_root/publish-assets"
 mkdir -p "$publish_dir" "$stub_dir"
 : >"$publish_dir/signalscope_1.2.3_amd64.deb"
-: >"$publish_dir/SignalScope_1.2.3_x64-setup.exe"
-: >"$publish_dir/signalscope-shell.exe"
 : >"$publish_dir/latest.json"
 
 cat >"$stub_dir/gh" <<'STUB'
@@ -174,16 +208,10 @@ PATH="$stub_dir:$PATH" GH_TOKEN=test GH_STUB_ARGS="$test_root/gh-args" \
   "$script_dir/release.sh" publish v1.2.3 "$publish_dir"
 
 published="$(sed -n "s|^$publish_dir/||p" "$test_root/gh-args" | LC_ALL=C sort | tr '\n' ' ')"
-if [ "$published" != "SignalScope_1.2.3_x64-setup.exe signalscope_1.2.3_amd64.deb " ]; then
+if [ "$published" != "signalscope_1.2.3_amd64.deb " ]; then
   printf 'publish must forward only publishable assets, got: %s\n' "$published" >&2
   failures=$((failures + 1))
 fi
-
-# The Windows installer script must refuse to run anywhere but Windows.
-case "$(uname -s)" in
-MINGW* | MSYS* | CYGWIN*) ;;
-*) expect_status 1 "$script_dir/build-windows.sh" ;;
-esac
 
 if [ "$failures" -ne 0 ]; then
   exit 1

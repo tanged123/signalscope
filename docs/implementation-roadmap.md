@@ -6,7 +6,9 @@ Complete native file dialogs, persisted pyramid sidecars, progress reporting, MC
 
 ## Phase 2 — scientific interaction
 
-Finish linked desktop and touch gestures, gutter/inline axes, editable labels, split legend inspector, visible statistics, annotations and delta readouts, XY drop strip, color channel and colorbar, FFT, and histogram modes.
+Finish linked desktop gestures, gutter/inline axes, editable labels, split
+legend inspector, visible statistics, annotations and delta readouts, and
+time-series export fidelity.
 
 ## Phase 3 — transforms and durable sessions
 
@@ -105,6 +107,33 @@ phase.
 
 The plotting performance overhaul ([implementation plan](superpowers/plans/2026-08-04-plotting-performance-overhaul.md)) now reports a 6.0 s mc1000 first plot for 1,000 inputs; core tile p95 is 14.2 ms cold and 14.6 ms warm. Browser frame p95 remains 66.5 ms and the longest stall 2.1 s on the benchmark runner, so both still exceed their 33 ms and 250 ms budgets.
 
+The August 2026 ChartGPU work replaced the Tauri shell with the loopback
+`scope-server` HTTP host ([ADR 0038](adr/0038-browser-only-host.md)) and moved
+time-series rendering to a pinned, vendored WebGPU renderer
+([ADR 0039](adr/0039-chartgpu-time-series-renderer.md)). The Phase 0 spike
+measured a 470 ms first frame, 8 ms frame p95, and 33 ms full-thousand-series
+refeed; PNG capture uses the same-frame composite recipe proven by the spike.
+The presentation plane is now time-only and ChartGPU is the single plotter;
+the former XY, spectrum, and histogram paths were withdrawn in
+[ADR 0043](adr/0043-time-only-presentation.md).
+
+The full-resolution presentation baseline ([ADR 0041](adr/0041-full-resolution-presentation-baseline.md)) now keeps every live panel at native
+resolution across `HttpPlane` and baked snapshots containing level zero/full-
+fidelity data. Explicitly reduced-fidelity baked snapshots render their
+user-selected level without additional reduction. Legacy density and sample
+budget fields are inert for live requests, while explicit export limits still
+select the requested fidelity. Larger live transfers or resource failures are
+visible instead of triggering silent LOD fallback. The pyramid and coarse
+cache levels remain for explicit reduced-fidelity exports and follow-up work;
+HTML and CSV preview, standard, high, and full controls remain governed by
+ADRs 0024 and 0025. The approved [design spec](superpowers/specs/2026-08-16-full-resolution-rendering-design.md) names measured follow-ups: compact raw-sample binary transport and eventual pyramid removal after export consumers no longer need coarse levels.
+
+The first measured follow-up landed as
+[ADR 0042](adr/0042-padded-render-feed.md): the renderer consumes the padded
+tile response so an in-pad pan reuses resident vertices instead of rebuilding
+them, and presentation math bounds itself by the visible window. Compact
+raw-sample binary transport and eventual pyramid removal remain open.
+
 The channel map and facet splitting were subsequently removed. Channel
 identity is source-local, named sets cover reusable grouping, and schema v18
 migrates explicit mapped references before deleting the map
@@ -133,17 +162,15 @@ The categorical series order now uses MATLAB's canonical seven defaults, with
 the eighth slot rolling over to dashed blue; amber remains reserved by token
 and semantic role rather than by banning MATLAB yellow.
 
-Phase 2B closed the phase: XY panels with the amber drop strip, dashed `x:`
-and `c:` axis chips, window-dimmed trajectories, a trajectory cursor ring and
-datatips; a `batlow` sequential colormap with a labelled colorbar
-([ADR 0016](adr/0016-sequential-colormap.md)); FFT panels over the visible
-window ([ADR 0017](adr/0017-spectrum-semantics.md)); histogram panels
-([ADR 0018](adr/0018-histogram-semantics.md)); and the full touch gesture
-set. All three modes are presentation-plane computations over a bounded
-window slice served by one new protocol request
-([ADR 0015](adr/0015-window-sample-requests.md)).
+Phase 2B closed the time-series interaction work: linked windows, cursor
+readouts, annotations, deltas, and the gesture set are presentation-plane
+behavior over the tile response. The former XY, spectrum, and histogram
+experiments were withdrawn with the implementation in
+[ADR 0043](adr/0043-time-only-presentation.md); their accepted records remain
+historical context for a future reintroduction.
 
-Two design gaps were closed by decision rather than extraction and should be
-reviewed against any future design pass: histogram mode has no specification
-at all, and the FFT panel has only a pixel reference. The prototype's `1:1`
-equal-axis control was dropped for want of a home in the final chrome.
+The prototype's `1:1` equal-axis control was dropped for want of a home in the
+final chrome. Reintroducing XY is deferred until the sample path has binary
+columnar transport and two-dimensional per-vertex colour mapping has either a
+scoped ChartGPU fork or a binned-segment approximation; ADR 0043 records both
+constraints.

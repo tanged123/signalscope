@@ -77,7 +77,7 @@ pub fn movmean(values: &[f64], window: usize) -> Vec<f64> {
 /// Linearly interpolates `values` at `query`, returning NaN outside the
 /// sample range rather than holding the endpoints flat.
 ///
-/// This mirrors `lerpSample` in `frontend/src/app/xy.ts` exactly;
+/// This mirrors `lerpSample` in `frontend/src/app/samples.ts` exactly;
 /// `protocol/testdata/lerp-conformance.json` locks the two together.
 #[must_use]
 #[allow(clippy::float_cmp)]
@@ -117,6 +117,15 @@ pub struct SampleSlice {
     pub stride: u32,
 }
 
+fn sample_window_bounds(time: &[f64], t0: f64, t1: f64) -> Option<(usize, usize)> {
+    if time.is_empty() || t1 < time[0] || t0 > time[time.len() - 1] {
+        return None;
+    }
+    let start = time.partition_point(|value| *value < t0).saturating_sub(1);
+    let end = (time.partition_point(|value| *value <= t1) + 1).min(time.len());
+    (start < end).then_some((start, end))
+}
+
 /// Selects at most `max_points` samples inside `[t0, t1]`, plus one
 /// neighbour past each edge so strokes reach the plot border.
 ///
@@ -136,22 +145,13 @@ pub fn sample_window(
     max_points: u32,
 ) -> SampleSlice {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
-    if time.is_empty() || t1 < time[0] || t0 > time[time.len() - 1] {
+    let Some((start, end)) = sample_window_bounds(time, t0, t1) else {
         return SampleSlice {
             time: Vec::new(),
             values: Vec::new(),
             stride: 1,
         };
-    }
-    let start = time.partition_point(|value| *value < t0).saturating_sub(1);
-    let end = (time.partition_point(|value| *value <= t1) + 1).min(time.len());
-    if start >= end {
-        return SampleSlice {
-            time: Vec::new(),
-            values: Vec::new(),
-            stride: 1,
-        };
-    }
+    };
     let span = end - start;
     let cap = max_points.max(1) as usize;
     let stride = span.div_ceil(cap).max(1);
@@ -171,6 +171,31 @@ pub fn sample_window(
         time: picked_time,
         values: picked_values,
         stride: u32::try_from(stride).unwrap_or(u32::MAX),
+    }
+}
+
+/// Returns every sample inside `[t0, t1]`, plus one neighbour past each edge.
+///
+/// `max_points` remains on the wire for protocol compatibility, but callers
+/// use this helper when a sample-mode panel needs the full window.
+///
+/// # Panics
+///
+/// Panics when `time` and `values` have different lengths.
+#[must_use]
+pub fn sample_window_full(time: &[f64], values: &[f64], t0: f64, t1: f64) -> SampleSlice {
+    assert_eq!(time.len(), values.len(), "time/value lengths differ");
+    let Some((start, end)) = sample_window_bounds(time, t0, t1) else {
+        return SampleSlice {
+            time: Vec::new(),
+            values: Vec::new(),
+            stride: 1,
+        };
+    };
+    SampleSlice {
+        time: time[start..end].to_vec(),
+        values: values[start..end].to_vec(),
+        stride: 1,
     }
 }
 
@@ -257,6 +282,20 @@ mod tests {
         assert_eq!(slice.stride, 1);
         assert_eq!(slice.time, vec![2.0, 3.0, 4.0, 5.0, 6.0]);
         assert_eq!(slice.values, vec![4.0, 6.0, 8.0, 10.0, 12.0]);
+    }
+
+    #[test]
+    fn sample_window_full_ignores_compatibility_cap() {
+        let time: Vec<f64> = (0..100).map(f64::from).collect();
+        let values = time.clone();
+        let slice = sample_window_full(&time, &values, 20.0, 79.0);
+
+        assert_eq!(slice.stride, 1);
+        assert_eq!(slice.time.len(), 62);
+        assert_eq!(slice.time.first(), Some(&19.0));
+        assert_eq!(slice.time.last(), Some(&80.0));
+        assert_eq!(slice.time, (19..=80).map(f64::from).collect::<Vec<_>>());
+        assert_eq!(slice.values, slice.time);
     }
 
     #[test]

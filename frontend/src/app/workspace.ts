@@ -7,7 +7,6 @@ import type {
   GhostMode,
   LayoutRow,
   LinkedTime,
-  PanelMode,
   PanelState,
   Session,
   SeriesOverride,
@@ -430,30 +429,6 @@ export class WorkspaceModel {
     this.touch();
   }
 
-  setMode(id: string, mode: PanelMode): void {
-    const panel = this.panel(id);
-    if (panel !== undefined) {
-      panel.mode = mode;
-      this.touch(true);
-    }
-  }
-
-  /** Enters XY mode, adopting the first plotted series as the x axis. */
-  promoteSeriesToX(id: string): void {
-    const panel = this.panel(id);
-    if (panel === undefined || panel.x_ref !== null) return;
-    const first = panel.bindings.flatMap((binding) => binding.refs)[0];
-    if (first !== undefined) this.setXRef(id, first);
-  }
-
-  setColorByTime(id: string): void {
-    const panel = this.panel(id);
-    if (panel === undefined) return;
-    panel.color_ref = null;
-    panel.color_axis = "time";
-    this.touch(true);
-  }
-
   toggleSeriesVisible(panelId: string, ref: SeriesRef): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
@@ -502,11 +477,6 @@ export class WorkspaceModel {
     panel.focus = panel.focus.filter(
       (entry) => entry.ref === null || !sameRef(entry.ref, ref),
     );
-    if (sameRef(panel.x_ref, ref)) panel.x_ref = null;
-    if (sameRef(panel.color_ref, ref)) {
-      panel.color_ref = null;
-      panel.color_axis = "none";
-    }
     if (path !== undefined) {
       panel.annotations = panel.annotations.filter(
         (annotation) => annotation.series_path !== path,
@@ -621,44 +591,6 @@ export class WorkspaceModel {
 
   focusEntries(panelId: string): readonly FocusEntry[] {
     return this.panel(panelId)?.focus ?? [];
-  }
-
-  setXRef(panelId: string, ref: SeriesRef | null): void {
-    const panel = this.panel(panelId);
-    if (panel === undefined) return;
-    if ((panel.x_ref === null && ref === null) || sameRef(panel.x_ref, ref)) {
-      return;
-    }
-    if (panel.x_ref !== null) {
-      this.addSeriesRef(panelId, panel.x_ref);
-    }
-    if (ref !== null) {
-      panel.bindings = panel.bindings
-        .map((binding) =>
-          binding.kind === "pick"
-            ? {
-                ...binding,
-                refs: binding.refs.filter((entry) => !sameRef(entry, ref)),
-              }
-            : binding,
-        )
-        .filter(
-          (binding) => binding.kind !== "pick" || binding.refs.length > 0,
-        );
-    }
-    panel.x_ref = ref === null ? null : { ...ref };
-    panel.x_range = null;
-    panel.y_range = null;
-    panel.annotations = [];
-    this.touch(true);
-  }
-
-  setColorRef(panelId: string, ref: SeriesRef | null): void {
-    const panel = this.panel(panelId);
-    if (panel === undefined) return;
-    panel.color_ref = ref === null ? null : { ...ref };
-    panel.color_axis = ref === null ? "none" : "signal";
-    this.touch(true);
   }
 
   namedSets(): readonly NamedSet[] {
@@ -825,12 +757,11 @@ export class WorkspaceModel {
     }
   }
 
-  setAxisLabel(id: string, axis: "x" | "y" | "c", label: string | null): void {
+  setAxisLabel(id: string, axis: "x" | "y", label: string | null): void {
     const panel = this.panel(id);
     if (panel === undefined) return;
     if (axis === "x") panel.x_label = label;
-    else if (axis === "y") panel.y_label = label;
-    else panel.c_label = label;
+    else panel.y_label = label;
     this.touch();
   }
 
@@ -887,14 +818,6 @@ export class WorkspaceModel {
     const panel = this.panel(id);
     if (panel !== undefined) {
       panel.axis_style = panel.axis_style === "gutter" ? "inline" : "gutter";
-      this.touch();
-    }
-  }
-
-  toggleAxisEqual(id: string): void {
-    const panel = this.panel(id);
-    if (panel !== undefined) {
-      panel.axis_equal = !panel.axis_equal;
       this.touch();
     }
   }
@@ -989,9 +912,6 @@ export class WorkspaceModel {
       title: `Panel ${String(this.nextPanelNumber)}`,
       mode: "time",
       axis_style: "gutter",
-      x_ref: null,
-      color_axis: "none",
-      color_ref: null,
       bindings: [],
       color_by: "source",
       overrides: [],
@@ -1002,11 +922,9 @@ export class WorkspaceModel {
       x_range: null,
       x_label: null,
       y_label: null,
-      c_label: null,
       time_window: null,
       annotations: [],
       show_stats: false,
-      axis_equal: false,
     };
     this.nextPanelNumber += 1;
     this.activeTab().panels.push(panel);

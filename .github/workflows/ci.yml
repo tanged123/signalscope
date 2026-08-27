@@ -93,6 +93,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cargo-cache-key: e2e
       - run: ./scripts/ci.sh e2e
 
   coverage:
@@ -106,7 +107,6 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cargo-cache-key: coverage
       - run: ./scripts/coverage.sh
       - if: env.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v7
@@ -130,18 +130,7 @@ jobs:
 
   build:
     if: github.event_name != 'pull_request'
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: release-linux-packages
-            bundles: |
-              target/release/bundle/deb/*.deb
-              target/release/bundle/rpm/*.rpm
-          - os: macos-latest
-            artifact: release-macos
-            bundles: target/release/bundle/dmg/*.dmg
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -153,53 +142,13 @@ jobs:
       - run: ./scripts/ci.sh build
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.bundles }}
-          if-no-files-found: error
-
-  appimage:
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/cargo-cache
-        with:
-          target-key: appimage
-      - run: ./scripts/setup-appimage.sh
-      - run: ./scripts/ci.sh appimage
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-linux-appimage
-          path: target/release/bundle/appimage/*.AppImage
-          if-no-files-found: error
-
-  windows:
-    if: github.event_name != 'pull_request'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/cargo-cache
-        with:
-          target-key: windows
-      - env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: ./scripts/ci.sh windows
-        shell: bash
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-windows-nsis
-          path: target/release/bundle/nsis/*-setup.exe
+          name: release-linux-app
+          path: build/app
           if-no-files-found: error
 
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs:
-      [version, flake, quality, rust, frontend, e2e, build, appimage, windows]
+    needs: [version, flake, quality, rust, frontend, e2e, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -284,7 +233,7 @@ jobs:
         uses: actions/deploy-pages@v5
 
   publish:
-    needs: [tag, build, appimage, windows]
+    needs: [tag, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

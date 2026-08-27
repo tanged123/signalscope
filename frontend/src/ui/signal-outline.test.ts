@@ -277,6 +277,26 @@ describe("SignalOutlineView", () => {
     list.remove();
   });
 
+  it("preserves the focused row across live-value refreshes", () => {
+    const { list, selection, view } = viewFor(
+      Catalog.build([signal("run-01", "temp")]),
+    );
+    document.body.append(list);
+    list.querySelector<HTMLElement>('[data-path="run-01/temp"]')?.focus();
+
+    view.setLiveValues(new Map([["run-01/temp", "9.0000"]]));
+
+    const refreshed = list.querySelector<HTMLElement>(
+      '[data-path="run-01/temp"]',
+    );
+    expect(document.activeElement).toBe(refreshed);
+    refreshed?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: " ", bubbles: true }),
+    );
+    expect(selection.keys()).toEqual(["run-01\u0000temp"]);
+    list.remove();
+  });
+
   it("removes owned listeners when destroyed", () => {
     const { list, view } = viewFor(Catalog.build([signal("run-01", "temp")]));
     const render = vi.fn();

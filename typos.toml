@@ -1,6 +1,10 @@
 [default.extend-identifiers]
 PNGs = "PNGs"
 
+[default.extend-words]
+LOD = "LOD"
+lod = "lod"
+
 [files]
 extend-exclude = [
   "docs/Signal Scope UI Design Pass/**",
@@ -9,6 +13,7 @@ extend-exclude = [
   "pnpm-lock.yaml",
   "flake.lock",
   "frontend/src/generated/**",
+  "frontend/vendor/**",
   "protocol/src/generated.rs",
   "core/scope-core/src/session/generated.rs",
 ]
