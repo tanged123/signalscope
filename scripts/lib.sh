@@ -84,5 +84,5 @@ bake_bench_smoke_artifact() {
 }
 
 build_e2e_server() {
-  cargo build -p scope-server
+  cargo build --release -p scope-server
 }

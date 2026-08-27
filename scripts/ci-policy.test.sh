@@ -6,6 +6,10 @@ failures=0
 
 setup_script="$script_dir/setup.sh"
 setup_action="$script_dir/../.github/actions/setup/action.yml"
+ci_workflow="$script_dir/../.github/workflows/ci.yml"
+flake="$script_dir/../flake.nix"
+lib_script="$script_dir/lib.sh"
+live_plane_test="$script_dir/../frontend/tests/e2e/live-plane.spec.ts"
 
 # shellcheck disable=SC2016
 if ! grep -Fq '"$signalscope_scripts_dir/chartgpu-submodule.sh" init' "$setup_script"; then
@@ -14,6 +18,22 @@ if ! grep -Fq '"$signalscope_scripts_dir/chartgpu-submodule.sh" init' "$setup_sc
 fi
 if ! grep -Fq 'run: ./scripts/chartgpu-submodule.sh init' "$setup_action"; then
   echo "the shared CI setup action must initialize ChartGPU" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq "if [ -z \"''\${CI:-}\" ]; then" "$flake"; then
+  echo "the Nix shell must cap local builds without capping CI" >&2
+  failures=$((failures + 1))
+fi
+if grep -Fq 'cargo-cache-key: coverage' "$ci_workflow"; then
+  echo "coverage must not cache its instrumented Cargo target" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq 'cargo build --release -p scope-server' "$lib_script"; then
+  echo "E2E setup must build the release server used by every smoke test" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq '"target", "release", "scope-server"' "$live_plane_test"; then
+  echo "live-plane E2E must run the prebuilt release server" >&2
   failures=$((failures + 1))
 fi
 

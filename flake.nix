@@ -94,7 +94,9 @@
             ++ linuxPackages;
 
           shellHook = ''
-            export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-2}"
+            if [ -z "''${CI:-}" ]; then
+              export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-2}"
+            fi
             export RUST_BACKTRACE=1
             export HDF5_DIR="${hdf5Root}"
             ${lib.optionalString pkgs.stdenv.isLinux ''

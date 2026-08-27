@@ -12,24 +12,12 @@ let dataDirectory: string | undefined;
 
 test.beforeAll(async () => {
   // The wrapper builds once before Playwright starts so compilation does not
-  // contend with the parallel browser workers. `cargo run` still builds when
-  // this file is invoked directly.
+  // contend with the parallel browser workers.
   test.setTimeout(600_000);
   dataDirectory = mkdtempSync(join(tmpdir(), "signalscope-live-"));
   server = spawn(
-    "cargo",
-    [
-      "run",
-      "-p",
-      "scope-server",
-      "--",
-      "--no-auth",
-      "--no-open",
-      "--port",
-      "43118",
-      "--data-dir",
-      dataDirectory,
-    ],
+    join(repositoryRoot, "target", "release", "scope-server"),
+    ["--no-auth", "--no-open", "--port", "43118", "--data-dir", dataDirectory],
     { cwd: repositoryRoot, stdio: ["ignore", "ignore", "inherit"] },
   );
   for (let attempt = 0; attempt < 600; attempt += 1) {
