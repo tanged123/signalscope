@@ -19,6 +19,43 @@ function bin(time: number, value: number | null): EnvelopeBin {
   };
 }
 
+function buildLevels(levelZero: EnvelopeBin[]): EnvelopeBin[][] {
+  const levels = [levelZero];
+  let current = levelZero;
+  while (current.length > 1) {
+    const next: EnvelopeBin[] = [];
+    for (let index = 0; index < current.length; index += 2) {
+      const left = current[index];
+      const right = current[index + 1];
+      if (left === undefined) continue;
+      next.push(
+        right === undefined
+          ? left
+          : {
+              t0: left.t0,
+              t1: right.t1,
+              first: left.first,
+              last: right.last,
+              min: left.min ?? right.min,
+              max: right.max ?? left.max,
+              sum: left.sum + right.sum,
+              sum_sq: left.sum_sq + right.sum_sq,
+              finite_count: String(
+                Number(left.finite_count) + Number(right.finite_count),
+              ),
+              sample_count: String(
+                Number(left.sample_count) + Number(right.sample_count),
+              ),
+              has_gap: left.has_gap || right.has_gap,
+            },
+      );
+    }
+    levels.push(next);
+    current = next;
+  }
+  return levels;
+}
+
 describe("BakedPlane.querySamples", () => {
   it("returns the full neighbour-inclusive level-zero slice with gaps intact", async () => {
     const summary: SignalSummary = {
@@ -194,7 +231,7 @@ describe("BakedPlane.querySamples", () => {
 });
 
 describe("BakedPlane.queryTiles", () => {
-  it("returns every raw level-zero bin in the window despite tile budgets", async () => {
+  it("selects adaptive overview and raw detail despite tile budgets", async () => {
     const summary: SignalSummary = {
       signal_id: "7",
       source_id: "3",
@@ -214,41 +251,35 @@ describe("BakedPlane.queryTiles", () => {
         signals: [
           {
             summary,
-            levels: [
-              levelZero,
-              [
-                {
-                  t0: 0,
-                  t1: 99,
-                  first: 0,
-                  last: 99,
-                  min: 0,
-                  max: 99,
-                  sum: 4950,
-                  sum_sq: 328350,
-                  finite_count: "100",
-                  sample_count: "100",
-                  has_gap: false,
-                },
-              ],
-            ],
+            levels: buildLevels(levelZero),
           },
         ],
       }),
     );
 
-    const response = await plane.queryTiles({
+    const overview = await plane.queryTiles({
       request_id: "tiles-1",
       signal_ids: ["7"],
-      window: { t0: 20, t1: 79 },
-      pixel_width: 1,
+      window: { t0: 0, t1: 99 },
+      pixel_width: 20,
       max_total_bins: 1,
     });
 
-    expect(response.series[0]?.level).toBe(0);
-    expect(response.series[0]?.bins.count).toBe(62);
-    expect(response.series[0]?.bins.t0[0]).toBe(19);
-    expect(response.series[0]?.bins.t0[61]).toBe(80);
+    expect(overview.series[0]?.level).toBe(2);
+    expect(overview.series[0]?.bins.count).toBe(25);
+
+    const detail = await plane.queryTiles({
+      request_id: "tiles-2",
+      signal_ids: ["7"],
+      window: { t0: 40, t1: 50 },
+      pixel_width: 20,
+      max_total_bins: 1,
+    });
+
+    expect(detail.series[0]?.level).toBe(0);
+    expect(
+      detail.series[0]?.bins.sampleCount.every((count) => count === 1),
+    ).toBe(true);
   });
 
   it("returns requested signals in request order", async () => {

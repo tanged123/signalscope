@@ -1,41 +1,93 @@
 import { describe, expect, it } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
-import { queryRawPyramidRange } from "./pyramid-query";
+import { queryAdaptivePyramidRange } from "./pyramid-query";
 
-describe("queryRawPyramidRange", () => {
-  it("selects the raw level with neighbouring bins regardless of coarse levels", () => {
-    const levelZero = Array.from(
-      { length: 100 },
-      (_, time) =>
-        ({
-          t0: time,
-          t1: time,
-          first: time,
-          last: time,
-          min: time,
-          max: time,
-          has_gap: false,
-        }) as EnvelopeBin,
+function bin(t0: number, t1: number): EnvelopeBin {
+  return {
+    t0,
+    t1,
+    first: t0,
+    last: t1,
+    min: t0,
+    max: t1,
+    sum: t0,
+    sum_sq: t0 * t0,
+    finite_count: "1",
+    sample_count: "1",
+    has_gap: false,
+  };
+}
+
+function buildLevels(levelZero: EnvelopeBin[]): EnvelopeBin[][] {
+  const levels = [levelZero];
+  let current = levelZero;
+  while (current.length > 1) {
+    const next: EnvelopeBin[] = [];
+    for (let index = 0; index < current.length; index += 2) {
+      const left = current[index];
+      const right = current[index + 1];
+      if (left === undefined) continue;
+      next.push(
+        right === undefined
+          ? left
+          : {
+              t0: left.t0,
+              t1: right.t1,
+              first: left.first,
+              last: right.last,
+              min: Math.min(left.min ?? Infinity, right.min ?? Infinity),
+              max: Math.max(left.max ?? -Infinity, right.max ?? -Infinity),
+              sum: left.sum + right.sum,
+              sum_sq: left.sum_sq + right.sum_sq,
+              finite_count: String(
+                Number(left.finite_count) + Number(right.finite_count),
+              ),
+              sample_count: String(
+                Number(left.sample_count) + Number(right.sample_count),
+              ),
+              has_gap: left.has_gap || right.has_gap,
+            },
+      );
+    }
+    levels.push(next);
+    current = next;
+  }
+  return levels;
+}
+
+describe("queryAdaptivePyramidRange", () => {
+  it("selects an overview level with neighbouring bins", () => {
+    const levels = buildLevels(
+      Array.from({ length: 100 }, (_, time) => bin(time, time)),
     );
-    const levels = [
-      levelZero,
-      [
-        {
-          t0: 0,
-          t1: 99,
-          first: 0,
-          last: 99,
-          min: 0,
-          max: 99,
-          has_gap: false,
-        } as EnvelopeBin,
-      ],
-    ];
 
-    expect(queryRawPyramidRange(levels, 20, 79)).toEqual({
-      level: 0,
-      start: 19,
-      end: 81,
+    expect(queryAdaptivePyramidRange(levels, 0, 99, 20)).toEqual({
+      level: 2,
+      start: 0,
+      end: 25,
     });
+  });
+
+  it("refines a narrow window to level zero", () => {
+    const levels = buildLevels(
+      Array.from({ length: 100 }, (_, time) => bin(time, time)),
+    );
+
+    expect(queryAdaptivePyramidRange(levels, 40, 50, 20).level).toBe(0);
+  });
+
+  it("refines irregular overview bins until their span fits a pixel", () => {
+    const levelZero = Array.from({ length: 100 }, (_, index) => {
+      const time = index * 2 + (index >= 50 ? 5 : 0);
+      return bin(time, time);
+    });
+    const levels = buildLevels(levelZero);
+    const range = queryAdaptivePyramidRange(levels, 0, 203, 20);
+
+    expect(range.level).toBeGreaterThan(0);
+    const pixelSpan = (203 - 0) / 20;
+    for (const selected of levels[range.level]!.slice(range.start, range.end)) {
+      expect(selected.t1 - selected.t0).toBeLessThanOrEqual(pixelSpan);
+    }
   });
 });
