@@ -338,6 +338,21 @@ describe("adaptive tile refresh", () => {
     prepareResponseFeeds.mockReset();
   });
 
+  it("refreshes adaptive tiles when a panel changes physical width", () => {
+    const shell = Object.create(AppShell.prototype) as {
+      scheduleRender: ReturnType<typeof vi.fn>;
+      scheduleRefresh: ReturnType<typeof vi.fn>;
+      handlePanelResize(): void;
+    };
+    shell.scheduleRender = vi.fn();
+    shell.scheduleRefresh = vi.fn();
+
+    shell.handlePanelResize();
+
+    expect(shell.scheduleRender).toHaveBeenCalledOnce();
+    expect(shell.scheduleRefresh).toHaveBeenCalledOnce();
+  });
+
   it("keeps stale drawable tiles while refinement is pending", async () => {
     const pending = deferred<ColumnarTileResponse>();
     const queryTiles = vi.fn(() => pending.promise);
@@ -434,6 +449,55 @@ describe("adaptive tile refresh", () => {
       ),
     ).toBe(true);
     expect(order).toEqual(["prewarm", "prewarm", "render"]);
+  });
+
+  it("reports feed preparation failures without publishing a replacement", async () => {
+    const preparationError = new Error("feed allocation failed");
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve(tileResponse("replacement")),
+    );
+    const shell = refreshShell(queryTiles);
+    const current = tileResponse("current");
+    const stale = {
+      ...current,
+      series: current.series.map((series) => ({
+        ...series,
+        level: 2,
+        bins: binColumnsFromWire(
+          Array.from({ length: 20 }, (_, index) => ({
+            t0: index,
+            t1: index + 6,
+            first: 1,
+            last: 2,
+            min: 1,
+            max: 2,
+            sum: 3,
+            sum_sq: 5,
+            finite_count: "2",
+            sample_count: "2",
+            has_gap: false,
+          })),
+        ),
+      })),
+    };
+    shell.tilesByPanel = new Map([["panel-1", current]]);
+    shell.tileWindowCache.store("panel-1", {
+      response: stale,
+      window: { t0: 0, t1: 25 },
+      pixelWidth: 1,
+      requestedDevicePixels: 1,
+      idsKey: "1",
+    });
+    prepareResponseFeeds.mockImplementation(() => {
+      throw preparationError;
+    });
+
+    await shell.refreshTiles();
+
+    expect(shell.reportError).toHaveBeenCalledWith(preparationError);
+    expect(shell.tilesByPanel.get("panel-1")).toBe(current);
+    expect(shell.tileWindowCache.get("panel-1")?.response).toBe(stale);
+    expect(shell.renderTiles).not.toHaveBeenCalled();
   });
 
   it("rejects more than 3,000 visible resolved series before querying", async () => {

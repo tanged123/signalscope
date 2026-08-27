@@ -319,7 +319,10 @@ test("adaptive responses refine to raw data without clearing the plot", async ({
     })
     .toBe(0);
 
-  const observed = (await probeLevels(page)).slice(overviewIndex).flat();
+  const observed = (await probeLevels(page))
+    .slice(overviewIndex)
+    .map((response) => response[0])
+    .filter((level): level is number => level !== undefined);
   expect(observed.at(-1)).toBe(0);
   for (let index = 1; index < observed.length; index += 1) {
     expect(observed[index]).toBeLessThanOrEqual(observed[index - 1] ?? 0);

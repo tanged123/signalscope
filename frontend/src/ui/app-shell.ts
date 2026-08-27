@@ -403,7 +403,7 @@ export class AppShell {
           this.renderTiles();
         },
         onResized: () => {
-          this.scheduleRender();
+          this.handlePanelResize();
         },
         onGesture: (id, hint) => {
           required(this.root, ".gesture-hint").textContent = hint ?? "";
@@ -2623,8 +2623,15 @@ export class AppShell {
       }),
     );
     if (refreshToken !== this.refreshToken) return;
+    try {
+      for (const replacement of replacements.values()) {
+        prepareResponseFeeds(replacement.response);
+      }
+    } catch (error: unknown) {
+      if (refreshToken === this.refreshToken) this.reportError(error);
+      return;
+    }
     for (const [panelId, replacement] of replacements) {
-      prepareResponseFeeds(replacement.response);
       this.tileWindowCache.store(panelId, replacement);
     }
     this.tilesByPanel = nextTiles;
@@ -2677,6 +2684,11 @@ export class AppShell {
 
   private isDerivedPath(path: string): boolean {
     return this.workspace.derived().some((entry) => entry.path === path);
+  }
+
+  private handlePanelResize(): void {
+    this.scheduleRender();
+    this.scheduleRefresh();
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
