@@ -67,6 +67,8 @@ export function defaultPreferences(): Preferences {
     ingest_working_bytes: null,
     ingest_resident_bytes: null,
     recipe_directory: null,
+    presentation_cpu_bytes: null,
+    presentation_gpu_bytes: null,
   };
 }
 
@@ -114,7 +116,8 @@ export function parsePreferences(json: string): Preferences | null {
     value.schema_version !== 3 &&
     value.schema_version !== 4 &&
     value.schema_version !== 5 &&
-    value.schema_version !== 6
+    value.schema_version !== 6 &&
+    value.schema_version !== 7
   )
     return null;
   const defaults = defaultPreferences();
@@ -142,7 +145,7 @@ export function parsePreferences(json: string): Preferences | null {
       size(value.plot_font_size, defaults.plot_font_size),
     ),
     plot_line_width_scale: clampPlotLineWidthScale(
-      value.schema_version === PREFERENCES_SCHEMA_VERSION
+      value.schema_version >= 6
         ? size(value.plot_line_width_scale, defaults.plot_line_width_scale)
         : defaults.plot_line_width_scale,
     ),
@@ -160,6 +163,8 @@ export function parsePreferences(json: string): Preferences | null {
       value.recipe_directory.length > 0
         ? value.recipe_directory
         : null,
+    presentation_cpu_bytes: bytes(value.presentation_cpu_bytes, null),
+    presentation_gpu_bytes: bytes(value.presentation_gpu_bytes, null),
   };
 }
 

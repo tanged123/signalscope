@@ -32,6 +32,8 @@ impl Default for Preferences {
             ingest_working_bytes: None,
             ingest_resident_bytes: None,
             recipe_directory: None,
+            presentation_cpu_bytes: None,
+            presentation_gpu_bytes: None,
         }
     }
 }
@@ -125,7 +127,7 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
     from_json(&std::fs::read_to_string(path)?)
 }
 
-/// Migration ladder (ADR 0005 pattern): v6 is current; each future bump adds
+/// Migration ladder (ADR 0005 pattern): v7 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
@@ -135,6 +137,7 @@ fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, Prefe
             preferences.plot_line_width_scale = Preferences::default().plot_line_width_scale;
             Ok(preferences)
         }
+        6 => Ok(repair_current(value)),
         version => Err(PreferencesError::UnsupportedVersion(version)),
     }
 }
@@ -189,6 +192,10 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
             .and_then(serde_json::Value::as_str)
             .filter(|path| !path.is_empty())
             .map(str::to_owned),
+        presentation_cpu_bytes: u64_value(value, "presentation_cpu_bytes")
+            .filter(|bytes| *bytes > 0),
+        presentation_gpu_bytes: u64_value(value, "presentation_gpu_bytes")
+            .filter(|bytes| *bytes > 0),
     }
 }
 
@@ -369,6 +376,23 @@ mod tests {
         let restored = from_json(&stored.to_string()).expect("repairs preferences");
         let value = serde_json::to_value(restored).expect("serializes preferences");
         assert_eq!(value["plot_line_width_scale"], 0.75);
+    }
+
+    #[test]
+    fn v6_preferences_gain_auto_presentation_budgets() {
+        let stored = serde_json::json!({
+            "schema_version": 6,
+            "theme": "dark",
+            "ui_font_family": "inter",
+            "plot_font_family": "jetbrains",
+            "ui_font_size": 13.0,
+            "plot_font_size": 9.0,
+            "plot_line_width_scale": 1.0,
+            "cache_max_bytes": DEFAULT_CACHE_MAX_BYTES.to_string()
+        });
+        let restored = from_json(&stored.to_string()).expect("migrates from v6");
+        assert_eq!(restored.presentation_cpu_bytes, None);
+        assert_eq!(restored.presentation_gpu_bytes, None);
     }
 
     #[test]

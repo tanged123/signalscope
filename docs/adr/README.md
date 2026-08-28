@@ -46,5 +46,6 @@ Accepted decisions:
 42. [Padded render feed and windowed presentation math](0042-padded-render-feed.md)
 43. [Time-only presentation and a single plotter](0043-time-only-presentation.md)
 44. [Adaptive-resolution presentation](0044-adaptive-resolution-presentation.md)
+45. [Budgeted persistent presentation](0045-budgeted-persistent-presentation.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.
