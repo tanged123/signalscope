@@ -9,11 +9,15 @@ import {
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
-import { MAX_RESIDENT_SERIES } from "../app/render-limits";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
 } from "../app/bin-columns";
+import {
+  autoPresentationBudgets,
+  planPresentationDensity,
+  type PresentationBudgets,
+} from "../app/presentation-budget";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -43,6 +47,11 @@ import {
 import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { TileWindowCache } from "../app/tile-window-cache";
+import {
+  prepareTileBank,
+  type PreparedTileBank,
+  type TileBankRole,
+} from "../app/prepared-tile-bank";
 import { Catalog } from "../app/catalog";
 import { resolvePanel, type ResolvedSeries } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
@@ -88,7 +97,6 @@ import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import type { GpuContext, GpuFailure } from "../render/gpu-context";
-import { prepareResponseFeeds } from "../render/m4-feed";
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -152,6 +160,38 @@ function validateDerivedBundleName(path: string): void {
   }
 }
 
+function sameWindow(
+  left: { t0: number; t1: number },
+  right: { t0: number; t1: number },
+): boolean {
+  return left.t0 === right.t0 && left.t1 === right.t1;
+}
+
+function isPresentationAllocationError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "QuotaExceededError") {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /allocation|out of memory|buffer|capacity|memory/i.test(message);
+}
+
+function presentationAllocationMessage(
+  requestedCpuBytes: number,
+  requestedGpuBytes: number,
+  budgets: PresentationBudgets,
+): string {
+  return [
+    "presentation resolution limited after allocation failure",
+    `requested ${Math.ceil(requestedCpuBytes).toLocaleString()} CPU bytes / ${Math.ceil(requestedGpuBytes).toLocaleString()} GPU bytes`,
+    `managed budgets ${Math.ceil(budgets.cpuBytes).toLocaleString()} CPU bytes / ${Math.ceil(budgets.gpuBytes).toLocaleString()} GPU bytes`,
+  ].join("; ");
+}
+
+function validByteOverride(value: string): boolean {
+  if (!/^[1-9]\d*$/.test(value)) return false;
+  return Number.isSafeInteger(Number(value)) && Number(value) > 0;
+}
+
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
@@ -180,6 +220,7 @@ export class AppShell {
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
+  private banksByPanel = new Map<string, PreparedTileBank>();
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -1744,8 +1785,9 @@ export class AppShell {
   ): { t0: number; t1: number } | null {
     let t0 = Number.POSITIVE_INFINITY;
     let t1 = Number.NEGATIVE_INFINITY;
+    const signalsByPath = this.signalsByPath ?? new Map();
     for (const path of paths) {
-      const summary = this.signalsByPath.get(path);
+      const summary = signalsByPath.get(path);
       if (summary === undefined) continue;
       t0 = Math.min(t0, summary.t_min);
       t1 = Math.max(t1, summary.t_max);
@@ -2534,20 +2576,12 @@ export class AppShell {
     return this.refreshQueued;
   }
 
-  private async refreshTilesPass(refreshToken: number): Promise<void> {
+  private async refreshTilesPass(
+    refreshToken: number,
+    maxDensity?: number,
+    retried = false,
+  ): Promise<void> {
     const panels = this.workspace.panels();
-    const visibleSeries = panels.reduce(
-      (total, panel) =>
-        total +
-        this.resolvedFor(panel).filter((series) => series.visible).length,
-      0,
-    );
-    if (visibleSeries > MAX_RESIDENT_SERIES) {
-      this.reportError(
-        `series limit exceeded: ${String(visibleSeries)} visible; maximum ${String(MAX_RESIDENT_SERIES)}`,
-      );
-      return;
-    }
     const width = Math.max(
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
@@ -2557,83 +2591,196 @@ export class AppShell {
       : 1;
     const nextTiles = new Map<string, ColumnarTileResponse>();
     const nextMissing = new Map<string, string[]>();
-    const replacements = new Map<
-      string,
-      {
-        response: ColumnarTileResponse;
-        window: { t0: number; t1: number };
-        pixelWidth: number;
-        requestedDevicePixels: number;
-        idsKey: string;
-      }
-    >();
+    const nextBanks = new Map<string, PreparedTileBank>();
+    let preparationFailed = false;
+    let allocationFailure: unknown = null;
+    const demands: {
+      panel: PanelState;
+      ids: string[];
+      idsKey: string;
+      missing: string[];
+      window: { t0: number; t1: number };
+      paddedWindow: { t0: number; t1: number };
+      role: TileBankRole;
+      physicalPixels: number;
+      paddingRatio: number;
+      visibleSeries: number;
+    }[] = [];
+    for (const panel of panels) {
+      const { ids, missing } = this.panelSignalIds(panel);
+      nextMissing.set(panel.id, missing);
+      if (ids.length === 0) continue;
+      const window = this.effectiveWindow(panel);
+      const extent = this.timeExtent(
+        this.resolvedFor(panel)
+          .filter((series) => series.visible)
+          .map((series) => series.path),
+      );
+      const role: TileBankRole =
+        extent !== null && sameWindow(window, extent) ? "overview" : "detail";
+      const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+      const visibleSpan = window.t1 - window.t0;
+      const paddedSpan = paddedWindow.t1 - paddedWindow.t0;
+      const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+      const cssWidth = panelWidth > 0 ? panelWidth : width;
+      const physicalPixels = Math.max(
+        1,
+        Math.ceil(cssWidth * devicePixelRatio),
+      );
+      demands.push({
+        panel,
+        ids,
+        idsKey: [...ids].sort().join("\u0000"),
+        missing,
+        window,
+        paddedWindow,
+        role,
+        physicalPixels,
+        paddingRatio:
+          visibleSpan > 0 && paddedSpan > visibleSpan
+            ? paddedSpan / visibleSpan
+            : 1,
+        visibleSeries: this.resolvedFor(panel).filter(
+          (series) => series.visible,
+        ).length,
+      });
+    }
+    const retainedGpuBytes =
+      typeof this.workspaceView?.presentationGpuBytes === "function"
+        ? this.workspaceView.presentationGpuBytes()
+        : 0;
+    const densityPlan = planPresentationDensity({
+      demands: demands.map((demand) => ({
+        panelId: demand.panel.id,
+        physicalPixels: demand.physicalPixels,
+        paddingRatio: demand.paddingRatio,
+        visibleSeries: demand.visibleSeries,
+      })),
+      budgets: this.presentationBudgets(),
+      retainedCpuBytes: this.tileWindowCache.cpuBytes(),
+      retainedGpuBytes,
+      maxDensity,
+    });
+    const replacements = new Map<string, PreparedTileBank>();
     await Promise.all(
-      panels.map(async (panel) => {
-        const { ids, missing } = this.panelSignalIds(panel);
-        nextMissing.set(panel.id, missing);
-        if (ids.length === 0) return;
-        const window = this.effectiveWindow(panel);
-        const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-        const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
-        const devicePixelWidth = Math.max(
-          1,
-          Math.ceil(pixelWidth * devicePixelRatio),
-        );
-        const idsKey = [...ids].sort().join("\u0000");
+      demands.map(async (demand) => {
         const lookup = this.tileWindowCache.lookup(
-          panel.id,
-          idsKey,
-          window,
-          devicePixelWidth,
+          demand.panel.id,
+          demand.role,
+          demand.idsKey,
+          demand.window,
+          densityPlan.density,
         );
         if (lookup.kind === "current") {
-          nextTiles.set(panel.id, lookup.response);
+          nextBanks.set(demand.panel.id, lookup.bank);
+          nextTiles.set(demand.panel.id, lookup.bank.response);
+          this.tileWindowCache.setSelected(demand.panel.id, lookup.bank.id);
+          this.workspaceView?.selectBank(demand.panel.id, demand.role);
           return;
         }
-        const fallback = lookup.kind === "stale" ? lookup.response : null;
-        const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
-        const requestedDevicePixels = TileWindowCache.requestPixelWidth(
-          pixelWidth,
-          devicePixelRatio,
-          window,
-          paddedWindow,
-        );
+        const fallback = lookup.kind === "stale" ? lookup.bank : null;
+        if (fallback !== null) {
+          nextBanks.set(demand.panel.id, fallback);
+          nextTiles.set(demand.panel.id, fallback.response);
+          this.tileWindowCache.setSelected(demand.panel.id, fallback.id);
+          this.workspaceView?.selectBank(demand.panel.id, demand.role);
+        }
+        let response: ColumnarTileResponse;
         try {
-          const response = await this.plane.queryTiles({
+          response = await this.plane.queryTiles({
             request_id: crypto.randomUUID(),
-            signal_ids: ids,
-            window: paddedWindow,
-            pixel_width: requestedDevicePixels,
+            signal_ids: demand.ids,
+            window: demand.paddedWindow,
+            pixel_width: densityPlan.requests.get(demand.panel.id) ?? 1,
             max_total_bins: null,
           });
-          if (refreshToken !== this.refreshToken) return;
-          replacements.set(panel.id, {
-            response,
-            window: paddedWindow,
-            pixelWidth,
-            requestedDevicePixels,
-            idsKey,
-          });
-          nextTiles.set(panel.id, response);
         } catch (error: unknown) {
           if (refreshToken !== this.refreshToken) return;
           this.reportError(error);
-          if (fallback !== null) nextTiles.set(panel.id, fallback);
+          return;
+        }
+        if (refreshToken !== this.refreshToken) return;
+        try {
+          const bank = prepareTileBank({
+            id: `${demand.panel.id}:${demand.role}:${response.requestId}`,
+            role: demand.role,
+            response,
+            window: demand.paddedWindow,
+            visibleWindow: demand.window,
+            idsKey: demand.idsKey,
+            density: densityPlan.density,
+            requestedPixelWidth: densityPlan.requests.get(demand.panel.id) ?? 1,
+          });
+          replacements.set(demand.panel.id, bank);
+          nextBanks.set(demand.panel.id, bank);
+          nextTiles.set(demand.panel.id, bank.response);
+        } catch (error: unknown) {
+          if (refreshToken !== this.refreshToken) return;
+          if (isPresentationAllocationError(error)) {
+            allocationFailure ??= error;
+          } else {
+            this.reportError(error);
+            preparationFailed = true;
+          }
         }
       }),
     );
     if (refreshToken !== this.refreshToken) return;
-    try {
-      for (const replacement of replacements.values()) {
-        prepareResponseFeeds(replacement.response);
+    if (allocationFailure !== null) {
+      if (!retried) {
+        this.evictForPresentationRetry(panels.map((panel) => panel.id));
+        await this.refreshTilesPass(
+          refreshToken,
+          densityPlan.density / 2,
+          true,
+        );
+      } else {
+        this.reportError(allocationFailure);
+        this.reportError(
+          presentationAllocationMessage(
+            densityPlan.estimatedCpuBytes,
+            densityPlan.estimatedGpuBytes,
+            this.presentationBudgets(),
+          ),
+        );
       }
-    } catch (error: unknown) {
-      if (refreshToken === this.refreshToken) this.reportError(error);
       return;
     }
+    if (preparationFailed) return;
     for (const [panelId, replacement] of replacements) {
-      this.tileWindowCache.store(panelId, replacement);
+      try {
+        this.publishPreparedBank(panelId, replacement);
+        this.tileWindowCache.store(
+          panelId,
+          replacement,
+          replacement.role === "overview",
+        );
+        this.tileWindowCache.setSelected(panelId, replacement.id);
+      } catch (error: unknown) {
+        if (refreshToken !== this.refreshToken) return;
+        if (!retried && isPresentationAllocationError(error)) {
+          this.evictForPresentationRetry(panels.map((panel) => panel.id));
+          await this.refreshTilesPass(
+            refreshToken,
+            densityPlan.density / 2,
+            true,
+          );
+        } else {
+          this.reportError(error);
+          if (retried && isPresentationAllocationError(error)) {
+            this.reportError(
+              presentationAllocationMessage(
+                densityPlan.estimatedCpuBytes,
+                densityPlan.estimatedGpuBytes,
+                this.presentationBudgets(),
+              ),
+            );
+          }
+        }
+        return;
+      }
     }
+    this.banksByPanel = nextBanks;
     this.tilesByPanel = nextTiles;
     this.missingByPanel = nextMissing;
     this.renderTiles();
@@ -2644,7 +2791,7 @@ export class AppShell {
     ids: string[];
     missing: string[];
   } {
-    const resolved = this.resolvedFor(panel);
+    const resolved = this.resolvedFor(panel).filter((series) => series.visible);
     const paths = resolved.map((series) => series.path);
     const ids: string[] = [];
     const missing: string[] = [];
@@ -2682,6 +2829,50 @@ export class AppShell {
     return counts;
   }
 
+  private presentationBudgets(): PresentationBudgets {
+    const cpuOverride = this.prefs?.presentation_cpu_bytes;
+    const gpuOverride = this.prefs?.presentation_gpu_bytes;
+    const auto = autoPresentationBudgets(
+      this.gpu?.adapter?.limits?.maxBufferSize ?? 0,
+      (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    );
+    return {
+      cpuBytes:
+        typeof cpuOverride === "string" && validByteOverride(cpuOverride)
+          ? Number(cpuOverride)
+          : auto.cpuBytes,
+      gpuBytes:
+        typeof gpuOverride === "string" && validByteOverride(gpuOverride)
+          ? Number(gpuOverride)
+          : auto.gpuBytes,
+    };
+  }
+
+  private evictForPresentationRetry(activePanelIds: readonly string[]): void {
+    this.tileWindowCache.evictCpu(Number.POSITIVE_INFINITY, activePanelIds);
+    for (const panelId of activePanelIds) {
+      const current = this.banksByPanel?.get(panelId);
+      if (current === undefined) {
+        this.workspaceView?.evictGpu(panelId, "overview");
+        this.workspaceView?.evictGpu(panelId, "detail");
+      } else {
+        this.workspaceView?.evictGpu(
+          panelId,
+          current.role === "overview" ? "detail" : "overview",
+        );
+      }
+    }
+  }
+
+  private publishPreparedBank(panelId: string, bank: PreparedTileBank): void {
+    this.workspaceView?.publishPreparedBank(
+      panelId,
+      bank.role,
+      bank,
+      bank.visibleWindow,
+    );
+  }
+
   private isDerivedPath(path: string): boolean {
     return this.workspace.derived().some((entry) => entry.path === path);
   }
@@ -2714,6 +2905,7 @@ export class AppShell {
               : this.effectiveWindow(panel);
           },
           (panelId) => this.missingByPanel.get(panelId) ?? [],
+          (panelId) => this.banksByPanel.get(panelId) ?? null,
         ) ?? 0;
       required(this.root, ".render-ms").textContent =
         `${elapsed.toFixed(1)} ms`;
@@ -2782,6 +2974,15 @@ export class AppShell {
       this.renderTiles();
       this.scheduleRefresh();
       return;
+    }
+    const { ids } = this.panelSignalIds(panel);
+    const idsKey = [...ids].sort().join("\u0000");
+    const overview = this.tileWindowCache.overview(panelId, idsKey);
+    if (overview !== null) {
+      this.banksByPanel?.set(panelId, overview);
+      this.tilesByPanel?.set(panelId, overview.response);
+      this.tileWindowCache.setSelected(panelId, overview.id);
+      this.workspaceView?.selectBank(panelId, "overview");
     }
     this.applyTimeWindow(panelId, extent.t0, extent.t1);
     this.commitHistory();

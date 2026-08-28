@@ -23,6 +23,7 @@ import {
   binColumnsFromWire,
   type ColumnarTileResponse,
 } from "../app/bin-columns";
+import type { PreparedTileBank } from "../app/prepared-tile-bank";
 import type { SeriesRef } from "../generated/session";
 import type { GpuContext, GpuFailure } from "../render/gpu-context";
 import { TileWindowCache } from "../app/tile-window-cache";
@@ -39,6 +40,11 @@ import {
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
+
+beforeEach(() => {
+  prepareResponseFeeds.mockReset();
+  prepareResponseFeeds.mockReturnValue([]);
+});
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -336,6 +342,7 @@ describe("tile refresh cache", () => {
 describe("adaptive tile refresh", () => {
   beforeEach(() => {
     prepareResponseFeeds.mockReset();
+    prepareResponseFeeds.mockReturnValue([]);
   });
 
   it("refreshes adaptive tiles when a panel changes physical width", () => {
@@ -428,7 +435,10 @@ describe("adaptive tile refresh", () => {
 
   it("prewarms every replacement before publishing the map", async () => {
     const order: string[] = [];
-    prepareResponseFeeds.mockImplementation(() => order.push("prewarm"));
+    prepareResponseFeeds.mockImplementation(() => {
+      order.push("prewarm");
+      return [];
+    });
     const queryTiles = vi.fn(
       (request: Parameters<DataPlane["queryTiles"]>[0]) =>
         Promise.resolve(tileResponse(request.signal_ids[0] ?? "1")),
@@ -500,25 +510,83 @@ describe("adaptive tile refresh", () => {
     expect(shell.renderTiles).not.toHaveBeenCalled();
   });
 
-  it("rejects more than 3,000 visible resolved series before querying", async () => {
-    const queryTiles = vi.fn<DataPlane["queryTiles"]>();
+  it("admits 5,000 visible series with one shared planned density", async () => {
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve(tileResponse()),
+    );
     const shell = refreshShell(queryTiles);
     shell.resolvedFor = vi.fn(() =>
-      Array.from({ length: 3001 }, () => ({ visible: true })),
+      Array.from({ length: 5000 }, () => ({ visible: true })),
     );
-    const current = new Map<string, ColumnarTileResponse>([
-      ["panel-1", tileResponse()],
-    ]);
-    shell.tilesByPanel = current;
 
     await shell.refreshTiles();
 
-    expect(shell.reportError).toHaveBeenCalledWith(
-      "series limit exceeded: 3001 visible; maximum 3000",
+    expect(queryTiles).toHaveBeenCalled();
+    expect(
+      new Set(queryTiles.mock.calls.map(([request]) => request.pixel_width)),
+    ).toHaveLength(1);
+    expect(shell.reportError).not.toHaveBeenCalled();
+  });
+
+  it("selects a resident overview synchronously during fit", () => {
+    const order: string[] = [];
+    const overview = {
+      id: "overview",
+      role: "overview",
+      response: tileResponse("overview"),
+      window: { t0: 0, t1: 100 },
+      visibleWindow: { t0: 0, t1: 100 },
+      idsKey: "1",
+      density: 2,
+      requestedPixelWidth: 100,
+      feeds: [new Float32Array()],
+      cpuBytes: 1,
+    } as PreparedTileBank;
+    const shell = Object.create(AppShell.prototype) as {
+      workspace: {
+        panel(id: string): { id: string; time_window: null } | undefined;
+        clearPanelYRange(id: string): void;
+      };
+      workspaceView: {
+        resetYAxis(id: string): void;
+        selectBank(id: string, role: "overview" | "detail"): boolean;
+      };
+      tileWindowCache: TileWindowCache;
+      panelSignalIds(panel: { id: string }): { ids: string[] };
+      resolutionCache: Map<string, unknown>;
+      resolvedFor(): { path: string }[];
+      signalsByPath: Map<string, { t_min: number; t_max: number }>;
+      applyTimeWindow(id: string, t0: number, t1: number): void;
+      commitHistory(): void;
+      fitPanelView(id: string): void;
+    };
+    shell.workspace = {
+      panel: () => ({ id: "panel-1", time_window: null }),
+      clearPanelYRange: vi.fn(),
+    };
+    shell.workspaceView = {
+      resetYAxis: vi.fn(),
+      selectBank: vi.fn(() => {
+        order.push("select");
+        return true;
+      }),
+    };
+    shell.tileWindowCache = new TileWindowCache();
+    shell.tileWindowCache.store("panel-1", overview, true);
+    shell.panelSignalIds = vi.fn(() => ({ ids: ["1"] }));
+    shell.resolutionCache = new Map();
+    shell.resolvedFor = vi.fn(() => [{ path: "run/value" }]);
+    shell.signalsByPath = new Map([["run/value", { t_min: 0, t_max: 100 }]]);
+    shell.applyTimeWindow = vi.fn(() => order.push("window"));
+    shell.commitHistory = vi.fn();
+
+    shell.fitPanelView("panel-1");
+
+    expect(shell.workspaceView.selectBank).toHaveBeenCalledWith(
+      "panel-1",
+      "overview",
     );
-    expect(queryTiles).not.toHaveBeenCalled();
-    expect(shell.tilesByPanel).toBe(current);
-    expect(shell.renderTiles).not.toHaveBeenCalled();
+    expect(order).toEqual(["select", "window"]);
   });
 });
 

@@ -1,6 +1,7 @@
 import { formatCombo } from "../app/commands";
 import type { ColumnarTileResponse } from "../app/bin-columns";
-import { MAX_RESIDENT_SERIES } from "../app/render-limits";
+import type { PreparedTileBank, TileBankRole } from "../app/prepared-tile-bank";
+import type { ChartRenderRequest } from "../render/chart-host";
 import type { WorkspaceModel } from "../app/workspace";
 import { bindPointerDrag } from "./dom";
 import {
@@ -16,7 +17,6 @@ import {
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
 import type { GpuContext } from "../render/gpu-context";
-import { panelsToEvict } from "./panel-residency";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -147,6 +147,7 @@ export class WorkspaceView {
     tilesByPanel: ReadonlyMap<string, ColumnarTileResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
+    bankFor: (panelId: string) => PreparedTileBank | null = () => null,
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -160,6 +161,7 @@ export class WorkspaceView {
             tilesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
+            bankFor(panel.id),
           ) ?? 0;
     }
     return total;
@@ -209,6 +211,41 @@ export class WorkspaceView {
     return (await this.views.get(id)?.capturePlot()) ?? null;
   }
 
+  publishBank(
+    panelId: string,
+    role: TileBankRole,
+    request: ChartRenderRequest,
+  ): number {
+    return this.views.get(panelId)?.publishBank(role, request) ?? 0;
+  }
+
+  publishPreparedBank(
+    panelId: string,
+    role: TileBankRole,
+    bank: PreparedTileBank,
+    window: { t0: number; t1: number },
+  ): number {
+    const view = this.views.get(panelId);
+    const request = view?.requestForBank(role, bank, window);
+    return request === null || request === undefined
+      ? 0
+      : this.publishBank(panelId, role, request);
+  }
+
+  presentationGpuBytes(): number {
+    let bytes = 0;
+    for (const view of this.views.values()) bytes += view.residentGpuBytes();
+    return bytes;
+  }
+
+  selectBank(panelId: string, role: TileBankRole): boolean {
+    return this.views.get(panelId)?.selectBank(role) ?? false;
+  }
+
+  evictGpu(panelId: string, role: TileBankRole): void {
+    this.views.get(panelId)?.evictBank(role);
+  }
+
   panelRect(id: string): DOMRect | null {
     return this.views.get(id)?.panelRect() ?? null;
   }
@@ -231,23 +268,7 @@ export class WorkspaceView {
     }
   }
 
-  private applyResidency(): void {
-    const active = new Set(this.model.panels().map((panel) => panel.id));
-    const residents = Array.from(this.views, ([id]) => ({
-      id,
-      seriesCount: this.seriesCounts.get(id) ?? 0,
-      lastUsed: this.lastUsed.get(id) ?? 0,
-      active: active.has(id),
-    }));
-    for (const id of panelsToEvict(residents, MAX_RESIDENT_SERIES)) {
-      const view = this.views.get(id);
-      if (view === undefined || active.has(id)) continue;
-      view.dispose();
-      view.element.remove();
-      this.views.delete(id);
-      this.lastUsed.delete(id);
-    }
-  }
+  private applyResidency(): void {}
 
   private maximizedPanelBar(maximizedId: string): HTMLElement {
     const bar = document.createElement("nav");

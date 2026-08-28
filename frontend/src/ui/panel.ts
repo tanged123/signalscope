@@ -47,8 +47,11 @@ import {
   resolvePalette,
 } from "../render/plot-theme";
 import type { ChartRenderRequest } from "../render/chart-host";
-import { prepareTileBank } from "../app/prepared-tile-bank";
-import type { TileBankRole } from "../app/prepared-tile-bank";
+import {
+  prepareTileBank,
+  type PreparedTileBank,
+  type TileBankRole,
+} from "../app/prepared-tile-bank";
 import type { GpuContext } from "../render/gpu-context";
 import { PanelRenderBanks } from "../render/panel-render-banks";
 import {
@@ -490,6 +493,7 @@ export class PanelView {
     TileBankRole,
     ChartRenderRequest
   >();
+  private readonly publishedBanks = new Map<TileBankRole, PreparedTileBank>();
   private disposed = false;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
@@ -497,6 +501,7 @@ export class PanelView {
   private lastInputState: PanelState | null = null;
   private lastStateKey: string | null = null;
   private lastTiles: ColumnarTileResponse | null = null;
+  private lastBankId: string | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private lastMissingEmpty = true;
   private preparedPlot: PreparedPlot | null = null;
@@ -799,11 +804,14 @@ export class PanelView {
     tiles: ColumnarTileResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
+    bank: PreparedTileBank | null = null,
   ): number {
     const stateKey = JSON.stringify(state);
+    const bankId = bank?.id ?? null;
     if (
       stateKey === this.lastStateKey &&
       tiles === this.lastTiles &&
+      bankId === this.lastBankId &&
       this.lastWindow !== null &&
       window.t0 === this.lastWindow.t0 &&
       window.t1 === this.lastWindow.t1 &&
@@ -816,12 +824,19 @@ export class PanelView {
     this.lastInputState = state;
     this.lastStateKey = stateKey;
     this.lastState = rendered;
-    this.lastTiles = tiles;
+    this.lastTiles = bank?.response ?? tiles;
+    this.lastBankId = bankId;
     this.lastWindow = { ...window };
     this.lastMissingEmpty = missing.length === 0;
     this.preparedPlot = null;
     this.hitAdapter = null;
-    const elapsed = this.renderForMode(rendered, tiles, window);
+    const elapsed = this.renderForMode(
+      rendered,
+      bank?.response ?? tiles,
+      window,
+      bank?.role ?? "detail",
+      bank,
+    );
     this.hitAdapter =
       (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
     this.interactions.setPolicy(
@@ -841,6 +856,8 @@ export class PanelView {
     state: RenderPanelState,
     tiles: ColumnarTileResponse | null,
     window: { t0: number; t1: number },
+    role: TileBankRole = "detail",
+    bank: PreparedTileBank | null = null,
   ): number {
     if (this.gpu === null) {
       this.chartHostElement.hidden = true;
@@ -852,14 +869,41 @@ export class PanelView {
     }
     this.chartHostElement.hidden = false;
     if (tiles === null) return 0;
+    const response = bank?.response ?? {
+      requestId: tiles.requestId,
+      series: tiles.series,
+    };
+    const request = this.requestForBank(
+      role,
+      bank ?? this.fallbackBank(response, window),
+      window,
+    );
+    return request === null ? 0 : this.publishBank(role, request);
+  }
+
+  requestForBank(
+    role: TileBankRole,
+    bank: PreparedTileBank,
+    window: { t0: number; t1: number },
+  ): ChartRenderRequest | null {
+    if (this.lastState === null) return null;
+    return this.buildBankRequest(this.lastState, role, bank, window);
+  }
+
+  private buildBankRequest(
+    state: RenderPanelState,
+    role: TileBankRole,
+    bank: PreparedTileBank,
+    window: { t0: number; t1: number },
+  ): ChartRenderRequest | null {
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
     );
-    const shown = tiles.series.filter(
+    const shown = bank.response.series.filter(
       (tile) => bySeries.get(tile.signalPath)?.visible ?? true,
     );
-    const response = { requestId: tiles.requestId, series: shown };
-    this.preparedPlot = prepareTimePlot({
+    this.lastTiles = bank.response;
+    const plot = prepareTimePlot({
       series: shown.map((tile) => {
         const series = bySeries.get(tile.signalPath);
         return {
@@ -871,13 +915,8 @@ export class PanelView {
       window,
     });
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
-    const ranges = this.resolvePlotRanges(
-      state,
-      this.preparedPlot,
-      window,
-      seriesKey,
-    );
-    if (ranges === null) return 0;
+    const ranges = this.resolvePlotRanges(state, plot, window, seriesKey);
+    if (ranges === null) return null;
     const styles = shown.map((tile) => {
       const series = bySeries.get(tile.signalPath);
       return {
@@ -893,35 +932,65 @@ export class PanelView {
         : shown.flatMap((tile, index) =>
             this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
           );
-    const request: ChartRenderRequest = {
-      bank: prepareTileBank({
-        id: `${this.id}:detail:${response.requestId}`,
-        role: "detail",
-        response,
-        window,
-        visibleWindow: window,
-        idsKey: seriesKey,
-        density: 2,
-        requestedPixelWidth: Math.max(1, Math.ceil(this.plotWidth())),
-      }),
-      response,
+    this.preparedPlot = plot;
+    this.hitAdapter = plot.hitAdapter;
+    return {
+      bank,
+      response: bank.response,
       xRange: ranges.x,
       yRange: [ranges.y.min, ranges.y.max],
       xLabel: state.x_label ?? "time (s)",
-      yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
+      yLabel:
+        state.y_label ?? yLabel(bank.response.series.map((tile) => tile.unit)),
       styles,
       emphasisIndices,
       palette: resolvePalette(),
     };
+  }
+
+  private fallbackBank(
+    response: ColumnarTileResponse,
+    window: { t0: number; t1: number },
+  ): PreparedTileBank {
+    const seriesKey = response.series
+      .map((series) => series.signalPath)
+      .join("\u0000");
+    return prepareTileBank({
+      id: `${this.id}:detail:${response.requestId}`,
+      role: "detail",
+      response,
+      window,
+      visibleWindow: window,
+      idsKey: seriesKey,
+      density: 2,
+      requestedPixelWidth: Math.max(1, Math.ceil(this.plotWidth())),
+    });
+  }
+
+  publishBank(role: TileBankRole, request: ChartRenderRequest): number {
+    this.publishedBanks.set(role, request.bank);
+    this.lastTiles = request.bank.response;
+    this.lastWindow = { ...request.bank.visibleWindow };
     if (this.chartBanks === null) {
-      this.pendingChartRenders.set("detail", request);
+      this.pendingChartRenders.set(role, request);
       return 0;
     }
-    const elapsed = this.chartBanks.publish("detail", request);
-    if (this.chartBanks.selectedRole() === null) {
-      this.chartBanks.select("detail");
-    }
+    const elapsed = this.chartBanks.publish(role, request);
+    if (this.chartBanks.selectedRole() === null) this.chartBanks.select(role);
     return elapsed;
+  }
+
+  selectBank(role: TileBankRole): boolean {
+    return this.chartBanks?.select(role) ?? false;
+  }
+
+  evictBank(role: TileBankRole): void {
+    this.pendingChartRenders.delete(role);
+    this.chartBanks?.evict(role);
+  }
+
+  residentGpuBytes(): number {
+    return this.chartBanks?.residentGpuBytes() ?? 0;
   }
 
   private resolvePlotRanges(
@@ -965,7 +1034,15 @@ export class PanelView {
     invalidatePalette();
     this.overlayRenderer.invalidateTheme();
     if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderForMode(this.lastState, this.lastTiles, this.lastWindow);
+      const banks = [...this.publishedBanks];
+      if (banks.length === 0) {
+        this.renderForMode(this.lastState, this.lastTiles, this.lastWindow);
+      } else {
+        for (const [role, bank] of banks) {
+          const request = this.requestForBank(role, bank, this.lastWindow);
+          if (request !== null) this.publishBank(role, request);
+        }
+      }
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
   }
@@ -1670,7 +1747,15 @@ export class PanelView {
     if (setsEqual(this.emphasizePaths, next)) return;
     this.emphasizePaths = next;
     if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderForMode(this.lastState, this.lastTiles, this.lastWindow);
+      const role = this.chartBanks?.selectedRole() ?? "detail";
+      const bank = this.publishedBanks.get(role) ?? null;
+      this.renderForMode(
+        this.lastState,
+        bank?.response ?? this.lastTiles,
+        this.lastWindow,
+        role,
+        bank,
+      );
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
   }
