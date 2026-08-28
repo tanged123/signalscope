@@ -385,7 +385,7 @@ export class TileWindowCache {
         ? entry.requestedDevicePixels
         : Math.max(1, Math.ceil(entry.pixelWidth));
     const bank: PreparedTileBank = Object.freeze({
-      id: `legacy:${panelId}:${++this.clock}`,
+      id: `legacy:${panelId}:${String(++this.clock)}`,
       role: "detail",
       response: entry.response,
       window: Object.freeze({ ...entry.window }),

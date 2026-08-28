@@ -93,6 +93,7 @@ type RefreshShell = {
   workspaceView: null;
   plane: Pick<DataPlane, "queryTiles">;
   tileWindowCache: TileWindowCache;
+  prefs: ReturnType<typeof defaultPreferences>;
   panelSignalIds: (panel: { id: string }) => {
     ids: string[];
     missing: string[];
@@ -105,6 +106,7 @@ type RefreshShell = {
   refreshPromise: Promise<void> | null;
   refreshQueued: boolean;
   tilesByPanel: Map<string, ColumnarTileResponse>;
+  banksByPanel: Map<string, PreparedTileBank>;
   missingByPanel: Map<string, string[]>;
   refreshTiles(): Promise<void>;
 };
@@ -122,6 +124,7 @@ function refreshShell(
   shell.workspaceView = null;
   shell.plane = { queryTiles };
   shell.tileWindowCache = new TileWindowCache();
+  shell.prefs = defaultPreferences();
   shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
   shell.resolvedFor = vi.fn(() => [{ visible: true }]);
   shell.effectiveWindow = vi.fn(() => ({ t0: 0, t1: 5 }));
@@ -131,6 +134,7 @@ function refreshShell(
   shell.refreshPromise = null;
   shell.refreshQueued = false;
   shell.tilesByPanel = new Map();
+  shell.banksByPanel = new Map();
   shell.missingByPanel = new Map();
   return shell;
 }
@@ -143,6 +147,7 @@ describe("sample refresh requests", () => {
     };
     plane: Pick<DataPlane, "queryTiles" | "querySamples">;
     tileWindowCache: TileWindowCache;
+    prefs: ReturnType<typeof defaultPreferences>;
     panelSignalIds(): { ids: string[]; missing: string[] };
     resolvedFor(): { visible: boolean }[];
     effectiveWindow(): { t0: number; t1: number };
@@ -167,6 +172,7 @@ describe("sample refresh requests", () => {
     };
     shell.plane = { queryTiles, querySamples };
     shell.tileWindowCache = new TileWindowCache();
+    shell.prefs = defaultPreferences();
     shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
     shell.resolvedFor = vi.fn(() => [{ visible: true }]);
     shell.effectiveWindow = vi.fn(() => ({ t0: 20, t1: 79 }));
@@ -308,6 +314,7 @@ describe("tile refresh cache", () => {
       workspaceView: null;
       plane: Pick<DataPlane, "queryTiles">;
       tileWindowCache: TileWindowCache;
+      prefs: ReturnType<typeof defaultPreferences>;
       panelSignalIds(): { ids: string[]; missing: string[] };
       resolvedFor(): { visible: boolean }[];
       effectiveWindow(): { t0: number; t1: number };
@@ -324,6 +331,7 @@ describe("tile refresh cache", () => {
     shell.workspaceView = null;
     shell.plane = { queryTiles };
     shell.tileWindowCache = new TileWindowCache();
+    shell.prefs = defaultPreferences();
     shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
     shell.resolvedFor = vi.fn(() => [{ visible: true }]);
     shell.effectiveWindow = vi.fn(() => ({ t0: 0, t1: 5 }));
@@ -531,6 +539,7 @@ describe("adaptive tile refresh", () => {
 
   it("selects a resident overview synchronously during fit", () => {
     const order: string[] = [];
+    const selected: unknown[] = [];
     const overview = {
       id: "overview",
       role: "overview",
@@ -553,6 +562,8 @@ describe("adaptive tile refresh", () => {
         selectBank(id: string, role: "overview" | "detail"): boolean;
       };
       tileWindowCache: TileWindowCache;
+      tilesByPanel: Map<string, ColumnarTileResponse>;
+      banksByPanel: Map<string, PreparedTileBank>;
       panelSignalIds(panel: { id: string }): { ids: string[] };
       resolutionCache: Map<string, unknown>;
       resolvedFor(): { path: string }[];
@@ -567,12 +578,15 @@ describe("adaptive tile refresh", () => {
     };
     shell.workspaceView = {
       resetYAxis: vi.fn(),
-      selectBank: vi.fn(() => {
+      selectBank: vi.fn((id: string, role: "overview" | "detail") => {
         order.push("select");
+        selected.push(id, role);
         return true;
       }),
     };
     shell.tileWindowCache = new TileWindowCache();
+    shell.tilesByPanel = new Map();
+    shell.banksByPanel = new Map();
     shell.tileWindowCache.store("panel-1", overview, true);
     shell.panelSignalIds = vi.fn(() => ({ ids: ["1"] }));
     shell.resolutionCache = new Map();
@@ -583,10 +597,7 @@ describe("adaptive tile refresh", () => {
 
     shell.fitPanelView("panel-1");
 
-    expect(shell.workspaceView.selectBank).toHaveBeenCalledWith(
-      "panel-1",
-      "overview",
-    );
+    expect(selected).toEqual(["panel-1", "overview"]);
     expect(order).toEqual(["select", "window"]);
   });
 });
@@ -1585,6 +1596,10 @@ describe("appearance settings entries", () => {
 
   it("cycles presentation budgets and schedules an upgrade refresh", () => {
     const probe = appearanceProbe();
+    const scheduled: number[] = [];
+    probe.scheduleRefresh = vi.fn((delay: number | undefined) =>
+      scheduled.push(delay ?? 50),
+    );
     const entry = probe
       .settingsEntries()
       .find(({ title }) => title === "Presentation CPU budget");
@@ -1593,6 +1608,6 @@ describe("appearance settings entries", () => {
     entry?.run();
 
     expect(probe.prefs.presentation_cpu_bytes).toBe("268435456");
-    expect(probe.scheduleRefresh).toHaveBeenCalledWith(250);
+    expect(scheduled).toEqual([250]);
   });
 });

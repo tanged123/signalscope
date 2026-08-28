@@ -44,7 +44,7 @@ function setupHostMocks(): void {
       render: vi.fn(() => 12),
       layout: vi.fn(() => layout),
       resize: vi.fn(),
-      capture: vi.fn(async () => document.createElement("canvas")),
+      capture: vi.fn(() => Promise.resolve(document.createElement("canvas"))),
       dispose: vi.fn(),
     };
     state.hosts.push(host);
@@ -87,7 +87,7 @@ describe("PanelRenderBanks", () => {
 
     expect(banks.select("detail")).toBe(true);
     expect(elements[0]).toBe(overviewElement);
-    expect((elements[0] as HTMLElement | undefined)?.hidden).toBe(true);
+    expect(elements[0]?.hidden).toBe(true);
     expect(elements[1]?.hidden).toBe(false);
     expect(banks.selectedRole()).toBe("detail");
   });

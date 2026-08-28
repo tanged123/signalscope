@@ -125,7 +125,7 @@ export function nextPresentationBudget(
     (choice) => choice === null || Number(choice) <= hardLimit,
   );
   if (choices.length === 0) return null;
-  const currentIndex = choices.indexOf(current as (typeof choices)[number]);
+  const currentIndex = choices.indexOf(current);
   return choices[(currentIndex + 1) % choices.length] ?? null;
 }
 

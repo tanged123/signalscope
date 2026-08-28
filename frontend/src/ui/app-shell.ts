@@ -219,7 +219,9 @@ export function formatPresentationStatus(
   const gpuUsage =
     budgets.gpuBytes > 0 ? plan.estimatedGpuBytes / budgets.gpuBytes : 1;
   const usage = Math.max(cpuUsage, gpuUsage);
-  return usage >= 0.8 ? `presentation ${Math.round(usage * 100)}%` : null;
+  return usage >= 0.8
+    ? `presentation ${String(Math.round(usage * 100))}%`
+    : null;
 }
 
 export class AppShell {
@@ -1842,7 +1844,10 @@ export class AppShell {
   ): { t0: number; t1: number } | null {
     let t0 = Number.POSITIVE_INFINITY;
     let t1 = Number.NEGATIVE_INFINITY;
-    const signalsByPath = this.signalsByPath ?? new Map();
+    const signalsByPath =
+      this.signalsByPath instanceof Map
+        ? this.signalsByPath
+        : new Map<string, SignalSummary>();
     for (const path of paths) {
       const summary = signalsByPath.get(path);
       if (summary === undefined) continue;
@@ -2340,9 +2345,11 @@ export class AppShell {
       this.selection.clear();
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
-      this.tileWindowCache?.invalidate();
+      if (this.tileWindowCache instanceof TileWindowCache) {
+        this.tileWindowCache.invalidate();
+      }
       this.tilesByPanel.clear();
-      this.banksByPanel?.clear();
+      if (this.banksByPanel instanceof Map) this.banksByPanel.clear();
       this.presentationPlan = null;
       this.presentationVisibleSeries = 0;
       this.missingByPanel.clear();
@@ -2647,7 +2654,7 @@ export class AppShell {
     const nextTiles = new Map<string, ColumnarTileResponse>();
     const nextMissing = new Map<string, string[]>();
     const nextBanks = new Map<string, PreparedTileBank>();
-    let preparationFailed = false;
+    const preparationFailures: unknown[] = [];
     let allocationFailure: unknown = null;
     const demands: {
       panel: PanelState;
@@ -2786,7 +2793,7 @@ export class AppShell {
             allocationFailure ??= error;
           } else {
             this.reportError(error);
-            preparationFailed = true;
+            preparationFailures.push(error);
           }
         }
       }),
@@ -2812,7 +2819,7 @@ export class AppShell {
       }
       return;
     }
-    if (preparationFailed) return;
+    if (preparationFailures.length > 0) return;
     for (const [panelId, replacement] of replacements) {
       try {
         this.publishPreparedBank(panelId, replacement);
@@ -2880,8 +2887,8 @@ export class AppShell {
   }
 
   private presentationBudgets(): PresentationBudgets {
-    const cpuOverride = this.prefs?.presentation_cpu_bytes;
-    const gpuOverride = this.prefs?.presentation_gpu_bytes;
+    const cpuOverride = this.prefs.presentation_cpu_bytes;
+    const gpuOverride = this.prefs.presentation_gpu_bytes;
     const auto = autoPresentationBudgets(
       (
         this.gpu?.adapter as unknown as {
@@ -2943,7 +2950,7 @@ export class AppShell {
     }[],
   ): ResidentBank[] {
     const residents = new Map<string, ResidentBank>();
-    const current = this.banksByPanel ?? new Map<string, PreparedTileBank>();
+    const current = this.banksByPanel;
     for (const bank of this.tileWindowCache.residentBanks()) {
       const active = activePanelIds.has(bank.panelId);
       residents.set(`${bank.panelId}\u0000${bank.bankId}`, {
@@ -2995,7 +3002,7 @@ export class AppShell {
   private evictForPresentationRetry(activePanelIds: readonly string[]): void {
     this.tileWindowCache.evictCpu(Number.POSITIVE_INFINITY, activePanelIds);
     for (const panelId of activePanelIds) {
-      const current = this.banksByPanel?.get(panelId);
+      const current = this.banksByPanel.get(panelId);
       if (current === undefined) {
         this.workspaceView?.evictGpu(panelId, "overview");
         this.workspaceView?.evictGpu(panelId, "detail");
@@ -3142,8 +3149,8 @@ export class AppShell {
     const idsKey = [...ids].sort().join("\u0000");
     const overview = this.tileWindowCache.overview(panelId, idsKey);
     if (overview !== null) {
-      this.banksByPanel?.set(panelId, overview);
-      this.tilesByPanel?.set(panelId, overview.response);
+      this.banksByPanel.set(panelId, overview);
+      this.tilesByPanel.set(panelId, overview.response);
       this.tileWindowCache.setSelected(panelId, overview.id);
       this.workspaceView?.selectBank(panelId, "overview");
     }

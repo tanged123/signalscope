@@ -28,6 +28,14 @@ interface BakedPlaneModule {
   };
 }
 
+interface PanelViewModule {
+  PanelView: {
+    prototype: {
+      publishBank: (this: object, ...args: unknown[]) => number;
+    };
+  };
+}
+
 async function installResolutionProbe(
   page: Page,
   forceFull = false,
@@ -140,20 +148,24 @@ async function installResolutionProbe(
           const nextRequest = rewriteFull
             ? { ...request, pixel_width: 1_000_000 }
             : request;
-          return originalQueryTiles.call(this, nextRequest).then((response) => {
-            record(response.series.map((series) => series.level));
-            return hold(response);
-          });
+          return Reflect.apply(originalQueryTiles, this, [nextRequest]).then(
+            (response) => {
+              record(response.series.map((series) => series.level));
+              return hold(response);
+            },
+          );
         };
       });
     const panelModulePath = "/src/ui/panel.ts";
     void import(/* @vite-ignore */ panelModulePath).then((module) => {
-      const PanelView = (module as typeof import("../../src/ui/panel"))
-        .PanelView;
-      const original = PanelView.prototype.publishBank;
+      const PanelView = (module as PanelViewModule).PanelView;
+      const original = Reflect.get(PanelView.prototype, "publishBank") as (
+        this: object,
+        ...args: unknown[]
+      ) => number;
       PanelView.prototype.publishBank = function (...args) {
         probe.__signalscopePreparedBankCount += 1;
-        return original.apply(this, args);
+        return Reflect.apply(original, this, args);
       };
     });
   }, forceFull);
@@ -721,11 +733,8 @@ test("admits 5,000 visible channels with one budgeted density", async ({
 async function selectedBankRole(page: Page): Promise<string | null> {
   return page.evaluate(
     () =>
-      (
-        document.querySelector(
-          ".panel .chart-bank:not([hidden])",
-        ) as HTMLElement | null
-      )?.dataset.bankRole ?? null,
+      document.querySelector<HTMLElement>(".panel .chart-bank:not([hidden])")
+        ?.dataset.bankRole ?? null,
   );
 }
 
