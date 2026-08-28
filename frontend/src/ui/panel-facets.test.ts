@@ -125,7 +125,7 @@ afterEach(() => {
 });
 
 describe("PanelView panel chrome", () => {
-  it("waits for a mounted panel before creating ChartGPU", () => {
+  it("keeps both ChartGPU banks lazy after mounting", () => {
     const create = vi
       .spyOn(ChartHost, "create")
       .mockResolvedValue({} as ChartHost);
@@ -139,10 +139,8 @@ describe("PanelView panel chrome", () => {
     document.body.appendChild(view.element);
     view.mount();
 
-    expect(create).toHaveBeenCalledWith(
-      view.element.querySelector(".chart-host"),
-      expect.anything(),
-    );
+    expect(create).not.toHaveBeenCalled();
+    expect(view.element.querySelectorAll(".chart-bank")).toHaveLength(2);
   });
 
   it("renders the legend and focus strip below a header without roster tokens", () => {

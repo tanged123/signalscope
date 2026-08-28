@@ -1184,6 +1184,11 @@ button {
   pointer-events: none;
 }
 
+.chart-bank {
+  position: absolute;
+  inset: 0;
+}
+
 .chart-host * {
   pointer-events: none !important;
 }
@@ -1191,6 +1196,7 @@ button {
 .overlay-canvas {
   position: absolute;
   inset: 0;
+  z-index: 1;
   width: 100%;
   height: 100%;
   cursor: crosshair;

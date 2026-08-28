@@ -81,17 +81,15 @@ describe("panel markup", () => {
     const chartHostElement = document.createElement("div");
     const view = Object.create(PanelView.prototype) as {
       gpu: GpuContext | null;
-      chartHost: { dispose(): void } | null;
-      chartHostReady: Promise<{ dispose(): void } | null> | null;
-      pendingChartRender: object | null;
+      chartBanks: { dispose(): void } | null;
+      pendingChartRenders: Map<string, object>;
       chartHostElement: HTMLElement;
       disposed: boolean;
       releaseGpu(): void;
     };
     view.gpu = {} as GpuContext;
-    view.chartHost = { dispose };
-    view.chartHostReady = Promise.resolve(view.chartHost);
-    view.pendingChartRender = {};
+    view.chartBanks = { dispose };
+    view.pendingChartRenders = new Map([["detail", {}]]);
     view.chartHostElement = chartHostElement;
     view.disposed = false;
 
@@ -99,9 +97,8 @@ describe("panel markup", () => {
 
     expect(dispose).toHaveBeenCalledOnce();
     expect(view.gpu).toBeNull();
-    expect(view.chartHost).toBeNull();
-    expect(view.chartHostReady).toBeNull();
-    expect(view.pendingChartRender).not.toBeNull();
+    expect(view.chartBanks).toBeNull();
+    expect(view.pendingChartRenders.size).toBe(1);
     expect(chartHostElement.hidden).toBe(true);
     expect(view.disposed).toBe(false);
   });
@@ -173,7 +170,7 @@ describe("panel series", () => {
       } as unknown as PanelCallbacks;
       const view = Object.create(PanelView.prototype) as unknown as {
         callbacks: PanelCallbacks;
-        chartHost: { layout(): PlotLayout } | null;
+        chartBanks: { layout(): PlotLayout | null } | null;
         lastState: RenderPanelState;
         preparedPlot: PreparedPlot;
         hitAdapter: PreparedPlot["hitAdapter"];
@@ -185,7 +182,7 @@ describe("panel series", () => {
       };
       const series = visible("run_01/temp");
       view.callbacks = callbacks;
-      view.chartHost = { layout: () => gestureLayout };
+      view.chartBanks = { layout: () => gestureLayout };
       view.lastState = { ...timeState([series]), mode };
       view.preparedPlot = {
         annotationAt: () => null,
@@ -217,7 +214,7 @@ describe("panel series", () => {
     const series = visible("run_01/temp");
     const view = Object.create(PanelView.prototype) as unknown as {
       callbacks: PanelCallbacks;
-      chartHost: { layout(): PlotLayout } | null;
+      chartBanks: { layout(): PlotLayout | null } | null;
       lastState: RenderPanelState;
       preparedPlot: PreparedPlot;
       hitAdapter: PreparedPlot["hitAdapter"];
@@ -228,7 +225,7 @@ describe("panel series", () => {
       ): void;
     };
     view.callbacks = callbacks;
-    view.chartHost = { layout: () => gestureLayout };
+    view.chartBanks = { layout: () => gestureLayout };
     view.lastState = timeState([series]);
     view.preparedPlot = {
       annotationAt: () => ({

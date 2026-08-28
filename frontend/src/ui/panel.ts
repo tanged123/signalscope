@@ -46,9 +46,11 @@ import {
   invalidatePalette,
   resolvePalette,
 } from "../render/plot-theme";
-import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
+import type { ChartRenderRequest } from "../render/chart-host";
 import { prepareTileBank } from "../app/prepared-tile-bank";
+import type { TileBankRole } from "../app/prepared-tile-bank";
 import type { GpuContext } from "../render/gpu-context";
+import { PanelRenderBanks } from "../render/panel-render-banks";
 import {
   marker,
   OverlayRenderer,
@@ -483,10 +485,11 @@ export class PanelView {
   private readonly overlay: HTMLCanvasElement;
   private readonly chartHostElement: HTMLElement;
   private readonly overlayRenderer: OverlayRenderer;
-  private chartHost: ChartHost | null = null;
-  private chartHostReady: Promise<ChartHost | null> | null = null;
-  private pendingChartRender: ChartRenderRequest | null = null;
-  private chartHostGeneration = 0;
+  private chartBanks: PanelRenderBanks | null = null;
+  private readonly pendingChartRenders = new Map<
+    TileBankRole,
+    ChartRenderRequest
+  >();
   private disposed = false;
   private readonly interactions: PlotInteractionController;
   private readonly yAxis = new YAxisPolicy();
@@ -532,7 +535,7 @@ export class PanelView {
       applyYRange: (min, max) => {
         const layout = this.activeLayout();
         if (layout !== null) {
-          this.chartHost?.setRangesOnly(layout.xRange, [min, max]);
+          this.chartBanks?.setRangesOnly(layout.xRange, [min, max]);
         }
         this.callbacks.onYRange(this.id, [min, max]);
       },
@@ -566,7 +569,7 @@ export class PanelView {
       },
     });
     new ResizeObserver(() => {
-      this.chartHost?.resize();
+      this.chartBanks?.resize();
       this.callbacks.onResized(this.id);
     }).observe(this.chartHostElement);
   }
@@ -588,54 +591,18 @@ export class PanelView {
     if (
       this.gpu === null ||
       this.disposed ||
-      this.chartHostReady !== null ||
+      this.chartBanks !== null ||
       !this.element.isConnected
     ) {
       return;
     }
-    this.initializeChartHost(this.gpu);
-  }
-
-  private initializeChartHost(gpu: GpuContext): void {
-    const generation = this.chartHostGeneration;
-    this.chartHostReady = ChartHost.create(this.chartHostElement, gpu)
-      .then((host) => {
-        if (
-          this.disposed ||
-          generation !== this.chartHostGeneration ||
-          this.gpu !== gpu
-        ) {
-          host.dispose();
-          return null;
-        }
-        this.chartHost = host;
-        if (this.pendingChartRender !== null) {
-          host.render(this.pendingChartRender);
-          this.pendingChartRender = null;
-          this.drawOverlay();
-        }
-        return host;
-      })
-      .catch((error: unknown) => {
-        if (
-          this.disposed ||
-          generation !== this.chartHostGeneration ||
-          this.gpu !== gpu
-        ) {
-          return null;
-        }
-        console.error("ChartGPU initialization failed", error);
-        this.gpu = null;
-        this.chartHostElement.hidden = true;
-        if (this.lastInputState !== null) {
-          this.lastStateKey = null;
-          this.update(
-            this.lastInputState,
-            this.element.classList.contains("maximized"),
-          );
-        }
-        return null;
-      });
+    this.chartBanks = new PanelRenderBanks(this.chartHostElement, this.gpu);
+    const hadDetailRequest = this.pendingChartRenders.has("detail");
+    for (const [role, request] of this.pendingChartRenders) {
+      this.chartBanks.publish(role, request);
+    }
+    this.pendingChartRenders.clear();
+    if (hadDetailRequest) this.chartBanks.select("detail");
   }
 
   private bind(): void {
@@ -946,11 +913,15 @@ export class PanelView {
       emphasisIndices,
       palette: resolvePalette(),
     };
-    if (this.chartHost === null) {
-      this.pendingChartRender = request;
+    if (this.chartBanks === null) {
+      this.pendingChartRenders.set("detail", request);
       return 0;
     }
-    return this.chartHost.render(request);
+    const elapsed = this.chartBanks.publish("detail", request);
+    if (this.chartBanks.selectedRole() === null) {
+      this.chartBanks.select("detail");
+    }
+    return elapsed;
   }
 
   private resolvePlotRanges(
@@ -1033,9 +1004,8 @@ export class PanelView {
     plot: HTMLCanvasElement;
     overlay: HTMLCanvasElement;
   }> {
-    const host = this.chartHost ?? (await this.chartHostReady);
-    if (host === null) throw new Error("chart host unavailable");
-    return { plot: await host.capture(), overlay: this.overlay };
+    if (this.chartBanks === null) throw new Error("chart host unavailable");
+    return { plot: await this.chartBanks.capture(), overlay: this.overlay };
   }
 
   dispose(): void {
@@ -1045,16 +1015,14 @@ export class PanelView {
   }
 
   releaseGpu(): void {
-    this.chartHostGeneration += 1;
-    this.chartHost?.dispose();
-    this.chartHost = null;
-    this.chartHostReady = null;
+    this.chartBanks?.dispose();
+    this.chartBanks = null;
     this.gpu = null;
     this.chartHostElement.hidden = true;
   }
 
   private activeLayout(): PlotLayout | null {
-    return this.chartHost?.layout() ?? null;
+    return this.chartBanks?.layout() ?? null;
   }
 
   panelRect(): DOMRect {
@@ -1315,7 +1283,7 @@ export class PanelView {
   private applyXRange(min: number, max: number): void {
     const layout = this.activeLayout();
     if (layout !== null) {
-      this.chartHost?.setRangesOnly({ min, max }, [
+      this.chartBanks?.setRangesOnly({ min, max }, [
         layout.yRange.min,
         layout.yRange.max,
       ]);
