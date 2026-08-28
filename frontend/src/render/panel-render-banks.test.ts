@@ -87,7 +87,7 @@ describe("PanelRenderBanks", () => {
 
     expect(banks.select("detail")).toBe(true);
     expect(elements[0]).toBe(overviewElement);
-    expect(elements[0]?.hidden).toBe(true);
+    expect((elements[0] as HTMLElement | undefined)?.hidden).toBe(true);
     expect(elements[1]?.hidden).toBe(false);
     expect(banks.selectedRole()).toBe("detail");
   });
@@ -122,7 +122,7 @@ describe("PanelRenderBanks", () => {
     expect(state.hosts[0]?.dispose).toHaveBeenCalledOnce();
     expect(state.hosts[1]?.dispose).not.toHaveBeenCalled();
     expect(container.querySelectorAll(".chart-bank")).toHaveLength(2);
-    expect(elements[0]?.hidden).toBe(true);
+    expect((elements[0] as HTMLElement | undefined)?.hidden).toBe(true);
     expect(banks.selectedRole()).toBeNull();
   });
 

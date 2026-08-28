@@ -81,6 +81,7 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
   await expect(
     page.locator(".workspace .chart-host canvas").first(),
   ).toBeVisible();
+  await expect(page.locator(".panel .chart-bank")).toHaveCount(2);
   await page.evaluate(() => {
     const canvas = document.querySelector<HTMLCanvasElement>(
       ".workspace .chart-host canvas",
@@ -144,6 +145,7 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
     "panel-2",
   );
   await expect(page.locator(".binding-chip")).toHaveCount(1);
+  await expect(page.locator(".panel .chart-bank")).toHaveCount(2);
 });
 
 test("overflowing workspace tabs keep their controls clear", async ({

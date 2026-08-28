@@ -39,7 +39,7 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
   await page.keyboard.press("Control+Comma");
   const palette = page.locator(".palette");
   await expect(palette).toBeVisible();
-  await expect(palette.locator(".palette-row")).toHaveCount(7);
+  await expect(palette.locator(".palette-row")).toHaveCount(9);
 
   const plotFont = palette
     .locator(".palette-row", { hasText: "Plot font" })

@@ -1315,7 +1315,11 @@ export class AppShell {
       budgetEntry(
         "Presentation GPU budget",
         "presentation_gpu_bytes",
-        this.gpu?.adapter?.limits?.maxBufferSize ?? Number.POSITIVE_INFINITY,
+        (
+          this.gpu?.adapter as unknown as {
+            limits?: { maxBufferSize?: number };
+          } | null
+        )?.limits?.maxBufferSize ?? Number.POSITIVE_INFINITY,
       ),
       {
         title: "Reset appearance to defaults",
@@ -2705,7 +2709,7 @@ export class AppShell {
       typeof this.workspaceView?.presentationGpuBytes === "function"
         ? this.workspaceView.presentationGpuBytes()
         : 0;
-    const densityPlan = planPresentationDensity({
+    const densityInput = {
       demands: demands.map((demand) => ({
         panelId: demand.panel.id,
         physicalPixels: demand.physicalPixels,
@@ -2715,8 +2719,9 @@ export class AppShell {
       budgets,
       retainedCpuBytes: this.tileWindowCache.cpuBytes(),
       retainedGpuBytes,
-      maxDensity,
-    });
+      ...(maxDensity === undefined ? {} : { maxDensity }),
+    };
+    const densityPlan = planPresentationDensity(densityInput);
     this.presentationPlan = densityPlan;
     this.presentationVisibleSeries = demands.reduce(
       (total, demand) => total + demand.visibleSeries,
@@ -2811,6 +2816,7 @@ export class AppShell {
     for (const [panelId, replacement] of replacements) {
       try {
         this.publishPreparedBank(panelId, replacement);
+        this.workspaceView?.selectBank(panelId, replacement.role);
         this.tileWindowCache.store(panelId, replacement, false);
         this.tileWindowCache.setSelected(panelId, replacement.id);
       } catch (error: unknown) {
@@ -2877,7 +2883,11 @@ export class AppShell {
     const cpuOverride = this.prefs?.presentation_cpu_bytes;
     const gpuOverride = this.prefs?.presentation_gpu_bytes;
     const auto = autoPresentationBudgets(
-      this.gpu?.adapter?.limits?.maxBufferSize ?? 0,
+      (
+        this.gpu?.adapter as unknown as {
+          limits?: { maxBufferSize?: number };
+        } | null
+      )?.limits?.maxBufferSize ?? 0,
       (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
     );
     return {

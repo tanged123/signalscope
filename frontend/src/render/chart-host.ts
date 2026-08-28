@@ -193,7 +193,10 @@ export class ChartHost {
   }
 
   residentGpuBytes(): number {
-    return this.chart.getPerformanceMetrics()?.memory.used ?? 0;
+    const metricsHost = this.chart as unknown as {
+      getPerformanceMetrics?(): { memory: { used: number } } | null;
+    };
+    return metricsHost.getPerformanceMetrics?.()?.memory.used ?? 0;
   }
 
   async capture(): Promise<HTMLCanvasElement> {

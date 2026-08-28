@@ -222,7 +222,7 @@ export class WorkspaceView {
     window: { t0: number; t1: number },
   ): number {
     const view = this.views.get(panelId);
-    const request = view?.requestForBank(role, bank, window);
+    const request = view?.requestForBank(bank, window);
     return request === null || request === undefined
       ? 0
       : this.publishBank(panelId, role, request);

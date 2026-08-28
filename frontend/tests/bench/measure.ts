@@ -5,6 +5,7 @@ interface BenchWindow {
   __benchFrames: number[];
   __benchLongTasks: number[];
   __benchStop?: () => void;
+  __benchTileQueryCount: number;
 }
 
 export interface FrameStats {
@@ -13,6 +14,23 @@ export interface FrameStats {
   frames: number;
   longTasks: number;
   longestTaskMs: number;
+}
+
+export async function installPresentationProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const bench = window as unknown as BenchWindow;
+    bench.__benchTileQueryCount = 0;
+    const modulePath = "/src/app/data-plane.ts";
+    void import(/* @vite-ignore */ modulePath).then((module) => {
+      const BakedPlane = (module as typeof import("../../src/app/data-plane"))
+        .BakedPlane;
+      const original = BakedPlane.prototype.queryTiles;
+      BakedPlane.prototype.queryTiles = function (...args) {
+        bench.__benchTileQueryCount += 1;
+        return original.apply(this, args);
+      };
+    });
+  });
 }
 
 export async function startFrameProbe(page: Page): Promise<void> {
