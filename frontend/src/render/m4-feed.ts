@@ -162,7 +162,9 @@ export function responseTimeReference(response: ColumnarTileResponse): number {
   return Number.isFinite(minimum) ? minimum : 0;
 }
 
-export function prepareResponseFeeds(response: ColumnarTileResponse): void {
+export function prepareResponseFeeds(
+  response: ColumnarTileResponse,
+): readonly SeriesFeed[] {
   const tRef = responseTimeReference(response);
-  for (const series of response.series) cachedFeed(series.bins, tRef);
+  return response.series.map((series) => cachedFeed(series.bins, tRef));
 }

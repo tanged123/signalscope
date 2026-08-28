@@ -47,6 +47,7 @@ import {
   resolvePalette,
 } from "../render/plot-theme";
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
+import { prepareTileBank } from "../app/prepared-tile-bank";
 import type { GpuContext } from "../render/gpu-context";
 import {
   marker,
@@ -926,6 +927,16 @@ export class PanelView {
             this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
           );
     const request: ChartRenderRequest = {
+      bank: prepareTileBank({
+        id: `${this.id}:detail:${response.requestId}`,
+        role: "detail",
+        response,
+        window,
+        visibleWindow: window,
+        idsKey: seriesKey,
+        density: 2,
+        requestedPixelWidth: Math.max(1, Math.ceil(this.plotWidth())),
+      }),
       response,
       xRange: ranges.x,
       yRange: [ranges.y.min, ranges.y.max],

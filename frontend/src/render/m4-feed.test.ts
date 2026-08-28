@@ -238,11 +238,12 @@ describe("m4Feed", () => {
         },
       ],
     };
-    prepareResponseFeeds(response);
+    const feeds = prepareResponseFeeds(response);
     const reference = responseTimeReference(response);
     const first = response.series[0];
     if (first === undefined) throw new Error("missing response series");
     const prepared = cachedFeed(first.bins, reference);
+    expect(feeds).toEqual([prepared]);
     expect(prepared).toBe(cachedFeed(first.bins, reference));
   });
 });
