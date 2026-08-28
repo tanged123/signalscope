@@ -16,8 +16,13 @@ import {
 import {
   autoPresentationBudgets,
   planPresentationDensity,
+  type DensityPlan,
   type PresentationBudgets,
 } from "../app/presentation-budget";
+import {
+  planPresentationEvictions,
+  type ResidentBank,
+} from "../app/presentation-residency";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -39,7 +44,9 @@ import {
   defaultPreferences,
   FONT_FAMILIES,
   fontLabel,
+  nextPresentationBudget,
   parsePreferences,
+  presentationBudgetLabel,
   PLOT_FONT_SIZE,
   PLOT_LINE_WIDTH_SCALE,
   UI_FONT_SIZE,
@@ -192,6 +199,29 @@ function validByteOverride(value: string): boolean {
   return Number.isSafeInteger(Number(value)) && Number(value) > 0;
 }
 
+export function formatPresentationStatus(
+  plan: Pick<
+    DensityPlan,
+    | "density"
+    | "targetDensity"
+    | "limited"
+    | "estimatedCpuBytes"
+    | "estimatedGpuBytes"
+  >,
+  visibleSeries: number,
+  budgets: PresentationBudgets,
+): string | null {
+  if (plan.limited) {
+    return `resolution limited · ${plan.density.toFixed(1)}/${plan.targetDensity.toFixed(1)} bins/px · ${visibleSeries.toLocaleString()} series`;
+  }
+  const cpuUsage =
+    budgets.cpuBytes > 0 ? plan.estimatedCpuBytes / budgets.cpuBytes : 1;
+  const gpuUsage =
+    budgets.gpuBytes > 0 ? plan.estimatedGpuBytes / budgets.gpuBytes : 1;
+  const usage = Math.max(cpuUsage, gpuUsage);
+  return usage >= 0.8 ? `presentation ${Math.round(usage * 100)}%` : null;
+}
+
 export class AppShell {
   private readonly workspace = new WorkspaceModel();
   private readonly commands = new CommandRegistry();
@@ -221,6 +251,8 @@ export class AppShell {
   private exportGeneration = 0;
   private tilesByPanel = new Map<string, ColumnarTileResponse>();
   private banksByPanel = new Map<string, PreparedTileBank>();
+  private presentationPlan: DensityPlan | null = null;
+  private presentationVisibleSeries = 0;
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
@@ -1218,6 +1250,21 @@ export class AppShell {
         this.updatePreferences({ [key]: this.prefs[key] + direction * step });
       },
     });
+    const budgetEntry = (
+      title: string,
+      key: "presentation_cpu_bytes" | "presentation_gpu_bytes",
+      hardLimit = Number.POSITIVE_INFINITY,
+    ): PaletteEntry => ({
+      title,
+      hint: presentationBudgetLabel(this.prefs[key]),
+      keepOpen: true,
+      run: () => {
+        this.updatePreferences({
+          [key]: nextPresentationBudget(this.prefs[key], hardLimit),
+        });
+        this.scheduleRefresh(250);
+      },
+    });
     return [
       {
         title: "Theme",
@@ -1264,6 +1311,12 @@ export class AppShell {
           });
         },
       },
+      budgetEntry("Presentation CPU budget", "presentation_cpu_bytes"),
+      budgetEntry(
+        "Presentation GPU budget",
+        "presentation_gpu_bytes",
+        this.gpu?.adapter?.limits?.maxBufferSize ?? Number.POSITIVE_INFINITY,
+      ),
       {
         title: "Reset appearance to defaults",
         hint: "",
@@ -1918,10 +1971,7 @@ export class AppShell {
       this.workspace.tabs(),
       this.workspace.activeTabId(),
     );
-    this.workspaceView?.sync(
-      this.signals.length > 0,
-      this.visibleSeriesCounts(),
-    );
+    this.workspaceView?.sync(this.signals.length > 0);
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
     this.syncCursorMode();
     void this.refreshTiles();
@@ -2244,10 +2294,7 @@ export class AppShell {
       this.workspace.tabs(),
       this.workspace.activeTabId(),
     );
-    this.workspaceView?.sync(
-      this.signals.length > 0,
-      this.visibleSeriesCounts(),
-    );
+    this.workspaceView?.sync(this.signals.length > 0);
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
   }
 
@@ -2289,7 +2336,11 @@ export class AppShell {
       this.selection.clear();
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
+      this.tileWindowCache?.invalidate();
       this.tilesByPanel.clear();
+      this.banksByPanel?.clear();
+      this.presentationPlan = null;
+      this.presentationVisibleSeries = 0;
       this.missingByPanel.clear();
       clearIngestProgress(this.root);
       this.workspace.setTheme(this.prefs.theme);
@@ -2645,6 +2696,11 @@ export class AppShell {
         ).length,
       });
     }
+    const budgets = this.presentationBudgets();
+    this.applyPresentationEvictions(
+      new Set(panels.map((panel) => panel.id)),
+      budgets,
+    );
     const retainedGpuBytes =
       typeof this.workspaceView?.presentationGpuBytes === "function"
         ? this.workspaceView.presentationGpuBytes()
@@ -2656,11 +2712,16 @@ export class AppShell {
         paddingRatio: demand.paddingRatio,
         visibleSeries: demand.visibleSeries,
       })),
-      budgets: this.presentationBudgets(),
+      budgets,
       retainedCpuBytes: this.tileWindowCache.cpuBytes(),
       retainedGpuBytes,
       maxDensity,
     });
+    this.presentationPlan = densityPlan;
+    this.presentationVisibleSeries = demands.reduce(
+      (total, demand) => total + demand.visibleSeries,
+      0,
+    );
     const replacements = new Map<string, PreparedTileBank>();
     await Promise.all(
       demands.map(async (demand) => {
@@ -2750,11 +2811,7 @@ export class AppShell {
     for (const [panelId, replacement] of replacements) {
       try {
         this.publishPreparedBank(panelId, replacement);
-        this.tileWindowCache.store(
-          panelId,
-          replacement,
-          replacement.role === "overview",
-        );
+        this.tileWindowCache.store(panelId, replacement, false);
         this.tileWindowCache.setSelected(panelId, replacement.id);
       } catch (error: unknown) {
         if (refreshToken !== this.refreshToken) return;
@@ -2816,19 +2873,6 @@ export class AppShell {
     return resolved;
   }
 
-  private visibleSeriesCounts(): ReadonlyMap<string, number> {
-    const counts = new Map<string, number>();
-    for (const tab of this.workspace.tabs()) {
-      for (const panel of tab.panels) {
-        counts.set(
-          panel.id,
-          this.resolvedFor(panel).filter((series) => series.visible).length,
-        );
-      }
-    }
-    return counts;
-  }
-
   private presentationBudgets(): PresentationBudgets {
     const cpuOverride = this.prefs?.presentation_cpu_bytes;
     const gpuOverride = this.prefs?.presentation_gpu_bytes;
@@ -2846,6 +2890,96 @@ export class AppShell {
           ? Number(gpuOverride)
           : auto.gpuBytes,
     };
+  }
+
+  private applyPresentationEvictions(
+    activePanelIds: ReadonlySet<string>,
+    budgets: PresentationBudgets,
+  ): void {
+    const gpuBanks =
+      typeof this.workspaceView?.presentationUsage === "function"
+        ? this.workspaceView.presentationUsage()
+        : [];
+    const banks = this.presentationResidentBanks(activePanelIds, gpuBanks);
+    const cpuBytes = this.tileWindowCache.cpuBytes();
+    const gpuBytes = gpuBanks.reduce((total, bank) => total + bank.gpuBytes, 0);
+    const actions = planPresentationEvictions({
+      cpuBytes,
+      gpuBytes,
+      budgets,
+      banks,
+      activePanelIds,
+    });
+    for (const action of actions) {
+      if (action.medium === "gpu") {
+        this.evictGpuBank(action.panelId, action.role);
+        continue;
+      }
+      this.evictGpuBank(action.panelId, action.role);
+      this.tileWindowCache.evictCpuBank(action.panelId, action.role);
+    }
+  }
+
+  private presentationResidentBanks(
+    activePanelIds: ReadonlySet<string>,
+    gpuBanks: readonly {
+      panelId: string;
+      role: TileBankRole;
+      bankId: string;
+      cpuBytes: number;
+      gpuBytes: number;
+      selected: boolean;
+      lastUsed: number;
+    }[],
+  ): ResidentBank[] {
+    const residents = new Map<string, ResidentBank>();
+    const current = this.banksByPanel ?? new Map<string, PreparedTileBank>();
+    for (const bank of this.tileWindowCache.residentBanks()) {
+      const active = activePanelIds.has(bank.panelId);
+      residents.set(`${bank.panelId}\u0000${bank.bankId}`, {
+        panelId: bank.panelId,
+        role: bank.role,
+        cpuBytes: bank.cpuBytes,
+        gpuBytes: 0,
+        selected: bank.selected,
+        superseded:
+          active &&
+          bank.role === "detail" &&
+          current.get(bank.panelId)?.id !== bank.bankId,
+        active,
+        lastUsed: bank.lastUsed,
+      });
+    }
+    for (const bank of gpuBanks) {
+      const key = `${bank.panelId}\u0000${bank.bankId}`;
+      const resident = residents.get(key);
+      if (resident !== undefined) {
+        resident.gpuBytes = bank.gpuBytes;
+        resident.selected ||= bank.selected;
+        resident.lastUsed = Math.max(resident.lastUsed, bank.lastUsed);
+        continue;
+      }
+      const active = activePanelIds.has(bank.panelId);
+      residents.set(key, {
+        panelId: bank.panelId,
+        role: bank.role,
+        cpuBytes: bank.cpuBytes,
+        gpuBytes: bank.gpuBytes,
+        selected: bank.selected,
+        superseded:
+          active &&
+          bank.role === "detail" &&
+          current.get(bank.panelId)?.id !== bank.bankId,
+        active,
+        lastUsed: bank.lastUsed,
+      });
+    }
+    return [...residents.values()];
+  }
+
+  private evictGpuBank(panelId: string, role: TileBankRole): void {
+    const view = this.workspaceView;
+    if (typeof view?.evictGpu === "function") view.evictGpu(panelId, role);
   }
 
   private evictForPresentationRetry(activePanelIds: readonly string[]): void {
@@ -2909,9 +3043,28 @@ export class AppShell {
         ) ?? 0;
       required(this.root, ".render-ms").textContent =
         `${elapsed.toFixed(1)} ms`;
+      this.renderPresentationStatus();
     } catch (error: unknown) {
       this.reportError(error);
     }
+  }
+
+  private renderPresentationStatus(): void {
+    const stat = this.root.querySelector<HTMLElement>(".presentation-stat");
+    if (stat === null) return;
+    const plan = this.presentationPlan;
+    const text =
+      plan === null
+        ? null
+        : formatPresentationStatus(
+            plan,
+            this.presentationVisibleSeries,
+            this.presentationBudgets(),
+          );
+    stat.hidden = text === null;
+    stat.textContent = text ?? "";
+    stat.title =
+      "Managed presentation CPU/GPU budgets. Zoom, hide series, close inactive tabs, or raise an advanced budget preference to recover resolution.";
   }
 
   private applyTimeWindow(panelId: string, t0: number, t1: number): void {
@@ -3576,6 +3729,7 @@ export function shellMarkup(): string {
       <span class="source-truth">
         <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
         <span class="render-stat"> · render <span class="render-ms">— ms</span></span>
+        <span class="presentation-stat" hidden></span>
       </span>
       <span class="status-spacer"></span>
       <span class="gesture-hint"></span>

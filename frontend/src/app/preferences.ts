@@ -17,6 +17,13 @@ export const PLOT_LINE_WIDTH_SCALE = {
   default: 1,
   step: 0.25,
 } as const;
+export const PRESENTATION_BUDGET_CHOICES = [
+  null,
+  String(256 * 1024 * 1024),
+  String(512 * 1024 * 1024),
+  String(1024 * 1024 * 1024),
+  String(2 * 1024 * 1024 * 1024),
+] as const;
 
 export const FONT_FAMILIES: readonly FontFamily[] = [
   "inter",
@@ -91,6 +98,35 @@ export function clampPlotLineWidthScale(value: number): number {
     Math.max(PLOT_LINE_WIDTH_SCALE.min, value),
   );
   return Math.round(clamped * 4) / 4;
+}
+
+export function presentationBudgetLabel(value: string | null): string {
+  switch (value) {
+    case null:
+      return "Auto";
+    case String(256 * 1024 * 1024):
+      return "256 MiB";
+    case String(512 * 1024 * 1024):
+      return "512 MiB";
+    case String(1024 * 1024 * 1024):
+      return "1 GiB";
+    case String(2 * 1024 * 1024 * 1024):
+      return "2 GiB";
+    default:
+      return `${value} bytes`;
+  }
+}
+
+export function nextPresentationBudget(
+  current: string | null,
+  hardLimit = Number.POSITIVE_INFINITY,
+): string | null {
+  const choices = PRESENTATION_BUDGET_CHOICES.filter(
+    (choice) => choice === null || Number(choice) <= hardLimit,
+  );
+  if (choices.length === 0) return null;
+  const currentIndex = choices.indexOf(current as (typeof choices)[number]);
+  return choices[(currentIndex + 1) % choices.length] ?? null;
 }
 
 /**

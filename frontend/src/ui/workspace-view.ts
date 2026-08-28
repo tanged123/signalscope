@@ -17,6 +17,11 @@ import {
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
 import type { GpuContext } from "../render/gpu-context";
+import type { GpuBankResidency } from "../render/panel-render-banks";
+
+export interface WorkspaceGpuBankResidency extends GpuBankResidency {
+  panelId: string;
+}
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -36,9 +41,6 @@ export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
   private mountedKey = "";
   private cursorMode: CursorMode = "none";
-  private seriesCounts: ReadonlyMap<string, number> = new Map();
-  private useCounter = 0;
-  private readonly lastUsed = new Map<string, number>();
 
   constructor(
     private readonly root: HTMLElement,
@@ -53,7 +55,7 @@ export class WorkspaceView {
     if (this.gpu === gpu) return;
     this.gpu = gpu;
     for (const view of this.views.values()) view.setGpu(gpu);
-    if (this.views.size === 0) this.sync(hasSignals, this.seriesCounts);
+    if (this.views.size === 0) this.sync(hasSignals);
   }
 
   releaseGpu(): void {
@@ -61,8 +63,7 @@ export class WorkspaceView {
     this.gpu = null;
   }
 
-  sync(hasSignals: boolean, seriesCounts: ReadonlyMap<string, number>): void {
-    this.seriesCounts = seriesCounts;
+  sync(hasSignals: boolean): void {
     const allPanels = this.model.tabs().flatMap((tab) => tab.panels);
     const alive = new Set(allPanels.map((panel) => panel.id));
     for (const [id, view] of this.views) {
@@ -70,7 +71,6 @@ export class WorkspaceView {
         view.dispose();
         view.element.remove();
         this.views.delete(id);
-        this.lastUsed.delete(id);
       }
     }
     const key = this.structureKey(hasSignals);
@@ -80,14 +80,12 @@ export class WorkspaceView {
       if (this.model.maximizedPanelId() === null) this.applySizes();
       this.refreshPanelStates();
       this.touchActivePanels();
-      this.applyResidency();
       return;
     }
     this.mountedKey = key;
     this.root.replaceChildren();
     if (this.model.panels().length === 0) {
       this.root.appendChild(emptyState(hasSignals));
-      this.applyResidency();
       return;
     }
     const maximized = this.model.maximizedPanelId();
@@ -101,7 +99,6 @@ export class WorkspaceView {
       view.mount();
       this.refreshPanelStates();
       this.touchActivePanels();
-      this.applyResidency();
       return;
     }
     this.model.layout().forEach((row, rowIndex) => {
@@ -122,7 +119,6 @@ export class WorkspaceView {
     });
     this.refreshPanelStates();
     this.touchActivePanels();
-    this.applyResidency();
   }
 
   /** Identity of the mounted DOM: rows, cell order, maximization, empty. */
@@ -238,6 +234,16 @@ export class WorkspaceView {
     return bytes;
   }
 
+  presentationUsage(): readonly WorkspaceGpuBankResidency[] {
+    const banks: WorkspaceGpuBankResidency[] = [];
+    for (const [panelId, view] of this.views) {
+      for (const bank of view.presentationUsage()) {
+        banks.push({ panelId, ...bank });
+      }
+    }
+    return banks;
+  }
+
   selectBank(panelId: string, role: TileBankRole): boolean {
     return this.views.get(panelId)?.selectBank(role) ?? false;
   }
@@ -263,12 +269,9 @@ export class WorkspaceView {
 
   private touchActivePanels(): void {
     for (const panel of this.model.panels()) {
-      this.useCounter += 1;
-      this.lastUsed.set(panel.id, this.useCounter);
+      this.views.get(panel.id)?.touchPresentation();
     }
   }
-
-  private applyResidency(): void {}
 
   private maximizedPanelBar(maximizedId: string): HTMLElement {
     const bar = document.createElement("nav");

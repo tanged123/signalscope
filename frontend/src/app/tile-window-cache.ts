@@ -19,6 +19,16 @@ export type TileCacheLookup =
   | { kind: "stale"; response: ColumnarTileResponse }
   | { kind: "miss" };
 
+export interface CachedBankResidency {
+  panelId: string;
+  bankId: string;
+  role: TileBankRole;
+  cpuBytes: number;
+  selected: boolean;
+  pinned: boolean;
+  lastUsed: number;
+}
+
 interface SeriesResolution {
   level: number;
   maxBinSpan: number;
@@ -183,6 +193,33 @@ export class TileWindowCache {
     let bytes = 0;
     for (const entry of this.entries.values()) bytes += entry.bank.cpuBytes;
     return bytes;
+  }
+
+  residentBanks(): readonly CachedBankResidency[] {
+    return [...this.entries.values()].map((entry) => ({
+      panelId: entry.panelId,
+      bankId: entry.bank.id,
+      role: entry.bank.role,
+      cpuBytes: entry.bank.cpuBytes,
+      selected: this.selectedByPanel.get(entry.panelId) === entry.bank.id,
+      pinned: entry.pinned,
+      lastUsed: entry.lastUsed,
+    }));
+  }
+
+  evictCpuBank(panelId: string, role: TileBankRole): PreparedTileBank | null {
+    const selected = this.selectedByPanel.get(panelId);
+    const candidate = this.entriesFor(panelId)
+      .filter(
+        (entry) =>
+          entry.bank.role === role &&
+          !entry.pinned &&
+          entry.bank.id !== selected,
+      )
+      .sort((left, right) => left.lastUsed - right.lastUsed)[0];
+    if (candidate === undefined) return null;
+    this.entries.delete(entryKey(panelId, candidate.bank.id));
+    return candidate.bank;
   }
 
   evictCpu(

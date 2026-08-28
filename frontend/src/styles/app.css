@@ -1678,7 +1678,8 @@ button {
 
 .source-truth,
 .render-ms,
-.cursor-time {
+.cursor-time,
+.presentation-stat {
   color: var(--fg-2);
 }
 
@@ -2474,6 +2475,7 @@ button {
   }
 
   .source-truth .render-stat,
+  .source-truth .presentation-stat,
   .source-truth .point-count,
   .palette-hints,
   .gesture-hint {
@@ -2489,7 +2491,8 @@ button {
 @media (max-width: 1100px) {
   .palette-hints,
   .gesture-hint,
-  .source-truth .render-stat {
+  .source-truth .render-stat,
+  .source-truth .presentation-stat {
     display: none;
   }
 }

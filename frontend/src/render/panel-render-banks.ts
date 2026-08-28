@@ -1,5 +1,5 @@
 import type { PlotLayout } from "../app/plot-math";
-import type { TileBankRole } from "../app/prepared-tile-bank";
+import type { PreparedTileBank, TileBankRole } from "../app/prepared-tile-bank";
 import { ChartHost, type ChartRenderRequest } from "./chart-host";
 import type { GpuContext } from "./gpu-context";
 
@@ -8,14 +8,26 @@ interface BankState {
   host: ChartHost | null;
   ready: Promise<ChartHost | null> | null;
   pending: ChartRenderRequest | null;
+  bank: PreparedTileBank | null;
+  lastUsed: number;
   generation: number;
 }
 
 const ROLES: readonly TileBankRole[] = ["overview", "detail"];
 
+export interface GpuBankResidency {
+  role: TileBankRole;
+  bankId: string;
+  cpuBytes: number;
+  gpuBytes: number;
+  selected: boolean;
+  lastUsed: number;
+}
+
 export class PanelRenderBanks {
   private readonly states = new Map<TileBankRole, BankState>();
   private selected: TileBankRole | null = null;
+  private useCounter = 0;
   private disposed = false;
 
   constructor(
@@ -36,6 +48,8 @@ export class PanelRenderBanks {
         host: null,
         ready: null,
         pending: null,
+        bank: null,
+        lastUsed: 0,
         generation: 0,
       });
     }
@@ -45,6 +59,8 @@ export class PanelRenderBanks {
     if (this.disposed) return 0;
     const state = this.state(role);
     state.pending = request;
+    state.bank = request.bank;
+    this.touch(state);
     if (state.host !== null) {
       state.pending = null;
       return state.host.render(request);
@@ -63,6 +79,7 @@ export class PanelRenderBanks {
       candidate.element.hidden = true;
     state.element.hidden = false;
     this.selected = role;
+    this.touch(state);
     return true;
   }
 
@@ -92,6 +109,23 @@ export class PanelRenderBanks {
     return bytes;
   }
 
+  residency(): readonly GpuBankResidency[] {
+    return ROLES.flatMap((role) => {
+      const state = this.state(role);
+      if (state.host === null || state.bank === null) return [];
+      return [
+        {
+          role,
+          bankId: state.bank.id,
+          cpuBytes: state.bank.cpuBytes,
+          gpuBytes: state.host.residentGpuBytes(),
+          selected: this.selected === role,
+          lastUsed: state.lastUsed,
+        },
+      ];
+    });
+  }
+
   evict(role: TileBankRole): void {
     const state = this.state(role);
     state.generation += 1;
@@ -99,8 +133,15 @@ export class PanelRenderBanks {
     state.host = null;
     state.ready = null;
     state.pending = null;
+    state.bank = null;
     state.element.hidden = true;
     if (this.selected === role) this.selected = null;
+  }
+
+  touchAll(): void {
+    for (const state of this.states.values()) {
+      if (state.host !== null || state.pending !== null) this.touch(state);
+    }
   }
 
   resize(): void {
@@ -122,6 +163,7 @@ export class PanelRenderBanks {
       state.host = null;
       state.ready = null;
       state.pending = null;
+      state.bank = null;
     }
     this.selected = null;
   }
@@ -148,6 +190,7 @@ export class PanelRenderBanks {
           console.error(`ChartGPU ${role} bank initialization failed`, error);
           state.ready = null;
           state.pending = null;
+          state.bank = null;
         }
         return null;
       });
@@ -171,5 +214,9 @@ export class PanelRenderBanks {
     if (state === undefined)
       throw new Error(`unknown chart bank role: ${role}`);
     return state;
+  }
+
+  private touch(state: BankState): void {
+    state.lastUsed = ++this.useCounter;
   }
 }

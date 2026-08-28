@@ -33,6 +33,7 @@ import {
   bundleCompletionEntries,
   clearIngestProgress,
   exportSourceOptions,
+  formatPresentationStatus,
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
@@ -1214,6 +1215,49 @@ describe("source dock rail", () => {
     );
   });
 
+  it("only surfaces presentation pressure at the target threshold", () => {
+    const budgets = { cpuBytes: 100, gpuBytes: 100 };
+    expect(
+      formatPresentationStatus(
+        {
+          density: 2,
+          targetDensity: 2,
+          limited: false,
+          estimatedCpuBytes: 79,
+          estimatedGpuBytes: 79,
+        },
+        5_000,
+        budgets,
+      ),
+    ).toBeNull();
+    expect(
+      formatPresentationStatus(
+        {
+          density: 2,
+          targetDensity: 2,
+          limited: false,
+          estimatedCpuBytes: 82,
+          estimatedGpuBytes: 70,
+        },
+        5_000,
+        budgets,
+      ),
+    ).toBe("presentation 82%");
+    expect(
+      formatPresentationStatus(
+        {
+          density: 0.8,
+          targetDensity: 2,
+          limited: true,
+          estimatedCpuBytes: 120,
+          estimatedGpuBytes: 120,
+        },
+        5_000,
+        budgets,
+      ),
+    ).toBe("resolution limited · 0.8/2.0 bins/px · 5,000 series");
+  });
+
   it("does not render a duplicate per-source listing", () => {
     const markup = shellMarkup();
     expect(markup).not.toContain('class="source-rows"');
@@ -1500,9 +1544,11 @@ describe("appearance settings entries", () => {
     updatePreferences(patch: Record<string, unknown>): void;
     toggleTheme(): void;
     recipeDirectoryEntries(): [];
+    scheduleRefresh(delay?: number): void;
     settingsEntries(): Array<{
       title: string;
       hint: string;
+      run: () => void;
       adjust?: (direction: -1 | 1) => void;
     }>;
   }
@@ -1515,6 +1561,7 @@ describe("appearance settings entries", () => {
     };
     probe.toggleTheme = vi.fn();
     probe.recipeDirectoryEntries = () => [];
+    probe.scheduleRefresh = vi.fn();
     return probe;
   }
 
@@ -1534,5 +1581,18 @@ describe("appearance settings entries", () => {
     probe.prefs.plot_line_width_scale = 1;
     entry?.adjust?.(-1);
     expect(probe.prefs.plot_line_width_scale).toBe(0.75);
+  });
+
+  it("cycles presentation budgets and schedules an upgrade refresh", () => {
+    const probe = appearanceProbe();
+    const entry = probe
+      .settingsEntries()
+      .find(({ title }) => title === "Presentation CPU budget");
+
+    expect(entry?.hint).toBe("Auto");
+    entry?.run();
+
+    expect(probe.prefs.presentation_cpu_bytes).toBe("268435456");
+    expect(probe.scheduleRefresh).toHaveBeenCalledWith(250);
   });
 });

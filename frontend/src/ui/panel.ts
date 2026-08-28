@@ -53,7 +53,10 @@ import {
   type TileBankRole,
 } from "../app/prepared-tile-bank";
 import type { GpuContext } from "../render/gpu-context";
-import { PanelRenderBanks } from "../render/panel-render-banks";
+import {
+  PanelRenderBanks,
+  type GpuBankResidency,
+} from "../render/panel-render-banks";
 import {
   marker,
   OverlayRenderer,
@@ -991,6 +994,14 @@ export class PanelView {
 
   residentGpuBytes(): number {
     return this.chartBanks?.residentGpuBytes() ?? 0;
+  }
+
+  presentationUsage(): readonly GpuBankResidency[] {
+    return this.chartBanks?.residency() ?? [];
+  }
+
+  touchPresentation(): void {
+    this.chartBanks?.touchAll();
   }
 
   private resolvePlotRanges(
