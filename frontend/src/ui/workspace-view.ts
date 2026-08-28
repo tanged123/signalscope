@@ -244,8 +244,12 @@ export class WorkspaceView {
     return banks;
   }
 
-  selectBank(panelId: string, role: TileBankRole): boolean {
-    return this.views.get(panelId)?.selectBank(role) ?? false;
+  selectBank(
+    panelId: string,
+    role: TileBankRole,
+    window?: { t0: number; t1: number },
+  ): boolean {
+    return this.views.get(panelId)?.selectBank(role, window) ?? false;
   }
 
   evictGpu(panelId: string, role: TileBankRole): void {

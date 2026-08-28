@@ -105,10 +105,12 @@ type RefreshShell = {
   refreshToken: number;
   refreshPromise: Promise<void> | null;
   refreshQueued: boolean;
+  refreshTimer: number | null;
   tilesByPanel: Map<string, ColumnarTileResponse>;
   banksByPanel: Map<string, PreparedTileBank>;
   missingByPanel: Map<string, string[]>;
   refreshTiles(): Promise<void>;
+  scheduleRefresh(delay?: number): void;
 };
 
 function refreshShell(
@@ -133,6 +135,7 @@ function refreshShell(
   shell.refreshToken = 0;
   shell.refreshPromise = null;
   shell.refreshQueued = false;
+  shell.refreshTimer = null;
   shell.tilesByPanel = new Map();
   shell.banksByPanel = new Map();
   shell.missingByPanel = new Map();
@@ -442,6 +445,37 @@ describe("adaptive tile refresh", () => {
     );
   });
 
+  it("invalidates an in-flight resize response as soon as a pan schedules refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = deferred<ColumnarTileResponse>();
+      const second = deferred<ColumnarTileResponse>();
+      const queryTiles = vi
+        .fn<DataPlane["queryTiles"]>()
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      const shell = refreshShell(queryTiles);
+
+      const resizeRefresh = shell.refreshTiles();
+      await Promise.resolve();
+      shell.scheduleRefresh();
+      first.resolve(tileResponse("resize"));
+      await resizeRefresh;
+
+      expect(shell.renderTiles).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      second.resolve(tileResponse("pan"));
+      await vi.runAllTimersAsync();
+      await shell.refreshPromise;
+
+      expect(shell.tileWindowCache.get("panel-1")?.response.requestId).toBe(
+        "tiles-pan",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("prewarms every replacement before publishing the map", async () => {
     const order: string[] = [];
     prepareResponseFeeds.mockImplementation(() => {
@@ -559,7 +593,11 @@ describe("adaptive tile refresh", () => {
       };
       workspaceView: {
         resetYAxis(id: string): void;
-        selectBank(id: string, role: "overview" | "detail"): boolean;
+        selectBank(
+          id: string,
+          role: "overview" | "detail",
+          window: { t0: number; t1: number },
+        ): boolean;
       };
       tileWindowCache: TileWindowCache;
       tilesByPanel: Map<string, ColumnarTileResponse>;
@@ -578,9 +616,9 @@ describe("adaptive tile refresh", () => {
     };
     shell.workspaceView = {
       resetYAxis: vi.fn(),
-      selectBank: vi.fn((id: string, role: "overview" | "detail") => {
+      selectBank: vi.fn((id, role, window) => {
         order.push("select");
-        selected.push(id, role);
+        selected.push(id, role, window);
         return true;
       }),
     };
@@ -597,7 +635,7 @@ describe("adaptive tile refresh", () => {
 
     shell.fitPanelView("panel-1");
 
-    expect(selected).toEqual(["panel-1", "overview"]);
+    expect(selected).toEqual(["panel-1", "overview", { t0: 0, t1: 100 }]);
     expect(order).toEqual(["select", "window"]);
   });
 });

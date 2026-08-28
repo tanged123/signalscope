@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
     render: ReturnType<typeof vi.fn>;
     layout: ReturnType<typeof vi.fn>;
     resize: ReturnType<typeof vi.fn>;
+    setRangesOnly: ReturnType<typeof vi.fn>;
     capture: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
   }>,
@@ -44,6 +45,7 @@ function setupHostMocks(): void {
       render: vi.fn(() => 12),
       layout: vi.fn(() => layout),
       resize: vi.fn(),
+      setRangesOnly: vi.fn(),
       capture: vi.fn(() => Promise.resolve(document.createElement("canvas"))),
       dispose: vi.fn(),
     };
@@ -104,7 +106,73 @@ describe("PanelRenderBanks", () => {
     await expect(banks.capture()).resolves.toBeInstanceOf(HTMLCanvasElement);
     banks.resize();
     expect(state.hosts[0]?.resize).toHaveBeenCalledOnce();
-    expect(state.hosts[1]?.resize).toHaveBeenCalledOnce();
+    expect(state.hosts[1]?.resize).toHaveBeenCalledTimes(2);
+  });
+
+  it("resizes a selected host before applying its current ranges", async () => {
+    setupHostMocks();
+    const banks = new PanelRenderBanks(document.createElement("div"), gpu());
+    banks.publish("overview", request("overview"));
+    await settle();
+
+    expect(
+      banks.select("overview", {
+        xRange: { min: 20, max: 30 },
+        yRange: [-2, 4],
+      }),
+    ).toBe(true);
+
+    const host = state.hosts[0];
+    expect(host?.resize).toHaveBeenCalledOnce();
+    expect(host?.setRangesOnly).toHaveBeenCalledWith(
+      { min: 20, max: 30 },
+      [-2, 4],
+    );
+    expect(host?.resize.mock.invocationCallOrder[0]).toBeLessThan(
+      host?.setRangesOnly.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("resizes and ranges a selected host when async creation finishes", async () => {
+    setupHostMocks();
+    const banks = new PanelRenderBanks(document.createElement("div"), gpu());
+    banks.publish("detail", request("detail"));
+
+    expect(
+      banks.select("detail", {
+        xRange: { min: 40, max: 50 },
+        yRange: [1, 2],
+      }),
+    ).toBe(true);
+    await settle();
+
+    expect(state.hosts[0]?.resize).toHaveBeenCalledOnce();
+    expect(state.hosts[0]?.setRangesOnly).toHaveBeenCalledWith(
+      { min: 40, max: 50 },
+      [1, 2],
+    );
+  });
+
+  it("updates ranges without resizing an already selected bank again", async () => {
+    setupHostMocks();
+    const banks = new PanelRenderBanks(document.createElement("div"), gpu());
+    banks.publish("detail", request("detail"));
+    await settle();
+    banks.select("detail", {
+      xRange: { min: 0, max: 10 },
+      yRange: [0, 1],
+    });
+
+    banks.select("detail", {
+      xRange: { min: 2, max: 4 },
+      yRange: [-1, 2],
+    });
+
+    expect(state.hosts[0]?.resize).toHaveBeenCalledOnce();
+    expect(state.hosts[0]?.setRangesOnly).toHaveBeenLastCalledWith(
+      { min: 2, max: 4 },
+      [-1, 2],
+    );
   });
 
   it("evicts one role without removing its stable hidden container", async () => {

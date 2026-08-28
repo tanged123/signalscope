@@ -2748,7 +2748,11 @@ export class AppShell {
           nextBanks.set(demand.panel.id, lookup.bank);
           nextTiles.set(demand.panel.id, lookup.bank.response);
           this.tileWindowCache.setSelected(demand.panel.id, lookup.bank.id);
-          this.workspaceView?.selectBank(demand.panel.id, demand.role);
+          this.workspaceView?.selectBank(
+            demand.panel.id,
+            demand.role,
+            demand.window,
+          );
           return;
         }
         const fallback = lookup.kind === "stale" ? lookup.bank : null;
@@ -2756,7 +2760,11 @@ export class AppShell {
           nextBanks.set(demand.panel.id, fallback);
           nextTiles.set(demand.panel.id, fallback.response);
           this.tileWindowCache.setSelected(demand.panel.id, fallback.id);
-          this.workspaceView?.selectBank(demand.panel.id, demand.role);
+          this.workspaceView?.selectBank(
+            demand.panel.id,
+            demand.role,
+            demand.window,
+          );
         }
         let response: ColumnarTileResponse;
         try {
@@ -2823,7 +2831,11 @@ export class AppShell {
     for (const [panelId, replacement] of replacements) {
       try {
         this.publishPreparedBank(panelId, replacement);
-        this.workspaceView?.selectBank(panelId, replacement.role);
+        this.workspaceView?.selectBank(
+          panelId,
+          replacement.role,
+          replacement.visibleWindow,
+        );
         this.tileWindowCache.store(panelId, replacement, false);
         this.tileWindowCache.setSelected(panelId, replacement.id);
       } catch (error: unknown) {
@@ -3124,6 +3136,7 @@ export class AppShell {
   }
 
   private scheduleRefresh(delay = 50): void {
+    this.refreshToken += 1;
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => {
       this.refreshTimer = null;
@@ -3152,7 +3165,7 @@ export class AppShell {
       this.banksByPanel.set(panelId, overview);
       this.tilesByPanel.set(panelId, overview.response);
       this.tileWindowCache.setSelected(panelId, overview.id);
-      this.workspaceView?.selectBank(panelId, "overview");
+      this.workspaceView?.selectBank(panelId, "overview", extent);
     }
     this.applyTimeWindow(panelId, extent.t0, extent.t1);
     this.commitHistory();

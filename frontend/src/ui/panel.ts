@@ -520,6 +520,10 @@ export class PanelView {
   private rosterCleanup: (() => void) | null = null;
   private bindingCleanup: (() => void) | null = null;
   private rulesCleanup: (() => void) | null = null;
+  private readonly resizeObserver: ResizeObserver;
+  private readonly onWindowResize: () => void;
+  private devicePixelRatio: number;
+  private resizePending = false;
 
   constructor(
     private readonly id: string,
@@ -534,6 +538,14 @@ export class PanelView {
     this.chartHostElement = required<HTMLElement>(this.element, ".chart-host");
     this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
     this.overlayRenderer = new OverlayRenderer(this.overlay);
+    this.devicePixelRatio = currentDevicePixelRatio();
+    this.onWindowResize = () => {
+      const next = currentDevicePixelRatio();
+      if (next === this.devicePixelRatio) return;
+      this.devicePixelRatio = next;
+      this.handlePresentationResize();
+    };
+    window.addEventListener("resize", this.onWindowResize);
     this.bind();
     this.interactions = new PlotInteractionController(this.overlay, {
       layout: () => this.activeLayout(),
@@ -554,7 +566,7 @@ export class PanelView {
         this.plotClick(x, y, modifiers);
       },
       setGesture: (hint) => {
-        this.callbacks.onGesture(this.id, hint);
+        this.handleGesture(hint);
       },
       setBox: (box) => {
         this.box = box;
@@ -576,10 +588,10 @@ export class PanelView {
         this.beginAxisEdit(axis);
       },
     });
-    new ResizeObserver(() => {
-      this.chartBanks?.resize();
-      this.callbacks.onResized(this.id);
-    }).observe(this.chartHostElement);
+    this.resizeObserver = new ResizeObserver(() => {
+      this.handlePresentationResize();
+    });
+    this.resizeObserver.observe(this.chartHostElement);
   }
 
   setGpu(gpu: GpuContext): void {
@@ -605,12 +617,20 @@ export class PanelView {
       return;
     }
     this.chartBanks = new PanelRenderBanks(this.chartHostElement, this.gpu);
-    const hadDetailRequest = this.pendingChartRenders.has("detail");
+    const selectedRequest =
+      this.pendingChartRenders.get("detail") ??
+      this.pendingChartRenders.get("overview") ??
+      null;
     for (const [role, request] of this.pendingChartRenders) {
       this.chartBanks.publish(role, request);
     }
     this.pendingChartRenders.clear();
-    if (hadDetailRequest) this.chartBanks.select("detail");
+    if (selectedRequest !== null) {
+      this.chartBanks.select(selectedRequest.bank.role, {
+        xRange: selectedRequest.xRange,
+        yRange: selectedRequest.yRange,
+      });
+    }
   }
 
   private bind(): void {
@@ -829,8 +849,10 @@ export class PanelView {
     ) {
       const request = this.requestForBank(bank, window);
       if (request !== null) {
-        this.chartBanks.select(bank.role);
-        this.chartBanks.setRangesOnly(request.xRange, request.yRange);
+        this.chartBanks.select(bank.role, {
+          xRange: request.xRange,
+          yRange: request.yRange,
+        });
         this.lastTiles = bank.response;
         this.lastBankId = bank.id;
         this.lastWindow = { ...window };
@@ -928,8 +950,10 @@ export class PanelView {
       this.publishedBanks.get(role)?.id === bank.id &&
       request !== null
     ) {
-      this.chartBanks.select(role);
-      this.chartBanks.setRangesOnly(request.xRange, request.yRange);
+      this.chartBanks.select(role, {
+        xRange: request.xRange,
+        yRange: request.yRange,
+      });
       return 0;
     }
     return request === null ? 0 : this.publishBank(role, request);
@@ -1028,11 +1052,31 @@ export class PanelView {
       return 0;
     }
     const elapsed = this.chartBanks.publish(role, request);
-    if (this.chartBanks.selectedRole() === null) this.chartBanks.select(role);
+    if (this.chartBanks.selectedRole() === null) {
+      this.chartBanks.select(role, {
+        xRange: request.xRange,
+        yRange: request.yRange,
+      });
+    }
     return elapsed;
   }
 
-  selectBank(role: TileBankRole): boolean {
+  selectBank(
+    role: TileBankRole,
+    window: { t0: number; t1: number } | null = this.lastWindow,
+  ): boolean {
+    const bank = this.publishedBanks.get(role);
+    if (bank !== undefined && window !== null) {
+      const request = this.requestForBank(bank, window);
+      if (request !== null) {
+        return (
+          this.chartBanks?.select(role, {
+            xRange: request.xRange,
+            yRange: request.yRange,
+          }) ?? false
+        );
+      }
+    }
     return this.chartBanks?.select(role) ?? false;
   }
 
@@ -1149,6 +1193,8 @@ export class PanelView {
     this.disposed = true;
     this.releaseGpu();
     this.interactions.dispose();
+    this.resizeObserver.disconnect();
+    window.removeEventListener("resize", this.onWindowResize);
   }
 
   releaseGpu(): void {
@@ -1160,6 +1206,21 @@ export class PanelView {
 
   private activeLayout(): PlotLayout | null {
     return this.chartBanks?.layout() ?? null;
+  }
+
+  private handlePresentationResize(): void {
+    if (this.interactions.isDragging()) {
+      this.resizePending = true;
+      return;
+    }
+    this.resizePending = false;
+    this.chartBanks?.resize();
+    this.callbacks.onResized(this.id);
+  }
+
+  private handleGesture(hint: string | null): void {
+    if (hint === null && this.resizePending) this.handlePresentationResize();
+    this.callbacks.onGesture(this.id, hint);
   }
 
   panelRect(): DOMRect {
@@ -2356,6 +2417,12 @@ export class PanelView {
     this.inspectorPath = null;
     this.element.querySelector(".series-inspector")?.remove();
   }
+}
+
+function currentDevicePixelRatio(): number {
+  return Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+    ? window.devicePixelRatio
+    : 1;
 }
 
 function overrideTarget(

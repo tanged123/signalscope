@@ -1,4 +1,4 @@
-import type { PlotLayout } from "../app/plot-math";
+import type { PlotLayout, Range } from "../app/plot-math";
 import type { PreparedTileBank, TileBankRole } from "../app/prepared-tile-bank";
 import { ChartHost, type ChartRenderRequest } from "./chart-host";
 import type { GpuContext } from "./gpu-context";
@@ -11,6 +11,7 @@ interface BankState {
   bank: PreparedTileBank | null;
   lastUsed: number;
   generation: number;
+  selectedRanges: BankSelectionRanges | null;
 }
 
 const ROLES: readonly TileBankRole[] = ["overview", "detail"];
@@ -22,6 +23,11 @@ export interface GpuBankResidency {
   gpuBytes: number;
   selected: boolean;
   lastUsed: number;
+}
+
+export interface BankSelectionRanges {
+  xRange: Range;
+  yRange: readonly [number, number];
 }
 
 export class PanelRenderBanks {
@@ -51,6 +57,7 @@ export class PanelRenderBanks {
         bank: null,
         lastUsed: 0,
         generation: 0,
+        selectedRanges: null,
       });
     }
   }
@@ -69,17 +76,20 @@ export class PanelRenderBanks {
     return 0;
   }
 
-  select(role: TileBankRole): boolean {
+  select(role: TileBankRole, ranges?: BankSelectionRanges): boolean {
     if (this.disposed) return false;
     const state = this.state(role);
     if (state.host === null && state.ready === null && state.pending === null) {
       return false;
     }
+    const activating = this.selected !== role || state.element.hidden;
     for (const candidate of this.states.values())
       candidate.element.hidden = true;
     state.element.hidden = false;
     this.selected = role;
+    state.selectedRanges = ranges ?? null;
     this.touch(state);
+    this.prepareSelectedHost(state, activating);
     return true;
   }
 
@@ -134,6 +144,7 @@ export class PanelRenderBanks {
     state.ready = null;
     state.pending = null;
     state.bank = null;
+    state.selectedRanges = null;
     state.element.hidden = true;
     if (this.selected === role) this.selected = null;
   }
@@ -164,6 +175,7 @@ export class PanelRenderBanks {
       state.ready = null;
       state.pending = null;
       state.bank = null;
+      state.selectedRanges = null;
     }
     this.selected = null;
   }
@@ -183,6 +195,7 @@ export class PanelRenderBanks {
           state.pending = null;
           host.render(request);
         }
+        if (this.selected === role) this.prepareSelectedHost(state);
         return host;
       })
       .catch((error: unknown) => {
@@ -201,6 +214,17 @@ export class PanelRenderBanks {
     return this.selected === null
       ? null
       : (this.states.get(this.selected)?.host ?? null);
+  }
+
+  private prepareSelectedHost(state: BankState, resize = true): void {
+    if (state.host === null) return;
+    if (resize) state.host.resize();
+    if (state.selectedRanges !== null) {
+      state.host.setRangesOnly(
+        state.selectedRanges.xRange,
+        state.selectedRanges.yRange,
+      );
+    }
   }
 
   private async selectedReady(): Promise<ChartHost | null> {
