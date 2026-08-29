@@ -51,16 +51,3 @@ real render path.
 
 This amends the render-path portion of ADR 0036. Its tile budget, gap bits,
 finite extrema, and binary transport decisions remain authoritative.
-
-## Amendment: explicit external surface sizing
-
-As of 2026-08-28, SignalScope carries a scoped ChartGPU change under ADR 0040.
-External render frames retain the last explicitly committed CSS size and device
-pixel ratio; only `resize()` adopts new surface metrics. SignalScope owns that
-commit point, defers it across active gestures, and then refreshes physical-pixel
-tile density. Auto-render mode retains ChartGPU's per-frame resize behavior.
-
-This supersedes the statement above that there is no fork. It prevents one pan
-frame from mixing a new backing-store geometry with ranges calculated from the
-previous plot layout while preserving high-DPI rendering after the resize is
-committed.
