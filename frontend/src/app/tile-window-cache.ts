@@ -22,8 +22,14 @@ type CacheEntry = CachedPanelTiles & {
   resolutions: readonly SeriesResolution[];
 };
 
+interface PanelEntries {
+  overview: CacheEntry;
+  detail: CacheEntry | null;
+  current: CacheEntry;
+}
+
 export class TileWindowCache {
-  private readonly entries = new Map<string, CacheEntry>();
+  private readonly entries = new Map<string, PanelEntries>();
 
   static padWindow(t0: number, t1: number): { t0: number; t1: number } {
     const span = t1 - t0;
@@ -91,7 +97,7 @@ export class TileWindowCache {
   }
 
   get(panelId: string): CachedPanelTiles | null {
-    return this.entries.get(panelId) ?? null;
+    return this.entries.get(panelId)?.current ?? null;
   }
 
   lookup(
@@ -100,35 +106,50 @@ export class TileWindowCache {
     visible: { t0: number; t1: number },
     devicePixelWidth: number,
   ): TileCacheLookup {
-    const entry = this.entries.get(panelId);
-    if (
-      entry === undefined ||
-      entry.idsKey !== idsKey ||
-      visible.t0 < entry.window.t0 ||
-      visible.t1 > entry.window.t1
-    ) {
-      return { kind: "miss" };
-    }
-
     const pixels = Number.isFinite(devicePixelWidth)
       ? Math.max(1, Math.floor(devicePixelWidth))
       : 1;
     const visibleSpan = visible.t1 - visible.t0;
     const pixelSpan = visibleSpan / pixels;
-    const current = entry.resolutions.every((resolution, index) => {
-      if (resolution.level === 0) return true;
-      const series = entry.response.series[index];
-      return (
-        series !== undefined &&
-        Number.isFinite(pixelSpan) &&
-        pixelSpan > 0 &&
-        countVisibleBins(series.bins, visible) > pixels &&
-        resolution.maxBinSpan <= pixelSpan
-      );
-    });
-    return current
-      ? { kind: "current", response: entry.response }
-      : { kind: "stale", response: entry.response };
+    const candidates = this.coveringEntries(panelId, idsKey, visible);
+    const current = candidates.find((entry) =>
+      entry.resolutions.every((resolution, index) => {
+        if (resolution.level === 0) return true;
+        const series = entry.response.series[index];
+        return (
+          series !== undefined &&
+          Number.isFinite(pixelSpan) &&
+          pixelSpan > 0 &&
+          countVisibleBins(series.bins, visible) > pixels &&
+          resolution.maxBinSpan <= pixelSpan
+        );
+      }),
+    );
+    if (current !== undefined) {
+      return { kind: "current", response: current.response };
+    }
+    const stale = candidates[0];
+    return stale === undefined
+      ? { kind: "miss" }
+      : { kind: "stale", response: stale.response };
+  }
+
+  covering(
+    panelId: string,
+    idsKey: string,
+    visible: { t0: number; t1: number },
+  ): ColumnarTileResponse | null {
+    return this.coveringEntries(panelId, idsKey, visible)[0]?.response ?? null;
+  }
+
+  coveringCurrent(
+    panelId: string,
+    visible: { t0: number; t1: number },
+  ): ColumnarTileResponse | null {
+    const entries = this.entries.get(panelId);
+    return entries === undefined
+      ? null
+      : this.covering(panelId, entries.current.idsKey, visible);
   }
 
   /**
@@ -142,7 +163,7 @@ export class TileWindowCache {
     t0: number,
     t1: number,
   ): ColumnarTileResponse | null {
-    const entry = this.entries.get(panelId);
+    const entry = this.entries.get(panelId)?.current;
     if (
       entry === undefined ||
       entry.idsKey !== idsKey ||
@@ -163,21 +184,45 @@ export class TileWindowCache {
       "requestedDevicePixels" in entry
         ? entry.requestedDevicePixels
         : Math.max(1, Math.ceil(entry.pixelWidth));
-    this.entries.set(panelId, {
+    const cached: CacheEntry = {
       ...entry,
       requestedDevicePixels,
       resolutions: entry.response.series.map((series) => ({
         level: series.level,
         maxBinSpan: maxBinSpan(series.bins),
       })),
+    };
+    const existing = this.entries.get(panelId);
+    if (existing === undefined || existing.overview.idsKey !== cached.idsKey) {
+      this.entries.set(panelId, {
+        overview: cached,
+        detail: null,
+        current: cached,
+      });
+      return;
+    }
+    const overviewSpan = windowSpan(existing.overview.window);
+    const cachedSpan = windowSpan(cached.window);
+    if (cachedSpan >= overviewSpan) {
+      const detail =
+        cachedSpan > overviewSpan ? existing.overview : existing.detail;
+      this.entries.set(panelId, { overview: cached, detail, current: cached });
+      return;
+    }
+    this.entries.set(panelId, {
+      overview: existing.overview,
+      detail: cached,
+      current: cached,
     });
   }
 
   binCount(excludingPanelIds: ReadonlySet<string> = new Set()): number {
     let count = 0;
-    for (const [panelId, entry] of this.entries) {
+    for (const [panelId, entries] of this.entries) {
       if (excludingPanelIds.has(panelId)) continue;
-      for (const series of entry.response.series) count += series.bins.count;
+      for (const entry of uniqueEntries(entries)) {
+        for (const series of entry.response.series) count += series.bins.count;
+      }
     }
     return count;
   }
@@ -186,6 +231,36 @@ export class TileWindowCache {
     if (panelId === undefined) this.entries.clear();
     else this.entries.delete(panelId);
   }
+
+  private coveringEntries(
+    panelId: string,
+    idsKey: string,
+    visible: { t0: number; t1: number },
+  ): CacheEntry[] {
+    const entries = this.entries.get(panelId);
+    if (entries === undefined) return [];
+    return uniqueEntries(entries)
+      .filter(
+        (entry) =>
+          entry.idsKey === idsKey &&
+          visible.t0 >= entry.window.t0 &&
+          visible.t1 <= entry.window.t1,
+      )
+      .sort(
+        (left, right) => windowSpan(left.window) - windowSpan(right.window),
+      );
+  }
+}
+
+function uniqueEntries(entries: PanelEntries): CacheEntry[] {
+  return entries.detail === null || entries.detail === entries.overview
+    ? [entries.overview]
+    : [entries.detail, entries.overview];
+}
+
+function windowSpan(window: { t0: number; t1: number }): number {
+  const span = window.t1 - window.t0;
+  return Number.isFinite(span) && span > 0 ? span : 0;
 }
 
 function maxBinSpan(bins: BinColumns): number {

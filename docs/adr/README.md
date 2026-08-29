@@ -48,5 +48,6 @@ Accepted decisions:
 44. [Adaptive-resolution presentation](0044-adaptive-resolution-presentation.md)
 45. [Constant-work ChartGPU viewport updates](0045-constant-work-chart-viewport.md)
 46. [Uniform presentation admission](0046-uniform-presentation-admission.md)
+47. [Overview/detail tile retention](0047-overview-detail-tile-retention.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

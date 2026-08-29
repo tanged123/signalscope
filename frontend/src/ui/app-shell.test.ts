@@ -375,6 +375,62 @@ describe("adaptive tile refresh", () => {
     expect(shell.scheduleRefresh).toHaveBeenCalledOnce();
   });
 
+  it("publishes a retained overview before scheduling zoom-out refinement", () => {
+    const shell = Object.create(AppShell.prototype) as {
+      workspace: {
+        panel(id: string): { id: string } | undefined;
+        panels(): { id: string }[];
+        linkedTime(): { linked: boolean; t0: number; t1: number };
+        setLinkedWindow(t0: number, t1: number): void;
+      };
+      tileWindowCache: TileWindowCache;
+      tilesByPanel: Map<string, ColumnarTileResponse>;
+      renderWindowReadout: ReturnType<typeof vi.fn>;
+      markHistoryDirty: ReturnType<typeof vi.fn>;
+      scheduleRender: ReturnType<typeof vi.fn>;
+      scheduleRefresh: ReturnType<typeof vi.fn>;
+      applyTimeWindow(panelId: string, t0: number, t1: number): void;
+    };
+    const panel = { id: "panel-1" };
+    let window = { linked: true, t0: 45, t1: 55 };
+    shell.workspace = {
+      panel: (id) => (id === panel.id ? panel : undefined),
+      panels: () => [panel],
+      linkedTime: () => window,
+      setLinkedWindow: (t0, t1) => {
+        window = { linked: true, t0, t1 };
+      },
+    };
+    shell.tileWindowCache = new TileWindowCache();
+    const overview = tileResponse("overview");
+    const detail = tileResponse("detail");
+    shell.tileWindowCache.store(panel.id, {
+      response: overview,
+      window: { t0: 0, t1: 100 },
+      pixelWidth: 1000,
+      requestedDevicePixels: 2000,
+      idsKey: "1",
+    });
+    shell.tileWindowCache.store(panel.id, {
+      response: detail,
+      window: { t0: 40, t1: 60 },
+      pixelWidth: 1000,
+      requestedDevicePixels: 2000,
+      idsKey: "1",
+    });
+    shell.tilesByPanel = new Map([[panel.id, detail]]);
+    shell.renderWindowReadout = vi.fn();
+    shell.markHistoryDirty = vi.fn();
+    shell.scheduleRender = vi.fn();
+    shell.scheduleRefresh = vi.fn();
+
+    shell.applyTimeWindow(panel.id, 10, 90);
+
+    expect(shell.tilesByPanel.get(panel.id)).toBe(overview);
+    expect(shell.scheduleRender).toHaveBeenCalledOnce();
+    expect(shell.scheduleRefresh).toHaveBeenCalledOnce();
+  });
+
   it("keeps stale drawable tiles while refinement is pending", async () => {
     const pending = deferred<ColumnarTileResponse>();
     const queryTiles = vi.fn(() => pending.promise);

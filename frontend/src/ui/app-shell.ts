@@ -2767,6 +2767,7 @@ export class AppShell {
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
     }
+    this.publishCachedCoverage();
     this.markHistoryDirty(`range:${panelId}`);
     this.scheduleRender();
     this.scheduleRefresh();
@@ -2783,6 +2784,22 @@ export class AppShell {
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
     this.markHistoryDirty(`range:${panelId}`);
     this.scheduleRender();
+  }
+
+  private publishCachedCoverage(): void {
+    let next: Map<string, ColumnarTileResponse> | null = null;
+    for (const panel of this.workspace.panels()) {
+      const response = this.tileWindowCache.coveringCurrent(
+        panel.id,
+        this.effectiveWindow(panel),
+      );
+      if (response === null || this.tilesByPanel.get(panel.id) === response) {
+        continue;
+      }
+      next ??= new Map(this.tilesByPanel);
+      next.set(panel.id, response);
+    }
+    if (next !== null) this.tilesByPanel = next;
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {

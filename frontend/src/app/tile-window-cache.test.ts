@@ -114,6 +114,34 @@ test("level-zero responses remain current at any covered zoom", () => {
   });
 });
 
+test("retains a wide overview when a deep detail becomes current", () => {
+  const cache = new TileWindowCache();
+  const overview = {
+    ...entry(100, 4),
+    response: { ...entry(100, 4).response, requestId: "overview" },
+    window: { t0: 0, t1: 100 },
+  };
+  const detail = {
+    ...entry(20, 0),
+    response: { ...entry(20, 0).response, requestId: "detail" },
+    window: { t0: 40, t1: 60 },
+  };
+
+  cache.store("panel", overview);
+  cache.store("panel", detail);
+
+  expect(cache.get("panel")?.response.requestId).toBe("detail");
+  expect(cache.covering("panel", "7", { t0: 10, t1: 90 })?.requestId).toBe(
+    "overview",
+  );
+  expect(cache.covering("panel", "7", { t0: 45, t1: 55 })?.requestId).toBe(
+    "detail",
+  );
+  expect(cache.coveringCurrent("panel", { t0: 10, t1: 90 })?.requestId).toBe(
+    "overview",
+  );
+});
+
 test("lookup rejects mismatched keys and invalidates entries", () => {
   const cache = new TileWindowCache();
   cache.store("panel", entry());
@@ -132,9 +160,13 @@ test("binCount accounts for retained inactive panel data", () => {
   const cache = new TileWindowCache();
   cache.store("active", entry(20));
   cache.store("inactive", entry(12));
+  cache.store("inactive", {
+    ...entry(5),
+    window: { t0: 3, t1: 8 },
+  });
 
-  expect(cache.binCount()).toBe(32);
-  expect(cache.binCount(new Set(["active"]))).toBe(12);
+  expect(cache.binCount()).toBe(37);
+  expect(cache.binCount(new Set(["active"]))).toBe(17);
 });
 
 test("sliceColumns preserves typed-array views", () => {
