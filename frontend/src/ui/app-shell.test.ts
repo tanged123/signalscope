@@ -32,6 +32,7 @@ import {
   bundleCompletionEntries,
   clearIngestProgress,
   exportSourceOptions,
+  formatPresentationStatus,
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
@@ -39,6 +40,27 @@ import {
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
+
+describe("presentation status", () => {
+  it("is quiet at preferred density and explicit when constrained", () => {
+    expect(
+      formatPresentationStatus({
+        density: 2,
+        targetDensity: 2,
+        limited: false,
+        fits: true,
+      }),
+    ).toBe("");
+    expect(
+      formatPresentationStatus({
+        density: 1.25,
+        targetDensity: 2,
+        limited: true,
+        fits: true,
+      }),
+    ).toBe("resolution 1.25/2 bins/px");
+  });
+});
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -500,25 +522,30 @@ describe("adaptive tile refresh", () => {
     expect(shell.renderTiles).not.toHaveBeenCalled();
   });
 
-  it("rejects more than 3,000 visible resolved series before querying", async () => {
-    const queryTiles = vi.fn<DataPlane["queryTiles"]>();
-    const shell = refreshShell(queryTiles);
-    shell.resolvedFor = vi.fn(() =>
-      Array.from({ length: 3001 }, () => ({ visible: true })),
+  it("uniformly lowers density instead of rejecting more than 3,000 series", async () => {
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve(tileResponse()),
     );
-    const current = new Map<string, ColumnarTileResponse>([
-      ["panel-1", tileResponse()],
-    ]);
-    shell.tilesByPanel = current;
+    const shell = refreshShell(queryTiles);
+    Object.defineProperty(
+      shell.root.querySelector(".workspace"),
+      "clientWidth",
+      {
+        value: 1000,
+      },
+    );
+    shell.panelSignalIds = vi.fn(() => ({
+      ids: Array.from({ length: 3001 }, (_, index) => String(index)),
+      missing: [],
+    }));
 
     await shell.refreshTiles();
 
-    expect(shell.reportError).toHaveBeenCalledWith(
-      "series limit exceeded: 3001 visible; maximum 3000",
-    );
-    expect(queryTiles).not.toHaveBeenCalled();
-    expect(shell.tilesByPanel).toBe(current);
-    expect(shell.renderTiles).not.toHaveBeenCalled();
+    expect(shell.reportError).not.toHaveBeenCalled();
+    expect(queryTiles).toHaveBeenCalledOnce();
+    expect(queryTiles.mock.calls[0]?.[0].pixel_width).toBeGreaterThan(0);
+    expect(queryTiles.mock.calls[0]?.[0].pixel_width).toBeLessThan(2048);
+    expect(shell.renderTiles).toHaveBeenCalledOnce();
   });
 });
 

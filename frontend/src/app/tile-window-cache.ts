@@ -173,6 +173,15 @@ export class TileWindowCache {
     });
   }
 
+  binCount(excludingPanelIds: ReadonlySet<string> = new Set()): number {
+    let count = 0;
+    for (const [panelId, entry] of this.entries) {
+      if (excludingPanelIds.has(panelId)) continue;
+      for (const series of entry.response.series) count += series.bins.count;
+    }
+    return count;
+  }
+
   invalidate(panelId?: string): void {
     if (panelId === undefined) this.entries.clear();
     else this.entries.delete(panelId);

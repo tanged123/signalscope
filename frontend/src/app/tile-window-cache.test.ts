@@ -128,6 +128,15 @@ test("lookup rejects mismatched keys and invalidates entries", () => {
   expect(cache.get("panel")).toBeNull();
 });
 
+test("binCount accounts for retained inactive panel data", () => {
+  const cache = new TileWindowCache();
+  cache.store("active", entry(20));
+  cache.store("inactive", entry(12));
+
+  expect(cache.binCount()).toBe(32);
+  expect(cache.binCount(new Set(["active"]))).toBe(12);
+});
+
 test("sliceColumns preserves typed-array views", () => {
   const columns = binColumnsFromWire([bin(0, 0), bin(1, 1), bin(2, 2)]);
   const sliced = sliceColumns(columns, 1, 3);

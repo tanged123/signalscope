@@ -9,7 +9,13 @@ import {
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
-import { MAX_RESIDENT_SERIES } from "../app/render-limits";
+import {
+  autoPresentationBudgets,
+  CPU_BYTES_PER_BIN,
+  GPU_BYTES_PER_BIN,
+  planPresentationDensity,
+  type DensityPlan,
+} from "../app/presentation-budget";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
@@ -89,6 +95,14 @@ import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import type { GpuContext, GpuFailure } from "../render/gpu-context";
 import { prepareResponseFeeds } from "../render/m4-feed";
+
+export function formatPresentationStatus(
+  plan: Pick<DensityPlan, "density" | "targetDensity" | "limited" | "fits">,
+): string {
+  if (!plan.limited) return "";
+  if (!plan.fits) return "resolution constrained by presentation memory";
+  return `resolution ${plan.density.toFixed(2)}/${plan.targetDensity.toFixed(0)} bins/px`;
+}
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
@@ -183,6 +197,7 @@ export class AppShell {
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
+  private presentationPlan: DensityPlan | null = null;
   private refreshPromise: Promise<void> | null = null;
   private refreshQueued = false;
   private renderScheduled = false;
@@ -2536,18 +2551,6 @@ export class AppShell {
 
   private async refreshTilesPass(refreshToken: number): Promise<void> {
     const panels = this.workspace.panels();
-    const visibleSeries = panels.reduce(
-      (total, panel) =>
-        total +
-        this.resolvedFor(panel).filter((series) => series.visible).length,
-      0,
-    );
-    if (visibleSeries > MAX_RESIDENT_SERIES) {
-      this.reportError(
-        `series limit exceeded: ${String(visibleSeries)} visible; maximum ${String(MAX_RESIDENT_SERIES)}`,
-      );
-      return;
-    }
     const width = Math.max(
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
@@ -2555,6 +2558,46 @@ export class AppShell {
     const devicePixelRatio = Number.isFinite(window.devicePixelRatio)
       ? window.devicePixelRatio
       : 1;
+    const panelInputs = panels.map((panel) => {
+      const signals = this.panelSignalIds(panel);
+      const window = this.effectiveWindow(panel);
+      const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+      const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
+      const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+      const span = window.t1 - window.t0;
+      const paddingRatio =
+        span > 0 ? (paddedWindow.t1 - paddedWindow.t0) / span : 1;
+      return { panel, signals, window, paddedWindow, pixelWidth, paddingRatio };
+    });
+    const gpu = this.gpu as GpuContext | null | undefined;
+    const adapterLimits =
+      gpu === null || gpu === undefined
+        ? undefined
+        : (
+            gpu.adapter as unknown as {
+              limits?: { maxBufferSize?: unknown };
+            }
+          ).limits;
+    const budgets = autoPresentationBudgets(
+      Number(adapterLimits?.maxBufferSize ?? 0),
+      (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    );
+    const retainedBins = this.tileWindowCache.binCount(
+      new Set(panels.map((panel) => panel.id)),
+    );
+    const densityPlan = planPresentationDensity({
+      demands: panelInputs.map((input) => ({
+        panelId: input.panel.id,
+        physicalPixels: input.pixelWidth * devicePixelRatio,
+        paddingRatio: input.paddingRatio,
+        visibleSeries: input.signals.ids.length,
+      })),
+      budgets,
+      retainedCpuBytes: retainedBins * CPU_BYTES_PER_BIN,
+      retainedGpuBytes: retainedBins * GPU_BYTES_PER_BIN,
+    });
+    this.presentationPlan = densityPlan;
+    this.renderPresentationStatus();
     const nextTiles = new Map<string, ColumnarTileResponse>();
     const nextMissing = new Map<string, string[]>();
     const replacements = new Map<
@@ -2568,36 +2611,28 @@ export class AppShell {
       }
     >();
     await Promise.all(
-      panels.map(async (panel) => {
-        const { ids, missing } = this.panelSignalIds(panel);
+      panelInputs.map(async (input) => {
+        const { panel, signals, window, paddedWindow, pixelWidth } = input;
+        const { ids, missing } = signals;
         nextMissing.set(panel.id, missing);
         if (ids.length === 0) return;
-        const window = this.effectiveWindow(panel);
-        const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-        const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
-        const devicePixelWidth = Math.max(
+        const desiredDevicePixels = Math.max(
           1,
-          Math.ceil(pixelWidth * devicePixelRatio),
+          Math.ceil((pixelWidth * devicePixelRatio * densityPlan.density) / 2),
         );
         const idsKey = [...ids].sort().join("\u0000");
         const lookup = this.tileWindowCache.lookup(
           panel.id,
           idsKey,
           window,
-          devicePixelWidth,
+          desiredDevicePixels,
         );
         if (lookup.kind === "current") {
           nextTiles.set(panel.id, lookup.response);
           return;
         }
         const fallback = lookup.kind === "stale" ? lookup.response : null;
-        const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
-        const requestedDevicePixels = TileWindowCache.requestPixelWidth(
-          pixelWidth,
-          devicePixelRatio,
-          window,
-          paddedWindow,
-        );
+        const requestedDevicePixels = densityPlan.requests.get(panel.id) ?? 1;
         try {
           const response = await this.plane.queryTiles({
             request_id: crypto.randomUUID(),
@@ -2939,6 +2974,17 @@ export class AppShell {
       0,
     );
     void this.updateSources(pointCount);
+  }
+
+  private renderPresentationStatus(): void {
+    const status = this.root.querySelector<HTMLElement>(".presentation-status");
+    if (status === null) return;
+    const text =
+      this.presentationPlan === null
+        ? ""
+        : formatPresentationStatus(this.presentationPlan);
+    status.textContent = text.length > 0 ? ` · ${text}` : "";
+    status.hidden = text.length === 0;
   }
 
   private async updateSources(pointCount: number): Promise<void> {
@@ -3375,6 +3421,7 @@ export function shellMarkup(): string {
       <span class="source-truth">
         <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
         <span class="render-stat"> · render <span class="render-ms">— ms</span></span>
+        <span class="presentation-status" hidden></span>
       </span>
       <span class="status-spacer"></span>
       <span class="gesture-hint"></span>

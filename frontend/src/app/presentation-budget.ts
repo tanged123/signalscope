@@ -1,4 +1,4 @@
-export const TARGET_BINS_PER_PIXEL = 2 as const;
+const TARGET_BINS_PER_PIXEL = 2 as const;
 export const CPU_BYTES_PER_BIN = 121;
 export const GPU_BYTES_PER_BIN = 96;
 export const MIB = 1024 * 1024;
