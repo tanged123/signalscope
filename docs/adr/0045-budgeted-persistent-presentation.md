@@ -32,6 +32,8 @@ matching overview and detail ChartGPU hosts, and fit-to-all selects a resident
 overview synchronously. CPU and GPU eviction uses the fixed inactive-detail,
 inactive-overview, superseded-detail, and then inactive-CPU order before
 lowering active density. Bank publication remains generation-safe and atomic.
+Publishing or replacing bank data never changes the selected viewport; the
+host reapplies the current session-derived ranges before the next frame.
 
 ## Consequences
 

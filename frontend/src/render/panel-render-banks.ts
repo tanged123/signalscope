@@ -70,7 +70,9 @@ export class PanelRenderBanks {
     this.touch(state);
     if (state.host !== null) {
       state.pending = null;
-      return state.host.render(request);
+      const elapsed = state.host.render(request);
+      if (this.selected === role) this.applySelectedRanges(state);
+      return elapsed;
     }
     if (state.ready === null) this.initialize(role, state);
     return 0;
@@ -87,7 +89,9 @@ export class PanelRenderBanks {
       candidate.element.hidden = true;
     state.element.hidden = false;
     this.selected = role;
-    state.selectedRanges = ranges ?? null;
+    if (ranges !== undefined) {
+      state.selectedRanges = copySelectionRanges(ranges);
+    }
     this.touch(state);
     this.prepareSelectedHost(state, activating);
     return true;
@@ -106,7 +110,10 @@ export class PanelRenderBanks {
     xRange: { min: number; max: number },
     yRange: readonly [number, number],
   ): void {
-    this.selectedHost()?.setRangesOnly(xRange, yRange);
+    if (this.selected === null) return;
+    const state = this.state(this.selected);
+    state.selectedRanges = copySelectionRanges({ xRange, yRange });
+    state.host?.setRangesOnly(xRange, yRange);
   }
 
   residentGpuBytes(role?: TileBankRole): number {
@@ -219,6 +226,11 @@ export class PanelRenderBanks {
   private prepareSelectedHost(state: BankState, resize = true): void {
     if (state.host === null) return;
     if (resize) state.host.resize();
+    this.applySelectedRanges(state);
+  }
+
+  private applySelectedRanges(state: BankState): void {
+    if (state.host === null) return;
     if (state.selectedRanges !== null) {
       state.host.setRangesOnly(
         state.selectedRanges.xRange,
@@ -243,4 +255,11 @@ export class PanelRenderBanks {
   private touch(state: BankState): void {
     state.lastUsed = ++this.useCounter;
   }
+}
+
+function copySelectionRanges(ranges: BankSelectionRanges): BankSelectionRanges {
+  return {
+    xRange: { ...ranges.xRange },
+    yRange: [ranges.yRange[0], ranges.yRange[1]],
+  };
 }

@@ -175,6 +175,28 @@ describe("PanelRenderBanks", () => {
     );
   });
 
+  it("preserves the current viewport when selected-bank data is replaced", async () => {
+    setupHostMocks();
+    const banks = new PanelRenderBanks(document.createElement("div"), gpu());
+    banks.publish("detail", request("detail"));
+    await settle();
+    banks.select("detail");
+    banks.setRangesOnly({ min: 12, max: 18 }, [-3, 5]);
+    state.hosts[0]?.setRangesOnly.mockClear();
+
+    banks.publish("detail", request("detail"));
+
+    expect(state.hosts[0]?.render).toHaveBeenCalledTimes(2);
+    expect(state.hosts[0]?.setRangesOnly).toHaveBeenCalledOnce();
+    expect(state.hosts[0]?.setRangesOnly).toHaveBeenCalledWith(
+      { min: 12, max: 18 },
+      [-3, 5],
+    );
+    expect(state.hosts[0]?.render.mock.invocationCallOrder[1]).toBeLessThan(
+      state.hosts[0]?.setRangesOnly.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it("evicts one role without removing its stable hidden container", async () => {
     setupHostMocks();
     const container = document.createElement("div");
