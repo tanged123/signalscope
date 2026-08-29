@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   charts: [] as Array<{
     options: Record<string, unknown>;
     setOption: ReturnType<typeof vi.fn>;
+    setViewRange: ReturnType<typeof vi.fn>;
     renderFrame: ReturnType<typeof vi.fn>;
     resize: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
@@ -30,6 +31,18 @@ vi.mock("@chartgpu/chartgpu", () => ({
           setOption: vi.fn((next: Record<string, unknown>) => {
             chart.options = next;
           }),
+          setViewRange: vi.fn(
+            (range: {
+              x: { min: number; max: number };
+              y: { min: number; max: number };
+            }) => {
+              chart.options = {
+                ...chart.options,
+                xAxis: { min: range.x.min, max: range.x.max },
+                yAxis: { min: range.y.min, max: range.y.max },
+              };
+            },
+          ),
           renderFrame: vi.fn(() => true),
           resize: vi.fn(),
           dispose: vi.fn(),
@@ -312,9 +325,15 @@ describe("ChartHost", () => {
     host.render(request());
     const chart = state.charts.at(-1);
     const series = chart?.options.series;
+    chart?.setOption.mockClear();
 
     host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
 
+    expect(chart?.setOption).not.toHaveBeenCalled();
+    expect(chart?.setViewRange).toHaveBeenCalledWith({
+      x: { min: 1, max: 2 },
+      y: { min: -1, max: 5 },
+    });
     expect(chart?.options.series).toBe(series);
     expect(host.layout()).toEqual({
       plot: { x: 60, y: 8, width: 328, height: 258 },

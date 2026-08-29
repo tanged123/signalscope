@@ -58,6 +58,10 @@ declare module "@chartgpu/chartgpu" {
     readonly options: Readonly<ChartGPUOptions>;
     readonly disposed: boolean;
     setOption(options: ChartGPUOptions): void;
+    setViewRange(range: {
+      x: { min: number; max: number };
+      y: { min: number; max: number };
+    }): void;
     needsRender(): boolean;
     renderFrame(): boolean;
     resize(): void;
