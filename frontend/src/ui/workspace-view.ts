@@ -1,7 +1,6 @@
 import { formatCombo } from "../app/commands";
 import type { ColumnarTileResponse } from "../app/bin-columns";
-import type { PreparedTileBank, TileBankRole } from "../app/prepared-tile-bank";
-import type { ChartRenderRequest } from "../render/chart-host";
+import { MAX_RESIDENT_SERIES } from "../app/render-limits";
 import type { WorkspaceModel } from "../app/workspace";
 import { bindPointerDrag } from "./dom";
 import {
@@ -17,11 +16,7 @@ import {
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
 import type { GpuContext } from "../render/gpu-context";
-import type { GpuBankResidency } from "../render/panel-render-banks";
-
-export interface WorkspaceGpuBankResidency extends GpuBankResidency {
-  panelId: string;
-}
+import { panelsToEvict } from "./panel-residency";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
   onLayoutChanged(): void;
@@ -41,6 +36,9 @@ export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
   private mountedKey = "";
   private cursorMode: CursorMode = "none";
+  private seriesCounts: ReadonlyMap<string, number> = new Map();
+  private useCounter = 0;
+  private readonly lastUsed = new Map<string, number>();
 
   constructor(
     private readonly root: HTMLElement,
@@ -55,7 +53,7 @@ export class WorkspaceView {
     if (this.gpu === gpu) return;
     this.gpu = gpu;
     for (const view of this.views.values()) view.setGpu(gpu);
-    if (this.views.size === 0) this.sync(hasSignals);
+    if (this.views.size === 0) this.sync(hasSignals, this.seriesCounts);
   }
 
   releaseGpu(): void {
@@ -63,7 +61,8 @@ export class WorkspaceView {
     this.gpu = null;
   }
 
-  sync(hasSignals: boolean): void {
+  sync(hasSignals: boolean, seriesCounts: ReadonlyMap<string, number>): void {
+    this.seriesCounts = seriesCounts;
     const allPanels = this.model.tabs().flatMap((tab) => tab.panels);
     const alive = new Set(allPanels.map((panel) => panel.id));
     for (const [id, view] of this.views) {
@@ -71,6 +70,7 @@ export class WorkspaceView {
         view.dispose();
         view.element.remove();
         this.views.delete(id);
+        this.lastUsed.delete(id);
       }
     }
     const key = this.structureKey(hasSignals);
@@ -80,12 +80,14 @@ export class WorkspaceView {
       if (this.model.maximizedPanelId() === null) this.applySizes();
       this.refreshPanelStates();
       this.touchActivePanels();
+      this.applyResidency();
       return;
     }
     this.mountedKey = key;
     this.root.replaceChildren();
     if (this.model.panels().length === 0) {
       this.root.appendChild(emptyState(hasSignals));
+      this.applyResidency();
       return;
     }
     const maximized = this.model.maximizedPanelId();
@@ -99,6 +101,7 @@ export class WorkspaceView {
       view.mount();
       this.refreshPanelStates();
       this.touchActivePanels();
+      this.applyResidency();
       return;
     }
     this.model.layout().forEach((row, rowIndex) => {
@@ -119,6 +122,7 @@ export class WorkspaceView {
     });
     this.refreshPanelStates();
     this.touchActivePanels();
+    this.applyResidency();
   }
 
   /** Identity of the mounted DOM: rows, cell order, maximization, empty. */
@@ -143,7 +147,6 @@ export class WorkspaceView {
     tilesByPanel: ReadonlyMap<string, ColumnarTileResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
-    bankFor: (panelId: string) => PreparedTileBank | null = () => null,
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -157,7 +160,6 @@ export class WorkspaceView {
             tilesByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
-            bankFor(panel.id),
           ) ?? 0;
     }
     return total;
@@ -207,55 +209,6 @@ export class WorkspaceView {
     return (await this.views.get(id)?.capturePlot()) ?? null;
   }
 
-  publishBank(
-    panelId: string,
-    role: TileBankRole,
-    request: ChartRenderRequest,
-  ): number {
-    return this.views.get(panelId)?.publishBank(role, request) ?? 0;
-  }
-
-  publishPreparedBank(
-    panelId: string,
-    role: TileBankRole,
-    bank: PreparedTileBank,
-    window: { t0: number; t1: number },
-  ): number {
-    const view = this.views.get(panelId);
-    const request = view?.requestForBank(bank, window);
-    return request === null || request === undefined
-      ? 0
-      : this.publishBank(panelId, role, request);
-  }
-
-  presentationGpuBytes(): number {
-    let bytes = 0;
-    for (const view of this.views.values()) bytes += view.residentGpuBytes();
-    return bytes;
-  }
-
-  presentationUsage(): readonly WorkspaceGpuBankResidency[] {
-    const banks: WorkspaceGpuBankResidency[] = [];
-    for (const [panelId, view] of this.views) {
-      for (const bank of view.presentationUsage()) {
-        banks.push({ panelId, ...bank });
-      }
-    }
-    return banks;
-  }
-
-  selectBank(
-    panelId: string,
-    role: TileBankRole,
-    window?: { t0: number; t1: number },
-  ): boolean {
-    return this.views.get(panelId)?.selectBank(role, window) ?? false;
-  }
-
-  evictGpu(panelId: string, role: TileBankRole): void {
-    this.views.get(panelId)?.evictBank(role);
-  }
-
   panelRect(id: string): DOMRect | null {
     return this.views.get(id)?.panelRect() ?? null;
   }
@@ -273,7 +226,26 @@ export class WorkspaceView {
 
   private touchActivePanels(): void {
     for (const panel of this.model.panels()) {
-      this.views.get(panel.id)?.touchPresentation();
+      this.useCounter += 1;
+      this.lastUsed.set(panel.id, this.useCounter);
+    }
+  }
+
+  private applyResidency(): void {
+    const active = new Set(this.model.panels().map((panel) => panel.id));
+    const residents = Array.from(this.views, ([id]) => ({
+      id,
+      seriesCount: this.seriesCounts.get(id) ?? 0,
+      lastUsed: this.lastUsed.get(id) ?? 0,
+      active: active.has(id),
+    }));
+    for (const id of panelsToEvict(residents, MAX_RESIDENT_SERIES)) {
+      const view = this.views.get(id);
+      if (view === undefined || active.has(id)) continue;
+      view.dispose();
+      view.element.remove();
+      this.views.delete(id);
+      this.lastUsed.delete(id);
     }
   }
 

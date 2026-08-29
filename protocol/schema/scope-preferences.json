@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 6,
   "types": {
     "FontFamily": {
       "kind": "enum",
@@ -25,9 +25,7 @@
         "cache_max_bytes": "u64",
         "ingest_working_bytes": "u64?",
         "ingest_resident_bytes": "u64?",
-        "recipe_directory": "string?",
-        "presentation_cpu_bytes": "u64?",
-        "presentation_gpu_bytes": "u64?"
+        "recipe_directory": "string?"
       }
     }
   }

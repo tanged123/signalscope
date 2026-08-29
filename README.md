@@ -124,15 +124,11 @@ docs/adr/            accepted architecture decisions
 
 The frontend depends only on the versioned `DataPlane` contract. `HttpPlane`
 calls the localhost Rust server; `BakedPlane` reads the same response shapes
-from a snapshot data slot. Live time panels use one uniform, budgeted
-bins-per-physical-pixel density across the active layout. Prepared CPU and GPU
-overview/detail banks remain resident when budgets allow, inactive banks are
-evicted by managed bytes, and zoom refines from pixel-dense envelopes to exact
-level-zero samples. The UI reports managed presentation pressure; WebGPU does
-not expose total or free VRAM. `HttpPlane` and `BakedPlane` use the same
-adaptive presentation contract, while explicitly reduced-fidelity snapshots
-and HTML or CSV exports retain their independent fidelity controls; the
-renderer has no host-specific branch.
+from a snapshot data slot. Live time panels refine from pixel-dense envelopes
+to exact samples as the visible window narrows. `HttpPlane` and `BakedPlane`
+use the same adaptive presentation contract, while explicitly reduced-
+fidelity snapshots and HTML or CSV exports retain their independent fidelity
+controls; the renderer has no host-specific branch.
 
 See [the ADR index](docs/adr/README.md) for the decisions behind the two-host product shape, layer boundaries, tile pyramid, protocol, session schema, linked-time model, and snapshot injection mechanism.
 

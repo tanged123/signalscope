@@ -5,13 +5,6 @@ interface BenchWindow {
   __benchFrames: number[];
   __benchLongTasks: number[];
   __benchStop?: () => void;
-  __benchTileQueryCount: number;
-}
-
-interface BakedPlaneModule {
-  BakedPlane: {
-    prototype: { queryTiles: (...args: never[]) => Promise<unknown> };
-  };
 }
 
 export interface FrameStats {
@@ -20,25 +13,6 @@ export interface FrameStats {
   frames: number;
   longTasks: number;
   longestTaskMs: number;
-}
-
-export async function installPresentationProbe(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const bench = window as unknown as BenchWindow;
-    bench.__benchTileQueryCount = 0;
-    const modulePath = "/src/app/data-plane.ts";
-    void import(/* @vite-ignore */ modulePath).then((module) => {
-      const BakedPlane = (module as BakedPlaneModule).BakedPlane;
-      const original = Reflect.get(BakedPlane.prototype, "queryTiles") as (
-        this: object,
-        ...args: unknown[]
-      ) => Promise<unknown>;
-      BakedPlane.prototype.queryTiles = function (...args) {
-        bench.__benchTileQueryCount += 1;
-        return Reflect.apply(original, this, args);
-      };
-    });
-  });
 }
 
 export async function startFrameProbe(page: Page): Promise<void> {

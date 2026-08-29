@@ -5,7 +5,6 @@ import { binColumnsFromWire } from "../app/bin-columns";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Palette, SeriesStroke } from "./plot-theme";
 import type { GpuContext } from "./gpu-context";
-import { prepareTileBank } from "../app/prepared-tile-bank";
 
 const state = vi.hoisted(() => ({
   charts: [] as Array<{
@@ -15,7 +14,6 @@ const state = vi.hoisted(() => ({
     resize: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     needsRender: ReturnType<typeof vi.fn>;
-    getPerformanceMetrics: ReturnType<typeof vi.fn>;
   }>,
 }));
 
@@ -36,7 +34,6 @@ vi.mock("@chartgpu/chartgpu", () => ({
           resize: vi.fn(),
           dispose: vi.fn(),
           needsRender: vi.fn(() => false),
-          getPerformanceMetrics: vi.fn(() => ({ memory: { used: 4096 } })),
         };
         state.charts.push(chart);
         return Promise.resolve(chart);
@@ -96,18 +93,7 @@ function request(
   styles: readonly SeriesStroke[] = [stroke(0)],
   emphasisIndices: readonly number[] = [],
 ) {
-  const idsKey = data.series.map((series) => series.signalId).join("\u0000");
   return {
-    bank: prepareTileBank({
-      id: `test:${data.requestId}`,
-      role: "detail",
-      response: data,
-      window: { t0: 10, t1: 12 },
-      visibleWindow: { t0: 10, t1: 12 },
-      idsKey,
-      density: 2,
-      requestedPixelWidth: 400,
-    }),
     response: data,
     xRange: { min: 10, max: 12 },
     yRange: [0, 4] as const,
@@ -180,12 +166,12 @@ describe("ChartHost", () => {
       ),
     });
 
-    const rebaseResponse = {
-      requestId: "rebase",
-      series: [series("late", [40, 50, 60]), series("early", [25, 35, 45])],
-    };
     host.render({
-      ...request(rebaseResponse),
+      ...request(),
+      response: {
+        requestId: "rebase",
+        series: [series("late", [40, 50, 60]), series("early", [25, 35, 45])],
+      },
       styles: [stroke(0), stroke(1)],
       xRange: { min: 25, max: 60 },
     });
@@ -405,12 +391,6 @@ describe("ChartHost", () => {
     expect(canvas.height).toBe(180);
     expect(state.charts.at(-1)?.renderFrame).toHaveBeenCalled();
     getContext.mockRestore();
-  });
-
-  it("reports resident ChartGPU series-buffer capacity", async () => {
-    const host = await hostFixture();
-
-    expect(host.residentGpuBytes()).toBe(4096);
   });
 
   it("unregisters the host and disposes ChartGPU", async () => {

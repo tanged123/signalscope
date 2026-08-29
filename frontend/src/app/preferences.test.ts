@@ -9,8 +9,6 @@ import {
   defaultPreferences,
   fontStack,
   parsePreferences,
-  nextPresentationBudget,
-  presentationBudgetLabel,
   PLOT_FONT_SIZE,
   UI_FONT_SIZE,
 } from "./preferences";
@@ -18,7 +16,7 @@ import {
 describe("preferences", () => {
   it("defaults match the spec", () => {
     const prefs = defaultPreferences();
-    expect(prefs.schema_version).toBe(7);
+    expect(prefs.schema_version).toBe(6);
     expect(prefs.theme).toBe("dark");
     expect(prefs.ui_font_family).toBe("inter");
     expect(prefs.plot_font_family).toBe("jetbrains");
@@ -128,16 +126,6 @@ describe("preferences", () => {
 
   it("defaults the theme to dark", () => {
     expect(defaultPreferences().theme).toBe("dark");
-  });
-
-  it("cycles presentation budgets with decimal byte values", () => {
-    expect(presentationBudgetLabel(null)).toBe("Auto");
-    expect(presentationBudgetLabel(String(1024 * 1024 * 1024))).toBe("1 GiB");
-    expect(nextPresentationBudget(null)).toBe(String(256 * 1024 * 1024));
-    expect(nextPresentationBudget(String(2 * 1024 * 1024 * 1024))).toBe(null);
-    expect(nextPresentationBudget(null, 512 * 1024 * 1024)).toBe(
-      String(256 * 1024 * 1024),
-    );
   });
 
   it("applies the stored theme to the document root", () => {

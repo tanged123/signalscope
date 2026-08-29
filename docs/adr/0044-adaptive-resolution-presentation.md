@@ -3,7 +3,6 @@
 - Status: Accepted
 - Date: 2026-08-27
 - Amends: ADRs 0036 and 0041
-- Cache and residency policy superseded by: ADR 0045
 
 ## Context
 

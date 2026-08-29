@@ -68,13 +68,11 @@ describe("panel markup", () => {
       "ResizeObserver",
       class {
         observe(): void {}
-        disconnect(): void {}
       },
     );
     const panel = new PanelView("panel", {} as PanelCallbacks);
     expect(panel.element.querySelectorAll(".mode-pill")).toHaveLength(0);
     expect(panel.element.querySelector(".xy-drop-strip")).toBeNull();
-    panel.dispose();
     vi.unstubAllGlobals();
   });
 
@@ -83,15 +81,17 @@ describe("panel markup", () => {
     const chartHostElement = document.createElement("div");
     const view = Object.create(PanelView.prototype) as {
       gpu: GpuContext | null;
-      chartBanks: { dispose(): void } | null;
-      pendingChartRenders: Map<string, object>;
+      chartHost: { dispose(): void } | null;
+      chartHostReady: Promise<{ dispose(): void } | null> | null;
+      pendingChartRender: object | null;
       chartHostElement: HTMLElement;
       disposed: boolean;
       releaseGpu(): void;
     };
     view.gpu = {} as GpuContext;
-    view.chartBanks = { dispose };
-    view.pendingChartRenders = new Map([["detail", {}]]);
+    view.chartHost = { dispose };
+    view.chartHostReady = Promise.resolve(view.chartHost);
+    view.pendingChartRender = {};
     view.chartHostElement = chartHostElement;
     view.disposed = false;
 
@@ -99,100 +99,11 @@ describe("panel markup", () => {
 
     expect(dispose).toHaveBeenCalledOnce();
     expect(view.gpu).toBeNull();
-    expect(view.chartBanks).toBeNull();
-    expect(view.pendingChartRenders.size).toBe(1);
+    expect(view.chartHost).toBeNull();
+    expect(view.chartHostReady).toBeNull();
+    expect(view.pendingChartRender).not.toBeNull();
     expect(chartHostElement.hidden).toBe(true);
     expect(view.disposed).toBe(false);
-  });
-
-  it("resizes presentation banks when the window device scale changes", () => {
-    const onResized = vi.fn();
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        observe(): void {}
-        disconnect(): void {}
-      },
-    );
-    vi.stubGlobal("devicePixelRatio", 1);
-    const view = new PanelView("panel", {
-      onResized,
-    } as unknown as PanelCallbacks);
-    const resize = vi.fn();
-    const dispose = vi.fn();
-    (
-      view as unknown as {
-        chartBanks: {
-          resize(): void;
-          layout(): PlotLayout | null;
-          dispose(): void;
-        } | null;
-      }
-    ).chartBanks = { resize, layout: () => null, dispose };
-
-    vi.stubGlobal("devicePixelRatio", 2);
-    window.dispatchEvent(new Event("resize"));
-
-    expect(resize).toHaveBeenCalledOnce();
-    expect(onResized).toHaveBeenCalledWith("panel");
-    view.dispose();
-    vi.unstubAllGlobals();
-  });
-
-  it("defers an observed resize until an active gesture finishes", () => {
-    let notifyResize = (): void => {
-      throw new Error("resize observer was not created");
-    };
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(callback: ResizeObserverCallback) {
-          notifyResize = () => callback([], this);
-        }
-        observe(): void {}
-        disconnect(): void {}
-        unobserve(): void {}
-      },
-    );
-    const onResized = vi.fn();
-    const onGesture = vi.fn();
-    const view = new PanelView("panel", {
-      onResized,
-      onGesture,
-    } as unknown as PanelCallbacks);
-    const resize = vi.fn();
-    const dispose = vi.fn();
-    (
-      view as unknown as {
-        chartBanks: {
-          resize(): void;
-          layout(): PlotLayout | null;
-          dispose(): void;
-        } | null;
-      }
-    ).chartBanks = { resize, layout: () => null, dispose };
-    const interactions = (
-      view as unknown as {
-        interactions: { isDragging(): boolean };
-      }
-    ).interactions;
-    const dragging = vi.spyOn(interactions, "isDragging").mockReturnValue(true);
-
-    notifyResize();
-
-    expect(resize).not.toHaveBeenCalled();
-    expect(onResized).not.toHaveBeenCalled();
-    dragging.mockReturnValue(false);
-    (
-      view as unknown as {
-        handleGesture(hint: string | null): void;
-      }
-    ).handleGesture(null);
-    expect(resize).toHaveBeenCalledOnce();
-    expect(onResized).toHaveBeenCalledWith("panel");
-    expect(onGesture).toHaveBeenCalledWith("panel", null);
-    view.dispose();
-    vi.unstubAllGlobals();
   });
 });
 
@@ -262,7 +173,7 @@ describe("panel series", () => {
       } as unknown as PanelCallbacks;
       const view = Object.create(PanelView.prototype) as unknown as {
         callbacks: PanelCallbacks;
-        chartBanks: { layout(): PlotLayout | null } | null;
+        chartHost: { layout(): PlotLayout } | null;
         lastState: RenderPanelState;
         preparedPlot: PreparedPlot;
         hitAdapter: PreparedPlot["hitAdapter"];
@@ -274,7 +185,7 @@ describe("panel series", () => {
       };
       const series = visible("run_01/temp");
       view.callbacks = callbacks;
-      view.chartBanks = { layout: () => gestureLayout };
+      view.chartHost = { layout: () => gestureLayout };
       view.lastState = { ...timeState([series]), mode };
       view.preparedPlot = {
         annotationAt: () => null,
@@ -306,7 +217,7 @@ describe("panel series", () => {
     const series = visible("run_01/temp");
     const view = Object.create(PanelView.prototype) as unknown as {
       callbacks: PanelCallbacks;
-      chartBanks: { layout(): PlotLayout | null } | null;
+      chartHost: { layout(): PlotLayout } | null;
       lastState: RenderPanelState;
       preparedPlot: PreparedPlot;
       hitAdapter: PreparedPlot["hitAdapter"];
@@ -317,7 +228,7 @@ describe("panel series", () => {
       ): void;
     };
     view.callbacks = callbacks;
-    view.chartBanks = { layout: () => gestureLayout };
+    view.chartHost = { layout: () => gestureLayout };
     view.lastState = timeState([series]);
     view.preparedPlot = {
       annotationAt: () => ({

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: u32 = 7;
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 6;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -88,10 +88,4 @@ pub struct Preferences {
     pub ingest_resident_bytes: Option<u64>,
     #[serde(default)]
     pub recipe_directory: Option<String>,
-    #[serde(default)]
-    #[serde(with = "optional_u64_string")]
-    pub presentation_cpu_bytes: Option<u64>,
-    #[serde(default)]
-    #[serde(with = "optional_u64_string")]
-    pub presentation_gpu_bytes: Option<u64>,
 }

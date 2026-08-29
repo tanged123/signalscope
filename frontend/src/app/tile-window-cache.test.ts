@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
 import { binColumnsFromWire, sliceColumns } from "./bin-columns";
-import { prepareTileBank, type PreparedTileBank } from "./prepared-tile-bank";
 import { TileWindowCache, type CachedPanelTiles } from "./tile-window-cache";
 
 function bin(t0: number, t1: number): EnvelopeBin {
@@ -42,24 +41,6 @@ function entry(count = 20, level = 2): CachedPanelTiles {
     requestedDevicePixels: 8,
     idsKey: "7",
   };
-}
-
-function bank(
-  id: string,
-  role: "overview" | "detail",
-  options: { count?: number; level?: number; density?: number } = {},
-): PreparedTileBank {
-  const cached = entry(options.count ?? 20, options.level ?? 2);
-  return prepareTileBank({
-    id,
-    role,
-    response: cached.response,
-    window: cached.window,
-    visibleWindow: { t0: 5, t1: 15 },
-    idsKey: cached.idsKey,
-    density: options.density ?? 2,
-    requestedPixelWidth: cached.requestedDevicePixels,
-  });
 }
 
 test("padWindow aligns equal-span adjacent viewports", () => {
@@ -145,53 +126,6 @@ test("lookup rejects mismatched keys and invalidates entries", () => {
   expect(cache.get("missing")).toBeNull();
   cache.invalidate("panel");
   expect(cache.get("panel")).toBeNull();
-});
-
-test("retains independent overview and detail banks", () => {
-  const cache = new TileWindowCache();
-  const overview = bank("overview", "overview", { density: 1 });
-  const detail = bank("detail", "detail", { density: 2 });
-
-  cache.store("panel", overview, true);
-  cache.store("panel", detail, false);
-
-  expect(cache.overview("panel", "7")).toBe(overview);
-  expect(
-    cache.lookup("panel", "overview", "7", { t0: 5, t1: 15 }, 1),
-  ).toMatchObject({ kind: "current", bank: overview });
-  expect(
-    cache.lookup("panel", "detail", "7", { t0: 5, t1: 15 }, 4),
-  ).toMatchObject({ kind: "stale", bank: detail });
-  expect(cache.cpuBytes()).toBe(overview.cpuBytes + detail.cpuBytes);
-});
-
-test("evicts superseded active detail before inactive banks", () => {
-  const cache = new TileWindowCache();
-  const overview = bank("active-overview", "overview");
-  const oldDetail = bank("old-detail", "detail");
-  const selectedDetail = bank("selected-detail", "detail");
-  const inactiveDetail = bank("inactive-detail", "detail");
-  const inactiveOverview = bank("inactive-overview", "overview");
-
-  cache.store("active", overview, true);
-  cache.store("active", oldDetail, false);
-  cache.setSelected("active", oldDetail.id);
-  cache.store("active", selectedDetail, false);
-  cache.setSelected("active", selectedDetail.id);
-  cache.store("inactive", inactiveDetail, false);
-  cache.store("inactive", inactiveOverview, false);
-
-  const evicted = cache.evictCpu(cache.cpuBytes(), ["active"]);
-
-  expect(evicted.map((candidate) => candidate.id)).toEqual([
-    oldDetail.id,
-    inactiveDetail.id,
-    inactiveOverview.id,
-  ]);
-  expect(cache.overview("active", "7")).toBe(overview);
-  expect(cache.lookup("active", "detail", "7", { t0: 5, t1: 15 }, 2)).toEqual(
-    expect.objectContaining({ bank: selectedDetail }),
-  );
 });
 
 test("sliceColumns preserves typed-array views", () => {

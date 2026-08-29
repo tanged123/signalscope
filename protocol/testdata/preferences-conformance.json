@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 6,
   "theme": "dark",
   "ui_font_family": "inter",
   "plot_font_family": "jetbrains",
@@ -10,7 +10,5 @@
   "cache_max_bytes": "21474836480",
   "ingest_working_bytes": null,
   "ingest_resident_bytes": null,
-  "recipe_directory": null,
-  "presentation_cpu_bytes": null,
-  "presentation_gpu_bytes": null
+  "recipe_directory": null
 }

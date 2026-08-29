@@ -8,9 +8,8 @@ import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
 import { formatTicks, hueIndex } from "./plot-theme";
 import type { Palette, SeriesStroke } from "./plot-theme";
-import { responseTimeReference } from "./m4-feed";
+import { cachedFeed, responseTimeReference } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
-import type { PreparedTileBank } from "../app/prepared-tile-bank";
 
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
 const MIN_CHARTGPU_LINE_WIDTH = 2;
@@ -18,7 +17,6 @@ const MIN_CHARTGPU_GHOST_WIDTH = 1.5;
 const PLOT_LINE_WIDTH_BASELINE = 2;
 
 export interface ChartRenderRequest {
-  bank: PreparedTileBank;
   response: ColumnarTileResponse;
   xRange: Range;
   yRange: readonly [number, number];
@@ -137,11 +135,7 @@ export class ChartHost {
       const element: LineSeriesConfig = {
         type: "line",
         name: tile.signalPath,
-        data:
-          request.bank.feeds[index] ??
-          (() => {
-            throw new Error(`prepared bank is missing feed ${String(index)}`);
-          })(),
+        data: cachedFeed(tile.bins, this.tRef),
         sampling: "none",
         color,
         lineStyle: {
@@ -190,13 +184,6 @@ export class ChartHost {
 
   layout(): PlotLayout | null {
     return this.lastLayout;
-  }
-
-  residentGpuBytes(): number {
-    const metricsHost = this.chart as unknown as {
-      getPerformanceMetrics?(): { memory: { used: number } } | null;
-    };
-    return metricsHost.getPerformanceMetrics?.()?.memory.used ?? 0;
   }
 
   async capture(): Promise<HTMLCanvasElement> {
