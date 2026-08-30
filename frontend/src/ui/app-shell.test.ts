@@ -203,7 +203,7 @@ describe("GPU failure handling", () => {
     vi.unstubAllGlobals();
   });
 
-  it("releases panels and offers reload after device loss", () => {
+  it("releases panels and requests recovery after device loss", () => {
     const root = document.createElement("div");
     root.innerHTML = shellMarkup();
     let failure: ((value: GpuFailure) => void) | undefined;
@@ -216,6 +216,7 @@ describe("GPU failure handling", () => {
       gpu: GpuContext | null;
       signals: SignalSummary[];
       workspaceView: typeof workspaceView;
+      requestGpuRecovery: () => void;
       bindGpuWarning(): void;
       refreshTiles(): Promise<void>;
       setGpu(gpu: GpuContext): void;
@@ -224,6 +225,7 @@ describe("GPU failure handling", () => {
     shell.gpu = null;
     shell.signals = [];
     shell.workspaceView = workspaceView;
+    shell.requestGpuRecovery = vi.fn();
     shell.refreshTiles = vi.fn(() => Promise.resolve());
     const gpu = {
       onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
@@ -240,9 +242,9 @@ describe("GPU failure handling", () => {
 
     const warning = root.querySelector<HTMLElement>(".gpu-warning");
     expect(workspaceView.releaseGpu).toHaveBeenCalledOnce();
-    expect(warning?.textContent).toContain(
-      "WebGPU device lost — reload SignalScope",
-    );
+    expect(shell.gpu).toBeNull();
+    expect(shell.requestGpuRecovery).toHaveBeenCalledOnce();
+    expect(warning?.textContent).toContain("WebGPU device lost — reconnecting");
     expect(warning?.hidden).toBe(false);
     expect(
       root.querySelector<HTMLButtonElement>(".gpu-warning-dismiss")?.hidden,

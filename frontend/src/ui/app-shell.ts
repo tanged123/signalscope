@@ -222,12 +222,14 @@ export class AppShell {
     private readonly root: HTMLElement,
     private readonly plane: DataPlane,
     private gpu: GpuContext | null = null,
+    private readonly requestGpuRecovery: (() => void) | null = null,
   ) {}
 
   setGpu(gpu: GpuContext): void {
     if (this.gpu !== null) return;
     this.gpu = gpu;
     gpu.onFailure((failure) => {
+      if (this.gpu !== gpu) return;
       this.handleGpuFailure(failure);
     });
     const warning = this.root.querySelector<HTMLElement>(".gpu-warning");
@@ -241,13 +243,15 @@ export class AppShell {
       this.reportError(failure.message);
       return;
     }
+    this.gpu = null;
     this.workspaceView?.releaseGpu();
     const warning = required<HTMLElement>(this.root, ".gpu-warning");
     required<HTMLElement>(warning, ".gpu-warning-message").textContent =
-      "WebGPU device lost — reload SignalScope";
+      "WebGPU device lost — reconnecting";
     required<HTMLButtonElement>(warning, ".gpu-warning-dismiss").hidden = true;
     required<HTMLButtonElement>(warning, ".gpu-warning-reload").hidden = false;
     warning.hidden = false;
+    this.requestGpuRecovery?.();
   }
 
   private bindGpuWarning(): void {

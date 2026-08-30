@@ -12,10 +12,32 @@ async function boot(): Promise<void> {
 
   const planePromise = selectDataPlane();
   const gpuPromise = acquireGpuContext();
-  const app = new AppShell(root, await planePromise);
+  let recoveryPromise: Promise<void> | null = null;
+  let stopped = false;
+  let app: AppShell;
+  const recoverGpu = (): void => {
+    if (stopped || recoveryPromise !== null) return;
+    recoveryPromise = (async () => {
+      while (!stopped) {
+        const gpu = await acquireGpuContext();
+        if (gpu !== null) {
+          app.setGpu(gpu);
+          return;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+      }
+    })().finally(() => {
+      recoveryPromise = null;
+    });
+  };
+  window.addEventListener("pagehide", () => {
+    stopped = true;
+  });
+  app = new AppShell(root, await planePromise, null, recoverGpu);
   await app.mount();
   const gpu = await gpuPromise;
-  if (gpu !== null) app.setGpu(gpu);
+  if (gpu === null) recoverGpu();
+  else app.setGpu(gpu);
 }
 
 void boot().catch((error: unknown) => {
