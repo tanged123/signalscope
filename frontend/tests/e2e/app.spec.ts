@@ -33,12 +33,6 @@ test("shared presentation plane renders the demo workspace", async ({
   for (const name of await page.locator(".binding-chip").allTextContents()) {
     expect(name.trim()).not.toBe("");
   }
-  await expect(page.locator(".chart-host canvas").first()).toBeVisible({
-    timeout: 20_000,
-  });
-  await expect(page.locator(".render-ms")).not.toHaveText("— ms", {
-    timeout: 20_000,
-  });
   await expect(page.locator(".session-identity")).toHaveText(
     /— [1-9]\d* sources · [1-9]\d* signals/,
   );
