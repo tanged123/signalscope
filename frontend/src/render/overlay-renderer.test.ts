@@ -64,6 +64,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     xyMarkers: [],
     box: { x0: 100, y0: 50, x1: 200, y1: 150 },
     annotations: [],
+    delta: null,
   });
   expect(calls).toContain(`strokeStyle:${palette.amber}`);
   expect(calls).toContain(`fillStyle:${palette.amberFill}`);
@@ -77,6 +78,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     xyMarkers: [],
     box: null,
     annotations: [],
+    delta: null,
   });
   expect(calls).toContain("strokeStyle:#407fd0");
   expect(calls).toContain("arc");
@@ -89,6 +91,7 @@ test("draws the cursor and rubber band with interaction amber", () => {
     xyMarkers: [],
     box: null,
     annotations: [],
+    delta: null,
   });
   expect(calls).toContain(`strokeStyle:${palette.fg4}`);
   expect(calls).toContain("globalAlpha:0.5");
@@ -136,6 +139,7 @@ test("draws XY cursor markers as hollow amber rings", () => {
     xyMarkers: [{ x: 30, y: 0 }],
     box: null,
     annotations: [],
+    delta: null,
   });
   expect(calls).toContain("arc");
   expect(calls).toContain("lineTo");
@@ -202,12 +206,17 @@ test("places annotations at supplied plot points when given them", () => {
         label: "outside",
       },
     ],
+    delta: {
+      label: "Δt 30.0000 s · Δy 50.0000",
+      first: { x: 10, y: 100 },
+      second: { x: 40, y: 150 },
+    },
   };
   renderer.draw(layout, state);
   expect(calls.filter((call) => call.startsWith("arc:"))).toHaveLength(2);
   expect(calls).toContain(`strokeStyle:${palette.fg4}`);
   expect(calls).toContain(`strokeStyle:${palette.series[0] ?? ""}`);
-  expect(calls.join(" ")).not.toContain("Δ");
+  expect(calls.join(" ")).toContain("Δt");
 });
 
 test("clips overlay furniture and keeps edge labels inside the plot", () => {
@@ -260,6 +269,7 @@ test("clips overlay furniture and keeps edge labels inside the plot", () => {
         label: "edge annotation",
       },
     ],
+    delta: null,
   });
 
   expect(calls).toContainEqual({
@@ -333,6 +343,7 @@ test("truncates badge text that cannot fit the plot and keeps plates inside", ()
         label: "a very long annotation label that will never fit",
       },
     ],
+    delta: null,
   });
 
   expect(texts).toHaveLength(1);

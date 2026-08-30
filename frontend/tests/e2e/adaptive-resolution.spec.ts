@@ -35,25 +35,6 @@ async function installResolutionProbe(
     probe.__signalscopeHoldAdaptive = false;
     probe.__signalscopePending = false;
 
-    const align8 = (value: number): number => (value + 7) & ~7;
-    const levels = (buffer: ArrayBuffer): number[] => {
-      const view = new DataView(buffer);
-      const count = view.getUint32(8, true);
-      const out: number[] = [];
-      let offset = 16;
-      for (let index = 0; index < count; index += 1) {
-        const level = view.getUint32(offset + 8, true);
-        const bins = view.getUint32(offset + 12, true);
-        const pathBytes = view.getUint16(offset + 16, true);
-        const unitBytes = view.getUint16(offset + 18, true);
-        out.push(level);
-        offset = align8(
-          offset + 24 + pathBytes + (unitBytes === 0xffff ? 0 : unitBytes),
-        );
-        offset = align8(offset + bins * 73);
-      }
-      return out;
-    };
     const record = (responseLevels: number[]): void => {
       if (responseLevels.length > 0) {
         probe.__signalscopeTestLevels.push(responseLevels);
@@ -69,37 +50,6 @@ async function installResolutionProbe(
           resolve(value);
         };
       });
-    };
-
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = async (input, init) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
-      let nextInit = init;
-      if (
-        rewriteFull &&
-        new URL(url, window.location.href).pathname ===
-          "/api/query_tiles_bin" &&
-        typeof init?.body === "string"
-      ) {
-        const body = JSON.parse(init.body) as {
-          payload?: { pixel_width?: number };
-        };
-        if (body.payload !== undefined) body.payload.pixel_width = 1_000_000;
-        nextInit = { ...init, body: JSON.stringify(body) };
-      }
-      const response = await originalFetch(input, nextInit);
-      if (
-        new URL(url, window.location.href).pathname === "/api/query_tiles_bin"
-      ) {
-        record(levels(await response.clone().arrayBuffer()));
-        return hold(response);
-      }
-      return response;
     };
 
     const modulePath = "/src/app/data-plane.ts";

@@ -1172,8 +1172,6 @@ button {
   background: var(--surface-overlay);
   border: 1px solid var(--border);
   border-radius: 2px;
-  box-shadow: var(--elev-2);
-  backdrop-filter: blur(8px);
   font-family: var(--font-plot);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -1580,6 +1578,7 @@ button {
 }
 
 .panel-stats[hidden],
+.panel-annotations[hidden],
 .plot-tip[hidden] {
   display: none;
 }
@@ -1606,6 +1605,45 @@ button {
 .stats-hint {
   margin-left: auto;
   color: var(--fg-4);
+}
+
+.panel-annotations {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-2);
+  font: 0.7692rem var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.annotations-heading {
+  margin-bottom: 3px;
+  color: var(--fg-4);
+  font-size: 0.6923rem;
+  letter-spacing: 0.08em;
+}
+
+.annotation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.annotation-action {
+  margin-left: auto;
+  padding: 0;
+  color: var(--fg-4);
+}
+
+.annotation-action + .annotation-action {
+  margin-left: 0;
+}
+
+.annotation-label-input {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-1);
+  font: inherit;
 }
 
 .axis-label-editor {

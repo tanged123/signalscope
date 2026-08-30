@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { acquireGpuContext } from "./gpu-context";
 
 function deferred<T>(): {
@@ -36,6 +36,14 @@ function installDevice() {
 }
 
 describe("acquireGpuContext", () => {
+  afterEach(() => {
+    Object.defineProperty(navigator, "gpu", {
+      configurable: true,
+      value: undefined,
+    });
+    vi.restoreAllMocks();
+  });
+
   it("returns null when WebGPU is absent", async () => {
     expect(await acquireGpuContext()).toBeNull();
   });
@@ -86,6 +94,25 @@ describe("acquireGpuContext", () => {
     expect(renderFrame).toHaveBeenCalledTimes(1);
     expect(requestAnimationFrame).toHaveBeenCalled();
     unregister?.();
+  });
+
+  it("retries adapter acquisition without a power preference", async () => {
+    const { device } = installDevice();
+    const adapter = { requestDevice: vi.fn(() => Promise.resolve(device)) };
+    const requestAdapter = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(adapter);
+    Object.defineProperty(navigator, "gpu", {
+      configurable: true,
+      value: { requestAdapter },
+    });
+
+    expect(await acquireGpuContext()).not.toBeNull();
+    expect(requestAdapter).toHaveBeenNthCalledWith(1, {
+      powerPreference: "high-performance",
+    });
+    expect(requestAdapter).toHaveBeenNthCalledWith(2);
   });
 
   it("stops the shared loop and notifies once after device loss", async () => {

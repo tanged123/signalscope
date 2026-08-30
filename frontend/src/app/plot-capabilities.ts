@@ -77,6 +77,12 @@ interface PlotStatGroup {
   items: readonly PlotStat[];
 }
 
+export interface PlotDelta {
+  label: string;
+  first: PlotPoint;
+  second: PlotPoint;
+}
+
 interface SeriesHit {
   path: string;
   distance: number;
@@ -111,6 +117,7 @@ export interface PreparedPlot {
   ): AnnotationAnchor | null;
   resolveAnnotation(annotation: Annotation): ResolvedAnnotation | null;
   stats(): readonly PlotStatGroup[];
+  delta(resolved: readonly ResolvedAnnotation[]): PlotDelta | null;
 }
 
 interface PreparedSeries {
@@ -227,6 +234,9 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
         ]);
       });
     },
+    delta(items) {
+      return timeDelta(lastTwo(items));
+    },
   };
 }
 
@@ -285,4 +295,36 @@ function stat(
 
 function statsGroup(label: string, items: readonly PlotStat[]): PlotStatGroup {
   return { label, items };
+}
+
+function lastTwo(
+  items: readonly ResolvedAnnotation[],
+): readonly [ResolvedAnnotation, ResolvedAnnotation] | null {
+  const first = items[items.length - 2];
+  const second = items[items.length - 1];
+  return first === undefined || second === undefined ? null : [first, second];
+}
+
+function timeDelta(
+  pair: readonly [ResolvedAnnotation, ResolvedAnnotation] | null,
+): PlotDelta | null {
+  if (pair === null) return null;
+  const [first, second] = pair;
+  const deltaT = second.x - first.x;
+  const deltaY = second.y - first.y;
+  const parts = [`Δt ${formatValue(deltaT)} s`, `Δy ${formatValue(deltaY)}`];
+  if (deltaT !== 0) parts.push(`slope ${formatValue(deltaY / deltaT)}/s`);
+  return delta(parts, first, second);
+}
+
+function delta(
+  parts: readonly string[],
+  first: ResolvedAnnotation,
+  second: ResolvedAnnotation,
+): PlotDelta {
+  return {
+    label: parts.join(" · "),
+    first: { x: first.x, y: first.y },
+    second: { x: second.x, y: second.y },
+  };
 }

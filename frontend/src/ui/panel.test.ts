@@ -665,6 +665,12 @@ describe("panel series", () => {
       "panel",
       expect.objectContaining({ state: "rail", position: null }),
     );
+
+    state.series = [];
+    view.updatePlotLegend(state);
+    expect(legend.dataset.state).toBeUndefined();
+    expect(legend.dataset.collapsed).toBeUndefined();
+    expect(wrap.classList.contains("legend-rail")).toBe(false);
   });
 
   it("scrolls and searches the inline source roster", () => {

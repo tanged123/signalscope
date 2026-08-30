@@ -666,6 +666,23 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.time_window).toBeNull();
   });
 
+  it("updates annotation labels", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.addAnnotation(panel.id, {
+      id: "ann-1",
+      series_path: "a/b",
+      domain: "time",
+      anchor: 1,
+      pinned_value: 2,
+      label: "before",
+    });
+
+    model.setAnnotationLabel(panel.id, "ann-1", "after");
+
+    expect(model.panel(panel.id)?.annotations[0]?.label).toBe("after");
+  });
+
   it("toggles statistics and axis style", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

@@ -10,6 +10,8 @@ import { CanvasSurface } from "./surface";
 
 const ANNOTATION_PAD = 7;
 const ANNOTATION_HEIGHT = 16;
+const DELTA_PAD = 8;
+const DELTA_HEIGHT = 18;
 
 export interface OverlayPalette {
   amber: string;
@@ -32,6 +34,12 @@ interface OverlayAnnotation {
   label: string;
 }
 
+export interface OverlayDelta {
+  label: string;
+  first: XyMarker;
+  second: XyMarker;
+}
+
 export interface OverlayState {
   cursorT: number | null;
   cursorMode: CursorMode;
@@ -41,6 +49,8 @@ export interface OverlayState {
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   /** Mode-resolved plot coordinates and readouts. */
   annotations: readonly OverlayAnnotation[];
+  /** Mode-native delta geometry and copy. */
+  delta: OverlayDelta | null;
 }
 
 export type CursorMode = SessionCursorMode;
@@ -256,6 +266,66 @@ export class OverlayRenderer {
       context.fillStyle = palette.fg1;
       context.fillText(text, plateX + ANNOTATION_PAD, plateY + 12);
     });
+    if (state.delta !== null) {
+      this.drawDelta(context, layout, state.delta, palette);
+    }
+    context.restore();
+  }
+
+  private drawDelta(
+    context: CanvasRenderingContext2D,
+    layout: PlotLayout,
+    delta: OverlayDelta,
+    palette: OverlayPalette,
+  ): void {
+    context.save();
+    context.strokeStyle = palette.fg3;
+    context.globalAlpha = 0.6;
+    context.lineWidth = 1;
+    context.setLineDash([3, 3]);
+    context.beginPath();
+    context.moveTo(
+      projectX(layout, delta.first.x),
+      projectY(layout, delta.first.y),
+    );
+    context.lineTo(
+      projectX(layout, delta.second.x),
+      projectY(layout, delta.second.y),
+    );
+    context.stroke();
+    context.restore();
+    context.save();
+    context.font = `${String(palette.fontSize + 1)}px ${palette.fontPlot}`;
+    const text = fitText(
+      context,
+      delta.label,
+      layout.plot.width - DELTA_PAD * 2,
+    );
+    const width = context.measureText(text).width + DELTA_PAD * 2;
+    const right = layout.plot.x + layout.plot.width;
+    const bottom = layout.plot.y + layout.plot.height;
+    const x = clampToBand(right - width - 8, layout.plot.x, right, width);
+    const y = clampToBand(
+      layout.plot.y + 6,
+      layout.plot.y,
+      bottom,
+      DELTA_HEIGHT,
+    );
+    context.fillStyle = palette.surface2;
+    context.fillRect(x, y, width, DELTA_HEIGHT);
+    context.strokeStyle = palette.amber;
+    context.globalAlpha = 0.4;
+    context.lineWidth = 1;
+    context.setLineDash([]);
+    context.strokeRect(
+      x + 0.5,
+      y + 0.5,
+      Math.max(0, width - 1),
+      DELTA_HEIGHT - 1,
+    );
+    context.globalAlpha = 1;
+    context.fillStyle = palette.amber;
+    context.fillText(text, x + DELTA_PAD, y + 13);
     context.restore();
   }
 
@@ -325,7 +395,7 @@ function clampToBand(
 }
 
 /** Annotation badge glyph: circled digits ①–⑳, then parenthesised numbers. */
-function marker(index: number): string {
+export function marker(index: number): string {
   return index < 20
     ? String.fromCodePoint(0x2460 + index)
     : `(${String(index + 1)})`;

@@ -829,6 +829,20 @@ export class WorkspaceModel {
     this.touch();
   }
 
+  setAnnotationLabel(
+    panelId: string,
+    annotationId: string,
+    label: string,
+  ): void {
+    const annotation = this.panel(panelId)?.annotations.find(
+      (entry) => entry.id === annotationId,
+    );
+    if (annotation !== undefined) {
+      annotation.label = label;
+      this.touch();
+    }
+  }
+
   toggleStats(id: string): void {
     const panel = this.panel(id);
     if (panel !== undefined) {

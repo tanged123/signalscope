@@ -276,6 +276,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onXRange: () => {},
       onPinAnnotation: () => {},
       onRemoveAnnotation: () => {},
+      onEditAnnotationLabel: () => {},
       onFitView: () => {},
       onToggleStats: () => {},
       onToggleAxisStyle: () => {},

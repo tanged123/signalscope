@@ -37,6 +37,7 @@ import {
   prepareTimePlot,
   type AnnotationAnchor,
   type PlotCursor,
+  type PlotDelta,
   type PreparedPlot,
   type ResolvedAnnotation,
   type SeriesHitAdapter,
@@ -50,6 +51,7 @@ import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
 import {
   OverlayRenderer,
+  marker,
   type CursorMode,
   type CursorPoint,
 } from "../render/overlay-renderer";
@@ -72,7 +74,10 @@ const DOCK_SEAM_WIDTH = 5;
 
 export type PanelCursor = PlotCursor;
 
-type ResolvedAnnotations = readonly ResolvedAnnotation[];
+interface ResolvedAnnotations {
+  resolved: readonly ResolvedAnnotation[];
+  delta: PlotDelta | null;
+}
 
 function colorIndexForHue(hue: number | null): number {
   if (hue === null) return 0;
@@ -134,6 +139,7 @@ export interface PanelCallbacks {
   onXRange(id: string, range: readonly [number, number]): void;
   onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
+  onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
   onFitView(id: string): void;
   onToggleStats(id: string): void;
   onToggleAxisStyle(id: string): void;
@@ -839,6 +845,7 @@ export class PanelView {
     this.updateGhostToggle(rendered);
     this.updateLegend(rendered);
     const annotations = this.resolvedAnnotations(rendered);
+    this.renderAnnotationList(rendered, annotations);
     this.renderStats();
     this.drawOverlay(annotations);
     if (
@@ -895,6 +902,7 @@ export class PanelView {
     );
     this.renderStats();
     const annotations = this.resolvedAnnotations(rendered);
+    this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (missing.length > 0) {
       this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
@@ -1275,16 +1283,20 @@ export class PanelView {
 
   private resolvedAnnotations(state: RenderPanelState): ResolvedAnnotations {
     const prepared = this.preparedPlot;
-    if (prepared === null) return [];
-    return state.annotations
+    if (prepared === null) return { resolved: [], delta: null };
+    const resolved = state.annotations
       .map((annotation) => prepared.resolveAnnotation(annotation))
       .filter((annotation) => annotation !== null);
+    return { resolved, delta: prepared.delta(resolved) };
   }
 
   private drawOverlay(resolution?: ResolvedAnnotations): void {
     const state = this.lastState;
-    const resolved =
-      resolution ?? (state === null ? [] : this.resolvedAnnotations(state));
+    const { resolved, delta } =
+      resolution ??
+      (state === null
+        ? { resolved: [], delta: null }
+        : this.resolvedAnnotations(state));
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -1313,6 +1325,7 @@ export class PanelView {
           label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label} `}${annotation.summary}`,
         };
       }),
+      delta,
     });
   }
 
@@ -1389,6 +1402,89 @@ export class PanelView {
     hint.className = "stats-hint";
     hint.textContent = "visible region · S toggles";
     strip.replaceChildren(...rows, hint);
+  }
+
+  private renderAnnotationList(
+    state: RenderPanelState,
+    resolution: ResolvedAnnotations,
+  ): void {
+    const list = required<HTMLElement>(this.element, ".panel-annotations");
+    const prepared = this.preparedPlot;
+    const annotations = prepared === null ? [] : state.annotations;
+    list.hidden = annotations.length === 0;
+    if (annotations.length === 0) {
+      list.replaceChildren();
+      return;
+    }
+    const heading = document.createElement("div");
+    heading.className = "annotations-heading";
+    heading.textContent = `ANNOTATIONS — ${state.title.toUpperCase()}`;
+    const resolvedById = new Map(
+      resolution.resolved.map((entry) => [entry.annotation.id, entry]),
+    );
+    const rows = annotations.map((annotation, index) => {
+      const row = document.createElement("div");
+      row.className = "annotation-row";
+      const text = document.createElement("span");
+      text.className = "annotation-text";
+      const current = resolvedById.get(annotation.id);
+      text.textContent =
+        `${marker(index)} t ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
+        (annotation.label === "" ? "" : ` "${annotation.label}"`);
+      const edit = document.createElement("button");
+      edit.className = "annotation-action";
+      edit.textContent = "✎";
+      edit.title = "Edit label";
+      edit.addEventListener("click", () => {
+        this.openAnnotationLabelEditor(row, annotation.id, annotation.label);
+      });
+      const remove = document.createElement("button");
+      remove.className = "annotation-action";
+      remove.textContent = "✕";
+      remove.title = "Delete annotation";
+      remove.addEventListener("click", () => {
+        this.callbacks.onRemoveAnnotation(this.id, annotation.id);
+      });
+      row.append(text, edit, remove);
+      return row;
+    });
+    const deltaRow = document.createElement("div");
+    deltaRow.className = "annotation-delta";
+    deltaRow.textContent = resolution.delta?.label ?? "";
+    list.replaceChildren(
+      heading,
+      ...rows,
+      ...(resolution.delta === null ? [] : [deltaRow]),
+    );
+  }
+
+  private openAnnotationLabelEditor(
+    row: HTMLElement,
+    annotationId: string,
+    current: string,
+  ): void {
+    const input = document.createElement("input");
+    input.className = "annotation-label-input";
+    input.value = current;
+    input.setAttribute("aria-label", "Annotation label");
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") input.blur();
+      if (event.key === "Escape") {
+        input.value = current;
+        input.blur();
+      }
+      event.stopPropagation();
+    });
+    input.addEventListener("blur", () => {
+      this.callbacks.onEditAnnotationLabel(
+        this.id,
+        annotationId,
+        input.value.trim(),
+      );
+    });
+    row.append(input);
+    input.focus();
+    input.select();
   }
 
   private beginTitleEdit(): void {
@@ -1487,6 +1583,8 @@ export class PanelView {
     if (state.series.length === 0) {
       legend.hidden = true;
       legend.replaceChildren();
+      delete legend.dataset.state;
+      delete legend.dataset.collapsed;
       wrap.classList.remove("legend-dock-preview");
       wrap.classList.remove("legend-rail");
       wrap.classList.remove("legend-rail-collapsed");
@@ -2908,5 +3006,6 @@ function panelMarkup(): string {
       <div class="plot-series-legend" aria-label="Plot legend"></div>
       <div class="panel-empty" hidden></div>
     </div>
-    <div class="panel-stats" hidden></div>`;
+    <div class="panel-stats" hidden></div>
+    <div class="panel-annotations" hidden></div>`;
 }

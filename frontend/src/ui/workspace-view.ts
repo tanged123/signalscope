@@ -19,6 +19,7 @@ import type { GpuContext } from "../render/gpu-context";
 import { panelsToEvict } from "./panel-residency";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
+  onEvictPanel(id: string): void;
   onLayoutChanged(): void;
   onDropSignalNewPanel(path: string): void;
   onDropSignalsNewPanel?(paths: readonly string[]): void;
@@ -246,6 +247,7 @@ export class WorkspaceView {
       view.element.remove();
       this.views.delete(id);
       this.lastUsed.delete(id);
+      this.callbacks.onEvictPanel(id);
     }
   }
 

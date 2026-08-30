@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as M4Feed from "../render/m4-feed";
 
 const prepareResponseFeeds = vi.hoisted(() => vi.fn());
@@ -199,6 +199,10 @@ describe("sample refresh requests", () => {
 });
 
 describe("GPU failure handling", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("releases panels and offers reload after device loss", () => {
     const root = document.createElement("div");
     root.innerHTML = shellMarkup();
@@ -245,7 +249,6 @@ describe("GPU failure handling", () => {
     ).toBe(true);
     root.querySelector<HTMLButtonElement>(".gpu-warning-reload")?.click();
     expect(reload).toHaveBeenCalledOnce();
-    vi.unstubAllGlobals();
   });
 
   it("reports uncaptured GPU errors without releasing the workspace", () => {

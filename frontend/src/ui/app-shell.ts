@@ -349,6 +349,9 @@ export class AppShell {
       required(this.root, ".workspace"),
       this.workspace,
       {
+        onEvictPanel: (id) => {
+          this.tileWindowCache.invalidate(id);
+        },
         onFocus: (id) => {
           this.workspace.focusPanel(id);
         },
@@ -507,6 +510,11 @@ export class AppShell {
         },
         onRemoveAnnotation: (id, annotationId) => {
           this.workspace.removeAnnotation(id, annotationId);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onEditAnnotationLabel: (id, annotationId, label) => {
+          this.workspace.setAnnotationLabel(id, annotationId, label);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
@@ -1046,7 +1054,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 1.1.9");
+        this.showModeHelp("SignalScope 1.2.0");
       },
     });
     this.commands.register({
@@ -2627,7 +2635,7 @@ export class AppShell {
       Number(adapterLimits?.maxBufferSize ?? 0),
       (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
     );
-    const retainedBins = this.tileWindowCache.binCount(
+    const retainedBins = this.tileWindowCache.retainedBinCount(
       new Set(panels.map((panel) => panel.id)),
     );
     const densityPlan = planPresentationDensity({

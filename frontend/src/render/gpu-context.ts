@@ -25,10 +25,12 @@ interface DeviceEvents {
 
 export async function acquireGpuContext(): Promise<GpuContext | null> {
   try {
-    const adapter = await navigator.gpu?.requestAdapter({
-      powerPreference: "high-performance",
-    });
-    if (adapter === null || adapter === undefined) return null;
+    const gpu = navigator.gpu;
+    if (gpu === undefined) return null;
+    const adapter =
+      (await gpu.requestAdapter({ powerPreference: "high-performance" })) ??
+      (await gpu.requestAdapter());
+    if (adapter === null) return null;
     const device = (await adapter.requestDevice()) as unknown as GPUDevice;
     const deviceEvents = device as unknown as DeviceEvents;
     const hosts = new Set<{ needsRender(): boolean; renderFrame(): void }>();

@@ -50,31 +50,7 @@ export class TileWindowCache {
     devicePixelRatio: number,
     visible: { t0: number; t1: number },
     padded: { t0: number; t1: number },
-  ): number;
-  static requestPixelWidth(
-    cssWidth: number,
-    visible: { t0: number; t1: number },
-    padded: { t0: number; t1: number },
-  ): number;
-  static requestPixelWidth(
-    cssWidth: number,
-    devicePixelRatioOrVisible: number | { t0: number; t1: number },
-    visibleOrPadded: { t0: number; t1: number },
-    paddedArgument?: { t0: number; t1: number },
   ): number {
-    const devicePixelRatio =
-      typeof devicePixelRatioOrVisible === "number"
-        ? devicePixelRatioOrVisible
-        : 1;
-    const visible =
-      typeof devicePixelRatioOrVisible === "number"
-        ? visibleOrPadded
-        : devicePixelRatioOrVisible;
-    const padded =
-      typeof devicePixelRatioOrVisible === "number"
-        ? paddedArgument
-        : visibleOrPadded;
-    if (padded === undefined) return Math.max(1, Math.ceil(cssWidth));
     const physical = Math.max(
       1,
       Math.ceil(
@@ -152,30 +128,6 @@ export class TileWindowCache {
       : this.covering(panelId, entries.current.idsKey, visible);
   }
 
-  /**
-   * Returns the padded response for a covered viewport by reference. The
-   * presentation layer bounds itself by the visible window instead.
-   */
-  hit(
-    panelId: string,
-    idsKey: string,
-    pixelWidth: number,
-    t0: number,
-    t1: number,
-  ): ColumnarTileResponse | null {
-    const entry = this.entries.get(panelId)?.current;
-    if (
-      entry === undefined ||
-      entry.idsKey !== idsKey ||
-      entry.pixelWidth !== pixelWidth ||
-      t0 < entry.window.t0 ||
-      t1 > entry.window.t1
-    ) {
-      return null;
-    }
-    return entry.response;
-  }
-
   store(
     panelId: string,
     entry: CachedPanelTiles | Omit<CachedPanelTiles, "requestedDevicePixels">,
@@ -205,7 +157,9 @@ export class TileWindowCache {
     const cachedSpan = windowSpan(cached.window);
     if (cachedSpan >= overviewSpan) {
       const detail =
-        cachedSpan > overviewSpan ? existing.overview : existing.detail;
+        cachedSpan > overviewSpan
+          ? (existing.detail ?? existing.overview)
+          : existing.detail;
       this.entries.set(panelId, { overview: cached, detail, current: cached });
       return;
     }
@@ -220,9 +174,18 @@ export class TileWindowCache {
     let count = 0;
     for (const [panelId, entries] of this.entries) {
       if (excludingPanelIds.has(panelId)) continue;
-      for (const entry of uniqueEntries(entries)) {
-        for (const series of entry.response.series) count += series.bins.count;
-      }
+      for (const entry of uniqueEntries(entries)) count += entryBinCount(entry);
+    }
+    return count;
+  }
+
+  retainedBinCount(replacingPanelIds: ReadonlySet<string>): number {
+    let count = 0;
+    for (const [panelId, entries] of this.entries) {
+      const retained = uniqueEntries(entries).map(entryBinCount);
+      count += replacingPanelIds.has(panelId)
+        ? Math.max(0, ...retained)
+        : retained.reduce((sum, bins) => sum + bins, 0);
     }
     return count;
   }
@@ -261,6 +224,13 @@ function uniqueEntries(entries: PanelEntries): CacheEntry[] {
 function windowSpan(window: { t0: number; t1: number }): number {
   const span = window.t1 - window.t0;
   return Number.isFinite(span) && span > 0 ? span : 0;
+}
+
+function entryBinCount(entry: CacheEntry): number {
+  return entry.response.series.reduce(
+    (count, series) => count + series.bins.count,
+    0,
+  );
 }
 
 function maxBinSpan(bins: BinColumns): number {
