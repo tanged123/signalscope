@@ -243,11 +243,15 @@ export class AppShell {
       this.reportError(failure.message);
       return;
     }
+    const gpu = this.gpu;
     this.gpu = null;
     this.workspaceView?.releaseGpu();
+    gpu?.dispose();
     const warning = required<HTMLElement>(this.root, ".gpu-warning");
     required<HTMLElement>(warning, ".gpu-warning-message").textContent =
-      "WebGPU device lost — reconnecting";
+      failure.kind === "device-lost"
+        ? "WebGPU device lost — reconnecting"
+        : "WebGPU renderer unavailable — reconnecting";
     required<HTMLButtonElement>(warning, ".gpu-warning-dismiss").hidden = true;
     required<HTMLButtonElement>(warning, ".gpu-warning-reload").hidden = false;
     warning.hidden = false;

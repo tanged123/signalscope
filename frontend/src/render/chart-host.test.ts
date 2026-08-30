@@ -400,6 +400,10 @@ describe("ChartHost", () => {
     host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
 
     expect(chart?.setOption).toHaveBeenCalledOnce();
+    expect(chart?.setViewRange).toHaveBeenCalledWith({
+      x: { min: 1, max: 2 },
+      y: { min: -1, max: 5 },
+    });
     expect(chart?.options.series).toBe(series);
     expect(chart?.renderFrame).toHaveBeenCalled();
     expect(host.layout()).toEqual({

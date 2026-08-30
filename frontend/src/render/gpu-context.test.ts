@@ -284,4 +284,21 @@ describe("acquireGpuContext", () => {
     expect(cancelAnimationFrame).not.toHaveBeenCalled();
     unregister?.();
   });
+
+  it("forwards chart host initialization failures", async () => {
+    installDevice();
+    const gpu = await acquireGpuContext();
+    const onFailure = vi.fn();
+    gpu?.onFailure(onFailure);
+
+    gpu?.reportFailure({
+      kind: "host-initialization",
+      message: "canvas context unavailable",
+    });
+
+    expect(onFailure).toHaveBeenCalledWith({
+      kind: "host-initialization",
+      message: "canvas context unavailable",
+    });
+  });
 });

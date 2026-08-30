@@ -227,11 +227,13 @@ describe("GPU failure handling", () => {
     shell.workspaceView = workspaceView;
     shell.requestGpuRecovery = vi.fn();
     shell.refreshTiles = vi.fn(() => Promise.resolve());
+    const dispose = vi.fn();
     const gpu = {
       onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
         failure = callback;
         return vi.fn();
       }),
+      dispose,
     } as unknown as GpuContext;
 
     const reload = vi.fn();
@@ -242,6 +244,7 @@ describe("GPU failure handling", () => {
 
     const warning = root.querySelector<HTMLElement>(".gpu-warning");
     expect(workspaceView.releaseGpu).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
     expect(shell.gpu).toBeNull();
     expect(shell.requestGpuRecovery).toHaveBeenCalledOnce();
     expect(warning?.textContent).toContain("WebGPU device lost — reconnecting");
@@ -282,6 +285,7 @@ describe("GPU failure handling", () => {
         failure = callback;
         return vi.fn();
       }),
+      dispose: vi.fn(),
     } as unknown as GpuContext;
 
     shell.setGpu(gpu);

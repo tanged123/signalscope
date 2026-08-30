@@ -670,6 +670,14 @@ export class PanelView {
           return null;
         }
         console.error("ChartGPU initialization failed", error);
+        gpu.reportFailure({
+          kind: "host-initialization",
+          message:
+            error instanceof Error
+              ? error.message
+              : "ChartGPU initialization failed",
+        });
+        if (this.gpu !== gpu) return null;
         this.gpu = null;
         this.chartHostElement.hidden = true;
         if (this.lastInputState !== null) {

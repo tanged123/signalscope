@@ -1,7 +1,7 @@
 import { createPipelineCache } from "@chartgpu/chartgpu";
 
 export interface GpuFailure {
-  kind: "device-lost" | "uncaptured-error";
+  kind: "device-lost" | "host-initialization" | "uncaptured-error";
   message: string;
 }
 
@@ -11,6 +11,7 @@ export interface GpuContext {
   pipelineCache: unknown;
   register(host: { needsRender(): boolean; renderFrame(): void }): () => void;
   onFailure(callback: (failure: GpuFailure) => void): () => void;
+  reportFailure(failure: GpuFailure): void;
   dispose(): void;
 }
 
@@ -157,6 +158,9 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
         return () => {
           failureListeners.delete(callback);
         };
+      },
+      reportFailure(failure) {
+        if (!disposed && !lost) notifyFailure(failure);
       },
       dispose,
     };

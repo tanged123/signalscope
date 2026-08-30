@@ -210,6 +210,10 @@ export class ChartHost {
       yAxis: this.yAxis(yRange, this.options.yAxis?.name ?? "value"),
     };
     this.chart.setOption(this.options);
+    this.chart.setViewRange({
+      x: { min: xRange.min - this.tRef, max: xRange.max - this.tRef },
+      y: { min: yRange[0], max: yRange[1] },
+    });
     this.chart.renderFrame();
     this.lastLayout = this.makeLayout(xRange, yRange);
   }
