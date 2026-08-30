@@ -49,5 +49,6 @@ Accepted decisions:
 45. [Constant-work ChartGPU viewport updates](0045-constant-work-chart-viewport.md)
 46. [Uniform presentation admission](0046-uniform-presentation-admission.md)
 47. [Overview/detail tile retention](0047-overview-detail-tile-retention.md)
+48. [Legend console and serialized overlay state](0048-legend-console.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

@@ -255,7 +255,9 @@ test("catalog reload clears selection for a removed derived signal", async ({
   await formula.fill("derived/transient = 'rocket/velocity_body/x' * 2");
   await formula.press("Enter");
 
-  const derived = page.locator('[data-path="derived/transient"]');
+  const derived = page.locator(
+    '.signal-outline-row[data-path="derived/transient"]',
+  );
   await expect(derived).toBeVisible();
   await derived.click();
   await expect(page.locator(".sets-save-selection")).toBeEnabled();

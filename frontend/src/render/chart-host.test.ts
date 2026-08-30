@@ -298,6 +298,7 @@ describe("ChartHost", () => {
     expect(series.map(({ lineStyle }) => lineStyle.width)).toEqual([
       3, 4, 5.2, 4.8,
     ]);
+    expect(state.charts.at(-1)?.options.performance).toEqual({ lod: "strict" });
   });
 
   it("scales compensated ChartGPU widths globally", async () => {
@@ -322,6 +323,7 @@ describe("ChartHost", () => {
     [4.5, 6, 7.8, 7.2].forEach((expected, index) => {
       expect(widths[index]).toBeCloseTo(expected);
     });
+    expect(state.charts.at(-1)?.options.performance).toEqual({ lod: "strict" });
   });
 
   it("uses ghost and emphasis styling without changing series identity unnecessarily", async () => {

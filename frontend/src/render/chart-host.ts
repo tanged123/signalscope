@@ -262,6 +262,15 @@ export class ChartHost {
       renderMode: "external",
       tooltip: { show: false },
       legend: { show: false },
+      performance: {
+        lod:
+          request.palette.lineWidthScale !== 1 ||
+          request.styles.some(
+            (style) => style.hue !== null && style.width !== 1.4,
+          )
+            ? "strict"
+            : "auto",
+      },
       theme: {
         backgroundColor: request.palette.background,
         textColor: request.palette.fg2,

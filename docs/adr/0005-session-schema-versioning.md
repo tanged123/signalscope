@@ -77,3 +77,10 @@ any version other than the current one is rejected through
 longer load. This is a single deliberate break accepted for that change and
 does not relax the rule for future bumps, which continue to require a rung
 and a migration test. See [ADR 0043](0043-time-only-presentation.md).
+
+## Amendment (2026-08-30, legend console)
+
+Schema version 23 stores each panel's legend state, including the docked rail,
+position, size, snapped corner, and empty-focus hint dismissal. Version 22
+sessions migrate to the default keys state with no custom geometry. See
+[ADR 0048](0048-legend-console.md).

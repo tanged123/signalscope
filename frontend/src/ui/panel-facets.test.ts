@@ -37,6 +37,11 @@ function state(): PanelState {
     focus: [],
     ghost_mode: "all",
     split_by: "source",
+    legend_state: "keys",
+    legend_position: null,
+    legend_size: null,
+    legend_anchor: null,
+    legend_hint_dismissed: false,
     y_range: null,
     x_range: null,
     x_label: null,
@@ -57,11 +62,13 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onDropSignals: vi.fn(),
     onDropSet: vi.fn(),
     onFocusToggle: vi.fn(),
+    onFocusSolo: vi.fn(),
     onClearFocus: vi.fn(),
     onMuteSelector: vi.fn(),
     onMuteSeries: vi.fn(),
     onRemoveBinding: vi.fn(),
     onToggleGhostMode: vi.fn(),
+    onLegendLayout: vi.fn(),
     localPathFor: () => null,
     sourceKeyFor: () => null,
     pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
@@ -144,7 +151,7 @@ describe("PanelView panel chrome", () => {
     );
   });
 
-  it("renders the legend and focus strip below a header without roster tokens", () => {
+  it("renders the in-plot legend without a duplicate strip", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),
       signal("run-02", "temp"),
@@ -162,21 +169,19 @@ describe("PanelView panel chrome", () => {
     ];
     view.update(panel, false);
 
-    const strip = view.element.querySelector<HTMLElement>(
-      ".panel-legend-strip",
+    expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
+    const legend = view.element.querySelector(".plot-series-legend");
+    expect(legend?.getAttribute("data-state")).toBe("keys");
+    expect(legend?.querySelectorAll(".plot-legend-row")).toHaveLength(1);
+    expect(legend?.querySelector(".color-rule-token")?.textContent).toBe(
+      "color ← source ▾",
     );
-    expect(strip).not.toBeNull();
-    expect(strip?.querySelectorAll(".legend-count-token")).toHaveLength(2);
-    expect(strip?.querySelectorAll(".matrix-focus-chip")).toHaveLength(1);
-    expect(strip?.querySelector(".color-rule-token")?.textContent).toBe(
-      "color ← source",
-    );
-    expect(strip?.textContent).toContain(
-      "hover explore · ⇧click focus · ⌥ mute · esc clear",
-    );
+    view.element
+      .querySelector<HTMLButtonElement>(".panel-config-toggle")
+      ?.click();
     expect(
-      view.element.querySelectorAll(".panel-header .legend-count-token"),
-    ).toHaveLength(0);
+      view.element.querySelector(".panel-config-popover")?.textContent,
+    ).toContain("line style flat");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });

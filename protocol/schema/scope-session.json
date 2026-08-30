@@ -1,5 +1,5 @@
 {
-  "schema_version": 22,
+  "schema_version": 23,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -91,6 +91,15 @@
       "variants": ["none", "source", "channel"],
       "default": "none"
     },
+    "LegendState": {
+      "kind": "enum",
+      "variants": ["badge", "keys", "roster", "rail"],
+      "default": "keys"
+    },
+    "LegendAnchor": {
+      "kind": "enum",
+      "variants": ["top_left", "top_right", "bottom_left", "bottom_right"]
+    },
     "NamedSetKind": { "kind": "enum", "variants": ["query", "pick"] },
     "NamedSet": {
       "kind": "object",
@@ -126,6 +135,11 @@
         "focus": "FocusEntry[]",
         "ghost_mode": "GhostMode",
         "split_by": "SplitDimension",
+        "legend_state": "LegendState",
+        "legend_position": "f64[2]?",
+        "legend_size": "f64[2]?",
+        "legend_anchor": "LegendAnchor?",
+        "legend_hint_dismissed": "bool",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
         "x_label": "string?",

@@ -15,7 +15,6 @@ import {
   bindingChipEntries,
   focusChips,
   effectiveAxisStyle,
-  legendTokenLabel,
   matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
@@ -158,6 +157,11 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     color_by: "source",
     ghost_mode: "all",
     split_by: "none",
+    legend_state: "keys",
+    legend_position: null,
+    legend_size: null,
+    legend_anchor: null,
+    legend_hint_dismissed: false,
     bindings: [],
     overrides: [],
     focus: [],
@@ -347,6 +351,21 @@ describe("panel series", () => {
         (row) => row.value,
       ),
     ).toEqual(["temp"]);
+    expect(
+      matrixLegendRows(catalog, state, "source", "run_02").map(
+        (row) => row.value,
+      ),
+    ).toEqual(["run_02"]);
+    expect(
+      matrixLegendRows(catalog, state, "source", "run_0*").map(
+        (row) => row.value,
+      ),
+    ).toEqual(["run_01", "run_02", "run_03"]);
+    expect(
+      matrixLegendRows(catalog, state, "channel", "/ spe").map(
+        (row) => row.value,
+      ),
+    ).toEqual(["speed"]);
   });
 
   it("keeps only the first eight focus chips and reports overflow", () => {
@@ -382,56 +401,7 @@ describe("panel series", () => {
     expect(result.overflow).toBe(2);
   });
 
-  it("compresses a focused dimension into a value plus remainder count", () => {
-    const catalog = Catalog.build(
-      Array.from({ length: 12 }, (_, index) => ({
-        signal_id: `run-${String(index + 1)}-temp`,
-        source_id: `k${String(index + 1)}`,
-        source_key: `k${String(index + 1)}`,
-        local_path: "temp",
-        path: `run_${String(index + 1).padStart(2, "0")}/temp`,
-        unit: "K",
-        point_count: "2",
-        t_min: 0,
-        t_max: 1,
-        last_value: null,
-      })),
-    );
-    const state = timeState(
-      Array.from({ length: 12 }, (_, index) =>
-        visible(`run_${String(index + 1).padStart(2, "0")}/temp`),
-      ),
-    );
-    state.focus = [
-      { kind: "channel", ref: null, source_key: null, channel: "temp" },
-    ];
-    expect(legendTokenLabel(catalog, state, "channel", 12)).toBe("temp +11 ▾");
-    state.focus = [];
-    expect(legendTokenLabel(catalog, state, "channel", 12)).toBe("12 ▾");
-  });
-
-  it("renders one dash key per rendered channel in a focused source chip", () => {
-    const catalog = Catalog.build([
-      summary("run_07/temp"),
-      summary("run_07/temp_sp"),
-    ]);
-    const state = timeState([
-      visible("run_07/temp"),
-      visible("run_07/temp_sp"),
-    ]);
-    state.focus = [
-      { kind: "source", ref: null, source_key: "k7", channel: null },
-    ];
-    const view = Object.create(PanelView.prototype) as unknown as {
-      callbacks: Pick<PanelCallbacks, "catalog">;
-      focusChipElements(current: RenderPanelState): HTMLElement[];
-    };
-    view.callbacks = { catalog: () => catalog };
-    const [chip] = view.focusChipElements(state);
-    expect(chip?.querySelectorAll(".matrix-focus-key")).toHaveLength(2);
-  });
-
-  it("shows line-style state and opens a ghost-filtered roster", () => {
+  it("uses the in-plot keys as the only legend surface", () => {
     const catalog = Catalog.build([
       summary("run_07/temp"),
       summary("run_08/temp"),
@@ -449,60 +419,53 @@ describe("panel series", () => {
       },
     ];
     state.ghost_mode = "ghost";
+    const onLegendLayout = vi.fn();
     const view = Object.create(PanelView.prototype) as unknown as {
-      callbacks: Pick<PanelCallbacks, "catalog">;
+      callbacks: Pick<
+        PanelCallbacks,
+        | "catalog"
+        | "onFocusToggle"
+        | "onFocusSolo"
+        | "onMuteSeries"
+        | "onMuteSelector"
+        | "onLegendLayout"
+      >;
       element: HTMLElement;
-      plotLegendHidden: boolean;
       plotLegendPosition: { x: number; y: number } | null;
       plotLegendSize: { width: number; height: number } | null;
+      plotLegendAnchor: null;
       updateLegend(current: RenderPanelState): void;
     };
-    view.callbacks = { catalog: () => catalog };
-    view.plotLegendHidden = false;
+    view.callbacks = {
+      catalog: () => catalog,
+      onFocusToggle: vi.fn(),
+      onFocusSolo: vi.fn(),
+      onMuteSeries: vi.fn(),
+      onMuteSelector: vi.fn(),
+      onLegendLayout,
+    };
+    Object.assign(view, { id: "panel" });
     view.plotLegendPosition = null;
     view.plotLegendSize = null;
+    view.plotLegendAnchor = null;
     view.element = document.createElement("article");
     view.element.innerHTML =
-      '<div class="panel-legend"></div><span class="panel-gesture-hint"></span><div class="plot-series-legend"></div>';
+      '<div class="plot-wrap"><div class="plot-series-legend"></div></div>';
     view.updateLegend(state);
-    expect(view.element.querySelector(".panel-gesture-hint")?.textContent).toBe(
-      "· line style flat · hover explore · ⇧click focus · ⌥ mute · esc clear",
-    );
-    state.overrides = [
-      {
-        target_ref: { source_key: "run-07", channel: "temp" },
-        target_selector: null,
-        color_slot: null,
-        dash: "dash",
-        width: null,
-        opacity: null,
-        visible: null,
-      },
-    ];
-    view.updateLegend(state);
-    expect(
-      view.element.querySelector(".panel-gesture-hint")?.textContent,
-    ).toContain("line style ◆ overridden");
-    const ghost = view.element.querySelector<HTMLButtonElement>(
-      ".legend-ghost-token",
-    );
-    expect(ghost?.textContent).toBe("1 ghosts ▾");
+    expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
     expect(
       view.element.querySelector(".plot-legend-row")?.textContent,
     ).toContain("run_07");
-    expect(
-      view.element.querySelector(".plot-legend-summary")?.textContent,
-    ).toBe("1 ghosts ▾");
-    ghost?.click();
-    expect(
-      view.element.querySelector<HTMLElement>(".matrix-roster")?.dataset.filter,
-    ).toBe("ghost");
-    expect(
-      view.element.querySelector(".matrix-roster-row")?.textContent,
-    ).toContain("run_08");
+    expect(view.element.querySelector(".plot-legend-footer")?.textContent).toBe(
+      "1 ghosts ▾",
+    );
+    view.element
+      .querySelector<HTMLButtonElement>(".plot-legend-footer")
+      ?.click();
+    expect(onLegendLayout).toHaveBeenCalledWith("panel", { state: "roster" });
   });
 
-  it("resizes, hides, and keyboard-moves the plot legend", () => {
+  it("persists resize and keyboard movement without a hide control", () => {
     const paths = Array.from(
       { length: 8 },
       (_, index) => `run_${String(index + 1).padStart(2, "0")}/temp`,
@@ -515,21 +478,40 @@ describe("panel series", () => {
       source_key: null,
       channel: series.ref.channel,
     }));
+    const onLegendLayout = vi.fn();
     const view = Object.create(PanelView.prototype) as unknown as {
-      callbacks: Pick<PanelCallbacks, "catalog" | "onFocusToggle">;
+      callbacks: Pick<
+        PanelCallbacks,
+        | "catalog"
+        | "onFocusToggle"
+        | "onFocusSolo"
+        | "onMuteSeries"
+        | "onMuteSelector"
+        | "onLegendLayout"
+      >;
       element: HTMLElement;
-      plotLegendHidden: boolean;
       plotLegendPosition: { x: number; y: number } | null;
       plotLegendSize: { width: number; height: number } | null;
+      plotLegendAnchor: null;
+      plotLegendNearRightEdge(legend: HTMLElement): boolean;
+      plotLegendTouchesRightEdge(legend: HTMLElement): boolean;
       updatePlotLegend(current: RenderPanelState): void;
     };
-    view.callbacks = { catalog: () => catalog, onFocusToggle: vi.fn() };
+    view.callbacks = {
+      catalog: () => catalog,
+      onFocusToggle: vi.fn(),
+      onFocusSolo: vi.fn(),
+      onMuteSeries: vi.fn(),
+      onMuteSelector: vi.fn(),
+      onLegendLayout,
+    };
+    Object.assign(view, { id: "panel" });
     view.element = document.createElement("article");
     view.element.innerHTML =
       '<div class="plot-wrap"><div class="plot-series-legend"></div></div>';
-    view.plotLegendHidden = false;
     view.plotLegendPosition = null;
     view.plotLegendSize = null;
+    view.plotLegendAnchor = null;
     const wrap = view.element.querySelector<HTMLElement>(".plot-wrap");
     const legend = view.element.querySelector<HTMLElement>(
       ".plot-series-legend",
@@ -550,55 +532,198 @@ describe("panel series", () => {
 
     view.updatePlotLegend(state);
     expect(legend.querySelectorAll(".plot-legend-row")).toHaveLength(8);
+    expect(
+      legend.querySelector(".plot-legend-focus-rows")?.children,
+    ).toHaveLength(8);
+    expect(view.plotLegendNearRightEdge(legend)).toBe(true);
+    expect(view.plotLegendTouchesRightEdge(legend)).toBe(true);
     legend
-      .querySelector<HTMLButtonElement>(".plot-legend-resize")
+      .querySelector<HTMLButtonElement>(".plot-legend-resize-bottom")
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
-    expect(legend.style.height).toBe("196px");
+    expect(onLegendLayout).toHaveBeenCalledWith(
+      "panel",
+      expect.objectContaining({ state: "rail", size: [160, 196] }),
+    );
     legend
       .querySelector<HTMLButtonElement>(".plot-legend-drag")
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
     expect(legend.style.left).toBe("164px");
-
-    legend.querySelector<HTMLButtonElement>(".plot-legend-hide")?.click();
-    expect(legend.hidden).toBe(true);
-    expect(legend.childElementCount).toBe(0);
+    legend
+      .querySelector<HTMLButtonElement>(".plot-legend-drag")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    expect(onLegendLayout).toHaveBeenCalledWith(
+      "panel",
+      expect.objectContaining({ state: "rail", position: null }),
+    );
+    expect(legend.querySelector(".plot-legend-hide")).toBeNull();
   });
 
-  it("scrolls and searches the complete source roster", () => {
+  it("reflows around a full-height rail and returns it to floating", () => {
+    const paths = Array.from(
+      { length: 12 },
+      (_, index) => `run_${String(index + 1).padStart(2, "0")}/temp`,
+    );
+    const state = timeState(paths.map(visible));
+    state.legend_state = "rail";
+    state.legend_size = [180, 240];
+    const onLegendLayout = vi.fn();
+    const view = Object.create(PanelView.prototype) as unknown as {
+      id: string;
+      callbacks: Pick<
+        PanelCallbacks,
+        | "catalog"
+        | "onFocusToggle"
+        | "onFocusSolo"
+        | "onMuteSeries"
+        | "onMuteSelector"
+        | "onLegendLayout"
+      >;
+      element: HTMLElement;
+      plotLegendPosition: null;
+      plotLegendSize: null;
+      plotLegendAnchor: null;
+      updatePlotLegend(current: RenderPanelState): void;
+    };
+    view.id = "panel";
+    view.callbacks = {
+      catalog: () => Catalog.build(paths.map(summary)),
+      onFocusToggle: vi.fn(),
+      onFocusSolo: vi.fn(),
+      onMuteSeries: vi.fn(),
+      onMuteSelector: vi.fn(),
+      onLegendLayout,
+    };
+    view.element = document.createElement("article");
+    view.element.innerHTML = `<div class="plot-wrap">
+      <div class="chart-host"></div>
+      <canvas class="overlay-canvas"></canvas>
+      <div class="plot-series-legend"></div>
+      <div class="panel-empty"></div>
+    </div>`;
+    view.plotLegendPosition = null;
+    view.plotLegendSize = null;
+    view.plotLegendAnchor = null;
+    const wrap = view.element.querySelector<HTMLElement>(".plot-wrap");
+    const legend = view.element.querySelector<HTMLElement>(
+      ".plot-series-legend",
+    );
+    if (wrap === null || legend === null) throw new Error("Legend is missing");
+    vi.spyOn(wrap, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      right: 500,
+      top: 0,
+      width: 500,
+      height: 300,
+    } as DOMRect);
+    vi.spyOn(legend, "getBoundingClientRect").mockReturnValue({
+      left: 320,
+      right: 500,
+      top: 0,
+      width: 180,
+      height: 300,
+    } as DOMRect);
+
+    view.updatePlotLegend(state);
+    expect(wrap.classList.contains("legend-rail")).toBe(true);
+    expect(wrap.style.getPropertyValue("--plot-legend-rail-width")).toBe(
+      "180px",
+    );
+    expect(legend.style.height).toBe("100%");
+    expect(legend.querySelector(".plot-legend-roster")).not.toBeNull();
+    legend.querySelector<HTMLButtonElement>(".plot-legend-undock")?.click();
+    expect(onLegendLayout).toHaveBeenCalledWith("panel", {
+      state: "roster",
+      position: null,
+      size: [180, 180],
+      anchor: "top_right",
+    });
+
+    state.legend_size = [0, 300];
+    view.updatePlotLegend(state);
+    expect(wrap.classList.contains("legend-rail-collapsed")).toBe(true);
+    expect(wrap.style.getPropertyValue("--plot-legend-rail-width")).toBe("5px");
+    expect(legend.dataset.collapsed).toBe("true");
+    onLegendLayout.mockClear();
+    legend
+      .querySelector<HTMLButtonElement>(".plot-legend-resize-left")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+    expect(onLegendLayout).toHaveBeenCalledWith("panel", {
+      state: "rail",
+      position: null,
+      size: [225, 300],
+      anchor: null,
+    });
+
+    onLegendLayout.mockClear();
+    state.legend_state = "badge";
+    state.legend_size = null;
+    view.updatePlotLegend(state);
+    legend
+      .querySelector<HTMLButtonElement>(".plot-legend-badge-drag")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    expect(onLegendLayout).toHaveBeenCalledWith(
+      "panel",
+      expect.objectContaining({ state: "rail", position: null }),
+    );
+  });
+
+  it("scrolls and searches the inline source roster", () => {
     const paths = Array.from(
       { length: 100 },
       (_, index) => `run_${String(index + 1).padStart(3, "0")}/temp`,
     );
     const state = timeState(paths.map(visible));
+    state.legend_state = "roster";
     const view = Object.create(PanelView.prototype) as unknown as {
       id: string;
-      callbacks: Pick<PanelCallbacks, "catalog">;
+      callbacks: Pick<
+        PanelCallbacks,
+        | "catalog"
+        | "onFocusToggle"
+        | "onFocusSolo"
+        | "onMuteSeries"
+        | "onMuteSelector"
+        | "onLegendLayout"
+      >;
       element: HTMLElement;
-      rosterCleanup: (() => void) | null;
-      openRoster(
-        dimension: "source",
-        current: RenderPanelState,
-        anchor: HTMLElement,
-      ): void;
+      plotLegendPosition: null;
+      plotLegendSize: null;
+      plotLegendAnchor: null;
+      refreshPlotLegendRoster(): void;
+      updatePlotLegend(current: RenderPanelState): void;
     };
     view.id = "panel";
-    view.callbacks = { catalog: () => Catalog.build(paths.map(summary)) };
+    view.callbacks = {
+      catalog: () => Catalog.build(paths.map(summary)),
+      onFocusToggle: vi.fn(),
+      onFocusSolo: vi.fn(),
+      onMuteSeries: vi.fn(),
+      onMuteSelector: vi.fn(),
+      onLegendLayout: vi.fn(),
+    };
     view.element = document.createElement("article");
-    view.rosterCleanup = null;
-    const anchor = document.createElement("button");
-    view.element.append(anchor);
-
-    view.openRoster("source", state, anchor);
-    const rows = view.element.querySelector<HTMLElement>(".matrix-roster-rows");
+    view.element.innerHTML =
+      '<div class="plot-wrap"><div class="plot-series-legend"></div></div>';
+    view.plotLegendPosition = null;
+    view.plotLegendSize = null;
+    view.plotLegendAnchor = null;
+    view.updatePlotLegend(state);
+    const rows = view.element.querySelector<HTMLElement>(
+      ".plot-legend-roster-rows",
+    );
     const viewport = view.element.querySelector<HTMLElement>(
-      ".matrix-roster-viewport",
+      ".plot-legend-roster-viewport",
     );
     const search = view.element.querySelector<HTMLInputElement>(
-      ".matrix-roster-search",
+      ".plot-legend-search",
     );
     if (rows === null || viewport === null || search === null)
       throw new Error("Roster is missing");
     expect(viewport.style.height).toBe("2400px");
+    const initialRows = viewport.children.length;
+    Object.defineProperty(rows, "clientHeight", { value: 480 });
+    view.refreshPlotLegendRoster();
+    expect(viewport.children.length).toBeGreaterThan(initialRows);
     rows.scrollTop = 2176;
     rows.dispatchEvent(new Event("scroll"));
     expect(viewport.lastElementChild?.textContent).toContain("run_100");
@@ -606,7 +731,9 @@ describe("panel series", () => {
     search.value = "* @ run_100";
     search.dispatchEvent(new Event("input"));
     expect(rows.scrollTop).toBe(0);
-    expect(viewport.querySelectorAll(".matrix-roster-row")).toHaveLength(1);
+    expect(viewport.querySelectorAll(".plot-legend-roster-row")).toHaveLength(
+      1,
+    );
     expect(viewport.textContent).toContain("run_100");
   });
 

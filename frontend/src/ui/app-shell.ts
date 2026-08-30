@@ -68,6 +68,7 @@ import {
 } from "../generated/protocol";
 import type {
   CursorMode,
+  LegendState,
   PanelState,
   SeriesRef,
   Session,
@@ -258,6 +259,43 @@ export class AppShell {
     });
   }
 
+  private bindLegendLayoutMenu(): void {
+    const trigger = required<HTMLButtonElement>(this.root, ".layout-slot");
+    const menu = required<HTMLElement>(this.root, ".legend-layout-menu");
+    const close = (): void => {
+      menu.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+    };
+    trigger.addEventListener("click", () => {
+      menu.hidden = !menu.hidden;
+      trigger.setAttribute("aria-expanded", String(!menu.hidden));
+    });
+    for (const button of menu.querySelectorAll<HTMLButtonElement>(
+      "[data-legend-state]",
+    )) {
+      button.addEventListener("click", () => {
+        this.workspace.setAllLegendStates(
+          button.dataset.legendState as LegendState,
+        );
+        this.commitHistory();
+        this.workspaceView?.refreshPanelStates();
+        close();
+      });
+    }
+    document.addEventListener("pointerdown", (event) => {
+      if (
+        event.target instanceof Node &&
+        (menu.contains(event.target) || trigger.contains(event.target))
+      ) {
+        return;
+      }
+      close();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") close();
+    });
+  }
+
   async mount(): Promise<void> {
     delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
@@ -344,6 +382,12 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
+        onFocusSolo: (id, entry) => {
+          this.workspace.setFocus(id, entry);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
         onClearFocus: (id) => {
           this.workspace.clearFocus(id);
           this.commitHistory();
@@ -380,6 +424,11 @@ export class AppShell {
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
+        },
+        onLegendLayout: (id, layout) => {
+          this.workspace.setLegendLayout(id, layout);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
         },
         onSetColorBy: (id, dimension) => {
           this.workspace.setColorBy(id, dimension);
@@ -557,6 +606,7 @@ export class AppShell {
         },
       },
     );
+    this.bindLegendLayoutMenu();
     this.selection.onChange(() => {
       this.syncSelectionActions();
     });
@@ -3372,7 +3422,13 @@ export function shellMarkup(): string {
 
     <div class="workspace-strip">
       <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
-      <button class="layout-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">layout ▾</button>
+      <button class="layout-slot" aria-haspopup="menu" aria-expanded="false">layout ▾</button>
+      <div class="legend-layout-menu" role="menu" hidden>
+        <span>LEGENDS</span>
+        <button type="button" role="menuitem" data-legend-state="badge">badge</button>
+        <button type="button" role="menuitem" data-legend-state="keys">keys</button>
+        <button type="button" role="menuitem" data-legend-state="roster">roster</button>
+      </div>
     </div>
 
     <aside class="signal-tree" id="signal-tree" aria-label="Signals">
@@ -3414,7 +3470,7 @@ export function shellMarkup(): string {
       </div>
     </aside>
 
-    <div class="tree-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
+    <div class="tree-resize-handle dock-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
 
     <section class="workspace" aria-label="Panel workspace"></section>
 

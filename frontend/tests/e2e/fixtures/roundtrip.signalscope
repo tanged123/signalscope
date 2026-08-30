@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 22,
+  "schema_version": 23,
   "theme": "light",
   "linked_time": {
     "t0": 0.0,
@@ -59,6 +59,11 @@
           "focus": [],
           "ghost_mode": "all",
           "split_by": "none",
+          "legend_state": "keys",
+          "legend_position": null,
+          "legend_size": null,
+          "legend_anchor": null,
+          "legend_hint_dismissed": false,
           "y_range": null,
           "x_range": null,
           "x_label": "time (s)",

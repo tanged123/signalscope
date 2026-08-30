@@ -92,6 +92,10 @@ rosters, grouped binding chips, focus/ghost controls, plot hit navigation, and
 grouped cursor readouts keep large multi-source panels bounded while preserving
 keyboard access and session round-trips.
 
+The legend console follow-up removes the duplicate per-panel strip and makes a
+serialized badge, focused-key stack, inline virtual roster, or reflowing
+right-edge rail the only series surface.
+
 Signals-at-scale P4 is landed: the signals dock now provides a virtualized,
 sortable selector-filtered table with series/channel granularity, shared
 tree/table multi-selection, and bulk add, style, hide, save-set, and derive

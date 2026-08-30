@@ -558,6 +558,44 @@ describe("WorkspaceModel", () => {
     ]);
   });
 
+  it("stores per-panel and workspace-wide legend layouts", () => {
+    const model = new WorkspaceModel();
+    const first = model.addPanelRow();
+    const second = model.addPanelRow();
+
+    model.setLegendLayout(first.id, {
+      state: "roster",
+      position: [24, 32],
+      size: [252, 280],
+      anchor: "bottom_right",
+      hintDismissed: true,
+    });
+    expect(model.panel(first.id)).toMatchObject({
+      legend_state: "roster",
+      legend_position: [24, 32],
+      legend_size: [252, 280],
+      legend_anchor: "bottom_right",
+      legend_hint_dismissed: true,
+    });
+
+    model.setAllLegendStates("badge");
+    expect(model.panel(first.id)?.legend_state).toBe("badge");
+    expect(model.panel(second.id)?.legend_state).toBe("badge");
+
+    model.setLegendLayout(first.id, {
+      state: "rail",
+      position: null,
+      size: [180, 300],
+      anchor: null,
+    });
+    expect(model.panel(first.id)).toMatchObject({
+      legend_state: "rail",
+      legend_position: null,
+      legend_size: [180, 300],
+      legend_anchor: null,
+    });
+  });
+
   it("merges target-ref styles and manages the override stack", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -853,6 +891,11 @@ describe("WorkspaceModel", () => {
       focus: [],
       ghost_mode: "all",
       split_by: "none",
+      legend_state: "keys",
+      legend_position: null,
+      legend_size: null,
+      legend_anchor: null,
+      legend_hint_dismissed: false,
       y_range: null,
       x_range: null,
       x_label: null,

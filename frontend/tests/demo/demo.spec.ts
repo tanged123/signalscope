@@ -19,10 +19,8 @@ test("records the release demo", async ({ page }) => {
     "demo_flight/attitude/roll_deg",
   ]) {
     await page.locator(`[data-signal-path="${path}"]`).dblclick();
-    // The matrix legend replaced per-series names with count tokens; a
-    // single-signal arrival focuses it, so the focus chip carries its path.
     await expect(
-      firstPanel.locator(".matrix-focus-chip", { hasText: path }),
+      firstPanel.locator(".plot-legend-row", { hasText: path }),
     ).toHaveCount(1);
     await beat(page);
   }
@@ -46,7 +44,7 @@ test("records the release demo", async ({ page }) => {
   const contrastingSignal = "demo_flight/battery_v";
   await page.locator(`[data-signal-path="${contrastingSignal}"]`).dblclick();
   await expect(
-    secondPanel.locator(".matrix-focus-chip", { hasText: contrastingSignal }),
+    secondPanel.locator(".plot-legend-row", { hasText: contrastingSignal }),
   ).toHaveCount(1);
   await beat(page);
 

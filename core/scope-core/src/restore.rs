@@ -278,8 +278,8 @@ mod tests {
     use super::*;
     use crate::session::{
         Annotation, AnnotationDomain, AxisStyle, Binding, BindingKind, DerivedSignal, FocusEntry,
-        FocusKind, GhostMode, NamedSet, NamedSetKind, PanelMode, PanelState, SeriesOverride,
-        SeriesRef, Session, SplitDimension, StyleDimension,
+        FocusKind, GhostMode, LegendState, NamedSet, NamedSetKind, PanelMode, PanelState,
+        SeriesOverride, SeriesRef, Session, SplitDimension, StyleDimension,
     };
 
     fn record_without_recipe() -> SourceRecord {
@@ -440,6 +440,11 @@ mod tests {
             }],
             ghost_mode: GhostMode::All,
             split_by: SplitDimension::None,
+            legend_state: LegendState::Keys,
+            legend_position: None,
+            legend_size: None,
+            legend_anchor: None,
+            legend_hint_dismissed: false,
             y_range: None,
             x_range: None,
             x_label: None,

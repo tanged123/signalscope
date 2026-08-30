@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 22;
+pub const SESSION_SCHEMA_VERSION: u32 = 23;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -158,6 +158,25 @@ pub enum SplitDimension {
     Channel,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LegendState {
+    Badge,
+    #[default]
+    Keys,
+    Roster,
+    Rail,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegendAnchor {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NamedSetKind {
@@ -197,6 +216,14 @@ pub struct PanelState {
     pub focus: Vec<FocusEntry>,
     pub ghost_mode: GhostMode,
     pub split_by: SplitDimension,
+    pub legend_state: LegendState,
+    #[serde(default)]
+    pub legend_position: Option<[f64; 2]>,
+    #[serde(default)]
+    pub legend_size: Option<[f64; 2]>,
+    #[serde(default)]
+    pub legend_anchor: Option<LegendAnchor>,
+    pub legend_hint_dismissed: bool,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
     #[serde(default)]

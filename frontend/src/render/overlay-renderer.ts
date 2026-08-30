@@ -325,7 +325,7 @@ function clampToBand(
 }
 
 /** Annotation badge glyph: circled digits ①–⑳, then parenthesised numbers. */
-export function marker(index: number): string {
+function marker(index: number): string {
   return index < 20
     ? String.fromCodePoint(0x2460 + index)
     : `(${String(index + 1)})`;

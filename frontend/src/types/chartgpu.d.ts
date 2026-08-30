@@ -48,6 +48,7 @@ declare module "@chartgpu/chartgpu" {
     renderMode?: "internal" | "external";
     tooltip?: { show: boolean };
     legend?: { show: boolean };
+    performance?: { lod: "auto" | "strict" };
     grid?: { left: number; right: number; top: number; bottom: number };
     gridLines?: { show?: boolean; color?: string };
     xAxis?: AxisOptions;

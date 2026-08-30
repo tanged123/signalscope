@@ -5,6 +5,8 @@ import type {
   DerivedBundleState,
   DerivedSignal,
   GhostMode,
+  LegendAnchor,
+  LegendState,
   LayoutRow,
   LinkedTime,
   PanelState,
@@ -531,6 +533,32 @@ export class WorkspaceModel {
     }
   }
 
+  setLegendLayout(
+    panelId: string,
+    layout: {
+      state?: LegendState;
+      position?: [number, number] | null;
+      size?: [number, number] | null;
+      anchor?: LegendAnchor | null;
+      hintDismissed?: boolean;
+    },
+  ): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    if (layout.state !== undefined) panel.legend_state = layout.state;
+    if (layout.position !== undefined) panel.legend_position = layout.position;
+    if (layout.size !== undefined) panel.legend_size = layout.size;
+    if (layout.anchor !== undefined) panel.legend_anchor = layout.anchor;
+    if (layout.hintDismissed !== undefined)
+      panel.legend_hint_dismissed = layout.hintDismissed;
+    this.touch(true);
+  }
+
+  setAllLegendStates(state: LegendState): void {
+    for (const panel of this.activeTab().panels) panel.legend_state = state;
+    this.touch(true);
+  }
+
   addSelectorOverride(
     panelId: string,
     selector: string,
@@ -578,6 +606,7 @@ export class WorkspaceModel {
     const index = panel.focus.findIndex((current) => sameFocus(current, entry));
     if (index === -1) panel.focus.push(structuredClone(entry));
     else panel.focus.splice(index, 1);
+    if (panel.focus.length > 0) panel.legend_hint_dismissed = true;
     this.touch(true);
   }
 
@@ -587,6 +616,14 @@ export class WorkspaceModel {
       panel.focus = [];
       this.touch(true);
     }
+  }
+
+  setFocus(panelId: string, entry: FocusEntry): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.focus = [structuredClone(entry)];
+    panel.legend_hint_dismissed = true;
+    this.touch(true);
   }
 
   focusEntries(panelId: string): readonly FocusEntry[] {
@@ -904,6 +941,11 @@ export class WorkspaceModel {
       focus: [],
       ghost_mode: "all",
       split_by: "none",
+      legend_state: "keys",
+      legend_position: null,
+      legend_size: null,
+      legend_anchor: null,
+      legend_hint_dismissed: false,
       y_range: null,
       x_range: null,
       x_label: null,
