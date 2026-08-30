@@ -219,6 +219,34 @@ describe("ChartHost", () => {
     expect(series[0]?.data[0]).toBe(0);
   });
 
+  it("formats rebased X and plain Y singleton ticks from their visible ranges", async () => {
+    const host = await hostFixture();
+    const data = response();
+    const bins = data.series[0]?.bins;
+    if (bins === undefined) throw new Error("missing test bins");
+    bins.t0[0] = 323;
+    bins.t1[0] = 323;
+
+    host.render({
+      ...request(data),
+      xRange: { min: 323, max: 323.2 },
+      yRange: [1, 1.1],
+    });
+
+    const options = state.charts.at(-1)?.options ?? {};
+    const xAxis = options.xAxis as {
+      tickFormatter: (value: number) => string | null;
+    };
+    const yAxis = options.yAxis as {
+      tickFormatter: (value: number) => string | null;
+    };
+    expect(xAxis.tickFormatter(0.1)).toBe("323.100");
+    expect(yAxis.tickFormatter(1.04)).toBe("1.040");
+
+    host.setRangesOnly({ min: 323, max: 333 }, [1, 10]);
+    expect(xAxis.tickFormatter(0.1)).toBe("323.1");
+  });
+
   it("restores opacity when emphasis clears on an unchanged response", async () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);

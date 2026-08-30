@@ -1,4 +1,84 @@
 import { expect, gotoApp, test } from "./fixtures";
+import type { Page } from "@playwright/test";
+
+interface AxisLabelProbe {
+  frames: Array<Array<{ text: string; x: number; y: number }>>;
+  current: Array<{ text: string; x: number; y: number }>;
+}
+
+async function installAxisLabelProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const probe: AxisLabelProbe = { frames: [], current: [] };
+    (
+      window as unknown as { __axisLabelProbe: AxisLabelProbe }
+    ).__axisLabelProbe = probe;
+    const originalClearRect = Object.getOwnPropertyDescriptor(
+      CanvasRenderingContext2D.prototype,
+      "clearRect",
+    )?.value as (
+      this: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ) => void;
+    const originalFillText = Object.getOwnPropertyDescriptor(
+      CanvasRenderingContext2D.prototype,
+      "fillText",
+    )?.value as (
+      this: CanvasRenderingContext2D,
+      text: string,
+      x: number,
+      y: number,
+      maxWidth?: number,
+    ) => void;
+    CanvasRenderingContext2D.prototype.clearRect = function (
+      this: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ): void {
+      if (this.canvas.closest(".chart-host") !== null) {
+        if (probe.current.length > 0) probe.frames.push(probe.current);
+        probe.current = [];
+      }
+      originalClearRect.call(this, x, y, width, height);
+    };
+    CanvasRenderingContext2D.prototype.fillText = function (
+      this: CanvasRenderingContext2D,
+      text: string,
+      x: number,
+      y: number,
+      maxWidth?: number,
+    ): void {
+      if (this.canvas.closest(".chart-host") !== null) {
+        probe.current.push({ text, x, y });
+      }
+      if (maxWidth === undefined) originalFillText.call(this, text, x, y);
+      else originalFillText.call(this, text, x, y, maxWidth);
+    };
+  });
+}
+
+async function resetAxisLabels(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const probe = (window as unknown as { __axisLabelProbe: AxisLabelProbe })
+      .__axisLabelProbe;
+    probe.frames.splice(0);
+    probe.current.splice(0);
+  });
+}
+
+async function latestAxisLabels(
+  page: Page,
+): Promise<Array<{ text: string; x: number; y: number }>> {
+  return page.evaluate(() => {
+    const probe = (window as unknown as { __axisLabelProbe: AxisLabelProbe })
+      .__axisLabelProbe;
+    return probe.frames.at(-1) ?? probe.current;
+  });
+}
 
 test.describe("desktop plot interactions", () => {
   test.beforeEach(async ({ page }) => {
@@ -131,4 +211,39 @@ test.describe("desktop plot interactions", () => {
     await rules.getByRole("button", { name: "color ← channel" }).click();
     await expect(rules).toBeHidden();
   });
+});
+
+test("zoomed axes keep visible tick labels distinct", async ({ page }) => {
+  await installAxisLabelProbe(page);
+  await gotoApp(page);
+
+  const panel = page.locator(".panel").first();
+  const overlay = panel.locator(".overlay-canvas");
+  await expect(overlay).toBeVisible();
+  await expect
+    .poll(async () => (await latestAxisLabels(page)).length)
+    .toBeGreaterThan(0);
+  await resetAxisLabels(page);
+
+  const fitted = await page.locator(".window-readout").textContent();
+  await overlay.hover({ position: { x: 300, y: 120 } });
+  for (let index = 0; index < 10; index += 1) {
+    await page.mouse.wheel(0, -240);
+  }
+  await expect(page.locator(".window-readout")).not.toHaveText(fitted ?? "");
+  await expect
+    .poll(async () => (await latestAxisLabels(page)).length)
+    .toBeGreaterThan(0);
+
+  const chartHeight =
+    (await panel.locator(".chart-host").boundingBox())?.height ?? 0;
+  const xLabels = (await latestAxisLabels(page))
+    .filter(
+      ({ text, x, y }) =>
+        x >= 60 && y >= chartHeight - 45 && /^[-−]?\d/.test(text),
+    )
+    .map(({ text }) => text);
+  expect(xLabels.length).toBeGreaterThan(1);
+  expect(new Set(xLabels).size).toBe(xLabels.length);
+  expect(xLabels.some((label) => label.includes("."))).toBe(true);
 });

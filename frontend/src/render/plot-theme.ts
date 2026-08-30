@@ -36,7 +36,16 @@ export const SERIES_TOKENS = [
 export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
+const DEFAULT_TICK_COUNT = 5;
+const MAX_TICK_FRACTION_DIGITS = 8;
 let cached: Palette | null = null;
+
+export interface TickRange {
+  min: number;
+  max: number;
+}
+
+export type TickFormatter = (value: number) => string;
 
 export function hueIndex(hue: number): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
@@ -109,20 +118,84 @@ export function ticks(min: number, max: number, count: number): number[] {
   return values;
 }
 
-export function formatTicks(values: readonly number[]): string[] {
+export function formatTicks(
+  values: readonly number[],
+  range?: TickRange,
+): string[] {
   const magnitudes = values.map(Math.abs).filter((value) => value > 0);
   const largest = magnitudes.length === 0 ? 0 : Math.max(...magnitudes);
   const smallest = magnitudes.length === 0 ? 0 : Math.min(...magnitudes);
-  if (largest >= 10_000 || (smallest > 0 && smallest < 0.001)) {
-    return values.map((value) => value.toExponential(1).replace(/^-/, "−"));
-  }
   let gap = Number.POSITIVE_INFINITY;
   for (let index = 1; index < values.length; index += 1) {
     const step = Math.abs((values[index] ?? 0) - (values[index - 1] ?? 0));
     if (step > 0) gap = Math.min(gap, step);
   }
-  const digits = Number.isFinite(gap)
-    ? Math.min(6, Math.max(0, Math.ceil(-Math.log10(gap)) + 1))
-    : 0;
-  return values.map((value) => value.toFixed(digits).replace(/^-/, "−"));
+  if (range !== undefined) {
+    const rangeGap = tickStep(range);
+    if (Number.isFinite(rangeGap)) gap = rangeGap;
+  }
+  const digits = Number.isFinite(gap) ? Math.ceil(-Math.log10(gap)) + 1 : 0;
+  return values.map((value) => {
+    return formatTick(
+      value,
+      gap,
+      digits,
+      largest >= 10_000 || (smallest > 0 && smallest < 0.001),
+    );
+  });
+}
+
+export function createRangeTickFormatter(range: TickRange): TickFormatter {
+  let cachedMin = Number.NaN;
+  let cachedMax = Number.NaN;
+  let gap = Number.NaN;
+  let digits = 0;
+  return (value) => {
+    if (range.min !== cachedMin || range.max !== cachedMax) {
+      cachedMin = range.min;
+      cachedMax = range.max;
+      gap = tickStep(range);
+      digits = Number.isFinite(gap) ? Math.ceil(-Math.log10(gap)) + 1 : 0;
+    }
+    return formatTick(
+      value,
+      gap,
+      digits,
+      Math.abs(value) >= 10_000 ||
+        (Math.abs(value) > 0 && Math.abs(value) < 0.001),
+    );
+  };
+}
+
+function formatTick(
+  value: number,
+  gap: number,
+  digits: number,
+  scientific: boolean,
+): string {
+  if (scientific || digits > MAX_TICK_FRACTION_DIGITS) {
+    const scientificDigits = Number.isFinite(gap)
+      ? Math.max(1, Math.min(12, Math.ceil(Math.log10(Math.abs(value) / gap))))
+      : 1;
+    return value.toExponential(scientificDigits).replace(/^-/, "−");
+  }
+  return value
+    .toFixed(Math.min(MAX_TICK_FRACTION_DIGITS, Math.max(0, digits)))
+    .replace(/^-/, "−");
+}
+
+function tickStep(range: TickRange): number {
+  if (
+    !Number.isFinite(range.min) ||
+    !Number.isFinite(range.max) ||
+    range.min >= range.max
+  ) {
+    return Number.NaN;
+  }
+  const values = ticks(range.min, range.max, DEFAULT_TICK_COUNT);
+  for (let index = 1; index < values.length; index += 1) {
+    const gap = Math.abs((values[index] ?? 0) - (values[index - 1] ?? 0));
+    if (gap > 0) return gap;
+  }
+  return range.max - range.min;
 }

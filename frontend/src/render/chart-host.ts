@@ -6,8 +6,8 @@ import {
 } from "@chartgpu/chartgpu";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
-import { formatTicks, hueIndex } from "./plot-theme";
-import type { Palette, SeriesStroke } from "./plot-theme";
+import { createRangeTickFormatter, hueIndex } from "./plot-theme";
+import type { Palette, SeriesStroke, TickFormatter } from "./plot-theme";
 import { cachedFeed, responseTimeReference } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
 
@@ -46,6 +46,14 @@ export class ChartHost {
   private options: ChartGPUOptions | null = null;
   private lastLayout: PlotLayout | null = null;
   private lastLabels: { x: string; y: string } | null = null;
+  private readonly xTickRange = { min: 0, max: 1 };
+  private readonly yTickRange = { min: 0, max: 1 };
+  private readonly xTickFormatter: TickFormatter = createRangeTickFormatter(
+    this.xTickRange,
+  );
+  private readonly yTickFormatter: TickFormatter = createRangeTickFormatter(
+    this.yTickRange,
+  );
 
   private constructor(
     private readonly container: HTMLElement,
@@ -253,12 +261,14 @@ export class ChartHost {
     range: Range,
     label: string,
   ): NonNullable<ChartGPUOptions["xAxis"]> {
+    this.xTickRange.min = range.min - this.tRef;
+    this.xTickRange.max = range.max - this.tRef;
     return {
       type: "value",
       name: label,
-      min: range.min - this.tRef,
-      max: range.max - this.tRef,
-      tickFormatter: (value) => formatTicks([value + this.tRef])[0] ?? null,
+      min: this.xTickRange.min,
+      max: this.xTickRange.max,
+      tickFormatter: (value) => this.xTickFormatter(value + this.tRef),
     };
   }
 
@@ -266,12 +276,14 @@ export class ChartHost {
     range: readonly [number, number],
     label: string,
   ): NonNullable<ChartGPUOptions["yAxis"]> {
+    this.yTickRange.min = range[0];
+    this.yTickRange.max = range[1];
     return {
       type: "value",
       name: label,
       min: range[0],
       max: range[1],
-      tickFormatter: (value) => formatTicks([value])[0] ?? null,
+      tickFormatter: (value) => this.yTickFormatter(value),
     };
   }
 
