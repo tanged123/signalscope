@@ -1,10 +1,35 @@
-import { expect, test as base, type Page } from "@playwright/test";
+import { devices, expect, test as base, type Page } from "@playwright/test";
+
+const testBase = base.extend({
+  page: async ({ playwright }, use, testInfo) => {
+    const browser = await playwright.chromium.launch(
+      testInfo.project.use.launchOptions,
+    );
+    const { defaultBrowserType, ...desktop } = devices["Desktop Chrome"];
+    void defaultBrowserType;
+    const baseURL = testInfo.project.use.baseURL;
+    try {
+      const context = await browser.newContext({
+        ...desktop,
+        viewport: testInfo.project.use.viewport ?? desktop.viewport,
+        ...(baseURL === undefined ? {} : { baseURL }),
+      });
+      try {
+        await use(await context.newPage());
+      } finally {
+        await context.close();
+      }
+    } finally {
+      await browser.close();
+    }
+  },
+});
 
 interface CoverageFixtures {
   collectCoverage: undefined;
 }
 
-export const test = base.extend<CoverageFixtures>({
+export const test = testBase.extend<CoverageFixtures>({
   collectCoverage: [
     async ({ page }, use, testInfo) => {
       if (testInfo.config.metadata["coverage"] !== true) {

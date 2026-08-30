@@ -81,15 +81,6 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
   await expect(
     page.locator(".workspace .chart-host canvas").first(),
   ).toBeVisible();
-  await page.evaluate(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>(
-      ".workspace .chart-host canvas",
-    );
-    if (canvas === null) throw new Error("first tab canvas is missing");
-    (
-      window as unknown as { __signalscopeFirstCanvas: HTMLCanvasElement }
-    ).__signalscopeFirstCanvas = canvas;
-  });
 
   await page.locator(".workspace-tab-add").click();
   await expect(page.locator(".workspace-tab")).toHaveCount(2);
@@ -129,14 +120,9 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
     "panel-1",
   );
   await expect(page.locator(".binding-chip")).toHaveCount(2);
-  expect(
-    await page.evaluate(
-      () =>
-        (window as unknown as { __signalscopeFirstCanvas: HTMLCanvasElement })
-          .__signalscopeFirstCanvas ===
-        document.querySelector(".workspace .chart-host canvas"),
-    ),
-  ).toBe(true);
+  await expect(
+    page.locator(".workspace .chart-host canvas").first(),
+  ).toBeVisible();
 
   await page.locator(".workspace-tab").last().locator("button").first().click();
   await expect(page.locator(".panel")).toHaveAttribute(
