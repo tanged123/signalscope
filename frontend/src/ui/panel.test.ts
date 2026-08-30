@@ -76,6 +76,24 @@ describe("panel markup", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps legend controls from triggering a panel-focus rebuild", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe(): void {}
+      },
+    );
+    const onFocus = vi.fn();
+    const panel = new PanelView("panel", {
+      onFocus,
+    } as unknown as PanelCallbacks);
+    panel.element
+      .querySelector(".plot-series-legend")
+      ?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    expect(onFocus).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("releases its chart host without disposing the panel", () => {
     const dispose = vi.fn();
     const chartHostElement = document.createElement("div");

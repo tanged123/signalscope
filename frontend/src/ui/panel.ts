@@ -639,6 +639,12 @@ export class PanelView {
     this.element.addEventListener("pointerdown", () => {
       this.callbacks.onFocus(this.id);
     });
+    required(this.element, ".plot-series-legend").addEventListener(
+      "pointerdown",
+      (event) => {
+        event.stopPropagation();
+      },
+    );
     required(this.element, ".panel-close").addEventListener("click", () => {
       this.callbacks.onClose(this.id);
     });
