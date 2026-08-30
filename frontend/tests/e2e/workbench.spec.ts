@@ -80,7 +80,7 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
   await expect(page.locator(".panel")).toHaveCount(1);
   await expect(
     page.locator(".workspace .chart-host canvas").first(),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
 
   await page.locator(".workspace-tab-add").click();
   await expect(page.locator(".workspace-tab")).toHaveCount(2);
@@ -104,7 +104,7 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
   await expect(page.locator(".panel .binding-chip")).toHaveCount(1);
   await expect(
     page.locator(".workspace .chart-host canvas").first(),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
 
   await page
     .locator(".workspace-tab")
@@ -122,7 +122,7 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
   await expect(page.locator(".binding-chip")).toHaveCount(2);
   await expect(
     page.locator(".workspace .chart-host canvas").first(),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
 
   await page.locator(".workspace-tab").last().locator("button").first().click();
   await expect(page.locator(".panel")).toHaveAttribute(

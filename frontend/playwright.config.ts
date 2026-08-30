@@ -37,7 +37,6 @@ export default defineConfig({
         "--use-angle=swiftshader",
         "--use-webgpu-adapter=swiftshader",
         "--use-gpu-in-tests",
-        "--enable-accelerated-2d-canvas",
       ],
       ...(executablePath === undefined ? {} : { executablePath }),
     },
