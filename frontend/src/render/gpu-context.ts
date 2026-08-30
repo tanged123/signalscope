@@ -23,6 +23,8 @@ interface DeviceEvents {
   addEventListener(type: string, listener: EventListener): void;
 }
 
+const ADAPTER_RETRY_DELAYS_MS = [0, 100, 250, 500] as const;
+
 async function requestAdapterAndDevice(
   gpu: GPU,
 ): Promise<{ adapter: GPUAdapter; device: GPUDevice } | null> {
@@ -47,11 +49,19 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
   try {
     const gpu = navigator.gpu;
     if (gpu === undefined) return null;
-    const requested = await requestAdapterAndDevice(gpu);
+    let requested: Awaited<ReturnType<typeof requestAdapterAndDevice>> = null;
+    for (const delay of ADAPTER_RETRY_DELAYS_MS) {
+      if (delay > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      }
+      requested = await requestAdapterAndDevice(gpu);
+      if (requested !== null) break;
+    }
     if (requested === null) return null;
     const { adapter, device } = requested;
     const deviceEvents = device as unknown as DeviceEvents;
     const hosts = new Set<{ needsRender(): boolean; renderFrame(): void }>();
+    const failedHosts = new WeakSet();
     const failureListeners = new Set<(failure: GpuFailure) => void>();
     let frame: number | null = null;
     let lost = false;
@@ -87,7 +97,19 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
     const tick = (): void => {
       frame = null;
       for (const host of hosts) {
-        if (host.needsRender()) host.renderFrame();
+        try {
+          if (host.needsRender()) host.renderFrame();
+          failedHosts.delete(host);
+        } catch (error) {
+          if (!failedHosts.has(host)) {
+            failedHosts.add(host);
+            notifyFailure({
+              kind: "uncaptured-error",
+              message:
+                error instanceof Error ? error.message : "WebGPU render failed",
+            });
+          }
+        }
       }
       if (hosts.size > 0) frame = requestAnimationFrame(tick);
     };

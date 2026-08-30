@@ -588,6 +588,7 @@ export class PanelView {
       },
     });
     new ResizeObserver(() => {
+      if (!this.element.isConnected) return;
       this.chartHost?.resize();
       this.positionPlotLegend();
       this.callbacks.onResized(this.id);
@@ -608,12 +609,11 @@ export class PanelView {
   }
 
   mount(): void {
-    if (
-      this.gpu === null ||
-      this.disposed ||
-      this.chartHostReady !== null ||
-      !this.element.isConnected
-    ) {
+    if (this.gpu === null || this.disposed || !this.element.isConnected) {
+      return;
+    }
+    if (this.chartHostReady !== null) {
+      this.chartHost?.resize();
       return;
     }
     this.initializeChartHost(this.gpu);

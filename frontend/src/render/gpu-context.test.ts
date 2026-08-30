@@ -37,6 +37,7 @@ function installDevice() {
 
 describe("acquireGpuContext", () => {
   afterEach(() => {
+    vi.useRealTimers();
     Object.defineProperty(navigator, "gpu", {
       configurable: true,
       value: undefined,
@@ -132,6 +133,61 @@ describe("acquireGpuContext", () => {
 
     expect(await acquireGpuContext()).not.toBeNull();
     expect(requestAdapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries transient adapter unavailability", async () => {
+    const { device } = installDevice();
+    const adapter = { requestDevice: vi.fn(() => Promise.resolve(device)) };
+    const requestAdapter = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(adapter);
+    Object.defineProperty(navigator, "gpu", {
+      configurable: true,
+      value: { requestAdapter },
+    });
+
+    const context = await acquireGpuContext();
+    expect(requestAdapter).toHaveBeenCalledTimes(3);
+    expect(context).not.toBeNull();
+  });
+
+  it("keeps rendering other hosts after a synchronous render failure", async () => {
+    const frames: FrameRequestCallback[] = [];
+    Object.defineProperty(globalThis, "requestAnimationFrame", {
+      configurable: true,
+      value: vi.fn((callback: FrameRequestCallback) => {
+        frames.push(callback);
+        return frames.length;
+      }),
+    });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    installDevice();
+    const gpu = await acquireGpuContext();
+    const onFailure = vi.fn();
+    gpu?.onFailure(onFailure);
+    const failed = {
+      needsRender: () => true,
+      renderFrame: vi.fn(() => {
+        throw new Error("temporary render failure");
+      }),
+    };
+    const healthy = { needsRender: () => true, renderFrame: vi.fn() };
+    gpu?.register(failed);
+    gpu?.register(healthy);
+
+    frames.shift()?.(0);
+
+    expect(onFailure).toHaveBeenCalledWith({
+      kind: "uncaptured-error",
+      message: "temporary render failure",
+    });
+    expect(healthy.renderFrame).toHaveBeenCalledOnce();
+    expect(frames).toHaveLength(1);
   });
 
   it("stops the shared loop and notifies once after device loss", async () => {

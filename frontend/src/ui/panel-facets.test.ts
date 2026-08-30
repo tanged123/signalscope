@@ -152,6 +152,27 @@ describe("PanelView panel chrome", () => {
     );
   });
 
+  it("resizes an existing chart after its panel is remounted", async () => {
+    const resize = vi.fn();
+    vi.spyOn(ChartHost, "create").mockResolvedValue({
+      resize,
+    } as unknown as ChartHost);
+    const view = new PanelView(
+      "panel",
+      callbacks(Catalog.build([])),
+      {} as GpuContext,
+    );
+    document.body.appendChild(view.element);
+    view.mount();
+    await Promise.resolve();
+
+    view.element.remove();
+    document.body.appendChild(view.element);
+    view.mount();
+
+    expect(resize).toHaveBeenCalledOnce();
+  });
+
   it("renders the in-plot legend without a duplicate strip", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),
