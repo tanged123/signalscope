@@ -33,6 +33,8 @@ export default defineConfig({
         "--enable-features=Vulkan",
         "--use-angle=swiftshader",
         "--use-webgpu-adapter=swiftshader",
+        "--use-gpu-in-tests",
+        "--enable-accelerated-2d-canvas",
       ],
       ...(executablePath === undefined ? {} : { executablePath }),
     },

@@ -115,6 +115,25 @@ describe("acquireGpuContext", () => {
     expect(requestAdapter).toHaveBeenNthCalledWith(2);
   });
 
+  it("retries after device acquisition fails", async () => {
+    const { device } = installDevice();
+    const requestAdapter = vi
+      .fn()
+      .mockResolvedValueOnce({
+        requestDevice: vi.fn(() => Promise.reject(new Error("not ready"))),
+      })
+      .mockResolvedValueOnce({
+        requestDevice: vi.fn(() => Promise.resolve(device)),
+      });
+    Object.defineProperty(navigator, "gpu", {
+      configurable: true,
+      value: { requestAdapter },
+    });
+
+    expect(await acquireGpuContext()).not.toBeNull();
+    expect(requestAdapter).toHaveBeenCalledTimes(2);
+  });
+
   it("stops the shared loop and notifies once after device loss", async () => {
     const frames: FrameRequestCallback[] = [];
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {

@@ -23,15 +23,33 @@ interface DeviceEvents {
   addEventListener(type: string, listener: EventListener): void;
 }
 
+async function requestAdapterAndDevice(
+  gpu: GPU,
+): Promise<{ adapter: GPUAdapter; device: GPUDevice } | null> {
+  const requests = [
+    () => gpu.requestAdapter({ powerPreference: "high-performance" }),
+    () => gpu.requestAdapter(),
+  ];
+  for (const requestAdapter of requests) {
+    try {
+      const adapter = await requestAdapter();
+      if (adapter === null) continue;
+      const device = (await adapter.requestDevice()) as unknown as GPUDevice;
+      return { adapter, device };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 export async function acquireGpuContext(): Promise<GpuContext | null> {
   try {
     const gpu = navigator.gpu;
     if (gpu === undefined) return null;
-    const adapter =
-      (await gpu.requestAdapter({ powerPreference: "high-performance" })) ??
-      (await gpu.requestAdapter());
-    if (adapter === null) return null;
-    const device = (await adapter.requestDevice()) as unknown as GPUDevice;
+    const requested = await requestAdapterAndDevice(gpu);
+    if (requested === null) return null;
+    const { adapter, device } = requested;
     const deviceEvents = device as unknown as DeviceEvents;
     const hosts = new Set<{ needsRender(): boolean; renderFrame(): void }>();
     const failureListeners = new Set<(failure: GpuFailure) => void>();
