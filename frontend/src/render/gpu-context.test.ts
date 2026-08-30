@@ -18,6 +18,7 @@ function installDevice() {
   const device = {
     queue: {},
     lost: loss.promise,
+    destroy: vi.fn(),
     addEventListener: vi.fn((type: string, listener: EventListener) => {
       listeners.set(type, listener);
     }),
@@ -47,6 +48,17 @@ describe("acquireGpuContext", () => {
 
   it("returns null when WebGPU is absent", async () => {
     expect(await acquireGpuContext()).toBeNull();
+  });
+
+  it("destroys its caller-owned device when disposed", async () => {
+    const { device } = installDevice();
+    const gpu = await acquireGpuContext();
+
+    gpu?.dispose();
+
+    expect(device.destroy).toHaveBeenCalledOnce();
+    gpu?.dispose();
+    expect(device.destroy).toHaveBeenCalledOnce();
   });
 
   it("drives registered hosts from one animation frame loop", async () => {

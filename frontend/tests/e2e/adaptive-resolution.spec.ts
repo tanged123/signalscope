@@ -25,11 +25,11 @@ interface BakedPlaneModule {
   };
 }
 
-async function installResolutionProbe(
-  page: Page,
-  forceFull = false,
-): Promise<void> {
-  await page.addInitScript((rewriteFull: boolean) => {
+async function installResolutionProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const rewriteFull = new URLSearchParams(location.search).has(
+      "e2e-force-full",
+    );
     const probe = window as unknown as ResolutionProbe;
     probe.__signalscopeTestLevels = [];
     probe.__signalscopeHoldAdaptive = false;
@@ -75,7 +75,7 @@ async function installResolutionProbe(
           });
         };
       });
-  }, forceFull);
+  });
 }
 
 async function probeLevels(page: Page): Promise<number[][]> {
@@ -293,20 +293,16 @@ test("adaptive and forced-full plots differ only at isolated pixels", async ({
   });
   const adaptive = await capturePixels(page);
 
-  const fullPage = await page.context().newPage();
-  try {
-    await fullPage.setViewportSize({ width: 640, height: 800 });
-    await installResolutionProbe(fullPage, true);
-    await gotoApp(fullPage);
-    await expect(fullPage.locator(".chart-host canvas").first()).toBeVisible({
-      timeout: 20_000,
-    });
-    await expect(fullPage.locator(".render-ms")).not.toHaveText("— ms", {
-      timeout: 20_000,
-    });
-    const full = await capturePixels(fullPage);
-    assertVisualDifferenceIsPixelLocal(adaptive, full);
-  } finally {
-    await fullPage.close();
-  }
+  await page.goto("/?e2e-force-full=1");
+  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true", {
+    timeout: 20_000,
+  });
+  await expect(page.locator(".chart-host canvas").first()).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.locator(".render-ms")).not.toHaveText("— ms", {
+    timeout: 20_000,
+  });
+  const full = await capturePixels(page);
+  assertVisualDifferenceIsPixelLocal(adaptive, full);
 });

@@ -85,9 +85,6 @@ export class WorkspaceView {
       return;
     }
     this.mountedKey = key;
-    for (const view of this.views.values()) {
-      if (view.element.isConnected) view.releaseGpu();
-    }
     this.root.replaceChildren();
     if (this.model.panels().length === 0) {
       this.root.appendChild(emptyState(hasSignals));
@@ -224,8 +221,6 @@ export class WorkspaceView {
       view.setCursorMode(this.cursorMode);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);
-    } else if (this.gpu !== null) {
-      view.setGpu(this.gpu);
     }
     return view;
   }

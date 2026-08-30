@@ -1,5 +1,6 @@
 interface GPUDevice {
   readonly queue: unknown;
+  destroy(): void;
 }
 
 interface GPUAdapter {

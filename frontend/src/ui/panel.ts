@@ -49,6 +49,8 @@ import {
 } from "../render/plot-theme";
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
+
+const CHART_HOST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
 import {
   OverlayRenderer,
   marker,
@@ -503,6 +505,7 @@ export class PanelView {
   private readonly overlayRenderer: OverlayRenderer;
   private chartHost: ChartHost | null = null;
   private chartHostReady: Promise<ChartHost | null> | null = null;
+  private chartHostRetryTimer: number | null = null;
   private pendingChartRender: ChartRenderRequest | null = null;
   private chartHostGeneration = 0;
   private disposed = false;
@@ -612,14 +615,14 @@ export class PanelView {
     if (this.gpu === null || this.disposed || !this.element.isConnected) {
       return;
     }
-    if (this.chartHostReady !== null) {
+    if (this.chartHostReady !== null || this.chartHostRetryTimer !== null) {
       this.chartHost?.resize();
       return;
     }
     this.initializeChartHost(this.gpu);
   }
 
-  private initializeChartHost(gpu: GpuContext): void {
+  private initializeChartHost(gpu: GpuContext, attempt = 0): void {
     const generation = this.chartHostGeneration;
     this.chartHostReady = ChartHost.create(this.chartHostElement, gpu)
       .then((host) => {
@@ -645,6 +648,23 @@ export class PanelView {
           generation !== this.chartHostGeneration ||
           this.gpu !== gpu
         ) {
+          return null;
+        }
+        this.chartHostReady = null;
+        const retryDelay = CHART_HOST_RETRY_DELAYS_MS[attempt];
+        if (retryDelay !== undefined) {
+          this.chartHostRetryTimer = window.setTimeout(() => {
+            this.chartHostRetryTimer = null;
+            if (
+              this.disposed ||
+              generation !== this.chartHostGeneration ||
+              this.gpu !== gpu ||
+              !this.element.isConnected
+            ) {
+              return;
+            }
+            this.initializeChartHost(gpu, attempt + 1);
+          }, retryDelay);
           return null;
         }
         console.error("ChartGPU initialization failed", error);
@@ -1079,6 +1099,10 @@ export class PanelView {
 
   releaseGpu(): void {
     this.chartHostGeneration += 1;
+    if (this.chartHostRetryTimer !== null) {
+      window.clearTimeout(this.chartHostRetryTimer);
+      this.chartHostRetryTimer = null;
+    }
     this.chartHost?.dispose();
     this.chartHost = null;
     this.chartHostReady = null;

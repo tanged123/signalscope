@@ -173,6 +173,26 @@ describe("PanelView panel chrome", () => {
     expect(resize).toHaveBeenCalledOnce();
   });
 
+  it("retries transient chart initialization failures", async () => {
+    vi.useFakeTimers();
+    const create = vi
+      .spyOn(ChartHost, "create")
+      .mockRejectedValueOnce(new Error("context unavailable"))
+      .mockResolvedValue({ resize: vi.fn() } as unknown as ChartHost);
+    const view = new PanelView(
+      "panel",
+      callbacks(Catalog.build([])),
+      {} as GpuContext,
+    );
+    document.body.appendChild(view.element);
+
+    view.mount();
+    await vi.runAllTimersAsync();
+
+    expect(create).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
   it("renders the in-plot legend without a duplicate strip", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),

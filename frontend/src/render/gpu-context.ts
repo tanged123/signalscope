@@ -11,6 +11,7 @@ export interface GpuContext {
   pipelineCache: unknown;
   register(host: { needsRender(): boolean; renderFrame(): void }): () => void;
   onFailure(callback: (failure: GpuFailure) => void): () => void;
+  dispose(): void;
 }
 
 interface DeviceLostInfo {
@@ -65,10 +66,31 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
     const failureListeners = new Set<(failure: GpuFailure) => void>();
     let frame: number | null = null;
     let lost = false;
+    let disposed = false;
+    const page = typeof window === "undefined" ? null : window;
 
     const notifyFailure = (failure: GpuFailure): void => {
       for (const listener of failureListeners) listener(failure);
     };
+
+    const dispose = (): void => {
+      if (disposed) return;
+      disposed = true;
+      lost = true;
+      hosts.clear();
+      failureListeners.clear();
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        frame = null;
+      }
+      page?.removeEventListener("pagehide", dispose);
+      try {
+        device.destroy();
+      } catch {
+        // Device loss may race page teardown.
+      }
+    };
+    page?.addEventListener("pagehide", dispose);
 
     void deviceEvents.lost.then((info) => {
       if (info.reason === "destroyed" || lost) return;
@@ -136,6 +158,7 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
           failureListeners.delete(callback);
         };
       },
+      dispose,
     };
   } catch {
     return null;

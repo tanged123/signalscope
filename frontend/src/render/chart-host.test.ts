@@ -390,7 +390,7 @@ describe("ChartHost", () => {
     expect(series.at(-1)?.lineStyle.opacity).toBe(1);
   });
 
-  it("updates ranges without rebuilding series and reports the ChartGPU grid layout", async () => {
+  it("updates ranges without rebuilding series and refreshes the text layer", async () => {
     const host = await hostFixture();
     host.render(request());
     const chart = state.charts.at(-1);
@@ -399,12 +399,9 @@ describe("ChartHost", () => {
 
     host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
 
-    expect(chart?.setOption).not.toHaveBeenCalled();
-    expect(chart?.setViewRange).toHaveBeenCalledWith({
-      x: { min: 1, max: 2 },
-      y: { min: -1, max: 5 },
-    });
+    expect(chart?.setOption).toHaveBeenCalledOnce();
     expect(chart?.options.series).toBe(series);
+    expect(chart?.renderFrame).toHaveBeenCalled();
     expect(host.layout()).toEqual({
       plot: { x: 60, y: 8, width: 328, height: 258 },
       xRange: { min: 11, max: 12 },
