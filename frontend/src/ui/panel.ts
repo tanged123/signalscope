@@ -50,9 +50,7 @@ import {
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
 
-const CHART_HOST_RETRY_DELAYS_MS = [
-  100, 250, 500, 1_000, 2_000, 4_000,
-] as const;
+const CHART_HOST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
 import {
   OverlayRenderer,
   marker,

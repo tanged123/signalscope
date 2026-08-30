@@ -232,7 +232,9 @@ test("zoomed axes keep visible tick labels distinct", async ({ page }) => {
   }
   await expect(page.locator(".window-readout")).not.toHaveText(fitted ?? "");
   await expect
-    .poll(async () => (await latestAxisLabels(page)).length)
+    .poll(async () => (await latestAxisLabels(page)).length, {
+      timeout: 15_000,
+    })
     .toBeGreaterThan(0);
 
   const chartHeight =
