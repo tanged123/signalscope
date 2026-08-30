@@ -172,7 +172,14 @@ export class ChartHost {
       return performance.now() - started;
     }
     this.lastLabels = { x: request.xLabel, y: request.yLabel };
-    const options = this.makeOptions(request, series);
+    const orderedSeries = series
+      .map((element, index) => ({
+        element,
+        ghost: (request.styles[index]?.hue ?? null) === null,
+      }))
+      .sort((left, right) => Number(right.ghost) - Number(left.ghost))
+      .map(({ element }) => element);
+    const options = this.makeOptions(request, orderedSeries);
     this.options = options;
     this.chart.setOption(options);
     this.lastLayout = this.makeLayout(request.xRange, request.yRange);

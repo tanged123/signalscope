@@ -295,7 +295,7 @@ describe("ChartHost", () => {
       lineStyle: { width: number };
     }>;
     expect(series.map(({ lineStyle }) => lineStyle.width)).toEqual([
-      4, 3, 5.2, 4.8,
+      3, 4, 5.2, 4.8,
     ]);
   });
 
@@ -318,7 +318,7 @@ describe("ChartHost", () => {
       lineStyle: { width: number };
     }>;
     const widths = series.map(({ lineStyle }) => lineStyle.width);
-    [6, 4.5, 7.8, 7.2].forEach((expected, index) => {
+    [4.5, 6, 7.8, 7.2].forEach((expected, index) => {
       expect(widths[index]).toBeCloseTo(expected);
     });
   });
@@ -346,6 +346,25 @@ describe("ChartHost", () => {
     const second = state.charts.at(-1)?.options.series as unknown[];
     expect(second[0]).toBe(first[0]);
     expect(second[1]).toBe(first[1]);
+  });
+
+  it("draws colored series after ghost series", async () => {
+    const host = await hostFixture();
+    const data = response(["focus-1", "ghost-1", "focus-2", "ghost-2"]);
+
+    host.render(
+      request(data, [stroke(1), stroke(null), stroke(2), stroke(null)]),
+    );
+
+    const series = state.charts.at(-1)?.options.series as Array<{
+      name: string;
+    }>;
+    expect(series.map(({ name }) => name)).toEqual([
+      "signal_1",
+      "signal_3",
+      "signal_0",
+      "signal_2",
+    ]);
   });
 
   it("updates ranges without rebuilding series and reports the ChartGPU grid layout", async () => {
