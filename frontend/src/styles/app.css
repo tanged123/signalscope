@@ -798,10 +798,16 @@ button {
   overflow-y: auto;
 }
 
+.matrix-roster-viewport {
+  position: relative;
+}
+
 .matrix-roster-row {
+  position: absolute;
+  left: 0;
   display: grid;
   width: 100%;
-  min-height: 24px;
+  height: 24px;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
   gap: 4px;
@@ -1203,6 +1209,133 @@ button {
   touch-action: none;
 }
 
+.plot-series-legend {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  width: min(220px, calc(100% - 16px));
+  height: min(180px, calc(100% - 16px));
+  min-width: 140px;
+  min-height: 64px;
+  max-width: 100%;
+  max-height: 100%;
+  flex-direction: column;
+  padding: 3px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-family: var(--font-plot);
+  font-size: calc(var(--plot-font-size) * 1px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.plot-series-legend[hidden] {
+  display: none;
+}
+
+.plot-legend-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.plot-legend-drag,
+.plot-legend-hide {
+  min-height: 20px;
+  padding: 2px 4px;
+  color: var(--fg-4);
+  font: inherit;
+}
+
+.plot-legend-drag {
+  overflow: hidden;
+  cursor: move;
+  text-align: left;
+  text-overflow: ellipsis;
+  touch-action: none;
+  white-space: nowrap;
+}
+
+.plot-legend-hide {
+  padding-inline: 2px;
+  text-align: center;
+}
+
+.plot-legend-entries {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.plot-legend-row,
+.plot-legend-summary {
+  min-height: 20px;
+  padding: 2px 4px;
+  color: var(--fg-2);
+  font: inherit;
+  text-align: left;
+}
+
+.plot-legend-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+}
+
+.plot-legend-row:hover,
+.plot-legend-row:focus-visible,
+.plot-legend-summary:hover,
+.plot-legend-summary:focus-visible,
+.plot-legend-drag:hover,
+.plot-legend-drag:focus-visible,
+.plot-legend-hide:hover,
+.plot-legend-hide:focus-visible {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.plot-legend-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.plot-legend-resize::after {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid var(--fg-4);
+  border-bottom: 1px solid var(--fg-4);
+  content: "";
+}
+
+.plot-legend-swatch {
+  width: 9px;
+  height: 2px;
+}
+
+.plot-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-legend-summary {
+  color: var(--fg-4);
+}
+
 .panel-axis-toggle {
   color: var(--fg-4);
   font-size: 0.7692rem;
@@ -1222,7 +1355,6 @@ button {
 }
 
 .panel-stats[hidden],
-.panel-annotations[hidden],
 .plot-tip[hidden] {
   display: none;
 }
@@ -1251,38 +1383,6 @@ button {
   color: var(--fg-4);
 }
 
-.panel-annotations {
-  padding: 6px 10px;
-  border-top: 1px solid var(--border);
-  color: var(--fg-2);
-  font: 0.7692rem var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.annotations-heading {
-  margin-bottom: 3px;
-  color: var(--fg-4);
-  font-size: 0.6923rem;
-  letter-spacing: 0.08em;
-}
-
-.annotation-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.annotation-action {
-  margin-left: auto;
-  padding: 0;
-  color: var(--fg-4);
-}
-
-.annotation-action + .annotation-action {
-  margin-left: 0;
-}
-
-.annotation-label-input,
 .axis-label-editor {
   border: 1px solid var(--border-strong);
   border-radius: 2px;

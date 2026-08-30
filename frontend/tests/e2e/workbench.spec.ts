@@ -204,11 +204,11 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
     const { Catalog } = catalogModule as { Catalog: typeof CatalogClass };
     const host = document.createElement("div");
     host.id = "legend-probe";
-    host.style.width = "1400px";
+    host.style.width = "1200px";
     host.style.height = "320px";
     host.style.display = "flex";
     document.body.replaceChildren(host);
-    const summaries = Array.from({ length: 40 }, (_, index) => {
+    const summaries = Array.from({ length: 100 }, (_, index) => {
       const number = String(index + 1).padStart(2, "0");
       return {
         signal_id: `id:run_${number}/temp`,
@@ -272,7 +272,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onXRange: () => {},
       onPinAnnotation: () => {},
       onRemoveAnnotation: () => {},
-      onEditAnnotationLabel: () => {},
       onFitView: () => {},
       onToggleStats: () => {},
       onToggleAxisStyle: () => {},
@@ -295,7 +294,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
           {
             kind: "pick" as const,
             selector: null,
-            refs: Array.from({ length: 40 }, (_, index) => ({
+            refs: Array.from({ length: 100 }, (_, index) => ({
               source_key: `run_${String(index + 1).padStart(2, "0")}`,
               channel: "temp",
             })),
@@ -304,7 +303,15 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         ],
         color_by: "source",
         overrides: [],
-        focus: [],
+        focus: Array.from({ length: 12 }, (_, index) => ({
+          kind: "series" as const,
+          ref: {
+            source_key: `run_${String(index + 1).padStart(2, "0")}`,
+            channel: "temp",
+          },
+          source_key: null,
+          channel: "temp",
+        })),
         ghost_mode: "all",
         split_by: "none",
         y_range: null,
@@ -320,9 +327,59 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
   });
 
   const panel = page.locator("#legend-probe .panel");
-  await expect(panel.locator(".binding-chip")).toHaveText("temp ×40");
+  await expect(panel.locator(".binding-chip")).toHaveText("temp ×100");
   await expect(panel.locator(".legend-count-token")).toHaveCount(2);
   await expect(panel.locator(".panel-actions")).toBeVisible();
+  const plotLegend = panel.locator(".plot-series-legend");
+  await expect(plotLegend.locator(".plot-legend-row")).toHaveCount(12);
+  await expect
+    .poll(() =>
+      plotLegend.evaluate((element) => {
+        const root = getComputedStyle(document.documentElement);
+        const row = getComputedStyle(
+          element.querySelector(".plot-legend-row") as HTMLElement,
+        );
+        return {
+          plotFamilyApplied: row.fontFamily.includes("JetBrains Mono"),
+          plotSizeApplied:
+            row.fontSize ===
+            `${root.getPropertyValue("--plot-font-size").trim()}px`,
+        };
+      }),
+    )
+    .toEqual({ plotFamilyApplied: true, plotSizeApplied: true });
+  const beforeResize = await plotLegend.boundingBox();
+  const resizeHandle = plotLegend.locator(".plot-legend-resize");
+  const resizeBox = await resizeHandle.boundingBox();
+  if (beforeResize === null || resizeBox === null)
+    throw new Error("Plot legend resize handle is not laid out");
+  await page.mouse.move(
+    resizeBox.x + resizeBox.width / 2,
+    resizeBox.y + resizeBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(resizeBox.x, resizeBox.y + 80);
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await plotLegend.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(beforeResize.height + 50);
+  const beforeDrag = await plotLegend.boundingBox();
+  const dragHandle = plotLegend.locator(".plot-legend-drag");
+  const handleBox = await dragHandle.boundingBox();
+  if (beforeDrag === null || handleBox === null)
+    throw new Error("Plot legend is not laid out");
+  await page.mouse.move(
+    handleBox.x + handleBox.width / 2,
+    handleBox.y + handleBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x - 100, handleBox.y + 40);
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await plotLegend.boundingBox())?.x ?? beforeDrag.x)
+    .toBeLessThan(beforeDrag.x - 50);
+  await plotLegend.locator(".plot-legend-hide").click();
+  await expect(plotLegend).toBeHidden();
   await panel.locator(".legend-count-token").first().click();
   await expect(panel.locator(".matrix-roster")).toBeVisible();
   await expect
@@ -350,7 +407,16 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
     });
   await expect
     .poll(() => panel.locator(".matrix-roster-row").count())
-    .toBeLessThan(40);
+    .toBeLessThan(100);
+  const rosterRows = panel.locator(".matrix-roster-rows");
+  await rosterRows.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(panel.locator(".matrix-roster-row").last()).toContainText(
+    "run_100",
+  );
+  await panel.locator(".matrix-roster-search").fill("* @ run_01");
+  await expect(panel.locator(".matrix-roster-row")).toHaveCount(1);
   await panel.locator(".matrix-roster-row").first().click();
   await expect(panel.locator(".binding-chip")).toHaveCount(1);
   await panel.locator(".binding-chip").click();

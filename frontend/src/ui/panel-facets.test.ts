@@ -77,7 +77,6 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onXRange: vi.fn(),
     onPinAnnotation: vi.fn(),
     onRemoveAnnotation: vi.fn(),
-    onEditAnnotationLabel: vi.fn(),
     onFitView: vi.fn(),
     onToggleStats: vi.fn(),
     onToggleAxisStyle: vi.fn(),
@@ -179,9 +178,7 @@ describe("PanelView panel chrome", () => {
       view.element.querySelectorAll(".panel-header .legend-count-token"),
     ).toHaveLength(0);
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
-    expect(
-      view.element.querySelector<HTMLElement>(".panel-annotations")?.hidden,
-    ).toBe(true);
+    expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });
 
   it("ignores legacy facet state and keeps one plot surface", () => {

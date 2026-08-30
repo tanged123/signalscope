@@ -82,6 +82,7 @@ export class ChartHost {
         animation: false,
         renderMode: "external",
         tooltip: { show: false },
+        legend: { show: false },
         grid: CHART_GRID,
         series: [],
       },
@@ -260,6 +261,7 @@ export class ChartHost {
       animation: false,
       renderMode: "external",
       tooltip: { show: false },
+      legend: { show: false },
       theme: {
         backgroundColor: request.palette.background,
         textColor: request.palette.fg2,

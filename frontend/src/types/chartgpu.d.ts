@@ -47,6 +47,7 @@ declare module "@chartgpu/chartgpu" {
     animation?: boolean;
     renderMode?: "internal" | "external";
     tooltip?: { show: boolean };
+    legend?: { show: boolean };
     grid?: { left: number; right: number; top: number; bottom: number };
     gridLines?: { show?: boolean; color?: string };
     xAxis?: AxisOptions;

@@ -422,16 +422,30 @@ describe("panel series", () => {
       visible("run_07/temp"),
       { ...visible("run_08/temp"), display: "ghost", focused: false },
     ]);
+    state.focus = [
+      {
+        kind: "series",
+        ref: state.series[0]?.ref ?? null,
+        source_key: null,
+        channel: "temp",
+      },
+    ];
     state.ghost_mode = "ghost";
     const view = Object.create(PanelView.prototype) as unknown as {
       callbacks: Pick<PanelCallbacks, "catalog">;
       element: HTMLElement;
+      plotLegendHidden: boolean;
+      plotLegendPosition: { x: number; y: number } | null;
+      plotLegendSize: { width: number; height: number } | null;
       updateLegend(current: RenderPanelState): void;
     };
     view.callbacks = { catalog: () => catalog };
+    view.plotLegendHidden = false;
+    view.plotLegendPosition = null;
+    view.plotLegendSize = null;
     view.element = document.createElement("article");
     view.element.innerHTML =
-      '<div class="panel-legend"></div><span class="panel-gesture-hint"></span>';
+      '<div class="panel-legend"></div><span class="panel-gesture-hint"></span><div class="plot-series-legend"></div>';
     view.updateLegend(state);
     expect(view.element.querySelector(".panel-gesture-hint")?.textContent).toBe(
       "· line style flat · hover explore · ⇧click focus · ⌥ mute · esc clear",
@@ -455,6 +469,12 @@ describe("panel series", () => {
       ".legend-ghost-token",
     );
     expect(ghost?.textContent).toBe("1 ghosts ▾");
+    expect(
+      view.element.querySelector(".plot-legend-row")?.textContent,
+    ).toContain("run_07");
+    expect(
+      view.element.querySelector(".plot-legend-summary")?.textContent,
+    ).toBe("1 ghosts ▾");
     ghost?.click();
     expect(
       view.element.querySelector<HTMLElement>(".matrix-roster")?.dataset.filter,
@@ -462,6 +482,114 @@ describe("panel series", () => {
     expect(
       view.element.querySelector(".matrix-roster-row")?.textContent,
     ).toContain("run_08");
+  });
+
+  it("resizes, hides, and keyboard-moves the plot legend", () => {
+    const paths = Array.from(
+      { length: 8 },
+      (_, index) => `run_${String(index + 1).padStart(2, "0")}/temp`,
+    );
+    const catalog = Catalog.build(paths.map(summary));
+    const state = timeState(paths.map(visible));
+    state.focus = state.series.map((series) => ({
+      kind: "series",
+      ref: series.ref,
+      source_key: null,
+      channel: series.ref.channel,
+    }));
+    const view = Object.create(PanelView.prototype) as unknown as {
+      callbacks: Pick<PanelCallbacks, "catalog" | "onFocusToggle">;
+      element: HTMLElement;
+      plotLegendHidden: boolean;
+      plotLegendPosition: { x: number; y: number } | null;
+      plotLegendSize: { width: number; height: number } | null;
+      updatePlotLegend(current: RenderPanelState): void;
+    };
+    view.callbacks = { catalog: () => catalog, onFocusToggle: vi.fn() };
+    view.element = document.createElement("article");
+    view.element.innerHTML =
+      '<div class="plot-wrap"><div class="plot-series-legend"></div></div>';
+    view.plotLegendHidden = false;
+    view.plotLegendPosition = null;
+    view.plotLegendSize = null;
+    const wrap = view.element.querySelector<HTMLElement>(".plot-wrap");
+    const legend = view.element.querySelector<HTMLElement>(
+      ".plot-series-legend",
+    );
+    if (wrap === null || legend === null) throw new Error("Legend is missing");
+    vi.spyOn(wrap, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 400,
+      height: 300,
+    } as DOMRect);
+    vi.spyOn(legend, "getBoundingClientRect").mockReturnValue({
+      left: 172,
+      top: 8,
+      width: 220,
+      height: 180,
+    } as DOMRect);
+
+    view.updatePlotLegend(state);
+    expect(legend.querySelectorAll(".plot-legend-row")).toHaveLength(8);
+    legend
+      .querySelector<HTMLButtonElement>(".plot-legend-resize")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    expect(legend.style.height).toBe("196px");
+    legend
+      .querySelector<HTMLButtonElement>(".plot-legend-drag")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+    expect(legend.style.left).toBe("164px");
+
+    legend.querySelector<HTMLButtonElement>(".plot-legend-hide")?.click();
+    expect(legend.hidden).toBe(true);
+    expect(legend.childElementCount).toBe(0);
+  });
+
+  it("scrolls and searches the complete source roster", () => {
+    const paths = Array.from(
+      { length: 100 },
+      (_, index) => `run_${String(index + 1).padStart(3, "0")}/temp`,
+    );
+    const state = timeState(paths.map(visible));
+    const view = Object.create(PanelView.prototype) as unknown as {
+      id: string;
+      callbacks: Pick<PanelCallbacks, "catalog">;
+      element: HTMLElement;
+      rosterCleanup: (() => void) | null;
+      openRoster(
+        dimension: "source",
+        current: RenderPanelState,
+        anchor: HTMLElement,
+      ): void;
+    };
+    view.id = "panel";
+    view.callbacks = { catalog: () => Catalog.build(paths.map(summary)) };
+    view.element = document.createElement("article");
+    view.rosterCleanup = null;
+    const anchor = document.createElement("button");
+    view.element.append(anchor);
+
+    view.openRoster("source", state, anchor);
+    const rows = view.element.querySelector<HTMLElement>(".matrix-roster-rows");
+    const viewport = view.element.querySelector<HTMLElement>(
+      ".matrix-roster-viewport",
+    );
+    const search = view.element.querySelector<HTMLInputElement>(
+      ".matrix-roster-search",
+    );
+    if (rows === null || viewport === null || search === null)
+      throw new Error("Roster is missing");
+    expect(viewport.style.height).toBe("2400px");
+    rows.scrollTop = 2176;
+    rows.dispatchEvent(new Event("scroll"));
+    expect(viewport.lastElementChild?.textContent).toContain("run_100");
+
+    search.value = "* @ run_100";
+    search.dispatchEvent(new Event("input"));
+    expect(rows.scrollTop).toBe(0);
+    expect(viewport.querySelectorAll(".matrix-roster-row")).toHaveLength(1);
+    expect(viewport.textContent).toContain("run_100");
   });
 
   it("lays out style rules with a palette, static line rules, and override actions", () => {

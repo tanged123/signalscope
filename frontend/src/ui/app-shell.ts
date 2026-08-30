@@ -461,11 +461,6 @@ export class AppShell {
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
-        onEditAnnotationLabel: (id, annotationId, label) => {
-          this.workspace.setAnnotationLabel(id, annotationId, label);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-        },
         onFitView: (id) => {
           this.fitPanelView(id);
         },

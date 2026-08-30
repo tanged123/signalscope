@@ -150,6 +150,7 @@ describe("ChartHost", () => {
     const options = state.charts.at(-1)?.options ?? {};
     const xAxis = options.xAxis as { min: number; max: number };
     const series = options.series as Array<{ data: Float32Array }>;
+    expect(options.legend).toEqual({ show: false });
     expect(xAxis.min).toBe(0);
     expect(xAxis.max).toBe(2);
     expect(series[0]?.data[0]).toBe(0);
@@ -383,12 +384,8 @@ describe("ChartHost", () => {
       lineStyle: { opacity: number };
     }>;
     expect(series[0]?.lineStyle.opacity).toBeCloseTo(0.25);
-    expect(series.at(-1)).toEqual(
-      expect.objectContaining({
-        name: "signal_64",
-        lineStyle: expect.objectContaining({ opacity: 1 }),
-      }),
-    );
+    expect(series.at(-1)?.name).toBe("signal_64");
+    expect(series.at(-1)?.lineStyle.opacity).toBe(1);
   });
 
   it("updates ranges without rebuilding series and reports the ChartGPU grid layout", async () => {

@@ -35,7 +35,6 @@ import { resolveRanges } from "../app/plot-gestures";
 import {
   prepareTimePlot,
   type AnnotationAnchor,
-  type PlotDelta,
   type PlotCursor,
   type PreparedPlot,
   type ResolvedAnnotation,
@@ -49,7 +48,6 @@ import {
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
 import {
-  marker,
   OverlayRenderer,
   type CursorMode,
   type CursorPoint,
@@ -69,10 +67,7 @@ export const MAXIMIZE_GLYPH = "↗";
 
 export type PanelCursor = PlotCursor;
 
-interface ResolvedAnnotations {
-  resolved: readonly ResolvedAnnotation[];
-  delta: PlotDelta | null;
-}
+type ResolvedAnnotations = readonly ResolvedAnnotation[];
 
 function colorIndexForHue(hue: number | null): number {
   if (hue === null) return 0;
@@ -123,7 +118,6 @@ export interface PanelCallbacks {
   onXRange(id: string, range: readonly [number, number]): void;
   onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
-  onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
   onFitView(id: string): void;
   onToggleStats(id: string): void;
   onToggleAxisStyle(id: string): void;
@@ -508,6 +502,9 @@ export class PanelView {
   private rosterCleanup: (() => void) | null = null;
   private bindingCleanup: (() => void) | null = null;
   private rulesCleanup: (() => void) | null = null;
+  private plotLegendHidden = false;
+  private plotLegendPosition: { x: number; y: number } | null = null;
+  private plotLegendSize: { width: number; height: number } | null = null;
 
   constructor(
     private readonly id: string,
@@ -566,6 +563,7 @@ export class PanelView {
     });
     new ResizeObserver(() => {
       this.chartHost?.resize();
+      this.positionPlotLegend();
       this.callbacks.onResized(this.id);
     }).observe(this.chartHostElement);
   }
@@ -805,7 +803,6 @@ export class PanelView {
     this.updateGhostToggle(rendered);
     this.updateLegend(rendered);
     const annotations = this.resolvedAnnotations(rendered);
-    this.renderAnnotationList(rendered, annotations);
     this.renderStats();
     this.drawOverlay(annotations);
     if (
@@ -861,7 +858,6 @@ export class PanelView {
     );
     this.renderStats();
     const annotations = this.resolvedAnnotations(rendered);
-    this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (missing.length > 0) {
       this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
@@ -1239,20 +1235,16 @@ export class PanelView {
 
   private resolvedAnnotations(state: RenderPanelState): ResolvedAnnotations {
     const prepared = this.preparedPlot;
-    if (prepared === null) return { resolved: [], delta: null };
-    const resolved = state.annotations
+    if (prepared === null) return [];
+    return state.annotations
       .map((annotation) => prepared.resolveAnnotation(annotation))
       .filter((annotation) => annotation !== null);
-    return { resolved, delta: prepared.delta(resolved) };
   }
 
   private drawOverlay(resolution?: ResolvedAnnotations): void {
     const state = this.lastState;
-    const { resolved, delta } =
-      resolution ??
-      (state === null
-        ? { resolved: [], delta: null }
-        : this.resolvedAnnotations(state));
+    const resolved =
+      resolution ?? (state === null ? [] : this.resolvedAnnotations(state));
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -1267,13 +1259,20 @@ export class PanelView {
           : [],
       xyMarkers,
       box: this.box,
-      annotations: resolved.map((annotation) => ({
-        x: annotation.x,
-        y: annotation.y,
-        colorIndex: annotation.colorIndex,
-        label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label} `}${annotation.summary}`,
-      })),
-      delta,
+      annotations: resolved.map((annotation) => {
+        const series = bySeries.get(annotation.annotation.series_path);
+        return {
+          x: annotation.x,
+          y: annotation.y,
+          colorIndex:
+            series === undefined
+              ? annotation.colorIndex
+              : series.hue === null
+                ? null
+                : colorIndexForHue(series.hue),
+          label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label} `}${annotation.summary}`,
+        };
+      }),
     });
   }
 
@@ -1350,90 +1349,6 @@ export class PanelView {
     hint.className = "stats-hint";
     hint.textContent = "visible region · S toggles";
     strip.replaceChildren(...rows, hint);
-  }
-
-  private renderAnnotationList(
-    state: RenderPanelState,
-    resolution: ResolvedAnnotations,
-  ): void {
-    const list = required<HTMLElement>(this.element, ".panel-annotations");
-    const prepared = this.preparedPlot;
-    const annotations = prepared === null ? [] : state.annotations;
-    list.hidden = annotations.length === 0;
-    if (annotations.length === 0) {
-      list.replaceChildren();
-      return;
-    }
-    const heading = document.createElement("div");
-    heading.className = "annotations-heading";
-    heading.textContent = `ANNOTATIONS — ${state.title.toUpperCase()}`;
-    const resolvedById = new Map(
-      resolution.resolved.map((entry) => [entry.annotation.id, entry]),
-    );
-    const rows = annotations.map((annotation, index) => {
-      const row = document.createElement("div");
-      row.className = "annotation-row";
-      const text = document.createElement("span");
-      text.className = "annotation-text";
-      const current = resolvedById.get(annotation.id);
-      const domainLabel = "t";
-      text.textContent =
-        `${marker(index)} ${domainLabel} ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
-        (annotation.label === "" ? "" : ` "${annotation.label}"`);
-      const edit = document.createElement("button");
-      edit.className = "annotation-action";
-      edit.textContent = "✎";
-      edit.title = "Edit label";
-      edit.addEventListener("click", () => {
-        this.openAnnotationLabelEditor(row, annotation.id, annotation.label);
-      });
-      const remove = document.createElement("button");
-      remove.className = "annotation-action";
-      remove.textContent = "✕";
-      remove.title = "Delete annotation";
-      remove.addEventListener("click", () => {
-        this.callbacks.onRemoveAnnotation(this.id, annotation.id);
-      });
-      row.append(text, edit, remove);
-      return row;
-    });
-    const deltaRow = document.createElement("div");
-    deltaRow.className = "annotation-delta";
-    deltaRow.textContent = resolution.delta?.label ?? "";
-    list.replaceChildren(
-      heading,
-      ...rows,
-      ...(resolution.delta === null ? [] : [deltaRow]),
-    );
-  }
-
-  private openAnnotationLabelEditor(
-    row: HTMLElement,
-    annotationId: string,
-    current: string,
-  ): void {
-    const input = document.createElement("input");
-    input.className = "annotation-label-input";
-    input.value = current;
-    input.setAttribute("aria-label", "Annotation label");
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") input.blur();
-      if (event.key === "Escape") {
-        input.value = current;
-        input.blur();
-      }
-      event.stopPropagation();
-    });
-    input.addEventListener("blur", () => {
-      this.callbacks.onEditAnnotationLabel(
-        this.id,
-        annotationId,
-        input.value.trim(),
-      );
-    });
-    row.append(input);
-    input.focus();
-    input.select();
   }
 
   private beginTitleEdit(): void {
@@ -1540,6 +1455,255 @@ export class PanelView {
       : "line style flat";
     required<HTMLElement>(this.element, ".panel-gesture-hint").textContent =
       `· ${lineStyle} · hover explore · ⇧click focus · ⌥ mute · esc clear`;
+    this.updatePlotLegend(state);
+  }
+
+  private updatePlotLegend(state: RenderPanelState): void {
+    const legend = required<HTMLElement>(this.element, ".plot-series-legend");
+    const visible = state.series.filter((series) => series.visible);
+    if (visible.length === 0 || this.plotLegendHidden) {
+      legend.hidden = true;
+      legend.replaceChildren();
+      return;
+    }
+    legend.hidden = false;
+
+    const header = document.createElement("div");
+    header.className = "plot-legend-header";
+    const drag = document.createElement("button");
+    drag.className = "plot-legend-drag";
+    drag.type = "button";
+    drag.textContent = "⠿ legend";
+    drag.title = "Drag plot legend; arrow keys move it";
+    this.bindPlotLegendDrag(drag, legend);
+    const hide = document.createElement("button");
+    hide.className = "plot-legend-hide";
+    hide.type = "button";
+    hide.textContent = "×";
+    hide.title = "Hide plot legend";
+    hide.addEventListener("click", () => {
+      this.plotLegendHidden = true;
+      this.updatePlotLegend(state);
+    });
+    header.append(drag, hide);
+
+    const focus = focusChips(
+      this.callbacks.catalog(),
+      state,
+      state.focus.length,
+    );
+    const rows = focus.chips.map((entry) => {
+      const row = document.createElement("button");
+      row.className = "plot-legend-row";
+      row.type = "button";
+      const swatch = document.createElement("span");
+      swatch.className = "plot-legend-swatch";
+      swatch.style.background =
+        entry.hue === null
+          ? "var(--fg-4)"
+          : `var(--series-${String(colorIndexForHue(entry.hue) + 1)})`;
+      const label = document.createElement("span");
+      label.className = "plot-legend-label";
+      label.textContent = entry.label;
+      const paths = visible
+        .filter((series) => focusMatches(entry.entry, series.ref))
+        .map((series) => series.path);
+      row.addEventListener("mouseenter", () => this.setEmphasis(paths));
+      row.addEventListener("mouseleave", () => this.setEmphasis(null));
+      row.addEventListener("click", () => {
+        this.callbacks.onFocusToggle(this.id, entry.entry);
+      });
+      row.append(swatch, label);
+      return row;
+    });
+    const ghosts = visible.filter(
+      (series) => series.display === "ghost",
+    ).length;
+    const summaries: HTMLButtonElement[] = [];
+    const summary = (
+      label: string,
+      focusedOnly: boolean,
+      ghostOnly: boolean,
+    ): void => {
+      const button = document.createElement("button");
+      button.className = "plot-legend-summary";
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", (event) => {
+        this.openRoster(
+          "source",
+          state,
+          event.currentTarget as HTMLElement,
+          focusedOnly,
+          ghostOnly,
+        );
+      });
+      summaries.push(button);
+    };
+    if (focus.overflow > 0)
+      summary(`+${String(focus.overflow)} focused ▾`, true, false);
+    if (ghosts > 0) summary(`${String(ghosts)} ghosts ▾`, false, true);
+    if (summaries.length === 0)
+      summary(`${String(visible.length)} series ▾`, false, false);
+    const entries = document.createElement("div");
+    entries.className = "plot-legend-entries";
+    entries.append(...rows, ...summaries);
+    const resize = document.createElement("button");
+    resize.className = "plot-legend-resize";
+    resize.type = "button";
+    resize.title = "Resize plot legend; arrow keys adjust size";
+    resize.setAttribute("aria-label", "Resize plot legend");
+    this.bindPlotLegendResize(resize, legend);
+    legend.replaceChildren(header, entries, resize);
+    this.positionPlotLegend();
+  }
+
+  private bindPlotLegendResize(
+    handle: HTMLButtonElement,
+    legend: HTMLElement,
+  ): void {
+    const resize = (width: number, height: number): void => {
+      const position = this.currentPlotLegendPosition(legend);
+      const box = legend.getBoundingClientRect();
+      this.plotLegendPosition = position;
+      this.plotLegendSize = {
+        width: width || box.width,
+        height: height || box.height,
+      };
+      this.positionPlotLegend();
+    };
+    handle.addEventListener("keydown", (event) => {
+      const directions: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const direction = directions[event.key];
+      if (direction === undefined) return;
+      event.preventDefault();
+      const box = legend.getBoundingClientRect();
+      const step = event.shiftKey ? 48 : 16;
+      resize(box.width + direction[0] * step, box.height + direction[1] * step);
+    });
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const box = legend.getBoundingClientRect();
+      const start = { x: event.clientX, y: event.clientY };
+      const move = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        resize(
+          box.width + next.clientX - start.x,
+          box.height + next.clientY - start.y,
+        );
+      };
+      const end = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", end);
+        document.removeEventListener("pointercancel", end);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", end);
+      document.addEventListener("pointercancel", end);
+    });
+  }
+
+  private bindPlotLegendDrag(
+    handle: HTMLButtonElement,
+    legend: HTMLElement,
+  ): void {
+    handle.addEventListener("keydown", (event) => {
+      const directions: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const direction = directions[event.key];
+      if (direction === undefined) return;
+      event.preventDefault();
+      const step = event.shiftKey ? 24 : 8;
+      const current = this.currentPlotLegendPosition(legend);
+      this.plotLegendPosition = {
+        x: current.x + direction[0] * step,
+        y: current.y + direction[1] * step,
+      };
+      this.positionPlotLegend();
+    });
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const origin = this.currentPlotLegendPosition(legend);
+      const start = { x: event.clientX, y: event.clientY };
+      const move = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        this.plotLegendPosition = {
+          x: origin.x + next.clientX - start.x,
+          y: origin.y + next.clientY - start.y,
+        };
+        this.positionPlotLegend();
+      };
+      const end = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", end);
+        document.removeEventListener("pointercancel", end);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", end);
+      document.addEventListener("pointercancel", end);
+    });
+  }
+
+  private currentPlotLegendPosition(legend: HTMLElement): {
+    x: number;
+    y: number;
+  } {
+    if (this.plotLegendPosition !== null) return this.plotLegendPosition;
+    const wrap = legend.parentElement;
+    if (wrap === null) return { x: 0, y: 0 };
+    const bounds = wrap.getBoundingClientRect();
+    const box = legend.getBoundingClientRect();
+    return { x: box.left - bounds.left, y: box.top - bounds.top };
+  }
+
+  private positionPlotLegend(): void {
+    const legend = required<HTMLElement>(this.element, ".plot-series-legend");
+    const wrap = legend.parentElement;
+    if (wrap === null) return;
+    const bounds = wrap.getBoundingClientRect();
+    const box = legend.getBoundingClientRect();
+    const position = this.currentPlotLegendPosition(legend);
+    if (this.plotLegendSize !== null) {
+      const width = clamp(
+        this.plotLegendSize.width,
+        140,
+        Math.max(140, bounds.width - position.x),
+      );
+      const height = clamp(
+        this.plotLegendSize.height,
+        64,
+        Math.max(64, bounds.height - position.y),
+      );
+      this.plotLegendSize = { width, height };
+      legend.style.width = `${String(width)}px`;
+      legend.style.height = `${String(height)}px`;
+    }
+    if (this.plotLegendPosition === null) return;
+    const x = Math.min(
+      Math.max(0, this.plotLegendPosition.x),
+      Math.max(0, bounds.width - box.width),
+    );
+    const y = Math.min(
+      Math.max(0, this.plotLegendPosition.y),
+      Math.max(0, bounds.height - box.height),
+    );
+    this.plotLegendPosition = { x, y };
+    legend.style.left = `${String(x)}px`;
+    legend.style.top = `${String(y)}px`;
+    legend.style.right = "auto";
   }
 
   private ghostToken(state: RenderPanelState): HTMLButtonElement {
@@ -1716,6 +1880,8 @@ export class PanelView {
     search.setAttribute("aria-label", `Filter ${dimension} roster`);
     const rows = document.createElement("div");
     rows.className = "matrix-roster-rows";
+    const viewport = document.createElement("div");
+    viewport.className = "matrix-roster-viewport";
     const renderRows = (): void => {
       const all = matrixLegendRows(
         this.callbacks.catalog(),
@@ -1726,13 +1892,13 @@ export class PanelView {
         (row) => (!focusedOnly || row.focused) && (!ghostOnly || row.ghosted),
       );
       const slice = virtualSlice(all.length, rows.scrollTop, 224, 24);
-      rows.replaceChildren();
-      rows.style.height = `${String(slice.totalHeight)}px`;
-      rows.style.paddingTop = `${String(slice.topPadding)}px`;
-      for (const row of all.slice(slice.start, slice.end)) {
+      viewport.replaceChildren();
+      viewport.style.height = `${String(slice.totalHeight)}px`;
+      for (const [offset, row] of all.slice(slice.start, slice.end).entries()) {
         const button = document.createElement("button");
         button.className = "matrix-roster-row";
         button.type = "button";
+        button.style.top = `${String(slice.topPadding + offset * 24)}px`;
         button.innerHTML = `<span class="matrix-roster-key"></span><span class="matrix-roster-label"></span><span class="matrix-roster-count"></span>`;
         const key = required<HTMLElement>(button, ".matrix-roster-key");
         key.style.color =
@@ -1759,11 +1925,15 @@ export class PanelView {
             this.callbacks.onMuteSelector(this.id, row.selector);
           else this.callbacks.onFocusToggle(this.id, entry);
         });
-        rows.append(button);
+        viewport.append(button);
       }
     };
-    search.addEventListener("input", renderRows);
+    search.addEventListener("input", () => {
+      rows.scrollTop = 0;
+      renderRows();
+    });
     rows.addEventListener("scroll", renderRows);
+    rows.append(viewport);
     roster.append(search, rows);
     this.element.append(roster);
     const rect = this.element.getBoundingClientRect();
@@ -2343,8 +2513,8 @@ function panelMarkup(): string {
     <div class="plot-wrap">
       <div class="chart-host" hidden></div>
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
+      <div class="plot-series-legend" aria-label="Plot legend"></div>
       <div class="panel-empty" hidden></div>
     </div>
-    <div class="panel-stats" hidden></div>
-    <div class="panel-annotations" hidden></div>`;
+    <div class="panel-stats" hidden></div>`;
 }
