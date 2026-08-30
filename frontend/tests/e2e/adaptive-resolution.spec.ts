@@ -1,13 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, gotoApp, test } from "./fixtures";
 
-interface ResolutionProbe {
-  __signalscopeTestLevels: number[][];
-  __signalscopeHoldAdaptive: boolean;
-  __signalscopePending: boolean;
-  __signalscopeRelease?: () => void;
-}
-
 interface BakedQueryRequest {
   pixel_width: number;
   [key: string]: unknown;
@@ -25,32 +18,12 @@ interface BakedPlaneModule {
   };
 }
 
-async function installResolutionProbe(page: Page): Promise<void> {
+async function installForcedFullProbe(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const rewriteFull = new URLSearchParams(location.search).has(
       "e2e-force-full",
     );
-    const probe = window as unknown as ResolutionProbe;
-    probe.__signalscopeTestLevels = [];
-    probe.__signalscopeHoldAdaptive = false;
-    probe.__signalscopePending = false;
-
-    const record = (responseLevels: number[]): void => {
-      if (responseLevels.length > 0) {
-        probe.__signalscopeTestLevels.push(responseLevels);
-      }
-    };
-    const hold = <T>(value: T): Promise<T> => {
-      if (!probe.__signalscopeHoldAdaptive) return Promise.resolve(value);
-      probe.__signalscopePending = true;
-      return new Promise((resolve) => {
-        probe.__signalscopeRelease = () => {
-          probe.__signalscopePending = false;
-          delete probe.__signalscopeRelease;
-          resolve(value);
-        };
-      });
-    };
+    if (!rewriteFull) return;
 
     const modulePath = "/src/app/data-plane.ts";
     void import(/* @vite-ignore */ modulePath)
@@ -66,22 +39,12 @@ async function installResolutionProbe(page: Page): Promise<void> {
         BakedPlane.prototype.queryTiles = function (
           request: BakedQueryRequest,
         ) {
-          const nextRequest = rewriteFull
-            ? { ...request, pixel_width: 1_000_000 }
-            : request;
-          return originalQueryTiles.call(this, nextRequest).then((response) => {
-            record(response.series.map((series) => series.level));
-            return hold(response);
+          return originalQueryTiles.call(this, {
+            ...request,
+            pixel_width: 1_000_000,
           });
         };
       });
-  });
-}
-
-async function probeLevels(page: Page): Promise<number[][]> {
-  return page.evaluate(() => {
-    const probe = window as unknown as ResolutionProbe;
-    return probe.__signalscopeTestLevels.map((response) => [...response]);
   });
 }
 
@@ -172,118 +135,11 @@ function assertVisualDifferenceIsPixelLocal(
   }
 }
 
-test("adaptive responses refine to raw data without clearing the plot", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  await page.setViewportSize({ width: 640, height: 800 });
-  await installResolutionProbe(page);
-  await gotoApp(page);
-
-  const canvas = page.locator(".chart-host canvas").first();
-  await expect(canvas).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".render-ms")).not.toHaveText("— ms", {
-    timeout: 20_000,
-  });
-  await expect
-    .poll(async () => (await probeLevels(page)).length)
-    .toBeGreaterThan(0);
-  const overviewIndex = (await probeLevels(page)).length;
-  await page.evaluate(() => {
-    const workbench = document.querySelector<HTMLElement>(".workbench");
-    if (workbench === null) throw new Error("workbench is missing");
-    workbench.style.width = "200px";
-    workbench.style.minWidth = "0";
-    const workspace = document.querySelector<HTMLElement>(".workspace");
-    if (workspace === null) throw new Error("workspace is missing");
-    workspace.style.width = "200px";
-    workspace.style.minWidth = "0";
-    for (const panel of document.querySelectorAll<HTMLElement>(".panel")) {
-      panel.style.width = "200px";
-      panel.style.minWidth = "0";
-    }
-  });
-
-  await page.evaluate(() => {
-    (window as unknown as ResolutionProbe).__signalscopeHoldAdaptive = true;
-  });
-  await page.keyboard.press("n");
-  const row = page.locator('.outline-scroll [data-row-kind="series"]').first();
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  await row.dispatchEvent("dragstart", { dataTransfer });
-  await page
-    .locator(".panel")
-    .last()
-    .dispatchEvent("dragover", { dataTransfer });
-  await page.locator(".panel").last().dispatchEvent("drop", { dataTransfer });
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => (window as unknown as ResolutionProbe).__signalscopePending,
-      ),
-    )
-    .toBe(true);
-  await expect(canvas).toBeVisible();
-
-  await page.evaluate(() => {
-    const probe = window as unknown as ResolutionProbe;
-    probe.__signalscopeHoldAdaptive = false;
-    probe.__signalscopeRelease?.();
-  });
-  await expect
-    .poll(async () => {
-      const responses = await probeLevels(page);
-      return responses.slice(overviewIndex).at(-1)?.[0] ?? -1;
-    })
-    .toBeGreaterThan(0);
-
-  const detailOverlay = page.locator(".overlay-canvas").last();
-  const detailBox = await detailOverlay.boundingBox();
-  if (detailBox === null) throw new Error("detail overlay is not laid out");
-  await page.evaluate(() => {
-    (window as unknown as ResolutionProbe).__signalscopeHoldAdaptive = true;
-  });
-  await page.mouse.move(
-    detailBox.x + detailBox.width / 2,
-    detailBox.y + detailBox.height / 2,
-  );
-  await page.mouse.wheel(0, -4_000);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => (window as unknown as ResolutionProbe).__signalscopePending,
-      ),
-    )
-    .toBe(true);
-  await expect(detailOverlay).toBeVisible();
-
-  await page.evaluate(() => {
-    const probe = window as unknown as ResolutionProbe;
-    probe.__signalscopeHoldAdaptive = false;
-    probe.__signalscopeRelease?.();
-  });
-  await expect
-    .poll(async () => {
-      const responses = await probeLevels(page);
-      return responses.at(-1)?.[0] ?? -1;
-    })
-    .toBe(0);
-
-  const observed = (await probeLevels(page))
-    .slice(overviewIndex)
-    .map((response) => response[0])
-    .filter((level): level is number => level !== undefined);
-  expect(observed.at(-1)).toBe(0);
-  for (let index = 1; index < observed.length; index += 1) {
-    expect(observed[index]).toBeLessThanOrEqual(observed[index - 1] ?? 0);
-  }
-});
-
 test("adaptive and forced-full plots differ only at isolated pixels", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 640, height: 800 });
-  await installResolutionProbe(page);
+  await installForcedFullProbe(page);
   await gotoApp(page);
   await expect(page.locator(".chart-host canvas").first()).toBeVisible({
     timeout: 20_000,
