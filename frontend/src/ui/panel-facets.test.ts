@@ -165,6 +165,8 @@ describe("PanelView panel chrome", () => {
     document.body.appendChild(view.element);
     view.mount();
     await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     view.element.remove();
     document.body.appendChild(view.element);
@@ -190,6 +192,28 @@ describe("PanelView panel chrome", () => {
     await vi.runAllTimersAsync();
 
     expect(create).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("reports chart initialization that never settles", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const create = vi
+      .spyOn(ChartHost, "create")
+      .mockImplementation(() => new Promise(() => {}));
+    const reportFailure = vi.fn();
+    const gpu = { reportFailure } as unknown as GpuContext;
+    const view = new PanelView("panel", callbacks(Catalog.build([])), gpu);
+    document.body.appendChild(view.element);
+
+    view.mount();
+    await vi.runAllTimersAsync();
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(reportFailure).toHaveBeenCalledWith({
+      kind: "host-initialization",
+      message: "ChartGPU initialization timed out",
+    });
     vi.useRealTimers();
   });
 

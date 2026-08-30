@@ -1,7 +1,11 @@
 import { createPipelineCache } from "@chartgpu/chartgpu";
 
 export interface GpuFailure {
-  kind: "device-lost" | "host-initialization" | "uncaptured-error";
+  kind:
+    | "device-lost"
+    | "host-initialization"
+    | "render-failed"
+    | "uncaptured-error";
   message: string;
 }
 

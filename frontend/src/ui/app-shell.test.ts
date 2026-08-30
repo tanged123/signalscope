@@ -203,58 +203,70 @@ describe("GPU failure handling", () => {
     vi.unstubAllGlobals();
   });
 
-  it("releases panels and requests recovery after device loss", () => {
-    const root = document.createElement("div");
-    root.innerHTML = shellMarkup();
-    let failure: ((value: GpuFailure) => void) | undefined;
-    const workspaceView = {
-      setGpu: vi.fn(),
-      releaseGpu: vi.fn(),
-    };
-    const shell = Object.create(AppShell.prototype) as {
-      root: HTMLElement;
-      gpu: GpuContext | null;
-      signals: SignalSummary[];
-      workspaceView: typeof workspaceView;
-      requestGpuRecovery: () => void;
-      bindGpuWarning(): void;
-      refreshTiles(): Promise<void>;
-      setGpu(gpu: GpuContext): void;
-    };
-    shell.root = root;
-    shell.gpu = null;
-    shell.signals = [];
-    shell.workspaceView = workspaceView;
-    shell.requestGpuRecovery = vi.fn();
-    shell.refreshTiles = vi.fn(() => Promise.resolve());
-    const dispose = vi.fn();
-    const gpu = {
-      onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
-        failure = callback;
-        return vi.fn();
-      }),
-      dispose,
-    } as unknown as GpuContext;
+  it.each([
+    {
+      kind: "device-lost" as const,
+      warning: "WebGPU device lost — reconnecting",
+    },
+    {
+      kind: "render-failed" as const,
+      warning: "WebGPU renderer unavailable — reconnecting",
+    },
+  ])(
+    "releases panels and requests recovery after $kind",
+    ({ kind, warning: expectedWarning }) => {
+      const root = document.createElement("div");
+      root.innerHTML = shellMarkup();
+      let failure: ((value: GpuFailure) => void) | undefined;
+      const workspaceView = {
+        setGpu: vi.fn(),
+        releaseGpu: vi.fn(),
+      };
+      const shell = Object.create(AppShell.prototype) as {
+        root: HTMLElement;
+        gpu: GpuContext | null;
+        signals: SignalSummary[];
+        workspaceView: typeof workspaceView;
+        requestGpuRecovery: () => void;
+        bindGpuWarning(): void;
+        refreshTiles(): Promise<void>;
+        setGpu(gpu: GpuContext): void;
+      };
+      shell.root = root;
+      shell.gpu = null;
+      shell.signals = [];
+      shell.workspaceView = workspaceView;
+      shell.requestGpuRecovery = vi.fn();
+      shell.refreshTiles = vi.fn(() => Promise.resolve());
+      const dispose = vi.fn();
+      const gpu = {
+        onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
+          failure = callback;
+          return vi.fn();
+        }),
+        dispose,
+      } as unknown as GpuContext;
 
-    const reload = vi.fn();
-    vi.stubGlobal("window", { location: { reload } });
-    shell.bindGpuWarning();
-    shell.setGpu(gpu);
-    failure?.({ kind: "device-lost", message: "adapter reset" });
+      const reload = vi.fn();
+      vi.stubGlobal("window", { location: { reload } });
+      shell.bindGpuWarning();
+      shell.setGpu(gpu);
+      failure?.({ kind, message: "adapter reset" });
 
-    const warning = root.querySelector<HTMLElement>(".gpu-warning");
-    expect(workspaceView.releaseGpu).toHaveBeenCalledOnce();
-    expect(dispose).toHaveBeenCalledOnce();
-    expect(shell.gpu).toBeNull();
-    expect(shell.requestGpuRecovery).toHaveBeenCalledOnce();
-    expect(warning?.textContent).toContain("WebGPU device lost — reconnecting");
-    expect(warning?.hidden).toBe(false);
-    expect(
-      root.querySelector<HTMLButtonElement>(".gpu-warning-dismiss")?.hidden,
-    ).toBe(true);
-    root.querySelector<HTMLButtonElement>(".gpu-warning-reload")?.click();
-    expect(reload).toHaveBeenCalledOnce();
-  });
+      const warning = root.querySelector<HTMLElement>(".gpu-warning");
+      expect(workspaceView.releaseGpu).toHaveBeenCalledOnce();
+      expect(dispose).toHaveBeenCalledOnce();
+      expect(shell.gpu).toBeNull();
+      expect(shell.requestGpuRecovery).toHaveBeenCalledOnce();
+      expect(warning?.textContent).toContain(expectedWarning);
+      expect(warning?.hidden).toBe(false);
+      expect(
+        root.querySelector<HTMLButtonElement>(".gpu-warning-dismiss")?.hidden,
+      ).toBe(true);
+      root.querySelector<HTMLButtonElement>(".gpu-warning-reload")?.click();
+      expect(reload).toHaveBeenCalledOnce();
+    },
+  );
 
   it("reports uncaptured GPU errors without releasing the workspace", () => {
     const root = document.createElement("div");

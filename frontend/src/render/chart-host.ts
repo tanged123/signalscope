@@ -61,14 +61,12 @@ export class ChartHost {
   private constructor(
     private readonly container: HTMLElement,
     chart: ChartGPUInstance,
-    gpu: GpuContext,
+    private readonly gpu: GpuContext,
   ) {
     this.chart = chart;
     this.unregister = gpu.register({
       needsRender: () => this.chart.needsRender(),
-      renderFrame: () => {
-        this.chart.renderFrame();
-      },
+      renderFrame: () => this.renderPendingFrame(),
     });
   }
 
@@ -214,7 +212,7 @@ export class ChartHost {
       x: { min: xRange.min - this.tRef, max: xRange.max - this.tRef },
       y: { min: yRange[0], max: yRange[1] },
     });
-    this.chart.renderFrame();
+    this.renderPendingFrame();
     this.lastLayout = this.makeLayout(xRange, yRange);
   }
 
@@ -226,7 +224,7 @@ export class ChartHost {
     if (this.options !== null) this.chart.setOption({ ...this.options });
     return new Promise((resolve) => {
       requestAnimationFrame(() => {
-        this.chart.renderFrame();
+        this.renderPendingFrame();
         const sources = Array.from(this.container.querySelectorAll("canvas"));
         const target = document.createElement("canvas");
         target.width = sources[0]?.width ?? 1;
@@ -253,6 +251,14 @@ export class ChartHost {
   dispose(): void {
     this.unregister();
     this.chart.dispose();
+  }
+
+  private renderPendingFrame(): void {
+    if (this.chart.renderFrame()) return;
+    this.gpu.reportFailure({
+      kind: "render-failed",
+      message: "ChartGPU failed to render a pending frame",
+    });
   }
 
   private makeOptions(

@@ -50,7 +50,8 @@ import {
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
 
-const CHART_HOST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
+const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 2_000;
+const CHART_HOST_RETRY_DELAYS_MS = [100] as const;
 import {
   OverlayRenderer,
   marker,
@@ -624,7 +625,22 @@ export class PanelView {
 
   private initializeChartHost(gpu: GpuContext, attempt = 0): void {
     const generation = this.chartHostGeneration;
-    this.chartHostReady = ChartHost.create(this.chartHostElement, gpu)
+    let timedOut = false;
+    let timeoutId = 0;
+    const creation = ChartHost.create(this.chartHostElement, gpu);
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        reject(new Error("ChartGPU initialization timed out"));
+      }, CHART_HOST_INITIALIZATION_TIMEOUT_MS);
+    });
+    void creation.then(
+      (host) => {
+        if (timedOut) host.dispose();
+      },
+      () => {},
+    );
+    this.chartHostReady = Promise.race([creation, timeout])
       .then((host) => {
         if (
           this.disposed ||
@@ -686,6 +702,9 @@ export class PanelView {
           );
         }
         return null;
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId);
       });
   }
 

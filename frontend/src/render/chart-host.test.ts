@@ -118,7 +118,7 @@ function request(
   };
 }
 
-async function hostFixture(): Promise<ChartHost> {
+async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
   const container = document.createElement("div");
   Object.defineProperty(container, "clientWidth", {
     configurable: true,
@@ -133,6 +133,7 @@ async function hostFixture(): Promise<ChartHost> {
     device: {},
     pipelineCache: {},
     register: vi.fn(() => vi.fn()),
+    reportFailure,
   } as unknown as GpuContext;
   return ChartHost.create(container, gpu);
 }
@@ -410,6 +411,20 @@ describe("ChartHost", () => {
       plot: { x: 60, y: 8, width: 328, height: 258 },
       xRange: { min: 11, max: 12 },
       yRange: { min: -1, max: 5 },
+    });
+  });
+
+  it("reports a pending frame that ChartGPU cannot render", async () => {
+    const reportFailure = vi.fn();
+    const host = await hostFixture(reportFailure);
+    host.render(request());
+    state.charts.at(-1)?.renderFrame.mockReturnValueOnce(false);
+
+    host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
+
+    expect(reportFailure).toHaveBeenCalledWith({
+      kind: "render-failed",
+      message: "ChartGPU failed to render a pending frame",
     });
   });
 
