@@ -14,6 +14,8 @@ import type { GpuContext } from "./gpu-context";
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
 const MIN_CHARTGPU_LINE_WIDTH = 2;
 const MIN_CHARTGPU_GHOST_WIDTH = 1.5;
+const FULL_OPACITY_GHOST_COUNT = 16;
+const MIN_DENSE_GHOST_OPACITY = 0.06;
 const PLOT_LINE_WIDTH_BASELINE = 2;
 
 export interface ChartRenderRequest {
@@ -33,6 +35,7 @@ interface SeriesElement {
   emphasis: boolean;
   /** Opacity depends on whether any series is emphasized, not only this one. */
   emphasisActive: boolean;
+  ghostOpacityScale: number;
   palette: Palette;
   element: LineSeriesConfig;
 }
@@ -104,6 +107,13 @@ export class ChartHost {
     }
     const emphasis = new Set(request.emphasisIndices);
     const emphasisActive = request.emphasisIndices.length > 0;
+    const ghostCount = request.response.series.filter(
+      (_, index) => (request.styles[index]?.hue ?? null) === null,
+    ).length;
+    const ghostOpacityScale = Math.min(
+      1,
+      Math.sqrt(FULL_OPACITY_GHOST_COUNT / Math.max(1, ghostCount)),
+    );
     const series = request.response.series.map((tile, index) => {
       const style = request.styles[index] ?? {
         hue: null,
@@ -119,6 +129,7 @@ export class ChartHost {
         sameStyle(previous.style, style) &&
         previous.emphasis === isEmphasized &&
         previous.emphasisActive === emphasisActive &&
+        previous.ghostOpacityScale === ghostOpacityScale &&
         previous.palette === request.palette
       ) {
         return previous.element;
@@ -129,10 +140,13 @@ export class ChartHost {
       const color = ghost
         ? request.palette.fg4
         : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
+      const baseOpacity = ghost
+        ? Math.max(MIN_DENSE_GHOST_OPACITY, style.alpha * ghostOpacityScale)
+        : style.alpha;
       const opacity =
         emphasisActive && !isEmphasized && !ghost
           ? 0.25
-          : Math.min(1, style.alpha + (isEmphasized ? 0.4 : 0));
+          : Math.min(1, baseOpacity + (isEmphasized ? 0.4 : 0));
       const minimumWidth = ghost
         ? MIN_CHARTGPU_GHOST_WIDTH
         : MIN_CHARTGPU_LINE_WIDTH;
@@ -157,6 +171,7 @@ export class ChartHost {
         style,
         emphasis: isEmphasized,
         emphasisActive,
+        ghostOpacityScale,
         palette: request.palette,
         element,
       };

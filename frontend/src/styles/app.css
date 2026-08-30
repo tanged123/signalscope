@@ -1161,6 +1161,7 @@ button {
   position: relative;
   min-height: 0;
   flex: 1;
+  isolation: isolate;
 }
 
 .plot-hover-tag {
@@ -1180,7 +1181,9 @@ button {
 
 .chart-host {
   position: absolute;
+  z-index: 0;
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -1190,6 +1193,7 @@ button {
 
 .overlay-canvas {
   position: absolute;
+  z-index: 1;
   inset: 0;
   width: 100%;
   height: 100%;
@@ -1802,6 +1806,7 @@ button {
 
 .panel-empty {
   position: absolute;
+  z-index: 2;
   inset: 0;
   display: grid;
   place-items: center;

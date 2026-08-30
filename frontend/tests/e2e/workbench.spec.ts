@@ -326,6 +326,29 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
   await panel.locator(".legend-count-token").first().click();
   await expect(panel.locator(".matrix-roster")).toBeVisible();
   await expect
+    .poll(() =>
+      panel.evaluate((element) => ({
+        chart: getComputedStyle(
+          element.querySelector(".chart-host") as HTMLElement,
+        ).zIndex,
+        overlay: getComputedStyle(
+          element.querySelector(".overlay-canvas") as HTMLElement,
+        ).zIndex,
+        plotIsolation: getComputedStyle(
+          element.querySelector(".plot-wrap") as HTMLElement,
+        ).isolation,
+        roster: getComputedStyle(
+          element.querySelector(".matrix-roster") as HTMLElement,
+        ).zIndex,
+      })),
+    )
+    .toEqual({
+      chart: "0",
+      overlay: "1",
+      plotIsolation: "isolate",
+      roster: "4",
+    });
+  await expect
     .poll(() => panel.locator(".matrix-roster-row").count())
     .toBeLessThan(40);
   await panel.locator(".matrix-roster-row").first().click();

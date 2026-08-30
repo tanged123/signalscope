@@ -367,6 +367,30 @@ describe("ChartHost", () => {
     ]);
   });
 
+  it("attenuates dense ghost fields without dimming colored foreground", async () => {
+    const host = await hostFixture();
+    const signalIds = Array.from({ length: 65 }, (_, index) =>
+      index === 64 ? "focus" : `ghost-${String(index)}`,
+    );
+    const styles = signalIds.map((_, index) =>
+      index === 64 ? stroke(1) : { ...stroke(null), alpha: 0.5 },
+    );
+
+    host.render(request(response(signalIds), styles));
+
+    const series = state.charts.at(-1)?.options.series as Array<{
+      name: string;
+      lineStyle: { opacity: number };
+    }>;
+    expect(series[0]?.lineStyle.opacity).toBeCloseTo(0.25);
+    expect(series.at(-1)).toEqual(
+      expect.objectContaining({
+        name: "signal_64",
+        lineStyle: expect.objectContaining({ opacity: 1 }),
+      }),
+    );
+  });
+
   it("updates ranges without rebuilding series and reports the ChartGPU grid layout", async () => {
     const host = await hostFixture();
     host.render(request());
