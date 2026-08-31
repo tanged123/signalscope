@@ -110,6 +110,7 @@ trap 'rm -rf "$test_root"' EXIT
 version_root="$test_root/version"
 mkdir -p \
   "$version_root/core" \
+  "$version_root/desktop" \
   "$version_root/frontend/src/ui" \
   "$version_root/scripts"
 cp "$script_dir/version.mjs" "$version_root/scripts/version.mjs"
@@ -133,6 +134,7 @@ name = "core"
 version = "1.2.3"
 EOF
 printf '{"version":"1.2.3"}\n' >"$version_root/frontend/package.json"
+printf '{"version":"1.2.3"}\n' >"$version_root/desktop/package.json"
 printf 'showModeHelp("SignalScope 1.2.3")\n' >"$version_root/frontend/src/ui/app-shell.ts"
 cat >"$version_root/README.md" <<'EOF'
 [![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.2.2)](https://tanged123.github.io/signalscope/demo.html)
@@ -230,6 +232,20 @@ publish_dir="$test_root/publish-assets"
 mkdir -p "$publish_dir" "$stub_dir"
 : >"$publish_dir/signalscope_1.2.3_amd64.deb"
 : >"$publish_dir/latest.json"
+for asset in \
+  SignalScope-1.2.3-linux-x64.AppImage \
+  SignalScope-1.2.3-windows-x64-setup.exe \
+  SignalScope-1.2.3-mac-x64.dmg \
+  SignalScope-1.2.3-mac-arm64.dmg; do
+  printf x >"$publish_dir/$asset"
+done
+"$script_dir/release.sh" checksums v1.2.3 "$publish_dir"
+
+stale_dir="$test_root/stale-assets"
+cp -R "$publish_dir" "$stale_dir"
+mv "$stale_dir/SignalScope-1.2.3-mac-arm64.dmg" \
+  "$stale_dir/SignalScope-1.2.2-mac-arm64.dmg"
+expect_status 1 "$script_dir/release.sh" verify v1.2.3 "$stale_dir"
 
 cat >"$stub_dir/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -241,7 +257,8 @@ PATH="$stub_dir:$PATH" GH_TOKEN=test GH_STUB_ARGS="$test_root/gh-args" \
   "$script_dir/release.sh" publish v1.2.3 "$publish_dir"
 
 published="$(sed -n "s|^$publish_dir/||p" "$test_root/gh-args" | LC_ALL=C sort | tr '\n' ' ')"
-if [ "$published" != "signalscope_1.2.3_amd64.deb " ]; then
+expected="SHA256SUMS.txt SignalScope-1.2.3-linux-x64.AppImage SignalScope-1.2.3-mac-arm64.dmg SignalScope-1.2.3-mac-x64.dmg SignalScope-1.2.3-windows-x64-setup.exe signalscope_1.2.3_amd64.deb "
+if [ "$published" != "$expected" ]; then
   printf 'publish must forward only publishable assets, got: %s\n' "$published" >&2
   failures=$((failures + 1))
 fi

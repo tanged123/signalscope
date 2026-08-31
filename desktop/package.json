@@ -1,0 +1,20 @@
+{
+  "name": "@signalscope/desktop",
+  "version": "1.3.0",
+  "description": "SignalScope time-series analysis workbench",
+  "author": "SignalScope contributors",
+  "desktopName": "SignalScope.desktop",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc",
+    "package": "electron-builder --config electron-builder.yml",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "26.15.7",
+    "typescript": "5.9.3",
+    "vitest": "4.0.16"
+  }
+}

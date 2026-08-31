@@ -50,5 +50,6 @@ Accepted decisions:
 46. [Uniform presentation admission](0046-uniform-presentation-admission.md)
 47. [Overview/detail tile retention](0047-overview-detail-tile-retention.md)
 48. [Legend console and serialized overlay state](0048-legend-console.md)
+49. [Electron distribution shell](0049-electron-distribution-shell.md)
 
 ADRs are amended with a superseding record; accepted records are not silently rewritten when implementation constraints change.

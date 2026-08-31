@@ -44,6 +44,10 @@ export default defineConfig({
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },
     {
+      name: "electron-packaged",
+      testMatch: /electron-packaged\.spec\.ts/,
+    },
+    {
       name: "demo",
       testDir: "./tests/demo",
       use: {
@@ -64,7 +68,8 @@ export default defineConfig({
   ],
   webServer:
     process.env.SIGNALSCOPE_DEMO === "1" ||
-    process.env.SIGNALSCOPE_BENCH === "1"
+    process.env.SIGNALSCOPE_BENCH === "1" ||
+    process.env.SIGNALSCOPE_PACKAGE_SMOKE === "1"
       ? undefined
       : {
           command: "pnpm dev",

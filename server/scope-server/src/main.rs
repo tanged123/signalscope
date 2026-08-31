@@ -1,6 +1,7 @@
-use std::{env, net::SocketAddr, path::PathBuf};
+use std::{env, io::Write, net::SocketAddr, path::PathBuf};
 
 use scope_server::{AppContext, build_router};
+use tokio::io::AsyncReadExt;
 
 struct Args {
     port: u16,
@@ -8,10 +9,16 @@ struct Args {
     data_dir: Option<PathBuf>,
     no_auth: bool,
     no_open: bool,
+    exit_on_stdin_close: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = parse_args()?;
+    let arguments: Vec<_> = env::args().skip(1).collect();
+    if arguments == ["--version"] {
+        println!(env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    let args = parse_args_from(arguments)?;
     let token = (!args.no_auth).then(|| format!("{:032x}", rand::random::<u128>()));
     let data_dir = args.data_dir.unwrap_or_else(|| {
         dirs::data_dir()
@@ -20,24 +27,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let frontend_dir = args.frontend_dir.or_else(default_frontend_dir);
     let ctx = AppContext::new(data_dir, token.clone(), frontend_dir);
-    let port = args.port;
-    let url = token.as_deref().map_or_else(
-        || format!("http://127.0.0.1:{port}/"),
-        |token| format!("http://127.0.0.1:{port}/?token={token}"),
-    );
-    println!("{url}");
-    if !args.no_open {
-        let _ = open::that(&url);
-    }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
         let listener =
-            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?;
+            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], args.port))).await?;
+        let port = listener.local_addr()?.port();
+        let url = launch_url(port, token.as_deref());
+        println!("{url}");
+        std::io::stdout().flush()?;
+        if !args.no_open {
+            let _ = open::that(&url);
+        }
         axum::serve(listener, build_router(ctx))
-            .with_graceful_shutdown(shutdown_signal())
+            .with_graceful_shutdown(shutdown_signal(args.exit_on_stdin_close))
             .await
             .map_err(Into::into)
     })
+}
+
+fn launch_url(port: u16, token: Option<&str>) -> String {
+    token.map_or_else(
+        || format!("http://127.0.0.1:{port}/"),
+        |token| format!("http://127.0.0.1:{port}/?token={token}"),
+    )
 }
 
 fn default_frontend_dir() -> Option<PathBuf> {
@@ -52,7 +64,7 @@ fn default_frontend_dir() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_dir())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(exit_on_stdin_close: bool) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
@@ -67,20 +79,31 @@ async fn shutdown_signal() {
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
+    let stdin_closed = async move {
+        if exit_on_stdin_close {
+            let mut stdin = tokio::io::stdin();
+            let mut byte = [0_u8; 1];
+            while stdin.read(&mut byte).await.unwrap_or(0) != 0 {}
+        } else {
+            std::future::pending::<()>().await;
+        }
+    };
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
+        () = stdin_closed => {},
     }
 }
 
-fn parse_args() -> Result<Args, String> {
-    let mut args = env::args().skip(1);
+fn parse_args_from(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
+    let mut args = args.into_iter();
     let mut parsed = Args {
         port: 8317,
         frontend_dir: None,
         data_dir: None,
         no_auth: false,
         no_open: false,
+        exit_on_stdin_close: false,
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -103,8 +126,46 @@ fn parse_args() -> Result<Args, String> {
             }
             "--no-auth" => parsed.no_auth = true,
             "--no-open" => parsed.no_open = true,
+            "--exit-on-stdin-close" => parsed.exit_on_stdin_close = true,
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{launch_url, parse_args_from};
+    use std::path::PathBuf;
+
+    #[test]
+    fn desktop_arguments_select_an_ephemeral_authenticated_server() {
+        let args = parse_args_from(
+            [
+                "--port",
+                "0",
+                "--no-open",
+                "--exit-on-stdin-close",
+                "--frontend-dir",
+                "/app/frontend",
+                "--data-dir",
+                "/data",
+            ]
+            .map(String::from),
+        )
+        .unwrap();
+        assert_eq!(args.port, 0);
+        assert!(args.no_open);
+        assert!(args.exit_on_stdin_close);
+        assert_eq!(args.frontend_dir, Some(PathBuf::from("/app/frontend")));
+        assert_eq!(args.data_dir, Some(PathBuf::from("/data")));
+    }
+
+    #[test]
+    fn launch_url_contains_the_bound_port_and_token() {
+        assert_eq!(
+            launch_url(43817, Some("secret")),
+            "http://127.0.0.1:43817/?token=secret"
+        );
+    }
 }

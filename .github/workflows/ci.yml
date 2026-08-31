@@ -133,25 +133,83 @@ jobs:
 
   build:
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - os: windows-2025
+            platform: windows
+            arch: x64
+          - os: macos-26-intel
+            platform: mac
+            arch: x64
+          - os: macos-26
+            platform: mac
+            arch: arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        if: matrix.platform != 'windows'
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: build
-      - run: ./scripts/ci.sh build
+      - if: matrix.platform != 'windows'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ./scripts/ci.sh build
+      - if: matrix.platform == 'windows'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: ./scripts/build-windows.sh
+        shell: bash
+      - env:
+          SIGNALSCOPE_WINDOWS_BUILD: ${{ matrix.platform == 'windows' && '1' || '' }}
+        run: ./scripts/test.sh desktop package
+        shell: bash
       - uses: actions/upload-artifact@v7
         with:
-          name: release-linux-app
-          path: build/app
+          name: package-${{ matrix.platform }}-${{ matrix.arch }}
+          path: build/packages/${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+
+  release-gate:
+    if: github.event_name != 'pull_request'
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: package-*
+          path: release-assets
+          merge-multiple: true
+      - id: version
+        run: printf 'version=%s\n' "$(./scripts/version.sh get)" >> "$GITHUB_OUTPUT"
+      - env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/release.sh checksums "v$RELEASE_VERSION" release-assets
+      - uses: actions/upload-artifact@v7
+        with:
+          name: verified-release-${{ github.sha }}
+          path: release-assets
           if-no-files-found: error
 
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [version, flake, quality, rust, frontend, e2e, build]
+    needs: [version, flake, quality, rust, frontend, e2e, release-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -236,7 +294,7 @@ jobs:
         uses: actions/deploy-pages@v5
 
   publish:
-    needs: [tag, build]
+    needs: [tag, release-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -248,9 +306,8 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          pattern: release-*
+          name: verified-release-${{ github.sha }}
           path: release-assets
-          merge-multiple: true
       - env:
           RELEASE_TAG: ${{ needs.tag.outputs.tag }}
         run: ./scripts/release.sh publish "$RELEASE_TAG" release-assets

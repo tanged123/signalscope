@@ -63,7 +63,6 @@
             libsoup_3
             librsvg
             pango
-            webkitgtk_4_1
           ]
         );
       in
@@ -78,6 +77,7 @@
               cargo-llvm-cov
               cargo-machete
               clippy
+              electron_43
               ffmpeg
               hdf5Root
               llvmPackages.llvm
@@ -99,6 +99,7 @@
             fi
             export RUST_BACKTRACE=1
             export HDF5_DIR="${hdf5Root}"
+            export SIGNALSCOPE_ELECTRON_BIN="${pkgs.electron_43}/bin/electron"
             ${lib.optionalString pkgs.stdenv.isLinux ''
               export PLAYWRIGHT_BROWSERS_PATH=0
               export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"

@@ -3,15 +3,21 @@ set -euo pipefail
 
 # shellcheck source=scripts/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-ensure_dev_shell "$@"
+if [ "${SIGNALSCOPE_WINDOWS_BUILD:-}" = 1 ]; then
+  export PATH="$signalscope_root/build/windows-tools/node_modules/.bin:$PATH"
+  cd "$signalscope_root" || exit 1
+else
+  ensure_dev_shell "$@"
+fi
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|server|unit|frontend|e2e|bench|full]
+Usage: ./scripts/test.sh [quick|core|server|desktop|unit|frontend|e2e|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
   server    Test the browser host server, optionally filtered.
+  desktop   Test the Electron shell; pass package to smoke-test a built package.
   unit      Run frontend unit tests, optionally filtered.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
@@ -27,6 +33,49 @@ test_core() {
 
 test_server() {
   cargo test -p scope-server -- "$@"
+}
+
+test_desktop() {
+  if [ "${1:-}" != package ]; then
+    pnpm --filter @signalscope/desktop test -- "$@"
+    return
+  fi
+  local packaged_bin packaged_app packaged_resources electron_bin=""
+  case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    packaged_bin="$(find desktop/release -type f -path '*/win-unpacked/signalscope.exe' -print -quit)"
+    ;;
+  Darwin)
+    packaged_bin="$(find desktop/release -type f -path '*/SignalScope.app/Contents/MacOS/signalscope' -print -quit)"
+    ;;
+  *)
+    packaged_bin="$(find desktop/release -type f -path '*/linux-unpacked/signalscope' -print -quit)"
+    ;;
+  esac
+  if [ -z "$packaged_bin" ]; then
+    echo "unpacked SignalScope application is missing" >&2
+    return 1
+  fi
+  packaged_resources="$(dirname "$packaged_bin")/resources"
+  packaged_app="$packaged_resources/app.asar"
+  if [ "$(uname -s)" = Darwin ]; then
+    packaged_resources="$(dirname "$packaged_bin")/../Resources"
+    packaged_app="$packaged_resources/app.asar"
+  fi
+  if [ "$(uname -s)" = Linux ] &&
+    grep -q 'not found' <<<"$(ldd "$packaged_bin" 2>/dev/null || true)" &&
+    [ -n "${SIGNALSCOPE_ELECTRON_BIN:-}" ]; then
+    electron_bin="$SIGNALSCOPE_ELECTRON_BIN"
+  fi
+  local -a command=(pnpm --filter @signalscope/frontend exec playwright test --project=electron-packaged)
+  if [ "$(uname -s)" = Linux ] && command -v xvfb-run >/dev/null 2>&1; then
+    command=(xvfb-run -a "${command[@]}")
+  fi
+  SIGNALSCOPE_PACKAGED_BIN="$signalscope_root/$packaged_bin" \
+    SIGNALSCOPE_PACKAGED_APP="$signalscope_root/$packaged_app" \
+    SIGNALSCOPE_PACKAGED_RESOURCES="$signalscope_root/$packaged_resources" \
+    SIGNALSCOPE_ELECTRON_BIN="$electron_bin" \
+    SIGNALSCOPE_PACKAGE_SMOKE=1 "${command[@]}"
 }
 
 test_unit() {
@@ -105,6 +154,10 @@ core)
 server)
   shift || true
   test_server "$@"
+  ;;
+desktop)
+  shift || true
+  test_desktop "$@"
   ;;
 unit)
   shift || true
