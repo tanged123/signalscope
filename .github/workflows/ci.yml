@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       run_demo:
-        description: Generate demo artifacts without publishing them
+        description: Generate the HTML demo without publishing it
         required: false
         default: false
         type: boolean

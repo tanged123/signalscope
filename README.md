@@ -24,12 +24,10 @@ panel grids over the same loaded sources and linked time window.
 
 ## Interactive demo
 
-[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.3.0)](https://tanged123.github.io/signalscope/demo.html)
-
 **[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)**
 to zoom, inspect values, and explore the exported workspace in your browser.
-The preview and snapshot are regenerated from SignalScope's export path on
-every release, so this view tracks the shipping UI.
+The snapshot is regenerated from SignalScope's export path on every release,
+so this view tracks the shipping UI.
 
 ## Quick start
 

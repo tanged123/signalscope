@@ -77,7 +77,6 @@
               cargo-llvm-cov
               cargo-machete
               clippy
-              ffmpeg
               hdf5Root
               llvmPackages.llvm
               nodejs_22

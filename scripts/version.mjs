@@ -11,13 +11,10 @@ const releaseFiles = {
   frontend: resolve(repositoryRoot, "frontend/package.json"),
   desktop: resolve(repositoryRoot, "desktop/package.json"),
   about: resolve(repositoryRoot, "frontend/src/ui/app-shell.ts"),
-  readme: resolve(repositoryRoot, "README.md"),
 };
 
 /** The version the About command shows; nothing else checks this literal. */
 const aboutPattern = /(showModeHelp\("SignalScope )(\d+\.\d+\.\d+)("\))/;
-const demoPattern =
-  /(https:\/\/tanged123\.github\.io\/signalscope\/demo\.gif\?v=)(\d+\.\d+\.\d+)/;
 
 async function workspacePackageNames() {
   const cargo = await readFile(releaseFiles.cargo, "utf8");
@@ -121,29 +118,16 @@ function aboutVersion(text) {
   return match[2];
 }
 
-function demoVersion(text) {
-  const match = demoPattern.exec(text);
-  if (!match) throw new Error("README.md has no versioned demo GIF URL");
-  return match[2];
-}
-
 async function readReleaseState(packageNames) {
-  const [
-    cargoText,
-    lockText,
-    frontendText,
-    desktopText,
-    aboutText,
-    readmeText,
-  ] = await Promise.all(
-    Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
-  );
+  const [cargoText, lockText, frontendText, desktopText, aboutText] =
+    await Promise.all(
+      Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
+    );
   const versions = new Map([
     ["Cargo.toml [workspace.package]", cargoWorkspaceVersion(cargoText)],
     ["frontend/package.json", JSON.parse(frontendText).version],
     ["desktop/package.json", JSON.parse(desktopText).version],
     ["frontend/src/ui/app-shell.ts About", aboutVersion(aboutText)],
-    ["README.md demo GIF", demoVersion(readmeText)],
   ]);
   for (const [name, version] of workspaceDependencyVersions(
     cargoText,
@@ -242,25 +226,12 @@ function setAboutVersion(text, version) {
   return updated;
 }
 
-function setDemoVersion(text, version) {
-  const updated = text.replace(demoPattern, `$1${version}`);
-  if (updated === text)
-    throw new Error("README.md demo GIF version was not updated");
-  return updated;
-}
-
 async function setVersion(version, packageNames) {
   parseVersion(version);
-  const [
-    cargoText,
-    lockText,
-    frontendText,
-    desktopText,
-    aboutText,
-    readmeText,
-  ] = await Promise.all(
-    Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
-  );
+  const [cargoText, lockText, frontendText, desktopText, aboutText] =
+    await Promise.all(
+      Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
+    );
   await Promise.all([
     writeFile(
       releaseFiles.cargo,
@@ -279,7 +250,6 @@ async function setVersion(version, packageNames) {
       setJsonVersion(desktopText, version, "desktop/package.json"),
     ),
     writeFile(releaseFiles.about, setAboutVersion(aboutText, version)),
-    writeFile(releaseFiles.readme, setDemoVersion(readmeText, version)),
   ]);
   console.log(`SignalScope version set to ${version}`);
 }

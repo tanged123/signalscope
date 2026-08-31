@@ -95,8 +95,8 @@ if ! grep -q '^## Interactive demo$' "$readme"; then
   echo "README must give the hosted demo its own section" >&2
   failures=$((failures + 1))
 fi
-if ! grep -Eq '!\[SignalScope interactive demo\]\(https://tanged123\.github\.io/signalscope/demo\.gif\?v=[0-9]+\.[0-9]+\.[0-9]+\)' "$readme"; then
-  echo "README must embed the release-generated demo GIF" >&2
+if grep -Fq 'demo.gif' "$readme"; then
+  echo "README must not embed the retired demo GIF" >&2
   failures=$((failures + 1))
 fi
 if ! grep -Fq '[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)' "$readme"; then
@@ -134,17 +134,10 @@ name = "core"
 version = "1.2.3"
 EOF
 printf '{"version":"1.2.3"}\n' >"$version_root/frontend/package.json"
-printf '{"version":"1.2.3"}\n' >"$version_root/desktop/package.json"
+printf '{"version":"1.2.2"}\n' >"$version_root/desktop/package.json"
 printf 'showModeHelp("SignalScope 1.2.3")\n' >"$version_root/frontend/src/ui/app-shell.ts"
-cat >"$version_root/README.md" <<'EOF'
-[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.2.2)](https://tanged123.github.io/signalscope/demo.html)
-EOF
 expect_status 1 node "$version_root/scripts/version.mjs" check
 expect_status 0 node "$version_root/scripts/version.mjs" set 2.0.0
-if ! grep -Fq 'demo.gif?v=2.0.0' "$version_root/README.md"; then
-  echo "version set must update the README demo cache key" >&2
-  failures=$((failures + 1))
-fi
 
 git -C "$version_root" init -q
 git -C "$version_root" config user.name test
@@ -171,14 +164,12 @@ expect_status 2 "$script_dir/demo.sh" publish
 
 incomplete_demo_dir="$test_root/incomplete-demo"
 mkdir -p "$incomplete_demo_dir"
-: >"$incomplete_demo_dir/demo.html"
 expect_status 1 "$script_dir/demo.sh" publish "$incomplete_demo_dir"
 
 complete_demo_dir="$test_root/complete-demo"
 stub_dir="$test_root/stub-bin"
 mkdir -p "$complete_demo_dir" "$stub_dir"
 : >"$complete_demo_dir/demo.html"
-: >"$complete_demo_dir/demo.gif"
 
 real_git="$(command -v git)"
 cat >"$stub_dir/git" <<'STUB'
