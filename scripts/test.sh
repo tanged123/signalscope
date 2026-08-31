@@ -43,7 +43,7 @@ test_desktop() {
   local packaged_bin packaged_app packaged_resources electron_bin=""
   case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
-    packaged_bin="$(find desktop/release -type f -path '*/win-unpacked/*.exe' -print -quit)"
+    packaged_bin="$(find desktop/release -type f -path '*/win-unpacked/signalscope.exe' -print -quit)"
     ;;
   Darwin)
     packaged_bin="$(find desktop/release -type f -path '*.app/Contents/MacOS/*' -print -quit)"
