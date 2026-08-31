@@ -11,6 +11,7 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs-darwin-x64.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
     treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
@@ -18,13 +19,16 @@
     {
       self,
       nixpkgs,
+      nixpkgs-darwin-x64,
       flake-utils,
       treefmt-nix,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        # Unstable dropped Intel macOS after 26.05.
+        selectedNixpkgs = if system == "x86_64-darwin" then nixpkgs-darwin-x64 else nixpkgs;
+        pkgs = selectedNixpkgs.legacyPackages.${system};
         lib = pkgs.lib;
         hdf5Root = pkgs.symlinkJoin {
           name = "hdf5";
@@ -77,7 +81,6 @@
               cargo-llvm-cov
               cargo-machete
               clippy
-              electron_43
               ffmpeg
               hdf5Root
               llvmPackages.llvm
@@ -91,6 +94,7 @@
               typos
               zizmor
             ]
+            ++ lib.optionals pkgs.stdenv.isLinux [ electron_43 ]
             ++ linuxPackages;
 
           shellHook = ''
@@ -99,8 +103,8 @@
             fi
             export RUST_BACKTRACE=1
             export HDF5_DIR="${hdf5Root}"
-            export SIGNALSCOPE_ELECTRON_BIN="${pkgs.electron_43}/bin/electron"
             ${lib.optionalString pkgs.stdenv.isLinux ''
+              export SIGNALSCOPE_ELECTRON_BIN="${pkgs.electron_43}/bin/electron"
               export PLAYWRIGHT_BROWSERS_PATH=0
               export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"
               export XDG_DATA_DIRS="${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-}"

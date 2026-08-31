@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION } from "../../src/generated/protocol";
 
-test("the packaged Electron workbench uses authenticated HttpPlane and WebGPU", async () => {
+test("the packaged Electron workbench uses authenticated HttpPlane", async () => {
   const executablePath = process.env.SIGNALSCOPE_PACKAGED_BIN;
   if (executablePath === undefined) {
     test.skip(true, "packaged executable is not configured");
@@ -16,18 +16,19 @@ test("the packaged Electron workbench uses authenticated HttpPlane and WebGPU", 
   const electronBinary = process.env.SIGNALSCOPE_ELECTRON_BIN;
   const packagedApp = process.env.SIGNALSCOPE_PACKAGED_APP;
   const packagedResources = process.env.SIGNALSCOPE_PACKAGED_RESOURCES;
+  const expectWebGpu = process.env.SIGNALSCOPE_EXPECT_WEBGPU !== "0";
+  const usingElectronWrapper =
+    electronBinary !== undefined && electronBinary.length > 0;
   const application = await electron.launch({
-    executablePath:
-      electronBinary === undefined || electronBinary.length === 0
-        ? executablePath
-        : electronBinary,
+    executablePath: usingElectronWrapper ? electronBinary : executablePath,
     cwd: userData,
     args: [
-      ...(electronBinary === undefined ||
-      electronBinary.length === 0 ||
-      packagedApp === undefined
-        ? []
-        : [packagedApp]),
+      ...(usingElectronWrapper && packagedApp !== undefined
+        ? [packagedApp]
+        : []),
+      ...(usingElectronWrapper && process.platform === "linux"
+        ? ["--no-sandbox"]
+        : []),
       `--user-data-dir=${userData}`,
       "--enable-unsafe-webgpu",
       "--enable-features=Vulkan",
@@ -49,7 +50,8 @@ test("the packaged Electron workbench uses authenticated HttpPlane and WebGPU", 
   try {
     const page = await application.firstWindow();
     await expect(page.locator(".formula-toggle")).toBeVisible();
-    await expect(page.locator(".gpu-warning")).toBeHidden();
+    if (expectWebGpu) await expect(page.locator(".gpu-warning")).toBeHidden();
+    else await expect(page.locator(".gpu-warning")).toBeVisible();
     const state = await page.evaluate(
       async ({ source, protocolVersion }) => {
         const post = async <T>(
@@ -96,13 +98,13 @@ test("the packaged Electron workbench uses authenticated HttpPlane and WebGPU", 
       },
       { source, protocolVersion: PROTOCOL_VERSION },
     );
-    expect(state).toEqual({
+    expect(state).toMatchObject({
       host: "127.0.0.1",
       protocol: "http:",
       ingested: true,
-      gpu: "object",
       node: "undefined",
     });
+    if (expectWebGpu) expect(state.gpu).toBe("object");
   } finally {
     await application.close();
     await rm(userData, { recursive: true, force: true });

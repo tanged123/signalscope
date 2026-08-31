@@ -35,7 +35,9 @@ case "$mode" in
   exit 0
   ;;
 flake)
-  exec nix flake check
+  nix flake check
+  nix eval --raw .#devShells.x86_64-darwin.default.drvPath >/dev/null
+  exit
   ;;
 esac
 
