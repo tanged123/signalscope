@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -215,25 +215,15 @@ pub struct RestoreSourcesRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct RestoreReconcileRequest {
+pub struct RestoreFinalizeRequest {
     pub session_json: String,
     #[serde(with = "u64_string")]
     pub job_id: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct AliasConflictSummary {
-    pub legacy_path: String,
-    pub claimants: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct RestoreReconcileResponse {
+pub struct RestoreFinalizeResponse {
     pub session_json: String,
-    #[serde(with = "u64_string")]
-    pub rewritten: u64,
-    pub conflicts: Vec<AliasConflictSummary>,
-    pub unresolved: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -243,8 +233,6 @@ pub struct TileRequest {
     pub signal_ids: Vec<u64>,
     pub window: TimeWindow,
     pub pixel_width: u32,
-    #[serde(default)]
-    pub max_total_bins: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

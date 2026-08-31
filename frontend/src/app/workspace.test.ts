@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { WorkspaceModel, emptySession } from "./workspace";
 import type {
   PanelState,
-  Session,
   SourceRecord,
   StyleDimension,
 } from "../generated/session";
@@ -66,7 +65,6 @@ function sourceRecord(overrides: Partial<SourceRecord> = {}): SourceRecord {
     decode_provenance: null,
     recipe_id: null,
     recipe_digest: null,
-    reconcile_legacy: false,
     ...overrides,
   };
 }
@@ -151,7 +149,6 @@ describe("derived definitions", () => {
     model.addAnnotation(first.id, {
       id: "ann-1",
       series_path: path,
-      domain: "time",
       anchor: 0,
       pinned_value: 1,
       label: "",
@@ -171,7 +168,6 @@ describe("derived definitions", () => {
     model.addAnnotation(second.id, {
       id: "ann-2",
       series_path: path,
-      domain: "time",
       anchor: 1,
       pinned_value: 2,
       label: "",
@@ -494,18 +490,6 @@ describe("WorkspaceModel", () => {
     expect(model.focusEntries(panel.id)).toEqual([]);
   });
 
-  it("normalizes legacy facet split state when restoring a session", () => {
-    const model = new WorkspaceModel();
-    const panel = model.addPanelRow();
-    panel.split_by = "source";
-
-    const restored = new WorkspaceModel(
-      structuredClone(model.snapshot()) as Session,
-    );
-
-    expect(restored.panel(panel.id)?.split_by).toBe("none");
-  });
-
   it("keeps the user dash default solid and writes the spec width", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -672,7 +656,6 @@ describe("WorkspaceModel", () => {
     model.addAnnotation(panel.id, {
       id: "ann-1",
       series_path: "a/b",
-      domain: "time",
       anchor: 1,
       pinned_value: 2,
       label: "before",
@@ -705,7 +688,6 @@ describe("WorkspaceModel", () => {
     model.addAnnotation(panel.id, {
       id: "ann-1",
       series_path: "a/b",
-      domain: "time",
       anchor: 0,
       pinned_value: 0,
       label: "",
@@ -900,14 +882,12 @@ describe("WorkspaceModel", () => {
     tab.panels.push({
       id: "panel-1",
       title: "Panel 1",
-      mode: "time",
       axis_style: "gutter",
       bindings: [],
       color_by: "source",
       overrides: [],
       focus: [],
       ghost_mode: "all",
-      split_by: "none",
       legend_state: "keys",
       legend_position: null,
       legend_size: null,

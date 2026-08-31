@@ -4,9 +4,6 @@ use std::{collections::BTreeSet, path::Path};
 
 use uuid::Uuid;
 
-/// Fixed namespace for pre-v11 session migration.
-pub const LEGACY_NAMESPACE: Uuid = Uuid::from_u128(0x6a1f_2d47_9c53_4f21_8b0e_1d7c_3a95_04ef);
-
 #[must_use]
 pub fn normalize_segment(raw: &str) -> String {
     raw.trim()
@@ -43,11 +40,6 @@ pub fn allocate_prefix(taken: &BTreeSet<String>, path: &Path, key: Uuid) -> Opti
     })
 }
 
-#[must_use]
-pub fn legacy_source_key(path: &str) -> Uuid {
-    Uuid::new_v5(&LEGACY_NAMESPACE, path.as_bytes())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,7 +56,7 @@ mod tests {
 
     #[test]
     fn collisions_widen_a_key_digest_instead_of_counting() {
-        let key = legacy_source_key("/a/run.csv");
+        let key = Uuid::from_bytes([7; 16]);
         let mut taken = BTreeSet::new();
         let first = allocate_prefix(&taken, Path::new("/a/run.csv"), key).unwrap();
         assert_eq!(first, "run");
@@ -76,22 +68,6 @@ mod tests {
             allocate_prefix(&taken, Path::new("/c/run.csv"), key)
                 .unwrap()
                 .starts_with("run_")
-        );
-    }
-
-    #[test]
-    fn legacy_keys_are_stable_across_machines() {
-        assert_eq!(
-            legacy_source_key("/data/run.csv"),
-            legacy_source_key("/data/run.csv")
-        );
-        assert_ne!(
-            legacy_source_key("/data/run.csv"),
-            legacy_source_key("/data/run2.csv")
-        );
-        assert_eq!(
-            legacy_source_key("/data/run.csv").to_string(),
-            uuid::Uuid::new_v5(&LEGACY_NAMESPACE, b"/data/run.csv").to_string()
         );
     }
 }

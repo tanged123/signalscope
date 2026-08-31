@@ -262,7 +262,6 @@ describe("BakedPlane.queryTiles", () => {
       signal_ids: ["7"],
       window: { t0: 0, t1: 99 },
       pixel_width: 20,
-      max_total_bins: 1,
     });
 
     expect(overview.series[0]?.level).toBe(2);
@@ -273,7 +272,6 @@ describe("BakedPlane.queryTiles", () => {
       signal_ids: ["7"],
       window: { t0: 40, t1: 50 },
       pixel_width: 20,
-      max_total_bins: 1,
     });
 
     expect(detail.series[0]?.level).toBe(0);
@@ -316,7 +314,6 @@ describe("BakedPlane.queryTiles", () => {
       signal_ids: ["8", "7"],
       window: { t0: 0, t1: 2 },
       pixel_width: 10,
-      max_total_bins: 10,
     });
 
     expect(response.series.map((series) => series.signalId)).toEqual([
@@ -356,7 +353,6 @@ describe("BakedPlane.queryTiles", () => {
         signal_ids: ["missing"],
         window: { t0: 0, t1: 2 },
         pixel_width: 10,
-        max_total_bins: 10,
       }),
     ).rejects.toThrow("unknown signal id: missing");
   });
@@ -480,11 +476,8 @@ describe("HttpPlane", () => {
   it("routes restore, derived, session, preferences, and export calls over HTTP", async () => {
     const { plane } = httpPlane({
       restore_sources: seal({ job_id: "9" }),
-      restore_reconcile: seal({
+      restore_finalize: seal({
         session_json: "{}",
-        rewritten: "2",
-        conflicts: [],
-        unresolved: [],
       }),
       create_derived: seal({
         signal_id: "7",
@@ -504,7 +497,7 @@ describe("HttpPlane", () => {
     });
 
     expect(await plane.restore.start("{}")).toBe("9");
-    expect((await plane.restore.reconcile("{}", "9")).rewritten).toBe("2");
+    expect((await plane.restore.finalize("{}", "9")).session_json).toBe("{}");
     expect((await plane.derived.create("derived/speed", "1")).path).toBe(
       "derived/speed",
     );

@@ -1,6 +1,6 @@
 # ADR 0001: Product shape and two-host frontend
 
-- Status: Accepted
+- Status: Accepted; host implementation amended by ADRs 0038 and 0049
 - Date: 2026-07-23
 
 ## Context

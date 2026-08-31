@@ -1,236 +1,114 @@
 # SignalScope agent instructions
 
-These are repository-specific rules for Codex, Claude Code, and other coding
-agents. They supplement the user's request and the code itself. Preserve
-unrelated user changes in the worktree; inspect before editing.
+These rules apply to Codex, Claude Code, and other agents. Preserve unrelated
+worktree changes; inspect before editing.
 
-## Start here
+## Source of truth
 
-Before changing code, read the relevant source of truth. For product or UI
-work, read these in order:
+At the start of every task, inspect `git status`, target files, nearby tests,
+and the relevant scripts.
 
-1. `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/kickoffprompt.md`
-2. `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/README.md`
-3. `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/SignalScope Final Spec.dc.html`
-4. `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/reference/signalscope.html`
+- UI work: read `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/README.md`
+  and `SignalScope Final Spec.dc.html` in that directory. The Final Spec is
+  authoritative for visuals and interaction. Consult
+  `reference/signalscope.html` only for a behavior detail the current code and
+  accepted ADRs do not settle; it is not production code.
+- Architecture/data work: read this file, the current records in
+  `docs/adr/README.md` and relevant ADRs, and
+  `docs/implementation-roadmap.md`. Superseded ADRs and historical design
+  explorations are context, not requirements.
+- For ambiguity, state a small proposal before expanding scope. Update the
+  nearest README, roadmap, or ADR when behavior or architecture changes.
 
-For architecture or data work, read the relevant accepted ADRs in
-`docs/adr/README.md` and `docs/adr/`, plus `docs/implementation-roadmap.md`.
-The Final Spec is authoritative for visuals and interaction. The prototype is
-behavioral reference material, not production code. Do not import it into the
-application or silently revive an obsolete design-pass decision.
+## Brevity and safety
 
-At the beginning of a task, inspect `git status`, the target files, nearby
-tests, and the existing scripts. Do not overwrite or reset unrelated changes.
-If an instruction or design requirement is ambiguous, state the ambiguity and
-make a small, explicit proposal before expanding scope.
+Prefer deletion and the shortest correct implementation. Do not add speculative
+abstractions, wrappers, defensive scaffolding, or comments that restate code.
+Keep commands and logs quiet. Use `apply_patch` for file edits. Never reset,
+overwrite, or stage unrelated work; review staged and unstaged diffs
+separately.
 
-## Brevity
+## Canonical commands
 
-Prefer the shortest version that is still correct and clear. Verbosity is a
-defect, not a style preference.
-
-- Code: no speculative abstraction, defensive scaffolding, or wrapper layers
-  nobody asked for. Delete dead code; do not comment it out or deprecate it.
-- Comments: explain why, never what the line already says. Most code needs
-  none.
-- Program output: quiet by default. No progress chatter, banners, decorative
-  separators, or emoji in CLI, script, and log output.
-- Chat and handoff notes: lead with the answer. No preamble, no restating the
-  diff in prose, no recap of what the reader can already see. Report what
-  changed, what you ran, and what is still open.
-- Docs and ADRs: record the decision and its consequences, not the
-  deliberation that produced it.
-- Commits: a conventional subject plus the why. Not a line-by-line changelog.
-
-If a sentence, comment, helper, or paragraph can go without losing
-information, cut it.
-
-## Command and workflow policy
-
-The `scripts/` directory is the repository's public developer and CI API. Use
-the wrappers so local commands and GitHub Actions execute the same operations.
-Do not default to ad-hoc `cargo`, `pnpm`, `npm`, `nix develop`, or custom shell
-pipelines when a script exists. If a needed operation has no wrapper, add or
-extend a focused script first and document it.
-
-Canonical commands:
+Use the `scripts/` wrappers so local and CI operations match. If a needed
+operation has no wrapper, add a focused one first.
 
 ```text
 ./scripts/setup.sh                    locked frontend dependencies
-./scripts/run.sh web                  browser demo host
-./scripts/run.sh dev                  browser host plus Vite development host
-./scripts/test.sh                     quick Rust + frontend checks
-./scripts/test.sh core [filter…]         filtered Rust data-plane tests
-./scripts/test.sh server [filter…]       filtered browser host tests
-./scripts/test.sh unit [filter…]         filtered frontend unit tests
-./scripts/test.sh frontend|e2e|full
-./scripts/format.sh                   apply treefmt formatting in place
-./scripts/format.sh --check           check an isolated copy; writes nothing
-./scripts/build.sh web|app             frontend or browser host bundles
-./scripts/export.sh                   bake a self-contained HTML snapshot
-./scripts/demo.sh                     bake, record, and encode the demo artifacts
-./scripts/demo.sh publish <dir>       force-push staged demo artifacts to gh-pages
-./scripts/coverage.sh                 Rust + frontend LCOV
-./scripts/version.sh get|check        release manifest inspection
-./scripts/version.sh set 0.1.1        synchronize a release version
-./scripts/version.sh bump patch        increment and synchronize a version
-./scripts/release.sh version            validate release metadata
-./scripts/release.sh tag                create and push an annotated release tag
-./scripts/release.sh publish <tag> <dir> publish staged release assets
-./scripts/release.sh assets <dir>       list publishable release assets
-./scripts/ci.sh format|quality|rust|frontend|e2e|build
-./scripts/ci.sh all                   complete local quality gate
-./scripts/ci.sh flake                 flake check (includes formatting)
+./scripts/run.sh app|dev|web          packaged host, development host, browser
+./scripts/test.sh [core|server|unit|frontend|e2e|full]
+./scripts/format.sh [--check]         treefmt formatting
+./scripts/build.sh [web|server|app]
+./scripts/export.sh                   self-contained snapshot
+./scripts/coverage.sh
+./scripts/ci.sh [format|quality|rust|frontend|e2e|build|all]
+./scripts/version.sh get|check|set|bump
+./scripts/release.sh version|tag|assets|publish
 ```
 
-`quality_checks()` in `scripts/lib.sh` is the single source of truth for the
-deterministic quality gate. Extend that function and its matching `quality` job
-rather than adding parallel ad-hoc workflow commands.
+`quality_checks()` in `scripts/lib.sh` is the deterministic quality gate and
+must remain aligned with the CI quality job. `treefmt` (via `nix fmt` or
+`./scripts/format.sh`) formats all supported languages, including Markdown.
+Run formatting before staging. Install hooks with
+`./scripts/install-hooks.sh`.
 
-treefmt, reachable as `nix fmt`, is the repository's only formatter. It covers
-Rust, TypeScript, Nix, shell, TOML, **and Markdown** — documentation, ADRs,
-specs, and plans are formatted exactly like source, and `.prettierignore` lists
-the few exclusions. When the format gate fails, run `./scripts/format.sh` and
-commit the result. Never hand-format to match the tool, and never move, delete,
-or stash tracked files to make a gate pass.
+Run the narrowest affected test and formatter before handoff. For cross-layer
+changes run `./scripts/ci.sh all`; run `./scripts/ci.sh e2e` only after the
+implementation plan is complete. Do not claim GUI, platform, or end-to-end
+validation that was not run.
 
-The pre-commit hook formats staged files but does not stage the result, so a
-commit can still carry unformatted content. Run `./scripts/format.sh` before
-staging rather than relying on the hook.
-
-Run `./scripts/setup.sh` before frontend work when dependencies are absent.
-The Nix flake supplies the normal pinned toolchain. The browser host runs on
-the loopback interface and serves the built frontend from `scope-server`.
-
-Every workflow shell command must call an appropriate script. Keep setup,
-formatting, linting, tests, coverage, builds, artifact checks, and release
-preparation reproducible through scripts. GitHub actions that upload artifacts
-or publish releases may remain native actions; their build inputs must still
-come from scripts.
-
-Before handoff, run the narrowest relevant script and then the broader gate
-proportional to risk. At minimum, run `./scripts/format.sh` plus the affected
-test suite; for cross-layer changes run `./scripts/ci.sh all` or explain why a
-narrower check is sufficient. Report commands and results. Do not claim a GUI
-or platform build was tested if it was not. Defer GUI, platform-build, and
-end-to-end testing until the entire implementation plan is finished; run
-`./scripts/ci.sh e2e` only at the end of that finished plan.
-
-Install the repository hook with `./scripts/install-hooks.sh`. Do not use a
-blanket `git add -A` or silently stage unrelated work. Review staged and
-unstaged diffs separately before committing.
-
-Each PR targeting `main` must include exactly one synchronized version increment.
-Make it once, as the final PR-level change before handoff. Never increment the
-version for individual commits, retries, test fixes, or later updates in the
-same PR; keep the version already selected. Choose `major` for breaking API,
-protocol, schema, or session-compatibility changes; `minor`
-for backward-compatible user-facing features or capabilities; and `patch` for
-fixes, refactors, tests, build/CI/tooling, or documentation. Run
-`./scripts/version.sh bump <major|minor|patch>` followed by
-`./scripts/version.sh check`, and commit all resulting manifest changes. For
-parallel PRs, update from the latest target branch before finalizing; if its
-version changed, recompute the bump so the PR increments from the current
-target version.
-
-## Product and architecture invariants
+## Architecture invariants
 
 SignalScope is a local browser workbench with a portable export:
 
-- One TypeScript/canvas presentation plane runs in the browser host and the
-  self-contained HTML snapshot.
-- The live host uses `HttpPlane`; snapshots use `BakedPlane`; both implement
-  the same versioned `DataPlane` contract. UI and renderer code must not branch
-  on host identity.
+- One TypeScript presentation plane serves the live `HttpPlane` host and
+  offline `BakedPlane` snapshots. UI and renderer code never branch on host
+  identity.
 - Rust owns ingest, storage, pyramids, compute, persistence, and HTTP-facing
-  data. The browser host stays thin: routing, dialogs, and protocol wiring.
-- `scope-core::{store, ingest, pyramid, compute, session}` remain separable
-  modules. Do not make core modules depend on shell or frontend state.
-- Frontend code consumes protocol tiles/views, never raw native arrays or
-  source-format details. `HttpPlane` is the live transport; keep the protocol
-  boundary open to future local transport variants without coupling UI code to
-  them.
+  data. Keep `scope-core::{store, ingest, pyramid, compute, session}`
+  separable; dependency direction is inward.
+- Frontend code consumes protocol tiles/views, not raw native arrays or source
+  formats. Keep the protocol boundary open to future local transports.
+- Ingest decoders stream and registration is transactional: failed imports
+  leave no source or partial signals visible.
+- Query time columns are finite and monotonically nondecreasing. Pyramid
+  parents preserve first/last, finite extrema, sample count, and ORed gap bits;
+  gaps break strokes but do not discard finite extrema.
+- Query density is bounded by viewport width and preserves visible peaks. Do
+  not scan raw arrays in the renderer for ordinary pan/zoom.
+- `protocol/schema/scope-protocol.json` is the schema source. Generated Rust
+  and TypeScript outputs are committed and must be regenerated, never hand
+  edited. Wire `u64` identifiers use the schema's exact string boundary.
+- Protocol/session changes are API changes: additive fields need defaults,
+  breaking changes need a version and migration, and unknown future versions
+  fail clearly without partial restore.
+- Snapshots contain session state plus selected decimated tiles, replace the
+  exact injection slot, make no network requests, stay within the size
+  budget, and escape data before HTML script injection. Treat external names
+  as data and prefer `textContent`.
 
-The dependency direction is inward: ingest/pyramid/compute use store; server
-uses protocol and core crates; frontend uses generated protocol types. An
-architectural change requires a new or amended ADR; accepted ADRs are not
-silently rewritten.
+## Design and testing invariants
 
-## Data and protocol rules
+Follow the Final Spec: near-black flat surfaces, 1px seams, radii ≤4px, no
+glows or gradients; achromatic chrome; amber only for interaction; Inter for
+UI and JetBrains Mono/tabular numerals for values, paths, axes, and readouts.
+Use the categorical `--series-1` through `--series-8` palette consistently;
+identity must not depend on color alone and status colors are reserved. Every
+plot owns complete labeled axes, linked-time/per-panel state, and serialized
+axis choices. Every pointer action needs a keyboard path. Input is desktop-only
+per ADR 0021. Keep renderer output deterministic and snapshot dependencies
+offline.
 
-- Ingest decoders are streaming and trait-based. Never load a multi-GB source
-  merely to render it or make the browser hold raw source arrays.
-- Signal registration is transactional: a failed CSV/MCAP ingest must not
-  leave a source or partial signals visible in the store.
-- Time columns used for pyramid queries must be finite and monotonically
-  nondecreasing. Invalid named time columns need validation/fallback rather
-  than being accepted by name alone.
-- The pyramid is a binary multi-resolution min/max envelope. Parent bins
-  preserve first, last, finite min/max, sample count, and the OR of child gap
-  bits. `has_gap` breaks a rendered stroke; it does not mean the entire bin's
-  finite extrema should be discarded. All-NaN bins may have null extrema.
-- Query density is bounded by viewport width; preserve peaks and visible
-  extrema. Do not scan raw arrays in the renderer for ordinary pan/zoom.
-- `protocol/schema/scope-protocol.json` is the single schema source. Generated
-  Rust and TypeScript files are committed outputs: do not hand-edit them.
-  Regenerate through the repository's checked workflow and keep the codegen
-  diff check green.
-- Wire-level `u64` identifiers must remain exact; use the schema's string
-  representation at the TypeScript boundary rather than unsafe JS numbers.
-- Protocol and session schemas are APIs. Additive changes need defaults;
-  breaking changes need a version and migration. Unknown future versions must
-  fail clearly, never partially restore.
-- Snapshots contain session state plus selected decimated tiles, use the exact
-  injection slot, make no network requests, and remain within the artifact
-  size budget. Escape data before placing it in an HTML script element.
-- Treat untrusted signal/source names as data. Do not concatenate CSV headers
-  or other external values into HTML without escaping; prefer `textContent`.
+Add behavior tests with behavior changes: Rust ingest, finite-time, pyramid,
+protocol/session, and expression semantics; TypeScript linked-time,
+formula-bar, renderer, and snapshot checks where relevant; Playwright for
+desktop input, layout, and export boundaries. Keep generated protocol outputs
+synchronized.
 
-## Design and frontend rules
+## Delivery
 
-Match the Final Spec rather than generic dashboard patterns:
-
-- Near-black flat surfaces, 1px seams, radii at most 4px, no glows,
-  gradients, floating-card chrome, or decorative shadows in the dark theme.
-- Chrome is achromatic. Amber is interaction-only: cursor, focus inset,
-  deltas, derived marks, and drag/drop targets. Never use amber as a generic
-  active fill or series/status color.
-- Use Inter for UI and JetBrains Mono with tabular numerals for values, paths,
-  axes, and readouts. Signal paths are lowercase snake_case.
-- Use the design tokens as the source of truth. Light mode is a token swap,
-  not a collection of per-component overrides.
-- Use the categorical `--series-1` through `--series-8` palette consistently;
-  identity must not depend on color alone. Status colors are reserved.
-- Every plot owns complete labeled axes. Preserve gutter/inline axis semantics,
-  linked time, per-panel state, and serialized axis choices.
-- Preserve keyboard paths for pointer actions and the specified desktop
-  gestures. Right-click must never be the only way to perform an action.
-  Touch input is out of scope per ADR 0021.
-- Keep the renderer deterministic from tiles, viewport, and tokens so snapshot
-  and workbench output stay pixel- and behavior-aligned.
-- Avoid adding runtime dependencies to the snapshot frontend. The exported
-  HTML must remain self-contained and offline.
-
-## Testing expectations
-
-Add tests with behavior changes, not only compilation checks:
-
-- Rust: ingest comments/delimiters, duplicate/atomic failure, finite time
-  validation, pyramid extrema and NaN-gap invariants, protocol/session
-  round-trips and migrations, expression parse/evaluate semantics.
-- TypeScript: linked-time units, formula-bar input parsing, renderer behavior
-  where practical, snapshot/no-network/size checks.
-- Playwright: desktop interactions when changing input, gestures, layout, or
-  export behavior.
-- Keep generated protocol outputs synchronized and run the artifact checks for
-  snapshot changes.
-
-## Documentation and delivery
-
-Update the nearest README, ADR, roadmap, or design note when behavior or
-architecture changes. New architectural decisions belong in a numbered ADR.
-Use small conventional commits that describe the behavior, and keep changes
-traceable to the requested task. Before finalizing, summarize changed files,
-validation commands, known platform limitations, and any unrelated work left
-unstaged.
+Use small conventional commits that explain why. Do not version-bump ordinary
+commits. A PR targeting `main` gets exactly one synchronized final bump:
+`./scripts/version.sh bump <major|minor|patch>`, then `check`, with `major` for
+breaking protocol/session/API changes and `minor` for backward-compatible
+features; refactors, tests, tooling, and docs use `patch`.

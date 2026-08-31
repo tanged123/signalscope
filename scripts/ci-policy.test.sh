@@ -8,6 +8,7 @@ setup_script="$script_dir/setup.sh"
 setup_action="$script_dir/../.github/actions/setup/action.yml"
 ci_workflow="$script_dir/../.github/workflows/ci.yml"
 version_job="$(sed -n '/^  version:/,/^  flake:/p' "$ci_workflow")"
+rust_job="$(sed -n '/^  rust:/,/^  frontend:/p' "$ci_workflow")"
 coverage_job="$(sed -n '/^  coverage:/,/^  ci-ok:/p' "$ci_workflow")"
 flake="$script_dir/../flake.nix"
 lib_script="$script_dir/lib.sh"
@@ -36,20 +37,25 @@ if ! grep -Fq '  schedule:' "$ci_workflow" ||
   echo "CI must run nightly at 03:00 UTC" >&2
   failures=$((failures + 1))
 fi
-if ! grep -Fq "    if: github.event_name != 'pull_request'" <<<"$coverage_job"; then
-  echo "full coverage must not run for pull requests" >&2
+if ! grep -Fq "github.event_name == 'schedule'" <<<"$coverage_job" ||
+  ! grep -Fq "github.event_name == 'workflow_dispatch' && inputs.run_coverage" <<<"$coverage_job"; then
+  echo "full coverage must run only nightly or when manually requested" >&2
   failures=$((failures + 1))
 fi
 if ! grep -Fq "github.event_name == 'pull_request' && github.base_ref == 'main'" <<<"$version_job"; then
   echo "version increments must be required only for PRs targeting main" >&2
   failures=$((failures + 1))
 fi
-if ! grep -Fq 'cargo build --release -p scope-server' "$lib_script"; then
-  echo "E2E setup must build the release server used by every smoke test" >&2
+if ! grep -Fq 'install-frontend: "false"' <<<"$rust_job"; then
+  echo "the Rust job must not install unused frontend dependencies" >&2
   failures=$((failures + 1))
 fi
-if ! grep -Fq '"target", "release", "scope-server"' "$live_plane_test"; then
-  echo "live-plane E2E must run the prebuilt release server" >&2
+if ! grep -Fq 'cargo build -p scope-server' "$lib_script"; then
+  echo "E2E setup must build the incremental server used by every smoke test" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq '"target", "debug", "scope-server"' "$live_plane_test"; then
+  echo "live-plane E2E must run the prebuilt debug server" >&2
   failures=$((failures + 1))
 fi
 if ! grep -Fq 'workers: process.env.CI ? 1 : undefined' "$playwright_config"; then

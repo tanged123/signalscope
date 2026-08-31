@@ -197,7 +197,6 @@ pub(crate) fn core_source_record(record: &session::SourceRecord) -> Result<Sourc
         decode_provenance: record.decode_provenance.clone(),
         recipe_id: record.recipe_id.clone(),
         recipe_digest: record.recipe_digest.clone(),
-        reconcile_legacy: record.reconcile_legacy,
     })
 }
 

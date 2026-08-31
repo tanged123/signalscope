@@ -104,7 +104,7 @@ function tileResponse(signalId = "1"): ColumnarTileResponse {
 
 type RefreshShell = {
   root: HTMLElement;
-  workspace: { panels(): { id: string; mode: "time" }[] };
+  workspace: { panels(): { id: string }[] };
   workspaceView: null;
   plane: Pick<DataPlane, "queryTiles">;
   tileWindowCache: TileWindowCache;
@@ -132,7 +132,7 @@ function refreshShell(
   shell.root = document.createElement("div");
   shell.root.innerHTML = '<div class="workspace"></div>';
   shell.workspace = {
-    panels: () => panelIds.map((id) => ({ id, mode: "time" as const })),
+    panels: () => panelIds.map((id) => ({ id })),
   };
   shell.workspaceView = null;
   shell.plane = { queryTiles };
@@ -154,7 +154,7 @@ describe("sample refresh requests", () => {
   interface RefreshProbe {
     root: HTMLElement;
     workspace: {
-      panels(): { id: string; mode: "time" }[];
+      panels(): { id: string }[];
     };
     plane: Pick<DataPlane, "queryTiles" | "querySamples">;
     tileWindowCache: TileWindowCache;
@@ -178,7 +178,7 @@ describe("sample refresh requests", () => {
     shell.root = document.createElement("div");
     shell.root.innerHTML = '<div class="workspace"></div>';
     shell.workspace = {
-      panels: () => [{ id: "panel-1", mode: "time" }],
+      panels: () => [{ id: "panel-1" }],
     };
     shell.plane = { queryTiles, querySamples };
     shell.tileWindowCache = new TileWindowCache();
@@ -340,7 +340,7 @@ describe("tile refresh cache", () => {
     );
     const shell = Object.create(AppShell.prototype) as {
       root: HTMLElement;
-      workspace: { panels(): { id: string; mode: "time" }[] };
+      workspace: { panels(): { id: string }[] };
       workspaceView: null;
       plane: Pick<DataPlane, "queryTiles">;
       tileWindowCache: TileWindowCache;
@@ -355,7 +355,7 @@ describe("tile refresh cache", () => {
     shell.root = document.createElement("div");
     shell.root.innerHTML = '<div class="workspace"></div>';
     shell.workspace = {
-      panels: () => [{ id: "panel-1", mode: "time" }],
+      panels: () => [{ id: "panel-1" }],
     };
     shell.workspaceView = null;
     shell.plane = { queryTiles };
@@ -542,11 +542,6 @@ describe("adaptive tile refresh", () => {
     await shell.refreshTiles();
 
     expect(prepareResponseFeeds).toHaveBeenCalledTimes(2);
-    expect(
-      queryTiles.mock.calls.every(
-        ([request]) => request.max_total_bins === null,
-      ),
-    ).toBe(true);
     expect(order).toEqual(["prewarm", "prewarm", "render"]);
   });
 

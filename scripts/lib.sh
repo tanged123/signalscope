@@ -90,5 +90,7 @@ bake_bench_smoke_artifact() {
 }
 
 build_e2e_server() {
-  cargo build --release -p scope-server
+  # Functional E2E exercises the browser-host contract. Release compilation
+  # is covered by the packaged-app build, so keep this lane incremental.
+  cargo build -p scope-server
 }

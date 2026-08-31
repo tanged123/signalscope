@@ -112,7 +112,6 @@ describe("history session projection", () => {
     decode_provenance: null,
     recipe_id: null,
     recipe_digest: null,
-    reconcile_legacy: false,
   };
 
   it("excludes cursor, focus, and ingested sources", () => {

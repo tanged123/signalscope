@@ -12,15 +12,13 @@ use axum::{
     response::IntoResponse,
 };
 use base64::Engine;
-use scope_core::{
-    compute, ingest::batch::JobId, preferences, restore, session, snapshot, store::SignalId,
-};
+use scope_core::{compute, ingest::batch::JobId, preferences, session, snapshot, store::SignalId};
 use scope_protocol::{
-    AliasConflictSummary, BatchDetail, BatchDetailRequest, BatchJob, CreateDerivedBundleRequest,
-    DerivedRequest, Envelope, ExportEstimate, ExportEstimateRequest, ExportFileKind, ExportRange,
+    BatchDetail, BatchDetailRequest, BatchJob, CreateDerivedBundleRequest, DerivedRequest,
+    Envelope, ExportEstimate, ExportEstimateRequest, ExportFileKind, ExportRange,
     ExportWriteRequest, IngestBatchRequest, IntrospectRequest, LoadSessionRequest, LoadedSession,
     PickSessionRequest, RecipeDestination, RemoveDerivedBundleRequest, RemoveSignalRequest,
-    RestoreReconcileRequest, RestoreReconcileResponse, RestoreSourcesRequest, SampleRequest,
+    RestoreFinalizeRequest, RestoreFinalizeResponse, RestoreSourcesRequest, SampleRequest,
     SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
     SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest, ScanSourcesRequest, TileRequest,
 };
@@ -419,9 +417,9 @@ pub async fn restore_sources(
     Ok(Json(Envelope::new(BatchJob { job_id: job.0 })))
 }
 
-pub async fn restore_reconcile(
+pub async fn restore_finalize(
     State(ctx): State<AppContext>,
-    Json(request): Json<Envelope<RestoreReconcileRequest>>,
+    Json(request): Json<Envelope<RestoreFinalizeRequest>>,
 ) -> Result<impl IntoResponse, ApiError> {
     let request = request.open().map_err(|error| err(error.to_string()))?;
     let gate = Arc::clone(&ctx.gate);
@@ -433,8 +431,6 @@ pub async fn restore_reconcile(
             .ok_or_else(|| format!("unknown batch job: {}", request.job_id))?;
         let mut restored =
             session::from_json(&request.session_json).map_err(|error| error.to_string())?;
-        let mut builder = restore::AliasBuilder::default();
-        let mut missing = std::collections::BTreeSet::new();
         {
             let data = state.lock().map_err(|error| error.to_string())?;
             for record in &mut restored.sources {
@@ -443,7 +439,6 @@ pub async fn restore_reconcile(
                 };
                 let key = scope_core::store::SourceKey(uuid);
                 let Some(current) = data.registry.record(key) else {
-                    missing.insert(key);
                     continue;
                 };
                 record.path = current.path.display().to_string();
@@ -454,53 +449,10 @@ pub async fn restore_reconcile(
                     .clone_from(&current.decode_provenance);
                 record.recipe_id.clone_from(&current.recipe_id);
                 record.recipe_digest.clone_from(&current.recipe_digest);
-                let Some(source) = data.store.sources().find(|source| source.key == key) else {
-                    missing.insert(key);
-                    continue;
-                };
-                let Some(provider) = current.provider_id.as_deref() else {
-                    missing.insert(key);
-                    continue;
-                };
-                if !record.reconcile_legacy {
-                    continue;
-                }
-                let local_paths = data
-                    .store
-                    .signals_of(source.id)
-                    .map(|signal| signal.local_path.clone())
-                    .collect::<Vec<_>>();
-                for (legacy, path) in restore::legacy_aliases(provider, current, &local_paths) {
-                    builder.add(key, legacy, path);
-                }
             }
         }
-        let built = builder.build();
-        missing.extend(
-            built
-                .conflicts
-                .iter()
-                .flat_map(|conflict| conflict.claimants.iter().copied()),
-        );
-        let mut outcome = restore::reconcile(&mut restored, &built.aliases, &missing)
-            .map_err(|error| error.to_string())?;
-        outcome.conflicts = built.conflicts;
-        Ok::<_, String>(Envelope::new(RestoreReconcileResponse {
+        Ok::<_, String>(Envelope::new(RestoreFinalizeResponse {
             session_json: serde_json::to_string(&restored).map_err(|error| error.to_string())?,
-            rewritten: outcome.rewritten,
-            conflicts: outcome
-                .conflicts
-                .into_iter()
-                .map(|conflict| AliasConflictSummary {
-                    legacy_path: conflict.legacy_path,
-                    claimants: conflict
-                        .claimants
-                        .into_iter()
-                        .map(|key| key.0.to_string())
-                        .collect(),
-                })
-                .collect(),
-            unresolved: outcome.unresolved,
         }))
     })
     .await
@@ -1098,14 +1050,12 @@ mod tests {
         t0: f64,
         t1: f64,
         pixel_width: u32,
-        max_total_bins: Option<u32>,
     ) -> scope_protocol::tile_binary::OwnedBinarySeries {
         let request = Envelope::new(TileRequest {
             request_id: "adaptive".into(),
             signal_ids: vec![signal_id],
             window: scope_protocol::TimeWindow { t0, t1 },
             pixel_width,
-            max_total_bins,
         });
         let response = router
             .clone()
@@ -1151,12 +1101,12 @@ mod tests {
             signal_id
         };
         let router = crate::build_router(ctx);
-        let overview = request_tiles(&router, signal_id.0, 0.0, 9_999.0, 200, Some(1)).await;
+        let overview = request_tiles(&router, signal_id.0, 0.0, 9_999.0, 200).await;
         assert!(overview.level > 0);
         assert!(overview.bin_count > 200);
         assert!(overview.bin_count <= 402);
 
-        let detail = request_tiles(&router, signal_id.0, 4_900.0, 5_100.0, 400, Some(1)).await;
+        let detail = request_tiles(&router, signal_id.0, 4_900.0, 5_100.0, 400).await;
         assert_eq!(detail.level, 0);
         assert!(detail.sample_count.iter().all(|count| *count == 1));
     }

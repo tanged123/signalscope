@@ -23,6 +23,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(request.signal_ids, vec![9_007_199_254_740_993]);
-        assert_eq!(request.max_total_bins, None);
     }
 }

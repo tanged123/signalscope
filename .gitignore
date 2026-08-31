@@ -1,5 +1,6 @@
 /.direnv/
 /.claude/worktrees/
+/.claude/settings.local.json
 /build/
 /target/
 /result

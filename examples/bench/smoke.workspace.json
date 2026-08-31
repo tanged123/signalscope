@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 23,
+  "schema_version": 24,
   "theme": "dark",
   "linked_time": {
     "t0": 0,
@@ -22,7 +22,6 @@
         {
           "id": "panel-ensemble",
           "title": "ensemble response",
-          "mode": "time",
           "axis_style": "gutter",
           "bindings": [
             {
@@ -36,7 +35,6 @@
           "overrides": [],
           "focus": [],
           "ghost_mode": "all",
-          "split_by": "none",
           "legend_state": "keys",
           "legend_position": null,
           "legend_size": null,
@@ -53,7 +51,6 @@
         {
           "id": "panel-detail",
           "title": "command and temperature",
-          "mode": "time",
           "axis_style": "gutter",
           "bindings": [
             {
@@ -73,7 +70,6 @@
           "overrides": [],
           "focus": [],
           "ghost_mode": "all",
-          "split_by": "none",
           "legend_state": "keys",
           "legend_position": null,
           "legend_size": null,

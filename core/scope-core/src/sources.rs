@@ -20,7 +20,6 @@ pub struct SourceRecord {
     pub decode_provenance: Option<String>,
     pub recipe_id: Option<String>,
     pub recipe_digest: Option<String>,
-    pub reconcile_legacy: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,7 +86,6 @@ impl SourceRegistry {
             decode_provenance: None,
             recipe_id: None,
             recipe_digest: None,
-            reconcile_legacy: false,
         };
         self.prefixes.insert(prefix);
         self.by_path.insert(canonical.to_path_buf(), key);
@@ -139,7 +137,6 @@ impl SourceRegistry {
         if let Some(record) = self.by_key.get_mut(&key) {
             record.provider_id = Some(provider_id);
             record.decode_provenance = Some(digest);
-            record.reconcile_legacy = false;
         }
     }
 
