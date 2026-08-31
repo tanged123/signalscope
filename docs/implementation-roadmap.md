@@ -62,7 +62,7 @@ Derived columns spill under resident pressure.
 
 ## Phase 4 — export and fidelity
 
-Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. The release-generated README GIF and hosted live demo now ship from the export path per the [automated demo artifacts plan](superpowers/plans/2026-07-30-automated-demo-artifacts.md).
+Implement the export size-budget model, visible/all-loaded tile selection, PNG and visible CSV exports, renderer screenshot matrices across themes and axes, and deterministic snapshot parity checks. The hosted HTML demo now ships from the export path per the [automated demo artifacts plan](superpowers/plans/2026-07-30-automated-demo-artifacts.md).
 
 The HTML export picker lists each source once, independent of its signal
 count. Its source list and dialog body remain bounded and scroll internally so
@@ -120,6 +120,11 @@ refeed; PNG capture uses the same-frame composite recipe proven by the spike.
 The presentation plane is now time-only and ChartGPU is the single plotter;
 the former XY, spectrum, and histogram paths were withdrawn in
 [ADR 0043](adr/0043-time-only-presentation.md).
+
+Formal desktop distribution is restored by a thin Electron lifecycle wrapper
+([ADR 0049](adr/0049-electron-distribution-shell.md)). It loads the same
+authenticated `scope-server` and `HttpPlane` path while producing NSIS, DMG,
+and AppImage releases from clean, version-checked staging inputs.
 
 Adaptive-resolution presentation ([ADR 0044](adr/0044-adaptive-resolution-presentation.md)) now queries live time panels by physical device-pixel density, refining pixel-dense pyramid envelopes asynchronously to level-zero samples as the visible raw slice fits. Current, stale, and missing cache states keep an existing drawable response visible while a panel-wide replacement is fetched and prewarmed. The live path has no fixed total-bin split; retained workspace tabs share a 3,000-visible-series GPU residency ceiling, and WebGPU loss is explicit and recoverable through reload. `HttpPlane` and baked snapshots retain the same host-neutral contract, while explicit export fidelity remains governed by ADRs 0024 and 0025. ADR 0041's full-resolution baseline remains the zoom endpoint rather than the overview transfer policy.
 

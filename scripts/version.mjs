@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,14 +9,12 @@ const releaseFiles = {
   cargo: resolve(repositoryRoot, "Cargo.toml"),
   lock: resolve(repositoryRoot, "Cargo.lock"),
   frontend: resolve(repositoryRoot, "frontend/package.json"),
+  desktop: resolve(repositoryRoot, "desktop/package.json"),
   about: resolve(repositoryRoot, "frontend/src/ui/app-shell.ts"),
-  readme: resolve(repositoryRoot, "README.md"),
 };
 
 /** The version the About command shows; nothing else checks this literal. */
 const aboutPattern = /(showModeHelp\("SignalScope )(\d+\.\d+\.\d+)("\))/;
-const demoPattern =
-  /(https:\/\/tanged123\.github\.io\/signalscope\/demo\.gif\?v=)(\d+\.\d+\.\d+)/;
 
 async function workspacePackageNames() {
   const cargo = await readFile(releaseFiles.cargo, "utf8");
@@ -42,6 +40,7 @@ function usage() {
 
 Commands:
   get                         Print the canonical application version.
+  github-output               Write the canonical version to GITHUB_OUTPUT.
   check                       Verify every release manifest is synchronized.
   check-pr <base-ref>        Require one semantic-version increment from base-ref.
   set <major.minor.patch>     Set all application release manifests.
@@ -119,22 +118,16 @@ function aboutVersion(text) {
   return match[2];
 }
 
-function demoVersion(text) {
-  const match = demoPattern.exec(text);
-  if (!match) throw new Error("README.md has no versioned demo GIF URL");
-  return match[2];
-}
-
 async function readReleaseState(packageNames) {
-  const [cargoText, lockText, frontendText, aboutText, readmeText] =
+  const [cargoText, lockText, frontendText, desktopText, aboutText] =
     await Promise.all(
       Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
     );
   const versions = new Map([
     ["Cargo.toml [workspace.package]", cargoWorkspaceVersion(cargoText)],
     ["frontend/package.json", JSON.parse(frontendText).version],
+    ["desktop/package.json", JSON.parse(desktopText).version],
     ["frontend/src/ui/app-shell.ts About", aboutVersion(aboutText)],
-    ["README.md demo GIF", demoVersion(readmeText)],
   ]);
   for (const [name, version] of workspaceDependencyVersions(
     cargoText,
@@ -233,16 +226,9 @@ function setAboutVersion(text, version) {
   return updated;
 }
 
-function setDemoVersion(text, version) {
-  const updated = text.replace(demoPattern, `$1${version}`);
-  if (updated === text)
-    throw new Error("README.md demo GIF version was not updated");
-  return updated;
-}
-
 async function setVersion(version, packageNames) {
   parseVersion(version);
-  const [cargoText, lockText, frontendText, aboutText, readmeText] =
+  const [cargoText, lockText, frontendText, desktopText, aboutText] =
     await Promise.all(
       Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
     );
@@ -259,8 +245,11 @@ async function setVersion(version, packageNames) {
       releaseFiles.frontend,
       setJsonVersion(frontendText, version, "frontend/package.json"),
     ),
+    writeFile(
+      releaseFiles.desktop,
+      setJsonVersion(desktopText, version, "desktop/package.json"),
+    ),
     writeFile(releaseFiles.about, setAboutVersion(aboutText, version)),
-    writeFile(releaseFiles.readme, setDemoVersion(readmeText, version)),
   ]);
   console.log(`SignalScope version set to ${version}`);
 }
@@ -285,6 +274,12 @@ try {
   } else if (command === "get") {
     const packageNames = await workspacePackageNames();
     console.log(assertConsistent(await readReleaseState(packageNames)));
+  } else if (command === "github-output") {
+    const output = process.env.GITHUB_OUTPUT;
+    if (!output) throw new Error("GITHUB_OUTPUT is not set");
+    const packageNames = await workspacePackageNames();
+    const version = assertConsistent(await readReleaseState(packageNames));
+    await appendFile(output, `version=${version}\n`);
   } else if (command === "check") {
     const packageNames = await workspacePackageNames();
     console.log(

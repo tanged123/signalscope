@@ -1,0 +1,43 @@
+appId: dev.signalscope.workbench
+productName: SignalScope
+executableName: signalscope
+asar: true
+npmRebuild: false
+files:
+  - dist/**
+  - package.json
+extraResources:
+  - from: ../build/desktop-stage/bin
+    to: bin
+  - from: ../build/desktop-stage/frontend
+    to: frontend
+  - from: ../build/desktop-stage/version
+    to: version
+directories:
+  output: release
+  buildResources: assets
+linux:
+  category: Science
+  syncDesktopName: true
+  target:
+    - AppImage
+  icon: assets/icons/icon.png
+  artifactName: SignalScope-${version}-linux-x64.${ext}
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icons/icon.ico
+nsis:
+  perMachine: false
+  oneClick: false
+  artifactName: SignalScope-${version}-windows-x64-setup.${ext}
+mac:
+  target:
+    - dmg
+  hardenedRuntime: true
+  notarize: false
+  icon: assets/icons/icon.icns
+dmg:
+  artifactName: SignalScope-${version}-mac-${arch}.${ext}

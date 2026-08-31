@@ -27,6 +27,11 @@ frontend_checks() {
   pnpm test
 }
 
+desktop_checks() {
+  pnpm --filter @signalscope/desktop test
+  pnpm --filter @signalscope/desktop build
+}
+
 artifact_checks() {
   "$signalscope_scripts_dir/build.sh" web
   pnpm check:artifacts
@@ -48,6 +53,7 @@ quality_checks() {
   cargo machete
   pnpm --filter @signalscope/frontend check:deps
   pnpm --filter @signalscope/frontend check:unused
+  desktop_checks
   zizmor .github/workflows/ .github/actions/
 }
 

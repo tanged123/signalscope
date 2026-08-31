@@ -5,6 +5,8 @@
 /result
 **/node_modules/
 /frontend/dist/
+/desktop/dist/
+/desktop/release/
 /frontend/playwright-report/
 /frontend/test-results/
 *.log

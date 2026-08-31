@@ -22,7 +22,7 @@ Each named mode matches the GitHub Actions job with the same name:
             snapshot artifact checks.
   e2e       Playwright desktop smoke tests.
   bench     Full benchmark suite; writes build/bench/report.json.
-  build     Browser host and frontend via ./scripts/build.sh app.
+  build     Official Electron package for the current operating system.
 
 `all` runs format, quality, rust, frontend, and e2e sequentially with Cargo
 capped at two jobs by default — the complete local quality gate.

@@ -8,7 +8,8 @@
 SignalScope combines a Rust data plane for logs larger than memory with one
 TypeScript presentation plane that runs in a browser host and in snapshots:
 
-- The localhost browser host streams and memory-maps source data.
+- The Electron application and localhost browser host stream and memory-map
+  source data through the same `scope-server` and `HttpPlane` path.
 - A self-contained HTML snapshot uses the same renderer against embedded tiles selected by explicit export fidelity.
 
 Time-series panels use the pinned ChartGPU submodule WebGPU renderer. A
@@ -23,12 +24,10 @@ panel grids over the same loaded sources and linked time window.
 
 ## Interactive demo
 
-[![SignalScope interactive demo](https://tanged123.github.io/signalscope/demo.gif?v=1.2.0)](https://tanged123.github.io/signalscope/demo.html)
-
 **[Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html)**
 to zoom, inspect values, and explore the exported workspace in your browser.
-The preview and snapshot are regenerated from SignalScope's export path on
-every release, so this view tracks the shipping UI.
+The snapshot is regenerated from SignalScope's export path on every release,
+so this view tracks the shipping UI.
 
 ## Quick start
 
@@ -96,10 +95,12 @@ formulas, and Escape closes the bar. Angle conversions use `rad2deg(x)` and
 Build the workbench and the portable snapshot template:
 
 ```bash
-./scripts/build.sh
+./scripts/build.sh app
+./scripts/build.sh web
 ```
 
-The snapshot is written to `frontend/dist/snapshot-template.html`.
+The first command produces the official package for the current operating
+system. The snapshot is written to `frontend/dist/snapshot-template.html`.
 
 ## Repository layout
 
@@ -117,6 +118,7 @@ frontend/
   src/render/        deterministic ChartGPU renderer and overlays
   src/ui/            workbench chrome and design tokens
 server/scope-server/ localhost HTTP host, dialogs, and protocol commands
+desktop/            thin Electron lifecycle and distribution wrapper
 docs/adr/            accepted architecture decisions
 ```
 
@@ -144,7 +146,8 @@ All CI tools are provided by the pinned Nix flake.
 ./scripts/test.sh           # lightweight core + frontend checks
 ./scripts/test.sh full      # browser host + Playwright checks too
 ./scripts/build.sh web      # frontend + snapshot-template.html
-./scripts/build.sh app      # browser host binary + shared frontend
+./scripts/build.sh app      # AppImage, NSIS, or DMG for the current OS
+./scripts/build.sh server   # shell-independent scope-server binary
 ./scripts/coverage.sh       # Rust + merged Vitest/Playwright frontend LCOV
 ./scripts/version.sh check  # verify synchronized release manifests
 ./scripts/release.sh version # validate release metadata

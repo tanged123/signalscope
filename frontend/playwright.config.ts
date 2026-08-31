@@ -44,14 +44,8 @@ export default defineConfig({
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },
     {
-      name: "demo",
-      testDir: "./tests/demo",
-      use: {
-        ...devices["Desktop Chrome"],
-        viewport: { width: 1280, height: 800 },
-        video: { mode: "on", size: { width: 1280, height: 800 } },
-      },
-      outputDir: "../build/demo/recording",
+      name: "electron-packaged",
+      testMatch: /electron-packaged\.spec\.ts/,
     },
     {
       name: "bench",
@@ -63,8 +57,8 @@ export default defineConfig({
     },
   ],
   webServer:
-    process.env.SIGNALSCOPE_DEMO === "1" ||
-    process.env.SIGNALSCOPE_BENCH === "1"
+    process.env.SIGNALSCOPE_BENCH === "1" ||
+    process.env.SIGNALSCOPE_PACKAGE_SMOKE === "1"
       ? undefined
       : {
           command: "pnpm dev",

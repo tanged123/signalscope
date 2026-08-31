@@ -63,7 +63,6 @@
             libsoup_3
             librsvg
             pango
-            webkitgtk_4_1
           ]
         );
       in
@@ -78,7 +77,6 @@
               cargo-llvm-cov
               cargo-machete
               clippy
-              ffmpeg
               hdf5Root
               llvmPackages.llvm
               nodejs_22
@@ -91,6 +89,7 @@
               typos
               zizmor
             ]
+            ++ lib.optionals pkgs.stdenv.isLinux [ electron_43 ]
             ++ linuxPackages;
 
           shellHook = ''
@@ -100,6 +99,7 @@
             export RUST_BACKTRACE=1
             export HDF5_DIR="${hdf5Root}"
             ${lib.optionalString pkgs.stdenv.isLinux ''
+              export SIGNALSCOPE_ELECTRON_BIN="${pkgs.electron_43}/bin/electron"
               export PLAYWRIGHT_BROWSERS_PATH=0
               export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"
               export XDG_DATA_DIRS="${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:''${XDG_DATA_DIRS:-}"
