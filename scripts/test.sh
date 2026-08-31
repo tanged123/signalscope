@@ -46,7 +46,7 @@ test_desktop() {
     packaged_bin="$(find desktop/release -type f -path '*/win-unpacked/*.exe' -print -quit)"
     ;;
   Darwin)
-    packaged_bin="$(find desktop/release -type f -path '*/SignalScope.app/Contents/MacOS/*' -print -quit)"
+    packaged_bin="$(find desktop/release -type f -path '*.app/Contents/MacOS/*' -print -quit)"
     ;;
   *)
     packaged_bin="$(find desktop/release -type f -path '*/linux-unpacked/signalscope' -print -quit)"
