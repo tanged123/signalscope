@@ -195,7 +195,7 @@ jobs:
           path: release-assets
           merge-multiple: true
       - id: version
-        run: printf 'version=%s\n' "$(./scripts/version.sh get)" >> "$GITHUB_OUTPUT"
+        run: ./scripts/version.sh github-output
       - env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: ./scripts/release.sh checksums "v$RELEASE_VERSION" release-assets

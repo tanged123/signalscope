@@ -131,6 +131,28 @@ checksums() {
   mv "$temporary" "$output"
 }
 
+verify_checksum_manifest() {
+  local asset_dir="$1"
+  local expected actual path name
+  expected="$(
+    while IFS= read -r -d '' path; do
+      name="$(basename "$path")"
+      if [ "$name" != SHA256SUMS.txt ]; then
+        printf '%s\n' "$name"
+      fi
+    done < <(assets "$asset_dir")
+  )"
+  actual="$(
+    sed -n 's/^[[:xdigit:]]\{64\} [ *]//p' "$asset_dir/SHA256SUMS.txt" |
+      LC_ALL=C sort
+  )"
+  if [ "$actual" != "$expected" ]; then
+    echo "release checksum manifest does not cover every asset exactly once" >&2
+    return 1
+  fi
+  (cd "$asset_dir" && sha256sum --check SHA256SUMS.txt)
+}
+
 publish() {
   local tag="${1:-}"
   local asset_dir="${2:-}"
@@ -156,7 +178,7 @@ publish() {
     echo "release checksum manifest is missing" >&2
     exit 1
   fi
-  (cd "$asset_dir" && sha256sum --check SHA256SUMS.txt)
+  verify_checksum_manifest "$asset_dir"
 
   mapfile -d '' release_assets < <(assets "$asset_dir")
   if [ "${#release_assets[@]}" -eq 0 ]; then

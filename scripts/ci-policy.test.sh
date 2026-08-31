@@ -252,6 +252,13 @@ printf '%s\n' "$@" >"$GH_STUB_ARGS"
 STUB
 chmod +x "$stub_dir/gh"
 
+incomplete_checksum_dir="$test_root/incomplete-checksums"
+cp -R "$publish_dir" "$incomplete_checksum_dir"
+sed -i '/windows-x64-setup\.exe/d' "$incomplete_checksum_dir/SHA256SUMS.txt"
+expect_status 1 env PATH="$stub_dir:$PATH" GH_TOKEN=test \
+  GH_STUB_ARGS="$test_root/incomplete-gh-args" \
+  "$script_dir/release.sh" publish v1.2.3 "$incomplete_checksum_dir"
+
 PATH="$stub_dir:$PATH" GH_TOKEN=test GH_STUB_ARGS="$test_root/gh-args" \
   "$script_dir/release.sh" publish v1.2.3 "$publish_dir"
 

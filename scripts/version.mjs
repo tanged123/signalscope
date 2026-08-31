@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +43,7 @@ function usage() {
 
 Commands:
   get                         Print the canonical application version.
+  github-output               Write the canonical version to GITHUB_OUTPUT.
   check                       Verify every release manifest is synchronized.
   check-pr <base-ref>        Require one semantic-version increment from base-ref.
   set <major.minor.patch>     Set all application release manifests.
@@ -303,6 +304,12 @@ try {
   } else if (command === "get") {
     const packageNames = await workspacePackageNames();
     console.log(assertConsistent(await readReleaseState(packageNames)));
+  } else if (command === "github-output") {
+    const output = process.env.GITHUB_OUTPUT;
+    if (!output) throw new Error("GITHUB_OUTPUT is not set");
+    const packageNames = await workspacePackageNames();
+    const version = assertConsistent(await readReleaseState(packageNames));
+    await appendFile(output, `version=${version}\n`);
   } else if (command === "check") {
     const packageNames = await workspacePackageNames();
     console.log(

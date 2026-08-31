@@ -1,7 +1,11 @@
-use std::{env, io::Write, net::SocketAddr, path::PathBuf};
+use std::{
+    env,
+    io::{Read, Write},
+    net::SocketAddr,
+    path::PathBuf,
+};
 
 use scope_server::{AppContext, build_router};
-use tokio::io::AsyncReadExt;
 
 struct Args {
     port: u16,
@@ -81,9 +85,14 @@ async fn shutdown_signal(exit_on_stdin_close: bool) {
     let terminate = std::future::pending::<()>();
     let stdin_closed = async move {
         if exit_on_stdin_close {
-            let mut stdin = tokio::io::stdin();
-            let mut byte = [0_u8; 1];
-            while stdin.read(&mut byte).await.unwrap_or(0) != 0 {}
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            std::thread::spawn(move || {
+                let mut stdin = std::io::stdin().lock();
+                let mut byte = [0_u8; 1];
+                while stdin.read(&mut byte).unwrap_or(0) != 0 {}
+                let _ = sender.send(());
+            });
+            let _ = receiver.await;
         } else {
             std::future::pending::<()>().await;
         }

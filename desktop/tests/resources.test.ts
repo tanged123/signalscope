@@ -12,8 +12,8 @@ describe("packaged resource lookup", () => {
 
   it("selects the Unix executable", () => {
     expect(resolveDesktopResources("/app/resources", "linux")).toEqual({
-      executable: "/app/resources/bin/scope-server",
-      frontend: "/app/resources/frontend",
+      executable: join("/app/resources", "bin", "scope-server"),
+      frontend: join("/app/resources", "frontend"),
     });
   });
 });

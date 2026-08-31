@@ -41,6 +41,7 @@ test_desktop() {
     return
   fi
   local packaged_bin packaged_app packaged_resources electron_bin=""
+  local packaged_bin_path packaged_app_path packaged_resources_path
   case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
     packaged_bin="$(find desktop/release -type f -path '*/win-unpacked/signalscope.exe' -print -quit)"
@@ -67,13 +68,23 @@ test_desktop() {
     [ -n "${SIGNALSCOPE_ELECTRON_BIN:-}" ]; then
     electron_bin="$SIGNALSCOPE_ELECTRON_BIN"
   fi
+  packaged_bin_path="$signalscope_root/$packaged_bin"
+  packaged_app_path="$signalscope_root/$packaged_app"
+  packaged_resources_path="$signalscope_root/$packaged_resources"
+  case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    packaged_bin_path="$(cygpath -w "$packaged_bin_path")"
+    packaged_app_path="$(cygpath -w "$packaged_app_path")"
+    packaged_resources_path="$(cygpath -w "$packaged_resources_path")"
+    ;;
+  esac
   local -a command=(pnpm --filter @signalscope/frontend exec playwright test --project=electron-packaged)
   if [ "$(uname -s)" = Linux ] && command -v xvfb-run >/dev/null 2>&1; then
     command=(xvfb-run -a "${command[@]}")
   fi
-  SIGNALSCOPE_PACKAGED_BIN="$signalscope_root/$packaged_bin" \
-    SIGNALSCOPE_PACKAGED_APP="$signalscope_root/$packaged_app" \
-    SIGNALSCOPE_PACKAGED_RESOURCES="$signalscope_root/$packaged_resources" \
+  SIGNALSCOPE_PACKAGED_BIN="$packaged_bin_path" \
+    SIGNALSCOPE_PACKAGED_APP="$packaged_app_path" \
+    SIGNALSCOPE_PACKAGED_RESOURCES="$packaged_resources_path" \
     SIGNALSCOPE_ELECTRON_BIN="$electron_bin" \
     SIGNALSCOPE_PACKAGE_SMOKE=1 "${command[@]}"
 }
