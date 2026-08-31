@@ -25,9 +25,9 @@ remain authenticated `scope-server` routes, the frontend always uses
 `HttpPlane`, and snapshots remain `BakedPlane`. UI and renderer code must not
 detect Electron or branch on host identity.
 
-Official releases require Windows x64 NSIS, macOS x64 and arm64 DMG, and Linux
-x64 AppImage packages. The Linux server tarball remains an additional
-artifact. Packaging starts from a fresh stage containing only the current
+Official releases require Windows x64 NSIS, macOS arm64 DMG, and Linux x64
+AppImage packages. The Linux server tarball remains an additional artifact.
+Packaging starts from a fresh stage containing only the current
 `scope-server` binary and frontend build. The release gate rejects missing,
 stale, nested, or symlinked artifacts and generates SHA-256 checksums before
 tagging.

@@ -14,14 +14,11 @@ case "${1:-}" in
 --update-lock)
   pnpm install --lockfile-only
   ;;
---update-nix-lock)
-  nix flake lock
-  ;;
 "")
   pnpm install --frozen-lockfile
   ;;
 *)
-  echo "usage: ./scripts/setup.sh [--update-lock|--update-nix-lock]" >&2
+  echo "usage: ./scripts/setup.sh [--update-lock]" >&2
   exit 2
   ;;
 esac

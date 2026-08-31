@@ -143,9 +143,6 @@ jobs:
           - os: windows-2025
             platform: windows
             arch: x64
-          - os: macos-26-intel
-            platform: mac
-            arch: x64
           - os: macos-26
             platform: mac
             arch: arm64

@@ -11,7 +11,6 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixpkgs-darwin-x64.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
     treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
@@ -19,16 +18,13 @@
     {
       self,
       nixpkgs,
-      nixpkgs-darwin-x64,
       flake-utils,
       treefmt-nix,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        # Unstable dropped Intel macOS after 26.05.
-        selectedNixpkgs = if system == "x86_64-darwin" then nixpkgs-darwin-x64 else nixpkgs;
-        pkgs = selectedNixpkgs.legacyPackages.${system};
+        pkgs = nixpkgs.legacyPackages.${system};
         lib = pkgs.lib;
         hdf5Root = pkgs.symlinkJoin {
           name = "hdf5";

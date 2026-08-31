@@ -84,16 +84,13 @@ package_app() {
     builder_args=(--linux AppImage --x64)
     ;;
   Darwin)
-    platform=mac
-    case "$(uname -m)" in
-    arm64) arch=arm64 ;;
-    x86_64) arch=x64 ;;
-    *)
-      echo "unsupported macOS architecture: $(uname -m)" >&2
+    if [ "$(uname -m)" != arm64 ]; then
+      echo "macOS packages require an arm64 build host" >&2
       return 1
-      ;;
-    esac
-    builder_args=(--mac dmg "--$arch")
+    fi
+    platform=mac
+    arch=arm64
+    builder_args=(--mac dmg --arm64)
     signing_status=0
     configure_macos_signing || signing_status=$?
     if [ "$signing_status" -eq 1 ]; then

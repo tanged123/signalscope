@@ -142,7 +142,6 @@ All CI tools are provided by the pinned Nix flake.
 
 ```bash
 ./scripts/setup.sh          # initialize ChartGPU and install locked dependencies
-./scripts/setup.sh --update-nix-lock # refresh pinned Nix inputs
 ./scripts/dev.sh            # enter the development shell
 ./scripts/run.sh web        # launch browser frontend
 ./scripts/run.sh dev        # launch browser host and Vite

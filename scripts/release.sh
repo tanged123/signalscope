@@ -15,7 +15,7 @@ Usage: ./scripts/release.sh [version|tag|verify|checksums|publish|assets]
   assets <dir>            List publishable release assets in a staged directory.
 
 'tag' is strict: it refuses an existing tag and never overwrites release
-history. 'publish' accepts only a verified four-platform package set and uses
+history. 'publish' accepts only a verified required package set and uses
 GH_TOKEN for GitHub authentication.
 EOF
 }
@@ -81,7 +81,6 @@ verify() {
   local -a required=(
     "SignalScope-$version-linux-x64.AppImage"
     "SignalScope-$version-windows-x64-setup.exe"
-    "SignalScope-$version-mac-x64.dmg"
     "SignalScope-$version-mac-arm64.dmg"
   )
   local name count

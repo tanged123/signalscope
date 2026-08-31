@@ -235,7 +235,6 @@ mkdir -p "$publish_dir" "$stub_dir"
 for asset in \
   SignalScope-1.2.3-linux-x64.AppImage \
   SignalScope-1.2.3-windows-x64-setup.exe \
-  SignalScope-1.2.3-mac-x64.dmg \
   SignalScope-1.2.3-mac-arm64.dmg; do
   printf x >"$publish_dir/$asset"
 done
@@ -257,7 +256,7 @@ PATH="$stub_dir:$PATH" GH_TOKEN=test GH_STUB_ARGS="$test_root/gh-args" \
   "$script_dir/release.sh" publish v1.2.3 "$publish_dir"
 
 published="$(sed -n "s|^$publish_dir/||p" "$test_root/gh-args" | LC_ALL=C sort | tr '\n' ' ')"
-expected="SHA256SUMS.txt SignalScope-1.2.3-linux-x64.AppImage SignalScope-1.2.3-mac-arm64.dmg SignalScope-1.2.3-mac-x64.dmg SignalScope-1.2.3-windows-x64-setup.exe signalscope_1.2.3_amd64.deb "
+expected="SHA256SUMS.txt SignalScope-1.2.3-linux-x64.AppImage SignalScope-1.2.3-mac-arm64.dmg SignalScope-1.2.3-windows-x64-setup.exe signalscope_1.2.3_amd64.deb "
 if [ "$published" != "$expected" ]; then
   printf 'publish must forward only publishable assets, got: %s\n' "$published" >&2
   failures=$((failures + 1))
