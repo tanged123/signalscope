@@ -92,6 +92,10 @@ rosters, grouped binding chips, focus/ghost controls, plot hit navigation, and
 grouped cursor readouts keep large multi-source panels bounded while preserving
 keyboard access and session round-trips.
 
+The legend console follow-up removes the duplicate per-panel strip and makes a
+serialized badge, focused-key stack, inline virtual roster, or reflowing
+right-edge rail the only series surface.
+
 Signals-at-scale P4 is landed: the signals dock now provides a virtualized,
 sortable selector-filtered table with series/channel granularity, shared
 tree/table multi-selection, and bulk add, style, hide, save-set, and derive
@@ -117,16 +121,7 @@ The presentation plane is now time-only and ChartGPU is the single plotter;
 the former XY, spectrum, and histogram paths were withdrawn in
 [ADR 0043](adr/0043-time-only-presentation.md).
 
-The full-resolution presentation baseline ([ADR 0041](adr/0041-full-resolution-presentation-baseline.md)) now keeps every live panel at native
-resolution across `HttpPlane` and baked snapshots containing level zero/full-
-fidelity data. Explicitly reduced-fidelity baked snapshots render their
-user-selected level without additional reduction. Legacy density and sample
-budget fields are inert for live requests, while explicit export limits still
-select the requested fidelity. Larger live transfers or resource failures are
-visible instead of triggering silent LOD fallback. The pyramid and coarse
-cache levels remain for explicit reduced-fidelity exports and follow-up work;
-HTML and CSV preview, standard, high, and full controls remain governed by
-ADRs 0024 and 0025. The approved [design spec](superpowers/specs/2026-08-16-full-resolution-rendering-design.md) names measured follow-ups: compact raw-sample binary transport and eventual pyramid removal after export consumers no longer need coarse levels.
+Adaptive-resolution presentation ([ADR 0044](adr/0044-adaptive-resolution-presentation.md)) now queries live time panels by physical device-pixel density, refining pixel-dense pyramid envelopes asynchronously to level-zero samples as the visible raw slice fits. Current, stale, and missing cache states keep an existing drawable response visible while a panel-wide replacement is fetched and prewarmed. The live path has no fixed total-bin split; retained workspace tabs share a 3,000-visible-series GPU residency ceiling, and WebGPU loss is explicit and recoverable through reload. `HttpPlane` and baked snapshots retain the same host-neutral contract, while explicit export fidelity remains governed by ADRs 0024 and 0025. ADR 0041's full-resolution baseline remains the zoom endpoint rather than the overview transfer policy.
 
 The first measured follow-up landed as
 [ADR 0042](adr/0042-padded-render-feed.md): the renderer consumes the padded

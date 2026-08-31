@@ -8,7 +8,6 @@ import type { CursorMode as SessionCursorMode } from "../generated/session";
 import { SERIES_TOKENS } from "./plot-theme";
 import { CanvasSurface } from "./surface";
 
-/** Badge plate geometry, shared by the measure and annotation overlays. */
 const ANNOTATION_PAD = 7;
 const ANNOTATION_HEIGHT = 16;
 const DELTA_PAD = 8;
@@ -31,7 +30,7 @@ export interface OverlayPalette {
 interface OverlayAnnotation {
   x: number;
   y: number;
-  colorIndex: number;
+  colorIndex: number | null;
   label: string;
 }
 
@@ -237,7 +236,9 @@ export class OverlayRenderer {
       context.beginPath();
       context.fillStyle = palette.surface0;
       context.strokeStyle =
-        palette.series[annotation.colorIndex] ?? palette.fg2;
+        annotation.colorIndex === null
+          ? palette.fg4
+          : (palette.series[annotation.colorIndex] ?? palette.fg2);
       context.lineWidth = 1.6;
       context.setLineDash([]);
       context.arc(x, y, 3.5, 0, Math.PI * 2);

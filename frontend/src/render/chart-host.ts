@@ -6,14 +6,16 @@ import {
 } from "@chartgpu/chartgpu";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
-import { formatTicks, hueIndex } from "./plot-theme";
-import type { Palette, SeriesStroke } from "./plot-theme";
-import { cachedFeed } from "./m4-feed";
+import { createRangeTickFormatter, hueIndex } from "./plot-theme";
+import type { Palette, SeriesStroke, TickFormatter } from "./plot-theme";
+import { cachedFeed, responseTimeReference } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
 
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
 const MIN_CHARTGPU_LINE_WIDTH = 2;
 const MIN_CHARTGPU_GHOST_WIDTH = 1.5;
+const FULL_OPACITY_GHOST_COUNT = 16;
+const MIN_DENSE_GHOST_OPACITY = 0.06;
 const PLOT_LINE_WIDTH_BASELINE = 2;
 
 export interface ChartRenderRequest {
@@ -33,6 +35,7 @@ interface SeriesElement {
   emphasis: boolean;
   /** Opacity depends on whether any series is emphasized, not only this one. */
   emphasisActive: boolean;
+  ghostOpacityScale: number;
   palette: Palette;
   element: LineSeriesConfig;
 }
@@ -46,18 +49,24 @@ export class ChartHost {
   private options: ChartGPUOptions | null = null;
   private lastLayout: PlotLayout | null = null;
   private lastLabels: { x: string; y: string } | null = null;
+  private readonly xTickRange = { min: 0, max: 1 };
+  private readonly yTickRange = { min: 0, max: 1 };
+  private readonly xTickFormatter: TickFormatter = createRangeTickFormatter(
+    this.xTickRange,
+  );
+  private readonly yTickFormatter: TickFormatter = createRangeTickFormatter(
+    this.yTickRange,
+  );
 
   private constructor(
     private readonly container: HTMLElement,
     chart: ChartGPUInstance,
-    gpu: GpuContext,
+    private readonly gpu: GpuContext,
   ) {
     this.chart = chart;
     this.unregister = gpu.register({
       needsRender: () => this.chart.needsRender(),
-      renderFrame: () => {
-        this.chart.renderFrame();
-      },
+      renderFrame: () => this.renderPendingFrame(),
     });
   }
 
@@ -71,6 +80,7 @@ export class ChartHost {
         animation: false,
         renderMode: "external",
         tooltip: { show: false },
+        legend: { show: false },
         grid: CHART_GRID,
         series: [],
       },
@@ -86,7 +96,7 @@ export class ChartHost {
   render(request: ChartRenderRequest): number {
     const started = performance.now();
     const ids = request.response.series.map((series) => series.signalId);
-    const nextTRef = minimumTime(request.response);
+    const nextTRef = responseTimeReference(request.response);
     let rebuilt = false;
     if (!sameStrings(ids, this.seriesIds) || nextTRef !== this.tRef) {
       this.seriesIds = ids;
@@ -96,6 +106,13 @@ export class ChartHost {
     }
     const emphasis = new Set(request.emphasisIndices);
     const emphasisActive = request.emphasisIndices.length > 0;
+    const ghostCount = request.response.series.filter(
+      (_, index) => (request.styles[index]?.hue ?? null) === null,
+    ).length;
+    const ghostOpacityScale = Math.min(
+      1,
+      Math.sqrt(FULL_OPACITY_GHOST_COUNT / Math.max(1, ghostCount)),
+    );
     const series = request.response.series.map((tile, index) => {
       const style = request.styles[index] ?? {
         hue: null,
@@ -111,6 +128,7 @@ export class ChartHost {
         sameStyle(previous.style, style) &&
         previous.emphasis === isEmphasized &&
         previous.emphasisActive === emphasisActive &&
+        previous.ghostOpacityScale === ghostOpacityScale &&
         previous.palette === request.palette
       ) {
         return previous.element;
@@ -121,10 +139,13 @@ export class ChartHost {
       const color = ghost
         ? request.palette.fg4
         : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
+      const baseOpacity = ghost
+        ? Math.max(MIN_DENSE_GHOST_OPACITY, style.alpha * ghostOpacityScale)
+        : style.alpha;
       const opacity =
         emphasisActive && !isEmphasized && !ghost
           ? 0.25
-          : Math.min(1, style.alpha + (isEmphasized ? 0.4 : 0));
+          : Math.min(1, baseOpacity + (isEmphasized ? 0.4 : 0));
       const minimumWidth = ghost
         ? MIN_CHARTGPU_GHOST_WIDTH
         : MIN_CHARTGPU_LINE_WIDTH;
@@ -149,6 +170,7 @@ export class ChartHost {
         style,
         emphasis: isEmphasized,
         emphasisActive,
+        ghostOpacityScale,
         palette: request.palette,
         element,
       };
@@ -164,7 +186,14 @@ export class ChartHost {
       return performance.now() - started;
     }
     this.lastLabels = { x: request.xLabel, y: request.yLabel };
-    const options = this.makeOptions(request, series);
+    const orderedSeries = series
+      .map((element, index) => ({
+        element,
+        ghost: (request.styles[index]?.hue ?? null) === null,
+      }))
+      .sort((left, right) => Number(right.ghost) - Number(left.ghost))
+      .map(({ element }) => element);
+    const options = this.makeOptions(request, orderedSeries);
     this.options = options;
     this.chart.setOption(options);
     this.lastLayout = this.makeLayout(request.xRange, request.yRange);
@@ -179,6 +208,11 @@ export class ChartHost {
       yAxis: this.yAxis(yRange, this.options.yAxis?.name ?? "value"),
     };
     this.chart.setOption(this.options);
+    this.chart.setViewRange({
+      x: { min: xRange.min - this.tRef, max: xRange.max - this.tRef },
+      y: { min: yRange[0], max: yRange[1] },
+    });
+    this.renderPendingFrame();
     this.lastLayout = this.makeLayout(xRange, yRange);
   }
 
@@ -190,7 +224,7 @@ export class ChartHost {
     if (this.options !== null) this.chart.setOption({ ...this.options });
     return new Promise((resolve) => {
       requestAnimationFrame(() => {
-        this.chart.renderFrame();
+        this.renderPendingFrame();
         const sources = Array.from(this.container.querySelectorAll("canvas"));
         const target = document.createElement("canvas");
         target.width = sources[0]?.width ?? 1;
@@ -219,6 +253,14 @@ export class ChartHost {
     this.chart.dispose();
   }
 
+  private renderPendingFrame(): void {
+    if (this.chart.renderFrame()) return;
+    this.gpu.reportFailure({
+      kind: "render-failed",
+      message: "ChartGPU failed to render a pending frame",
+    });
+  }
+
   private makeOptions(
     request: ChartRenderRequest,
     series: readonly LineSeriesConfig[],
@@ -227,6 +269,16 @@ export class ChartHost {
       animation: false,
       renderMode: "external",
       tooltip: { show: false },
+      legend: { show: false },
+      performance: {
+        lod:
+          request.palette.lineWidthScale !== 1 ||
+          request.styles.some(
+            (style) => style.hue !== null && style.width !== 1.4,
+          )
+            ? "strict"
+            : "auto",
+      },
       theme: {
         backgroundColor: request.palette.background,
         textColor: request.palette.fg2,
@@ -250,12 +302,14 @@ export class ChartHost {
     range: Range,
     label: string,
   ): NonNullable<ChartGPUOptions["xAxis"]> {
+    this.xTickRange.min = range.min - this.tRef;
+    this.xTickRange.max = range.max - this.tRef;
     return {
       type: "value",
       name: label,
-      min: range.min - this.tRef,
-      max: range.max - this.tRef,
-      tickFormatter: (value) => formatTicks([value + this.tRef])[0] ?? null,
+      min: this.xTickRange.min,
+      max: this.xTickRange.max,
+      tickFormatter: (value) => this.xTickFormatter(value + this.tRef),
     };
   }
 
@@ -263,12 +317,14 @@ export class ChartHost {
     range: readonly [number, number],
     label: string,
   ): NonNullable<ChartGPUOptions["yAxis"]> {
+    this.yTickRange.min = range[0];
+    this.yTickRange.max = range[1];
     return {
       type: "value",
       name: label,
       min: range[0],
       max: range[1],
-      tickFormatter: (value) => formatTicks([value])[0] ?? null,
+      tickFormatter: (value) => this.yTickFormatter(value),
     };
   }
 
@@ -312,13 +368,4 @@ function sameStyle(left: SeriesStroke, right: SeriesStroke): boolean {
     left.width === right.width &&
     left.alpha === right.alpha
   );
-}
-
-function minimumTime(response: ColumnarTileResponse): number {
-  let minimum = Number.POSITIVE_INFINITY;
-  for (const series of response.series) {
-    if (series.bins.count === 0) continue;
-    minimum = Math.min(minimum, series.bins.t0[0] as number);
-  }
-  return Number.isFinite(minimum) ? minimum : 0;
 }

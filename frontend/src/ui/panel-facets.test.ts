@@ -37,6 +37,11 @@ function state(): PanelState {
     focus: [],
     ghost_mode: "all",
     split_by: "source",
+    legend_state: "keys",
+    legend_position: null,
+    legend_size: null,
+    legend_anchor: null,
+    legend_hint_dismissed: false,
     y_range: null,
     x_range: null,
     x_label: null,
@@ -57,11 +62,13 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onDropSignals: vi.fn(),
     onDropSet: vi.fn(),
     onFocusToggle: vi.fn(),
+    onFocusSolo: vi.fn(),
     onClearFocus: vi.fn(),
     onMuteSelector: vi.fn(),
     onMuteSeries: vi.fn(),
     onRemoveBinding: vi.fn(),
     onToggleGhostMode: vi.fn(),
+    onLegendLayout: vi.fn(),
     localPathFor: () => null,
     sourceKeyFor: () => null,
     pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
@@ -145,7 +152,72 @@ describe("PanelView panel chrome", () => {
     );
   });
 
-  it("renders the legend and focus strip below a header without roster tokens", () => {
+  it("resizes an existing chart after its panel is remounted", async () => {
+    const resize = vi.fn();
+    vi.spyOn(ChartHost, "create").mockResolvedValue({
+      resize,
+    } as unknown as ChartHost);
+    const view = new PanelView(
+      "panel",
+      callbacks(Catalog.build([])),
+      {} as GpuContext,
+    );
+    document.body.appendChild(view.element);
+    view.mount();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    view.element.remove();
+    document.body.appendChild(view.element);
+    view.mount();
+
+    expect(resize).toHaveBeenCalledOnce();
+  });
+
+  it("retries transient chart initialization failures", async () => {
+    vi.useFakeTimers();
+    const create = vi
+      .spyOn(ChartHost, "create")
+      .mockRejectedValueOnce(new Error("context unavailable"))
+      .mockResolvedValue({ resize: vi.fn() } as unknown as ChartHost);
+    const view = new PanelView(
+      "panel",
+      callbacks(Catalog.build([])),
+      {} as GpuContext,
+    );
+    document.body.appendChild(view.element);
+
+    view.mount();
+    await vi.runAllTimersAsync();
+
+    expect(create).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("reports chart initialization that never settles", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const create = vi
+      .spyOn(ChartHost, "create")
+      .mockImplementation(() => new Promise(() => {}));
+    const reportFailure = vi.fn();
+    const gpu = { reportFailure } as unknown as GpuContext;
+    const view = new PanelView("panel", callbacks(Catalog.build([])), gpu);
+    document.body.appendChild(view.element);
+
+    view.mount();
+    await vi.runAllTimersAsync();
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(reportFailure).toHaveBeenCalledWith({
+      kind: "host-initialization",
+      message: "ChartGPU initialization timed out",
+    });
+    vi.useRealTimers();
+  });
+
+  it("renders the in-plot legend without a duplicate strip", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),
       signal("run-02", "temp"),
@@ -163,21 +235,19 @@ describe("PanelView panel chrome", () => {
     ];
     view.update(panel, false);
 
-    const strip = view.element.querySelector<HTMLElement>(
-      ".panel-legend-strip",
+    expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
+    const legend = view.element.querySelector(".plot-series-legend");
+    expect(legend?.getAttribute("data-state")).toBe("keys");
+    expect(legend?.querySelectorAll(".plot-legend-row")).toHaveLength(1);
+    expect(legend?.querySelector(".color-rule-token")?.textContent).toBe(
+      "color ← source ▾",
     );
-    expect(strip).not.toBeNull();
-    expect(strip?.querySelectorAll(".legend-count-token")).toHaveLength(2);
-    expect(strip?.querySelectorAll(".matrix-focus-chip")).toHaveLength(1);
-    expect(strip?.querySelector(".color-rule-token")?.textContent).toBe(
-      "color ← source",
-    );
-    expect(strip?.textContent).toContain(
-      "hover explore · ⇧click focus · ⌥ mute · esc clear",
-    );
+    view.element
+      .querySelector<HTMLButtonElement>(".panel-config-toggle")
+      ?.click();
     expect(
-      view.element.querySelectorAll(".panel-header .legend-count-token"),
-    ).toHaveLength(0);
+      view.element.querySelector(".panel-config-popover")?.textContent,
+    ).toContain("line style flat");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
     expect(
       view.element.querySelector<HTMLElement>(".panel-annotations")?.hidden,

@@ -1,5 +1,6 @@
 import { formatCombo } from "../app/commands";
 import type { ColumnarTileResponse } from "../app/bin-columns";
+import { MAX_RESIDENT_SERIES } from "../app/render-limits";
 import type { WorkspaceModel } from "../app/workspace";
 import { bindPointerDrag } from "./dom";
 import {
@@ -15,8 +16,10 @@ import {
 } from "./panel";
 import type { CursorMode } from "../render/overlay-renderer";
 import type { GpuContext } from "../render/gpu-context";
+import { panelsToEvict } from "./panel-residency";
 
 export interface WorkspaceCallbacks extends PanelCallbacks {
+  onEvictPanel(id: string): void;
   onLayoutChanged(): void;
   onDropSignalNewPanel(path: string): void;
   onDropSignalsNewPanel?(paths: readonly string[]): void;
@@ -34,6 +37,9 @@ export class WorkspaceView {
   private readonly views = new Map<string, PanelView>();
   private mountedKey = "";
   private cursorMode: CursorMode = "none";
+  private seriesCounts: ReadonlyMap<string, number> = new Map();
+  private useCounter = 0;
+  private readonly lastUsed = new Map<string, number>();
 
   constructor(
     private readonly root: HTMLElement,
@@ -48,16 +54,24 @@ export class WorkspaceView {
     if (this.gpu === gpu) return;
     this.gpu = gpu;
     for (const view of this.views.values()) view.setGpu(gpu);
-    if (this.views.size === 0) this.sync(hasSignals);
+    if (this.views.size === 0) this.sync(hasSignals, this.seriesCounts);
   }
 
-  sync(hasSignals: boolean): void {
-    const alive = new Set(this.model.panels().map((panel) => panel.id));
+  releaseGpu(): void {
+    for (const view of this.views.values()) view.releaseGpu();
+    this.gpu = null;
+  }
+
+  sync(hasSignals: boolean, seriesCounts: ReadonlyMap<string, number>): void {
+    this.seriesCounts = seriesCounts;
+    const allPanels = this.model.tabs().flatMap((tab) => tab.panels);
+    const alive = new Set(allPanels.map((panel) => panel.id));
     for (const [id, view] of this.views) {
       if (!alive.has(id)) {
         view.dispose();
         view.element.remove();
         this.views.delete(id);
+        this.lastUsed.delete(id);
       }
     }
     const key = this.structureKey(hasSignals);
@@ -66,12 +80,18 @@ export class WorkspaceView {
       // instead of tearing down and re-observing every panel.
       if (this.model.maximizedPanelId() === null) this.applySizes();
       this.refreshPanelStates();
+      this.touchActivePanels();
+      this.applyResidency();
       return;
     }
     this.mountedKey = key;
+    for (const view of this.views.values()) {
+      if (view.element.isConnected) view.releaseGpu();
+    }
     this.root.replaceChildren();
     if (this.model.panels().length === 0) {
       this.root.appendChild(emptyState(hasSignals));
+      this.applyResidency();
       return;
     }
     const maximized = this.model.maximizedPanelId();
@@ -84,6 +104,8 @@ export class WorkspaceView {
       this.root.append(this.maximizedPanelBar(maximized), rowElement);
       view.mount();
       this.refreshPanelStates();
+      this.touchActivePanels();
+      this.applyResidency();
       return;
     }
     this.model.layout().forEach((row, rowIndex) => {
@@ -103,6 +125,8 @@ export class WorkspaceView {
       for (const cell of row.panels) this.views.get(cell.panel_id)?.mount();
     });
     this.refreshPanelStates();
+    this.touchActivePanels();
+    this.applyResidency();
   }
 
   /** Identity of the mounted DOM: rows, cell order, maximization, empty. */
@@ -200,8 +224,36 @@ export class WorkspaceView {
       view.setCursorMode(this.cursorMode);
       this.bindPanelRearrange(view.element, id);
       this.views.set(id, view);
+    } else if (this.gpu !== null) {
+      view.setGpu(this.gpu);
     }
     return view;
+  }
+
+  private touchActivePanels(): void {
+    for (const panel of this.model.panels()) {
+      this.useCounter += 1;
+      this.lastUsed.set(panel.id, this.useCounter);
+    }
+  }
+
+  private applyResidency(): void {
+    const active = new Set(this.model.panels().map((panel) => panel.id));
+    const residents = Array.from(this.views, ([id]) => ({
+      id,
+      seriesCount: this.seriesCounts.get(id) ?? 0,
+      lastUsed: this.lastUsed.get(id) ?? 0,
+      active: active.has(id),
+    }));
+    for (const id of panelsToEvict(residents, MAX_RESIDENT_SERIES)) {
+      const view = this.views.get(id);
+      if (view === undefined || active.has(id)) continue;
+      view.dispose();
+      view.element.remove();
+      this.views.delete(id);
+      this.lastUsed.delete(id);
+      this.callbacks.onEvictPanel(id);
+    }
   }
 
   private maximizedPanelBar(maximizedId: string): HTMLElement {

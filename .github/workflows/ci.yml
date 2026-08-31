@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       run_demo:
@@ -29,7 +31,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: ./scripts/version.sh check
-      - if: github.event_name == 'pull_request'
+      - if: github.event_name == 'pull_request' && github.base_ref == 'main'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: ./scripts/version.sh check-pr "$BASE_SHA"
@@ -97,6 +99,7 @@ jobs:
       - run: ./scripts/ci.sh e2e
 
   coverage:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     env:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

@@ -10,6 +10,13 @@ import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import {
+  autoPresentationBudgets,
+  CPU_BYTES_PER_BIN,
+  GPU_BYTES_PER_BIN,
+  planPresentationDensity,
+  type DensityPlan,
+} from "../app/presentation-budget";
+import {
   columnsValueAtTime,
   type ColumnarTileResponse,
 } from "../app/bin-columns";
@@ -61,6 +68,7 @@ import {
 } from "../generated/protocol";
 import type {
   CursorMode,
+  LegendState,
   PanelState,
   SeriesRef,
   Session,
@@ -86,12 +94,20 @@ import { SetsListView } from "./sets-list";
 import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
-import type { GpuContext } from "../render/gpu-context";
+import type { GpuContext, GpuFailure } from "../render/gpu-context";
+import { prepareResponseFeeds } from "../render/m4-feed";
+
+export function formatPresentationStatus(
+  plan: Pick<DensityPlan, "density" | "targetDensity" | "limited" | "fits">,
+): string {
+  if (!plan.limited) return "";
+  if (!plan.fits) return "resolution constrained by presentation memory";
+  return `resolution ${plan.density.toFixed(2)}/${plan.targetDensity.toFixed(0)} bins/px`;
+}
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
-const TILE_BIN_BUDGET = 250_000;
 const DERIVED_PREFIX = "derived/";
 
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
@@ -182,6 +198,7 @@ export class AppShell {
   private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
   private refreshToken = 0;
+  private presentationPlan: DensityPlan | null = null;
   private refreshPromise: Promise<void> | null = null;
   private refreshQueued = false;
   private renderScheduled = false;
@@ -205,20 +222,92 @@ export class AppShell {
     private readonly root: HTMLElement,
     private readonly plane: DataPlane,
     private gpu: GpuContext | null = null,
+    private readonly requestGpuRecovery: (() => void) | null = null,
   ) {}
 
   setGpu(gpu: GpuContext): void {
     if (this.gpu !== null) return;
     this.gpu = gpu;
+    gpu.onFailure((failure) => {
+      if (this.gpu !== gpu) return;
+      this.handleGpuFailure(failure);
+    });
     const warning = this.root.querySelector<HTMLElement>(".gpu-warning");
     if (warning !== null) warning.hidden = true;
     this.workspaceView?.setGpu(gpu, this.signals.length > 0);
     void this.refreshTiles();
   }
 
+  private handleGpuFailure(failure: GpuFailure): void {
+    if (failure.kind === "uncaptured-error") {
+      this.reportError(failure.message);
+      return;
+    }
+    const gpu = this.gpu;
+    this.gpu = null;
+    this.workspaceView?.releaseGpu();
+    gpu?.dispose();
+    const warning = required<HTMLElement>(this.root, ".gpu-warning");
+    required<HTMLElement>(warning, ".gpu-warning-message").textContent =
+      failure.kind === "device-lost"
+        ? "WebGPU device lost — reconnecting"
+        : "WebGPU renderer unavailable — reconnecting";
+    required<HTMLButtonElement>(warning, ".gpu-warning-dismiss").hidden = true;
+    required<HTMLButtonElement>(warning, ".gpu-warning-reload").hidden = false;
+    warning.hidden = false;
+    this.requestGpuRecovery?.();
+  }
+
+  private bindGpuWarning(): void {
+    required<HTMLButtonElement>(
+      this.root,
+      ".gpu-warning-reload",
+    ).addEventListener("click", () => {
+      window.location.reload();
+    });
+  }
+
+  private bindLegendLayoutMenu(): void {
+    const trigger = required<HTMLButtonElement>(this.root, ".layout-slot");
+    const menu = required<HTMLElement>(this.root, ".legend-layout-menu");
+    const close = (): void => {
+      menu.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+    };
+    trigger.addEventListener("click", () => {
+      menu.hidden = !menu.hidden;
+      trigger.setAttribute("aria-expanded", String(!menu.hidden));
+    });
+    for (const button of menu.querySelectorAll<HTMLButtonElement>(
+      "[data-legend-state]",
+    )) {
+      button.addEventListener("click", () => {
+        this.workspace.setAllLegendStates(
+          button.dataset.legendState as LegendState,
+        );
+        this.commitHistory();
+        this.workspaceView?.refreshPanelStates();
+        close();
+      });
+    }
+    document.addEventListener("pointerdown", (event) => {
+      if (
+        event.target instanceof Node &&
+        (menu.contains(event.target) || trigger.contains(event.target))
+      ) {
+        return;
+      }
+      close();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") close();
+    });
+  }
+
   async mount(): Promise<void> {
     delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
+    this.bindGpuWarning();
     if (this.gpu === null) {
       const warning = required<HTMLElement>(this.root, ".gpu-warning");
       warning.hidden = false;
@@ -248,7 +337,18 @@ export class AppShell {
           this.afterLayoutChange();
         },
         onClose: (id) => {
+          const tab = this.workspace.tabs().find((entry) => entry.id === id);
+          const panelIds = tab?.panels.map((panel) => panel.id) ?? [];
+          const canClose = this.workspace.tabs().length > 1;
           this.workspace.closeTab(id);
+          if (
+            canClose &&
+            !this.workspace.tabs().some((entry) => entry.id === id)
+          ) {
+            for (const panelId of panelIds) {
+              this.tileWindowCache.invalidate(panelId);
+            }
+          }
           this.afterLayoutChange();
         },
       },
@@ -257,11 +357,16 @@ export class AppShell {
       required(this.root, ".workspace"),
       this.workspace,
       {
+        onEvictPanel: (id) => {
+          this.tileWindowCache.invalidate(id);
+        },
         onFocus: (id) => {
           this.workspace.focusPanel(id);
         },
         onClose: (id) => {
+          const panelExisted = this.workspace.panel(id) !== undefined;
           this.workspace.closePanel(id);
+          if (panelExisted) this.tileWindowCache.invalidate(id);
           this.afterLayoutChange();
         },
         onSplitRight: (id) => {
@@ -284,6 +389,12 @@ export class AppShell {
         },
         onFocusToggle: (id, entry) => {
           this.workspace.toggleFocus(id, entry);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onFocusSolo: (id, entry) => {
+          this.workspace.setFocus(id, entry);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -325,6 +436,11 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
+        onLegendLayout: (id, layout) => {
+          this.workspace.setLegendLayout(id, layout);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
         onSetColorBy: (id, dimension) => {
           this.workspace.setColorBy(id, dimension);
           this.commitHistory();
@@ -362,7 +478,7 @@ export class AppShell {
           this.renderTiles();
         },
         onResized: () => {
-          this.scheduleRender();
+          this.handlePanelResize();
         },
         onGesture: (id, hint) => {
           required(this.root, ".gesture-hint").textContent = hint ?? "";
@@ -506,6 +622,7 @@ export class AppShell {
         },
       },
     );
+    this.bindLegendLayoutMenu();
     this.selection.onChange(() => {
       this.syncSelectionActions();
     });
@@ -945,7 +1062,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 1.1.8");
+        this.showModeHelp("SignalScope 1.2.0");
       },
     });
     this.commands.register({
@@ -1835,7 +1952,10 @@ export class AppShell {
       this.workspace.tabs(),
       this.workspace.activeTabId(),
     );
-    this.workspaceView?.sync(this.signals.length > 0);
+    this.workspaceView?.sync(
+      this.signals.length > 0,
+      this.visibleSeriesCounts(),
+    );
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
     this.syncCursorMode();
     void this.refreshTiles();
@@ -2158,7 +2278,10 @@ export class AppShell {
       this.workspace.tabs(),
       this.workspace.activeTabId(),
     );
-    this.workspaceView?.sync(this.signals.length > 0);
+    this.workspaceView?.sync(
+      this.signals.length > 0,
+      this.visibleSeriesCounts(),
+    );
     this.workspaceView?.setCursorMode(this.workspace.cursorMode());
   }
 
@@ -2466,6 +2589,7 @@ export class AppShell {
 
   private refreshTiles(): Promise<void> {
     this.refreshQueued = true;
+    this.refreshToken += 1;
     if (this.refreshPromise !== null) {
       return this.refreshPromise;
     }
@@ -2473,7 +2597,7 @@ export class AppShell {
       try {
         while (this.hasQueuedRefresh()) {
           this.refreshQueued = false;
-          await this.refreshTilesPass();
+          await this.refreshTilesPass(this.refreshToken);
         }
       } finally {
         this.refreshPromise = null;
@@ -2486,60 +2610,126 @@ export class AppShell {
     return this.refreshQueued;
   }
 
-  private async refreshTilesPass(): Promise<void> {
-    const refreshToken = ++this.refreshToken;
+  private async refreshTilesPass(refreshToken: number): Promise<void> {
+    const panels = this.workspace.panels();
     const width = Math.max(
       1,
       Math.round(required(this.root, ".workspace").clientWidth),
     );
+    const devicePixelRatio = Number.isFinite(window.devicePixelRatio)
+      ? window.devicePixelRatio
+      : 1;
+    const panelInputs = panels.map((panel) => {
+      const signals = this.panelSignalIds(panel);
+      const window = this.effectiveWindow(panel);
+      const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
+      const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
+      const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
+      const span = window.t1 - window.t0;
+      const paddingRatio =
+        span > 0 ? (paddedWindow.t1 - paddedWindow.t0) / span : 1;
+      return { panel, signals, window, paddedWindow, pixelWidth, paddingRatio };
+    });
+    const gpu = this.gpu as GpuContext | null | undefined;
+    const adapterLimits =
+      gpu === null || gpu === undefined
+        ? undefined
+        : (
+            gpu.adapter as unknown as {
+              limits?: { maxBufferSize?: unknown };
+            }
+          ).limits;
+    const budgets = autoPresentationBudgets(
+      Number(adapterLimits?.maxBufferSize ?? 0),
+      (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    );
+    const retainedBins = this.tileWindowCache.retainedBinCount(
+      new Set(panels.map((panel) => panel.id)),
+    );
+    const densityPlan = planPresentationDensity({
+      demands: panelInputs.map((input) => ({
+        panelId: input.panel.id,
+        physicalPixels: input.pixelWidth * devicePixelRatio,
+        paddingRatio: input.paddingRatio,
+        visibleSeries: input.signals.ids.length,
+      })),
+      budgets,
+      retainedCpuBytes: retainedBins * CPU_BYTES_PER_BIN,
+      retainedGpuBytes: retainedBins * GPU_BYTES_PER_BIN,
+    });
+    this.presentationPlan = densityPlan;
+    this.renderPresentationStatus();
     const nextTiles = new Map<string, ColumnarTileResponse>();
     const nextMissing = new Map<string, string[]>();
+    const replacements = new Map<
+      string,
+      {
+        response: ColumnarTileResponse;
+        window: { t0: number; t1: number };
+        pixelWidth: number;
+        requestedDevicePixels: number;
+        idsKey: string;
+      }
+    >();
     await Promise.all(
-      this.workspace.panels().map(async (panel) => {
-        const { ids, missing } = this.panelSignalIds(panel);
+      panelInputs.map(async (input) => {
+        const { panel, signals, window, paddedWindow, pixelWidth } = input;
+        const { ids, missing } = signals;
         nextMissing.set(panel.id, missing);
         if (ids.length === 0) return;
-        const window = this.effectiveWindow(panel);
+        const desiredDevicePixels = Math.max(
+          1,
+          Math.ceil((pixelWidth * devicePixelRatio * densityPlan.density) / 2),
+        );
+        const idsKey = [...ids].sort().join("\u0000");
+        const lookup = this.tileWindowCache.lookup(
+          panel.id,
+          idsKey,
+          window,
+          desiredDevicePixels,
+        );
+        if (lookup.kind === "current") {
+          nextTiles.set(panel.id, lookup.response);
+          return;
+        }
+        const fallback = lookup.kind === "stale" ? lookup.response : null;
+        const requestedDevicePixels = densityPlan.requests.get(panel.id) ?? 1;
         try {
-          const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-          const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
-          const idsKey = [...ids].sort().join("\u0000");
-          const cached = this.tileWindowCache.hit(
-            panel.id,
-            idsKey,
-            pixelWidth,
-            window.t0,
-            window.t1,
-          );
-          if (cached !== null) {
-            nextTiles.set(panel.id, cached);
-            return;
-          }
-          const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
           const response = await this.plane.queryTiles({
             request_id: crypto.randomUUID(),
             signal_ids: ids,
             window: paddedWindow,
-            pixel_width: TileWindowCache.requestPixelWidth(
-              pixelWidth,
-              window,
-              paddedWindow,
-            ),
-            max_total_bins: TILE_BIN_BUDGET,
+            pixel_width: requestedDevicePixels,
+            max_total_bins: null,
           });
-          this.tileWindowCache.store(panel.id, {
+          if (refreshToken !== this.refreshToken) return;
+          replacements.set(panel.id, {
             response,
             window: paddedWindow,
             pixelWidth,
+            requestedDevicePixels,
             idsKey,
           });
           nextTiles.set(panel.id, response);
         } catch (error: unknown) {
+          if (refreshToken !== this.refreshToken) return;
           this.reportError(error);
+          if (fallback !== null) nextTiles.set(panel.id, fallback);
         }
       }),
     );
     if (refreshToken !== this.refreshToken) return;
+    try {
+      for (const replacement of replacements.values()) {
+        prepareResponseFeeds(replacement.response);
+      }
+    } catch (error: unknown) {
+      if (refreshToken === this.refreshToken) this.reportError(error);
+      return;
+    }
+    for (const [panelId, replacement] of replacements) {
+      this.tileWindowCache.store(panelId, replacement);
+    }
     this.tilesByPanel = nextTiles;
     this.missingByPanel = nextMissing;
     this.renderTiles();
@@ -2575,8 +2765,26 @@ export class AppShell {
     return resolved;
   }
 
+  private visibleSeriesCounts(): ReadonlyMap<string, number> {
+    const counts = new Map<string, number>();
+    for (const tab of this.workspace.tabs()) {
+      for (const panel of tab.panels) {
+        counts.set(
+          panel.id,
+          this.resolvedFor(panel).filter((series) => series.visible).length,
+        );
+      }
+    }
+    return counts;
+  }
+
   private isDerivedPath(path: string): boolean {
     return this.workspace.derived().some((entry) => entry.path === path);
+  }
+
+  private handlePanelResize(): void {
+    this.scheduleRender();
+    this.scheduleRefresh();
   }
 
   /** Coalesces bursts of per-panel resize renders into one frame. */
@@ -2620,6 +2828,7 @@ export class AppShell {
     } else {
       this.workspace.setPanelTimeWindow(panelId, [t0, t1]);
     }
+    this.publishCachedCoverage();
     this.markHistoryDirty(`range:${panelId}`);
     this.scheduleRender();
     this.scheduleRefresh();
@@ -2636,6 +2845,22 @@ export class AppShell {
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
     this.markHistoryDirty(`range:${panelId}`);
     this.scheduleRender();
+  }
+
+  private publishCachedCoverage(): void {
+    let next: Map<string, ColumnarTileResponse> | null = null;
+    for (const panel of this.workspace.panels()) {
+      const response = this.tileWindowCache.coveringCurrent(
+        panel.id,
+        this.effectiveWindow(panel),
+      );
+      if (response === null || this.tilesByPanel.get(panel.id) === response) {
+        continue;
+      }
+      next ??= new Map(this.tilesByPanel);
+      next.set(panel.id, response);
+    }
+    if (next !== null) this.tilesByPanel = next;
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
@@ -2827,6 +3052,17 @@ export class AppShell {
       0,
     );
     void this.updateSources(pointCount);
+  }
+
+  private renderPresentationStatus(): void {
+    const status = this.root.querySelector<HTMLElement>(".presentation-status");
+    if (status === null) return;
+    const text =
+      this.presentationPlan === null
+        ? ""
+        : formatPresentationStatus(this.presentationPlan);
+    status.textContent = text.length > 0 ? ` · ${text}` : "";
+    status.hidden = text.length === 0;
   }
 
   private async updateSources(pointCount: number): Promise<void> {
@@ -3195,13 +3431,20 @@ export function shellMarkup(): string {
       <span class="session-identity"></span>
     </div>
     <div class="gpu-warning" hidden role="status">
-      WebGPU unavailable — time-series panels disabled
+      <span class="gpu-warning-message">WebGPU unavailable — time-series panels disabled</span>
       <button class="gpu-warning-dismiss" type="button" aria-label="Dismiss WebGPU warning">✕</button>
+      <button class="gpu-warning-reload" type="button" aria-label="Reload SignalScope" hidden>Reload</button>
     </div>
 
     <div class="workspace-strip">
       <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
-      <button class="layout-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">layout ▾</button>
+      <button class="layout-slot" aria-haspopup="menu" aria-expanded="false">layout ▾</button>
+      <div class="legend-layout-menu" role="menu" hidden>
+        <span>LEGENDS</span>
+        <button type="button" role="menuitem" data-legend-state="badge">badge</button>
+        <button type="button" role="menuitem" data-legend-state="keys">keys</button>
+        <button type="button" role="menuitem" data-legend-state="roster">roster</button>
+      </div>
     </div>
 
     <aside class="signal-tree" id="signal-tree" aria-label="Signals">
@@ -3243,7 +3486,7 @@ export function shellMarkup(): string {
       </div>
     </aside>
 
-    <div class="tree-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
+    <div class="tree-resize-handle dock-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
 
     <section class="workspace" aria-label="Panel workspace"></section>
 
@@ -3262,6 +3505,7 @@ export function shellMarkup(): string {
       <span class="source-truth">
         <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
         <span class="render-stat"> · render <span class="render-ms">— ms</span></span>
+        <span class="presentation-status" hidden></span>
       </span>
       <span class="status-spacer"></span>
       <span class="gesture-hint"></span>

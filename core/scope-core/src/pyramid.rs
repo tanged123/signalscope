@@ -502,11 +502,24 @@ impl Pyramid {
                 break;
             }
         }
+        let mut bins = self
+            .level_window(level_index, Some((t0, t1)))
+            .unwrap_or_default();
+        if max_bins.is_none() {
+            while level_index > 0 && !meets_pixel_floor(&bins, t0, t1, pixel_width) {
+                let finer = self
+                    .level_window(level_index - 1, Some((t0, t1)))
+                    .unwrap_or_default();
+                if finer.len() > target {
+                    break;
+                }
+                level_index -= 1;
+                bins = finer;
+            }
+        }
         PyramidQuery {
             level: u32::try_from(level_index).unwrap_or(u32::MAX),
-            bins: self
-                .level_window(level_index, Some((t0, t1)))
-                .unwrap_or_default(),
+            bins,
         }
     }
 
@@ -541,14 +554,25 @@ impl Pyramid {
             };
         }
 
-        let level_index = (1..self.level_count())
+        let mut level_index = (1..self.level_count())
             .find(|index| self.overlap_count(*index, t0, t1) <= target)
             .unwrap_or_else(|| self.level_count().saturating_sub(1));
+        let mut bins = self
+            .level_window(level_index, Some((t0, t1)))
+            .unwrap_or_default();
+        while level_index > 0 && !meets_pixel_floor(&bins, t0, t1, pixel_width) {
+            let finer = self
+                .level_window(level_index - 1, Some((t0, t1)))
+                .unwrap_or_default();
+            if finer.len() > target {
+                break;
+            }
+            level_index -= 1;
+            bins = finer;
+        }
         PyramidQuery {
             level: u32::try_from(level_index).unwrap_or(u32::MAX),
-            bins: self
-                .level_window(level_index, Some((t0, t1)))
-                .unwrap_or_default(),
+            bins,
         }
     }
 
@@ -643,6 +667,21 @@ impl Pyramid {
 pub struct PyramidQuery {
     pub level: u32,
     pub bins: BinLevel,
+}
+
+fn meets_pixel_floor(bins: &BinLevel, t0: f64, t1: f64, pixel_width: u32) -> bool {
+    let pixels = usize::try_from(pixel_width.max(1)).unwrap_or(usize::MAX);
+    if bins.len() <= pixels {
+        return false;
+    }
+    let pixel_span = (t1 - t0) / f64::from(pixel_width.max(1));
+    pixel_span.is_finite()
+        && pixel_span > 0.0
+        && bins
+            .t0_column()
+            .iter()
+            .zip(bins.t1_column())
+            .all(|(start, end)| end - start <= pixel_span)
 }
 
 fn synthesize_level_from_columns(
@@ -857,6 +896,66 @@ mod tests {
 
         assert!(query.bins.len() <= 402);
         assert!(query.level > 0);
+    }
+
+    #[test]
+    fn adaptive_query_stays_above_one_bin_per_pixel() {
+        let time = (0..10_000).map(f64::from).collect::<Vec<_>>();
+        let pyramid = Pyramid::from_samples(&time, &time);
+        let query = pyramid.query(0.0, 9_999.0, 200);
+
+        assert!(query.level > 0);
+        assert!(query.bins.len() > 200);
+        assert!(query.bins.len() <= 402);
+        let pixel_span = 9_999.0 / 200.0;
+        assert!(
+            query
+                .bins
+                .t0_column()
+                .iter()
+                .zip(query.bins.t1_column())
+                .all(|(start, end)| end - start <= pixel_span)
+        );
+    }
+
+    #[test]
+    fn adaptive_query_stays_bounded_across_large_time_gaps() {
+        let mut time = (0..100_000).map(f64::from).collect::<Vec<_>>();
+        for value in &mut time[50_001..] {
+            *value += 10_000.0;
+        }
+        let pyramid = Pyramid::from_samples(&time, &time);
+        let query = pyramid.query(0.0, 109_999.0, 256);
+
+        assert!(query.level > 0);
+        assert!(query.bins.len() <= 514);
+        let bins = query.bins.to_wire_vec();
+        let min = bins
+            .iter()
+            .filter_map(|bin| bin.min)
+            .fold(f64::INFINITY, f64::min);
+        let max = bins
+            .iter()
+            .filter_map(|bin| bin.max)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(min.abs() <= f64::EPSILON);
+        assert!((max - 109_999.0).abs() <= f64::EPSILON);
+    }
+
+    #[test]
+    fn adaptive_query_reaches_level_zero_when_raw_fits() {
+        let time = (0..10_000).map(f64::from).collect::<Vec<_>>();
+        let pyramid = Pyramid::from_samples(&time, &time);
+        let query = pyramid.query(4_900.0, 5_100.0, 400);
+
+        assert_eq!(query.level, 0);
+        assert!(
+            query
+                .bins
+                .to_wire_vec()
+                .iter()
+                .all(|bin| bin.sample_count == 1)
+        );
     }
 
     #[test]

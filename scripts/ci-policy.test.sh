@@ -7,6 +7,8 @@ failures=0
 setup_script="$script_dir/setup.sh"
 setup_action="$script_dir/../.github/actions/setup/action.yml"
 ci_workflow="$script_dir/../.github/workflows/ci.yml"
+version_job="$(sed -n '/^  version:/,/^  flake:/p' "$ci_workflow")"
+coverage_job="$(sed -n '/^  coverage:/,/^  ci-ok:/p' "$ci_workflow")"
 flake="$script_dir/../flake.nix"
 lib_script="$script_dir/lib.sh"
 live_plane_test="$script_dir/../frontend/tests/e2e/live-plane.spec.ts"
@@ -27,6 +29,19 @@ if ! grep -Fq "if [ -z \"''\${CI:-}\" ]; then" "$flake"; then
 fi
 if grep -Fq 'cargo-cache-key: coverage' "$ci_workflow"; then
   echo "coverage must not cache its instrumented Cargo target" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq '  schedule:' "$ci_workflow" ||
+  ! grep -Fq '    - cron: "0 3 * * *"' "$ci_workflow"; then
+  echo "CI must run nightly at 03:00 UTC" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq "    if: github.event_name != 'pull_request'" <<<"$coverage_job"; then
+  echo "full coverage must not run for pull requests" >&2
+  failures=$((failures + 1))
+fi
+if ! grep -Fq "github.event_name == 'pull_request' && github.base_ref == 'main'" <<<"$version_job"; then
+  echo "version increments must be required only for PRs targeting main" >&2
   failures=$((failures + 1))
 fi
 if ! grep -Fq 'cargo build --release -p scope-server' "$lib_script"; then
@@ -70,6 +85,7 @@ check_ci_results() {
 
 expect_status 0 check_ci_results '{"version":{"result":"success"},"flake":{"result":"success"}}'
 expect_status 0 check_ci_results '{"version":{"result":"success"},"flake":{"result":"skipped"}}'
+expect_status 0 check_ci_results '{"version":{"result":"success"},"coverage":{"result":"skipped"}}'
 expect_status 1 check_ci_results '{"version":{"result":"success"},"flake":{"result":"failure"}}'
 expect_status 1 check_ci_results '{"version":{"result":"cancelled"},"flake":{"result":"success"}}'
 expect_status 1 check_ci_results ''
@@ -127,6 +143,23 @@ if ! grep -Fq 'demo.gif?v=2.0.0' "$version_root/README.md"; then
   echo "version set must update the README demo cache key" >&2
   failures=$((failures + 1))
 fi
+
+git -C "$version_root" init -q
+git -C "$version_root" config user.name test
+git -C "$version_root" config user.email test@example.com
+git -C "$version_root" add .
+git -C "$version_root" commit -qm base
+check_pr_version() {
+  (cd "$version_root" && node scripts/version.mjs check-pr HEAD)
+}
+expect_status 0 node "$version_root/scripts/version.mjs" set 2.0.1
+expect_status 0 check_pr_version
+expect_status 0 node "$version_root/scripts/version.mjs" set 2.0.2
+expect_status 1 check_pr_version
+expect_status 0 node "$version_root/scripts/version.mjs" set 2.1.0
+expect_status 0 check_pr_version
+expect_status 0 node "$version_root/scripts/version.mjs" set 3.0.0
+expect_status 0 check_pr_version
 
 asset_dir="$test_root/empty-assets"
 mkdir -p "$asset_dir"

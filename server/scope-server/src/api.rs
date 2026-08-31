@@ -629,7 +629,7 @@ pub async fn query_tiles_bin(
                 .pyramids
                 .get(&signal_id)
                 .ok_or_else(|| format!("pyramid is unavailable for signal id: {raw_id}"))?;
-            let query = pyramid.query_raw(request.window.t0, request.window.t1);
+            let query = pyramid.query(request.window.t0, request.window.t1, request.pixel_width);
             owned.push((
                 *raw_id,
                 signal.path.clone(),
@@ -1092,10 +1092,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    async fn request_tiles(
+        router: &axum::Router,
+        signal_id: u64,
+        t0: f64,
+        t1: f64,
+        pixel_width: u32,
+        max_total_bins: Option<u32>,
+    ) -> scope_protocol::tile_binary::OwnedBinarySeries {
+        let request = Envelope::new(TileRequest {
+            request_id: "adaptive".into(),
+            signal_ids: vec![signal_id],
+            window: scope_protocol::TimeWindow { t0, t1 },
+            pixel_width,
+            max_total_bins,
+        });
+        let response = router
+            .clone()
+            .oneshot(
+                Request::post("/api/query_tiles_bin")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        scope_protocol::tile_binary::decode_tile_response(&body)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
     #[tokio::test]
-    async fn query_tiles_bin_returns_raw_window_samples() {
+    async fn query_tiles_bin_refines_from_envelope_to_raw() {
         let ctx = crate::AppContext::for_tests(None);
-        let (signal_id, expected_path) = {
+        let signal_id = {
             let mut data = ctx.state.lock().unwrap();
             let source = data
                 .store
@@ -1114,44 +1148,17 @@ mod tests {
                 signal_id,
                 scope_core::pyramid::Pyramid::from_samples(&time, &time),
             );
-            (signal_id, "raw-query/value".to_owned())
+            signal_id
         };
         let router = crate::build_router(ctx);
-        let request = Envelope::new(TileRequest {
-            request_id: "raw".into(),
-            signal_ids: vec![signal_id.0],
-            window: scope_protocol::TimeWindow {
-                t0: 2_000.0,
-                t1: 7_999.0,
-            },
-            pixel_width: 1,
-            max_total_bins: Some(1),
-        });
-        let response = router
-            .oneshot(
-                Request::post("/api/query_tiles_bin")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers()[header::CONTENT_TYPE],
-            "application/octet-stream"
-        );
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let decoded = scope_protocol::tile_binary::decode_tile_response(&body).unwrap();
-        assert_eq!(decoded.len(), 1);
-        let series = &decoded[0];
-        assert_eq!(series.signal_id, signal_id.0);
-        assert_eq!(series.signal_path, expected_path);
-        assert_eq!(series.level, 0);
-        assert_eq!(series.bin_count, 6_002);
-        assert_eq!(series.t0.first(), Some(&1_999.0));
-        assert_eq!(series.t1.last(), Some(&8_000.0));
-        assert!(series.sample_count.iter().all(|count| *count == 1));
+        let overview = request_tiles(&router, signal_id.0, 0.0, 9_999.0, 200, Some(1)).await;
+        assert!(overview.level > 0);
+        assert!(overview.bin_count > 200);
+        assert!(overview.bin_count <= 402);
+
+        let detail = request_tiles(&router, signal_id.0, 4_900.0, 5_100.0, 400, Some(1)).await;
+        assert_eq!(detail.level, 0);
+        assert!(detail.sample_count.iter().all(|count| *count == 1));
     }
 
     #[tokio::test]

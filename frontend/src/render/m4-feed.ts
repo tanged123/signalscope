@@ -6,6 +6,7 @@ import {
   HAS_MIN,
   type BinColumns,
 } from "../app/bin-columns";
+import type { ColumnarTileResponse } from "../app/bin-columns";
 
 /**
  * Interleaved `[x0, y0, x1, y1, ...]` in single precision: the layout
@@ -46,17 +47,40 @@ export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
     ) {
       append(columns.t0[index] as number, columns.first[index] as number);
     } else {
+      const first =
+        (flags & HAS_FIRST) !== 0
+          ? (columns.first[index] as number)
+          : Number.NaN;
+      const min =
+        (flags & HAS_MIN) !== 0 ? (columns.min[index] as number) : Number.NaN;
+      const max =
+        (flags & HAS_MAX) !== 0 ? (columns.max[index] as number) : Number.NaN;
+      const last =
+        (flags & HAS_LAST) !== 0 ? (columns.last[index] as number) : Number.NaN;
       if ((flags & HAS_FIRST) !== 0) {
-        append(columns.t0[index] as number, columns.first[index] as number);
+        append(columns.t0[index] as number, first);
       }
-      if ((flags & HAS_MIN) !== 0) {
-        append(midpoint, columns.min[index] as number);
+      let emittedExtremum: number | null = null;
+      if (
+        (flags & HAS_MIN) !== 0 &&
+        Number.isFinite(min) &&
+        min !== first &&
+        min !== last
+      ) {
+        append(midpoint, min);
+        emittedExtremum = min;
       }
-      if ((flags & HAS_MAX) !== 0) {
-        append(midpoint, columns.max[index] as number);
+      if (
+        (flags & HAS_MAX) !== 0 &&
+        Number.isFinite(max) &&
+        max !== first &&
+        max !== last &&
+        max !== emittedExtremum
+      ) {
+        append(midpoint, max);
       }
       if ((flags & HAS_LAST) !== 0) {
-        append(columns.t1[index] as number, columns.last[index] as number);
+        append(columns.t1[index] as number, last);
       }
     }
     if (length === start) {
@@ -83,21 +107,36 @@ function vertexCount(columns: BinColumns): number {
       count += 1 + (hasGap ? 2 : 0);
       continue;
     }
-    const finite =
-      ((flags & HAS_FIRST) !== 0 &&
-      Number.isFinite(columns.first[index] as number)
-        ? 1
-        : 0) +
-      ((flags & HAS_MIN) !== 0 && Number.isFinite(columns.min[index] as number)
-        ? 1
-        : 0) +
-      ((flags & HAS_MAX) !== 0 && Number.isFinite(columns.max[index] as number)
-        ? 1
-        : 0) +
-      ((flags & HAS_LAST) !== 0 &&
-      Number.isFinite(columns.last[index] as number)
-        ? 1
-        : 0);
+    const first =
+      (flags & HAS_FIRST) !== 0 ? (columns.first[index] as number) : Number.NaN;
+    const min =
+      (flags & HAS_MIN) !== 0 ? (columns.min[index] as number) : Number.NaN;
+    const max =
+      (flags & HAS_MAX) !== 0 ? (columns.max[index] as number) : Number.NaN;
+    const last =
+      (flags & HAS_LAST) !== 0 ? (columns.last[index] as number) : Number.NaN;
+    let finite = 0;
+    if ((flags & HAS_FIRST) !== 0 && Number.isFinite(first)) finite += 1;
+    let emittedExtremum: number | null = null;
+    if (
+      (flags & HAS_MIN) !== 0 &&
+      Number.isFinite(min) &&
+      min !== first &&
+      min !== last
+    ) {
+      finite += 1;
+      emittedExtremum = min;
+    }
+    if (
+      (flags & HAS_MAX) !== 0 &&
+      Number.isFinite(max) &&
+      max !== first &&
+      max !== last &&
+      max !== emittedExtremum
+    ) {
+      finite += 1;
+    }
+    if ((flags & HAS_LAST) !== 0 && Number.isFinite(last)) finite += 1;
     count += finite === 0 ? 1 : finite;
     if (hasGap) count += 2;
   }
@@ -112,4 +151,18 @@ export function cachedFeed(columns: BinColumns, tRef: number): SeriesFeed {
   const feed = m4Feed(columns, tRef);
   feedCache.set(columns, { tRef, feed });
   return feed;
+}
+
+export function responseTimeReference(response: ColumnarTileResponse): number {
+  let minimum = Number.POSITIVE_INFINITY;
+  for (const series of response.series) {
+    if (series.bins.count === 0) continue;
+    minimum = Math.min(minimum, series.bins.t0[0] as number);
+  }
+  return Number.isFinite(minimum) ? minimum : 0;
+}
+
+export function prepareResponseFeeds(response: ColumnarTileResponse): void {
+  const tRef = responseTimeReference(response);
+  for (const series of response.series) cachedFeed(series.bins, tRef);
 }

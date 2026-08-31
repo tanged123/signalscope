@@ -33,7 +33,7 @@ import {
   type ColumnarTileResponse,
 } from "./bin-columns";
 import { open, seal, type Envelope } from "./envelope";
-import { queryRawPyramidRange } from "./pyramid-query";
+import { queryAdaptivePyramidRange } from "./pyramid-query";
 import { binsToSamples, sampleWindow, sampleWindowFull } from "./samples";
 import { decodeTileResponse } from "./tile-binary";
 
@@ -419,10 +419,11 @@ export class BakedPlane implements DataPlane {
           if (signal === undefined) {
             throw new Error(`unknown signal id: ${signalId}`);
           }
-          const range = queryRawPyramidRange(
+          const range = queryAdaptivePyramidRange(
             signal.levels,
             request.window.t0,
             request.window.t1,
+            request.pixel_width,
           );
           const bins = this.columnsFor(
             signal,

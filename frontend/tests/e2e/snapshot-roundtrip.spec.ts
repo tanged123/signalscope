@@ -44,7 +44,16 @@ test.describe("exported snapshot round trip", () => {
         "alpha ×1",
         "beta ×1",
       ]);
-      await expect(panel.locator(".annotation-row")).toContainText("peak");
+      const annotations = panel.locator(".panel-annotations");
+      await expect(annotations).toBeVisible();
+      await expect(annotations).toContainText('"peak"');
+      await expect(annotations.locator(".annotation-action")).toHaveCount(2);
+      const session = JSON.parse(bakedManifest(artifact).session_json) as {
+        tabs: Array<{
+          panels: Array<{ annotations: Array<{ label: string }> }>;
+        }>;
+      };
+      expect(session.tabs[0]?.panels[0]?.annotations[0]?.label).toBe("peak");
       await expect(page.locator(".window-readout")).toHaveText(
         "window 0.000 → 7.500 s",
       );

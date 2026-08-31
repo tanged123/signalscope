@@ -69,11 +69,37 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     if head.app != "signalscope" {
         return Err(SessionError::WrongApplication(head.app));
     }
-    if head.schema_version == SESSION_SCHEMA_VERSION {
-        Ok(serde_json::from_value(value)?)
-    } else {
-        Err(SessionError::UnsupportedVersion(head.schema_version))
+    let current = match head.schema_version {
+        SESSION_SCHEMA_VERSION => value,
+        22 => migrate_v22(value),
+        version => return Err(SessionError::UnsupportedVersion(version)),
+    };
+    Ok(serde_json::from_value(current)?)
+}
+
+fn migrate_v22(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
+        for tab in tabs {
+            let Some(panels) = tab
+                .get_mut("panels")
+                .and_then(|panels| panels.as_array_mut())
+            else {
+                continue;
+            };
+            for panel in panels {
+                let Some(panel) = panel.as_object_mut() else {
+                    continue;
+                };
+                panel.insert("legend_state".into(), "keys".into());
+                panel.insert("legend_position".into(), serde_json::Value::Null);
+                panel.insert("legend_size".into(), serde_json::Value::Null);
+                panel.insert("legend_anchor".into(), serde_json::Value::Null);
+                panel.insert("legend_hint_dismissed".into(), false.into());
+            }
+        }
     }
+    value
 }
 
 /// Serializes `session` to `path` through a sibling temporary file that is
@@ -262,6 +288,11 @@ mod tests {
                     focus: Vec::new(),
                     ghost_mode: GhostMode::All,
                     split_by: SplitDimension::None,
+                    legend_state: LegendState::Keys,
+                    legend_position: None,
+                    legend_size: None,
+                    legend_anchor: None,
+                    legend_hint_dismissed: false,
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -315,7 +346,7 @@ mod tests {
 
     #[test]
     fn earlier_schema_versions_are_rejected() {
-        for version in 1..SESSION_SCHEMA_VERSION {
+        for version in 1..22 {
             let value = serde_json::json!({
                 "app": "signalscope",
                 "schema_version": version,
@@ -325,5 +356,66 @@ mod tests {
                 Err(SessionError::UnsupportedVersion(_))
             ));
         }
+    }
+
+    #[test]
+    fn v22_panels_migrate_to_the_default_legend() {
+        let panel = serde_json::json!({
+            "id": "panel-a",
+            "title": "Panel A",
+            "mode": "time",
+            "axis_style": "gutter",
+            "bindings": [],
+            "color_by": "source",
+            "overrides": [],
+            "focus": [],
+            "ghost_mode": "all",
+            "split_by": "none",
+            "y_range": null,
+            "x_range": null,
+            "x_label": null,
+            "y_label": null,
+            "time_window": null,
+            "annotations": [],
+            "show_stats": false
+        });
+        let value = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 22,
+            "theme": "dark",
+            "linked_time": {
+                "t0": 0.0,
+                "t1": 1.0,
+                "linked": true,
+                "paused": false,
+                "cursorT": null,
+                "mode": "fixed"
+            },
+            "active_tab_id": "workspace-1",
+            "tabs": [{
+                "id": "workspace-1",
+                "title": "Workspace 1",
+                "cursor_mode": "none",
+                "focused_panel_id": "panel-a",
+                "maximized_panel_id": null,
+                "panels": [panel],
+                "layout": [{
+                    "height": 1.0,
+                    "panels": [{"panel_id": "panel-a", "width": 1.0}]
+                }]
+            }],
+            "named_sets": [],
+            "derived": [],
+            "derived_bundles": [],
+            "sources": []
+        });
+
+        let restored = from_json(&value.to_string()).expect("v22 migrates");
+        let panel = &restored.tabs[0].panels[0];
+        assert_eq!(panel.legend_state, LegendState::Keys);
+        assert_eq!(panel.legend_position, None);
+        assert_eq!(panel.legend_size, None);
+        assert_eq!(panel.legend_anchor, None);
+        assert!(!panel.legend_hint_dismissed);
     }
 }

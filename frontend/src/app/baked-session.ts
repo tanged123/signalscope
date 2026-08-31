@@ -202,6 +202,16 @@ function isPanel(value: unknown): boolean {
     value.focus.every(isFocus) &&
     ["ghost", "all"].includes(String(value.ghost_mode)) &&
     ["none", "source", "channel"].includes(String(value.split_by)) &&
+    ["badge", "keys", "roster", "rail"].includes(String(value.legend_state)) &&
+    isNullable(value.legend_position, isNumberPair) &&
+    isNullable(value.legend_size, isNumberPair) &&
+    isNullable(
+      value.legend_anchor,
+      (item): item is string =>
+        typeof item === "string" &&
+        ["top_left", "top_right", "bottom_left", "bottom_right"].includes(item),
+    ) &&
+    typeof value.legend_hint_dismissed === "boolean" &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&

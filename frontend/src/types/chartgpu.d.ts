@@ -1,5 +1,6 @@
 interface GPUDevice {
   readonly queue: unknown;
+  destroy(): void;
 }
 
 interface GPUAdapter {
@@ -47,6 +48,8 @@ declare module "@chartgpu/chartgpu" {
     animation?: boolean;
     renderMode?: "internal" | "external";
     tooltip?: { show: boolean };
+    legend?: { show: boolean };
+    performance?: { lod: "auto" | "strict" };
     grid?: { left: number; right: number; top: number; bottom: number };
     gridLines?: { show?: boolean; color?: string };
     xAxis?: AxisOptions;
@@ -58,6 +61,10 @@ declare module "@chartgpu/chartgpu" {
     readonly options: Readonly<ChartGPUOptions>;
     readonly disposed: boolean;
     setOption(options: ChartGPUOptions): void;
+    setViewRange(range: {
+      x: { min: number; max: number };
+      y: { min: number; max: number };
+    }): void;
     needsRender(): boolean;
     renderFrame(): boolean;
     resize(): void;

@@ -121,9 +121,11 @@ Install the repository hook with `./scripts/install-hooks.sh`. Do not use a
 blanket `git add -A` or silently stage unrelated work. Review staged and
 unstaged diffs separately before committing.
 
-Every completed PR must include a synchronized version bump as its final change before handoff. Only
-do a version bump when the PR is absolutely completed, do not version bump for intermediate commits.
-Choose `major`for breaking API, protocol, schema, or session-compatibility changes; `minor`
+Each PR targeting `main` must include exactly one synchronized version increment.
+Make it once, as the final PR-level change before handoff. Never increment the
+version for individual commits, retries, test fixes, or later updates in the
+same PR; keep the version already selected. Choose `major` for breaking API,
+protocol, schema, or session-compatibility changes; `minor`
 for backward-compatible user-facing features or capabilities; and `patch` for
 fixes, refactors, tests, build/CI/tooling, or documentation. Run
 `./scripts/version.sh bump <major|minor|patch>` followed by

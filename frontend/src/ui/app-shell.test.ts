@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as M4Feed from "../render/m4-feed";
+
+const prepareResponseFeeds = vi.hoisted(() => vi.fn());
+
+vi.mock("../render/m4-feed", async () => ({
+  ...(await vi.importActual<typeof M4Feed>("../render/m4-feed")),
+  prepareResponseFeeds,
+}));
 
 import { WorkspaceModel } from "../app/workspace";
 import { SelectionModel } from "../app/selection";
@@ -16,6 +24,7 @@ import {
   type ColumnarTileResponse,
 } from "../app/bin-columns";
 import type { SeriesRef } from "../generated/session";
+import type { GpuContext, GpuFailure } from "../render/gpu-context";
 import { TileWindowCache } from "../app/tile-window-cache";
 import {
   AppShell,
@@ -23,6 +32,7 @@ import {
   bundleCompletionEntries,
   clearIngestProgress,
   exportSourceOptions,
+  formatPresentationStatus,
   groupCursorRows,
   renderBatchProgress,
   renderDockFooter,
@@ -30,6 +40,115 @@ import {
   shellMarkup,
   statusAggregate,
 } from "./app-shell";
+
+describe("presentation status", () => {
+  it("is quiet at preferred density and explicit when constrained", () => {
+    expect(
+      formatPresentationStatus({
+        density: 2,
+        targetDensity: 2,
+        limited: false,
+        fits: true,
+      }),
+    ).toBe("");
+    expect(
+      formatPresentationStatus({
+        density: 1.25,
+        targetDensity: 2,
+        limited: true,
+        fits: true,
+      }),
+    ).toBe("resolution 1.25/2 bins/px");
+  });
+});
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function tileResponse(signalId = "1"): ColumnarTileResponse {
+  return {
+    requestId: `tiles-${signalId}`,
+    series: [
+      {
+        signalId,
+        signalPath: "run/value",
+        unit: "V",
+        level: 0,
+        bins: binColumnsFromWire([
+          {
+            t0: 0,
+            t1: 1,
+            first: 1,
+            last: 2,
+            min: 1,
+            max: 2,
+            sum: 3,
+            sum_sq: 5,
+            finite_count: "2",
+            sample_count: "2",
+            has_gap: false,
+          },
+        ]),
+      },
+    ],
+  };
+}
+
+type RefreshShell = {
+  root: HTMLElement;
+  workspace: { panels(): { id: string; mode: "time" }[] };
+  workspaceView: null;
+  plane: Pick<DataPlane, "queryTiles">;
+  tileWindowCache: TileWindowCache;
+  panelSignalIds: (panel: { id: string }) => {
+    ids: string[];
+    missing: string[];
+  };
+  resolvedFor: () => { visible: boolean }[];
+  effectiveWindow: () => { t0: number; t1: number };
+  renderTiles: () => void;
+  reportError: (error: unknown) => void;
+  refreshToken: number;
+  refreshPromise: Promise<void> | null;
+  refreshQueued: boolean;
+  tilesByPanel: Map<string, ColumnarTileResponse>;
+  missingByPanel: Map<string, string[]>;
+  refreshTiles(): Promise<void>;
+};
+
+function refreshShell(
+  queryTiles: DataPlane["queryTiles"],
+  panelIds = ["panel-1"],
+): RefreshShell {
+  const shell = Object.create(AppShell.prototype) as RefreshShell;
+  shell.root = document.createElement("div");
+  shell.root.innerHTML = '<div class="workspace"></div>';
+  shell.workspace = {
+    panels: () => panelIds.map((id) => ({ id, mode: "time" as const })),
+  };
+  shell.workspaceView = null;
+  shell.plane = { queryTiles };
+  shell.tileWindowCache = new TileWindowCache();
+  shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
+  shell.resolvedFor = vi.fn(() => [{ visible: true }]);
+  shell.effectiveWindow = vi.fn(() => ({ t0: 0, t1: 5 }));
+  shell.renderTiles = vi.fn();
+  shell.reportError = vi.fn();
+  shell.refreshToken = 0;
+  shell.refreshPromise = null;
+  shell.refreshQueued = false;
+  shell.tilesByPanel = new Map();
+  shell.missingByPanel = new Map();
+  return shell;
+}
 
 describe("sample refresh requests", () => {
   interface RefreshProbe {
@@ -40,11 +159,12 @@ describe("sample refresh requests", () => {
     plane: Pick<DataPlane, "queryTiles" | "querySamples">;
     tileWindowCache: TileWindowCache;
     panelSignalIds(): { ids: string[]; missing: string[] };
+    resolvedFor(): { visible: boolean }[];
     effectiveWindow(): { t0: number; t1: number };
     renderTiles(): void;
     reportError(error: unknown): void;
     refreshToken: number;
-    refreshTilesPass(): Promise<void>;
+    refreshTilesPass(token: number): Promise<void>;
   }
 
   function refreshProbe() {
@@ -63,6 +183,7 @@ describe("sample refresh requests", () => {
     shell.plane = { queryTiles, querySamples };
     shell.tileWindowCache = new TileWindowCache();
     shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
+    shell.resolvedFor = vi.fn(() => [{ visible: true }]);
     shell.effectiveWindow = vi.fn(() => ({ t0: 20, t1: 79 }));
     shell.renderTiles = vi.fn();
     shell.reportError = vi.fn();
@@ -72,8 +193,118 @@ describe("sample refresh requests", () => {
 
   it("does not issue an uncapped sample request for live refresh", async () => {
     const { shell, querySamples } = refreshProbe();
-    await shell.refreshTilesPass();
+    await shell.refreshTilesPass(0);
     expect(querySamples).not.toHaveBeenCalled();
+  });
+});
+
+describe("GPU failure handling", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    {
+      kind: "device-lost" as const,
+      warning: "WebGPU device lost — reconnecting",
+    },
+    {
+      kind: "render-failed" as const,
+      warning: "WebGPU renderer unavailable — reconnecting",
+    },
+  ])(
+    "releases panels and requests recovery after $kind",
+    ({ kind, warning: expectedWarning }) => {
+      const root = document.createElement("div");
+      root.innerHTML = shellMarkup();
+      let failure: ((value: GpuFailure) => void) | undefined;
+      const workspaceView = {
+        setGpu: vi.fn(),
+        releaseGpu: vi.fn(),
+      };
+      const shell = Object.create(AppShell.prototype) as {
+        root: HTMLElement;
+        gpu: GpuContext | null;
+        signals: SignalSummary[];
+        workspaceView: typeof workspaceView;
+        requestGpuRecovery: () => void;
+        bindGpuWarning(): void;
+        refreshTiles(): Promise<void>;
+        setGpu(gpu: GpuContext): void;
+      };
+      shell.root = root;
+      shell.gpu = null;
+      shell.signals = [];
+      shell.workspaceView = workspaceView;
+      shell.requestGpuRecovery = vi.fn();
+      shell.refreshTiles = vi.fn(() => Promise.resolve());
+      const dispose = vi.fn();
+      const gpu = {
+        onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
+          failure = callback;
+          return vi.fn();
+        }),
+        dispose,
+      } as unknown as GpuContext;
+
+      const reload = vi.fn();
+      vi.stubGlobal("window", { location: { reload } });
+      shell.bindGpuWarning();
+      shell.setGpu(gpu);
+      failure?.({ kind, message: "adapter reset" });
+
+      const warning = root.querySelector<HTMLElement>(".gpu-warning");
+      expect(workspaceView.releaseGpu).toHaveBeenCalledOnce();
+      expect(dispose).toHaveBeenCalledOnce();
+      expect(shell.gpu).toBeNull();
+      expect(shell.requestGpuRecovery).toHaveBeenCalledOnce();
+      expect(warning?.textContent).toContain(expectedWarning);
+      expect(warning?.hidden).toBe(false);
+      expect(
+        root.querySelector<HTMLButtonElement>(".gpu-warning-dismiss")?.hidden,
+      ).toBe(true);
+      root.querySelector<HTMLButtonElement>(".gpu-warning-reload")?.click();
+      expect(reload).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("reports uncaptured GPU errors without releasing the workspace", () => {
+    const root = document.createElement("div");
+    root.innerHTML = shellMarkup();
+    let failure: ((value: GpuFailure) => void) | undefined;
+    const workspaceView = {
+      setGpu: vi.fn(),
+      releaseGpu: vi.fn(),
+    };
+    const reportError = vi.fn();
+    const shell = Object.create(AppShell.prototype) as {
+      root: HTMLElement;
+      gpu: GpuContext | null;
+      signals: SignalSummary[];
+      workspaceView: typeof workspaceView;
+      reportError(error: unknown): void;
+      refreshTiles(): Promise<void>;
+      setGpu(gpu: GpuContext): void;
+    };
+    shell.root = root;
+    shell.gpu = null;
+    shell.signals = [];
+    shell.workspaceView = workspaceView;
+    shell.reportError = reportError;
+    shell.refreshTiles = vi.fn(() => Promise.resolve());
+    const gpu = {
+      onFailure: vi.fn((callback: (value: GpuFailure) => void) => {
+        failure = callback;
+        return vi.fn();
+      }),
+      dispose: vi.fn(),
+    } as unknown as GpuContext;
+
+    shell.setGpu(gpu);
+    failure?.({ kind: "uncaptured-error", message: "shader failed" });
+
+    expect(reportError).toHaveBeenCalledWith("shader failed");
+    expect(workspaceView.releaseGpu).not.toHaveBeenCalled();
   });
 });
 
@@ -114,11 +345,12 @@ describe("tile refresh cache", () => {
       plane: Pick<DataPlane, "queryTiles">;
       tileWindowCache: TileWindowCache;
       panelSignalIds(): { ids: string[]; missing: string[] };
+      resolvedFor(): { visible: boolean }[];
       effectiveWindow(): { t0: number; t1: number };
       renderTiles(): void;
       reportError: ReturnType<typeof vi.fn>;
       refreshToken: number;
-      refreshTilesPass(): Promise<void>;
+      refreshTilesPass(token: number): Promise<void>;
     };
     shell.root = document.createElement("div");
     shell.root.innerHTML = '<div class="workspace"></div>';
@@ -129,17 +361,268 @@ describe("tile refresh cache", () => {
     shell.plane = { queryTiles };
     shell.tileWindowCache = new TileWindowCache();
     shell.panelSignalIds = vi.fn(() => ({ ids: ["1"], missing: [] }));
+    shell.resolvedFor = vi.fn(() => [{ visible: true }]);
     shell.effectiveWindow = vi.fn(() => ({ t0: 0, t1: 5 }));
     shell.renderTiles = vi.fn();
     shell.reportError = vi.fn();
     shell.refreshToken = 0;
 
-    await shell.refreshTilesPass();
-    await shell.refreshTilesPass();
+    await shell.refreshTilesPass(0);
+    await shell.refreshTilesPass(0);
 
     expect(queryTiles).toHaveBeenCalledOnce();
     const { reportError } = shell;
     expect(reportError).not.toHaveBeenCalled();
+  });
+});
+
+describe("adaptive tile refresh", () => {
+  beforeEach(() => {
+    prepareResponseFeeds.mockReset();
+  });
+
+  it("refreshes adaptive tiles when a panel changes physical width", () => {
+    const shell = Object.create(AppShell.prototype) as {
+      scheduleRender: ReturnType<typeof vi.fn>;
+      scheduleRefresh: ReturnType<typeof vi.fn>;
+      handlePanelResize(): void;
+    };
+    shell.scheduleRender = vi.fn();
+    shell.scheduleRefresh = vi.fn();
+
+    shell.handlePanelResize();
+
+    expect(shell.scheduleRender).toHaveBeenCalledOnce();
+    expect(shell.scheduleRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("publishes a retained overview before scheduling zoom-out refinement", () => {
+    const shell = Object.create(AppShell.prototype) as {
+      workspace: {
+        panel(id: string): { id: string } | undefined;
+        panels(): { id: string }[];
+        linkedTime(): { linked: boolean; t0: number; t1: number };
+        setLinkedWindow(t0: number, t1: number): void;
+      };
+      tileWindowCache: TileWindowCache;
+      tilesByPanel: Map<string, ColumnarTileResponse>;
+      renderWindowReadout: ReturnType<typeof vi.fn>;
+      markHistoryDirty: ReturnType<typeof vi.fn>;
+      scheduleRender: ReturnType<typeof vi.fn>;
+      scheduleRefresh: ReturnType<typeof vi.fn>;
+      applyTimeWindow(panelId: string, t0: number, t1: number): void;
+    };
+    const panel = { id: "panel-1" };
+    let window = { linked: true, t0: 45, t1: 55 };
+    shell.workspace = {
+      panel: (id) => (id === panel.id ? panel : undefined),
+      panels: () => [panel],
+      linkedTime: () => window,
+      setLinkedWindow: (t0, t1) => {
+        window = { linked: true, t0, t1 };
+      },
+    };
+    shell.tileWindowCache = new TileWindowCache();
+    const overview = tileResponse("overview");
+    const detail = tileResponse("detail");
+    shell.tileWindowCache.store(panel.id, {
+      response: overview,
+      window: { t0: 0, t1: 100 },
+      pixelWidth: 1000,
+      requestedDevicePixels: 2000,
+      idsKey: "1",
+    });
+    shell.tileWindowCache.store(panel.id, {
+      response: detail,
+      window: { t0: 40, t1: 60 },
+      pixelWidth: 1000,
+      requestedDevicePixels: 2000,
+      idsKey: "1",
+    });
+    shell.tilesByPanel = new Map([[panel.id, detail]]);
+    shell.renderWindowReadout = vi.fn();
+    shell.markHistoryDirty = vi.fn();
+    shell.scheduleRender = vi.fn();
+    shell.scheduleRefresh = vi.fn();
+
+    shell.applyTimeWindow(panel.id, 10, 90);
+
+    expect(shell.tilesByPanel.get(panel.id)).toBe(overview);
+    expect(shell.scheduleRender).toHaveBeenCalledOnce();
+    expect(shell.scheduleRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps stale drawable tiles while refinement is pending", async () => {
+    const pending = deferred<ColumnarTileResponse>();
+    const queryTiles = vi.fn(() => pending.promise);
+    const shell = refreshShell(queryTiles);
+    const stale = tileResponse();
+    shell.tileWindowCache.store("panel-1", {
+      response: {
+        ...stale,
+        series: stale.series.map((series) => ({
+          ...series,
+          level: 2,
+          bins: binColumnsFromWire(
+            Array.from({ length: 20 }, (_, index) => ({
+              t0: index,
+              t1: index + 5,
+              first: 1,
+              last: 2,
+              min: 1,
+              max: 2,
+              sum: 3,
+              sum_sq: 5,
+              finite_count: "2",
+              sample_count: "2",
+              has_gap: false,
+            })),
+          ),
+        })),
+      },
+      window: { t0: 0, t1: 25 },
+      pixelWidth: 1,
+      requestedDevicePixels: 1,
+      idsKey: "1",
+    });
+    shell.effectiveWindow = vi.fn(() => ({ t0: 8, t1: 12 }));
+    shell.tilesByPanel = new Map([["panel-1", stale]]);
+
+    const refresh = shell.refreshTiles();
+    await Promise.resolve();
+
+    expect(queryTiles).toHaveBeenCalledOnce();
+    expect(shell.tilesByPanel.get("panel-1")).toBe(stale);
+    expect(shell.renderTiles).not.toHaveBeenCalled();
+    pending.resolve(tileResponse());
+    await refresh;
+  });
+
+  it("discards a superseded response before the queued refresh publishes", async () => {
+    const first = deferred<ColumnarTileResponse>();
+    const second = deferred<ColumnarTileResponse>();
+    const queryTiles = vi
+      .fn<DataPlane["queryTiles"]>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const shell = refreshShell(queryTiles);
+
+    const refresh = shell.refreshTiles();
+    await Promise.resolve();
+    const queued = shell.refreshTiles();
+    first.resolve(tileResponse("first"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(shell.renderTiles).not.toHaveBeenCalled();
+    expect(shell.tileWindowCache.get("panel-1")).toBeNull();
+    second.resolve(tileResponse("second"));
+    await Promise.all([refresh, queued]);
+
+    expect(shell.renderTiles).toHaveBeenCalledOnce();
+    expect(shell.tileWindowCache.get("panel-1")?.response.requestId).toBe(
+      "tiles-second",
+    );
+  });
+
+  it("prewarms every replacement before publishing the map", async () => {
+    const order: string[] = [];
+    prepareResponseFeeds.mockImplementation(() => order.push("prewarm"));
+    const queryTiles = vi.fn(
+      (request: Parameters<DataPlane["queryTiles"]>[0]) =>
+        Promise.resolve(tileResponse(request.signal_ids[0] ?? "1")),
+    );
+    const shell = refreshShell(queryTiles, ["panel-1", "panel-2"]);
+    shell.panelSignalIds = vi.fn((panel: { id: string }) => ({
+      ids: [panel.id === "panel-1" ? "1" : "2"],
+      missing: [],
+    })) as RefreshShell["panelSignalIds"];
+    shell.renderTiles = vi.fn(() => order.push("render"));
+
+    await shell.refreshTiles();
+
+    expect(prepareResponseFeeds).toHaveBeenCalledTimes(2);
+    expect(
+      queryTiles.mock.calls.every(
+        ([request]) => request.max_total_bins === null,
+      ),
+    ).toBe(true);
+    expect(order).toEqual(["prewarm", "prewarm", "render"]);
+  });
+
+  it("reports feed preparation failures without publishing a replacement", async () => {
+    const preparationError = new Error("feed allocation failed");
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve(tileResponse("replacement")),
+    );
+    const shell = refreshShell(queryTiles);
+    const current = tileResponse("current");
+    const stale = {
+      ...current,
+      series: current.series.map((series) => ({
+        ...series,
+        level: 2,
+        bins: binColumnsFromWire(
+          Array.from({ length: 20 }, (_, index) => ({
+            t0: index,
+            t1: index + 6,
+            first: 1,
+            last: 2,
+            min: 1,
+            max: 2,
+            sum: 3,
+            sum_sq: 5,
+            finite_count: "2",
+            sample_count: "2",
+            has_gap: false,
+          })),
+        ),
+      })),
+    };
+    shell.tilesByPanel = new Map([["panel-1", current]]);
+    shell.tileWindowCache.store("panel-1", {
+      response: stale,
+      window: { t0: 0, t1: 25 },
+      pixelWidth: 1,
+      requestedDevicePixels: 1,
+      idsKey: "1",
+    });
+    prepareResponseFeeds.mockImplementation(() => {
+      throw preparationError;
+    });
+
+    await shell.refreshTiles();
+
+    expect(shell.reportError).toHaveBeenCalledWith(preparationError);
+    expect(shell.tilesByPanel.get("panel-1")).toBe(current);
+    expect(shell.tileWindowCache.get("panel-1")?.response).toBe(stale);
+    expect(shell.renderTiles).not.toHaveBeenCalled();
+  });
+
+  it("uniformly lowers density instead of rejecting more than 3,000 series", async () => {
+    const queryTiles = vi.fn<DataPlane["queryTiles"]>(() =>
+      Promise.resolve(tileResponse()),
+    );
+    const shell = refreshShell(queryTiles);
+    Object.defineProperty(
+      shell.root.querySelector(".workspace"),
+      "clientWidth",
+      {
+        value: 1000,
+      },
+    );
+    shell.panelSignalIds = vi.fn(() => ({
+      ids: Array.from({ length: 3001 }, (_, index) => String(index)),
+      missing: [],
+    }));
+
+    await shell.refreshTiles();
+
+    expect(shell.reportError).not.toHaveBeenCalled();
+    expect(queryTiles).toHaveBeenCalledOnce();
+    expect(queryTiles.mock.calls[0]?.[0].pixel_width).toBeGreaterThan(0);
+    expect(queryTiles.mock.calls[0]?.[0].pixel_width).toBeLessThan(2048);
+    expect(shell.renderTiles).toHaveBeenCalledOnce();
   });
 });
 

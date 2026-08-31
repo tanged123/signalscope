@@ -9,6 +9,9 @@ export default defineConfig({
   // GitHub's SwiftShader WebGPU adapter is not available to two browser
   // processes reliably; local hardware remains parallel.
   workers: process.env.CI ? 1 : undefined,
+  // SwiftShader can briefly reject a context while the preceding test's GPU
+  // device is being released. Retry the isolated test with a fresh context.
+  retries: process.env.CI ? 2 : 0,
   metadata: {
     coverage,
   },
@@ -33,6 +36,7 @@ export default defineConfig({
         "--enable-features=Vulkan",
         "--use-angle=swiftshader",
         "--use-webgpu-adapter=swiftshader",
+        "--use-gpu-in-tests",
       ],
       ...(executablePath === undefined ? {} : { executablePath }),
     },

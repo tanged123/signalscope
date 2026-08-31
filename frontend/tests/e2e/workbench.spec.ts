@@ -93,6 +93,13 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
     "panel-2",
   );
 
+  const row = page.locator('.outline-scroll [data-row-kind="series"]').first();
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await row.dispatchEvent("dragstart", { dataTransfer });
+  await page.locator(".panel").dispatchEvent("dragover", { dataTransfer });
+  await page.locator(".panel").dispatchEvent("drop", { dataTransfer });
+  await expect(page.locator(".panel .binding-chip")).toHaveCount(1);
+
   await page
     .locator(".workspace-tab")
     .first()
@@ -113,7 +120,7 @@ test("workspace tabs keep independent panel layouts", async ({ page }) => {
     "data-panel-id",
     "panel-2",
   );
-  await expect(page.locator(".binding-chip")).toHaveCount(0);
+  await expect(page.locator(".binding-chip")).toHaveCount(1);
 });
 
 test("overflowing workspace tabs keep their controls clear", async ({
@@ -174,11 +181,11 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
     const { Catalog } = catalogModule as { Catalog: typeof CatalogClass };
     const host = document.createElement("div");
     host.id = "legend-probe";
-    host.style.width = "1400px";
+    host.style.width = "1200px";
     host.style.height = "320px";
     host.style.display = "flex";
     document.body.replaceChildren(host);
-    const summaries = Array.from({ length: 40 }, (_, index) => {
+    const summaries = Array.from({ length: 100 }, (_, index) => {
       const number = String(index + 1).padStart(2, "0");
       return {
         signal_id: `id:run_${number}/temp`,
@@ -203,11 +210,15 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onDropSignals: () => {},
       onDropSet: () => {},
       onFocusToggle: () => {},
+      onFocusSolo: () => {},
       onClearFocus: () => {},
       onMuteSelector: () => {},
       onMuteSeries: () => {},
       onRemoveBinding: () => {},
       onToggleGhostMode: () => {},
+      onLegendLayout: (_id, layout) => {
+        if (layout.state !== undefined) host.dataset.legendState = layout.state;
+      },
       onSetColorBy: (_id, dimension) => {
         host.dataset.colorBy = dimension;
       },
@@ -265,7 +276,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
           {
             kind: "pick" as const,
             selector: null,
-            refs: Array.from({ length: 40 }, (_, index) => ({
+            refs: Array.from({ length: 100 }, (_, index) => ({
               source_key: `run_${String(index + 1).padStart(2, "0")}`,
               channel: "temp",
             })),
@@ -274,9 +285,22 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         ],
         color_by: "source",
         overrides: [],
-        focus: [],
+        focus: Array.from({ length: 12 }, (_, index) => ({
+          kind: "series" as const,
+          ref: {
+            source_key: `run_${String(index + 1).padStart(2, "0")}`,
+            channel: "temp",
+          },
+          source_key: null,
+          channel: "temp",
+        })),
         ghost_mode: "all",
         split_by: "none",
+        legend_state: "roster",
+        legend_position: null,
+        legend_size: null,
+        legend_anchor: null,
+        legend_hint_dismissed: false,
         y_range: null,
         x_range: null,
         x_label: null,
@@ -290,15 +314,96 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
   });
 
   const panel = page.locator("#legend-probe .panel");
-  await expect(panel.locator(".binding-chip")).toHaveText("temp ×40");
-  await expect(panel.locator(".legend-count-token")).toHaveCount(2);
+  await expect(panel.locator(".binding-chip")).toHaveText("temp ×100");
+  await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
   await expect(panel.locator(".panel-actions")).toBeVisible();
-  await panel.locator(".legend-count-token").first().click();
-  await expect(panel.locator(".matrix-roster")).toBeVisible();
+  const plotLegend = panel.locator(".plot-series-legend");
+  await expect(plotLegend.locator(".plot-legend-row")).toHaveCount(12);
   await expect
-    .poll(() => panel.locator(".matrix-roster-row").count())
-    .toBeLessThan(40);
-  await panel.locator(".matrix-roster-row").first().click();
+    .poll(() =>
+      plotLegend.evaluate((element) => {
+        const row = getComputedStyle(
+          element.querySelector(".plot-legend-row") as HTMLElement,
+        );
+        return {
+          plotFamilyApplied: row.fontFamily.includes("JetBrains Mono"),
+          plotSizeApplied: row.fontSize === "10px",
+        };
+      }),
+    )
+    .toEqual({ plotFamilyApplied: true, plotSizeApplied: true });
+  const beforeResize = await plotLegend.boundingBox();
+  const resizeHandle = plotLegend.locator(".plot-legend-resize-corner");
+  const resizeBox = await resizeHandle.boundingBox();
+  if (beforeResize === null || resizeBox === null)
+    throw new Error("Plot legend resize handle is not laid out");
+  await page.mouse.move(
+    resizeBox.x + resizeBox.width / 2,
+    resizeBox.y + resizeBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(resizeBox.x, resizeBox.y + 80);
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await plotLegend.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(beforeResize.height + 50);
+  const beforeDrag = await plotLegend.boundingBox();
+  const dragHandle = plotLegend.locator(".plot-legend-drag");
+  const handleBox = await dragHandle.boundingBox();
+  if (beforeDrag === null || handleBox === null)
+    throw new Error("Plot legend is not laid out");
+  await page.mouse.move(
+    handleBox.x + handleBox.width / 2,
+    handleBox.y + handleBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + 100, handleBox.y + 40);
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await plotLegend.boundingBox())?.x ?? beforeDrag.x)
+    .toBeGreaterThan(beforeDrag.x + 50);
+  await expect(plotLegend.locator(".plot-legend-hide")).toHaveCount(0);
+  await plotLegend.locator(".plot-legend-collapse").click();
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-legend-state",
+    "badge",
+  );
+  await expect
+    .poll(() =>
+      panel.evaluate((element) => ({
+        chart: getComputedStyle(
+          element.querySelector(".chart-host") as HTMLElement,
+        ).zIndex,
+        overlay: getComputedStyle(
+          element.querySelector(".overlay-canvas") as HTMLElement,
+        ).zIndex,
+        plotIsolation: getComputedStyle(
+          element.querySelector(".plot-wrap") as HTMLElement,
+        ).isolation,
+        roster: getComputedStyle(
+          element.querySelector(".plot-series-legend") as HTMLElement,
+        ).zIndex,
+      })),
+    )
+    .toEqual({
+      chart: "0",
+      overlay: "1",
+      plotIsolation: "isolate",
+      roster: "2",
+    });
+  await expect
+    .poll(() => panel.locator(".plot-legend-roster-row").count())
+    .toBeLessThan(100);
+  const rosterRows = panel.locator(".plot-legend-roster-rows");
+  await rosterRows.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(panel.locator(".plot-legend-roster-row").last()).toContainText(
+    "run_100",
+  );
+  await panel.locator(".plot-legend-search").fill("* @ run_01");
+  await expect(panel.locator(".plot-legend-roster-row")).toHaveCount(1);
+  await panel.locator(".plot-legend-roster-row").first().click();
   await expect(panel.locator(".binding-chip")).toHaveCount(1);
   await panel.locator(".binding-chip").click();
   await expect(panel.locator(".binding-popover")).toBeVisible();
@@ -757,16 +862,95 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await expect(page.locator(".panel .binding-chip")).toHaveCount(0);
 });
 
-test("legend strip stays bounded", async ({ page }) => {
+test("legend console replaces the strip and supports workspace-wide states", async ({
+  page,
+}) => {
   await gotoApp(page);
   const panel = page.locator(".panel").first();
-  const strip = panel.locator(".panel-legend-strip");
-  await expect(strip).toBeVisible();
-  await expect(strip.locator(".legend-count-token")).toHaveCount(2);
-  await expect(strip).toContainText("⇧click focus");
-  await expect(panel.locator(".panel-header .legend-count-token")).toHaveCount(
-    0,
+  await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
+  await expect(panel.locator(".plot-series-legend")).toBeVisible();
+  await page.locator(".layout-slot").click();
+  await page.locator('[data-legend-state="badge"]').click();
+  await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
+    "data-state",
+    "badge",
   );
+  await panel.locator(".plot-legend-badge-summary").click();
+  const wrap = panel.locator(".plot-wrap");
+  const drag = panel.locator(".plot-legend-drag");
+  const legend = panel.locator(".plot-series-legend");
+  const [wrapBox, dragBox, legendBox] = await Promise.all([
+    wrap.boundingBox(),
+    drag.boundingBox(),
+    legend.boundingBox(),
+  ]);
+  if (wrapBox === null || dragBox === null || legendBox === null)
+    throw new Error("Legend dock targets are not laid out");
+  const dragX = dragBox.x + dragBox.width / 2;
+  await page.mouse.move(dragX, dragBox.y + dragBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    dragX + wrapBox.x + wrapBox.width - legendBox.x - legendBox.width - 8,
+    dragBox.y,
+  );
+  await expect(wrap).toHaveClass(/legend-dock-preview/);
+  await page.mouse.up();
+  await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
+    "data-state",
+    "rail",
+  );
+  await expect(wrap).toHaveClass(/legend-rail/);
+  await expect
+    .poll(() =>
+      wrap.evaluate((element) => {
+        const wrapRect = element.getBoundingClientRect();
+        const overlayRect = (
+          element.querySelector(".overlay-canvas") as HTMLElement
+        ).getBoundingClientRect();
+        const legendRect = (
+          element.querySelector(".plot-series-legend") as HTMLElement
+        ).getBoundingClientRect();
+        return {
+          plotReflowed: overlayRect.width < wrapRect.width,
+          fullHeight: Math.abs(legendRect.height - wrapRect.height) < 1,
+        };
+      }),
+    )
+    .toEqual({ plotReflowed: true, fullHeight: true });
+  const rail = panel.locator(".plot-series-legend");
+  const railResize = rail.locator(".plot-legend-resize-left");
+  const [railBox, railResizeBox] = await Promise.all([
+    rail.boundingBox(),
+    railResize.boundingBox(),
+  ]);
+  if (railBox === null || railResizeBox === null)
+    throw new Error("Legend rail seam is not laid out");
+  await page.mouse.move(
+    railResizeBox.x + railResizeBox.width / 2,
+    railResizeBox.y + railResizeBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(railBox.x + railBox.width - 2, railResizeBox.y);
+  await page.mouse.up();
+  await expect(wrap).toHaveClass(/legend-rail-collapsed/);
+  await expect(rail).toHaveAttribute("data-collapsed", "true");
+  const collapsedResizeBox = await railResize.boundingBox();
+  if (collapsedResizeBox === null)
+    throw new Error("Collapsed legend rail seam is not laid out");
+  await page.mouse.move(
+    collapsedResizeBox.x + collapsedResizeBox.width / 2,
+    collapsedResizeBox.y + collapsedResizeBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(collapsedResizeBox.x - 180, collapsedResizeBox.y);
+  await page.mouse.up();
+  await expect(wrap).not.toHaveClass(/legend-rail-collapsed/);
+  await panel.locator(".plot-legend-undock").click();
+  await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
+    "data-state",
+    "roster",
+  );
+  await expect(wrap).not.toHaveClass(/legend-rail/);
 });
 
 test("seam drag resizes panel rows", async ({ page }) => {

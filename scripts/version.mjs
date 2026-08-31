@@ -43,7 +43,7 @@ function usage() {
 Commands:
   get                         Print the canonical application version.
   check                       Verify every release manifest is synchronized.
-  check-pr <base-ref>        Require a version strictly newer than base-ref.
+  check-pr <base-ref>        Require one semantic-version increment from base-ref.
   set <major.minor.patch>     Set all application release manifests.
   bump <major|minor|patch>    Increment the canonical version everywhere.
 
@@ -66,12 +66,16 @@ function formatVersion(parts) {
   return parts.join(".");
 }
 
-function compareVersions(left, right) {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index])
-      return left[index] > right[index] ? 1 : -1;
-  }
-  return 0;
+function isSingleIncrement(current, base) {
+  return (
+    (current[0] === base[0] &&
+      current[1] === base[1] &&
+      current[2] === base[2] + 1) ||
+    (current[0] === base[0] &&
+      current[1] === base[1] + 1 &&
+      current[2] === 0) ||
+    (current[0] === base[0] + 1 && current[1] === 0 && current[2] === 0)
+  );
 }
 
 function cargoWorkspaceVersion(text) {
@@ -300,13 +304,13 @@ try {
       );
     } else {
       const parsedBase = parseVersion(base, "base version");
-      if (compareVersions(current, parsedBase) <= 0) {
+      if (!isSingleIncrement(current, parsedBase)) {
         throw new Error(
-          `PR version ${formatVersion(current)} must be newer than base version ${base}`,
+          `PR version ${formatVersion(current)} must be one major, minor, or patch increment from base version ${base}`,
         );
       }
       console.log(
-        `PR version ${formatVersion(current)} is newer than base version ${base}.`,
+        `PR version ${formatVersion(current)} is one increment from base version ${base}.`,
       );
     }
   } else if (command === "set") {

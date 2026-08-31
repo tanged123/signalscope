@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   charts: [] as Array<{
     options: Record<string, unknown>;
     setOption: ReturnType<typeof vi.fn>;
+    setViewRange: ReturnType<typeof vi.fn>;
     renderFrame: ReturnType<typeof vi.fn>;
     resize: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
@@ -30,6 +31,18 @@ vi.mock("@chartgpu/chartgpu", () => ({
           setOption: vi.fn((next: Record<string, unknown>) => {
             chart.options = next;
           }),
+          setViewRange: vi.fn(
+            (range: {
+              x: { min: number; max: number };
+              y: { min: number; max: number };
+            }) => {
+              chart.options = {
+                ...chart.options,
+                xAxis: { min: range.x.min, max: range.x.max },
+                yAxis: { min: range.y.min, max: range.y.max },
+              };
+            },
+          ),
           renderFrame: vi.fn(() => true),
           resize: vi.fn(),
           dispose: vi.fn(),
@@ -105,7 +118,7 @@ function request(
   };
 }
 
-async function hostFixture(): Promise<ChartHost> {
+async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
   const container = document.createElement("div");
   Object.defineProperty(container, "clientWidth", {
     configurable: true,
@@ -120,6 +133,7 @@ async function hostFixture(): Promise<ChartHost> {
     device: {},
     pipelineCache: {},
     register: vi.fn(() => vi.fn()),
+    reportFailure,
   } as unknown as GpuContext;
   return ChartHost.create(container, gpu);
 }
@@ -137,6 +151,7 @@ describe("ChartHost", () => {
     const options = state.charts.at(-1)?.options ?? {};
     const xAxis = options.xAxis as { min: number; max: number };
     const series = options.series as Array<{ data: Float32Array }>;
+    expect(options.legend).toEqual({ show: false });
     expect(xAxis.min).toBe(0);
     expect(xAxis.max).toBe(2);
     expect(series[0]?.data[0]).toBe(0);
@@ -206,6 +221,34 @@ describe("ChartHost", () => {
     expect(series[0]?.data[0]).toBe(0);
   });
 
+  it("formats rebased X and plain Y singleton ticks from their visible ranges", async () => {
+    const host = await hostFixture();
+    const data = response();
+    const bins = data.series[0]?.bins;
+    if (bins === undefined) throw new Error("missing test bins");
+    bins.t0[0] = 323;
+    bins.t1[0] = 323;
+
+    host.render({
+      ...request(data),
+      xRange: { min: 323, max: 323.2 },
+      yRange: [1, 1.1],
+    });
+
+    const options = state.charts.at(-1)?.options ?? {};
+    const xAxis = options.xAxis as {
+      tickFormatter: (value: number) => string | null;
+    };
+    const yAxis = options.yAxis as {
+      tickFormatter: (value: number) => string | null;
+    };
+    expect(xAxis.tickFormatter(0.1)).toBe("323.100");
+    expect(yAxis.tickFormatter(1.04)).toBe("1.040");
+
+    host.setRangesOnly({ min: 323, max: 333 }, [1, 10]);
+    expect(xAxis.tickFormatter(0.1)).toBe("323.1");
+  });
+
   it("restores opacity when emphasis clears on an unchanged response", async () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);
@@ -254,8 +297,9 @@ describe("ChartHost", () => {
       lineStyle: { width: number };
     }>;
     expect(series.map(({ lineStyle }) => lineStyle.width)).toEqual([
-      4, 3, 5.2, 4.8,
+      3, 4, 5.2, 4.8,
     ]);
+    expect(state.charts.at(-1)?.options.performance).toEqual({ lod: "strict" });
   });
 
   it("scales compensated ChartGPU widths globally", async () => {
@@ -277,9 +321,10 @@ describe("ChartHost", () => {
       lineStyle: { width: number };
     }>;
     const widths = series.map(({ lineStyle }) => lineStyle.width);
-    [6, 4.5, 7.8, 7.2].forEach((expected, index) => {
+    [4.5, 6, 7.8, 7.2].forEach((expected, index) => {
       expect(widths[index]).toBeCloseTo(expected);
     });
+    expect(state.charts.at(-1)?.options.performance).toEqual({ lod: "strict" });
   });
 
   it("uses ghost and emphasis styling without changing series identity unnecessarily", async () => {
@@ -307,19 +352,79 @@ describe("ChartHost", () => {
     expect(second[1]).toBe(first[1]);
   });
 
-  it("updates ranges without rebuilding series and reports the ChartGPU grid layout", async () => {
+  it("draws colored series after ghost series", async () => {
+    const host = await hostFixture();
+    const data = response(["focus-1", "ghost-1", "focus-2", "ghost-2"]);
+
+    host.render(
+      request(data, [stroke(1), stroke(null), stroke(2), stroke(null)]),
+    );
+
+    const series = state.charts.at(-1)?.options.series as Array<{
+      name: string;
+    }>;
+    expect(series.map(({ name }) => name)).toEqual([
+      "signal_1",
+      "signal_3",
+      "signal_0",
+      "signal_2",
+    ]);
+  });
+
+  it("attenuates dense ghost fields without dimming colored foreground", async () => {
+    const host = await hostFixture();
+    const signalIds = Array.from({ length: 65 }, (_, index) =>
+      index === 64 ? "focus" : `ghost-${String(index)}`,
+    );
+    const styles = signalIds.map((_, index) =>
+      index === 64 ? stroke(1) : { ...stroke(null), alpha: 0.5 },
+    );
+
+    host.render(request(response(signalIds), styles));
+
+    const series = state.charts.at(-1)?.options.series as Array<{
+      name: string;
+      lineStyle: { opacity: number };
+    }>;
+    expect(series[0]?.lineStyle.opacity).toBeCloseTo(0.25);
+    expect(series.at(-1)?.name).toBe("signal_64");
+    expect(series.at(-1)?.lineStyle.opacity).toBe(1);
+  });
+
+  it("updates ranges without rebuilding series and refreshes the text layer", async () => {
     const host = await hostFixture();
     host.render(request());
     const chart = state.charts.at(-1);
     const series = chart?.options.series;
+    chart?.setOption.mockClear();
 
     host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
 
+    expect(chart?.setOption).toHaveBeenCalledOnce();
+    expect(chart?.setViewRange).toHaveBeenCalledWith({
+      x: { min: 1, max: 2 },
+      y: { min: -1, max: 5 },
+    });
     expect(chart?.options.series).toBe(series);
+    expect(chart?.renderFrame).toHaveBeenCalled();
     expect(host.layout()).toEqual({
       plot: { x: 60, y: 8, width: 328, height: 258 },
       xRange: { min: 11, max: 12 },
       yRange: { min: -1, max: 5 },
+    });
+  });
+
+  it("reports a pending frame that ChartGPU cannot render", async () => {
+    const reportFailure = vi.fn();
+    const host = await hostFixture(reportFailure);
+    host.render(request());
+    state.charts.at(-1)?.renderFrame.mockReturnValueOnce(false);
+
+    host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
+
+    expect(reportFailure).toHaveBeenCalledWith({
+      kind: "render-failed",
+      message: "ChartGPU failed to render a pending frame",
     });
   });
 
