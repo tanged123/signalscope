@@ -50,13 +50,4 @@ examples/   sample data and workspaces
 See [AGENTS.md](AGENTS.md) for contributor commands and
 [docs/adr](docs/adr/README.md) for architecture decisions.
 
-## Export
-
-SignalScope can save a workspace as one self-contained HTML file that works
-offline and uses the same interface as the live app.
-
-```bash
-./scripts/export.sh
-```
-
 MIT licensed.

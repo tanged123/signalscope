@@ -1,114 +1,128 @@
 # SignalScope agent instructions
 
-These rules apply to Codex, Claude Code, and other agents. Preserve unrelated
-worktree changes; inspect before editing.
+These rules supplement the code and accepted ADRs. Preserve unrelated worktree
+changes and inspect before editing.
 
-## Source of truth
+## Before editing
 
-At the start of every task, inspect `git status`, target files, nearby tests,
-and the relevant scripts.
+- Inspect `git status`, the target files, nearby tests, and existing scripts.
+- For UI work, read
+  `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/README.md`
+  and `SignalScope Final Spec.dc.html` in that directory. The Final Spec owns
+  visuals and interaction. The reference prototype is behavioral context, not
+  production code.
+- For architecture or data work, read `docs/adr/README.md`, the relevant
+  accepted ADRs, and `docs/implementation-roadmap.md`. Superseded ADRs and
+  historical design explorations are not requirements.
+- If requirements are ambiguous, state a small proposal before expanding
+  scope. Record architectural changes in a new or amended ADR.
 
-- UI work: read `docs/Signal Scope UI Design Pass/design_handoff_signalscope_ui/README.md`
-  and `SignalScope Final Spec.dc.html` in that directory. The Final Spec is
-  authoritative for visuals and interaction. Consult
-  `reference/signalscope.html` only for a behavior detail the current code and
-  accepted ADRs do not settle; it is not production code.
-- Architecture/data work: read this file, the current records in
-  `docs/adr/README.md` and relevant ADRs, and
-  `docs/implementation-roadmap.md`. Superseded ADRs and historical design
-  explorations are context, not requirements.
-- For ambiguity, state a small proposal before expanding scope. Update the
-  nearest README, roadmap, or ADR when behavior or architecture changes.
+## Working rules
 
-## Brevity and safety
-
-Prefer deletion and the shortest correct implementation. Do not add speculative
-abstractions, wrappers, defensive scaffolding, or comments that restate code.
-Keep commands and logs quiet. Use `apply_patch` for file edits. Never reset,
-overwrite, or stage unrelated work; review staged and unstaged diffs
+Prefer deletion and the shortest correct implementation. Do not add
+speculative abstractions, wrappers, defensive scaffolding, or comments that
+restate code. Keep commands and logs quiet. Use `apply_patch` for edits. Never
+reset, overwrite, or stage unrelated work; review staged and unstaged diffs
 separately.
 
-## Canonical commands
+## Commands and validation
 
-Use the `scripts/` wrappers so local and CI operations match. If a needed
-operation has no wrapper, add a focused one first.
+The `scripts/` directory is the developer and CI API. Use its wrappers when one
+exists; add a focused wrapper when an operation must be shared with CI. Schema
+generation is the sole direct package command below.
 
 ```text
-./scripts/setup.sh                    locked frontend dependencies
-./scripts/run.sh app|dev|web          packaged host, development host, browser
-./scripts/test.sh [core|server|unit|frontend|e2e|full]
-./scripts/format.sh [--check]         treefmt formatting
-./scripts/build.sh [web|server|app]
-./scripts/export.sh                   self-contained snapshot
+./scripts/setup.sh                    install locked frontend dependencies
+./scripts/run.sh app|dev|web          packaged, development, or browser host
+./scripts/test.sh [quick|core|server|desktop|unit|frontend|e2e|bench|full]
+./scripts/format.sh [--check]         apply or check treefmt formatting
+./scripts/build.sh app|server|web
+./scripts/export.sh                   build a self-contained snapshot
 ./scripts/coverage.sh
-./scripts/ci.sh [format|quality|rust|frontend|e2e|build|all]
+./scripts/ci.sh format|quality|rust|frontend|e2e|bench|build|all
 ./scripts/version.sh get|check|set|bump
 ./scripts/release.sh version|tag|assets|publish
+pnpm codegen                          regenerate committed schema types
 ```
 
 `quality_checks()` in `scripts/lib.sh` is the deterministic quality gate and
-must remain aligned with the CI quality job. `treefmt` (via `nix fmt` or
-`./scripts/format.sh`) formats all supported languages, including Markdown.
-Run formatting before staging. Install hooks with
-`./scripts/install-hooks.sh`.
+must match the CI quality job. `treefmt` is the only formatter and includes
+Markdown. Run `./scripts/format.sh` before staging; the pre-commit hook does not
+stage formatter changes. Install hooks with `./scripts/install-hooks.sh`.
 
-Run the narrowest affected test and formatter before handoff. For cross-layer
-changes run `./scripts/ci.sh all`; run `./scripts/ci.sh e2e` only after the
-implementation plan is complete. Do not claim GUI, platform, or end-to-end
-validation that was not run.
+Run the narrowest affected tests, then a gate proportional to the change. Use
+`./scripts/ci.sh all` for cross-layer work and defer e2e, GUI, and platform
+builds until implementation is complete. Report what actually ran.
 
-## Architecture invariants
+## Product and architecture boundaries
 
-SignalScope is a local browser workbench with a portable export:
+- SignalScope currently supports time-series plots. That is a present
+  capability, not a permanent architecture boundary; future plot types require
+  deliberate schema and design work. Touch and mobile remain out of scope.
+- The Electron app is a thin lifecycle and presentation wrapper around
+  `scope-server`. It adds no native data API. Frontend code always uses
+  `HttpPlane` and must not detect Electron.
+- The same TypeScript/canvas presentation plane serves live `HttpPlane` and
+  offline `BakedPlane` data. UI and renderer code never branch on host identity.
+- Rust owns ingest, storage, pyramids, compute, persistence, and HTTP data. Keep
+  `scope-core::{store, ingest, pyramid, compute, session}` separable with
+  dependencies directed inward.
+- Frontend code consumes protocol views and tiles, never raw native arrays or
+  source-format details. Keep the transport boundary open to future local
+  implementations.
 
-- One TypeScript presentation plane serves the live `HttpPlane` host and
-  offline `BakedPlane` snapshots. UI and renderer code never branch on host
-  identity.
-- Rust owns ingest, storage, pyramids, compute, persistence, and HTTP-facing
-  data. Keep `scope-core::{store, ingest, pyramid, compute, session}`
-  separable; dependency direction is inward.
-- Frontend code consumes protocol tiles/views, not raw native arrays or source
-  formats. Keep the protocol boundary open to future local transports.
-- Ingest decoders stream and registration is transactional: failed imports
-  leave no source or partial signals visible.
+## Data, schema, and rendering invariants
+
+- Ingest decoders stream, and signal registration is transactional. Failed
+  imports leave no source or partial signals visible.
 - Query time columns are finite and monotonically nondecreasing. Pyramid
   parents preserve first/last, finite extrema, sample count, and ORed gap bits;
   gaps break strokes but do not discard finite extrema.
-- Query density is bounded by viewport width and preserves visible peaks. Do
-  not scan raw arrays in the renderer for ordinary pan/zoom.
-- `protocol/schema/scope-protocol.json` is the schema source. Generated Rust
-  and TypeScript outputs are committed and must be regenerated, never hand
-  edited. Wire `u64` identifiers use the schema's exact string boundary.
-- Protocol/session changes are API changes: additive fields need defaults,
-  breaking changes need a version and migration, and unknown future versions
-  fail clearly without partial restore.
+- `protocol/schema/scope-{protocol,session,preferences}.json` are schema sources.
+  Generated Rust and TypeScript are committed outputs: regenerate with
+  `pnpm codegen`, never hand-edit them, and verify with
+  `./scripts/test.sh frontend`. Wire `u64` identifiers remain exact strings at
+  the TypeScript boundary.
+- Protocol, session, and preference schemas are APIs. Additive fields need
+  defaults; breaking changes need a version and migration. Unknown future and
+  unsupported old versions fail clearly without partial restore.
+- The current session model is time-only. Do not restore panel modes,
+  annotation domains, facet splits, reconciliation markers, or pre-migration
+  alias rewriting removed by ADR 0050. Source identity is the source key plus
+  local channel.
+- Live panels choose pyramid resolution from physical device pixels. Density
+  degrades uniformly across active panels under one global budget; do not add a
+  fixed active-series cap. Each panel keeps at most an overview and latest
+  detail CPU tile response, while stale covering data remains visible until an
+  atomic replacement is ready.
+- Each plot has one ChartGPU host. Use `setViewRange` for pan/zoom and
+  `setOption` only when data identity, content, or style changes; never
+  republish series progressively.
 - Snapshots contain session state plus selected decimated tiles, replace the
-  exact injection slot, make no network requests, stay within the size
-  budget, and escape data before HTML script injection. Treat external names
-  as data and prefer `textContent`.
+  exact injection slot, make no network requests, stay within the size budget,
+  and escape script data. Treat imported names as data and prefer
+  `textContent`.
 
-## Design and testing invariants
+## UI and tests
 
-Follow the Final Spec: near-black flat surfaces, 1px seams, radii ≤4px, no
-glows or gradients; achromatic chrome; amber only for interaction; Inter for
-UI and JetBrains Mono/tabular numerals for values, paths, axes, and readouts.
-Use the categorical `--series-1` through `--series-8` palette consistently;
-identity must not depend on color alone and status colors are reserved. Every
-plot owns complete labeled axes, linked-time/per-panel state, and serialized
-axis choices. Every pointer action needs a keyboard path. Input is desktop-only
-per ADR 0021. Keep renderer output deterministic and snapshot dependencies
+Follow the Final Spec: flat achromatic chrome, 1px seams, radii at most 4px, no
+glows or gradients, and amber only for interaction. Use Inter for UI,
+JetBrains Mono with tabular numerals for data, and the `--series-1` through
+`--series-8` palette for series. Identity cannot depend on color alone. Every
+plot owns complete labeled axes and serialized per-panel state. Pointer actions
+need keyboard paths. Keep rendering deterministic and snapshot dependencies
 offline.
 
-Add behavior tests with behavior changes: Rust ingest, finite-time, pyramid,
-protocol/session, and expression semantics; TypeScript linked-time,
-formula-bar, renderer, and snapshot checks where relevant; Playwright for
-desktop input, layout, and export boundaries. Keep generated protocol outputs
-synchronized.
+Behavior changes need behavior tests. Use Rust tests for ingest, time,
+pyramids, protocol/session, and expressions; TypeScript tests for application,
+renderer, and snapshot behavior; Playwright for desktop interaction, layout,
+and export boundaries. Keep generated outputs synchronized.
 
 ## Delivery
 
-Use small conventional commits that explain why. Do not version-bump ordinary
-commits. A PR targeting `main` gets exactly one synchronized final bump:
-`./scripts/version.sh bump <major|minor|patch>`, then `check`, with `major` for
-breaking protocol/session/API changes and `minor` for backward-compatible
-features; refactors, tests, tooling, and docs use `patch`.
+Use small conventional commits that explain why. Update the nearest README,
+roadmap, or ADR when behavior changes. A PR targeting `main` gets exactly one
+synchronized version bump: `major` for a breaking API/schema change, `minor`
+for a backward-compatible feature, and `patch` for fixes, refactors, tests,
+tooling, or docs. Run `./scripts/version.sh check` before handoff; never bump
+again for follow-up commits in the same PR.
