@@ -3,11 +3,7 @@ import {
   type ColumnarTileResponse,
 } from "../app/bin-columns";
 import type { Catalog } from "../app/catalog";
-import {
-  appliedOverrides,
-  overrideFor,
-  type ResolvedSeries,
-} from "../app/resolution";
+import { appliedOverrides, type ResolvedSeries } from "../app/resolution";
 import { virtualSlice } from "../app/outline-model";
 import { compileGlob, evaluateSelector } from "../app/selector";
 import type {
@@ -22,6 +18,7 @@ import type {
   SeriesRef,
   SeriesOverride,
   StyleDimension,
+  StatColumn,
 } from "../generated/session";
 import {
   clamp,
@@ -87,7 +84,7 @@ function colorIndexForHue(hue: number | null): number {
   return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
 }
 
-export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
+export type EncodingProperty = "color" | "dash" | "width";
 
 export interface PanelCallbacks {
   onFocus(id: string): void;
@@ -139,16 +136,31 @@ export interface PanelCallbacks {
   onToggleAxisStyle(id: string): void;
   onRenameTitle(id: string, title: string): void;
   onEditAxisLabel(id: string, axis: "x" | "y", label: string | null): void;
-  onSetColorBy(id: string, dimension: StyleDimension): void;
-  onRemoveOverride(id: string, index: number): void;
+  onSetEncoding(
+    id: string,
+    property: EncodingProperty,
+    dimension: StyleDimension | null,
+  ): void;
+  onSetPanelLineWidth(id: string, width: number): void;
+  onSetGhostOpacity(id: string, opacity: number): void;
+  onSetStatColumns(id: string, columns: StatColumn[]): void;
+  onSetStatsSort(
+    id: string,
+    column: StatColumn | null,
+    descending: boolean,
+  ): void;
+  onRevertStyleOverride(id: string, index: number): void;
   onClearOverrides(id: string): void;
-  onSetSeriesStyle(
+  onPatchSeriesStyle(
     id: string,
     ref: SeriesRef,
-    style: { color_slot: number; dash: DashStyle; width: number },
+    style: {
+      color_slot?: number | null;
+      dash?: DashStyle | null;
+      width?: number | null;
+    },
   ): void;
   onRemoveSeries(id: string, ref: SeriesRef): void;
-  onQuickTransform(id: string, path: string, kind: QuickTransform): void;
 }
 
 export function hasDragType(event: DragEvent, type: string): boolean {
@@ -172,6 +184,7 @@ export interface RenderSeries {
   visible: boolean;
   focused: boolean;
   overridden: boolean;
+  overrideFields: { color: boolean; dash: boolean; width: boolean };
 }
 
 export type RenderPanelState = PanelState & {
@@ -204,6 +217,15 @@ export interface BindingChipEntry {
   kind: Binding["kind"];
   refs: SeriesRef[];
   selector: string | null;
+}
+
+interface LegendStatValues {
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  rms: number | null;
+  n: number | null;
+  cursor: number | null;
 }
 
 export function matrixLegendRows(
@@ -423,6 +445,7 @@ function renderState(
       visible: entry.visible,
       focused: entry.focused,
       overridden: entry.overridden,
+      overrideFields: entry.overrideFields,
     })),
   };
 }
@@ -518,9 +541,10 @@ export class PanelView {
   private hoverPoint: { x: number; y: number } | null = null;
   private hoverTag: HTMLElement | null = null;
   private inspectorPath: string | null = null;
-  private inspectorCleanup: (() => void) | null = null;
+  private encodingDrawer: EncodingProperty | null = null;
+  private overrideDrawer = false;
+  private statsColumnsDrawer = false;
   private bindingCleanup: (() => void) | null = null;
-  private rulesCleanup: (() => void) | null = null;
   private panelConfigCleanup: (() => void) | null = null;
   private plotLegendPosition: { x: number; y: number } | null = null;
   private plotLegendSize: { width: number; height: number } | null = null;
@@ -734,17 +758,31 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
-    required(this.element, ".panel-ghost-toggle").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onToggleGhostMode(this.id);
-      },
-    );
-    required(this.element, ".panel-config-toggle").addEventListener(
+    required(this.element, ".panel-line-width").addEventListener(
       "click",
       (event) => {
         if (this.lastState !== null)
-          this.openPanelConfig(
+          this.openLineWidthMenu(
+            this.lastState,
+            event.currentTarget as HTMLElement,
+          );
+      },
+    );
+    required(this.element, ".panel-ghost-opacity").addEventListener(
+      "click",
+      (event) => {
+        if (this.lastState !== null)
+          this.openGhostMenu(
+            this.lastState,
+            event.currentTarget as HTMLElement,
+          );
+      },
+    );
+    required(this.element, ".panel-legend-state").addEventListener(
+      "click",
+      (event) => {
+        if (this.lastState !== null)
+          this.openLegendStateMenu(
             this.lastState,
             event.currentTarget as HTMLElement,
           );
@@ -756,6 +794,13 @@ export class PanelView {
         else this.callbacks.onClearFocus(this.id);
         this.closeBindingPopover();
         this.closePanelConfig();
+        this.encodingDrawer = null;
+        this.overrideDrawer = false;
+        this.statsColumnsDrawer = false;
+        if (this.inspectorPath !== null) {
+          this.inspectorPath = null;
+          if (this.lastState !== null) this.updatePlotLegend(this.lastState);
+        }
       } else if (
         event.target === this.element &&
         event.key === "Tab" &&
@@ -873,19 +918,29 @@ export class PanelView {
     );
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
-    axisToggle.hidden = true;
+    axisToggle.hidden = false;
+    required<HTMLElement>(this.element, ".panel-line-width-value").textContent =
+      formatToolbarNumber(rendered.line_width);
+    required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
+      rendered.ghost_mode === "all"
+        ? "all"
+        : `${String(Math.round(rendered.ghost_opacity * 100))}%`;
+    required<HTMLElement>(this.element, ".panel-legend-value").textContent =
+      rendered.legend_state;
+    required<HTMLButtonElement>(
+      this.element,
+      ".panel-stats-toggle",
+    ).setAttribute("aria-pressed", String(rendered.show_stats));
     this.updateBindings(rendered);
-    this.updateGhostToggle(rendered);
     this.updateLegend(rendered);
     const annotations = this.resolvedAnnotations(rendered);
     this.renderAnnotationList(rendered, annotations);
-    this.renderStats();
     this.drawOverlay(annotations);
     if (
       this.inspectorPath !== null &&
       !rendered.series.some((series) => series.path === this.inspectorPath)
     ) {
-      this.closeInspector();
+      this.inspectorPath = null;
     }
     const empty = required<HTMLElement>(this.element, ".panel-empty");
     if (rendered.series.length === 0) {
@@ -933,7 +988,7 @@ export class PanelView {
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
-    this.renderStats();
+    this.updatePlotLegend(rendered);
     const annotations = this.resolvedAnnotations(rendered);
     this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
@@ -1405,42 +1460,6 @@ export class PanelView {
     }
   }
 
-  private renderStats(): void {
-    const strip = required<HTMLElement>(this.element, ".panel-stats");
-    const state = this.lastState;
-    const show = state !== null && state.show_stats;
-    strip.hidden = !show;
-    if (!show) {
-      strip.replaceChildren();
-      return;
-    }
-    const groups = this.preparedPlot?.stats() ?? [];
-    if (groups.length === 0) {
-      strip.hidden = true;
-      strip.replaceChildren();
-      return;
-    }
-    const rows = groups.map((group) => {
-      const row = document.createElement("span");
-      row.className = "stats-series";
-      row.append(
-        statsName(group.label),
-        ...group.items.map((item) =>
-          statsItem(
-            item.label === "mean" ? "μ" : item.label,
-            item.value,
-            item.unit,
-          ),
-        ),
-      );
-      return row;
-    });
-    const hint = document.createElement("span");
-    hint.className = "stats-hint";
-    hint.textContent = "visible region · S toggles";
-    strip.replaceChildren(...rows, hint);
-  }
-
   private renderAnnotationList(
     state: RenderPanelState,
     resolution: ResolvedAnnotations,
@@ -1629,6 +1648,7 @@ export class PanelView {
       return;
     }
     legend.hidden = false;
+    legend.classList.toggle("stats-visible", state.show_stats);
     wrap.classList.remove("legend-dock-preview");
     legend.dataset.state = state.legend_state;
     wrap.classList.toggle("legend-rail", state.legend_state === "rail");
@@ -1687,10 +1707,16 @@ export class PanelView {
       undock.textContent = "⇥";
       undock.title = "Return legend to floating roster";
       undock.addEventListener("click", () => this.floatPlotLegend(legend));
-      header.append(title, undock);
+      header.append(title);
+      if (state.show_stats) header.append(this.statsScopeLabel());
+      header.append(undock);
       legend.replaceChildren(
         header,
-        this.plotLegendRoster(state),
+        this.plotLegendEncodingRow(state),
+        ...this.plotLegendDrawers(state),
+        state.show_stats
+          ? this.plotLegendStats(state)
+          : this.plotLegendRoster(state),
         this.legendResizeHandle("left", legend),
       );
       this.positionPlotLegend();
@@ -1715,8 +1741,7 @@ export class PanelView {
         state: state.legend_state === "roster" ? "keys" : "roster",
       });
     });
-    const rules = this.colorRuleToken(state);
-    rules.textContent += " ▾";
+    if (state.show_stats) header.append(this.statsScopeLabel());
     const collapse = document.createElement("button");
     collapse.className = "plot-legend-collapse";
     collapse.type = "button";
@@ -1725,10 +1750,11 @@ export class PanelView {
     collapse.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, { state: "badge" });
     });
-    header.append(drag, title, rules, collapse);
+    header.append(drag, title, collapse);
 
-    const content =
-      state.legend_state === "roster"
+    const content = state.show_stats
+      ? this.plotLegendStats(state)
+      : state.legend_state === "roster"
         ? this.plotLegendRoster(state)
         : this.plotLegendKeys(state);
     const rightResize = this.legendResizeHandle("right", legend);
@@ -1736,12 +1762,129 @@ export class PanelView {
     const cornerResize = this.legendResizeHandle("corner", legend);
     legend.replaceChildren(
       header,
+      this.plotLegendEncodingRow(state),
+      ...this.plotLegendDrawers(state),
       content,
       rightResize,
       bottomResize,
       cornerResize,
     );
     this.positionPlotLegend();
+  }
+
+  private statsScopeLabel(): HTMLElement {
+    const scope = document.createElement("span");
+    scope.className = "plot-legend-stats-scope";
+    scope.textContent = "Σ visible region";
+    scope.title = "Statistics recompute for the visible time region";
+    return scope;
+  }
+
+  private plotLegendEncodingRow(state: RenderPanelState): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "plot-legend-encoding";
+    for (const property of ["color", "dash", "width"] as const) {
+      const dimension =
+        property === "color"
+          ? state.color_by
+          : property === "dash"
+            ? state.dash_by
+            : state.width_by;
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "plot-legend-encoding-chip";
+      chip.dataset.property = property;
+      chip.setAttribute(
+        "aria-expanded",
+        String(this.encodingDrawer === property),
+      );
+      const sample = document.createElement("span");
+      sample.className = `encoding-sample encoding-sample-${property}`;
+      if (property === "color") sample.style.background = "var(--series-1)";
+      if (property === "width") {
+        sample.style.height = `${String(Math.max(1, state.line_width))}px`;
+      }
+      const label = document.createElement("span");
+      label.textContent = `${property} ← ${dimension ?? "flat"}`;
+      if (property === "width" && dimension === null) {
+        label.textContent += ` · ${formatToolbarNumber(state.line_width)}`;
+      }
+      chip.append(sample, label);
+      chip.addEventListener("click", () => {
+        this.encodingDrawer =
+          this.encodingDrawer === property ? null : property;
+        this.overrideDrawer = false;
+        this.statsColumnsDrawer = false;
+        this.updatePlotLegend(state);
+      });
+      row.append(chip);
+    }
+    return row;
+  }
+
+  private plotLegendDrawers(state: RenderPanelState): HTMLElement[] {
+    const drawers: HTMLElement[] = [];
+    if (typeof this.encodingDrawer === "string") {
+      drawers.push(this.plotEncodingDrawer(state, this.encodingDrawer));
+    }
+    if (this.overrideDrawer) drawers.push(this.plotOverrideDrawer());
+    if (this.statsColumnsDrawer)
+      drawers.push(this.plotStatsColumnsDrawer(state));
+    return drawers;
+  }
+
+  private plotEncodingDrawer(
+    state: RenderPanelState,
+    property: EncodingProperty,
+  ): HTMLElement {
+    const drawer = document.createElement("div");
+    drawer.className = "plot-legend-drawer plot-encoding-drawer";
+    const title = document.createElement("div");
+    title.className = "plot-legend-drawer-title";
+    title.textContent = `${property.toUpperCase()} · BIND TO`;
+    const choices = document.createElement("div");
+    choices.className = "plot-encoding-choices";
+    const active =
+      property === "color"
+        ? state.color_by
+        : property === "dash"
+          ? state.dash_by
+          : state.width_by;
+    for (const dimension of [
+      null,
+      "focus",
+      "source",
+      "channel",
+      "set",
+      "attr",
+    ] as const) {
+      const choice = document.createElement("button");
+      choice.type = "button";
+      choice.className = "plot-encoding-choice";
+      choice.classList.toggle("active", active === dimension);
+      choice.textContent = dimension ?? "flat";
+      choice.addEventListener("click", () => {
+        this.encodingDrawer = null;
+        this.callbacks.onSetEncoding(this.id, property, dimension);
+      });
+      choices.append(choice);
+    }
+    drawer.append(title, choices);
+    if (property === "color") {
+      const palette = document.createElement("div");
+      palette.className = "plot-encoding-palette";
+      for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
+        const swatch = document.createElement("span");
+        swatch.style.background = `var(--series-${String(slot)})`;
+        palette.append(swatch);
+      }
+      const count = active === null ? 1 : encodingValueCount(state, active);
+      const note = document.createElement("div");
+      note.className = "plot-encoding-note";
+      note.textContent = `${String(count)} ${count === 1 ? "value" : "values"} → ${String(COLOR_SLOTS)} slots${count > COLOR_SLOTS ? " · repeats disclosed" : ""}`;
+      drawer.append(palette, note);
+    }
+    return drawer;
   }
 
   private plotLegendKeys(state: RenderPanelState): HTMLElement {
@@ -1760,11 +1903,7 @@ export class PanelView {
     const ghosts = state.series.filter(
       (series) => series.visible && series.display === "ghost",
     ).length;
-    const footer = document.createElement("button");
-    footer.className = "plot-legend-footer";
-    footer.type = "button";
-    footer.textContent = `${String(ghosts)} ghosts ▾`;
-    footer.addEventListener("click", () => {
+    const footer = this.plotLegendFooter(state, ghosts, () => {
       this.callbacks.onLegendLayout(this.id, { state: "roster" });
     });
     content.append(focusRows, footer);
@@ -1790,6 +1929,8 @@ export class PanelView {
     state: RenderPanelState,
     entry: FocusChip,
   ): HTMLElement {
+    const block = document.createElement("div");
+    block.className = "plot-legend-row-block";
     const row = document.createElement("div");
     row.className = "plot-legend-row";
     const matching = state.series.filter(
@@ -1801,12 +1942,28 @@ export class PanelView {
     action.className = "plot-legend-row-action";
     action.type = "button";
     action.innerHTML =
-      '<span class="plot-legend-swatch"></span><span class="plot-legend-label"></span><span class="plot-legend-value">—</span><span class="plot-legend-unit"></span>';
-    const swatch = required<HTMLElement>(action, ".plot-legend-swatch");
-    swatch.style.background =
+      '<span class="plot-legend-label"></span><span class="plot-legend-value">—</span><span class="plot-legend-unit"></span>';
+    const inspector = document.createElement("button");
+    inspector.type = "button";
+    inspector.className = "plot-legend-swatch plot-row-inspector-toggle";
+    inspector.style.background =
       entry.hue === null
         ? "var(--fg-4)"
         : `var(--series-${String(colorIndexForHue(entry.hue) + 1)})`;
+    inspector.disabled = primary === undefined;
+    inspector.title =
+      primary === undefined
+        ? "Group styles are edited with selector rules"
+        : `Edit ${primary.path} line properties`;
+    if (primary !== undefined) {
+      inspector.setAttribute(
+        "aria-expanded",
+        String(this.inspectorPath === primary.path),
+      );
+      inspector.addEventListener("click", () => {
+        this.toggleInlineInspector(state, primary.path);
+      });
+    }
     required<HTMLElement>(action, ".plot-legend-label").textContent =
       `${entry.overridden ? "◆ " : ""}${entry.label}`;
     const value = required<HTMLElement>(action, ".plot-legend-value");
@@ -1843,9 +2000,13 @@ export class PanelView {
     remove.addEventListener("click", () => {
       this.callbacks.onFocusToggle(this.id, entry.entry);
     });
-    row.append(action, remove);
+    row.append(inspector, action, remove);
     this.updateLegendValue(value);
-    return row;
+    block.append(row);
+    if (primary !== undefined && this.inspectorPath === primary.path) {
+      block.append(this.inlineSeriesInspector(state, primary));
+    }
+    return block;
   }
 
   private plotLegendRoster(state: RenderPanelState): HTMLElement {
@@ -1909,21 +2070,16 @@ export class PanelView {
       for (const [offset, item] of all
         .slice(slice.start, slice.end)
         .entries()) {
-        const button = document.createElement("button");
-        button.className = "plot-legend-roster-row";
-        button.type = "button";
-        button.style.top = `${String(slice.topPadding + offset * 24)}px`;
-        button.innerHTML =
-          '<span class="plot-legend-swatch"></span><span class="plot-legend-label"></span><span class="plot-legend-count"></span>';
-        const swatch = required<HTMLElement>(button, ".plot-legend-swatch");
+        const row = document.createElement("div");
+        row.className = "plot-legend-roster-row";
+        row.style.top = `${String(slice.topPadding + offset * 24)}px`;
+        const swatch = document.createElement("button");
+        swatch.type = "button";
+        swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
         swatch.style.background =
           item.hue === null
             ? "var(--fg-4)"
             : `var(--series-${String(colorIndexForHue(item.hue) + 1)})`;
-        required<HTMLElement>(button, ".plot-legend-label").textContent =
-          `${item.overridden ? "◆ " : ""}${item.label}`;
-        required<HTMLElement>(button, ".plot-legend-count").textContent =
-          `×${String(item.count)}`;
         const matching = state.series.filter((series) =>
           dimension === "source"
             ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
@@ -1931,15 +2087,42 @@ export class PanelView {
             : series.ref.channel === item.value,
         );
         const paths = matching.map((series) => series.path);
-        button.addEventListener("mouseenter", () => this.setEmphasis(paths));
-        button.addEventListener("mouseleave", () => this.setEmphasis(null));
-        button.addEventListener("click", (event) => {
+        const action = document.createElement("button");
+        action.type = "button";
+        action.className = "plot-legend-roster-action";
+        const label = document.createElement("span");
+        label.className = "plot-legend-label";
+        label.textContent = `${item.overridden ? "▍ " : ""}${item.label}`;
+        const count = document.createElement("span");
+        count.className = "plot-legend-count";
+        count.textContent = `×${String(item.count)}`;
+        action.append(label, count);
+        action.addEventListener("mouseenter", () => this.setEmphasis(paths));
+        action.addEventListener("mouseleave", () => this.setEmphasis(null));
+        action.addEventListener("click", (event) => {
           const entry = this.focusEntryForRow(dimension, item, state);
           if (event.altKey)
             this.callbacks.onMuteSelector(this.id, item.selector);
           else this.callbacks.onFocusToggle(this.id, entry);
         });
-        viewport.append(button);
+        const single = matching.length === 1 ? matching[0] : undefined;
+        if (single === undefined) {
+          swatch.disabled = true;
+          swatch.title = "Group styles are edited with selector rules";
+        } else {
+          swatch.title = `Edit ${single.path} line properties`;
+          swatch.addEventListener("click", () => {
+            this.inspectorPath = single.path;
+            this.callbacks.onFocusToggle(this.id, {
+              kind: "series",
+              ref: single.ref,
+              source_key: null,
+              channel: single.ref.channel,
+            });
+          });
+        }
+        row.append(swatch, action);
+        viewport.append(row);
       }
     };
     search.addEventListener("input", () => {
@@ -1966,14 +2149,10 @@ export class PanelView {
     rows.addEventListener("scroll", renderRows);
     rows.append(viewport);
     group.append(groupTitle, rows);
-    const footer = document.createElement("button");
-    footer.className = "plot-legend-footer";
-    footer.type = "button";
     const ghosts = state.series.filter(
       (series) => series.visible && series.display === "ghost",
     ).length;
-    footer.textContent = `${String(ghosts)} ghosts ▾`;
-    footer.addEventListener("click", () => {
+    const footer = this.plotLegendFooter(state, ghosts, () => {
       search.value = "";
       search.focus();
       renderRows();
@@ -1981,6 +2160,423 @@ export class PanelView {
     content.append(searchWrap, focusTitle, focusRows, group, footer);
     renderRows();
     return content;
+  }
+
+  private plotLegendFooter(
+    state: RenderPanelState,
+    ghosts: number,
+    showGhosts: () => void,
+    exportStats = false,
+  ): HTMLElement {
+    const footer = document.createElement("div");
+    footer.className = "plot-legend-footer";
+    const ghostButton = document.createElement("button");
+    ghostButton.type = "button";
+    ghostButton.textContent = `${String(ghosts)} ghosts ▾`;
+    ghostButton.addEventListener("click", showGhosts);
+    footer.append(ghostButton);
+    if (exportStats) {
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = "plot-legend-stats-export";
+      exportButton.textContent = "⤓ csv";
+      exportButton.title = "Export visible statistic columns as CSV";
+      exportButton.addEventListener("click", () =>
+        this.exportLegendStats(state),
+      );
+      footer.append(exportButton);
+    }
+    const overrides = this.styleOverrides();
+    const overrideButton = document.createElement("button");
+    overrideButton.type = "button";
+    overrideButton.className = "plot-legend-overrides";
+    overrideButton.classList.toggle("active", overrides.length > 0);
+    overrideButton.textContent = `${String(overrides.length)} ${overrides.length === 1 ? "override" : "overrides"} ▾`;
+    overrideButton.addEventListener("click", () => {
+      this.overrideDrawer = !this.overrideDrawer;
+      this.encodingDrawer = null;
+      this.statsColumnsDrawer = false;
+      this.updatePlotLegend(state);
+    });
+    footer.append(overrideButton);
+    return footer;
+  }
+
+  private styleOverrides(): ReturnType<typeof appliedOverrides> {
+    const input = this.lastInputState;
+    if (
+      !input?.overrides.some((override) =>
+        [override.color_slot, override.dash, override.width].some(
+          (value) => value !== null,
+        ),
+      )
+    ) {
+      return [];
+    }
+    return appliedOverrides(
+      this.callbacks.catalog(),
+      input,
+      this.callbacks.namedSets(),
+    ).filter(({ override }) =>
+      [override.color_slot, override.dash, override.width].some(
+        (value) => value !== null,
+      ),
+    );
+  }
+
+  private plotOverrideDrawer(): HTMLElement {
+    const drawer = document.createElement("div");
+    drawer.className = "plot-legend-drawer plot-override-drawer";
+    const overrides = this.styleOverrides();
+    const heading = document.createElement("div");
+    heading.className = "plot-legend-drawer-title";
+    heading.textContent = `${String(overrides.length)} ${overrides.length === 1 ? "OVERRIDE" : "OVERRIDES"}`;
+    const revertAll = document.createElement("button");
+    revertAll.type = "button";
+    revertAll.textContent = "⟲ revert all";
+    revertAll.disabled = overrides.length === 0;
+    revertAll.addEventListener("click", () => {
+      this.callbacks.onClearOverrides(this.id);
+      this.overrideDrawer = false;
+    });
+    const titleRow = document.createElement("div");
+    titleRow.className = "plot-override-heading";
+    titleRow.append(heading, revertAll);
+    drawer.append(titleRow);
+    for (const item of overrides) {
+      const row = document.createElement("div");
+      row.className = "plot-override-row";
+      const target = document.createElement("span");
+      target.textContent = overrideTarget(item.override, this.callbacks);
+      target.title = target.textContent;
+      const fields = document.createElement("span");
+      fields.textContent = overrideFields(item.override);
+      const revert = document.createElement("button");
+      revert.type = "button";
+      revert.textContent = "⟲";
+      revert.title = `Revert ${target.textContent}`;
+      revert.addEventListener("click", () => {
+        this.callbacks.onRevertStyleOverride(this.id, item.index);
+      });
+      row.append(target, fields, revert);
+      drawer.append(row);
+    }
+    return drawer;
+  }
+
+  private plotStatsColumnsDrawer(state: RenderPanelState): HTMLElement {
+    const drawer = document.createElement("div");
+    drawer.className = "plot-legend-drawer plot-stats-columns-drawer";
+    const title = document.createElement("div");
+    title.className = "plot-legend-drawer-title";
+    title.textContent = "STAT COLUMNS · VISIBLE REGION";
+    drawer.append(title);
+    for (const column of [
+      "min",
+      "max",
+      "mean",
+      "rms",
+      "n",
+      "cursor",
+    ] as const satisfies readonly StatColumn[]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      const active = state.stat_columns.includes(column);
+      button.setAttribute("aria-pressed", String(active));
+      button.textContent = `${active ? "✓ " : "  "}${statColumnLabel(column)}`;
+      button.addEventListener("click", () => {
+        const columns = active
+          ? state.stat_columns.filter((entry) => entry !== column)
+          : [...state.stat_columns, column];
+        if (columns.length > 0)
+          this.callbacks.onSetStatColumns(this.id, columns);
+      });
+      drawer.append(button);
+    }
+    return drawer;
+  }
+
+  private plotLegendStats(state: RenderPanelState): HTMLElement {
+    const content = document.createElement("div");
+    content.className = "plot-legend-content plot-legend-stats";
+    const columns = this.visibleStatColumns(state);
+    const { units, mixedUnits, sharedUnit } = this.legendStatUnits(state);
+    const grid = statGridTemplate(columns.length);
+    const header = document.createElement("div");
+    header.className = "plot-stat-header";
+    header.style.gridTemplateColumns = grid;
+    const seriesHeader = document.createElement("span");
+    seriesHeader.className = "plot-stat-series-header";
+    seriesHeader.textContent = "SERIES";
+    const picker = document.createElement("button");
+    picker.type = "button";
+    picker.className = "plot-stat-column-picker";
+    picker.textContent = "⊞▾";
+    picker.title = "Choose statistic columns";
+    picker.setAttribute("aria-expanded", String(this.statsColumnsDrawer));
+    picker.addEventListener("click", () => {
+      this.statsColumnsDrawer = !this.statsColumnsDrawer;
+      this.encodingDrawer = null;
+      this.overrideDrawer = false;
+      this.updatePlotLegend(state);
+    });
+    seriesHeader.append(picker);
+    header.append(seriesHeader);
+    const spanHeader = document.createElement("span");
+    spanHeader.className = "plot-stat-span-header";
+    spanHeader.setAttribute("aria-label", "Minimum to maximum span");
+    header.append(spanHeader);
+    for (const column of columns) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "plot-stat-sort";
+      button.dataset.column = column;
+      const sorted = state.stats_sort === column;
+      const sortable = column === "n" || !mixedUnits;
+      button.classList.toggle("active", sorted);
+      button.disabled = !sortable;
+      button.title = sortable
+        ? `Sort by ${statColumnLabel(column)}`
+        : "Sorting is unavailable because these series have mixed units";
+      button.textContent = `${statColumnLabel(column, column === "n" ? null : sharedUnit)}${sorted ? (state.stats_sort_descending ? " ↓" : " ↑") : ""}`;
+      button.addEventListener("click", () => {
+        const descending =
+          state.stats_sort === column ? !state.stats_sort_descending : true;
+        this.callbacks.onSetStatsSort(this.id, column, descending);
+      });
+      header.append(button);
+    }
+
+    const values = this.legendStatsByPath();
+    const rows = state.series.map((series, index) => ({
+      series,
+      index,
+      values: values.get(series.path) ?? emptyLegendStats(),
+    }));
+    if (
+      state.stats_sort !== null &&
+      (state.stats_sort === "n" || !mixedUnits)
+    ) {
+      const column = state.stats_sort;
+      const direction = state.stats_sort_descending ? -1 : 1;
+      rows.sort((left, right) => {
+        const a = left.values[column];
+        const b = right.values[column];
+        if (a === null && b === null) return left.index - right.index;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return a === b ? left.index - right.index : (a - b) * direction;
+      });
+    }
+    const aggregate = aggregateLegendStats(
+      rows.map((row) => row.values),
+      mixedUnits,
+    );
+    const spanDomain = mixedUnits
+      ? null
+      : statSpanDomain(rows.map((row) => row.values));
+    const aggregateRow = document.createElement("div");
+    aggregateRow.className = "plot-stat-row plot-stat-aggregate";
+    aggregateRow.style.gridTemplateColumns = grid;
+    const aggregateLabel = document.createElement("span");
+    aggregateLabel.textContent = `∑ ${String(rows.length)} series`;
+    aggregateRow.append(
+      aggregateLabel,
+      statHistogram(
+        mixedUnits && state.stats_sort !== "n"
+          ? []
+          : rows.map((row) => row.values[state.stats_sort ?? "mean"]),
+      ),
+    );
+    for (const column of columns) {
+      aggregateRow.append(statCell(aggregate[column], column));
+    }
+
+    const body = document.createElement("div");
+    body.className = "plot-stat-body";
+    for (const row of rows) {
+      const element = document.createElement("div");
+      element.className = "plot-stat-row";
+      element.classList.toggle("muted", !row.series.visible);
+      element.classList.toggle("overridden", row.series.overridden);
+      element.style.gridTemplateColumns = grid;
+      const identity = document.createElement("span");
+      identity.className = "plot-stat-identity";
+      const swatch = document.createElement("button");
+      swatch.type = "button";
+      swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
+      swatch.style.background = seriesColor(row.series);
+      swatch.style.height = `${String(Math.max(1, row.series.width))}px`;
+      swatch.title = `Edit ${row.series.path} line properties`;
+      swatch.setAttribute(
+        "aria-expanded",
+        String(this.inspectorPath === row.series.path),
+      );
+      swatch.addEventListener("click", () => {
+        this.toggleInlineInspector(state, row.series.path);
+      });
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "plot-stat-label";
+      label.textContent = row.series.path;
+      if (row.series.overridden) {
+        const marker = document.createElement("span");
+        marker.className = "plot-row-override-marker";
+        marker.textContent = "▍";
+        label.append(marker);
+      }
+      label.addEventListener("mouseenter", () =>
+        this.setEmphasis(row.series.path),
+      );
+      label.addEventListener("mouseleave", () => this.setEmphasis(null));
+      label.addEventListener("click", (event) => {
+        if (event.altKey) this.callbacks.onMuteSeries(this.id, row.series.ref);
+        else
+          this.callbacks.onFocusToggle(this.id, {
+            kind: "series",
+            ref: row.series.ref,
+            source_key: null,
+            channel: row.series.ref.channel,
+          });
+      });
+      identity.append(swatch, label);
+      element.append(
+        identity,
+        statSpan(row.values, spanDomain, seriesColor(row.series)),
+      );
+      for (const column of columns) {
+        const cell = statCell(
+          row.values[column],
+          column,
+          mixedUnits && column !== "n" ? units.get(row.series.path) : null,
+        );
+        if (column === "cursor") cell.dataset.path = row.series.path;
+        element.append(cell);
+      }
+      body.append(element);
+      if (this.inspectorPath === row.series.path) {
+        body.append(this.inlineSeriesInspector(state, row.series));
+      }
+    }
+    const ghosts = state.series.filter(
+      (series) => series.visible && series.display === "ghost",
+    ).length;
+    content.append(
+      header,
+      aggregateRow,
+      body,
+      this.plotLegendFooter(
+        state,
+        ghosts,
+        () => {
+          this.callbacks.onLegendLayout(this.id, { state: "roster" });
+        },
+        true,
+      ),
+    );
+    return content;
+  }
+
+  private legendStatsByPath(): Map<string, LegendStatValues> {
+    const values = new Map<string, LegendStatValues>();
+    for (const group of this.preparedPlot?.stats() ?? []) {
+      const row = emptyLegendStats();
+      for (const item of group.items) {
+        if (item.label === "min") row.min = item.value;
+        else if (item.label === "max") row.max = item.value;
+        else if (item.label === "mean") row.mean = item.value;
+        else if (item.label === "rms") row.rms = item.value;
+        else if (item.label === "n") row.n = item.value;
+      }
+      row.cursor = this.valueAtCursor(group.label);
+      values.set(group.label, row);
+    }
+    return values;
+  }
+
+  private valueAtCursor(path: string): number | null {
+    const tile = this.lastTiles?.series.find(
+      (series) => series.signalPath === path,
+    );
+    return tile === undefined || this.cursorT === null
+      ? null
+      : columnsValueAtTime(tile.bins, this.cursorT);
+  }
+
+  private exportLegendStats(state: RenderPanelState): void {
+    const values = this.legendStatsByPath();
+    const columns = this.visibleStatColumns(state);
+    const { units, mixedUnits, sharedUnit } = this.legendStatUnits(state);
+    const lines = [
+      [
+        "series",
+        ...columns.map((column) =>
+          statColumnLabel(column, column === "n" ? null : sharedUnit),
+        ),
+      ]
+        .map(csvCell)
+        .join(","),
+      ...state.series.map((series) => {
+        const row = values.get(series.path) ?? emptyLegendStats();
+        return [
+          series.path,
+          ...columns.map((column) => {
+            if (row[column] === null) return "";
+            const unit =
+              mixedUnits && column !== "n"
+                ? (units.get(series.path) ?? null)
+                : null;
+            return `${String(row[column])}${unit === null ? "" : ` ${unit}`}`;
+          }),
+        ]
+          .map(csvCell)
+          .join(",");
+      }),
+    ];
+    downloadText(
+      `${safeFilename(state.title)}-visible-stats.csv`,
+      lines.join("\n"),
+    );
+  }
+
+  private visibleStatColumns(state: RenderPanelState): StatColumn[] {
+    const width = required<HTMLElement>(
+      this.element,
+      ".plot-series-legend",
+    ).clientWidth;
+    if (width === 0) return state.stat_columns;
+    const capacity = Math.max(1, Math.floor((width - 184) / 64));
+    if (capacity >= state.stat_columns.length) return state.stat_columns;
+    const retained = state.stat_columns.slice(0, capacity);
+    const sorted = state.stats_sort;
+    if (
+      sorted !== null &&
+      state.stat_columns.includes(sorted) &&
+      !retained.includes(sorted)
+    ) {
+      retained[retained.length - 1] = sorted;
+    }
+    return state.stat_columns.filter((column) => retained.includes(column));
+  }
+
+  private legendStatUnits(state: RenderPanelState): {
+    units: Map<string, string | null>;
+    mixedUnits: boolean;
+    sharedUnit: string | null;
+  } {
+    const units = new Map(
+      state.series.map((series) => [
+        series.path,
+        this.callbacks.catalog().get(series.ref)?.summary.unit ?? null,
+      ]),
+    );
+    const distinctUnits = new Set(units.values());
+    const mixedUnits = distinctUnits.size > 1;
+    const sharedUnit =
+      distinctUnits.size === 1
+        ? (distinctUnits.values().next().value ?? null)
+        : null;
+    return { units, mixedUnits, sharedUnit };
   }
 
   private updateLegendValue(value: HTMLElement): void {
@@ -1995,6 +2591,10 @@ export class PanelView {
   }
 
   private updateLegendValues(): void {
+    if (this.lastState?.show_stats === true) {
+      this.updatePlotLegend(this.lastState);
+      return;
+    }
     for (const value of this.element.querySelectorAll<HTMLElement>(
       ".plot-legend-value",
     )) {
@@ -2384,18 +2984,6 @@ export class PanelView {
       ?.dispatchEvent(new Event("scroll"));
   }
 
-  private colorRuleToken(state: RenderPanelState): HTMLButtonElement {
-    const token = document.createElement("button");
-    token.className = "color-rule-token";
-    token.type = "button";
-    token.textContent = `color ← ${state.color_by}`;
-    token.title = "Choose a color rule and review overrides";
-    token.addEventListener("click", (event) => {
-      this.openRulesPopover(state, event.currentTarget as HTMLElement);
-    });
-    return token;
-  }
-
   private updateBindings(state: RenderPanelState): void {
     const container = required(this.element, ".panel-bindings");
     container.replaceChildren();
@@ -2414,19 +3002,6 @@ export class PanelView {
       });
       container.append(chip);
     }
-  }
-
-  private updateGhostToggle(state: RenderPanelState): void {
-    const toggle = required<HTMLButtonElement>(
-      this.element,
-      ".panel-ghost-toggle",
-    );
-    const ghost = state.ghost_mode === "ghost";
-    toggle.textContent = ghost ? "ghost" : "all";
-    toggle.title = ghost
-      ? "Show all series"
-      : "Show focused and rule-matched series only";
-    toggle.setAttribute("aria-pressed", String(ghost));
   }
 
   private setEmphasis(paths: readonly string[] | string | null): void {
@@ -2500,9 +3075,8 @@ export class PanelView {
           this.callbacks.pathForRef(ref) ?? `${ref.source_key}/${ref.channel}`;
         path.addEventListener("click", (event) => {
           event.stopPropagation();
-          const rect = path.getBoundingClientRect();
           this.closeBindingPopover();
-          this.openInspector(path.textContent, rect.left, rect.bottom);
+          this.openInspector(path.textContent);
         });
         const remove = document.createElement("button");
         remove.type = "button";
@@ -2554,35 +3128,91 @@ export class PanelView {
     this.bindingCleanup = null;
   }
 
-  private openPanelConfig(state: RenderPanelState, anchor: HTMLElement): void {
+  private openLineWidthMenu(
+    state: RenderPanelState,
+    anchor: HTMLElement,
+  ): void {
+    this.openPanelMenu(
+      anchor,
+      "LINE WIDTH · PANEL DEFAULT",
+      [1, 1.4, 1.5, 2, 3].map((width) => ({
+        label: `${formatToolbarNumber(width)} px`,
+        active: Math.abs(state.line_width - width) < 0.001,
+        run: () => this.callbacks.onSetPanelLineWidth(this.id, width),
+      })),
+    );
+  }
+
+  private openGhostMenu(state: RenderPanelState, anchor: HTMLElement): void {
+    this.openPanelMenu(anchor, "GHOST POOL", [
+      {
+        label: "all series · no ghosts",
+        active: state.ghost_mode === "all",
+        run: () => {
+          if (state.ghost_mode !== "all")
+            this.callbacks.onToggleGhostMode(this.id);
+        },
+      },
+      ...[0.2, 0.35, 0.5].map((opacity) => ({
+        label: `${String(Math.round(opacity * 100))}% opacity`,
+        active:
+          state.ghost_mode === "ghost" &&
+          Math.abs(state.ghost_opacity - opacity) < 0.001,
+        run: () => {
+          this.callbacks.onSetGhostOpacity(this.id, opacity);
+          if (state.ghost_mode !== "ghost")
+            this.callbacks.onToggleGhostMode(this.id);
+        },
+      })),
+    ]);
+  }
+
+  private openLegendStateMenu(
+    state: RenderPanelState,
+    anchor: HTMLElement,
+  ): void {
+    this.openPanelMenu(
+      anchor,
+      "LEGEND SIZE",
+      (["badge", "keys", "roster"] as const).map((legendState) => ({
+        label: legendState,
+        active: state.legend_state === legendState,
+        run: () =>
+          this.callbacks.onLegendLayout(this.id, { state: legendState }),
+      })),
+    );
+  }
+
+  private openPanelMenu(
+    anchor: HTMLElement,
+    label: string,
+    options: readonly {
+      label: string;
+      active: boolean;
+      run: () => void;
+    }[],
+  ): void {
     this.closePanelConfig();
     const popover = document.createElement("div");
     popover.className = "panel-config-popover";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Panel configuration");
+    popover.setAttribute("role", "menu");
+    popover.setAttribute("aria-label", label);
     const title = document.createElement("div");
     title.className = "panel-config-title";
-    title.textContent = "PANEL CONFIG";
-    const lineStyle = document.createElement("button");
-    lineStyle.type = "button";
-    const overridden = state.overrides.some(
-      (override) => override.dash !== null || override.width !== null,
-    );
-    lineStyle.textContent = overridden
-      ? "line style ◆ overridden"
-      : "line style flat";
-    lineStyle.addEventListener("click", () => {
-      this.closePanelConfig();
-      this.openRulesPopover(state, anchor);
-    });
-    const stats = document.createElement("button");
-    stats.type = "button";
-    stats.textContent = `statistics ${state.show_stats ? "on" : "off"}`;
-    stats.addEventListener("click", () => {
-      this.callbacks.onToggleStats(this.id);
-      this.closePanelConfig();
-    });
-    popover.append(title, lineStyle, stats);
+    title.textContent = label;
+    popover.append(title);
+    for (const option of options) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "menuitemradio");
+      button.setAttribute("aria-checked", String(option.active));
+      button.textContent = `${option.active ? "✓ " : "  "}${option.label}`;
+      button.addEventListener("click", () => {
+        option.run();
+        this.closePanelConfig();
+      });
+      popover.append(button);
+    }
     this.element.append(popover);
     const panelRect = this.element.getBoundingClientRect();
     const anchorRect = anchor.getBoundingClientRect();
@@ -2613,218 +3243,111 @@ export class PanelView {
     this.panelConfigCleanup = null;
   }
 
-  private openRulesPopover(state: RenderPanelState, anchor: HTMLElement): void {
-    this.closeRulesPopover();
-    const popover = document.createElement("div");
-    popover.className = "rules-popover";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Color rules");
-    const heading = document.createElement("div");
-    heading.className = "rules-popover-title";
-    const panelNumber = /^panel-(\d+)$/.exec(this.id)?.[1] ?? this.id;
-    heading.textContent = `STYLE RULES — PANEL ${panelNumber}`;
-    const rules = document.createElement("div");
-    rules.className = "rules-rule-list";
-    const colorRow = document.createElement("div");
-    colorRow.className = "rules-rule-row rules-color-rule";
-    const colorDimension = document.createElement("button");
-    colorDimension.type = "button";
-    colorDimension.className = "rules-color-dimension";
-    colorDimension.textContent = `color ← ${state.color_by}`;
-    colorDimension.setAttribute("aria-expanded", "false");
-    const palette = document.createElement("span");
-    palette.className = "rules-palette";
-    for (let index = 1; index <= 8; index += 1) {
-      const swatch = document.createElement("span");
-      swatch.className = "rules-palette-swatch";
-      swatch.style.background = `var(--series-${String(index)})`;
-      swatch.setAttribute("aria-hidden", "true");
-      palette.append(swatch);
-    }
-    const dimensions = document.createElement("div");
-    dimensions.className = "rules-dimension-choice";
-    dimensions.hidden = true;
-    for (const dimension of [
-      "focus",
-      "source",
-      "channel",
-      "set",
-      "attr",
-    ] as const) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "rules-dimension";
-      button.dataset.dimension = dimension;
-      button.textContent = dimension;
-      button.classList.toggle("active", state.color_by === dimension);
-      button.addEventListener("click", () => {
-        this.callbacks.onSetColorBy(this.id, dimension);
-        this.closeRulesPopover();
-      });
-      dimensions.append(button);
-    }
-    const channelShortcut = document.createElement("button");
-    channelShortcut.type = "button";
-    channelShortcut.className = "rules-channel-shortcut";
-    channelShortcut.textContent = "color ← channel";
-    channelShortcut.addEventListener("click", () => {
-      this.callbacks.onSetColorBy(this.id, "channel");
-      this.closeRulesPopover();
-    });
-    colorDimension.addEventListener("click", () => {
-      dimensions.hidden = !dimensions.hidden;
-      colorDimension.setAttribute("aria-expanded", String(!dimensions.hidden));
-    });
-    colorRow.append(colorDimension, channelShortcut, palette, dimensions);
-    rules.append(colorRow);
-    for (const text of ["dash ← — flat", "width ← — flat"]) {
-      const row = document.createElement("div");
-      row.className = "rules-rule-row rules-rule-static";
-      row.textContent = text;
-      rules.append(row);
-    }
-    const overridesTitle = document.createElement("div");
-    overridesTitle.className = "rules-overrides-title";
-    const input = this.lastInputState;
-    const overrides =
-      input === null
-        ? []
-        : appliedOverrides(
-            this.callbacks.catalog(),
-            input,
-            this.callbacks.namedSets(),
-          );
-    overridesTitle.textContent = `OVERRIDES · ${String(overrides.length)}`;
-    const rows = document.createElement("div");
-    rows.className = "rules-overrides";
-    const renderOverrides = (): void => {
-      const slice = virtualSlice(overrides.length, rows.scrollTop, 224, 28);
-      rows.replaceChildren();
-      rows.style.height = `${String(slice.totalHeight)}px`;
-      rows.style.paddingTop = `${String(slice.topPadding)}px`;
-      for (const item of overrides.slice(slice.start, slice.end)) {
-        const row = document.createElement("div");
-        row.className = "rules-override-row";
-        const key = document.createElement("span");
-        key.className = "rules-override-key";
-        key.textContent = overrideKey(item.override);
-        const target = document.createElement("span");
-        target.className = "rules-override-target";
-        target.textContent = overrideTarget(item.override, this.callbacks);
-        target.title = target.textContent;
-        const fields = document.createElement("span");
-        fields.className = "rules-override-fields";
-        fields.textContent = overrideFields(item.override);
-        const revert = document.createElement("button");
-        revert.type = "button";
-        revert.textContent = "revert";
-        revert.title = `Revert ${target.textContent}`;
-        revert.addEventListener("click", () => {
-          this.callbacks.onRemoveOverride(this.id, item.index);
-          this.closeRulesPopover();
-        });
-        row.append(key, target, fields, revert);
-        rows.append(row);
-      }
-    };
-    rows.addEventListener("scroll", renderOverrides);
-    const footer = document.createElement("button");
-    footer.type = "button";
-    footer.className = "rules-revert-all";
-    footer.textContent = "revert all";
-    footer.disabled = overrides.length === 0;
-    footer.addEventListener("click", () => {
-      this.callbacks.onClearOverrides(this.id);
-      this.closeRulesPopover();
-    });
-    popover.append(heading, rules, overridesTitle, rows, footer);
-    this.element.append(popover);
-    const panelRect = this.element.getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
-    popover.style.left = `${String(
-      clamp(
-        anchorRect.left - panelRect.left,
-        4,
-        Math.max(4, panelRect.width - 280),
-      ),
-    )}px`;
-    popover.style.top = `${String(
-      clamp(
-        anchorRect.bottom - panelRect.top + 4,
-        4,
-        Math.max(4, panelRect.height - 340),
-      ),
-    )}px`;
-    renderOverrides();
-    const onPointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && popover.contains(event.target))
-        return;
-      this.closeRulesPopover();
-    };
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") this.closeRulesPopover();
-    };
-    document.addEventListener("pointerdown", onPointer, { capture: true });
-    document.addEventListener("keydown", onKey);
-    this.rulesCleanup = () => {
-      document.removeEventListener("pointerdown", onPointer, { capture: true });
-      document.removeEventListener("keydown", onKey);
-      popover.remove();
-    };
-  }
-
-  private closeRulesPopover(): void {
-    this.rulesCleanup?.();
-    this.rulesCleanup = null;
-  }
-
-  openInspector(path: string, clientX: number, clientY: number): void {
-    this.closeInspector();
+  openInspector(path: string): void {
     const series = this.lastState?.series.find((entry) => entry.path === path);
     if (series === undefined) return;
     this.inspectorPath = path;
-    const popover = document.createElement("div");
-    popover.className = "series-inspector";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", `${path} series inspector`);
-    const pathRow = document.createElement("div");
-    pathRow.className = "inspector-path";
-    pathRow.textContent = path;
-    const slots = document.createElement("div");
-    slots.className = "inspector-slots";
+    const hasSeriesFocus = this.lastInputState?.focus.some(
+      (entry) =>
+        entry.kind === "series" &&
+        entry.ref !== null &&
+        entry.ref.source_key === series.ref.source_key &&
+        entry.ref.channel === series.ref.channel,
+    );
+    if (hasSeriesFocus !== true) {
+      this.callbacks.onFocusToggle(this.id, {
+        kind: "series",
+        ref: series.ref,
+        source_key: null,
+        channel: series.ref.channel,
+      });
+    }
+    this.updatePlotLegend(this.lastState as RenderPanelState);
+  }
+
+  private toggleInlineInspector(state: RenderPanelState, path: string): void {
+    this.inspectorPath = this.inspectorPath === path ? null : path;
+    this.updatePlotLegend(state);
+  }
+
+  private inlineSeriesInspector(
+    state: RenderPanelState,
+    series: RenderSeries,
+  ): HTMLElement {
+    const inspector = document.createElement("div");
+    inspector.className = "plot-row-inspector";
+    inspector.setAttribute("role", "group");
+    inspector.setAttribute("aria-label", `${series.path} line properties`);
+    const heading = document.createElement("div");
+    heading.className = "plot-row-inspector-heading";
+    const sample = document.createElement("span");
+    sample.className = "plot-legend-swatch";
+    sample.style.background = seriesColor(series);
+    sample.style.height = `${String(Math.max(1, series.width))}px`;
+    const path = document.createElement("span");
+    path.textContent = series.path;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "✕";
+    close.title = "Close line inspector";
+    close.addEventListener("click", () =>
+      this.toggleInlineInspector(state, series.path),
+    );
+    heading.append(sample, path, close);
+
+    const color = document.createElement("div");
+    color.className = "plot-row-inspector-field";
+    color.classList.toggle("overridden", series.overrideFields.color);
+    const colorLabel = document.createElement("span");
+    colorLabel.textContent = "color";
+    const slots = document.createElement("span");
+    slots.className = "plot-row-color-slots";
     for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
       const swatch = document.createElement("button");
-      swatch.className = "inspector-slot";
+      swatch.type = "button";
       swatch.style.background = `var(--series-${String(slot)})`;
-      swatch.setAttribute("aria-label", `Colour slot ${String(slot)}`);
       swatch.classList.toggle(
         "active",
         colorIndexForHue(series.hue) + 1 === slot,
       );
+      swatch.setAttribute("aria-label", `Color slot ${String(slot)}`);
       swatch.addEventListener("click", () => {
-        this.callbacks.onSetSeriesStyle(this.id, series.ref, {
+        this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
           color_slot: slot,
-          dash: series.dash,
-          width: series.width,
         });
-        this.closeInspector();
       });
       slots.append(swatch);
     }
-    const dashes = document.createElement("div");
-    dashes.className = "inspector-dashes";
+    color.append(
+      colorLabel,
+      slots,
+      this.inspectorProvenance(
+        series.overrideFields.color,
+        `← ${state.color_by ?? "flat"}`,
+        () =>
+          this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
+            color_slot: null,
+          }),
+      ),
+    );
+
+    const line = document.createElement("div");
+    line.className = "plot-row-inspector-field";
+    line.classList.toggle(
+      "overridden",
+      series.overrideFields.dash || series.overrideFields.width,
+    );
+    const lineLabel = document.createElement("span");
+    lineLabel.textContent = "line";
+    const dashes = document.createElement("span");
+    dashes.className = "plot-row-dashes";
     for (const dash of ["solid", "dash", "dot"] as const) {
       const button = document.createElement("button");
-      button.className = "inspector-dash";
+      button.type = "button";
       button.textContent = dash;
       button.classList.toggle("active", series.dash === dash);
       button.addEventListener("click", () => {
-        this.callbacks.onSetSeriesStyle(this.id, series.ref, {
-          color_slot: series.hue ?? 1,
-          dash,
-          width: series.width,
-        });
-        this.closeInspector();
+        this.callbacks.onPatchSeriesStyle(this.id, series.ref, { dash });
       });
       dashes.append(button);
     }
@@ -2835,102 +3358,65 @@ export class PanelView {
     width.step = "0.25";
     width.value = String(series.width);
     width.setAttribute("aria-label", "Line width");
+    const widthValue = document.createElement("span");
+    widthValue.textContent = formatToolbarNumber(series.width);
+    width.addEventListener("input", () => {
+      widthValue.textContent = formatToolbarNumber(Number(width.value));
+    });
     width.addEventListener("change", () => {
-      this.callbacks.onSetSeriesStyle(this.id, series.ref, {
-        color_slot: series.hue ?? 1,
-        dash: series.dash,
+      this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
         width: Number(width.value),
       });
     });
-    dashes.append(width);
-    const transforms = document.createElement("div");
-    transforms.className = "inspector-transforms";
-    for (const [label, kind] of [
-      ["d/dt", "gradient"],
-      ["∫dt", "cumtrapz"],
-      ["smooth", "movmean"],
-      ["|x|", "abs"],
-    ] as const) {
-      const button = document.createElement("button");
-      button.className = "inspector-transform";
-      button.textContent = label;
-      button.addEventListener("click", () => {
-        this.closeInspector();
-        this.callbacks.onQuickTransform(this.id, path, kind);
-      });
-      transforms.append(button);
-    }
-    const override =
-      this.lastInputState === null
-        ? undefined
-        : overrideFor(this.lastInputState, series.ref);
-    let overrideAction: HTMLDivElement | null = null;
-    if (override !== undefined) {
-      const selectedOverride = override;
-      overrideAction = document.createElement("div");
-      overrideAction.className = "inspector-override";
-      overrideAction.textContent = `◆ override · ${overrideTarget(selectedOverride, this.callbacks)}`;
-      const revert = document.createElement("button");
-      revert.type = "button";
-      revert.textContent = "revert";
-      const overrideIndex =
-        this.lastInputState?.overrides.indexOf(selectedOverride) ?? -1;
-      revert.addEventListener("click", () => {
-        if (overrideIndex !== -1)
-          this.callbacks.onRemoveOverride(this.id, overrideIndex);
-        this.closeInspector();
-      });
-      overrideAction.append(revert);
-    }
-    const remove = document.createElement("button");
-    remove.className = "inspector-remove";
-    remove.textContent = "remove";
-    remove.addEventListener("click", () => {
-      this.closeInspector();
-      this.callbacks.onRemoveSeries(this.id, series.ref);
-    });
-    popover.append(
-      pathRow,
-      slots,
+    line.append(
+      lineLabel,
       dashes,
-      transforms,
-      ...(overrideAction === null ? [] : [overrideAction]),
-      remove,
-    );
-    this.element.append(popover);
-    const panelRect = this.element.getBoundingClientRect();
-    popover.style.left = `${String(
-      clamp(
-        clientX - panelRect.left - 8,
-        4,
-        Math.max(4, panelRect.width - 204),
+      width,
+      widthValue,
+      this.inspectorProvenance(
+        series.overrideFields.dash || series.overrideFields.width,
+        `← ${state.dash_by ?? "flat"} · ${state.width_by ?? "flat"}`,
+        () =>
+          this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
+            dash: null,
+            width: null,
+          }),
       ),
-    )}px`;
-    popover.style.top = `${String(
-      clamp(clientY - panelRect.top + 8, 4, Math.max(4, panelRect.height - 40)),
-    )}px`;
-    const dismiss = (event: PointerEvent): void => {
-      if (event.target instanceof Node && popover.contains(event.target)) {
-        return;
-      }
-      this.closeInspector();
-    };
-    const onEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") this.closeInspector();
-    };
-    document.addEventListener("pointerdown", dismiss, { capture: true });
-    document.addEventListener("keydown", onEscape);
-    this.inspectorCleanup = () => {
-      document.removeEventListener("pointerdown", dismiss, { capture: true });
-      document.removeEventListener("keydown", onEscape);
-    };
+    );
+
+    const footer = document.createElement("div");
+    footer.className = "plot-row-inspector-footer";
+    const count = Object.values(series.overrideFields).filter(Boolean).length;
+    const summary = document.createElement("span");
+    summary.textContent =
+      count === 0 ? "no overrides" : `${String(count)} overrides`;
+    summary.classList.toggle("active", count > 0);
+    const mute = document.createElement("button");
+    mute.type = "button";
+    mute.textContent = series.visible ? "⌫ mute" : "restore";
+    mute.addEventListener("click", () =>
+      this.callbacks.onMuteSeries(this.id, series.ref),
+    );
+    footer.append(summary, mute);
+    inspector.append(heading, color, line, footer);
+    return inspector;
   }
 
-  private closeInspector(): void {
-    this.inspectorCleanup?.();
-    this.inspectorCleanup = null;
-    this.inspectorPath = null;
-    this.element.querySelector(".series-inspector")?.remove();
+  private inspectorProvenance(
+    overridden: boolean,
+    inherited: string,
+    revert: () => void,
+  ): HTMLElement {
+    const control = document.createElement("button");
+    control.type = "button";
+    control.className = "plot-row-provenance";
+    control.textContent = overridden ? "⟲" : inherited;
+    control.disabled = !overridden;
+    control.title = overridden
+      ? "Revert field to its encoding rule"
+      : inherited;
+    if (overridden) control.addEventListener("click", revert);
+    return control;
   }
 }
 
@@ -2948,20 +3434,11 @@ function overrideTarget(
   return "unknown target";
 }
 
-function overrideKey(override: SeriesOverride): string {
-  if (override.color_slot !== null) return "color";
-  if (override.dash !== null) return "dash";
-  if (override.width !== null) return "width";
-  return "style";
-}
-
 function overrideFields(override: SeriesOverride): string {
   return [
-    override.width === null ? null : `width ${String(override.width)}`,
-    override.dash === null ? null : `dash ${override.dash}`,
-    override.opacity === null ? null : `opacity ${String(override.opacity)}`,
-    override.visible === null ? null : override.visible ? "visible" : "hidden",
-    override.color_slot === null ? null : "highlight",
+    override.color_slot === null ? null : "color",
+    override.dash === null ? null : "dash",
+    override.width === null ? null : "width",
   ]
     .filter((field): field is string => field !== null)
     .join(" · ");
@@ -2996,39 +3473,216 @@ function axisEditZone(
   return null;
 }
 
-function statsName(text: string): HTMLElement {
-  const name = document.createElement("span");
-  name.className = "stats-name";
-  name.textContent = text;
-  return name;
+function formatToolbarNumber(value: number): string {
+  return Number.isInteger(value) ? value.toFixed(1) : String(value);
 }
 
-function statsItem(
-  label: string,
+function encodingValueCount(
+  state: RenderPanelState,
+  dimension: StyleDimension,
+): number {
+  if (dimension === "focus")
+    return new Set(state.series.map((series) => series.focused)).size;
+  if (dimension === "source")
+    return new Set(state.series.map((series) => series.ref.source_key)).size;
+  if (dimension === "channel")
+    return new Set(state.series.map((series) => series.ref.channel)).size;
+  if (dimension === "set") return state.bindings.length;
+  return new Set(state.series.map((series) => series.path.split("/")[0])).size;
+}
+
+function seriesColor(series: Pick<RenderSeries, "hue">): string {
+  return series.hue === null
+    ? "var(--fg-4)"
+    : `var(--series-${String(colorIndexForHue(series.hue) + 1)})`;
+}
+
+function emptyLegendStats(): LegendStatValues {
+  return { min: null, max: null, mean: null, rms: null, n: null, cursor: null };
+}
+
+function aggregateLegendStats(
+  rows: readonly LegendStatValues[],
+  mixedUnits = false,
+): LegendStatValues {
+  const finite = (column: StatColumn): number[] =>
+    rows.flatMap((row) => {
+      const value = row[column];
+      return value === null ? [] : [value];
+    });
+  const min = finite("min");
+  const max = finite("max");
+  const mean = finite("mean");
+  const rms = finite("rms");
+  const n = finite("n");
+  const cursor = finite("cursor");
+  return {
+    min: mixedUnits || min.length === 0 ? null : Math.min(...min),
+    max: mixedUnits || max.length === 0 ? null : Math.max(...max),
+    mean: mixedUnits ? null : average(mean),
+    rms: mixedUnits ? null : average(rms),
+    n: n.length === 0 ? null : n.reduce((total, value) => total + value, 0),
+    cursor: mixedUnits ? null : average(cursor),
+  };
+}
+
+function average(values: readonly number[]): number | null {
+  return values.length === 0
+    ? null
+    : values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function statGridTemplate(columns: number): string {
+  return `minmax(128px, 1fr) minmax(56px, 1fr) repeat(${String(columns)}, 64px)`;
+}
+
+function statSpanDomain(
+  rows: readonly LegendStatValues[],
+): readonly [number, number] | null {
+  const minima = rows.flatMap((row) => (row.min === null ? [] : [row.min]));
+  const maxima = rows.flatMap((row) => (row.max === null ? [] : [row.max]));
+  return minima.length === 0 || maxima.length === 0
+    ? null
+    : [Math.min(...minima), Math.max(...maxima)];
+}
+
+function statSpan(
+  values: LegendStatValues,
+  domain: readonly [number, number] | null,
+  color: string,
+): HTMLElement {
+  const cell = document.createElement("span");
+  cell.className = "plot-stat-span";
+  const track = document.createElement("span");
+  track.className = "plot-stat-span-track";
+  cell.append(track);
+  if (values.min === null || values.max === null || domain === null)
+    return cell;
+  cell.title = `min ${formatStatValue(values.min)} · max ${formatStatValue(values.max)} · μ ${formatStatValue(values.mean)}`;
+  const extent = domain[1] - domain[0];
+  const position = (value: number): number =>
+    extent === 0 ? 50 : ((value - domain[0]) / extent) * 100;
+  const band = document.createElement("span");
+  band.className = "plot-stat-span-band";
+  band.style.background = color;
+  band.style.left = `${String(position(values.min))}%`;
+  band.style.right = `${String(100 - position(values.max))}%`;
+  track.append(band);
+  if (values.mean !== null) {
+    const mean = document.createElement("span");
+    mean.className = "plot-stat-span-mean";
+    mean.style.left = `${String(position(values.mean))}%`;
+    track.append(mean);
+  }
+  return cell;
+}
+
+function statHistogram(values: readonly (number | null)[]): HTMLElement {
+  const cell = document.createElement("span");
+  cell.className = "plot-stat-histogram";
+  const finite = values.filter((value): value is number => value !== null);
+  if (finite.length === 0) return cell;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const bins = Array.from({ length: 7 }, () => 0);
+  for (const value of finite) {
+    const index =
+      max === min
+        ? 3
+        : Math.min(6, Math.floor(((value - min) / (max - min)) * 7));
+    bins[index] = (bins[index] ?? 0) + 1;
+  }
+  const peak = Math.max(...bins);
+  for (const count of bins) {
+    const bar = document.createElement("span");
+    bar.style.height = `${String((count / peak) * 100)}%`;
+    cell.append(bar);
+  }
+  return cell;
+}
+
+function statColumnLabel(
+  column: StatColumn,
+  unit: string | null = null,
+): string {
+  const label =
+    column === "mean"
+      ? "μ"
+      : column === "cursor"
+        ? "@CUR"
+        : column.toUpperCase();
+  return unit === null || unit === "" ? label : `${label} (${unit})`;
+}
+
+function statCell(
   value: number | null,
+  column: StatColumn,
   unit: string | null = null,
 ): HTMLElement {
-  const item = document.createElement("span");
-  item.className = "stats-item";
-  const key = document.createElement("span");
-  key.textContent = label;
-  const reading = document.createElement("b");
-  reading.textContent =
-    unit === null ? formatValue(value) : `${formatValue(value)} ${unit}`;
-  item.append(key, reading);
-  return item;
+  const cell = document.createElement("span");
+  cell.className = "plot-stat-cell";
+  cell.dataset.column = column;
+  cell.textContent = formatStatValue(value);
+  if (value !== null && unit !== null && unit !== "") {
+    const suffix = document.createElement("span");
+    suffix.className = "plot-stat-unit";
+    suffix.textContent = ` ${unit}`;
+    cell.append(suffix);
+  }
+  return cell;
+}
+
+function formatStatValue(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (value === 0) return "0.000";
+  const absolute = Math.abs(value);
+  if (absolute >= 10_000 || absolute < 0.001) return value.toExponential(3);
+  return Number(value.toPrecision(4)).toString();
+}
+
+function csvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
+
+function safeFilename(value: string): string {
+  const safe = value.trim().replaceAll(/[^a-zA-Z0-9._-]+/g, "-");
+  return safe === "" ? "panel" : safe;
+}
+
+function downloadText(filename: string, text: string): void {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function panelMarkup(): string {
   return `<header class="panel-header">
-      <span class="drag-handle" aria-hidden="true">⠿</span>
-      <span class="panel-title"></span>
-      <span class="panel-bindings"></span>
-      <button class="panel-ghost-toggle" type="button" aria-pressed="false">all</button>
-      <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
-      <button class="panel-action panel-config-toggle" type="button" title="Panel configuration" aria-haspopup="dialog">▾</button>
+      <span class="panel-toolbar-group panel-toolbar-binding">
+        <span class="drag-handle" aria-hidden="true">⠿</span>
+        <span class="panel-title"></span>
+        <span class="panel-bindings"></span>
+      </span>
+      <span class="panel-toolbar-separator" aria-hidden="true"></span>
+      <span class="panel-toolbar-group panel-toolbar-axes">
+        <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
+      </span>
+      <span class="panel-toolbar-separator" aria-hidden="true"></span>
+      <span class="panel-toolbar-group panel-toolbar-render">
+        <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">1.4</span> <span class="toolbar-caret">▾</span></button>
+        <span class="panel-toolbar-fact">curve <b>linear</b></span>
+        <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Ghost visibility and strength">ghost <b class="panel-ghost-value">all</b> <span class="toolbar-caret">▾</span></button>
+        <span class="panel-toolbar-fact panel-points-fact">pts <b>auto</b></span>
+      </span>
+      <span class="panel-toolbar-separator" aria-hidden="true"></span>
+      <span class="panel-toolbar-group panel-toolbar-readout">
+        <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
+        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend size">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
+      </span>
       <span class="panel-actions">
-        <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">
           <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right — new panel">→</button>
           <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down — new panel">↓</button>
@@ -3043,6 +3697,5 @@ function panelMarkup(): string {
       <div class="plot-series-legend" aria-label="Plot legend"></div>
       <div class="panel-empty" hidden></div>
     </div>
-    <div class="panel-stats" hidden></div>
     <div class="panel-annotations" hidden></div>`;
 }

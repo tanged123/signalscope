@@ -120,21 +120,16 @@ test.describe("desktop plot interactions", () => {
     await expect(readout).not.toHaveText(beforeWindow ?? "");
 
     await panel.locator(".panel-stats-toggle").click();
-    await expect(panel.locator(".panel-stats")).toBeVisible();
-    await expect(panel.locator(".panel-stats")).toContainText("μ");
-    const metricMargins = await panel
-      .locator(".stats-series")
-      .first()
-      .locator(".stats-item")
-      .evaluateAll((items) =>
-        items
-          .slice(1)
-          .map((item) =>
-            getComputedStyle(item).getPropertyValue("margin-left"),
-          ),
-      );
-    expect(metricMargins.length).toBeGreaterThan(0);
-    expect(metricMargins.every((margin) => margin === "8px")).toBe(true);
+    const stats = panel.locator(".plot-legend-stats");
+    await expect(stats).toBeVisible();
+    await expect(stats).toContainText("μ");
+    await expect(panel.locator(".panel-stats")).toHaveCount(0);
+    await expect(stats.locator(".plot-stat-row")).not.toHaveCount(0);
+
+    const mean = stats.locator('.plot-stat-sort[data-column="mean"]');
+    await mean.click();
+    await expect(mean).toHaveClass(/active/);
+    await expect(mean).toContainText("↓");
   });
 
   test("the status-bar cursor button cycles the same three modes as C", async ({
@@ -193,7 +188,7 @@ test.describe("desktop plot interactions", () => {
     await expect(readout).toHaveText(fitted ?? "");
   });
 
-  test("title editing, inline axes and rules are keyboard reachable", async ({
+  test("title editing, inline axes and line properties are keyboard reachable", async ({
     page,
   }) => {
     const panel = page.locator(".panel").first();
@@ -204,12 +199,30 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.press("Enter");
     await expect(title).toHaveText("Body velocity");
 
-    await panel.locator(".color-rule-token").click();
-    const rules = panel.locator(".rules-popover");
-    await expect(rules).toBeVisible();
-    await expect(rules.locator(".rules-dimension")).toHaveCount(5);
-    await rules.getByRole("button", { name: "color ← channel" }).click();
-    await expect(rules).toBeHidden();
+    const colorEncoding = panel.locator(
+      '.plot-legend-encoding-chip[data-property="color"]',
+    );
+    await colorEncoding.click();
+    const drawer = panel.locator(".plot-encoding-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer.locator(".plot-encoding-choice")).toHaveCount(6);
+    await drawer.getByRole("button", { name: "channel" }).click();
+    await expect(colorEncoding).toContainText("color ← channel");
+    await expect(drawer).toBeHidden();
+
+    await panel.locator(".panel-stats-toggle").click();
+    const swatch = panel
+      .locator(".plot-stat-body .plot-stat-row .plot-row-inspector-toggle")
+      .first();
+    await swatch.click();
+    const inspector = panel.locator(".plot-row-inspector");
+    await expect(inspector).toBeVisible();
+    await expect(inspector).toContainText("line");
+    await expect(inspector.locator(".plot-row-dashes")).toBeVisible();
+    await expect(
+      inspector.locator('input[aria-label="Line width"]'),
+    ).toBeVisible();
+    await expect(inspector.locator(".quick-transform")).toHaveCount(0);
   });
 });
 

@@ -32,6 +32,10 @@ function state(): PanelState {
     axis_style: "gutter",
     bindings: [{ kind: "query", selector: "*", refs: [], set_id: null }],
     color_by: "source",
+    dash_by: null,
+    width_by: null,
+    line_width: 1.4,
+    ghost_opacity: 0.5,
     overrides: [],
     focus: [],
     ghost_mode: "all",
@@ -47,6 +51,9 @@ function state(): PanelState {
     time_window: null,
     annotations: [],
     show_stats: false,
+    stat_columns: ["min", "max", "mean", "rms", "cursor"],
+    stats_sort: null,
+    stats_sort_descending: false,
   };
 }
 
@@ -88,12 +95,15 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onToggleAxisStyle: vi.fn(),
     onRenameTitle: vi.fn(),
     onEditAxisLabel: vi.fn(),
-    onSetColorBy: vi.fn(),
-    onRemoveOverride: vi.fn(),
+    onSetEncoding: vi.fn(),
+    onSetPanelLineWidth: vi.fn(),
+    onSetGhostOpacity: vi.fn(),
+    onSetStatColumns: vi.fn(),
+    onSetStatsSort: vi.fn(),
+    onRevertStyleOverride: vi.fn(),
     onClearOverrides: vi.fn(),
-    onSetSeriesStyle: vi.fn(),
+    onPatchSeriesStyle: vi.fn(),
     onRemoveSeries: vi.fn(),
-    onQuickTransform: vi.fn(),
   };
 }
 
@@ -236,19 +246,198 @@ describe("PanelView chrome", () => {
     const legend = view.element.querySelector(".plot-series-legend");
     expect(legend?.getAttribute("data-state")).toBe("keys");
     expect(legend?.querySelectorAll(".plot-legend-row")).toHaveLength(1);
-    expect(legend?.querySelector(".color-rule-token")?.textContent).toBe(
-      "color ← source ▾",
-    );
-    view.element
-      .querySelector<HTMLButtonElement>(".panel-config-toggle")
-      ?.click();
     expect(
-      view.element.querySelector(".panel-config-popover")?.textContent,
-    ).toContain("line style flat");
+      [...(legend?.querySelectorAll(".plot-legend-encoding-chip") ?? [])].map(
+        (chip) => chip.textContent,
+      ),
+    ).toEqual(["color ← source", "dash ← flat", "width ← flat · 1.4"]);
+    expect(view.element.querySelector(".panel-config-toggle")).toBeNull();
+    expect(view.element.querySelector(".panel-line-width")?.textContent).toBe(
+      "1.4 ▾",
+    );
+    expect(
+      view.element.querySelector(".panel-ghost-opacity")?.textContent,
+    ).toBe("ghost all ▾");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
     expect(
       view.element.querySelector<HTMLElement>(".panel-annotations")?.hidden,
     ).toBe(true);
+  });
+
+  it("keeps the style cascade visible in the legend and routes encoding edits", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const panelCallbacks = callbacks(catalog);
+    const onSetEncoding = vi.fn();
+    panelCallbacks.onSetEncoding = onSetEncoding;
+    const view = new PanelView("panel", panelCallbacks);
+    view.update(state(), false);
+
+    const legend = view.element.querySelector<HTMLElement>(
+      ".plot-series-legend",
+    );
+    expect(legend).not.toBeNull();
+    expect(
+      [...(legend?.querySelectorAll(".plot-legend-encoding-chip") ?? [])].map(
+        (chip) => chip.textContent,
+      ),
+    ).toEqual(["color ← source", "dash ← flat", "width ← flat · 1.4"]);
+
+    legend
+      ?.querySelector<HTMLButtonElement>(
+        '.plot-legend-encoding-chip[data-property="color"]',
+      )
+      ?.click();
+    expect(legend?.querySelector(".plot-encoding-choices")).not.toBeNull();
+    const channelChoice = [
+      ...(legend?.querySelectorAll<HTMLButtonElement>(
+        ".plot-encoding-choice",
+      ) ?? []),
+    ].find((choice) => choice.textContent === "channel");
+    channelChoice?.click();
+    expect(onSetEncoding).toHaveBeenCalledWith("panel", "color", "channel");
+  });
+
+  it("edits a series inline and exposes field-level revert without legacy actions", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const panelCallbacks = callbacks(catalog);
+    const onPatchSeriesStyle = vi.fn();
+    panelCallbacks.onPatchSeriesStyle = onPatchSeriesStyle;
+    const panel = state();
+    panel.overrides = [
+      {
+        target_ref: { source_key: "run-01", channel: "temp" },
+        target_selector: null,
+        color_slot: 2,
+        dash: "dash",
+        width: 2.5,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    panel.focus = [
+      {
+        kind: "series",
+        ref: { source_key: "run-01", channel: "temp" },
+        source_key: null,
+        channel: null,
+      },
+    ];
+    const view = new PanelView("panel", panelCallbacks);
+    view.update(panel, false);
+
+    view.element
+      .querySelector<HTMLButtonElement>(".plot-row-inspector-toggle")
+      ?.click();
+    const inspector = view.element.querySelector<HTMLElement>(
+      ".plot-row-inspector",
+    );
+    expect(inspector).not.toBeNull();
+    expect(inspector?.querySelector(".plot-row-remove")).toBeNull();
+    expect(inspector?.querySelector(".plot-row-transform")).toBeNull();
+    expect(inspector?.querySelector(".quick-transform")).toBeNull();
+
+    inspector
+      ?.querySelector<HTMLButtonElement>(
+        ".plot-row-color-slots button:nth-child(3)",
+      )
+      ?.click();
+    inspector
+      ?.querySelector<HTMLButtonElement>(".plot-row-dashes button")
+      ?.click();
+    const width = inspector?.querySelector<HTMLInputElement>(
+      'input[type="range"]',
+    );
+    if (width === undefined || width === null) throw new Error("missing width");
+    width.value = "3";
+    width.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onPatchSeriesStyle).toHaveBeenCalledWith(
+      "panel",
+      { source_key: "run-01", channel: "temp" },
+      { color_slot: 3 },
+    );
+    expect(onPatchSeriesStyle).toHaveBeenCalledWith(
+      "panel",
+      { source_key: "run-01", channel: "temp" },
+      { dash: "solid" },
+    );
+    expect(onPatchSeriesStyle).toHaveBeenCalledWith(
+      "panel",
+      { source_key: "run-01", channel: "temp" },
+      { width: 3 },
+    );
+    const provenance = inspector?.querySelectorAll<HTMLButtonElement>(
+      ".plot-row-provenance",
+    );
+    expect(provenance).toHaveLength(2);
+    provenance?.[0]?.click();
+    expect(onPatchSeriesStyle).toHaveBeenCalledWith(
+      "panel",
+      { source_key: "run-01", channel: "temp" },
+      { color_slot: null },
+    );
+    provenance?.[1]?.click();
+    expect(onPatchSeriesStyle).toHaveBeenCalledWith(
+      "panel",
+      { source_key: "run-01", channel: "temp" },
+      { dash: null, width: null },
+    );
+  });
+
+  it("renders configurable statistics in the legend rather than a bottom strip", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const panelCallbacks = callbacks(catalog);
+    const onSetStatColumns = vi.fn();
+    const onSetStatsSort = vi.fn();
+    panelCallbacks.onSetStatColumns = onSetStatColumns;
+    panelCallbacks.onSetStatsSort = onSetStatsSort;
+    const panel = state();
+    panel.show_stats = true;
+    panel.stat_columns = ["min", "mean", "n"];
+    panel.stats_sort = "mean";
+    panel.stats_sort_descending = false;
+    panel.focus = [
+      {
+        kind: "series",
+        ref: { source_key: "run-01", channel: "temp" },
+        source_key: null,
+        channel: null,
+      },
+    ];
+    const view = new PanelView("panel", panelCallbacks);
+    const legend = view.element.querySelector<HTMLElement>(
+      ".plot-series-legend",
+    );
+    if (legend === null) throw new Error("missing legend");
+    Object.defineProperty(legend, "clientWidth", { value: 320 });
+    view.update(panel, false);
+
+    expect(legend.querySelector(".plot-legend-stats")).not.toBeNull();
+    expect(view.element.querySelector(".panel-stats")).toBeNull();
+    expect(
+      [...legend.querySelectorAll<HTMLElement>(".plot-stat-sort")].map(
+        (button) => button.dataset.column,
+      ),
+    ).toEqual(["min", "mean"]);
+
+    legend
+      .querySelector<HTMLButtonElement>('.plot-stat-sort[data-column="min"]')
+      ?.click();
+    expect(onSetStatsSort).toHaveBeenCalledWith("panel", "min", true);
+    legend
+      .querySelector<HTMLButtonElement>(".plot-stat-column-picker")
+      ?.click();
+    const columnN = legend.querySelector<HTMLButtonElement>(
+      '.plot-stats-columns-drawer button[aria-pressed="true"]',
+    );
+    expect(columnN).not.toBeNull();
+    expect(legend.querySelector(".plot-stats-columns-drawer")).not.toBeNull();
+    const nChoice = [
+      ...legend.querySelectorAll<HTMLButtonElement>(
+        ".plot-stats-columns-drawer button",
+      ),
+    ].find((button) => button.textContent.trim().replace(/^✓\s*/, "") === "N");
+    nChoice?.click();
+    expect(onSetStatColumns).toHaveBeenCalledWith("panel", ["min", "mean"]);
   });
 
   it("does not intercept Tab or Enter from descendant controls", () => {

@@ -165,7 +165,7 @@ test("command palette edits focused-panel axis labels", async ({ page }) => {
   }
 });
 
-test("panel matrix legend keeps rosters virtual and exposes rules", async ({
+test("panel matrix legend keeps rosters virtual and exposes unified styles", async ({
   page,
 }) => {
   await gotoApp(page);
@@ -219,10 +219,14 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onLegendLayout: (_id, layout) => {
         if (layout.state !== undefined) host.dataset.legendState = layout.state;
       },
-      onSetColorBy: (_id, dimension) => {
-        host.dataset.colorBy = dimension;
+      onSetEncoding: (_id, property, dimension) => {
+        host.dataset.encoding = `${property}:${dimension ?? "flat"}`;
       },
-      onRemoveOverride: () => {},
+      onSetPanelLineWidth: () => {},
+      onSetGhostOpacity: () => {},
+      onSetStatColumns: () => {},
+      onSetStatsSort: () => {},
+      onRevertStyleOverride: () => {},
       onClearOverrides: () => {},
       localPathFor: () => null,
       sourceKeyFor: () => null,
@@ -243,6 +247,7 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
             visible: true,
             focused: true,
             overridden: false,
+            overrideFields: { color: false, dash: false, width: false },
           })),
       onToggleSeries: () => {},
       onResized: () => {},
@@ -259,11 +264,8 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       onToggleAxisStyle: () => {},
       onRenameTitle: () => {},
       onEditAxisLabel: () => {},
-      onSetSeriesStyle: () => {},
+      onPatchSeriesStyle: () => {},
       onRemoveSeries: () => {},
-      onQuickTransform: (id, path, kind) => {
-        host.dataset.quickTransform = `${id}:${path}:${kind}`;
-      },
     });
     host.appendChild(view.element);
     view.update(
@@ -283,6 +285,10 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
           },
         ],
         color_by: "source",
+        dash_by: null,
+        width_by: null,
+        line_width: 1.4,
+        ghost_opacity: 0.5,
         overrides: [],
         focus: Array.from({ length: 12 }, (_, index) => ({
           kind: "series" as const,
@@ -306,6 +312,9 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
         time_window: null,
         annotations: [],
         show_stats: false,
+        stat_columns: ["min", "max", "mean", "rms", "cursor"],
+        stats_sort: null,
+        stats_sort_descending: false,
       },
       false,
     );
@@ -407,13 +416,18 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
   await expect(panel.locator(".binding-popover")).toBeVisible();
   await panel.getByRole("button", { name: "remove binding" }).click();
   await expect(panel.locator(".binding-popover")).toBeHidden();
-  await panel.locator(".color-rule-token").click();
-  await expect(panel.locator(".rules-popover")).toBeVisible();
-  await panel.getByRole("button", { name: "color ← channel" }).click();
-  await expect(page.locator("#legend-probe")).toHaveAttribute(
-    "data-color-by",
-    "channel",
+  const colorEncoding = panel.locator(
+    '.plot-legend-encoding-chip[data-property="color"]',
   );
+  await colorEncoding.click();
+  const encodingDrawer = panel.locator(".plot-encoding-drawer");
+  await expect(encodingDrawer).toBeVisible();
+  await encodingDrawer.getByRole("button", { name: "channel" }).click();
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-encoding",
+    "color:channel",
+  );
+  await expect(panel.locator(".rules-popover")).toHaveCount(0);
   await page.keyboard.press("Escape");
 });
 

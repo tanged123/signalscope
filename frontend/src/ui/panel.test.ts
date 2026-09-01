@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { SignalSummary } from "../generated/protocol";
-import type { FocusEntry, PanelState } from "../generated/session";
+import type { FocusEntry } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
@@ -137,6 +137,7 @@ function visible(path: string): RenderSeries {
     visible: true,
     focused: true,
     overridden: false,
+    overrideFields: { color: false, dash: false, width: false },
   };
 }
 
@@ -146,6 +147,10 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     title: "Time",
     axis_style: "gutter",
     color_by: "source",
+    dash_by: null,
+    width_by: null,
+    line_width: 1.4,
+    ghost_opacity: 0.5,
     ghost_mode: "all",
     legend_state: "keys",
     legend_position: null,
@@ -163,6 +168,9 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     time_window: null,
     annotations: [],
     show_stats: false,
+    stat_columns: ["min", "max", "mean", "rms", "cursor"],
+    stats_sort: null,
+    stats_sort_descending: false,
   };
 }
 
@@ -446,10 +454,10 @@ describe("panel series", () => {
       view.element.querySelector(".plot-legend-row")?.textContent,
     ).toContain("run_07");
     expect(view.element.querySelector(".plot-legend-footer")?.textContent).toBe(
-      "1 ghosts ▾",
+      "1 ghosts ▾0 overrides ▾",
     );
     view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-footer")
+      .querySelector<HTMLButtonElement>(".plot-legend-footer button")
       ?.click();
     expect(onLegendLayout).toHaveBeenCalledWith("panel", { state: "roster" });
   });
@@ -730,99 +738,6 @@ describe("panel series", () => {
       1,
     );
     expect(viewport.textContent).toContain("run_100");
-  });
-
-  it("lays out style rules with a palette, static line rules, and override actions", () => {
-    const catalog = Catalog.build([summary("run_07/temp")]);
-    const state = timeState([visible("run_07/temp")]);
-    state.overrides = [
-      {
-        target_ref: { source_key: "k7", channel: "temp" },
-        target_selector: null,
-        color_slot: 2,
-        dash: null,
-        width: 2.5,
-        opacity: null,
-        visible: null,
-      },
-    ];
-    const onSetColorBy = vi.fn();
-    const onRemoveOverride = vi.fn();
-    const onClearOverrides = vi.fn();
-    const view = Object.create(PanelView.prototype) as unknown as {
-      id: string;
-      callbacks: Pick<
-        PanelCallbacks,
-        | "catalog"
-        | "namedSets"
-        | "pathForRef"
-        | "onSetColorBy"
-        | "onRemoveOverride"
-        | "onClearOverrides"
-      >;
-      element: HTMLElement;
-      lastInputState: PanelState;
-      openRulesPopover(current: RenderPanelState, anchor: HTMLElement): void;
-    };
-    view.id = "panel-1";
-    view.callbacks = {
-      catalog: () => catalog,
-      namedSets: () => [],
-      pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
-      onSetColorBy,
-      onRemoveOverride,
-      onClearOverrides,
-    };
-    view.element = document.createElement("article");
-    const anchor = document.createElement("button");
-    view.element.append(anchor);
-    view.lastInputState = {
-      ...state,
-    } as unknown as PanelState;
-    view.openRulesPopover(state, anchor);
-
-    expect(
-      view.element.querySelector(".rules-popover-title")?.textContent,
-    ).toBe("STYLE RULES — PANEL 1");
-    expect(view.element.querySelectorAll(".rules-rule-row")).toHaveLength(3);
-    expect(view.element.querySelectorAll(".rules-palette-swatch")).toHaveLength(
-      8,
-    );
-    expect(view.element.querySelector(".rules-rule-static")?.textContent).toBe(
-      "dash ← — flat",
-    );
-    expect(view.element.querySelector(".rules-override-key")?.textContent).toBe(
-      "color",
-    );
-    expect(
-      view.element.querySelector(".rules-override-target")?.textContent,
-    ).toBe("k7/temp");
-    expect(
-      view.element.querySelector(".rules-override-fields")?.textContent,
-    ).toBe("width 2.5 · highlight");
-    view.element
-      .querySelector<HTMLButtonElement>(".rules-override-row button")
-      ?.click();
-    expect(onRemoveOverride).toHaveBeenCalledWith("panel-1", 0);
-    view.openRulesPopover(state, anchor);
-    view.element.querySelector<HTMLButtonElement>(".rules-revert-all")?.click();
-    expect(onClearOverrides).toHaveBeenCalledWith("panel-1");
-    view.openRulesPopover(state, anchor);
-    view.element
-      .querySelector<HTMLButtonElement>(".rules-color-dimension")
-      ?.click();
-    expect(view.element.querySelectorAll(".rules-dimension")).toHaveLength(5);
-    view.element
-      .querySelector<HTMLButtonElement>(
-        '.rules-dimension[data-dimension="channel"]',
-      )
-      ?.click();
-    expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
-    view.openRulesPopover(state, anchor);
-    view.element
-      .querySelector<HTMLButtonElement>(".rules-channel-shortcut")
-      ?.click();
-    expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
   });
 
   it("groups pick bindings and counts live query and set members", () => {

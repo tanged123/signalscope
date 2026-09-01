@@ -46,7 +46,6 @@ import {
   PLOT_LINE_WIDTH_SCALE,
   UI_FONT_SIZE,
 } from "../app/preferences";
-import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
@@ -87,7 +86,6 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
-import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalOutlineView } from "./signal-outline";
 import { SetsListView } from "./sets-list";
@@ -441,20 +439,42 @@ export class AppShell {
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
-        onSetColorBy: (id, dimension) => {
-          this.workspace.setColorBy(id, dimension);
+        onSetEncoding: (id, property, dimension) => {
+          this.workspace.setEncoding(id, property, dimension);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onRemoveOverride: (id, index) => {
-          this.workspace.removeOverride(id, index);
+        onSetPanelLineWidth: (id, width) => {
+          this.workspace.setPanelLineWidth(id, width);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetGhostOpacity: (id, opacity) => {
+          this.workspace.setGhostOpacity(id, opacity);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetStatColumns: (id, columns) => {
+          this.workspace.setStatColumns(id, columns);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onSetStatsSort: (id, column, descending) => {
+          this.workspace.setStatsSort(id, column, descending);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onRevertStyleOverride: (id, index) => {
+          this.workspace.clearStyleOverride(id, index);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onClearOverrides: (id) => {
-          this.workspace.clearOverrides(id);
+          this.workspace.clearStyleOverrides(id);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -550,8 +570,8 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onSetSeriesStyle: (id, ref, style) => {
-          this.workspace.setSeriesOverride(id, ref, style);
+        onPatchSeriesStyle: (id, ref, style) => {
+          this.workspace.patchSeriesOverride(id, ref, style);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -561,9 +581,6 @@ export class AppShell {
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
-        },
-        onQuickTransform: (_id, path, kind) => {
-          void this.applyQuickTransform(path, kind);
         },
         onLayoutChanged: () => {
           this.commitHistory();
@@ -1061,7 +1078,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 2.0.0");
+        this.showModeHelp("SignalScope 2.1.0");
       },
     });
     this.commands.register({
@@ -2535,17 +2552,6 @@ export class AppShell {
       if (!fullPaths.has(reference) && bundlePaths.has(reference)) return true;
     }
     return false;
-  }
-
-  private async applyQuickTransform(
-    path: string,
-    kind: QuickTransform,
-  ): Promise<void> {
-    try {
-      await this.createDerived(...quickTransform(path, kind));
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
   }
 
   private showModeHelp(text: string): void {
