@@ -22,6 +22,11 @@ export interface ResolvedSeries {
   visible: boolean;
   focused: boolean;
   overridden: boolean;
+  overrideFields: {
+    color: boolean;
+    dash: boolean;
+    width: boolean;
+  };
 }
 
 interface ResolvedRef {
@@ -61,23 +66,35 @@ export function resolvePanel(
         : ("rule" as const),
   );
   const hues = assignHues(panel, refs, focused);
+  const dashes = assignDashes(panel, refs, focused);
+  const widths = assignWidths(panel, refs, focused);
   const overrides = prepareOverrides(panel.overrides);
 
   return refs.map(({ ref, series }, index) => {
-    let hue: number | null = hues[index] ?? 1;
-    let dash: DashStyle = "solid";
-    let width = 1.4;
+    let hue: number | null = panel.color_by === null ? 1 : (hues[index] ?? 1);
+    let dash: DashStyle = dashes[index] ?? "solid";
+    let width = widths[index] ?? panel.line_width;
     let opacity = 1;
     let visible = true;
     let overridden = false;
+    const overrideFields = { color: false, dash: false, width: false };
 
     for (const prepared of overrides) {
       if (!matchesOverride(prepared, series, ref)) continue;
       overridden = true;
       const override = prepared.override;
-      if (override.color_slot !== null) hue = hueForSlot(override.color_slot);
-      if (override.dash !== null) dash = override.dash;
-      if (override.width !== null) width = override.width;
+      if (override.color_slot !== null) {
+        hue = hueForSlot(override.color_slot);
+        overrideFields.color = true;
+      }
+      if (override.dash !== null) {
+        dash = override.dash;
+        overrideFields.dash = true;
+      }
+      if (override.width !== null) {
+        width = override.width;
+        overrideFields.width = true;
+      }
       if (override.opacity !== null) opacity = override.opacity;
       if (override.visible !== null) visible = override.visible;
     }
@@ -86,7 +103,7 @@ export function resolvePanel(
       hue = null;
       dash = "solid";
       width = 1;
-      opacity = 0.5;
+      opacity = panel.ghost_opacity;
     }
 
     return {
@@ -100,6 +117,7 @@ export function resolvePanel(
       visible,
       focused: focused[index] ?? false,
       overridden,
+      overrideFields,
     };
   });
 }
@@ -190,11 +208,14 @@ function assignHues(
   refs: readonly ResolvedRef[],
   focused: readonly boolean[],
 ): number[] {
+  if (panel.color_by === null) return refs.map(() => 1);
+  const dimension = panel.color_by;
   const values = new Map<string, number>();
   const hues: number[] = [];
   refs.forEach(({ ref, series, bindingIndex }, index) => {
     const value = dimensionValue(
       panel,
+      dimension,
       ref,
       series,
       bindingIndex,
@@ -210,19 +231,74 @@ function assignHues(
   return hues;
 }
 
+function assignDashes(
+  panel: PanelState,
+  refs: readonly ResolvedRef[],
+  focused: readonly boolean[],
+): DashStyle[] {
+  if (panel.dash_by === null) return refs.map(() => "solid");
+  const dimension = panel.dash_by;
+  const values = new Map<string, DashStyle>();
+  const styles: DashStyle[] = ["solid", "dash", "dot"];
+  return refs.map(({ ref, series, bindingIndex }, index) => {
+    const value = dimensionValue(
+      panel,
+      dimension,
+      ref,
+      series,
+      bindingIndex,
+      focused[index] ?? false,
+    );
+    let dash = values.get(value);
+    if (dash === undefined) {
+      dash = styles[values.size % styles.length] ?? "solid";
+      values.set(value, dash);
+    }
+    return dash;
+  });
+}
+
+function assignWidths(
+  panel: PanelState,
+  refs: readonly ResolvedRef[],
+  focused: readonly boolean[],
+): number[] {
+  const base =
+    Number.isFinite(panel.line_width) && panel.line_width > 0
+      ? panel.line_width
+      : 1.4;
+  if (panel.width_by === null) return refs.map(() => base);
+  const dimension = panel.width_by;
+  const values = new Map<string, number>();
+  return refs.map(({ ref, series, bindingIndex }, index) => {
+    const value = dimensionValue(
+      panel,
+      dimension,
+      ref,
+      series,
+      bindingIndex,
+      focused[index] ?? false,
+    );
+    if (!values.has(value)) values.set(value, values.size);
+    const slot = values.get(value) ?? 0;
+    return base * (1 + Math.min(slot, 2) * 0.5);
+  });
+}
+
 function dimensionValue(
   panel: PanelState,
+  dimension: NonNullable<PanelState["color_by"]>,
   ref: SeriesRef,
   series: CatalogSeries,
   bindingIndex: number,
   isFocused: boolean,
 ): string {
-  if (panel.color_by === "channel") return `channel:${series.channel}`;
-  if (panel.color_by === "set") return `set:${String(bindingIndex)}`;
-  if (panel.color_by === "attr") {
+  if (dimension === "channel") return `channel:${series.channel}`;
+  if (dimension === "set") return `set:${String(bindingIndex)}`;
+  if (dimension === "attr") {
     return `attr:${series.summary.unit ?? "—"}`;
   }
-  if (panel.color_by === "focus") {
+  if (dimension === "focus") {
     const focusIndex = panel.focus.findIndex((entry) =>
       matchesFocus(entry, ref),
     );

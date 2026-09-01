@@ -84,3 +84,11 @@ Schema version 23 stores each panel's legend state, including the docked rail,
 position, size, snapped corner, and empty-focus hint dismissal. Version 22
 sessions migrate to the default keys state with no custom geometry. See
 [ADR 0048](0048-legend-console.md).
+
+## Amendment (2026-09-01, style cascade and legend statistics)
+
+Schema version 25 stores panel line defaults, color/dash/width encoding
+bindings, visible statistic columns, and statistic sort state. Version 24
+sessions migrate to the prior source-color rule, flat dash and width rules,
+1.4 px lines, 50% ghost opacity, and the prior visible statistic set. See
+[ADR 0051](0051-style-cascade-and-legend-statistics.md).

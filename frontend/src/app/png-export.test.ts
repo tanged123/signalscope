@@ -10,6 +10,10 @@ function panel(id: string, title: string): PanelState {
     axis_style: "gutter",
     bindings: [],
     color_by: "source",
+    dash_by: null,
+    width_by: null,
+    line_width: 1.4,
+    ghost_opacity: 0.5,
     overrides: [],
     focus: [],
     ghost_mode: "all",
@@ -25,6 +29,9 @@ function panel(id: string, title: string): PanelState {
     time_window: null,
     annotations: [],
     show_stats: false,
+    stat_columns: ["min", "max", "mean", "rms", "cursor"],
+    stats_sort: null,
+    stats_sort_descending: false,
   };
 }
 

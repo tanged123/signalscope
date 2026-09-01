@@ -542,6 +542,68 @@ describe("WorkspaceModel", () => {
     ]);
   });
 
+  it("swaps encoding dimensions atomically and supports flat rules", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setEncoding(panel.id, "color", "channel");
+    model.setEncoding(panel.id, "dash", "source");
+    model.setEncoding(panel.id, "width", "channel");
+    expect(model.panel(panel.id)).toMatchObject({
+      color_by: null,
+      dash_by: "source",
+      width_by: "channel",
+    });
+    model.setEncoding(panel.id, "width", null);
+    expect(model.panel(panel.id)?.width_by).toBeNull();
+  });
+
+  it("patches style fields without dropping mute overrides", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("a/one");
+    model.setSeriesVisible(panel.id, ref, false);
+    model.patchSeriesOverride(panel.id, ref, { width: 3 });
+    model.revertSeriesOverrideField(panel.id, ref, "width");
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      expect.objectContaining({
+        target_ref: ref,
+        width: null,
+        visible: false,
+      }),
+    ]);
+    model.clearStyleOverrides(panel.id);
+    expect(model.panel(panel.id)?.overrides[0]?.visible).toBe(false);
+    model.patchSeriesOverride(panel.id, ref, { dash: "dash" });
+    model.clearStyleOverride(panel.id, 0);
+    expect(model.panel(panel.id)?.overrides[0]?.visible).toBe(false);
+    model.revertSeriesOverride(panel.id, ref);
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      expect.objectContaining({ target_ref: ref, visible: false }),
+    ]);
+  });
+
+  it("stores panel render defaults and statistic state", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setPanelLineWidth(panel.id, 2.2);
+    model.setGhostOpacity(panel.id, 0.25);
+    model.setStatColumns(panel.id, ["max", "min", "max"]);
+    model.setStatsSort(panel.id, "max", true);
+    expect(model.panel(panel.id)).toMatchObject({
+      line_width: 2.2,
+      ghost_opacity: 0.25,
+      stat_columns: ["max", "min"],
+      stats_sort: "max",
+      stats_sort_descending: true,
+    });
+    model.setStatColumns(panel.id, ["min"]);
+    expect(model.panel(panel.id)).toMatchObject({
+      stat_columns: ["min"],
+      stats_sort: null,
+      stats_sort_descending: false,
+    });
+  });
+
   it("stores per-panel and workspace-wide legend layouts", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
@@ -885,6 +947,10 @@ describe("WorkspaceModel", () => {
       axis_style: "gutter",
       bindings: [],
       color_by: "source",
+      dash_by: null,
+      width_by: null,
+      line_width: 1.4,
+      ghost_opacity: 0.5,
       overrides: [],
       focus: [],
       ghost_mode: "all",
@@ -900,6 +966,9 @@ describe("WorkspaceModel", () => {
       time_window: null,
       annotations: [],
       show_stats: false,
+      stat_columns: ["min", "max", "mean", "rms", "cursor"],
+      stats_sort: null,
+      stats_sort_descending: false,
     });
     tab.layout.push({
       height: 1,

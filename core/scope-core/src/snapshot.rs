@@ -684,7 +684,11 @@ mod tests {
                     .collect(),
                 set_id: None,
             }],
-            color_by: crate::session::StyleDimension::Source,
+            color_by: Some(crate::session::StyleDimension::Source),
+            dash_by: None,
+            width_by: None,
+            line_width: 1.4,
+            ghost_opacity: 0.5,
             overrides: Vec::new(),
             focus: Vec::new(),
             ghost_mode: crate::session::GhostMode::All,
@@ -700,6 +704,15 @@ mod tests {
             time_window: None,
             annotations: Vec::new(),
             show_stats: false,
+            stat_columns: vec![
+                crate::session::StatColumn::Min,
+                crate::session::StatColumn::Max,
+                crate::session::StatColumn::Mean,
+                crate::session::StatColumn::Rms,
+                crate::session::StatColumn::Cursor,
+            ],
+            stats_sort: None,
+            stats_sort_descending: false,
         }
     }
 

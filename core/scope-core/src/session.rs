@@ -71,8 +71,9 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     }
     let current = match head.schema_version {
         SESSION_SCHEMA_VERSION => value,
-        23 => migrate_v23(value),
-        22 => migrate_v23(migrate_v22(value)),
+        24 => migrate_v24(value),
+        23 => migrate_v24(migrate_v23(value)),
+        22 => migrate_v24(migrate_v23(migrate_v22(value))),
         version => return Err(SessionError::UnsupportedVersion(version)),
     };
     Ok(serde_json::from_value(current)?)
@@ -104,7 +105,7 @@ fn migrate_v22(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 fn migrate_v23(mut value: serde_json::Value) -> serde_json::Value {
-    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["schema_version"] = 24.into();
     if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
         for tab in tabs {
             let Some(panels) = tab
@@ -139,6 +140,38 @@ fn migrate_v23(mut value: serde_json::Value) -> serde_json::Value {
         for source in sources {
             if let Some(source) = source.as_object_mut() {
                 source.remove("reconcile_legacy");
+            }
+        }
+    }
+    value
+}
+
+fn migrate_v24(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
+        for tab in tabs {
+            let Some(panels) = tab
+                .get_mut("panels")
+                .and_then(|panels| panels.as_array_mut())
+            else {
+                continue;
+            };
+            for panel in panels {
+                let Some(panel) = panel.as_object_mut() else {
+                    continue;
+                };
+                // Preserve the v24 source colour rule. The new dash and width
+                // rules are flat, inheriting the panel defaults.
+                panel.entry("color_by").or_insert_with(|| "source".into());
+                panel.entry("dash_by").or_insert(serde_json::Value::Null);
+                panel.entry("width_by").or_insert(serde_json::Value::Null);
+                panel.entry("line_width").or_insert(1.4.into());
+                panel.entry("ghost_opacity").or_insert(0.5.into());
+                panel
+                    .entry("stat_columns")
+                    .or_insert_with(|| serde_json::json!(["min", "max", "mean", "rms", "cursor"]));
+                panel.entry("stats_sort").or_insert(serde_json::Value::Null);
+                panel.entry("stats_sort_descending").or_insert(false.into());
             }
         }
     }
@@ -313,7 +346,11 @@ mod tests {
                         }],
                         set_id: None,
                     }],
-                    color_by: StyleDimension::Source,
+                    color_by: Some(StyleDimension::Source),
+                    dash_by: None,
+                    width_by: None,
+                    line_width: 1.4,
+                    ghost_opacity: 0.5,
                     overrides: vec![SeriesOverride {
                         target_ref: Some(SeriesRef {
                             source_key: "rocket".into(),
@@ -340,6 +377,15 @@ mod tests {
                     time_window: None,
                     annotations: Vec::new(),
                     show_stats: false,
+                    stat_columns: vec![
+                        StatColumn::Min,
+                        StatColumn::Max,
+                        StatColumn::Mean,
+                        StatColumn::Rms,
+                        StatColumn::Cursor,
+                    ],
+                    stats_sort: None,
+                    stats_sort_descending: false,
                 }],
                 layout: vec![LayoutRow {
                     height: 1.0,
@@ -457,5 +503,52 @@ mod tests {
         assert_eq!(panel.legend_size, None);
         assert_eq!(panel.legend_anchor, None);
         assert!(!panel.legend_hint_dismissed);
+    }
+
+    #[test]
+    fn v24_panels_migrate_style_and_statistics_defaults() {
+        let mut value = serde_json::json!({
+            "app": "signalscope",
+            "schema_version": 24,
+            "theme": "dark",
+            "linked_time": {
+                "t0": 0.0, "t1": 1.0, "linked": true, "paused": false,
+                "cursorT": null, "mode": "fixed"
+            },
+            "active_tab_id": "workspace-1",
+            "tabs": [{
+                "id": "workspace-1", "title": "Workspace 1", "cursor_mode": "none",
+                "focused_panel_id": null, "maximized_panel_id": null,
+                "panels": [], "layout": []
+            }],
+            "named_sets": [], "derived": [], "derived_bundles": [], "sources": []
+        });
+        value["tabs"][0]["panels"] = serde_json::json!([{
+            "id": "panel-a", "title": "Panel A", "axis_style": "gutter",
+            "bindings": [], "color_by": "source", "overrides": [], "focus": [],
+            "ghost_mode": "all", "legend_state": "keys", "legend_position": null,
+            "legend_size": null, "legend_anchor": null, "legend_hint_dismissed": false,
+            "y_range": null, "x_range": null, "x_label": null, "y_label": null,
+            "time_window": null, "annotations": [], "show_stats": false
+        }]);
+        let restored = from_json(&value.to_string()).expect("v24 migrates");
+        let panel = &restored.tabs[0].panels[0];
+        assert_eq!(panel.color_by, Some(StyleDimension::Source));
+        assert_eq!(panel.dash_by, None);
+        assert_eq!(panel.width_by, None);
+        assert!((panel.line_width - 1.4).abs() < f32::EPSILON);
+        assert!((panel.ghost_opacity - 0.5).abs() < f32::EPSILON);
+        assert_eq!(
+            panel.stat_columns,
+            vec![
+                StatColumn::Min,
+                StatColumn::Max,
+                StatColumn::Mean,
+                StatColumn::Rms,
+                StatColumn::Cursor,
+            ]
+        );
+        assert_eq!(panel.stats_sort, None);
+        assert!(!panel.stats_sort_descending);
     }
 }

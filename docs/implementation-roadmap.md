@@ -16,8 +16,9 @@ are recorded in [ADRs](adr/README.md).
   live workspaces; `BakedPlane` serves self-contained snapshots. UI and
   renderer code do not branch on host identity.
 - Presentation is time-series only. ChartGPU is the single plotter, with
-  linked time, per-panel axes, cursor/annotation/statistics interactions,
-  derived signals, named sets, and the serialized legend console.
+  linked time, per-panel axes, cursor/annotation interactions, derived signals,
+  named sets, and a serialized legend console that owns the line-style cascade
+  and visible-region statistic columns.
 - Live queries use adaptive pyramid resolution and retained overview/detail
   responses. The renderer remains deterministic from tiles, viewport, and
   design tokens. Snapshots embed selected tile data and session state without
