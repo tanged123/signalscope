@@ -1,4 +1,4 @@
-import type { Annotation, AnnotationDomain } from "../generated/session";
+import type { Annotation } from "../generated/session";
 import {
   columnsStats,
   columnsValueAtTime,
@@ -46,7 +46,6 @@ export interface PlotCursor {
 
 export interface AnnotationAnchor {
   path: string;
-  domain: AnnotationDomain;
   anchor: number;
   pinnedValue: number;
 }
@@ -98,7 +97,6 @@ export interface SeriesHitAdapter {
 }
 
 export interface PreparedPlot {
-  readonly domain: AnnotationDomain;
   readonly interaction: PlotInteractionPolicy;
   readonly hitAdapter: SeriesHitAdapter;
   autoRanges(): {
@@ -158,7 +156,6 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
     return resolved(annotation, annotation.anchor, y, series.colorIndex);
   };
   return {
-    domain: "time",
     interaction: TIME_POLICY,
     hitAdapter: {
       seriesAt(layout, x, y, threshold) {
@@ -212,7 +209,6 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
         ? null
         : {
             path: hit.path,
-            domain: "time",
             anchor: hit.time,
             pinnedValue: hit.value,
           };

@@ -1,6 +1,7 @@
 # ADR 0028: Ensemble run-mean envelope
 
-- Status: superseded by [bundled series highlights](../superpowers/specs/2026-07-31-bundled-series-highlights-design.md) — ensemble tiles and the band renderer were removed; bundles plot as per-source member series with highlights.
+- Status: Superseded by ADR 0030 — ensemble tiles and the band renderer were
+  removed; source-local signals and named sets provide the supported grouping.
 - Date: 2026-07-30
 - Amends: [ADR 0014](0014-envelope-bin-sums.md)
 

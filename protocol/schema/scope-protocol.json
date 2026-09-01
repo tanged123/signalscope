@@ -1,5 +1,5 @@
 {
-  "protocol_version": 18,
+  "protocol_version": 19,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -152,27 +152,17 @@
         "session_json": "string"
       }
     },
-    "RestoreReconcileRequest": {
+    "RestoreFinalizeRequest": {
       "kind": "object",
       "fields": {
         "session_json": "string",
         "job_id": "u64"
       }
     },
-    "AliasConflictSummary": {
+    "RestoreFinalizeResponse": {
       "kind": "object",
       "fields": {
-        "legacy_path": "string",
-        "claimants": "string[]"
-      }
-    },
-    "RestoreReconcileResponse": {
-      "kind": "object",
-      "fields": {
-        "session_json": "string",
-        "rewritten": "u64",
-        "conflicts": "AliasConflictSummary[]",
-        "unresolved": "string[]"
+        "session_json": "string"
       }
     },
     "TileRequest": {
@@ -181,8 +171,7 @@
         "request_id": "string",
         "signal_ids": "u64[]",
         "window": "TimeWindow",
-        "pixel_width": "u32",
-        "max_total_bins": "u32?"
+        "pixel_width": "u32"
       }
     },
     "EnvelopeBin": {

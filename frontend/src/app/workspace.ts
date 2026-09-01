@@ -54,12 +54,6 @@ export function emptySession(): Session {
   };
 }
 
-function clearFacetSplits(session: Session): void {
-  for (const tab of session.tabs) {
-    for (const panel of tab.panels) panel.split_by = "none";
-  }
-}
-
 export class WorkspaceModel {
   private session: Session;
   private nextPanelNumber: number;
@@ -69,7 +63,6 @@ export class WorkspaceModel {
 
   constructor(session: Session = emptySession()) {
     this.session = session;
-    clearFacetSplits(this.session);
     if (session.tabs.length === 0) {
       session.tabs.push(createWorkspaceTab(1));
     }
@@ -101,7 +94,6 @@ export class WorkspaceModel {
   /** Adopts a loaded session wholesale. Callers must re-render afterwards. */
   replace(session: Session): void {
     this.session = session;
-    clearFacetSplits(this.session);
     this.touch(true);
   }
 
@@ -947,14 +939,12 @@ export class WorkspaceModel {
     const panel: PanelState = {
       id: `panel-${String(this.nextPanelNumber)}`,
       title: `Panel ${String(this.nextPanelNumber)}`,
-      mode: "time",
       axis_style: "gutter",
       bindings: [],
       color_by: "source",
       overrides: [],
       focus: [],
       ghost_mode: "all",
-      split_by: "none",
       legend_state: "keys",
       legend_position: null,
       legend_size: null,

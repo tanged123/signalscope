@@ -125,7 +125,7 @@ pub fn build_router(ctx: AppContext) -> Router {
         .route("/introspect_container", post(api::introspect_container))
         .route("/save_recipe", post(api::save_recipe))
         .route("/restore_sources", post(api::restore_sources))
-        .route("/restore_reconcile", post(api::restore_reconcile))
+        .route("/restore_finalize", post(api::restore_finalize))
         .route("/list_sources", post(api::list_sources))
         .route("/list_signals", post(api::list_signals))
         .route("/query_tiles_bin", post(api::query_tiles_bin))

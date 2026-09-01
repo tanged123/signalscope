@@ -16,7 +16,7 @@ test.beforeAll(async () => {
   test.setTimeout(600_000);
   dataDirectory = mkdtempSync(join(tmpdir(), "signalscope-live-"));
   server = spawn(
-    join(repositoryRoot, "target", "release", "scope-server"),
+    join(repositoryRoot, "target", "debug", "scope-server"),
     ["--no-auth", "--no-open", "--port", "43118", "--data-dir", dataDirectory],
     { cwd: repositoryRoot, stdio: ["ignore", "ignore", "inherit"] },
   );

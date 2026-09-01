@@ -1060,7 +1060,6 @@ mod tests {
             decode_provenance: None,
             recipe_id: None,
             recipe_digest: None,
-            reconcile_legacy: true,
         };
         let jobs = BatchJobs::new(BatchOptions::for_tests());
         jobs.replace_sources(vec![record.clone()]).unwrap();
@@ -1108,7 +1107,6 @@ mod tests {
                 decode_provenance: None,
                 recipe_id: Some("layout-hdf5".into()),
                 recipe_digest: Some(recorded_digest.into()),
-                reconcile_legacy: false,
             };
             let jobs = BatchJobs::new(BatchOptions::for_tests());
             jobs.replace_sources(vec![record]).unwrap();

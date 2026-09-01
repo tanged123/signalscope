@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 23,
+  "schema_version": 24,
   "theme": "light",
   "linked_time": {
     "t0": 0.0,
@@ -22,7 +22,6 @@
         {
           "id": "alpha-beta",
           "title": "Alpha & Beta",
-          "mode": "time",
           "axis_style": "gutter",
           "bindings": [
             {
@@ -58,7 +57,6 @@
           ],
           "focus": [],
           "ghost_mode": "all",
-          "split_by": "none",
           "legend_state": "keys",
           "legend_position": null,
           "legend_size": null,
@@ -73,7 +71,6 @@
             {
               "id": "peak",
               "series_path": "roundtrip/alpha",
-              "domain": "time",
               "anchor": 4.0,
               "pinned_value": 8.0,
               "label": "peak"
@@ -104,8 +101,7 @@
       "path": "/data/roundtrip.csv",
       "prefix": "roundtrip",
       "provider_id": null,
-      "decode_provenance": null,
-      "reconcile_legacy": false
+      "decode_provenance": null
     }
   ]
 }

@@ -38,8 +38,7 @@ function isSource(value: unknown): boolean {
     isNullable(
       value.decode_provenance,
       (item): item is string => typeof item === "string",
-    ) &&
-    typeof value.reconcile_legacy === "boolean"
+    )
   );
 }
 
@@ -144,7 +143,6 @@ function isAnnotation(value: unknown): boolean {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.series_path === "string" &&
-    value.domain === "time" &&
     typeof value.anchor === "number" &&
     typeof value.pinned_value === "number" &&
     typeof value.label === "string"
@@ -189,7 +187,6 @@ function isPanel(value: unknown): boolean {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.title === "string" &&
-    value.mode === "time" &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
     Array.isArray(value.bindings) &&
     value.bindings.every(isBinding) &&
@@ -201,7 +198,6 @@ function isPanel(value: unknown): boolean {
     Array.isArray(value.focus) &&
     value.focus.every(isFocus) &&
     ["ghost", "all"].includes(String(value.ghost_mode)) &&
-    ["none", "source", "channel"].includes(String(value.split_by)) &&
     ["badge", "keys", "roster", "rail"].includes(String(value.legend_state)) &&
     isNullable(value.legend_position, isNumberPair) &&
     isNullable(value.legend_size, isNumberPair) &&

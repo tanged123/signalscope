@@ -14,6 +14,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_coverage:
+        description: Generate and upload the full Rust and frontend coverage reports
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -69,6 +74,7 @@ jobs:
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: rust
+          install-frontend: "false"
       - run: ./scripts/ci.sh rust
 
   frontend:
@@ -99,7 +105,9 @@ jobs:
       - run: ./scripts/ci.sh e2e
 
   coverage:
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_coverage)
     runs-on: ubuntu-latest
     env:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

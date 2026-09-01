@@ -2,8 +2,6 @@
 
 - Status: Accepted
 - Date: 2026-07-27
-- Supersedes: the touch gesture requirements carried into `AGENTS.md` from the
-  design kickoff prompt
 
 ## Context
 
@@ -13,19 +11,9 @@ pinch, tap-to-read, long-press-to-pin, and double-tap-to-fit. It costs roughly
 dedicated Playwright project, 17 `isMobile` guards, and a coarse-pointer CSS
 block.
 
-None of it is required by the controlling design documents. `SignalScope Final
-Spec.dc.html` and `SignalScope Audit v2.dc.html` mention mobile, touch, tablet,
-pinch, and long-press zero times. The gesture set traces to two non-controlling
-sources: `reference/prompt.md`, which lists the gestures and tags them
-"**(optional mobile support, deprioritize for now)**", and `kickoffprompt.md`,
-which asks to keep the prototype's full desktop-plus-touch gesture set.
-
-`reference/prompt.md` also raises the posture as open question 8 — "Mobile
-posture: full tool vs. review companion — pick one and design it" — and
-observes that "mobile is functional but secondary" with plots capturing all
-touch so panels scroll awkwardly. The design pass never answered the question.
-The Playwright project is named `mobile-review`, suggesting someone leaned
-toward the review-companion reading, but no record exists.
+None of it is required by the controlling Final Spec or the current product
+scope. The old design explorations left the mobile posture unresolved, while
+the production workbench and its browser coverage target desktop Chromium.
 
 The result is a working implementation of a product posture nobody chose. Its
 coverage reflects that: two e2e tests exercise one-finger pan and one also
@@ -59,7 +47,5 @@ pinch solver in particular is correct and well-tested.
 - Touching a SignalScope plot does nothing. On a touchscreen laptop the plot
   is inert rather than misbehaving, because `touch-action: none` still
   suppresses the browser's default.
-- Reversing this decision means answering design-pass question 8 first. The
-  reimplementation path is recorded in
-  `docs/superpowers/plans/2026-07-27-remove-touch-support.md`, and the deleted
-  code remains in git history.
+- Reversing this decision requires an explicit design decision and ADR. The
+  deleted code remains in git history.

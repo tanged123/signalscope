@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 23;
+pub const SESSION_SCHEMA_VERSION: u32 = 24;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -31,12 +31,6 @@ pub enum CursorMode {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum PanelMode {
-    Time,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum AxisStyle {
     Gutter,
     Inline,
@@ -48,12 +42,6 @@ pub enum DashStyle {
     Solid,
     Dash,
     Dot,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AnnotationDomain {
-    Time,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -151,15 +139,6 @@ pub enum StyleDimension {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum SplitDimension {
-    #[default]
-    None,
-    Source,
-    Channel,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum LegendState {
     Badge,
     #[default]
@@ -198,7 +177,6 @@ pub struct NamedSet {
 pub struct Annotation {
     pub id: String,
     pub series_path: String,
-    pub domain: AnnotationDomain,
     pub anchor: f64,
     pub pinned_value: f64,
     pub label: String,
@@ -208,14 +186,12 @@ pub struct Annotation {
 pub struct PanelState {
     pub id: String,
     pub title: String,
-    pub mode: PanelMode,
     pub axis_style: AxisStyle,
     pub bindings: Vec<Binding>,
     pub color_by: StyleDimension,
     pub overrides: Vec<SeriesOverride>,
     pub focus: Vec<FocusEntry>,
     pub ghost_mode: GhostMode,
-    pub split_by: SplitDimension,
     pub legend_state: LegendState,
     #[serde(default)]
     pub legend_position: Option<[f64; 2]>,
@@ -288,7 +264,6 @@ pub struct SourceRecord {
     pub recipe_id: Option<String>,
     #[serde(default)]
     pub recipe_digest: Option<String>,
-    pub reconcile_legacy: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

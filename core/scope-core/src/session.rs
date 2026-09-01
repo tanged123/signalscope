@@ -71,14 +71,15 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     }
     let current = match head.schema_version {
         SESSION_SCHEMA_VERSION => value,
-        22 => migrate_v22(value),
+        23 => migrate_v23(value),
+        22 => migrate_v23(migrate_v22(value)),
         version => return Err(SessionError::UnsupportedVersion(version)),
     };
     Ok(serde_json::from_value(current)?)
 }
 
 fn migrate_v22(mut value: serde_json::Value) -> serde_json::Value {
-    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["schema_version"] = 23.into();
     if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
         for tab in tabs {
             let Some(panels) = tab
@@ -96,6 +97,48 @@ fn migrate_v22(mut value: serde_json::Value) -> serde_json::Value {
                 panel.insert("legend_size".into(), serde_json::Value::Null);
                 panel.insert("legend_anchor".into(), serde_json::Value::Null);
                 panel.insert("legend_hint_dismissed".into(), false.into());
+            }
+        }
+    }
+    value
+}
+
+fn migrate_v23(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
+        for tab in tabs {
+            let Some(panels) = tab
+                .get_mut("panels")
+                .and_then(|panels| panels.as_array_mut())
+            else {
+                continue;
+            };
+            for panel in panels {
+                let Some(panel) = panel.as_object_mut() else {
+                    continue;
+                };
+                panel.remove("mode");
+                panel.remove("split_by");
+                if let Some(annotations) = panel
+                    .get_mut("annotations")
+                    .and_then(|annotations| annotations.as_array_mut())
+                {
+                    for annotation in annotations {
+                        if let Some(annotation) = annotation.as_object_mut() {
+                            annotation.remove("domain");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(sources) = value
+        .get_mut("sources")
+        .and_then(|sources| sources.as_array_mut())
+    {
+        for source in sources {
+            if let Some(source) = source.as_object_mut() {
+                source.remove("reconcile_legacy");
             }
         }
     }
@@ -153,7 +196,7 @@ mod tests {
     );
 
     fn source(path: &str) -> SourceRecord {
-        let key = crate::naming::legacy_source_key(path);
+        let key = uuid::Uuid::from_bytes([u8::try_from(path.len()).unwrap_or(0); 16]);
         SourceRecord {
             key: key.to_string(),
             path: path.into(),
@@ -162,7 +205,6 @@ mod tests {
             decode_provenance: None,
             recipe_id: None,
             recipe_digest: None,
-            reconcile_legacy: false,
         }
     }
 
@@ -261,7 +303,6 @@ mod tests {
                 panels: vec![PanelState {
                     id: "panel-a".into(),
                     title: "Body velocity".into(),
-                    mode: PanelMode::Time,
                     axis_style: AxisStyle::Gutter,
                     bindings: vec![Binding {
                         kind: BindingKind::Pick,
@@ -287,7 +328,6 @@ mod tests {
                     }],
                     focus: Vec::new(),
                     ghost_mode: GhostMode::All,
-                    split_by: SplitDimension::None,
                     legend_state: LegendState::Keys,
                     legend_position: None,
                     legend_size: None,

@@ -29,14 +29,12 @@ function state(): PanelState {
   return {
     id: "panel",
     title: "Panel",
-    mode: "time",
     axis_style: "gutter",
     bindings: [{ kind: "query", selector: "*", refs: [], set_id: null }],
     color_by: "source",
     overrides: [],
     focus: [],
     ghost_mode: "all",
-    split_by: "source",
     legend_state: "keys",
     legend_position: null,
     legend_size: null,
@@ -131,7 +129,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("PanelView panel chrome", () => {
+describe("PanelView chrome", () => {
   it("waits for a mounted panel before creating ChartGPU", () => {
     const create = vi
       .spyOn(ChartHost, "create")
@@ -224,7 +222,6 @@ describe("PanelView panel chrome", () => {
     ]);
     const view = new PanelView("panel", callbacks(catalog));
     const panel = state();
-    panel.split_by = "none";
     panel.focus = [
       {
         kind: "series",
@@ -252,18 +249,6 @@ describe("PanelView panel chrome", () => {
     expect(
       view.element.querySelector<HTMLElement>(".panel-annotations")?.hidden,
     ).toBe(true);
-  });
-
-  it("ignores legacy facet state and keeps one plot surface", () => {
-    const catalog = Catalog.build([signal("run-01", "temp")]);
-    const view = new PanelView("panel", callbacks(catalog));
-    const panel = state();
-
-    view.update(panel, false);
-
-    expect(view.element.querySelector(".panel-split-by")).toBeNull();
-    expect(view.element.querySelector(".facet-grid")).toBeNull();
-    expect(view.element.querySelector(".plot-canvas")).toBeNull();
   });
 
   it("does not intercept Tab or Enter from descendant controls", () => {

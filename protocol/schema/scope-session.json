@@ -1,5 +1,5 @@
 {
-  "schema_version": 23,
+  "schema_version": 24,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -16,16 +16,8 @@
       "variants": ["none", "track", "measure"],
       "default": "none"
     },
-    "PanelMode": {
-      "kind": "enum",
-      "variants": ["time"]
-    },
     "AxisStyle": { "kind": "enum", "variants": ["gutter", "inline"] },
     "DashStyle": { "kind": "enum", "variants": ["solid", "dash", "dot"] },
-    "AnnotationDomain": {
-      "kind": "enum",
-      "variants": ["time"]
-    },
     "LinkedTime": {
       "kind": "object",
       "fields": {
@@ -86,11 +78,6 @@
       "variants": ["focus", "source", "channel", "set", "attr"],
       "default": "source"
     },
-    "SplitDimension": {
-      "kind": "enum",
-      "variants": ["none", "source", "channel"],
-      "default": "none"
-    },
     "LegendState": {
       "kind": "enum",
       "variants": ["badge", "keys", "roster", "rail"],
@@ -116,7 +103,6 @@
       "fields": {
         "id": "string",
         "series_path": "string",
-        "domain": "AnnotationDomain",
         "anchor": "f64",
         "pinned_value": "f64",
         "label": "string"
@@ -127,14 +113,12 @@
       "fields": {
         "id": "string",
         "title": "string",
-        "mode": "PanelMode",
         "axis_style": "AxisStyle",
         "bindings": "Binding[]",
         "color_by": "StyleDimension",
         "overrides": "SeriesOverride[]",
         "focus": "FocusEntry[]",
         "ghost_mode": "GhostMode",
-        "split_by": "SplitDimension",
         "legend_state": "LegendState",
         "legend_position": "f64[2]?",
         "legend_size": "f64[2]?",
@@ -198,8 +182,7 @@
         "provider_id": "string?",
         "decode_provenance": "string?",
         "recipe_id": "string?",
-        "recipe_digest": "string?",
-        "reconcile_legacy": "bool"
+        "recipe_digest": "string?"
       }
     },
     "Session": {

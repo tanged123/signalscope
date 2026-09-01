@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 23,
+  "schema_version": 24,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
@@ -30,7 +30,7 @@
       "selector": null,
       "refs": [
         {
-          "source_key": "37a8f7d6-862d-5107-a0d7-6ad27b3bb161",
+          "source_key": "0d0d0d0d-0d0d-0d0d-0d0d-0d0d0d0d0d0d",
           "channel": "vx"
         }
       ]
@@ -52,14 +52,13 @@
   "derived_bundles": [],
   "sources": [
     {
-      "key": "37a8f7d6-862d-5107-a0d7-6ad27b3bb161",
+      "key": "0d0d0d0d-0d0d-0d0d-0d0d-0d0d0d0d0d0d",
       "path": "/data/run.csv",
       "prefix": "run",
       "provider_id": null,
       "decode_provenance": null,
       "recipe_id": null,
-      "recipe_digest": null,
-      "reconcile_legacy": false
+      "recipe_digest": null
     }
   ]
 }

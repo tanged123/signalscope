@@ -270,7 +270,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
       {
         id: "legend-probe-panel",
         title: "Many series",
-        mode: "time",
         axis_style: "gutter",
         bindings: [
           {
@@ -295,7 +294,6 @@ test("panel matrix legend keeps rosters virtual and exposes rules", async ({
           channel: "temp",
         })),
         ghost_mode: "all",
-        split_by: "none",
         legend_state: "roster",
         legend_position: null,
         legend_size: null,

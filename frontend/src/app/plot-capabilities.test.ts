@@ -11,15 +11,13 @@ const layout: PlotLayout = {
 };
 
 function annotation(
-  domain: Annotation["domain"],
   anchor: number,
   pinnedValue: number,
   path = "demo/y",
 ): Annotation {
   return {
-    id: `${domain}-${String(anchor)}`,
+    id: String(anchor),
     series_path: path,
-    domain,
     anchor,
     pinned_value: pinnedValue,
     label: "",
@@ -52,14 +50,13 @@ test("time capabilities link cursors and expose raw visible statistics", () => {
     window: { t0: 0, t1: 5 },
   });
 
-  expect(plot.domain).toBe("time");
   expect(plot.interaction.cursorLink).toBe("time");
   expect(plot.autoRanges()).toEqual({
     x: [0, 5],
     y: [1.88, 4.12],
   });
   expect(plot.cursorAt(layout, { x: 50, y: 50 }, 12)?.x).toBeCloseTo(5);
-  expect(plot.resolveAnnotation(annotation("time", 2.5, 3))).toMatchObject({
+  expect(plot.resolveAnnotation(annotation(2.5, 3))).toMatchObject({
     x: 2.5,
     y: 3,
   });

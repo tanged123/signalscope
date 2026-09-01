@@ -87,15 +87,6 @@ function colorIndexForHue(hue: number | null): number {
   return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
 }
 
-export function effectiveAxisStyle(
-  _mode: RenderPanelState["mode"],
-  _style: AxisStyle,
-): AxisStyle {
-  void _mode;
-  void _style;
-  return "gutter";
-}
-
 export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
 
 export interface PanelCallbacks {
@@ -580,12 +571,7 @@ export class PanelView {
         const state = this.lastState;
         return layout === null || state === null
           ? null
-          : axisEditZone(
-              layout,
-              effectiveAxisStyle(state.mode, state.axis_style),
-              x,
-              y,
-            );
+          : axisEditZone(layout, state.axis_style, x, y);
       },
       beginAxisEdit: (axis) => {
         this.beginAxisEdit(axis);

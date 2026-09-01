@@ -14,7 +14,6 @@ import {
   PanelView,
   bindingChipEntries,
   focusChips,
-  effectiveAxisStyle,
   matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
@@ -53,13 +52,6 @@ function summary(path: string): SignalSummary {
     last_value: null,
   };
 }
-
-describe("effectiveAxisStyle", () => {
-  it("forces gutter for time mode where ChartGPU always draws gutter axes", () => {
-    expect(effectiveAxisStyle("time", "inline")).toBe("gutter");
-    expect(effectiveAxisStyle("time", "gutter")).toBe("gutter");
-  });
-});
 
 describe("panel markup", () => {
   it("offers no mode selection", () => {
@@ -152,11 +144,9 @@ function timeState(series: RenderSeries[]): RenderPanelState {
   return {
     id: "panel",
     title: "Time",
-    mode: "time",
     axis_style: "gutter",
     color_by: "source",
     ghost_mode: "all",
-    split_by: "none",
     legend_state: "keys",
     legend_position: null,
     legend_size: null,
@@ -185,7 +175,7 @@ describe("panel series", () => {
     expect(MAX_SERIES_PER_PANEL).toBe(64);
   });
 
-  describe.each(["time"] as const)("%s plot gestures", (mode) => {
+  describe("plot gestures", () => {
     it("uses shift-click for focus and alt-click for mute", () => {
       const onFocusToggle = vi.fn();
       const onMuteSeries = vi.fn();
@@ -208,7 +198,7 @@ describe("panel series", () => {
       const series = visible("run_01/temp");
       view.callbacks = callbacks;
       view.chartHost = { layout: () => gestureLayout };
-      view.lastState = { ...timeState([series]), mode };
+      view.lastState = timeState([series]);
       view.preparedPlot = {
         annotationAt: () => null,
         hitAdapter: {
@@ -255,7 +245,6 @@ describe("panel series", () => {
     view.preparedPlot = {
       annotationAt: () => ({
         path: series.path,
-        domain: "time",
         anchor: 1,
         pinnedValue: 2,
       }),

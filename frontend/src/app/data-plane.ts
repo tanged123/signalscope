@@ -12,7 +12,7 @@ import {
   type ExportSelection,
   type FormatDescriptor,
   type LoadedSession,
-  type RestoreReconcileResponse,
+  type RestoreFinalizeResponse,
   type RecipeDestination,
   type SaveRecipeResponse,
   type SampleRequest,
@@ -75,10 +75,10 @@ export interface SessionPort {
 
 export interface RestorePort {
   start(sessionJson: string): Promise<string>;
-  reconcile(
+  finalize(
     sessionJson: string,
     jobId: string,
-  ): Promise<RestoreReconcileResponse>;
+  ): Promise<RestoreFinalizeResponse>;
 }
 
 export interface PreferencesPort {
@@ -215,8 +215,8 @@ export class HttpPlane implements DataPlane {
             session_json: sessionJson,
           })
         ).job_id,
-      reconcile: async (sessionJson: string, jobId: string) =>
-        this.post<RestoreReconcileResponse>("restore_reconcile", {
+      finalize: async (sessionJson: string, jobId: string) =>
+        this.post<RestoreFinalizeResponse>("restore_finalize", {
           session_json: sessionJson,
           job_id: jobId,
         }),

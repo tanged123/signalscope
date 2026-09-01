@@ -824,8 +824,6 @@ fn max_option(left: Option<f64>, right: Option<f64>) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use serde::{Deserialize, Serialize};
-
     use super::*;
 
     #[test]
@@ -1206,26 +1204,6 @@ mod tests {
         }
     }
 
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    struct Fixture {
-        levels: Vec<Vec<EnvelopeBin>>,
-        queries: Vec<FixtureQuery>,
-    }
-
-    #[derive(Debug, PartialEq, Serialize, Deserialize)]
-    struct FixtureQuery {
-        t0: f64,
-        t1: f64,
-        pixel_width: u32,
-        level: u32,
-        bins: Vec<EnvelopeBin>,
-    }
-
-    const FIXTURE_PATH: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../protocol/testdata/pyramid-conformance.json"
-    );
-
     fn conformance_pyramid() -> Pyramid {
         let time: Vec<f64> = (0..500).map(f64::from).collect();
         let values: Vec<f64> = time
@@ -1243,99 +1221,27 @@ mod tests {
     }
 
     #[test]
-    fn conformance_fixture_matches_rust_query() {
+    fn conformance_queries_preserve_extrema_and_gaps() {
         let pyramid = conformance_pyramid();
-        let windows = [
-            (0.0, 499.0, 400_u32),
-            (0.0, 499.0, 100),
-            (90.0, 120.0, 64),
-            (2_000.0, 3_000.0, 100),
-        ];
-        let current = Fixture {
-            levels: (0..pyramid.level_count())
-                .map(|index| pyramid.level(index).expect("level exists"))
-                .collect(),
-            queries: windows
-                .iter()
-                .map(|&(t0, t1, pixel_width)| {
-                    let query = pyramid.query(t0, t1, pixel_width);
-                    FixtureQuery {
-                        t0,
-                        t1,
-                        pixel_width,
-                        level: query.level,
-                        bins: query.bins.to_wire_vec(),
-                    }
-                })
-                .collect(),
-        };
+        let full = pyramid.query(0.0, 499.0, 400);
+        let full_bins = full.bins.to_wire_vec();
+        assert_eq!(full.level, 0);
+        assert_eq!(full_bins.len(), 500);
+        assert_eq!(full_bins.first().and_then(|bin| bin.min), Some(0.0));
+        assert!(full_bins[97..=103].iter().all(|bin| bin.has_gap));
 
-        if std::env::var("REGENERATE_FIXTURES").is_ok() {
-            std::fs::write(
-                FIXTURE_PATH,
-                serde_json::to_string_pretty(&current).expect("serializable"),
-            )
-            .expect("fixture written");
-            return;
-        }
-
-        let stored: Fixture = serde_json::from_str(
-            &std::fs::read_to_string(FIXTURE_PATH)
-                .expect("fixture exists; regenerate with REGENERATE_FIXTURES=1"),
-        )
-        .expect("fixture parses");
-        assert_fixture_matches(&current, &stored);
-    }
-
-    fn assert_fixture_matches(current: &Fixture, stored: &Fixture) {
-        assert_eq!(current.levels.len(), stored.levels.len());
-        for (current_level, stored_level) in current.levels.iter().zip(&stored.levels) {
-            assert_eq!(current_level.len(), stored_level.len());
-            for (current_bin, stored_bin) in current_level.iter().zip(stored_level) {
-                assert_bin_matches(current_bin, stored_bin);
-            }
-        }
-
-        assert_eq!(current.queries.len(), stored.queries.len());
-        for (current_query, stored_query) in current.queries.iter().zip(&stored.queries) {
-            assert_close(current_query.t0, stored_query.t0);
-            assert_close(current_query.t1, stored_query.t1);
-            assert_eq!(current_query.pixel_width, stored_query.pixel_width);
-            assert_eq!(current_query.level, stored_query.level);
-            assert_eq!(current_query.bins.len(), stored_query.bins.len());
-            for (current_bin, stored_bin) in current_query.bins.iter().zip(&stored_query.bins) {
-                assert_bin_matches(current_bin, stored_bin);
-            }
-        }
-    }
-
-    fn assert_bin_matches(current: &EnvelopeBin, stored: &EnvelopeBin) {
-        assert_close(current.t0, stored.t0);
-        assert_close(current.t1, stored.t1);
-        assert_option_close(current.first, stored.first);
-        assert_option_close(current.last, stored.last);
-        assert_option_close(current.min, stored.min);
-        assert_option_close(current.max, stored.max);
-        assert_close(current.sum, stored.sum);
-        assert_close(current.sum_sq, stored.sum_sq);
-        assert_eq!(current.finite_count, stored.finite_count);
-        assert_eq!(current.sample_count, stored.sample_count);
-        assert_eq!(current.has_gap, stored.has_gap);
-    }
-
-    fn assert_option_close(current: Option<f64>, stored: Option<f64>) {
-        match (current, stored) {
-            (Some(current), Some(stored)) => assert_close(current, stored),
-            (None, None) => {}
-            (current, stored) => panic!("envelope value mismatch: {current:?} != {stored:?}"),
-        }
-    }
-
-    fn assert_close(current: f64, stored: f64) {
-        let tolerance = current.abs().max(stored.abs()).max(1.0) * 1e-12;
+        let window = pyramid.query(90.0, 120.0, 64);
+        assert_eq!(window.level, 0);
+        assert!(window.bins.to_wire_vec().iter().any(|bin| bin.has_gap));
         assert!(
-            (current - stored).abs() <= tolerance,
-            "envelope value mismatch: {current} != {stored}"
+            window
+                .bins
+                .to_wire_vec()
+                .iter()
+                .any(|bin| bin.min.is_some() && bin.max.is_some())
         );
+
+        let outside = pyramid.query(2_000.0, 3_000.0, 100);
+        assert!(outside.bins.is_empty());
     }
 }

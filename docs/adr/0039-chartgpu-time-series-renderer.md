@@ -1,6 +1,7 @@
 # ADR 0039: ChartGPU time-series renderer
 
-- Status: Accepted
+- Status: Accepted; source delivery amended by ADR 0040 and viewport updates
+  amended by ADR 0045
 - Date: 2026-08-12
 
 ## Context
@@ -8,8 +9,8 @@
 The Canvas2D time stroke path was the dominant cost in large multi-series
 panels. The Phase 0 ChartGPU spike passed all nine gates, including the
 binding capture recipe, while preserving the tile-pyramid density contract.
-The result is recorded in
-[`chartgpu-spike-results.md`](../superpowers/specs/2026-08-12-chartgpu-spike-results.md).
+The measured spike established the binding capture recipe and is summarized by
+the performance records that amended this decision (ADRs 0040 and 0045).
 
 ## Decision
 
@@ -34,7 +35,7 @@ remain on Canvas2D because their vertex and colorbar behavior is separate
 from the tile envelope path. No protocol or session schema changes are
 required.
 
-There is no fork today. A scoped fork becomes justified only if windowed
+At the time of this decision there was no fork. A scoped fork becomes justified only if windowed
 refeeds miss the measured budget and ChartGPU's `setSeriesData` path is
 needed, or if native dash support is required. Until then, the known
 regression is that dashed time-series styles render solid. WebGPU is required
@@ -51,3 +52,10 @@ real render path.
 
 This amends the render-path portion of ADR 0036. Its tile budget, gap bits,
 finite extrema, and binary transport decisions remain authoritative.
+
+## Amendment (2026-08-29)
+
+ADR 0045 now pins the maintained ChartGPU fork and uses its `setViewRange`
+method for constant-work viewport updates. ADR 0040 separately records the
+submodule delivery change. The time-only renderer and tile contract above
+remain accepted.

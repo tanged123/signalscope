@@ -24,9 +24,9 @@ trap cleanup EXIT INT TERM
 
 # Build before starting the health window: a stale binary must not spend the
 # poll budget compiling (and --quiet would hide that it ever was).
-cargo build --release -p scope-server
+cargo build -p scope-server
 
-cargo run --quiet --release -p scope-server -- \
+cargo run --quiet -p scope-server -- \
   --no-auth --no-open --port 43117 --data-dir "$data_dir" &
 server_pid=$!
 
@@ -68,7 +68,6 @@ process.stdout.write(JSON.stringify({
     signal_ids: [],
     window: { t0: 0, t1: 1 },
     pixel_width: 100,
-    max_total_bins: 1000,
   },
 }));
 ' "$protocol")

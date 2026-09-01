@@ -4,7 +4,10 @@
 SignalScope is an internal time-series analysis workbench for engineering telemetry (vehicle logs, test-stand data, firmware traces, monte-carlo batches). This package is the FINAL design specification. Product pillars: (1) MATLAB — the plot is an inspectable, annotatable object; (2) Plotly — any session exports as one self-contained interactive HTML file; (3) uPlot — millions of points at interactive framerates, no chrome may assume small data; (4) PlotJuggler — one workspace, one linked time spine.
 
 ## About the Design Files
-The files here are **design references created in HTML** — mockups of intended look and behavior, not production code. Recreate them in the SignalScope codebase (keep the prototype's proven canvas min/max decimation renderer and interaction engine in `reference/signalscope.html`).
+The files here are **design references created in HTML** — mockups of intended
+look and behavior, not production code. Recreate them in the SignalScope
+codebase. `reference/signalscope.html` is retained only for behavior questions
+that are not settled by the current code or ADRs.
 
 ## Fidelity
 - **Pixel reference:** `SignalScope Final Spec.dc.html` → **F2** (canonical 2×2 workspace, 1440px, gutter axes). Recreate chrome, spacing, hierarchy precisely.
@@ -49,5 +52,5 @@ Global: time window {t0,t1}, linked flag, cursor t, focused panel, layout preset
 
 ## Files
 - `SignalScope Final Spec.dc.html` — THE final spec: F0 decisions, F1 IA wireframe, F2 pixel reference, F3 inline-axes/palette state, F5 legend, F6·1–5 key moments + build order.
-- `SignalScope Design Pass.dc.html` — the exploration record (turns 1–5), for rationale only; where it disagrees with the Final Spec, the Final Spec wins.
-- `ds/` — tokens + fonts. `reference/signalscope.html` — behavior source of truth. `reference/prompt.md` — original brief.
+- `ds/` — tokens + fonts. `reference/signalscope.html` — targeted behavioral
+  reference only.

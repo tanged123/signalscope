@@ -508,7 +508,6 @@ export class AppShell {
           this.workspace.addAnnotation(id, {
             id: crypto.randomUUID(),
             series_path: hit.path,
-            domain: hit.domain,
             anchor: hit.anchor,
             pinned_value: hit.pinnedValue,
             label: "",
@@ -1062,7 +1061,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 1.3.0");
+        this.showModeHelp("SignalScope 2.0.0");
       },
     });
     this.commands.register({
@@ -2371,25 +2370,19 @@ export class AppShell {
       if (ingestPort !== null && restorePort !== null) {
         progress.hidden = false;
         const jobId = await restorePort.start(sessionJson);
-        let reconciliationAttempted = false;
+        let finalized = false;
         try {
           await waitForBatch(ingestPort, jobId, (status) => {
             renderBatchProgress(progress, status, () => {
               void ingestPort.cancelBatch(jobId);
             });
           });
-          const reconciled = await restorePort.reconcile(sessionJson, jobId);
-          reconciliationAttempted = true;
-          sessionJson = reconciled.session_json;
-          const conflict = reconciled.conflicts[0];
-          if (conflict !== undefined) {
-            this.showModeHelp(
-              `${conflict.legacy_path} is claimed by ${String(conflict.claimants.length)} sources — relink to finish restoring`,
-            );
-          }
+          const restored = await restorePort.finalize(sessionJson, jobId);
+          finalized = true;
+          sessionJson = restored.session_json;
         } finally {
-          if (!reconciliationAttempted) {
-            await restorePort.reconcile(sessionJson, jobId).catch(() => {});
+          if (!finalized) {
+            await restorePort.finalize(sessionJson, jobId).catch(() => {});
           }
           await ingestPort.releaseBatch(jobId);
         }
@@ -2700,7 +2693,6 @@ export class AppShell {
             signal_ids: ids,
             window: paddedWindow,
             pixel_width: requestedDevicePixels,
-            max_total_bins: null,
           });
           if (refreshToken !== this.refreshToken) return;
           replacements.set(panel.id, {
@@ -3083,7 +3075,6 @@ export class AppShell {
         decode_provenance: null,
         recipe_id: null,
         recipe_digest: null,
-        reconcile_legacy: false,
       });
     }
     const sessionName =

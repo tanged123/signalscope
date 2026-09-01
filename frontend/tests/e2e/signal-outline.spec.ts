@@ -110,7 +110,7 @@ async function installHttpPlane(page: Page): Promise<void> {
           recent_failures: [],
         };
         break;
-      case "restore_reconcile":
+      case "restore_finalize":
         response = {
           session_json: payload["session_json"] ?? session,
           rewritten: "0",
