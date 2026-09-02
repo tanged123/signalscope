@@ -414,7 +414,7 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
   await expect(panel.locator(".binding-chip")).toHaveCount(1);
   await panel.locator(".binding-chip").click();
   await expect(panel.locator(".binding-popover")).toBeVisible();
-  await panel.getByRole("button", { name: "remove binding" }).click();
+  await panel.getByRole("button", { name: "remove all" }).click();
   await expect(panel.locator(".binding-popover")).toBeHidden();
   const colorEncoding = panel.locator(
     '.plot-legend-encoding-chip[data-property="color"]',

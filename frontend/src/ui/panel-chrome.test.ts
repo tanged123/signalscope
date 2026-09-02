@@ -307,6 +307,28 @@ describe("PanelView chrome", () => {
     expect(onSetEncoding).toHaveBeenCalledWith("panel", "color", "channel");
   });
 
+  it("opens line editing from the series name hit target", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const view = new PanelView("panel", callbacks(catalog));
+    const panel = state();
+    panel.focus = [
+      {
+        kind: "series",
+        ref: { source_key: "run-01", channel: "temp" },
+        source_key: null,
+        channel: null,
+      },
+    ];
+    view.update(panel, false);
+
+    const row = view.element.querySelector<HTMLButtonElement>(
+      ".plot-legend-row-action",
+    );
+    expect(row?.title).toContain("Edit run-01/temp line properties");
+    row?.click();
+    expect(view.element.querySelector(".plot-row-inspector")).not.toBeNull();
+  });
+
   it("reports attribute encoding values by unit", () => {
     const catalog = Catalog.build([
       { ...signal("run-01", "temp"), unit: "°C" },

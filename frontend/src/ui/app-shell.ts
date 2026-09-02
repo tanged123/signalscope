@@ -3437,10 +3437,11 @@ export function shellMarkup(): string {
       <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
       <button class="layout-slot" aria-haspopup="menu" aria-expanded="false">layout ▾</button>
       <div class="legend-layout-menu" role="menu" hidden>
-        <span>LEGENDS</span>
+        <span>LEGEND TYPE</span>
         <button type="button" role="menuitem" data-legend-state="badge">badge</button>
         <button type="button" role="menuitem" data-legend-state="keys">keys</button>
         <button type="button" role="menuitem" data-legend-state="roster">roster</button>
+        <button type="button" role="menuitem" data-legend-state="rail">rail</button>
       </div>
     </div>
 

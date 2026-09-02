@@ -1094,6 +1094,18 @@ interface SelectionProbe {
 }
 
 describe("selection actions", () => {
+  it("offers all legend types from the global layout menu", () => {
+    const root = document.createElement("div");
+    root.innerHTML = shellMarkup();
+    const menu = root.querySelector<HTMLElement>(".legend-layout-menu");
+    expect(menu?.querySelector("span")?.textContent).toBe("LEGEND TYPE");
+    expect(
+      [...(menu?.querySelectorAll("[data-legend-state]") ?? [])].map((button) =>
+        button.getAttribute("data-legend-state"),
+      ),
+    ).toEqual(["badge", "keys", "roster", "rail"]);
+  });
+
   it("renders the SETS save-selection button", () => {
     const markup = shellMarkup();
     expect(markup).toContain('class="sets-save-selection"');

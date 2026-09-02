@@ -219,7 +219,7 @@ export interface BindingChipEntry {
   selector: string | null;
 }
 
-interface LegendStatValues {
+export interface LegendStatValues {
   min: number | null;
   max: number | null;
   mean: number | null;
@@ -1068,6 +1068,7 @@ export class PanelView {
       styles,
       emphasisIndices,
       palette: resolvePalette(),
+      axisStyle: state.axis_style,
     };
     if (this.chartHost === null) {
       this.pendingChartRender = request;
@@ -1955,10 +1956,12 @@ export class PanelView {
     const inspector = document.createElement("button");
     inspector.type = "button";
     inspector.className = "plot-legend-swatch plot-row-inspector-toggle";
-    inspector.style.background =
+    inspector.style.setProperty(
+      "--plot-row-swatch-color",
       entry.hue === null
         ? "var(--fg-4)"
-        : `var(--series-${String(colorIndexForHue(entry.hue) + 1)})`;
+        : `var(--series-${String(colorIndexForHue(entry.hue) + 1)})`,
+    );
     inspector.disabled = primary === undefined;
     inspector.title =
       primary === undefined
@@ -1997,10 +2000,16 @@ export class PanelView {
                 : this.callbacks.catalog().get(primary.ref)?.sourceName,
             ),
           );
-      } else {
+      } else if (event.shiftKey || primary === undefined) {
         this.callbacks.onFocusSolo(this.id, entry.entry);
+      } else {
+        this.openInspector(primary.path);
       }
     });
+    action.title =
+      primary === undefined
+        ? `Focus ${entry.label}`
+        : `Edit ${primary.path} line properties; Shift-click to focus`;
     const remove = document.createElement("button");
     remove.className = "plot-legend-remove";
     remove.type = "button";
@@ -2085,10 +2094,12 @@ export class PanelView {
         const swatch = document.createElement("button");
         swatch.type = "button";
         swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
-        swatch.style.background =
+        swatch.style.setProperty(
+          "--plot-row-swatch-color",
           item.hue === null
             ? "var(--fg-4)"
-            : `var(--series-${String(colorIndexForHue(item.hue) + 1)})`;
+            : `var(--series-${String(colorIndexForHue(item.hue) + 1)})`,
+        );
         const matching = state.series.filter((series) =>
           dimension === "source"
             ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
@@ -2096,6 +2107,7 @@ export class PanelView {
             : series.ref.channel === item.value,
         );
         const paths = matching.map((series) => series.path);
+        const single = matching.length === 1 ? matching[0] : undefined;
         const action = document.createElement("button");
         action.type = "button";
         action.className = "plot-legend-roster-action";
@@ -2112,9 +2124,14 @@ export class PanelView {
           const entry = this.focusEntryForRow(dimension, item, state);
           if (event.altKey)
             this.callbacks.onMuteSelector(this.id, item.selector);
-          else this.callbacks.onFocusToggle(this.id, entry);
+          else if (event.shiftKey || single === undefined)
+            this.callbacks.onFocusToggle(this.id, entry);
+          else this.openInspector(single.path);
         });
-        const single = matching.length === 1 ? matching[0] : undefined;
+        action.title =
+          single === undefined
+            ? `Focus ${item.label}`
+            : `Edit ${single.path} line properties; Shift-click to focus`;
         if (single === undefined) {
           swatch.disabled = true;
           swatch.title = "Group styles are edited with selector rules";
@@ -2414,8 +2431,14 @@ export class PanelView {
       const swatch = document.createElement("button");
       swatch.type = "button";
       swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
-      swatch.style.background = seriesColor(row.series);
-      swatch.style.height = `${String(Math.max(1, row.series.width))}px`;
+      swatch.style.setProperty(
+        "--plot-row-swatch-color",
+        seriesColor(row.series),
+      );
+      swatch.style.setProperty(
+        "--plot-row-swatch-width",
+        `${String(Math.max(1, row.series.width))}px`,
+      );
       swatch.title = `Edit ${row.series.path} line properties`;
       swatch.setAttribute(
         "aria-expanded",
@@ -2440,13 +2463,14 @@ export class PanelView {
       label.addEventListener("mouseleave", () => this.setEmphasis(null));
       label.addEventListener("click", (event) => {
         if (event.altKey) this.callbacks.onMuteSeries(this.id, row.series.ref);
-        else
+        else if (event.shiftKey)
           this.callbacks.onFocusToggle(this.id, {
             kind: "series",
             ref: row.series.ref,
             source_key: null,
             channel: row.series.ref.channel,
           });
+        else this.openInspector(row.series.path);
       });
       identity.append(swatch, label);
       element.append(
@@ -3069,7 +3093,8 @@ export class PanelView {
     const removeBinding = document.createElement("button");
     removeBinding.className = "binding-popover-remove";
     removeBinding.type = "button";
-    removeBinding.textContent = "remove binding";
+    removeBinding.textContent = "remove all";
+    removeBinding.title = "Remove all series in this binding";
     removeBinding.addEventListener("click", () => {
       this.callbacks.onRemoveBinding(this.id, entry.bindingIndex);
       this.closeBindingPopover();
@@ -3187,8 +3212,8 @@ export class PanelView {
   ): void {
     this.openPanelMenu(
       anchor,
-      "LEGEND SIZE",
-      (["badge", "keys", "roster"] as const).map((legendState) => ({
+      "LEGEND TYPE",
+      (["badge", "keys", "roster", "rail"] as const).map((legendState) => ({
         label: legendState,
         active: state.legend_state === legendState,
         run: () =>
@@ -3518,7 +3543,7 @@ function emptyLegendStats(): LegendStatValues {
   return { min: null, max: null, mean: null, rms: null, n: null, cursor: null };
 }
 
-function aggregateLegendStats(
+export function aggregateLegendStats(
   rows: readonly LegendStatValues[],
   mixedUnits = false,
 ): LegendStatValues {
@@ -3529,15 +3554,33 @@ function aggregateLegendStats(
     });
   const min = finite("min");
   const max = finite("max");
-  const mean = finite("mean");
-  const rms = finite("rms");
+  const weighted = (column: "mean" | "rms"): number | null => {
+    let total = 0;
+    let weight = 0;
+    for (const row of rows) {
+      const value = row[column];
+      const count = row.n;
+      if (
+        value === null ||
+        count === null ||
+        !Number.isFinite(value) ||
+        !Number.isFinite(count) ||
+        count <= 0
+      )
+        continue;
+      total += column === "rms" ? count * value ** 2 : count * value;
+      weight += count;
+    }
+    if (weight === 0) return null;
+    return column === "rms" ? Math.sqrt(total / weight) : total / weight;
+  };
   const n = finite("n");
   const cursor = finite("cursor");
   return {
     min: mixedUnits || min.length === 0 ? null : Math.min(...min),
     max: mixedUnits || max.length === 0 ? null : Math.max(...max),
-    mean: mixedUnits ? null : average(mean),
-    rms: mixedUnits ? null : average(rms),
+    mean: mixedUnits ? null : weighted("mean"),
+    rms: mixedUnits ? null : weighted("rms"),
     n: n.length === 0 ? null : n.reduce((total, value) => total + value, 0),
     cursor: mixedUnits ? null : average(cursor),
   };
@@ -3706,7 +3749,7 @@ function panelMarkup(): string {
       <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-group panel-toolbar-readout">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
-        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend size">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend type">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
       </span>
       <span class="panel-actions">
         <span class="panel-split-actions" aria-label="Split panel" role="group">

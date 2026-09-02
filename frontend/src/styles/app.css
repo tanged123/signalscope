@@ -882,6 +882,7 @@ button {
   margin-top: 4px;
   border-top: 1px solid var(--border-subtle);
   color: var(--status-error);
+  font: 0.7692rem var(--font-mono);
   text-align: left;
 }
 
@@ -1153,13 +1154,14 @@ button {
 
 .plot-legend-encoding-chip {
   display: inline-flex;
-  min-width: 0;
+  flex: none;
   align-items: center;
   gap: 4px;
   padding: 1px 4px;
   border-radius: 2px;
   color: var(--fg-3);
   font: inherit;
+  white-space: nowrap;
 }
 
 .plot-legend-encoding-chip:hover,
@@ -1406,9 +1408,24 @@ button {
 }
 
 .plot-row-inspector-toggle {
+  position: relative;
+  width: 18px;
+  height: 18px;
   align-self: center;
   justify-self: center;
   padding: 0;
+  background: transparent;
+}
+
+.plot-row-inspector-toggle::before {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  left: 2px;
+  height: max(1px, var(--plot-row-swatch-width, 2px));
+  transform: translateY(-50%);
+  background: var(--plot-row-swatch-color, var(--fg-4));
+  content: "";
 }
 
 .plot-row-inspector-toggle:focus-visible {

@@ -55,7 +55,7 @@ vi.mock("@chartgpu/chartgpu", () => ({
   },
 }));
 
-import { CHART_GRID, ChartHost } from "./chart-host";
+import { CHART_GRID, ChartHost, INLINE_CHART_GRID } from "./chart-host";
 
 const palette: Palette = {
   background: "#101010",
@@ -115,6 +115,7 @@ function request(
     styles,
     emphasisIndices,
     palette,
+    axisStyle: "gutter" as const,
   };
 }
 
@@ -141,6 +142,26 @@ async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
 describe("ChartHost", () => {
   it("publishes the configured grid margins", () => {
     expect(CHART_GRID).toEqual({ left: 60, right: 12, top: 8, bottom: 34 });
+    expect(INLINE_CHART_GRID).toEqual({ left: 8, right: 8, top: 8, bottom: 8 });
+  });
+
+  it("publishes dash styles and switches axes into the inline plot", async () => {
+    const host = await hostFixture();
+    host.render({
+      ...request(),
+      styles: [{ ...stroke(0), dash: "dash" }],
+      axisStyle: "inline",
+    });
+
+    const options = state.charts.at(-1)?.options ?? {};
+    expect(
+      (options.series as Array<{ lineStyle: { dash: string } }>)[0]?.lineStyle
+        .dash,
+    ).toBe("dash");
+    expect(options.grid).toEqual(INLINE_CHART_GRID);
+    expect((options.xAxis as { inside: boolean }).inside).toBe(true);
+    expect((options.yAxis as { inside: boolean }).inside).toBe(true);
+    expect(options.performance).toEqual({ lod: "strict" });
   });
 
   it("normalizes time to a stable reference and emits ChartGPU series", async () => {
@@ -281,7 +302,7 @@ describe("ChartHost", () => {
     expect(series[1]?.color).toBe(palette.series[1]);
   });
 
-  it("compensates thin ChartGPU strokes without flattening wider styles", async () => {
+  it("passes configured stroke widths through without a hidden minimum", async () => {
     const host = await hostFixture();
     const data = response(["normal", "ghost", "wide", "emphasized"]);
     const styles = [
@@ -296,13 +317,13 @@ describe("ChartHost", () => {
     const series = state.charts.at(-1)?.options.series as Array<{
       lineStyle: { width: number };
     }>;
-    expect(series.map(({ lineStyle }) => lineStyle.width)).toEqual([
-      3, 4, 5.2, 4.8,
-    ]);
+    [1, 1.4, 2.6, 1.8].forEach((expected, index) => {
+      expect(series[index]?.lineStyle.width).toBeCloseTo(expected);
+    });
     expect(state.charts.at(-1)?.options.performance).toEqual({ lod: "strict" });
   });
 
-  it("scales compensated ChartGPU widths globally", async () => {
+  it("scales configured widths globally", async () => {
     const host = await hostFixture();
     const data = response(["normal", "ghost", "wide", "emphasized"]);
     const styles = [
@@ -321,7 +342,7 @@ describe("ChartHost", () => {
       lineStyle: { width: number };
     }>;
     const widths = series.map(({ lineStyle }) => lineStyle.width);
-    [4.5, 6, 7.8, 7.2].forEach((expected, index) => {
+    [1.5, 2.1, 3.9, 2.7].forEach((expected, index) => {
       expect(widths[index]).toBeCloseTo(expected);
     });
     expect(state.charts.at(-1)?.options.performance).toEqual({ lod: "strict" });
@@ -344,7 +365,7 @@ describe("ChartHost", () => {
     expect(firstStyles[0]?.color).toBe(palette.fg4);
     expect(firstStyles[0]?.lineStyle.opacity).toBe(1);
     expect(firstStyles[1]?.lineStyle.opacity).toBe(1);
-    expect(firstStyles[1]?.lineStyle.width).toBe(4.8);
+    expect(firstStyles[1]?.lineStyle.width).toBe(1.9);
 
     host.render(request(data, styles, [1]));
     const second = state.charts.at(-1)?.options.series as unknown[];

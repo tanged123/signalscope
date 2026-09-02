@@ -12,6 +12,7 @@ import {
   MAX_SERIES_PER_PANEL,
   MAXIMIZE_GLYPH,
   PanelView,
+  aggregateLegendStats,
   bindingChipEntries,
   focusChips,
   matrixLegendRows,
@@ -175,6 +176,32 @@ function timeState(series: RenderSeries[]): RenderPanelState {
 }
 
 describe("panel series", () => {
+  it("weights aggregate mean and RMS by each series sample count", () => {
+    const aggregate = aggregateLegendStats([
+      { min: 0, max: 4, mean: 2, rms: 2, n: 1, cursor: null },
+      { min: 0, max: 8, mean: 6, rms: 6, n: 3, cursor: null },
+    ]);
+
+    expect(aggregate.mean).toBe(5);
+    expect(aggregate.rms).toBeCloseTo(Math.sqrt(28), 12);
+    expect(aggregate.n).toBe(4);
+  });
+
+  it("does not aggregate value statistics across mixed units", () => {
+    const aggregate = aggregateLegendStats(
+      [
+        { min: 0, max: 4, mean: 2, rms: 2, n: 1, cursor: 2 },
+        { min: 0, max: 8, mean: 6, rms: 6, n: 3, cursor: 6 },
+      ],
+      true,
+    );
+
+    expect(aggregate.mean).toBeNull();
+    expect(aggregate.rms).toBeNull();
+    expect(aggregate.cursor).toBeNull();
+    expect(aggregate.n).toBe(4);
+  });
+
   it("uses a fallback-safe maximize glyph", () => {
     expect(MAXIMIZE_GLYPH).toBe("↗");
   });

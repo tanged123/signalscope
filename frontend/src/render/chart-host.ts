@@ -12,11 +12,14 @@ import { cachedFeed, responseTimeReference } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
 
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
-const MIN_CHARTGPU_LINE_WIDTH = 2;
-const MIN_CHARTGPU_GHOST_WIDTH = 1.5;
+export const INLINE_CHART_GRID = {
+  left: 8,
+  right: 8,
+  top: 8,
+  bottom: 8,
+} as const;
 const FULL_OPACITY_GHOST_COUNT = 16;
 const MIN_DENSE_GHOST_OPACITY = 0.06;
-const PLOT_LINE_WIDTH_BASELINE = 2;
 
 export interface ChartRenderRequest {
   response: ColumnarTileResponse;
@@ -27,6 +30,7 @@ export interface ChartRenderRequest {
   styles: readonly SeriesStroke[];
   emphasisIndices: readonly number[];
   palette: Palette;
+  axisStyle: "gutter" | "inline";
 }
 
 interface SeriesElement {
@@ -49,6 +53,7 @@ export class ChartHost {
   private options: ChartGPUOptions | null = null;
   private lastLayout: PlotLayout | null = null;
   private lastLabels: { x: string; y: string } | null = null;
+  private lastAxisStyle: "gutter" | "inline" = "gutter";
   private readonly xTickRange = { min: 0, max: 1 };
   private readonly yTickRange = { min: 0, max: 1 };
   private readonly xTickFormatter: TickFormatter = createRangeTickFormatter(
@@ -146,12 +151,8 @@ export class ChartHost {
         emphasisActive && !isEmphasized && !ghost
           ? 0.25
           : Math.min(1, baseOpacity + (isEmphasized ? 0.4 : 0));
-      const minimumWidth = ghost
-        ? MIN_CHARTGPU_GHOST_WIDTH
-        : MIN_CHARTGPU_LINE_WIDTH;
       const width =
-        (Math.max(style.width, minimumWidth) + (isEmphasized ? 0.4 : 0)) *
-        PLOT_LINE_WIDTH_BASELINE *
+        (style.width + (isEmphasized ? 0.4 : 0)) *
         request.palette.lineWidthScale;
       const element: LineSeriesConfig = {
         type: "line",
@@ -163,6 +164,7 @@ export class ChartHost {
           color,
           width,
           opacity,
+          dash: style.dash,
         },
       };
       this.elements[index] = {
@@ -180,12 +182,14 @@ export class ChartHost {
     const labelsChanged =
       this.lastLabels === null ||
       this.lastLabels.x !== request.xLabel ||
-      this.lastLabels.y !== request.yLabel;
+      this.lastLabels.y !== request.yLabel ||
+      this.lastAxisStyle !== request.axisStyle;
     if (!rebuilt && !labelsChanged && this.options !== null) {
       this.setRangesOnly(request.xRange, request.yRange);
       return performance.now() - started;
     }
     this.lastLabels = { x: request.xLabel, y: request.yLabel };
+    this.lastAxisStyle = request.axisStyle;
     const orderedSeries = series
       .map((element, index) => ({
         element,
@@ -204,8 +208,16 @@ export class ChartHost {
     if (this.options === null) return;
     this.options = {
       ...this.options,
-      xAxis: this.xAxis(xRange, this.options.xAxis?.name ?? "time (s)"),
-      yAxis: this.yAxis(yRange, this.options.yAxis?.name ?? "value"),
+      xAxis: this.xAxis(
+        xRange,
+        this.options.xAxis?.name ?? "time (s)",
+        this.options.xAxis?.inside === true,
+      ),
+      yAxis: this.yAxis(
+        yRange,
+        this.options.yAxis?.name ?? "value",
+        this.options.yAxis?.inside === true,
+      ),
     };
     this.chart.setOption(this.options);
     this.chart.setViewRange({
@@ -274,7 +286,7 @@ export class ChartHost {
         lod:
           request.palette.lineWidthScale !== 1 ||
           request.styles.some(
-            (style) => style.hue !== null && style.width !== 1.4,
+            (style) => style.width !== 1.4 || style.dash !== "solid",
           )
             ? "strict"
             : "auto",
@@ -290,10 +302,18 @@ export class ChartHost {
         fontSize: request.palette.fontSize,
       },
       palette: request.palette.series,
-      grid: CHART_GRID,
       gridLines: { show: true, color: request.palette.grid },
-      xAxis: this.xAxis(request.xRange, request.xLabel),
-      yAxis: this.yAxis(request.yRange, request.yLabel),
+      xAxis: this.xAxis(
+        request.xRange,
+        request.xLabel,
+        request.axisStyle === "inline",
+      ),
+      yAxis: this.yAxis(
+        request.yRange,
+        request.yLabel,
+        request.axisStyle === "inline",
+      ),
+      grid: request.axisStyle === "inline" ? INLINE_CHART_GRID : CHART_GRID,
       series,
     };
   }
@@ -301,12 +321,14 @@ export class ChartHost {
   private xAxis(
     range: Range,
     label: string,
+    inside = false,
   ): NonNullable<ChartGPUOptions["xAxis"]> {
     this.xTickRange.min = range.min - this.tRef;
     this.xTickRange.max = range.max - this.tRef;
     return {
       type: "value",
       name: label,
+      inside,
       min: this.xTickRange.min,
       max: this.xTickRange.max,
       tickFormatter: (value) => this.xTickFormatter(value + this.tRef),
@@ -316,12 +338,14 @@ export class ChartHost {
   private yAxis(
     range: readonly [number, number],
     label: string,
+    inside = false,
   ): NonNullable<ChartGPUOptions["yAxis"]> {
     this.yTickRange.min = range[0];
     this.yTickRange.max = range[1];
     return {
       type: "value",
       name: label,
+      inside,
       min: range[0],
       max: range[1],
       tickFormatter: (value) => this.yTickFormatter(value),
@@ -332,17 +356,16 @@ export class ChartHost {
     xRange: Range,
     yRange: readonly [number, number],
   ): PlotLayout {
+    const grid =
+      this.lastAxisStyle === "inline" ? INLINE_CHART_GRID : CHART_GRID;
     return {
       plot: {
-        x: CHART_GRID.left,
-        y: CHART_GRID.top,
-        width: Math.max(
-          1,
-          this.container.clientWidth - CHART_GRID.left - CHART_GRID.right,
-        ),
+        x: grid.left,
+        y: grid.top,
+        width: Math.max(1, this.container.clientWidth - grid.left - grid.right),
         height: Math.max(
           1,
-          this.container.clientHeight - CHART_GRID.top - CHART_GRID.bottom,
+          this.container.clientHeight - grid.top - grid.bottom,
         ),
       },
       xRange,

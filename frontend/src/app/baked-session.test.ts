@@ -36,6 +36,47 @@ describe("parseBakedSession", () => {
     });
   });
 
+  it.each([0, 1])("accepts ghost opacity at boundary %s", (opacity) => {
+    const model = new WorkspaceModel();
+    model.addPanelRow().ghost_opacity = opacity;
+
+    expect(() =>
+      parseBakedSession(JSON.stringify(model.snapshot())),
+    ).not.toThrow();
+  });
+
+  it.each([-0.1, 1.1])(
+    "rejects ghost opacity outside [0, 1]: %s",
+    (opacity) => {
+      const model = new WorkspaceModel();
+      model.addPanelRow().ghost_opacity = opacity;
+
+      expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+        /structure/,
+      );
+    },
+  );
+
+  it("rejects duplicate statistic columns", () => {
+    const model = new WorkspaceModel();
+    model.addPanelRow().stat_columns = ["min", "min"];
+
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+      /structure/,
+    );
+  });
+
+  it("rejects a statistic sort column not in the selected columns", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.stat_columns = ["min"];
+    panel.stats_sort = "max";
+
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+      /structure/,
+    );
+  });
+
   it("rejects a foreign app", () => {
     const json = JSON.stringify({ ...emptySession(), app: "other" });
     expect(() => parseBakedSession(json)).toThrow(/app/);

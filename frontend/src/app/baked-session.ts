@@ -209,6 +209,9 @@ function isPanel(value: unknown): boolean {
     isNullable(value.width_by, isStyleDimension) &&
     typeof value.line_width === "number" &&
     typeof value.ghost_opacity === "number" &&
+    Number.isFinite(value.ghost_opacity) &&
+    value.ghost_opacity >= 0 &&
+    value.ghost_opacity <= 1 &&
     Array.isArray(value.overrides) &&
     value.overrides.every(isOverride) &&
     Array.isArray(value.focus) &&
@@ -234,7 +237,10 @@ function isPanel(value: unknown): boolean {
     typeof value.show_stats === "boolean" &&
     Array.isArray(value.stat_columns) &&
     value.stat_columns.every(isStatColumn) &&
-    isNullable(value.stats_sort, isStatColumn) &&
+    new Set(value.stat_columns).size === value.stat_columns.length &&
+    (value.stats_sort === null ||
+      (isStatColumn(value.stats_sort) &&
+        value.stat_columns.includes(value.stats_sort))) &&
     typeof value.stats_sort_descending === "boolean"
   );
 }
