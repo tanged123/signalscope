@@ -69,6 +69,18 @@ configure_macos_signing() {
   return 2
 }
 
+build_server_release() {
+  if [ "$(uname -s)" = Linux ]; then
+    local rust_target=x86_64-unknown-linux-gnu
+    cargo zigbuild --release -p scope-server --target "$rust_target.2.35" "$@"
+    SIGNALSCOPE_SERVER_BIN="target/$rust_target/release/scope-server"
+    export SIGNALSCOPE_SERVER_BIN
+    "$signalscope_scripts_dir/check-linux-server.sh" "$SIGNALSCOPE_SERVER_BIN"
+  else
+    cargo build --release -p scope-server "$@"
+  fi
+}
+
 package_app() {
   local version platform arch signing_status
   local -a builder_args
@@ -115,7 +127,7 @@ package_app() {
 
   pnpm --filter @signalscope/frontend build
   pnpm --filter @signalscope/desktop build
-  cargo build --release -p scope-server
+  build_server_release
   node desktop/scripts/stage.mjs
   node desktop/scripts/clean.mjs --release
   pnpm --filter @signalscope/desktop exec electron-builder \
@@ -140,7 +152,7 @@ app)
   ;;
 server)
   shift || true
-  exec cargo build --release -p scope-server "$@"
+  build_server_release "$@"
   ;;
 web)
   shift || true

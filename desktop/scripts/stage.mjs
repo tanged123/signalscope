@@ -20,7 +20,9 @@ const binRoot = join(stageRoot, "bin");
 const frontendRoot = join(stageRoot, "frontend");
 const executableName =
   process.platform === "win32" ? "scope-server.exe" : "scope-server";
-const executableSource = join(repositoryRoot, "target/release", executableName);
+const executableSource = process.env.SIGNALSCOPE_SERVER_BIN
+  ? resolve(repositoryRoot, process.env.SIGNALSCOPE_SERVER_BIN)
+  : join(repositoryRoot, "target/release", executableName);
 const frontendSource = join(repositoryRoot, "frontend/dist");
 
 function fail(message) {

@@ -32,6 +32,11 @@ Packaging starts from a fresh stage containing only the current
 stale, nested, or symlinked artifacts and generates SHA-256 checksums before
 tagging.
 
+Linux `scope-server` artifacts target the Ubuntu 22.04 glibc 2.35 baseline.
+HDF5 and zlib are linked statically, while the optional Wayland client is
+loaded at runtime. The package gate rejects newer glibc symbols and native
+dependencies outside the baseline runtime.
+
 Windows certificate secrets retain the existing convention. macOS Developer
 ID and notarization credentials are all-or-nothing. Unsigned packages are
 permitted during the initial restoration; production operators can set

@@ -19,7 +19,8 @@ choose a version from [all release tags](https://github.com/tanged123/signalscop
 - Linux x64: `SignalScope-VERSION-linux-x64.AppImage` or the `.deb` package
 
 Release assets include `SHA256SUMS.txt` for verification. Rendering requires a
-WebGPU-capable system.
+WebGPU-capable system. Linux packages support the Ubuntu 22.04 glibc 2.35
+baseline and newer distributions.
 
 ## Build and run
 
