@@ -177,9 +177,11 @@ test.describe("desktop plot interactions", () => {
     await page.mouse.up();
     await expect(readout).toHaveText(fitted ?? "");
 
-    await page.mouse.move(box.x + box.width - 420, box.y + 60);
+    await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.55);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width - 150, box.y + 65, { steps: 6 });
+    await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.56, {
+      steps: 6,
+    });
     await expect(page.locator(".gesture-hint")).toHaveText("drag: zoom X");
     await page.mouse.up();
     await expect(page.locator(".gesture-hint")).toBeEmpty();
