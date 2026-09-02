@@ -26,9 +26,16 @@ open = "5"
 base64 = "0.22"
 uuid.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# rfd's portal backend otherwise makes Wayland a process-start dependency.
+wayland-backend = { version = "0.3", features = ["dlopen"] }
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+
+[package.metadata.cargo-machete]
+ignored = ["wayland-backend"]
 
 [lints]
 workspace = true

@@ -23,9 +23,6 @@ toml.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-hdf5-metno = { workspace = true, features = ["static"] }
-
 [dev-dependencies]
 tempfile.workspace = true
 

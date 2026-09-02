@@ -72,14 +72,18 @@
             with pkgs;
             [
               actionlint
+              binutils
               cargo
               cargo-deny
               cargo-llvm-cov
               cargo-machete
+              cargo-zigbuild
               clippy
+              cmake
               hdf5Root
               llvmPackages.llvm
               nodejs_22
+              patchelf
               pnpm
               pkg-config
               rustc
@@ -87,6 +91,7 @@
               shellcheck
               treefmtEval.config.build.wrapper
               typos
+              zig
               zizmor
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [ electron_43 ]
