@@ -48,16 +48,18 @@ editable pointer control remains a native button with a keyboard path.
 
 The existing serialized badge → keys → roster → rail size ladder remains. A
 rail may dock left, right, top, or bottom; resizing a floating legend never
-implicitly docks it. Every state above badge gains a permanent encoding row
-directly below the header. In the rail the three chips wrap without dropping
-their `property ← source` labels. Chip editors are in-legend drawers that push
-content down, keeping both the affected rows and plot visible.
+implicitly docks it. Unpositioned floating legends begin at the top-right to
+leave inline y-axis labels clear. Every state above badge gains a permanent
+encoding row directly below the header. In the rail the three chips wrap
+without dropping their `property ← source` labels. Chip editors are in-legend
+drawers that push content down, keeping both the affected rows and plot visible.
 
 Encoding and identity stay separate: source, channel, and focus dimensions
 assign visual properties, while keys and roster always render one canonical row
 per resolved signal path. Signals from the same source are never collapsed into
 an aggregate row, and every trace retains its own focus, mute, statistics, and
-line-properties controls.
+line-properties controls. The `SIGNALS` heading collapses this roster just as
+the `TIPS` heading collapses the annotation manifest.
 
 Clicking a singular row swatch expands that row in place. The inspector contains
 only color and line fields, inherited provenance, field-level revert, mute, and

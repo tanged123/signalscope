@@ -1059,7 +1059,7 @@ button {
   position: absolute;
   z-index: 2;
   top: 8px;
-  left: 8px;
+  right: 8px;
   display: flex;
   width: min(214px, calc(100% - 16px));
   min-width: 140px;
@@ -1593,6 +1593,10 @@ button {
   overflow: hidden;
 }
 
+.plot-legend-group.collapsed {
+  flex: 0 0 auto;
+}
+
 .plot-legend-group-title {
   display: flex;
   align-items: center;
@@ -1603,6 +1607,18 @@ button {
   border-bottom: 1px solid var(--border-faint);
   color: var(--fg-2);
   letter-spacing: 0.06em;
+}
+
+.plot-legend-signals-toggle {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.plot-legend-signals-toggle:hover,
+.plot-legend-signals-toggle:focus-visible {
+  color: var(--fg-1);
 }
 
 .plot-legend-focus-filter {

@@ -307,7 +307,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
       {
         id: "legend-probe-panel",
         title: "Many series",
-        axis_style: "gutter",
+        axis_style: "inline",
         bindings: [
           {
             kind: "pick" as const,
@@ -388,6 +388,16 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
   await expect(panel.locator(".panel-actions")).toBeVisible();
   const plotLegend = panel.locator(".plot-series-legend");
   await expect
+    .poll(async () => {
+      const legendBox = await plotLegend.boundingBox();
+      const wrapBox = await panel.locator(".plot-wrap").boundingBox();
+      if (legendBox === null || wrapBox === null) return false;
+      const rightInset =
+        wrapBox.x + wrapBox.width - (legendBox.x + legendBox.width);
+      return Math.abs(rightInset - 8) <= 1;
+    })
+    .toBe(true);
+  await expect
     .poll(() => plotLegend.locator(".plot-legend-roster-row").count())
     .toBeLessThan(100);
   await expect
@@ -462,6 +472,13 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     "data-focus-toggle",
     "run_05/temp",
   );
+  const signalsToggle = plotLegend.locator(".plot-legend-signals-toggle");
+  await signalsToggle.click();
+  await expect(plotLegend.locator(".plot-legend-roster-rows")).toBeHidden();
+  await expect(plotLegend.locator(".plot-legend-tips-heading")).toBeVisible();
+  await expect(signalsToggle).toHaveAttribute("aria-expanded", "false");
+  await signalsToggle.click();
+  await expect(plotLegend.locator(".plot-legend-roster-rows")).toBeVisible();
   await plotLegend.locator(".plot-legend-tips-heading button").first().click();
   await expect(plotLegend.locator(".plot-tip-reading").nth(1)).toHaveText(
     "5.1200 · 1.0565",
@@ -536,11 +553,11 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     handleBox.y + handleBox.height / 2,
   );
   await page.mouse.down();
-  await page.mouse.move(handleBox.x + 100, handleBox.y + 40);
+  await page.mouse.move(handleBox.x - 100, handleBox.y + 40);
   await page.mouse.up();
   await expect
     .poll(async () => (await plotLegend.boundingBox())?.x ?? beforeDrag.x)
-    .toBeGreaterThan(beforeDrag.x + 50);
+    .toBeLessThan(beforeDrag.x - 50);
   await expect(plotLegend.locator(".plot-legend-hide")).toHaveCount(0);
   await plotLegend.locator(".plot-legend-collapse").click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(

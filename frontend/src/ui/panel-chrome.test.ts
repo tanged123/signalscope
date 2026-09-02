@@ -266,6 +266,51 @@ describe("PanelView chrome", () => {
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });
 
+  it("collapses signal rows independently from tips", () => {
+    const catalog = Catalog.build([
+      signal("run-01", "temp"),
+      signal("run-01", "speed"),
+    ]);
+    const view = new PanelView("panel", callbacks(catalog));
+    const panel = state();
+    view.update(panel, false);
+
+    view.element
+      .querySelector<HTMLButtonElement>(".plot-legend-signals-toggle")
+      ?.click();
+    expect(
+      view.element.querySelector<HTMLButtonElement>(
+        ".plot-legend-signals-toggle",
+      )?.ariaExpanded,
+    ).toBe("false");
+    expect(
+      view.element.querySelector<HTMLElement>(".plot-legend-key-rows")?.hidden,
+    ).toBe(true);
+    expect(
+      view.element.querySelector<HTMLElement>(".plot-legend-tips")?.hidden,
+    ).toBe(false);
+
+    view.element
+      .querySelector<HTMLButtonElement>(".plot-legend-signals-toggle")
+      ?.click();
+    panel.legend_state = "roster";
+    view.update(panel, false);
+    view.element
+      .querySelector<HTMLButtonElement>(".plot-legend-signals-toggle")
+      ?.click();
+    expect(
+      view.element.querySelector<HTMLElement>(".plot-legend-search-wrap")
+        ?.hidden,
+    ).toBe(true);
+    expect(
+      view.element.querySelector<HTMLElement>(".plot-legend-roster-rows")
+        ?.hidden,
+    ).toBe(true);
+    expect(
+      view.element.querySelector(".plot-legend-group")?.classList,
+    ).toContain("collapsed");
+  });
+
   it("uses plain click to add focus, Ctrl-click to toggle, and Shift-click for ranges", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),

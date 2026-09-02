@@ -35,6 +35,8 @@ Encoding dimensions control how properties are assigned; they do not group
 legend identity. Keys and roster states contain one canonical row for every
 resolved signal, including signals that share a source, so every rendered trace
 has a direct focus, mute, statistics, and line-properties target.
+The signal heading collapses or expands this canonical roster independently of
+the annotation manifest.
 
 The floating series popover is replaced by an inline legend-row inspector.
 Plot-local derivation and row-level unbinding are removed from the style
@@ -80,6 +82,8 @@ The legend's `rail` state is independent from its dock edge. Session schema 27
 persists left, right, top, and bottom rails; schema 26 rails migrate to the
 previous right edge. Only dragging the legend to an edge docks it. Resizing a
 floating legend changes its floating dimensions and never implicitly docks it.
+Unpositioned floating legends default to the top-right so inline y-axis labels
+remain clear.
 The bounded tip manifest yields height to the series roster in compact layouts,
 and rails retain a combined x/value readout instead of hiding both numbers.
 

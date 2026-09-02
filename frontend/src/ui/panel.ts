@@ -476,6 +476,7 @@ export class PanelView {
     { x: number; y: number }
   >();
   private annotationsExpanded = false;
+  private signalsExpanded = true;
   private plotTipsHeight: number | null = null;
   private annotationDragId: string | null = null;
   private focusOnly = false;
@@ -1887,6 +1888,7 @@ export class PanelView {
     title.className = "plot-legend-section-title plot-legend-group-title";
     const rows = document.createElement("div");
     rows.className = "plot-legend-key-rows";
+    rows.hidden = !this.signalsExpanded;
     rows.append(
       ...shown.map((row) => this.plotLegendSeriesRow(state, row, shown)),
     );
@@ -1924,8 +1926,15 @@ export class PanelView {
     focusedCount: number,
   ): HTMLElement {
     const title = document.createElement("div");
-    const label = document.createElement("span");
-    label.textContent = "▾ SIGNALS";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "plot-legend-signals-toggle";
+    toggle.textContent = `${this.signalsExpanded ? "▾" : "▸"} SIGNALS`;
+    toggle.setAttribute("aria-expanded", String(this.signalsExpanded));
+    toggle.addEventListener("click", () => {
+      this.signalsExpanded = !this.signalsExpanded;
+      this.updatePlotLegend(state);
+    });
     const focus = document.createElement("button");
     focus.type = "button";
     focus.className = "plot-legend-focus-filter";
@@ -1942,7 +1951,7 @@ export class PanelView {
     });
     const total = document.createElement("span");
     total.textContent = String(count);
-    title.append(label, focus, total);
+    title.append(toggle, focus, total);
     return title;
   }
 
@@ -2027,12 +2036,15 @@ export class PanelView {
     searchMeta.className = "plot-legend-search-meta search-count";
     searchRow.append(searchPrefix, search);
     searchWrap.append(searchRow, searchMeta);
+    searchWrap.hidden = !this.signalsExpanded;
     const group = document.createElement("div");
     group.className = "plot-legend-group";
+    group.classList.toggle("collapsed", !this.signalsExpanded);
     const groupTitle = document.createElement("div");
     groupTitle.className = "plot-legend-section-title plot-legend-group-title";
     const rows = document.createElement("div");
     rows.className = "plot-legend-roster-rows";
+    rows.hidden = !this.signalsExpanded;
     const viewport = document.createElement("div");
     viewport.className = "plot-legend-roster-viewport";
     rows.addEventListener("click", (event) => {
@@ -3122,20 +3134,11 @@ export class PanelView {
     if (wrap === null) return { x: 8, y: 8 };
     const bounds = wrap.getBoundingClientRect();
     const box = legend.getBoundingClientRect();
-    if (this.plotLegendAnchor !== null) {
-      return {
-        x: this.plotLegendAnchor.endsWith("right")
-          ? bounds.width - box.width - 8
-          : 8,
-        y: this.plotLegendAnchor.startsWith("bottom")
-          ? bounds.height - box.height - 8
-          : 8,
-      };
-    }
-    const measured = { x: box.left - bounds.left, y: box.top - bounds.top };
-    return Number.isFinite(measured.x) && Number.isFinite(measured.y)
-      ? measured
-      : { x: 8, y: 8 };
+    const anchor = this.plotLegendAnchor ?? "top_right";
+    return {
+      x: anchor.endsWith("right") ? bounds.width - box.width - 8 : 8,
+      y: anchor.startsWith("bottom") ? bounds.height - box.height - 8 : 8,
+    };
   }
 
   private positionPlotLegend(): void {
