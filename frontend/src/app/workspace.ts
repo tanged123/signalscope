@@ -733,10 +733,11 @@ export class WorkspaceModel {
     }
   }
 
-  setFocus(panelId: string, entry: FocusEntry): void {
+  addFocus(panelId: string, entry: FocusEntry): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    panel.focus = [structuredClone(entry)];
+    if (panel.focus.some((current) => sameFocus(current, entry))) return;
+    panel.focus.push(structuredClone(entry));
     panel.legend_hint_dismissed = true;
     this.touch(true);
   }

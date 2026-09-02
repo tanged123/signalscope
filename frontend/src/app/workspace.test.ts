@@ -466,6 +466,29 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.focus).toEqual([]);
   });
 
+  it("adds focus without removing prior entries", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const first = {
+      kind: "series" as const,
+      ref: refForPath("run_01/alt"),
+      source_key: null,
+      channel: null,
+    };
+    const second = {
+      kind: "series" as const,
+      ref: refForPath("run_02/alt"),
+      source_key: null,
+      channel: null,
+    };
+
+    model.addFocus(panel.id, first);
+    model.addFocus(panel.id, second);
+    model.addFocus(panel.id, first);
+
+    expect(model.focusEntries(panel.id)).toEqual([first, second]);
+  });
+
   it("removes source and channel focus entries when toggled again", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

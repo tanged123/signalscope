@@ -70,7 +70,7 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onDropSignals: vi.fn(),
     onDropSet: vi.fn(),
     onFocusToggle: vi.fn(),
-    onFocusSolo: vi.fn(),
+    onFocusAdd: vi.fn(),
     onFocusRange: vi.fn(),
     onClearFocus: vi.fn(),
     onMuteSelector: vi.fn(),
@@ -266,17 +266,17 @@ describe("PanelView chrome", () => {
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });
 
-  it("uses plain click for solo focus, Ctrl-click to toggle, and Shift-click for ranges", () => {
+  it("uses plain click to add focus, Ctrl-click to toggle, and Shift-click for ranges", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),
       signal("run-02", "temp"),
       signal("run-03", "temp"),
     ]);
     const panelCallbacks = callbacks(catalog);
-    const onFocusSolo = vi.fn();
+    const onFocusAdd = vi.fn();
     const onFocusToggle = vi.fn();
     const onFocusRange = vi.fn();
-    panelCallbacks.onFocusSolo = onFocusSolo;
+    panelCallbacks.onFocusAdd = onFocusAdd;
     panelCallbacks.onFocusToggle = onFocusToggle;
     panelCallbacks.onFocusRange = onFocusRange;
     const view = new PanelView("panel", panelCallbacks);
@@ -293,7 +293,7 @@ describe("PanelView chrome", () => {
       new MouseEvent("click", { bubbles: true, ctrlKey: true }),
     );
 
-    expect(onFocusSolo).toHaveBeenCalledTimes(1);
+    expect(onFocusAdd).toHaveBeenCalledTimes(1);
     expect(onFocusRange).toHaveBeenCalledTimes(1);
     expect(
       (onFocusRange.mock.calls[0]?.[1] as Array<{ source_key: string }>).map(

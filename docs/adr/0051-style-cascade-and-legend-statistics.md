@@ -66,10 +66,10 @@ but it has no duplicate stack. Canonical legend and statistic rows receive the
 amber tint and left rule in place. A focused trace retains its series hue and is
 drawn one pixel wider. The user-facing `dim` control determines whether
 non-focused traces retain full color or use the serialized ghost opacity; the
-legacy schema field names remain unchanged. Plain row click replaces the focus
-set, Command/Ctrl-click adds or removes, Shift-click selects the contiguous
-visible range from the last anchor, and the focused-only control filters the
-existing list without reordering it.
+legacy schema field names remain unchanged. Plain row or trace click adds to the
+focus set without removing prior focus, Command/Ctrl-click adds or removes,
+Shift-click selects the contiguous visible range from the last anchor, and the
+focused-only control filters the existing list without reordering it.
 
 The legend's `rail` state is independent from its dock edge. Session schema 27
 persists left, right, top, and bottom rails; schema 26 rails migrate to the

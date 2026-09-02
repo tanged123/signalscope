@@ -211,13 +211,13 @@ describe("panel series", () => {
   });
 
   describe("plot gestures", () => {
-    it("uses line selection for focus, shift-click to add, and alt-click for mute", () => {
+    it("adds line focus on click, toggles with shift, and mutes with alt", () => {
       const onFocusToggle = vi.fn();
-      const onFocusSolo = vi.fn();
+      const onFocusAdd = vi.fn();
       const onMuteSeries = vi.fn();
       const callbacks = {
         onFocusToggle,
-        onFocusSolo,
+        onFocusAdd,
         onMuteSeries,
       } as unknown as PanelCallbacks;
       const view = Object.create(PanelView.prototype) as unknown as {
@@ -246,7 +246,7 @@ describe("panel series", () => {
 
       view.plotClick(50, 50, { alt: false, shift: false });
       expect(onFocusToggle).not.toHaveBeenCalled();
-      expect(onFocusSolo).toHaveBeenCalledTimes(1);
+      expect(onFocusAdd).toHaveBeenCalledTimes(1);
       expect(onMuteSeries).not.toHaveBeenCalled();
 
       view.plotClick(50, 50, { alt: false, shift: true });
@@ -260,11 +260,11 @@ describe("panel series", () => {
   it("routes plain-click pinning atomically while shift-click only adds focus", () => {
     const onPinAnnotation = vi.fn();
     const onFocusToggle = vi.fn();
-    const onFocusSolo = vi.fn();
+    const onFocusAdd = vi.fn();
     const callbacks = {
       onPinAnnotation,
       onFocusToggle,
-      onFocusSolo,
+      onFocusAdd,
     } as unknown as PanelCallbacks;
     const series = visible("run_01/temp");
     const view = Object.create(PanelView.prototype) as unknown as {
@@ -296,7 +296,7 @@ describe("panel series", () => {
     view.plotClick(50, 50, { alt: false, shift: false });
     expect(onPinAnnotation).toHaveBeenCalledTimes(1);
     expect(onFocusToggle).not.toHaveBeenCalled();
-    expect(onFocusSolo).not.toHaveBeenCalled();
+    expect(onFocusAdd).not.toHaveBeenCalled();
 
     view.plotClick(50, 50, { alt: false, shift: true });
     expect(onPinAnnotation).toHaveBeenCalledTimes(1);
@@ -422,7 +422,7 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
         | "onFocusRange"
         | "onMuteSeries"
         | "onMuteSelector"
@@ -437,7 +437,7 @@ describe("panel series", () => {
     view.callbacks = {
       catalog: () => catalog,
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
       onFocusRange: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
@@ -483,7 +483,7 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -498,7 +498,7 @@ describe("panel series", () => {
     view.callbacks = {
       catalog: () => catalog,
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout,
@@ -570,7 +570,7 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -585,7 +585,7 @@ describe("panel series", () => {
     view.callbacks = {
       catalog: () => Catalog.build(paths.map(summary)),
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout,
@@ -685,7 +685,7 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -701,7 +701,7 @@ describe("panel series", () => {
     view.callbacks = {
       catalog: () => Catalog.build(paths.map(summary)),
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout: vi.fn(),

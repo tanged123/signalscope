@@ -391,8 +391,8 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onFocusSolo: (id, entry) => {
-          this.workspace.setFocus(id, entry);
+        onFocusAdd: (id, entry) => {
+          this.workspace.addFocus(id, entry);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -541,7 +541,7 @@ export class AppShell {
           });
           const ref = this.catalog.refFromPath(hit.path);
           if (ref !== undefined) {
-            this.workspace.setFocus(id, {
+            this.workspace.addFocus(id, {
               kind: "series",
               ref,
               source_key: null,

@@ -113,12 +113,13 @@ its series hue and gains 1 px of presentation width. The user-facing `dim`
 control independently chooses whether other traces retain full color or use the
 serialized ghost opacity. No focused row is copied into a separate stack.
 
-Plain row click replaces the focus set, Command/Ctrl-click adds or removes,
-Shift-click selects the contiguous visible range from the last anchor, and
-clicking empty legend space clears it. `focus only` filters the existing rows
-without reordering. Hover remains an achromatic surface raise and cross-links
-row, trace, and tips. Tip selection is a separate transient amber outline used
-for delete/export actions, so it composes with focus rather than overloading it.
+Plain row or trace click adds to the focus set without removing prior focus,
+Command/Ctrl-click explicitly adds or removes, Shift-click selects the
+contiguous visible range from the last anchor, and clicking empty legend space
+clears it. `focus only` filters the existing rows without reordering. Hover
+remains an achromatic surface raise and cross-links row, trace, and tips. Tip
+selection is a separate transient amber outline used for delete/export actions,
+so it composes with focus rather than overloading it.
 
 ## Implementation plan
 

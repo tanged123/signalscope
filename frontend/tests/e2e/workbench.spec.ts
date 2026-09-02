@@ -215,8 +215,8 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
       onFocusToggle: (_id, entry) => {
         host.dataset.focusToggle = entry.source_key ?? entry.channel ?? "";
       },
-      onFocusSolo: (_id, entry) => {
-        host.dataset.focusSolo = entry.source_key ?? entry.channel ?? "";
+      onFocusAdd: (_id, entry) => {
+        host.dataset.focusAdd = entry.source_key ?? entry.channel ?? "";
       },
       onFocusRange: (_id, entries) => {
         host.dataset.focusRange = entries
@@ -433,7 +433,7 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
   const rosterActions = plotLegend.locator(".plot-legend-roster-action");
   await rosterActions.nth(0).click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(
-    "data-focus-solo",
+    "data-focus-add",
     "run_01",
   );
   await rosterActions.nth(3).click({ modifiers: ["Shift"] });

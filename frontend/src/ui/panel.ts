@@ -95,7 +95,7 @@ export interface PanelCallbacks {
   onDropSignals(id: string, paths: string[]): void;
   onDropSet(id: string, setId: string): void;
   onFocusToggle(id: string, entry: FocusEntry): void;
-  onFocusSolo(id: string, entry: FocusEntry): void;
+  onFocusAdd(id: string, entry: FocusEntry): void;
   onFocusRange(id: string, entries: readonly FocusEntry[]): void;
   onClearFocus(id: string): void;
   onMuteSelector(id: string, selector: string): void;
@@ -1262,7 +1262,7 @@ export class PanelView {
         (entry) => entry.path === path,
       );
       if (series !== undefined) {
-        this.callbacks.onFocusSolo(this.id, {
+        this.callbacks.onFocusAdd(this.id, {
           kind: "series",
           ref: series.ref,
           source_key: null,
@@ -2049,7 +2049,7 @@ export class PanelView {
           (row) => this.focusEntryForRow(dimension, row, state),
         );
     });
-    action.title = `Focus ${item.label}; Shift-click selects a range; Command/Ctrl-click toggles; Option-click mutes`;
+    action.title = `Add ${item.label} to focus; Shift-click selects a range; Command/Ctrl-click toggles; Option-click mutes`;
     row.append(swatch, action);
     block.append(row);
     if (single !== undefined && this.inspectorPath === single.path) {
@@ -2149,7 +2149,7 @@ export class PanelView {
           this.focusEntryForRow(dimension, first, state),
         );
       else
-        this.callbacks.onFocusSolo(
+        this.callbacks.onFocusAdd(
           this.id,
           this.focusEntryForRow(dimension, first, state),
         );
@@ -3402,7 +3402,7 @@ export class PanelView {
     const entry = focusEntry(row);
     if (event.metaKey || event.ctrlKey)
       this.callbacks.onFocusToggle(this.id, entry);
-    else this.callbacks.onFocusSolo(this.id, entry);
+    else this.callbacks.onFocusAdd(this.id, entry);
   }
 
   private openBindingPopover(
@@ -3663,7 +3663,7 @@ export class PanelView {
         channel: series.ref.channel,
       };
       if (additive) this.callbacks.onFocusToggle(this.id, focus);
-      else this.callbacks.onFocusSolo(this.id, focus);
+      else this.callbacks.onFocusAdd(this.id, focus);
     }
     this.drawOverlay();
     if (this.lastState !== null) this.updatePlotLegend(this.lastState);
