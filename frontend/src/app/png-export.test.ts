@@ -28,6 +28,7 @@ function panel(id: string, title: string): PanelState {
     y_label: null,
     time_window: null,
     annotations: [],
+    annotation_display: "labels",
     show_stats: false,
     stat_columns: ["min", "max", "mean", "rms", "cursor"],
     stats_sort: null,

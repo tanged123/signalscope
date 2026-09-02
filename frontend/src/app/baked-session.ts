@@ -145,7 +145,8 @@ function isAnnotation(value: unknown): boolean {
     typeof value.series_path === "string" &&
     typeof value.anchor === "number" &&
     typeof value.pinned_value === "number" &&
-    typeof value.label === "string"
+    typeof value.label === "string" &&
+    isNumberPair(value.offset)
   );
 }
 
@@ -234,6 +235,9 @@ function isPanel(value: unknown): boolean {
     isNullable(value.time_window, isNumberPair) &&
     Array.isArray(value.annotations) &&
     value.annotations.every(isAnnotation) &&
+    ["labels", "markers", "hidden"].includes(
+      String(value.annotation_display),
+    ) &&
     typeof value.show_stats === "boolean" &&
     Array.isArray(value.stat_columns) &&
     value.stat_columns.every(isStatColumn) &&

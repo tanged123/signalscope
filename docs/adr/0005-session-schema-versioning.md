@@ -92,3 +92,12 @@ bindings, visible statistic columns, and statistic sort state. Version 24
 sessions migrate to the prior source-color rule, flat dash and width rules,
 1.4 px lines, 50% ghost opacity, and the prior visible statistic set. See
 [ADR 0051](0051-style-cascade-and-legend-statistics.md).
+
+## Amendment (2026-09-02, data tips and unified focus)
+
+Schema version 26 stores each data tip's panel-local pixel offset and each
+panel's tip display mode (`labels`, `markers`, or `hidden`). Version 25
+sessions migrate to visible labels with the prior default label offset. Focus
+remains the serialized series/source/channel set, but its presentation now
+marks the canonical legend rows instead of creating a duplicate focus stack.
+See [ADR 0051](0051-style-cascade-and-legend-statistics.md).

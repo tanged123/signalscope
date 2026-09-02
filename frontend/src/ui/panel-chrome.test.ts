@@ -51,6 +51,7 @@ function state(): PanelState {
     y_label: null,
     time_window: null,
     annotations: [],
+    annotation_display: "labels",
     show_stats: false,
     stat_columns: ["min", "max", "mean", "rms", "cursor"],
     stats_sort: null,
@@ -246,7 +247,7 @@ describe("PanelView chrome", () => {
     expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
     const legend = view.element.querySelector(".plot-series-legend");
     expect(legend?.getAttribute("data-state")).toBe("keys");
-    expect(legend?.querySelectorAll(".plot-legend-row")).toHaveLength(1);
+    expect(legend?.querySelectorAll(".plot-legend-roster-row")).toHaveLength(2);
     expect(
       [...(legend?.querySelectorAll(".plot-legend-encoding-chip") ?? [])].map(
         (chip) => chip.textContent,
@@ -260,9 +261,7 @@ describe("PanelView chrome", () => {
       view.element.querySelector(".panel-ghost-opacity")?.textContent,
     ).toBe("ghost all ▾");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
-    expect(
-      view.element.querySelector<HTMLElement>(".panel-annotations")?.hidden,
-    ).toBe(true);
+    expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });
 
   it("keeps the style cascade visible in the legend and routes encoding edits", () => {
@@ -307,7 +306,7 @@ describe("PanelView chrome", () => {
     expect(onSetEncoding).toHaveBeenCalledWith("panel", "color", "channel");
   });
 
-  it("opens line editing from the series name hit target", () => {
+  it("keeps line editing on the row swatch while the name owns focus", () => {
     const catalog = Catalog.build([signal("run-01", "temp")]);
     const view = new PanelView("panel", callbacks(catalog));
     const panel = state();
@@ -322,9 +321,9 @@ describe("PanelView chrome", () => {
     view.update(panel, false);
 
     const row = view.element.querySelector<HTMLButtonElement>(
-      ".plot-legend-row-action",
+      ".plot-row-inspector-toggle",
     );
-    expect(row?.title).toContain("Edit run-01/temp line properties");
+    expect(row?.title).toBe("Edit run-01/temp line properties");
     row?.click();
     expect(view.element.querySelector(".plot-row-inspector")).not.toBeNull();
   });
@@ -348,7 +347,7 @@ describe("PanelView chrome", () => {
     view.update(panel, false);
 
     const swatches = view.element.querySelectorAll<HTMLElement>(
-      ".plot-legend-row .plot-legend-swatch",
+      ".plot-legend-roster-row .plot-legend-swatch",
     );
     expect(swatches).toHaveLength(8);
     expect(swatches[0]?.style.getPropertyValue("--plot-row-swatch-color")).toBe(

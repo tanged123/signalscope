@@ -2,7 +2,6 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { SignalSummary } from "../generated/protocol";
-import type { FocusEntry } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
@@ -14,7 +13,6 @@ import {
   PanelView,
   aggregateLegendStats,
   bindingChipEntries,
-  focusChips,
   matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
@@ -168,6 +166,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     y_label: null,
     time_window: null,
     annotations: [],
+    annotation_display: "labels",
     show_stats: false,
     stat_columns: ["min", "max", "mean", "rms", "cursor"],
     stats_sort: null,
@@ -211,11 +210,13 @@ describe("panel series", () => {
   });
 
   describe("plot gestures", () => {
-    it("uses shift-click for focus and alt-click for mute", () => {
+    it("uses line selection for focus, shift-click to add, and alt-click for mute", () => {
       const onFocusToggle = vi.fn();
+      const onFocusSolo = vi.fn();
       const onMuteSeries = vi.fn();
       const callbacks = {
         onFocusToggle,
+        onFocusSolo,
         onMuteSeries,
       } as unknown as PanelCallbacks;
       const view = Object.create(PanelView.prototype) as unknown as {
@@ -244,6 +245,7 @@ describe("panel series", () => {
 
       view.plotClick(50, 50, { alt: false, shift: false });
       expect(onFocusToggle).not.toHaveBeenCalled();
+      expect(onFocusSolo).toHaveBeenCalledTimes(1);
       expect(onMuteSeries).not.toHaveBeenCalled();
 
       view.plotClick(50, 50, { alt: false, shift: true });
@@ -254,12 +256,14 @@ describe("panel series", () => {
     });
   });
 
-  it("keeps annotation pinning on plain click while shift-click bypasses it", () => {
+  it("routes plain-click pinning atomically while shift-click only adds focus", () => {
     const onPinAnnotation = vi.fn();
     const onFocusToggle = vi.fn();
+    const onFocusSolo = vi.fn();
     const callbacks = {
       onPinAnnotation,
       onFocusToggle,
+      onFocusSolo,
     } as unknown as PanelCallbacks;
     const series = visible("run_01/temp");
     const view = Object.create(PanelView.prototype) as unknown as {
@@ -291,6 +295,7 @@ describe("panel series", () => {
     view.plotClick(50, 50, { alt: false, shift: false });
     expect(onPinAnnotation).toHaveBeenCalledTimes(1);
     expect(onFocusToggle).not.toHaveBeenCalled();
+    expect(onFocusSolo).not.toHaveBeenCalled();
 
     view.plotClick(50, 50, { alt: false, shift: true });
     expect(onPinAnnotation).toHaveBeenCalledTimes(1);
@@ -392,39 +397,6 @@ describe("panel series", () => {
     ).toEqual(["speed"]);
   });
 
-  it("keeps only the first eight focus chips and reports overflow", () => {
-    const catalog = Catalog.build(
-      Array.from({ length: 10 }, (_, index) => ({
-        signal_id: `run_0${String(index + 1)}-temp`,
-        source_id: `k${String(index + 1)}`,
-        source_key: `k${String(index + 1)}`,
-        local_path: "temp",
-        path: `run_0${String(index + 1)}/temp`,
-        unit: null,
-        point_count: "2",
-        t_min: 0,
-        t_max: 1,
-        last_value: null,
-      })),
-    );
-    const state = timeState(
-      Array.from({ length: 10 }, (_, index) =>
-        visible(`run_0${String(index + 1)}/temp`),
-      ),
-    );
-    state.focus = state.series.map(
-      (series): FocusEntry => ({
-        kind: "series",
-        ref: series.ref,
-        source_key: null,
-        channel: null,
-      }),
-    );
-    const result = focusChips(catalog, state);
-    expect(result.chips).toHaveLength(8);
-    expect(result.overflow).toBe(2);
-  });
-
   it("uses the in-plot keys as the only legend surface", () => {
     const catalog = Catalog.build([
       summary("run_07/temp"),
@@ -478,7 +450,7 @@ describe("panel series", () => {
     view.updateLegend(state);
     expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
     expect(
-      view.element.querySelector(".plot-legend-row")?.textContent,
+      view.element.querySelector(".plot-legend-roster-row")?.textContent,
     ).toContain("run_07");
     expect(view.element.querySelector(".plot-legend-footer")?.textContent).toBe(
       "1 ghosts ▾0 overrides ▾",
@@ -555,10 +527,8 @@ describe("panel series", () => {
     } as DOMRect);
 
     view.updatePlotLegend(state);
-    expect(legend.querySelectorAll(".plot-legend-row")).toHaveLength(8);
-    expect(
-      legend.querySelector(".plot-legend-focus-rows")?.children,
-    ).toHaveLength(8);
+    expect(legend.querySelectorAll(".plot-legend-roster-row")).toHaveLength(8);
+    expect(legend.querySelector(".plot-legend-focus-rows")).toBeNull();
     expect(view.plotLegendNearRightEdge(legend)).toBe(true);
     expect(view.plotLegendTouchesRightEdge(legend)).toBe(true);
     legend

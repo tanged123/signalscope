@@ -54,6 +54,7 @@ function panel(): PanelState {
     y_label: null,
     time_window: null,
     annotations: [],
+    annotation_display: "labels",
     show_stats: false,
     stat_columns: ["min", "max", "mean", "rms", "cursor"],
     stats_sort: null,
@@ -177,7 +178,9 @@ describe("resolvePanel", () => {
     expect(resolvePanel(catalog, state, [])).toEqual([
       expect.objectContaining({
         path: "a/temp",
-        hue: 1,
+        hue: null,
+        display: "ghost",
+        opacity: 0.5,
         focused: false,
         overridden: false,
       }),
@@ -228,7 +231,7 @@ describe("resolvePanel", () => {
     ).toEqual([1, 2, 1, 2, 1, 2]);
   });
 
-  it("assigns focus hues in focus-stack order", () => {
+  it("assigns focus hues in focus-set order", () => {
     const state = panel();
     state.color_by = "focus";
     state.bindings = [
@@ -308,7 +311,7 @@ describe("resolvePanel", () => {
   it.each([
     ["all", [], ["rule", "rule"]],
     ["ghost", [], ["ghost", "ghost"]],
-    ["all", ["b"], ["rule", "focus"]],
+    ["all", ["b"], ["ghost", "focus"]],
     ["ghost", ["b"], ["ghost", "focus"]],
   ] as const)("resolves %s display state", (ghostMode, sources, expected) => {
     const state = panel();
@@ -455,7 +458,7 @@ describe("resolvePanel", () => {
       expect.objectContaining({
         hue: null,
         dash: "solid",
-        width: 1,
+        width: 3,
         opacity: 0.5,
         visible: false,
         overridden: true,

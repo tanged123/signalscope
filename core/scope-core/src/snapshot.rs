@@ -703,6 +703,7 @@ mod tests {
             y_label: None,
             time_window: None,
             annotations: Vec::new(),
+            annotation_display: crate::session::AnnotationDisplay::Labels,
             show_stats: false,
             stat_columns: vec![
                 crate::session::StatColumn::Min,

@@ -943,7 +943,14 @@ export class WorkspaceModel {
 
   addAnnotation(panelId: string, annotation: Annotation): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) {
+    if (
+      panel !== undefined &&
+      !panel.annotations.some(
+        (entry) =>
+          entry.series_path === annotation.series_path &&
+          entry.anchor === annotation.anchor,
+      )
+    ) {
       panel.annotations.push({ ...annotation });
       this.touch();
     }
@@ -955,6 +962,36 @@ export class WorkspaceModel {
     panel.annotations = panel.annotations.filter(
       (annotation) => annotation.id !== annotationId,
     );
+    this.touch();
+  }
+
+  clearAnnotations(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || panel.annotations.length === 0) return;
+    panel.annotations = [];
+    this.touch();
+  }
+
+  setAnnotationDisplay(
+    panelId: string,
+    display: PanelState["annotation_display"],
+  ): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || panel.annotation_display === display) return;
+    panel.annotation_display = display;
+    this.touch();
+  }
+
+  setAnnotationOffset(
+    panelId: string,
+    annotationId: string,
+    offset: readonly [number, number],
+  ): void {
+    const annotation = this.panel(panelId)?.annotations.find(
+      (entry) => entry.id === annotationId,
+    );
+    if (annotation === undefined) return;
+    annotation.offset = [offset[0], offset[1]];
     this.touch();
   }
 
@@ -1097,6 +1134,7 @@ export class WorkspaceModel {
       y_label: null,
       time_window: null,
       annotations: [],
+      annotation_display: "labels",
       show_stats: false,
       stat_columns: ["min", "max", "mean", "rms", "cursor"],
       stats_sort: null,

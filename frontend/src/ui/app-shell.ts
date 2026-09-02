@@ -531,12 +531,38 @@ export class AppShell {
             anchor: hit.anchor,
             pinned_value: hit.pinnedValue,
             label: "",
+            offset: [10, -10],
           });
+          const ref = this.catalog.refFromPath(hit.path);
+          if (ref !== undefined) {
+            this.workspace.setFocus(id, {
+              kind: "series",
+              ref,
+              source_key: null,
+              channel: ref.channel,
+            });
+          }
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
         },
         onRemoveAnnotation: (id, annotationId) => {
           this.workspace.removeAnnotation(id, annotationId);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onClearAnnotations: (id) => {
+          this.workspace.clearAnnotations(id);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onSetAnnotationDisplay: (id, display) => {
+          this.workspace.setAnnotationDisplay(id, display);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onSetAnnotationOffset: (id, annotationId, offset) => {
+          this.workspace.setAnnotationOffset(id, annotationId, offset);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
@@ -857,10 +883,7 @@ export class AppShell {
       "clear-annotations",
       "Panel: clear annotations",
       (id) => {
-        const panel = this.workspace.panel(id);
-        for (const annotation of [...(panel?.annotations ?? [])]) {
-          this.workspace.removeAnnotation(id, annotation.id);
-        }
+        this.workspace.clearAnnotations(id);
       },
     );
     this.registerFocusedPanelCommand(
@@ -1160,7 +1183,6 @@ export class AppShell {
     });
     for (const planned of [
       ["open-recent", "Open Recent ▸", "file", "open"],
-      ["annotations-dock", "Annotations dock", "view", "docks"],
       ["axes-default", "Axes default ▸", "view", "display"],
       ["series-palette", "Series palette ▸", "view", "display"],
       ["duplicate-workspace", "Duplicate Workspace", "workspace", "new"],

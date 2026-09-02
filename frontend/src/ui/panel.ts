@@ -9,6 +9,7 @@ import { virtualSlice } from "../app/outline-model";
 import { compileGlob, evaluateSelector } from "../app/selector";
 import type {
   AxisStyle,
+  AnnotationDisplay,
   Binding,
   DashStyle,
   FocusEntry,
@@ -25,8 +26,6 @@ import {
   clamp,
   formatValue,
   insidePlot,
-  projectX,
-  projectY,
   type PlotLayout,
   type Range,
 } from "../app/plot-math";
@@ -35,7 +34,6 @@ import {
   prepareTimePlot,
   type AnnotationAnchor,
   type PlotCursor,
-  type PlotDelta,
   type PreparedPlot,
   type ResolvedAnnotation,
   type SeriesHitAdapter,
@@ -53,7 +51,7 @@ const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 5_000;
 const CHART_HOST_RETRY_DELAYS_MS = [100] as const;
 import {
   OverlayRenderer,
-  marker,
+  type OverlayAnnotation,
   type CursorMode,
   type CursorPoint,
 } from "../render/overlay-renderer";
@@ -78,7 +76,6 @@ export type PanelCursor = PlotCursor;
 
 interface ResolvedAnnotations {
   resolved: readonly ResolvedAnnotation[];
-  delta: PlotDelta | null;
 }
 
 function colorIndexForHue(hue: number | null): number {
@@ -132,6 +129,13 @@ export interface PanelCallbacks {
   onXRange(id: string, range: readonly [number, number]): void;
   onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
+  onClearAnnotations?(id: string): void;
+  onSetAnnotationDisplay?(id: string, display: AnnotationDisplay): void;
+  onSetAnnotationOffset?(
+    id: string,
+    annotationId: string,
+    offset: readonly [number, number],
+  ): void;
   onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
   onFitView(id: string): void;
   onToggleStats(id: string): void;
@@ -204,13 +208,6 @@ export interface MatrixLegendRow {
   ghosted: boolean;
   overridden: boolean;
   hue: number | null;
-}
-
-export interface FocusChip {
-  entry: FocusEntry;
-  label: string;
-  hue: number | null;
-  overridden: boolean;
 }
 
 export interface BindingChipEntry {
@@ -302,39 +299,6 @@ export function matrixLegendRows(
   );
 }
 
-export function focusChips(
-  catalog: Catalog,
-  state: Pick<RenderPanelState, "series" | "focus">,
-  limit = 8,
-): { chips: FocusChip[]; overflow: number } {
-  const chips = state.focus.map((entry) => {
-    const matching = state.series.filter((series) =>
-      focusMatches(entry, series.ref),
-    );
-    const first = matching[0];
-    const label =
-      entry.kind === "series"
-        ? (first?.path ?? entry.ref?.channel ?? "series")
-        : entry.kind === "source"
-          ? (catalog.get(
-              first?.ref ?? { source_key: entry.source_key ?? "", channel: "" },
-            )?.sourceName ??
-            entry.source_key ??
-            "source")
-          : (entry.channel ?? "channel");
-    return {
-      entry,
-      label,
-      hue: first?.hue ?? null,
-      overridden: matching.some((series) => series.overridden),
-    };
-  });
-  return {
-    chips: chips.slice(0, limit),
-    overflow: Math.max(0, chips.length - limit),
-  };
-}
-
 export function bindingChipEntries(
   catalog: Catalog,
   state: Pick<RenderPanelState, "bindings">,
@@ -418,15 +382,6 @@ function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
   return entry.kind === "source"
     ? entry.source_key === ref.source_key
     : entry.channel === ref.channel;
-}
-
-function focusSelector(entry: FocusEntry, sourceName?: string): string {
-  if (entry.kind === "source")
-    return `* @ ${sourceName ?? entry.source_key ?? "*"}`;
-  if (entry.kind === "channel") return `${entry.channel ?? "*"} @ *`;
-  return entry.ref === null
-    ? "*"
-    : `${entry.ref.channel} @ ${entry.ref.source_key}`;
 }
 
 function renderState(
@@ -540,8 +495,16 @@ export class PanelView {
   private cursorMode: CursorMode = "none";
   private box: InteractionBox | null = null;
   private emphasizePaths: ReadonlySet<string> | null = null;
-  private hoverPoint: { x: number; y: number } | null = null;
-  private hoverTag: HTMLElement | null = null;
+  private hoverTip: AnnotationAnchor | null = null;
+  private hoveredAnnotationId: string | null = null;
+  private readonly selectedAnnotationIds = new Set<string>();
+  private readonly annotationOffsets = new Map<
+    string,
+    { x: number; y: number }
+  >();
+  private annotationsExpanded = false;
+  private annotationDragId: string | null = null;
+  private focusOnly = false;
   private inspectorPath: string | null = null;
   private encodingDrawer: EncodingProperty | null = null;
   private overrideDrawer = false;
@@ -790,9 +753,17 @@ export class PanelView {
           );
       },
     );
+    required(this.element, ".panel-tips").addEventListener("click", (event) => {
+      if (this.lastState !== null)
+        this.openTipsMenu(this.lastState, event.currentTarget as HTMLElement);
+    });
     this.element.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
-        if (this.emphasizePaths !== null) this.clearHover();
+        if (this.selectedAnnotationIds.size > 0) {
+          this.selectedAnnotationIds.clear();
+          this.drawOverlay();
+          this.updatePlotLegend(this.lastState as RenderPanelState);
+        } else if (this.emphasizePaths !== null) this.clearHover();
         else this.callbacks.onClearFocus(this.id);
         this.closeBindingPopover();
         this.closePanelConfig();
@@ -808,6 +779,15 @@ export class PanelView {
         if ((drawerOpen || inspectorOpen) && this.lastState !== null) {
           this.updatePlotLegend(this.lastState);
         }
+      } else if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        this.selectedAnnotationIds.size > 0
+      ) {
+        event.preventDefault();
+        for (const id of this.selectedAnnotationIds) {
+          this.callbacks.onRemoveAnnotation(this.id, id);
+        }
+        this.selectedAnnotationIds.clear();
       } else if (
         event.target === this.element &&
         event.key === "Tab" &&
@@ -875,7 +855,8 @@ export class PanelView {
       this.callbacks.onDropSignals(this.id, paths);
     });
     this.overlay.addEventListener("pointermove", (event) => {
-      if (this.interactions.isDragging()) return;
+      if (this.interactions.isDragging() || this.annotationDragId !== null)
+        return;
       const layout = this.activeLayout();
       const inside =
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
@@ -884,12 +865,7 @@ export class PanelView {
           ? this.cursorAt(layout, event.offsetX, event.offsetY, 40)
           : null;
       if (layout !== null && inside) {
-        this.updateHover(
-          event.offsetX,
-          event.offsetY,
-          event.clientX,
-          event.clientY,
-        );
+        this.updateHover(event.offsetX, event.offsetY);
       } else {
         this.clearHover();
       }
@@ -899,10 +875,98 @@ export class PanelView {
         cursor === null ? null : { x: event.clientX, y: event.clientY },
       );
     });
+    this.overlay.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const hit = this.overlayRenderer.annotationAt(
+        event.offsetX,
+        event.offsetY,
+      );
+      if (hit === null) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (hit.part === "delete") {
+        this.callbacks.onRemoveAnnotation(this.id, hit.id);
+        return;
+      }
+      const start = { x: event.offsetX, y: event.offsetY };
+      const saved = this.lastState?.annotations.find(
+        (annotation) => annotation.id === hit.id,
+      )?.offset;
+      const initial = this.annotationOffsets.get(hit.id) ?? {
+        x: saved?.[0] ?? 10,
+        y: saved?.[1] ?? -10,
+      };
+      let moved = false;
+      this.annotationDragId = hit.id;
+      this.overlay.setPointerCapture(event.pointerId);
+      const move = (next: PointerEvent): void => {
+        if (hit.part !== "label") return;
+        const dx = next.offsetX - start.x;
+        const dy = next.offsetY - start.y;
+        if (!moved && Math.hypot(dx, dy) <= 3) return;
+        moved = true;
+        this.annotationOffsets.set(hit.id, {
+          x: initial.x + dx,
+          y: initial.y + dy,
+        });
+        this.drawOverlay();
+      };
+      const finish = (next: PointerEvent): void => {
+        cleanup();
+        if (!moved) {
+          this.selectAnnotation(
+            hit.id,
+            next.metaKey || next.ctrlKey || next.shiftKey,
+          );
+        } else {
+          const offset = this.annotationOffsets.get(hit.id);
+          if (offset !== undefined) {
+            this.callbacks.onSetAnnotationOffset?.(this.id, hit.id, [
+              offset.x,
+              offset.y,
+            ]);
+          }
+        }
+      };
+      const cleanup = (): void => {
+        this.overlay.removeEventListener("pointermove", move);
+        this.overlay.removeEventListener("pointerup", finish);
+        this.overlay.removeEventListener("pointercancel", cleanup);
+        this.annotationDragId = null;
+      };
+      this.overlay.addEventListener("pointermove", move);
+      this.overlay.addEventListener("pointerup", finish);
+      this.overlay.addEventListener("pointercancel", cleanup);
+    });
     this.overlay.addEventListener("pointerleave", () => {
-      if (!this.interactions.isDragging()) {
+      if (!this.interactions.isDragging() && this.annotationDragId === null) {
         this.clearHover();
         this.callbacks.onCursor(this.id, null, null);
+      }
+    });
+    this.overlay.addEventListener("dblclick", (event) => {
+      const layout = this.activeLayout();
+      const state = this.lastState;
+      if (
+        layout === null ||
+        state === null ||
+        state.annotations.length === 0 ||
+        !insidePlot(layout, event.offsetX, event.offsetY) ||
+        this.overlayRenderer.annotationAt(event.offsetX, event.offsetY) !==
+          null ||
+        this.seriesHit(event.offsetX, event.offsetY, 6) !== null
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (
+        window.confirm(
+          `Clear all ${String(state.annotations.length)} pinned tips?`,
+        )
+      ) {
+        this.selectedAnnotationIds.clear();
+        this.callbacks.onClearAnnotations?.(this.id);
       }
     });
     this.overlay.addEventListener("contextmenu", (event) => {
@@ -934,14 +998,16 @@ export class PanelView {
         : `${String(Math.round(rendered.ghost_opacity * 100))}%`;
     required<HTMLElement>(this.element, ".panel-legend-value").textContent =
       rendered.legend_state;
+    required<HTMLElement>(this.element, ".panel-tips-value").textContent =
+      String(rendered.annotations.length);
     required<HTMLButtonElement>(
       this.element,
       ".panel-stats-toggle",
     ).setAttribute("aria-pressed", String(rendered.show_stats));
     this.updateBindings(rendered);
     this.updateLegend(rendered);
+    this.pruneAnnotationUiState(rendered);
     const annotations = this.resolvedAnnotations(rendered);
-    this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (
       this.inspectorPath !== null &&
@@ -996,8 +1062,8 @@ export class PanelView {
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
     this.updatePlotLegend(rendered);
+    this.pruneAnnotationUiState(rendered);
     const annotations = this.resolvedAnnotations(rendered);
-    this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (missing.length > 0) {
       this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
@@ -1051,7 +1117,9 @@ export class PanelView {
       return {
         hue: series?.hue ?? null,
         dash: series?.dash ?? "solid",
-        width: series?.width ?? DEFAULT_PANEL_LINE_WIDTH,
+        width:
+          (series?.width ?? DEFAULT_PANEL_LINE_WIDTH) +
+          (series?.focused === true ? 1 : 0),
         alpha: series?.opacity ?? 1,
       };
     });
@@ -1203,8 +1271,23 @@ export class PanelView {
     },
   ): void {
     if (!modifiers.alt && !modifiers.shift) {
-      if (this.removeAt(offsetX, offsetY, 9)) return;
-      if (this.pinAt(offsetX, offsetY, 14)) return;
+      const hit = this.annotationAt(offsetX, offsetY, 14);
+      if (hit !== null) {
+        this.callbacks.onPinAnnotation(this.id, hit);
+        return;
+      }
+      const path = this.seriesHit(offsetX, offsetY, 6)?.path ?? null;
+      const series = this.lastState?.series.find(
+        (entry) => entry.path === path,
+      );
+      if (series !== undefined) {
+        this.callbacks.onFocusSolo(this.id, {
+          kind: "series",
+          ref: series.ref,
+          source_key: null,
+          channel: series.ref.channel,
+        });
+      }
       return;
     }
     const hit = this.seriesHit(offsetX, offsetY, 6);
@@ -1238,57 +1321,46 @@ export class PanelView {
       : this.hitAdapter.seriesAt(layout, offsetX, offsetY, threshold);
   }
 
-  private updateHover(
-    offsetX: number,
-    offsetY: number,
-    clientX: number,
-    clientY: number,
-  ): void {
+  private updateHover(offsetX: number, offsetY: number): void {
+    const annotationHit = this.overlayRenderer.annotationAt(offsetX, offsetY);
+    if (annotationHit !== null) {
+      const changed = this.hoveredAnnotationId !== annotationHit.id;
+      this.hoveredAnnotationId = annotationHit.id;
+      this.hoverTip = null;
+      this.setEmphasis(annotationHit.path);
+      if (changed) {
+        this.drawOverlay();
+        if (this.lastState !== null) this.updatePlotLegend(this.lastState);
+      }
+      return;
+    }
     const hit = this.seriesHit(offsetX, offsetY, 6);
     if (hit === null) {
       this.clearHover();
       return;
     }
-    this.hoverPoint = { x: offsetX, y: offsetY };
+    const layout = this.activeLayout();
+    this.hoveredAnnotationId = null;
+    this.hoverTip =
+      layout === null
+        ? null
+        : (this.preparedPlot?.annotationAt(
+            layout,
+            { x: offsetX, y: offsetY },
+            14,
+          ) ?? null);
     this.setEmphasis(hit.path);
-    this.showHoverTag(hit.path, clientX, clientY);
-  }
-
-  private showHoverTag(path: string, clientX: number, clientY: number): void {
-    const series = this.lastState?.series.find((entry) => entry.path === path);
-    if (series === undefined) return;
-    const panelRect = this.element.getBoundingClientRect();
-    const tag = this.hoverTag ?? document.createElement("div");
-    this.hoverTag = tag;
-    tag.className = "plot-hover-tag";
-    tag.textContent = `${series.path} — ⇧click to focus`;
-    tag.hidden = false;
-    this.element.append(tag);
-    const tagRect = tag.getBoundingClientRect();
-    tag.style.left = `${String(
-      clamp(
-        clientX - panelRect.left + 10,
-        4,
-        Math.max(4, panelRect.width - tagRect.width - 4),
-      ),
-    )}px`;
-    tag.style.top = `${String(
-      clamp(
-        clientY - panelRect.top + 10,
-        4,
-        Math.max(4, panelRect.height - tagRect.height - 4),
-      ),
-    )}px`;
+    this.drawOverlay();
   }
 
   private clearHover(): void {
-    this.hoverPoint = null;
+    const hadAnnotation = this.hoveredAnnotationId !== null;
+    this.hoverTip = null;
+    this.hoveredAnnotationId = null;
     this.setEmphasis(null);
-    if (this.hoverTag !== null) {
-      this.hoverTag.hidden = true;
-      this.hoverTag.remove();
-      this.hoverTag = null;
-    }
+    if (hadAnnotation && this.lastState !== null)
+      this.updatePlotLegend(this.lastState);
+    this.drawOverlay();
   }
 
   private walkHover(direction: -1 | 1): void {
@@ -1322,51 +1394,21 @@ export class PanelView {
     const wrapped = next ?? series[direction === 1 ? 0 : series.length - 1];
     if (wrapped === undefined) return;
     this.setEmphasis(wrapped.entry.path);
-    if (this.hoverPoint !== null) {
-      const canvasRect = this.overlay.getBoundingClientRect();
-      this.showHoverTag(
-        wrapped.entry.path,
-        canvasRect.left + this.hoverPoint.x,
-        canvasRect.top + this.hoverPoint.y,
-      );
-    }
   }
 
-  /** Removes the annotation under the pixel; true when one was removed. */
-  private removeAt(offsetX: number, offsetY: number, radius: number): boolean {
+  private annotationAt(
+    offsetX: number,
+    offsetY: number,
+    radius: number,
+  ): AnnotationAnchor | null {
     const layout = this.activeLayout();
-    const state = this.lastState;
-    const prepared = this.preparedPlot;
-    if (layout === null || state === null || prepared === null) return false;
-    const annotation = state.annotations
-      .map((entry) => prepared.resolveAnnotation(entry))
-      .filter((entry) => entry !== null)
-      .find(
-        (entry) =>
-          Math.hypot(
-            projectX(layout, entry.x) - offsetX,
-            projectY(layout, entry.y) - offsetY,
-          ) <= radius,
-      );
-    if (annotation === undefined) return false;
-    this.callbacks.onRemoveAnnotation(this.id, annotation.annotation.id);
-    return true;
-  }
-
-  /** Pins the nearest plotted vertex under the pixel, when one is in range. */
-  private pinAt(offsetX: number, offsetY: number, radius: number): boolean {
-    const layout = this.activeLayout();
-    if (layout === null) return false;
-    const hit = this.preparedPlot?.annotationAt(
-      layout,
-      { x: offsetX, y: offsetY },
-      radius,
-    );
-    if (hit !== null && hit !== undefined) {
-      this.callbacks.onPinAnnotation(this.id, hit);
-      return true;
-    }
-    return false;
+    return layout === null
+      ? null
+      : (this.preparedPlot?.annotationAt(
+          layout,
+          { x: offsetX, y: offsetY },
+          radius,
+        ) ?? null);
   }
 
   private cursorAt(
@@ -1383,20 +1425,18 @@ export class PanelView {
 
   private resolvedAnnotations(state: RenderPanelState): ResolvedAnnotations {
     const prepared = this.preparedPlot;
-    if (prepared === null) return { resolved: [], delta: null };
+    if (prepared === null) return { resolved: [] };
     const resolved = state.annotations
       .map((annotation) => prepared.resolveAnnotation(annotation))
       .filter((annotation) => annotation !== null);
-    return { resolved, delta: prepared.delta(resolved) };
+    return { resolved };
   }
 
   private drawOverlay(resolution?: ResolvedAnnotations): void {
     const state = this.lastState;
-    const { resolved, delta } =
+    const { resolved } =
       resolution ??
-      (state === null
-        ? { resolved: [], delta: null }
-        : this.resolvedAnnotations(state));
+      (state === null ? { resolved: [] } : this.resolvedAnnotations(state));
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -1411,22 +1451,71 @@ export class PanelView {
           : [],
       xyMarkers,
       box: this.box,
-      annotations: resolved.map((annotation) => {
-        const series = bySeries.get(annotation.annotation.series_path);
-        return {
-          x: annotation.x,
-          y: annotation.y,
-          colorIndex:
-            series === undefined
-              ? annotation.colorIndex
-              : series.hue === null
-                ? null
-                : colorIndexForHue(series.hue),
-          label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label} `}${annotation.summary}`,
-        };
-      }),
-      delta,
+      annotations: [
+        ...resolved.map((annotation) => {
+          const series = bySeries.get(annotation.annotation.series_path);
+          return {
+            id: annotation.annotation.id,
+            path: annotation.annotation.series_path,
+            x: annotation.x,
+            y: annotation.y,
+            colorIndex:
+              series === undefined
+                ? annotation.colorIndex
+                : series.hue === null
+                  ? null
+                  : colorIndexForHue(series.hue),
+            label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label}  `}${annotation.summary}`,
+            focused: series?.focused ?? false,
+            selected: this.selectedAnnotationIds.has(annotation.annotation.id),
+            hovered:
+              this.hoveredAnnotationId === annotation.annotation.id ||
+              this.emphasizePaths?.has(annotation.annotation.series_path) ===
+                true,
+            ghosted: series?.display === "ghost" || series?.visible === false,
+            ephemeral: false,
+            offset: this.annotationOffsets.get(annotation.annotation.id) ?? {
+              x: annotation.annotation.offset[0],
+              y: annotation.annotation.offset[1],
+            },
+          };
+        }),
+        ...this.overlayHoverTip(bySeries),
+      ],
+      annotationMode: state?.annotation_display ?? "labels",
     });
+  }
+
+  private overlayHoverTip(
+    bySeries: ReadonlyMap<string, RenderSeries>,
+  ): OverlayAnnotation[] {
+    const tip = this.hoverTip;
+    if (tip === null || this.lastState?.annotation_display === "hidden")
+      return [];
+    const duplicate = this.lastState?.annotations.some(
+      (annotation) =>
+        annotation.series_path === tip.path && annotation.anchor === tip.anchor,
+    );
+    if (duplicate === true) return [];
+    const series = bySeries.get(tip.path);
+    return [
+      {
+        id: null,
+        path: tip.path,
+        x: tip.anchor,
+        y: tip.pinnedValue,
+        colorIndex:
+          series?.hue === null || series === undefined
+            ? null
+            : colorIndexForHue(series.hue),
+        label: `${formatValue(tip.anchor)} · ${formatValue(tip.pinnedValue)}`,
+        focused: false,
+        selected: false,
+        hovered: false,
+        ghosted: series?.display === "ghost",
+        ephemeral: true,
+      },
+    ];
   }
 
   /** The dots the cursor puts on each series, in that mode's own domain. */
@@ -1466,89 +1555,6 @@ export class PanelView {
     } else {
       this.callbacks.onXRange(this.id, [min, max]);
     }
-  }
-
-  private renderAnnotationList(
-    state: RenderPanelState,
-    resolution: ResolvedAnnotations,
-  ): void {
-    const list = required<HTMLElement>(this.element, ".panel-annotations");
-    const prepared = this.preparedPlot;
-    const annotations = prepared === null ? [] : state.annotations;
-    list.hidden = annotations.length === 0;
-    if (annotations.length === 0) {
-      list.replaceChildren();
-      return;
-    }
-    const heading = document.createElement("div");
-    heading.className = "annotations-heading";
-    heading.textContent = `ANNOTATIONS — ${state.title.toUpperCase()}`;
-    const resolvedById = new Map(
-      resolution.resolved.map((entry) => [entry.annotation.id, entry]),
-    );
-    const rows = annotations.map((annotation, index) => {
-      const row = document.createElement("div");
-      row.className = "annotation-row";
-      const text = document.createElement("span");
-      text.className = "annotation-text";
-      const current = resolvedById.get(annotation.id);
-      text.textContent =
-        `${marker(index)} t ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
-        (annotation.label === "" ? "" : ` "${annotation.label}"`);
-      const edit = document.createElement("button");
-      edit.className = "annotation-action";
-      edit.textContent = "✎";
-      edit.title = "Edit label";
-      edit.addEventListener("click", () => {
-        this.openAnnotationLabelEditor(row, annotation.id, annotation.label);
-      });
-      const remove = document.createElement("button");
-      remove.className = "annotation-action";
-      remove.textContent = "✕";
-      remove.title = "Delete annotation";
-      remove.addEventListener("click", () => {
-        this.callbacks.onRemoveAnnotation(this.id, annotation.id);
-      });
-      row.append(text, edit, remove);
-      return row;
-    });
-    const deltaRow = document.createElement("div");
-    deltaRow.className = "annotation-delta";
-    deltaRow.textContent = resolution.delta?.label ?? "";
-    list.replaceChildren(
-      heading,
-      ...rows,
-      ...(resolution.delta === null ? [] : [deltaRow]),
-    );
-  }
-
-  private openAnnotationLabelEditor(
-    row: HTMLElement,
-    annotationId: string,
-    current: string,
-  ): void {
-    const input = document.createElement("input");
-    input.className = "annotation-label-input";
-    input.value = current;
-    input.setAttribute("aria-label", "Annotation label");
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") input.blur();
-      if (event.key === "Escape") {
-        input.value = current;
-        input.blur();
-      }
-      event.stopPropagation();
-    });
-    input.addEventListener("blur", () => {
-      this.callbacks.onEditAnnotationLabel(
-        this.id,
-        annotationId,
-        input.value.trim(),
-      );
-    });
-    row.append(input);
-    input.focus();
-    input.select();
   }
 
   private beginTitleEdit(): void {
@@ -1642,6 +1648,7 @@ export class PanelView {
   }
 
   private updatePlotLegend(state: RenderPanelState): void {
+    if (state.focus.length === 0) this.focusOnly = false;
     const legend = required<HTMLElement>(this.element, ".plot-series-legend");
     const wrap = required<HTMLElement>(this.element, ".plot-wrap");
     if (state.series.length === 0) {
@@ -1743,7 +1750,7 @@ export class PanelView {
       state.legend_state === "roster" ? " series" : ""
     } ▾`;
     title.title =
-      state.legend_state === "roster" ? "Show focused keys" : "Show roster";
+      state.legend_state === "roster" ? "Show compact keys" : "Show roster";
     title.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, {
         state: state.legend_state === "roster" ? "keys" : "roster",
@@ -1902,23 +1909,27 @@ export class PanelView {
   private plotLegendKeys(state: RenderPanelState): HTMLElement {
     const content = document.createElement("div");
     content.className = "plot-legend-content plot-legend-keys";
-    const focusRows = document.createElement("div");
-    focusRows.className = "plot-legend-focus-rows";
-    const focus = focusChips(
-      this.callbacks.catalog(),
-      state,
-      Number.POSITIVE_INFINITY,
+    const dimension: LegendDimension =
+      state.color_by === "channel" ? "channel" : "source";
+    const all = matrixLegendRows(this.callbacks.catalog(), state, dimension);
+    const shown = this.focusOnly ? all.filter((row) => row.focused) : all;
+    const title = this.plotLegendGroupTitle(state, dimension, shown.length);
+    title.className = "plot-legend-section-title plot-legend-group-title";
+    const rows = document.createElement("div");
+    rows.className = "plot-legend-key-rows";
+    rows.append(
+      ...shown.map((row) => this.plotLegendMatrixRow(state, dimension, row)),
     );
-    for (const entry of focus.chips) {
-      focusRows.append(this.plotLegendFocusRow(state, entry));
-    }
+    rows.addEventListener("click", (event) => {
+      if (event.target === rows) this.callbacks.onClearFocus(this.id);
+    });
     const ghosts = state.series.filter(
       (series) => series.visible && series.display === "ghost",
     ).length;
     const footer = this.plotLegendFooter(state, ghosts, () => {
       this.callbacks.onLegendLayout(this.id, { state: "roster" });
     });
-    content.append(focusRows, footer);
+    content.append(title, rows, this.plotLegendTips(state), footer);
     if (
       state.focus.length === 0 &&
       ghosts > 0 &&
@@ -1937,94 +1948,106 @@ export class PanelView {
     return content;
   }
 
-  private plotLegendFocusRow(
+  private plotLegendGroupTitle(
     state: RenderPanelState,
-    entry: FocusChip,
+    dimension: LegendDimension,
+    count: number,
+  ): HTMLElement {
+    const title = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = `▾ ${dimension.toUpperCase()}`;
+    const focus = document.createElement("button");
+    focus.type = "button";
+    focus.className = "plot-legend-focus-filter";
+    focus.textContent = this.focusOnly
+      ? `focus only ✓ · ${String(count)}/${String(state.series.length)}`
+      : `${String(state.focus.length)} focused ⤴`;
+    focus.hidden = state.focus.length === 0;
+    focus.title = this.focusOnly
+      ? "Show all legend rows"
+      : "Show focused rows only";
+    focus.addEventListener("click", () => {
+      this.focusOnly = !this.focusOnly;
+      this.updatePlotLegend(state);
+    });
+    const total = document.createElement("span");
+    total.textContent = String(count);
+    title.append(label, focus, total);
+    return title;
+  }
+
+  private plotLegendMatrixRow(
+    state: RenderPanelState,
+    dimension: LegendDimension,
+    item: MatrixLegendRow,
   ): HTMLElement {
     const block = document.createElement("div");
-    block.className = "plot-legend-row-block";
+    block.className = "plot-legend-row-block plot-legend-matrix-block";
     const row = document.createElement("div");
-    row.className = "plot-legend-row";
-    const matching = state.series.filter(
-      (series) => series.visible && focusMatches(entry.entry, series.ref),
+    row.className = "plot-legend-roster-row";
+    row.classList.toggle("focused", item.focused);
+    row.classList.toggle("ghosted", item.ghosted && !item.focused);
+    const matching = state.series.filter((series) =>
+      dimension === "source"
+        ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
+            series.ref.source_key) === item.value
+        : series.ref.channel === item.value,
     );
     const paths = matching.map((series) => series.path);
-    const primary = matching.length === 1 ? matching[0] : undefined;
-    const action = document.createElement("button");
-    action.className = "plot-legend-row-action";
-    action.type = "button";
-    action.innerHTML =
-      '<span class="plot-legend-label"></span><span class="plot-legend-value">—</span><span class="plot-legend-unit"></span>';
-    const inspector = document.createElement("button");
-    inspector.type = "button";
-    inspector.className = "plot-legend-swatch plot-row-inspector-toggle";
-    inspector.style.setProperty(
+    row.dataset.paths = JSON.stringify(paths);
+    const single = matching.length === 1 ? matching[0] : undefined;
+    const swatch = document.createElement("button");
+    swatch.type = "button";
+    swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
+    swatch.style.setProperty(
       "--plot-row-swatch-color",
-      entry.hue === null
+      item.hue === null
         ? "var(--fg-4)"
-        : `var(--series-${String(colorIndexForHue(entry.hue) + 1)})`,
+        : `var(--series-${String(colorIndexForHue(item.hue) + 1)})`,
     );
-    inspector.disabled = primary === undefined;
-    inspector.title =
-      primary === undefined
-        ? "Group styles are edited with selector rules"
-        : `Edit ${primary.path} line properties`;
-    if (primary !== undefined) {
-      inspector.setAttribute(
-        "aria-expanded",
-        String(this.inspectorPath === primary.path),
+    if (single !== undefined) {
+      swatch.style.setProperty(
+        "--plot-row-swatch-width",
+        `${String(single.width + (single.focused ? 1 : 0))}px`,
       );
-      inspector.addEventListener("click", () => {
-        this.toggleInlineInspector(state, primary.path);
+    }
+    if (single === undefined) {
+      swatch.disabled = true;
+      swatch.title = "Group styles are edited with selector rules";
+    } else {
+      swatch.title = `Edit ${single.path} line properties`;
+      swatch.setAttribute(
+        "aria-expanded",
+        String(this.inspectorPath === single.path),
+      );
+      swatch.addEventListener("click", () => {
+        this.toggleInlineInspector(state, single.path);
       });
     }
-    required<HTMLElement>(action, ".plot-legend-label").textContent =
-      `${entry.overridden ? "◆ " : ""}${entry.label}`;
-    const value = required<HTMLElement>(action, ".plot-legend-value");
-    if (primary !== undefined) value.dataset.path = primary.path;
-    required<HTMLElement>(action, ".plot-legend-unit").textContent =
-      primary === undefined
-        ? ""
-        : (this.callbacks.catalog().get(primary.ref)?.summary.unit ?? "");
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "plot-legend-roster-action";
+    const label = document.createElement("span");
+    label.className = "plot-legend-label";
+    label.textContent = `${item.overridden ? "▍ " : ""}${item.label}`;
+    const count = document.createElement("span");
+    count.className = "plot-legend-count";
+    count.textContent = `×${String(item.count)}`;
+    action.append(label, count);
     action.addEventListener("mouseenter", () => this.setEmphasis(paths));
     action.addEventListener("mouseleave", () => this.setEmphasis(null));
     action.addEventListener("click", (event) => {
-      if (event.altKey) {
-        if (entry.entry.kind === "series" && entry.entry.ref !== null)
-          this.callbacks.onMuteSeries(this.id, entry.entry.ref);
-        else
-          this.callbacks.onMuteSelector(
-            this.id,
-            focusSelector(
-              entry.entry,
-              primary === undefined
-                ? undefined
-                : this.callbacks.catalog().get(primary.ref)?.sourceName,
-            ),
-          );
-      } else if (event.shiftKey || primary === undefined) {
-        this.callbacks.onFocusSolo(this.id, entry.entry);
-      } else {
-        this.openInspector(primary.path);
-      }
+      const entry = this.focusEntryForRow(dimension, item, state);
+      if (event.altKey) this.callbacks.onMuteSelector(this.id, item.selector);
+      else if (event.metaKey || event.ctrlKey || event.shiftKey)
+        this.callbacks.onFocusToggle(this.id, entry);
+      else this.callbacks.onFocusSolo(this.id, entry);
     });
-    action.title =
-      primary === undefined
-        ? `Focus ${entry.label}`
-        : `Edit ${primary.path} line properties; Shift-click to focus`;
-    const remove = document.createElement("button");
-    remove.className = "plot-legend-remove";
-    remove.type = "button";
-    remove.textContent = "✕";
-    remove.title = `Remove focus: ${entry.label}`;
-    remove.addEventListener("click", () => {
-      this.callbacks.onFocusToggle(this.id, entry.entry);
-    });
-    row.append(inspector, action, remove);
-    this.updateLegendValue(value);
+    action.title = `Focus ${item.label}; Command-click adds; Option-click mutes`;
+    row.append(swatch, action);
     block.append(row);
-    if (primary !== undefined && this.inspectorPath === primary.path) {
-      block.append(this.inlineSeriesInspector(state, primary));
+    if (single !== undefined && this.inspectorPath === single.path) {
+      block.append(this.inlineSeriesInspector(state, single));
     }
     return block;
   }
@@ -2048,18 +2071,6 @@ export class PanelView {
     searchMeta.className = "plot-legend-search-meta search-count";
     searchRow.append(searchPrefix, search);
     searchWrap.append(searchRow, searchMeta);
-    const focusTitle = document.createElement("div");
-    focusTitle.className = "plot-legend-section-title";
-    focusTitle.textContent = `FOCUS ${String(state.focus.length)}`;
-    const focusRows = document.createElement("div");
-    focusRows.className = "plot-legend-focus-rows";
-    for (const entry of focusChips(
-      this.callbacks.catalog(),
-      state,
-      Number.POSITIVE_INFINITY,
-    ).chips) {
-      focusRows.append(this.plotLegendFocusRow(state, entry));
-    }
     const dimension: LegendDimension =
       state.color_by === "channel" ? "channel" : "source";
     const group = document.createElement("div");
@@ -2070,6 +2081,10 @@ export class PanelView {
     rows.className = "plot-legend-roster-rows";
     const viewport = document.createElement("div");
     viewport.className = "plot-legend-roster-viewport";
+    rows.addEventListener("click", (event) => {
+      if (event.target === rows || event.target === viewport)
+        this.callbacks.onClearFocus(this.id);
+    });
     const renderRows = (): void => {
       const all = matrixLegendRows(
         this.callbacks.catalog(),
@@ -2077,81 +2092,35 @@ export class PanelView {
         dimension,
         search.value,
       );
-      groupTitle.textContent = `▾ ${dimension.toUpperCase()} · ${String(all.length)}`;
-      searchMeta.textContent = `${String(all.length)} match · ⏎ focus · ⌥⏎ mute`;
+      const shown = this.focusOnly ? all.filter((item) => item.focused) : all;
+      groupTitle.replaceChildren(
+        ...this.plotLegendGroupTitle(state, dimension, shown.length).childNodes,
+      );
+      searchMeta.textContent = `${String(shown.length)} match · ⏎ focus · ⌥⏎ mute`;
+      if (typeof this.inspectorPath === "string") {
+        viewport.style.height = "auto";
+        viewport.replaceChildren(
+          ...shown.map((item) =>
+            this.plotLegendMatrixRow(state, dimension, item),
+          ),
+        );
+        return;
+      }
       const slice = virtualSlice(
-        all.length,
+        shown.length,
         rows.scrollTop,
         rows.clientHeight || 168,
         24,
       );
-      viewport.replaceChildren();
       viewport.style.height = `${String(slice.totalHeight)}px`;
-      for (const [offset, item] of all
-        .slice(slice.start, slice.end)
-        .entries()) {
-        const row = document.createElement("div");
-        row.className = "plot-legend-roster-row";
-        row.style.top = `${String(slice.topPadding + offset * 24)}px`;
-        const swatch = document.createElement("button");
-        swatch.type = "button";
-        swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
-        swatch.style.setProperty(
-          "--plot-row-swatch-color",
-          item.hue === null
-            ? "var(--fg-4)"
-            : `var(--series-${String(colorIndexForHue(item.hue) + 1)})`,
-        );
-        const matching = state.series.filter((series) =>
-          dimension === "source"
-            ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
-                series.ref.source_key) === item.value
-            : series.ref.channel === item.value,
-        );
-        const paths = matching.map((series) => series.path);
-        const single = matching.length === 1 ? matching[0] : undefined;
-        const action = document.createElement("button");
-        action.type = "button";
-        action.className = "plot-legend-roster-action";
-        const label = document.createElement("span");
-        label.className = "plot-legend-label";
-        label.textContent = `${item.overridden ? "▍ " : ""}${item.label}`;
-        const count = document.createElement("span");
-        count.className = "plot-legend-count";
-        count.textContent = `×${String(item.count)}`;
-        action.append(label, count);
-        action.addEventListener("mouseenter", () => this.setEmphasis(paths));
-        action.addEventListener("mouseleave", () => this.setEmphasis(null));
-        action.addEventListener("click", (event) => {
-          const entry = this.focusEntryForRow(dimension, item, state);
-          if (event.altKey)
-            this.callbacks.onMuteSelector(this.id, item.selector);
-          else if (event.shiftKey || single === undefined)
-            this.callbacks.onFocusToggle(this.id, entry);
-          else this.openInspector(single.path);
-        });
-        action.title =
-          single === undefined
-            ? `Focus ${item.label}`
-            : `Edit ${single.path} line properties; Shift-click to focus`;
-        if (single === undefined) {
-          swatch.disabled = true;
-          swatch.title = "Group styles are edited with selector rules";
-        } else {
-          swatch.title = `Edit ${single.path} line properties`;
-          swatch.addEventListener("click", () => {
-            this.inspectorPath = single.path;
-            this.callbacks.onFocusToggle(this.id, {
-              kind: "series",
-              ref: single.ref,
-              source_key: null,
-              channel: single.ref.channel,
-            });
-          });
-        }
-        row.append(swatch, action);
-        viewport.append(row);
-      }
+      viewport.replaceChildren(
+        ...shown.slice(slice.start, slice.end).map((item, offset) => {
+          const block = this.plotLegendMatrixRow(state, dimension, item);
+          block.classList.add("virtual");
+          block.style.top = `${String(slice.topPadding + offset * 24)}px`;
+          return block;
+        }),
+      );
     };
     search.addEventListener("input", () => {
       rows.scrollTop = 0;
@@ -2168,8 +2137,13 @@ export class PanelView {
       if (first === undefined) return;
       event.preventDefault();
       if (event.altKey) this.callbacks.onMuteSelector(this.id, first.selector);
-      else
+      else if (event.metaKey || event.ctrlKey || event.shiftKey)
         this.callbacks.onFocusToggle(
+          this.id,
+          this.focusEntryForRow(dimension, first, state),
+        );
+      else
+        this.callbacks.onFocusSolo(
           this.id,
           this.focusEntryForRow(dimension, first, state),
         );
@@ -2185,9 +2159,157 @@ export class PanelView {
       search.focus();
       renderRows();
     });
-    content.append(searchWrap, focusTitle, focusRows, group, footer);
+    content.append(searchWrap, group, this.plotLegendTips(state), footer);
     renderRows();
     return content;
+  }
+
+  private plotLegendTips(state: RenderPanelState): HTMLElement {
+    const section = document.createElement("section");
+    section.className = "plot-legend-tips";
+    const heading = document.createElement("div");
+    heading.className = "plot-legend-tips-heading";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = `${this.annotationsExpanded ? "▾" : "▸"} TIPS`;
+    toggle.setAttribute("aria-expanded", String(this.annotationsExpanded));
+    toggle.addEventListener("click", () => {
+      this.annotationsExpanded = !this.annotationsExpanded;
+      this.updatePlotLegend(state);
+    });
+    const count = document.createElement("span");
+    count.textContent = String(state.annotations.length);
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.className = "plot-tip-export";
+    exportButton.textContent = "⤓ csv";
+    exportButton.title = "Export pinned tips as CSV";
+    exportButton.addEventListener("click", () => this.exportAnnotations(state));
+    heading.append(toggle, count, exportButton);
+    section.append(heading);
+    if (!this.annotationsExpanded || state.annotations.length === 0)
+      return section;
+
+    const columns = document.createElement("div");
+    columns.className = "plot-tip-columns";
+    columns.innerHTML =
+      "<span></span><span>SERIES</span><span>x ↓</span><span>value</span><span></span>";
+    const body = document.createElement("div");
+    body.className = "plot-tip-rows";
+    const byPath = new Map(state.series.map((series) => [series.path, series]));
+    const annotations = [...state.annotations].sort(
+      (left, right) => right.anchor - left.anchor,
+    );
+    for (const annotation of annotations) {
+      const series = byPath.get(annotation.series_path);
+      const row = document.createElement("div");
+      row.className = "plot-tip-row";
+      row.dataset.paths = JSON.stringify([annotation.series_path]);
+      row.classList.toggle("focused", series?.focused ?? false);
+      row.classList.toggle(
+        "selected",
+        this.selectedAnnotationIds.has(annotation.id),
+      );
+      row.classList.toggle(
+        "ghosted",
+        series?.display === "ghost" || series?.visible === false,
+      );
+      row.classList.toggle(
+        "hovered",
+        this.hoveredAnnotationId === annotation.id,
+      );
+      const rule = document.createElement("span");
+      rule.className = "plot-tip-rule";
+      rule.style.background =
+        series === undefined ? "var(--fg-4)" : seriesColor(series);
+      const name = document.createElement("button");
+      name.type = "button";
+      name.className = "plot-tip-name";
+      name.textContent =
+        this.callbacks.localPathFor(annotation.series_path) ??
+        annotation.series_path;
+      name.title = annotation.series_path;
+      name.addEventListener("click", (event) => {
+        this.selectAnnotation(
+          annotation.id,
+          event.metaKey || event.ctrlKey || event.shiftKey,
+        );
+      });
+      const x = document.createElement("span");
+      x.textContent = formatValue(annotation.anchor);
+      const value = document.createElement("span");
+      value.textContent = formatValue(annotation.pinned_value);
+      const actions = document.createElement("span");
+      actions.className = "plot-tip-actions";
+      const locate = document.createElement("button");
+      locate.type = "button";
+      locate.textContent = "⌖";
+      locate.title = "Pan to tip";
+      locate.addEventListener("click", () =>
+        this.panToAnnotation(annotation.anchor),
+      );
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "✕";
+      remove.title = "Delete tip";
+      remove.addEventListener("click", () => {
+        this.callbacks.onRemoveAnnotation(this.id, annotation.id);
+      });
+      actions.append(locate, remove);
+      row.append(rule, name, x, value, actions);
+      row.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLButtonElement) return;
+        this.selectAnnotation(
+          annotation.id,
+          event.metaKey || event.ctrlKey || event.shiftKey,
+        );
+      });
+      row.addEventListener("mouseenter", () => {
+        this.hoveredAnnotationId = annotation.id;
+        this.setEmphasis(annotation.series_path);
+        this.drawOverlay();
+      });
+      row.addEventListener("mouseleave", () => {
+        this.hoveredAnnotationId = null;
+        this.setEmphasis(null);
+        this.drawOverlay();
+      });
+      body.append(row);
+    }
+    section.append(columns, body);
+    return section;
+  }
+
+  private panToAnnotation(anchor: number): void {
+    const range = this.activeLayout()?.xRange;
+    if (range === undefined) return;
+    const span = range.max - range.min;
+    this.applyXRange(anchor - span / 2, anchor + span / 2);
+  }
+
+  private exportAnnotations(state: RenderPanelState): void {
+    const selected =
+      this.selectedAnnotationIds.size === 0
+        ? state.annotations
+        : state.annotations.filter((annotation) =>
+            this.selectedAnnotationIds.has(annotation.id),
+          );
+    const lines = [
+      "series,x,value,label",
+      ...[...selected]
+        .sort((left, right) => right.anchor - left.anchor)
+        .map((annotation) =>
+          [
+            annotation.series_path,
+            String(annotation.anchor),
+            String(annotation.pinned_value),
+            annotation.label,
+          ]
+            .map(csvCell)
+            .join(","),
+        ),
+    ];
+    downloadText(`${safeFilename(state.title)}-tips.csv`, lines.join("\n"));
   }
 
   private plotLegendFooter(
@@ -2422,10 +2544,15 @@ export class PanelView {
 
     const body = document.createElement("div");
     body.className = "plot-stat-body";
+    body.addEventListener("click", (event) => {
+      if (event.target === body) this.callbacks.onClearFocus(this.id);
+    });
     for (const row of rows) {
       const element = document.createElement("div");
       element.className = "plot-stat-row";
+      element.dataset.paths = JSON.stringify([row.series.path]);
       element.classList.toggle("muted", !row.series.visible);
+      element.classList.toggle("focused", row.series.focused);
       element.classList.toggle("overridden", row.series.overridden);
       element.style.gridTemplateColumns = grid;
       const identity = document.createElement("span");
@@ -2439,7 +2566,7 @@ export class PanelView {
       );
       swatch.style.setProperty(
         "--plot-row-swatch-width",
-        `${String(Math.max(1, row.series.width))}px`,
+        `${String(Math.max(1, row.series.width + (row.series.focused ? 1 : 0)))}px`,
       );
       swatch.title = `Edit ${row.series.path} line properties`;
       swatch.setAttribute(
@@ -2465,14 +2592,20 @@ export class PanelView {
       label.addEventListener("mouseleave", () => this.setEmphasis(null));
       label.addEventListener("click", (event) => {
         if (event.altKey) this.callbacks.onMuteSeries(this.id, row.series.ref);
-        else if (event.shiftKey)
+        else if (event.metaKey || event.ctrlKey || event.shiftKey)
           this.callbacks.onFocusToggle(this.id, {
             kind: "series",
             ref: row.series.ref,
             source_key: null,
             channel: row.series.ref.channel,
           });
-        else this.openInspector(row.series.path);
+        else
+          this.callbacks.onFocusSolo(this.id, {
+            kind: "series",
+            ref: row.series.ref,
+            source_key: null,
+            channel: row.series.ref.channel,
+          });
       });
       identity.append(swatch, label);
       element.append(
@@ -2500,6 +2633,7 @@ export class PanelView {
       header,
       aggregateRow,
       body,
+      this.plotLegendTips(state),
       this.plotLegendFooter(
         state,
         ghosts,
@@ -3022,6 +3156,7 @@ export class PanelView {
     this.element
       .querySelector<HTMLElement>(".plot-legend-roster-rows")
       ?.dispatchEvent(new Event("scroll"));
+    this.updateEmphasisChrome();
   }
 
   private updateBindings(state: RenderPanelState): void {
@@ -3051,9 +3186,32 @@ export class PanelView {
         : new Set(typeof paths === "string" ? [paths] : paths);
     if (setsEqual(this.emphasizePaths, next)) return;
     this.emphasizePaths = next;
+    this.updateEmphasisChrome();
     if (this.lastState !== null && this.lastWindow !== null) {
       this.renderForMode(this.lastState, this.lastTiles, this.lastWindow);
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
+    }
+  }
+
+  private updateEmphasisChrome(): void {
+    for (const row of this.element.querySelectorAll<HTMLElement>(
+      "[data-paths]",
+    )) {
+      let paths: string[] = [];
+      try {
+        const value: unknown = JSON.parse(row.dataset.paths ?? "[]");
+        if (Array.isArray(value))
+          paths = value.filter(
+            (path): path is string => typeof path === "string",
+          );
+      } catch {
+        paths = [];
+      }
+      row.classList.toggle(
+        "cross-highlight",
+        this.emphasizePaths !== null &&
+          paths.some((path) => this.emphasizePaths?.has(path) === true),
+      );
     }
   }
 
@@ -3224,6 +3382,33 @@ export class PanelView {
     );
   }
 
+  private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
+    this.openPanelMenu(anchor, `TIPS · ${String(state.annotations.length)}`, [
+      ...(["labels", "markers", "hidden"] as const).map((mode) => ({
+        label: mode === "markers" ? "markers only" : mode,
+        active: state.annotation_display === mode,
+        run: () => {
+          this.callbacks.onSetAnnotationDisplay?.(this.id, mode);
+        },
+      })),
+      {
+        label: "clear all",
+        active: false,
+        run: () => {
+          if (
+            state.annotations.length === 0 ||
+            window.confirm(
+              `Clear all ${String(state.annotations.length)} pinned tips?`,
+            )
+          ) {
+            this.selectedAnnotationIds.clear();
+            this.callbacks.onClearAnnotations?.(this.id);
+          }
+        },
+      },
+    ]);
+  }
+
   private openPanelMenu(
     anchor: HTMLElement,
     label: string,
@@ -3288,22 +3473,48 @@ export class PanelView {
     const series = this.lastState?.series.find((entry) => entry.path === path);
     if (series === undefined) return;
     this.inspectorPath = path;
-    const hasSeriesFocus = this.lastInputState?.focus.some(
-      (entry) =>
-        entry.kind === "series" &&
-        entry.ref !== null &&
-        entry.ref.source_key === series.ref.source_key &&
-        entry.ref.channel === series.ref.channel,
+    this.updatePlotLegend(this.lastState as RenderPanelState);
+  }
+
+  private selectAnnotation(id: string, additive: boolean): void {
+    if (!additive) this.selectedAnnotationIds.clear();
+    if (additive && this.selectedAnnotationIds.has(id))
+      this.selectedAnnotationIds.delete(id);
+    else this.selectedAnnotationIds.add(id);
+    const annotation = this.lastState?.annotations.find(
+      (entry) => entry.id === id,
     );
-    if (hasSeriesFocus !== true) {
-      this.callbacks.onFocusToggle(this.id, {
+    const series = this.lastState?.series.find(
+      (entry) => entry.path === annotation?.series_path,
+    );
+    if (series !== undefined) {
+      const focus: FocusEntry = {
         kind: "series",
         ref: series.ref,
         source_key: null,
         channel: series.ref.channel,
-      });
+      };
+      if (additive) this.callbacks.onFocusToggle(this.id, focus);
+      else this.callbacks.onFocusSolo(this.id, focus);
     }
-    this.updatePlotLegend(this.lastState as RenderPanelState);
+    this.drawOverlay();
+    if (this.lastState !== null) this.updatePlotLegend(this.lastState);
+  }
+
+  private pruneAnnotationUiState(state: RenderPanelState): void {
+    const ids = new Set(state.annotations.map((annotation) => annotation.id));
+    for (const id of this.selectedAnnotationIds) {
+      if (!ids.has(id)) this.selectedAnnotationIds.delete(id);
+    }
+    for (const id of this.annotationOffsets.keys()) {
+      if (!ids.has(id)) this.annotationOffsets.delete(id);
+    }
+    if (
+      this.hoveredAnnotationId !== null &&
+      !ids.has(this.hoveredAnnotationId)
+    ) {
+      this.hoveredAnnotationId = null;
+    }
   }
 
   private toggleInlineInspector(state: RenderPanelState, path: string): void {
@@ -3749,6 +3960,7 @@ function panelMarkup(): string {
       <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-group panel-toolbar-readout">
         <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
+        <button class="panel-toolbar-control panel-tips" type="button" title="Tip density and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
         <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend type">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
       </span>
       <span class="panel-actions">
@@ -3765,6 +3977,5 @@ function panelMarkup(): string {
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
       <div class="plot-series-legend" aria-label="Plot legend"></div>
       <div class="panel-empty" hidden></div>
-    </div>
-    <div class="panel-annotations" hidden></div>`;
+    </div>`;
 }

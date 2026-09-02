@@ -1282,42 +1282,15 @@ button {
 }
 
 .plot-legend-keys {
-  padding-top: 3px;
+  min-height: 0;
 }
 
-.plot-legend-keys .plot-legend-focus-rows {
+.plot-legend-key-rows {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
 }
 
-.plot-legend-roster > .plot-legend-focus-rows {
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.plot-legend-row {
-  display: grid;
-  min-height: 20px;
-  grid-template-columns: 18px minmax(0, 1fr) 18px;
-  align-items: center;
-}
-
-.plot-legend-row-action {
-  display: grid;
-  min-width: 0;
-  min-height: 20px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 3px;
-  color: var(--fg-1);
-  font: inherit;
-  text-align: left;
-}
-
-.plot-legend-row-action:hover,
-.plot-legend-row-action:focus-visible,
 .plot-legend-roster-row:hover,
 .plot-legend-roster-row:focus-visible,
 .plot-legend-footer:hover,
@@ -1441,18 +1414,6 @@ button {
   color: var(--fg-4);
 }
 
-.plot-legend-remove {
-  min-height: 20px;
-  padding: 2px 4px;
-  color: var(--fg-4);
-  font: inherit;
-}
-
-.plot-legend-remove:hover,
-.plot-legend-remove:focus-visible {
-  color: var(--fg-1);
-}
-
 .plot-legend-footer,
 .plot-legend-hint {
   min-height: 20px;
@@ -1559,12 +1520,30 @@ button {
 }
 
 .plot-legend-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 5px 6px;
   background: var(--surface-2);
   border-top: 1px solid var(--border-faint);
   border-bottom: 1px solid var(--border-faint);
   color: var(--fg-2);
   letter-spacing: 0.06em;
+}
+
+.plot-legend-focus-filter {
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--amber-7);
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.plot-legend-focus-filter:hover,
+.plot-legend-focus-filter:focus-visible {
+  background: var(--amber-3);
+  color: var(--fg-1);
 }
 
 .plot-series-legend[data-state="rail"] .plot-legend-footer {
@@ -1581,9 +1560,13 @@ button {
   position: relative;
 }
 
-.plot-legend-roster-row {
+.plot-legend-matrix-block.virtual {
   position: absolute;
   left: 0;
+  width: 100%;
+}
+
+.plot-legend-roster-row {
   display: grid;
   width: 100%;
   height: 24px;
@@ -1594,6 +1577,35 @@ button {
   color: var(--fg-2);
   font: inherit;
   text-align: left;
+}
+
+.plot-legend-roster-row.focused,
+.plot-stat-row.focused,
+.plot-tip-row.focused {
+  background: var(--amber-3);
+  box-shadow: inset 2px 0 var(--amber-7);
+  color: var(--fg-1);
+}
+
+.plot-legend-roster-row.ghosted {
+  color: var(--fg-4);
+}
+
+.plot-legend-roster-row.ghosted .plot-legend-label {
+  text-decoration: line-through;
+}
+
+:is(.plot-legend-roster-row, .plot-stat-row, .plot-tip-row).cross-highlight {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+:is(
+    .plot-legend-roster-row,
+    .plot-stat-row,
+    .plot-tip-row
+  ).focused.cross-highlight {
+  background: var(--amber-3);
 }
 
 .plot-legend-roster-action {
@@ -1693,6 +1705,10 @@ button {
   color: var(--fg-1);
 }
 
+.plot-stat-row.focused:hover {
+  background: var(--amber-3);
+}
+
 .plot-stat-row.muted {
   color: var(--fg-4);
 }
@@ -1771,6 +1787,130 @@ button {
 
 .plot-stat-unit {
   color: var(--fg-4);
+}
+
+.plot-legend-tips {
+  flex: none;
+  border-top: 1px solid var(--border-faint);
+}
+
+.plot-legend-tips-heading {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 7px;
+  background: var(--surface-2);
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.plot-legend-tips-heading button {
+  color: inherit;
+  font: inherit;
+}
+
+.plot-legend-tips-heading > :first-child {
+  color: var(--fg-2);
+}
+
+.plot-tip-export {
+  margin-left: auto;
+}
+
+.plot-tip-columns,
+.plot-tip-row {
+  display: grid;
+  grid-template-columns: 8px minmax(72px, 1fr) 62px 62px 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+}
+
+.plot-tip-columns {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-faint);
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.plot-tip-columns > :nth-child(n + 3),
+.plot-tip-row > :nth-child(3),
+.plot-tip-row > :nth-child(4) {
+  text-align: right;
+}
+
+.plot-tip-rows {
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.plot-tip-row {
+  min-height: 22px;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.plot-tip-row:hover,
+.plot-tip-row.hovered {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.plot-tip-row.focused:hover,
+.plot-tip-row.focused.hovered {
+  background: var(--amber-3);
+}
+
+.plot-tip-row.selected {
+  outline: 1px solid var(--amber-7);
+  outline-offset: -1px;
+}
+
+.plot-tip-row.ghosted {
+  color: var(--fg-4);
+  opacity: 0.6;
+}
+
+.plot-tip-rule {
+  width: 2px;
+  height: 11px;
+}
+
+.plot-tip-name {
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-tip-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.plot-tip-actions button {
+  padding: 0 2px;
+  color: var(--fg-4);
+  font: inherit;
+}
+
+.plot-series-legend[data-state="rail"] .plot-tip-columns,
+.plot-series-legend[data-state="rail"] .plot-tip-row {
+  grid-template-columns: 8px minmax(0, 1fr) 16px;
+}
+
+.plot-series-legend[data-state="rail"]
+  :is(.plot-tip-columns, .plot-tip-row)
+  > :nth-child(3),
+.plot-series-legend[data-state="rail"]
+  :is(.plot-tip-columns, .plot-tip-row)
+  > :nth-child(4) {
+  display: none;
 }
 
 .plot-row-inspector {
@@ -1890,48 +2030,8 @@ button {
   white-space: nowrap;
 }
 
-.panel-annotations[hidden],
 .plot-tip[hidden] {
   display: none;
-}
-
-.panel-annotations {
-  padding: 6px 10px;
-  border-top: 1px solid var(--border);
-  color: var(--fg-2);
-  font: 0.7692rem var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.annotations-heading {
-  margin-bottom: 3px;
-  color: var(--fg-4);
-  font-size: 0.6923rem;
-  letter-spacing: 0.08em;
-}
-
-.annotation-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.annotation-action {
-  margin-left: auto;
-  padding: 0;
-  color: var(--fg-4);
-}
-
-.annotation-action + .annotation-action {
-  margin-left: 0;
-}
-
-.annotation-label-input {
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  background: var(--surface-2);
-  color: var(--fg-1);
-  font: inherit;
 }
 
 .axis-label-editor {

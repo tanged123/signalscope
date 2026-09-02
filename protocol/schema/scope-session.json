@@ -1,5 +1,5 @@
 {
-  "schema_version": 25,
+  "schema_version": 26,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -92,6 +92,11 @@
       "variants": ["top_left", "top_right", "bottom_left", "bottom_right"]
     },
     "NamedSetKind": { "kind": "enum", "variants": ["query", "pick"] },
+    "AnnotationDisplay": {
+      "kind": "enum",
+      "variants": ["labels", "markers", "hidden"],
+      "default": "labels"
+    },
     "NamedSet": {
       "kind": "object",
       "fields": {
@@ -109,7 +114,8 @@
         "series_path": "string",
         "anchor": "f64",
         "pinned_value": "f64",
-        "label": "string"
+        "label": "string",
+        "offset": "f64[2]"
       }
     },
     "PanelState": {
@@ -138,6 +144,7 @@
         "y_label": "string?",
         "time_window": "f64[2]?",
         "annotations": "Annotation[]",
+        "annotation_display": "AnnotationDisplay",
         "show_stats": "bool",
         "stat_columns": "StatColumn[]",
         "stats_sort": "StatColumn?",

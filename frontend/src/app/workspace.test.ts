@@ -152,6 +152,7 @@ describe("derived definitions", () => {
       anchor: 0,
       pinned_value: 1,
       label: "",
+      offset: [10, -10],
     });
     model.addNamedSet({
       id: "set-1",
@@ -171,6 +172,7 @@ describe("derived definitions", () => {
       anchor: 1,
       pinned_value: 2,
       label: "",
+      offset: [10, -10],
     });
 
     model.removeSignalRef(refForPath(path), path);
@@ -721,6 +723,7 @@ describe("WorkspaceModel", () => {
       anchor: 1,
       pinned_value: 2,
       label: "before",
+      offset: [10, -10],
     });
 
     model.setAnnotationLabel(panel.id, "ann-1", "after");
@@ -753,6 +756,7 @@ describe("WorkspaceModel", () => {
       anchor: 0,
       pinned_value: 0,
       label: "",
+      offset: [10, -10],
     });
     expect(legacySeries(model.panel(panel.id))[0]).toMatchObject({
       color_slot: 5,
@@ -965,6 +969,7 @@ describe("WorkspaceModel", () => {
       y_label: null,
       time_window: null,
       annotations: [],
+      annotation_display: "labels",
       show_stats: false,
       stat_columns: ["min", "max", "mean", "rms", "cursor"],
       stats_sort: null,

@@ -311,6 +311,7 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
         y_label: null,
         time_window: null,
         annotations: [],
+        annotation_display: "labels",
         show_stats: false,
         stat_columns: ["min", "max", "mean", "rms", "cursor"],
         stats_sort: null,
@@ -325,12 +326,12 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
   await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
   await expect(panel.locator(".panel-actions")).toBeVisible();
   const plotLegend = panel.locator(".plot-series-legend");
-  await expect(plotLegend.locator(".plot-legend-row")).toHaveCount(12);
+  await expect(plotLegend.locator(".plot-legend-roster-row")).toHaveCount(10);
   await expect
     .poll(() =>
       plotLegend.evaluate((element) => {
         const row = getComputedStyle(
-          element.querySelector(".plot-legend-row") as HTMLElement,
+          element.querySelector(".plot-legend-roster-row") as HTMLElement,
         );
         return {
           plotFamilyApplied: row.fontFamily.includes("JetBrains Mono"),

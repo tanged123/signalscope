@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 25;
+pub const SESSION_SCHEMA_VERSION: u32 = 26;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -174,6 +174,15 @@ pub enum NamedSetKind {
     Pick,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnnotationDisplay {
+    #[default]
+    Labels,
+    Markers,
+    Hidden,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NamedSet {
     pub id: String,
@@ -191,6 +200,7 @@ pub struct Annotation {
     pub anchor: f64,
     pub pinned_value: f64,
     pub label: String,
+    pub offset: [f64; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -229,6 +239,7 @@ pub struct PanelState {
     #[serde(default)]
     pub time_window: Option<[f64; 2]>,
     pub annotations: Vec<Annotation>,
+    pub annotation_display: AnnotationDisplay,
     pub show_stats: bool,
     pub stat_columns: Vec<StatColumn>,
     #[serde(default)]

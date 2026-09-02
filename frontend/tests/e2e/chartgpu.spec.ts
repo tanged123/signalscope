@@ -15,7 +15,10 @@ test("time panels use ChartGPU with WebGPU enabled", async ({ page }) => {
 
   const bounds = await chart.boundingBox();
   expect(bounds).not.toBeNull();
-  await page.mouse.move((bounds?.x ?? 0) + 220, (bounds?.y ?? 0) + 120);
+  await page.mouse.move(
+    (bounds?.x ?? 0) + (bounds?.width ?? 0) * 0.65,
+    (bounds?.y ?? 0) + (bounds?.height ?? 0) * 0.65,
+  );
   await page.mouse.wheel(0, 500);
   await expect
     .poll(

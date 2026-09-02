@@ -82,6 +82,39 @@ aggregate row summarizes the currently resolved set. Scope is stated as
 `Σ visible region`; full-record and selection choices are not exposed until the
 data plane can compute them truthfully.
 
+### Data tips and annotations
+
+A pinned data tip is one retained sample readout. Its plot label is the primary
+representation and contains the axis values in axis order, with series identity
+carried by the 2 px color rule. It never computes a delta, slope, or fit. The
+former bottom annotation register is removed so pinning does not change plot
+geometry.
+
+Labels are anchored to the datum with a serialized pixel offset, retain that
+offset through pan and zoom, and can be dragged. Collision handling nudges by at
+most two label heights before falling back to a marker that reveals its label on
+hover. The toolbar `tips n` control selects labels, markers-only, or hidden
+display without deleting pins and provides the explicit clear-all action.
+
+The legend contains one bounded `TIPS` manifest, collapsed by default and
+scrolling after approximately six rows. It is sorted by x descending and adds
+series identity, locate, delete, selection, cross-highlight, and CSV actions;
+it is an inventory, not a second primary readout. The rail drops numeric columns
+before identity and actions.
+
+### Focus and selection
+
+Focus is the persistent series highlight set. It is painted on the canonical
+legend/statistic row with an amber tint and 2 px left rule; the trace retains
+its series hue, gains 1 px of presentation width, and the other traces use ghost
+strength. No focused row is copied into a separate stack.
+
+Plain row click replaces the focus set, Command/Ctrl-click adds or removes, and
+clicking empty legend space clears it. `focus only` filters the existing rows
+without reordering. Hover remains an achromatic surface raise and cross-links
+row, trace, and tips. Tip selection is a separate transient amber outline used
+for delete/export actions, so it composes with focus rather than overloading it.
+
 ## Implementation plan
 
 1. Add session-schema fields for nullable color/dash/width encodings, panel line
@@ -107,6 +140,12 @@ data plane can compute them truthfully.
    documentation. Run the frontend gate first, then the proportional full CI
    gate because the change crosses schema, Rust migration, frontend state, and
    browser behavior.
+8. Advance the session schema for serialized tip display and label offsets;
+   remove pairwise delta computation and the bottom annotation register; add
+   overlay selection, dragging, collision fallback, and the legend manifest.
+9. Delete the focus stack, render compact keys and roster rows from the same
+   canonical entries, apply the shared focus paint to legend/stat rows, and
+   make the ChartGPU focus treatment hue-preserving and width-only.
 
 ## Explicitly deferred
 
@@ -118,3 +157,7 @@ data plane can compute them truthfully.
   product semantics beyond this UI unification pass.
 - Multi-row bulk style editing remains a follow-up after the singular inline
   editor and selector-based override behavior are stable.
+- A stable raw sample index is not present in the current adaptive tile
+  protocol. Time-series tips pin real first/last envelope samples and retain the
+  authoritative anchor/value; a future mutable/live source contract must add a
+  stable sample identity before promising cross-revision attachment.
