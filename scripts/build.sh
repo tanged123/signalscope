@@ -72,12 +72,13 @@ configure_macos_signing() {
 build_server_release() {
   if [ "$(uname -s)" = Linux ]; then
     local rust_target=x86_64-unknown-linux-gnu
-    cargo zigbuild --release -p scope-server --target "$rust_target.2.35" "$@"
+    env -u HDF5_DIR cargo zigbuild --release -p scope-server \
+      --target "$rust_target.2.35" "$@"
     SIGNALSCOPE_SERVER_BIN="target/$rust_target/release/scope-server"
     export SIGNALSCOPE_SERVER_BIN
     "$signalscope_scripts_dir/check-linux-server.sh" "$SIGNALSCOPE_SERVER_BIN"
   else
-    cargo build --release -p scope-server "$@"
+    env -u HDF5_DIR cargo build --release -p scope-server "$@"
   fi
 }
 
