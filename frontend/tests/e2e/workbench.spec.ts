@@ -165,7 +165,7 @@ test("command palette edits focused-panel axis labels", async ({ page }) => {
   }
 });
 
-test("panel matrix legend keeps rosters virtual and exposes unified styles", async ({
+test("panel signal legend keeps rosters virtual and exposes unified styles", async ({
   page,
 }) => {
   await page.route("**/api/health", (route) =>
@@ -188,14 +188,20 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
     host.style.height = "320px";
     host.style.display = "flex";
     document.body.replaceChildren(host);
-    const summaries = Array.from({ length: 100 }, (_, index) => {
-      const number = String(index + 1).padStart(2, "0");
+    const refs = Array.from({ length: 100 }, (_, index) => {
+      if (index === 99) return { source_key: "run_01", channel: "speed" };
       return {
-        signal_id: `id:run_${number}/temp`,
-        source_id: `source:run_${number}`,
-        source_key: `run_${number}`,
-        local_path: "temp",
-        path: `run_${number}/temp`,
+        source_key: `run_${String(index + 1).padStart(2, "0")}`,
+        channel: "temp",
+      };
+    });
+    const summaries = refs.map((ref) => {
+      return {
+        signal_id: `id:${ref.source_key}/${ref.channel}`,
+        source_id: `source:${ref.source_key}`,
+        source_key: ref.source_key,
+        local_path: ref.channel,
+        path: `${ref.source_key}/${ref.channel}`,
         unit: "C",
         point_count: "2",
         t_min: 0,
@@ -213,14 +219,24 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
       onDropSignals: () => {},
       onDropSet: () => {},
       onFocusToggle: (_id, entry) => {
-        host.dataset.focusToggle = entry.source_key ?? entry.channel ?? "";
+        host.dataset.focusToggle =
+          entry.ref === null
+            ? (entry.source_key ?? entry.channel ?? "")
+            : `${entry.ref.source_key}/${entry.ref.channel}`;
       },
       onFocusAdd: (_id, entry) => {
-        host.dataset.focusAdd = entry.source_key ?? entry.channel ?? "";
+        host.dataset.focusAdd =
+          entry.ref === null
+            ? (entry.source_key ?? entry.channel ?? "")
+            : `${entry.ref.source_key}/${entry.ref.channel}`;
       },
       onFocusRange: (_id, entries) => {
         host.dataset.focusRange = entries
-          .map((entry) => entry.source_key ?? entry.channel ?? "")
+          .map((entry) =>
+            entry.ref === null
+              ? (entry.source_key ?? entry.channel ?? "")
+              : `${entry.ref.source_key}/${entry.ref.channel}`,
+          )
           .join(",");
       },
       onClearFocus: () => {},
@@ -296,10 +312,7 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
           {
             kind: "pick" as const,
             selector: null,
-            refs: Array.from({ length: 100 }, (_, index) => ({
-              source_key: `run_${String(index + 1).padStart(2, "0")}`,
-              channel: "temp",
-            })),
+            refs,
             set_id: null,
           },
         ],
@@ -367,7 +380,10 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
   });
 
   const panel = page.locator("#legend-probe .panel");
-  await expect(panel.locator(".binding-chip")).toHaveText("temp ×100");
+  await expect(panel.locator(".binding-chip")).toHaveText([
+    "temp ×99",
+    "speed ×1",
+  ]);
   await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
   await expect(panel.locator(".panel-actions")).toBeVisible();
   const plotLegend = panel.locator(".plot-series-legend");
@@ -434,17 +450,17 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
   await rosterActions.nth(0).click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(
     "data-focus-add",
-    "run_01",
+    "run_01/temp",
   );
   await rosterActions.nth(3).click({ modifiers: ["Shift"] });
   await expect(page.locator("#legend-probe")).toHaveAttribute(
     "data-focus-range",
-    "run_01,run_02,run_03,run_04",
+    "run_01/temp,run_02/temp,run_03/temp,run_04/temp",
   );
   await rosterActions.nth(4).click({ modifiers: ["Control"] });
   await expect(page.locator("#legend-probe")).toHaveAttribute(
     "data-focus-toggle",
-    "run_05",
+    "run_05/temp",
   );
   await plotLegend.locator(".plot-legend-tips-heading button").first().click();
   await expect(plotLegend.locator(".plot-tip-reading").nth(1)).toHaveText(
@@ -562,13 +578,16 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
     element.scrollTop = element.scrollHeight;
   });
   await expect(panel.locator(".plot-legend-roster-row").last()).toContainText(
-    "run_100",
+    "run_01/speed",
   );
   await panel.locator(".plot-legend-search").fill("* @ run_01");
-  await expect(panel.locator(".plot-legend-roster-row")).toHaveCount(1);
+  await expect(panel.locator(".plot-legend-roster-row")).toHaveCount(2);
+  await expect(panel.locator(".plot-row-inspector-toggle:enabled")).toHaveCount(
+    2,
+  );
   await panel.locator(".plot-legend-roster-row").first().click();
-  await expect(panel.locator(".binding-chip")).toHaveCount(1);
-  await panel.locator(".binding-chip").click();
+  await expect(panel.locator(".binding-chip")).toHaveCount(2);
+  await panel.locator(".binding-chip").first().click();
   await expect(panel.locator(".binding-popover")).toBeVisible();
   await panel.getByRole("button", { name: "remove all" }).click();
   await expect(panel.locator(".binding-popover")).toBeHidden();

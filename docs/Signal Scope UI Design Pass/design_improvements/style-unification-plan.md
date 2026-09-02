@@ -53,6 +53,12 @@ directly below the header. In the rail the three chips wrap without dropping
 their `property ← source` labels. Chip editors are in-legend drawers that push
 content down, keeping both the affected rows and plot visible.
 
+Encoding and identity stay separate: source, channel, and focus dimensions
+assign visual properties, while keys and roster always render one canonical row
+per resolved signal path. Signals from the same source are never collapsed into
+an aggregate row, and every trace retains its own focus, mute, statistics, and
+line-properties controls.
+
 Clicking a singular row swatch expands that row in place. The inspector contains
 only color and line fields, inherited provenance, field-level revert, mute, and
 escape/close affordances. Only one row is expanded. The former floating series

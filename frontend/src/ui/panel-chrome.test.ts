@@ -296,14 +296,16 @@ describe("PanelView chrome", () => {
     expect(onFocusAdd).toHaveBeenCalledTimes(1);
     expect(onFocusRange).toHaveBeenCalledTimes(1);
     expect(
-      (onFocusRange.mock.calls[0]?.[1] as Array<{ source_key: string }>).map(
-        (entry) => entry.source_key,
-      ),
+      (
+        onFocusRange.mock.calls[0]?.[1] as Array<{
+          ref: { source_key: string };
+        }>
+      ).map((entry) => entry.ref.source_key),
     ).toEqual(["run-01", "run-02", "run-03"]);
     expect(onFocusToggle).toHaveBeenCalledTimes(1);
     expect(onFocusToggle.mock.calls[0]?.[1]).toMatchObject({
-      kind: "source",
-      source_key: "run-02",
+      kind: "series",
+      ref: { source_key: "run-02", channel: "temp" },
     });
   });
 

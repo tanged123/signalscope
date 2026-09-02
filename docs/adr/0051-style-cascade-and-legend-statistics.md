@@ -31,6 +31,11 @@ owns literal row overrides. A dimension can bind to only one property; assigning
 an occupied dimension swaps the two bindings. Override provenance is visible at
 the field, row, and legend-footer levels.
 
+Encoding dimensions control how properties are assigned; they do not group
+legend identity. Keys and roster states contain one canonical row for every
+resolved signal, including signals that share a source, so every rendered trace
+has a direct focus, mute, statistics, and line-properties target.
+
 The floating series popover is replaced by an inline legend-row inspector.
 Plot-local derivation and row-level unbinding are removed from the style
 surface. Derivation remains upstream and binding removal remains in the binding

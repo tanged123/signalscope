@@ -13,10 +13,10 @@ import {
   PanelView,
   aggregateLegendStats,
   bindingChipEntries,
-  matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
   parseSignalRefsPayload,
+  seriesLegendRows,
   type RenderPanelState,
   type RenderSeries,
 } from "./panel";
@@ -332,7 +332,7 @@ describe("panel series", () => {
     expect(parseSetPayload("not json")).toBeNull();
   });
 
-  it("builds bounded matrix roster rows with selector filtering", () => {
+  it("builds one roster row per signal with selector filtering", () => {
     const catalog = Catalog.build(
       ["run_01", "run_02", "run_03"].flatMap((source) =>
         ["temp", "speed"].map((channel) => ({
@@ -363,39 +363,28 @@ describe("panel series", () => {
         channel: null,
       },
     ];
-    expect(matrixLegendRows(catalog, state, "source")).toEqual([
-      expect.objectContaining({
-        value: "run_01",
-        count: 2,
-        selector: "* @ run_01",
-      }),
-      expect.objectContaining({
-        value: "run_02",
-        count: 1,
-        focused: true,
-      }),
-      expect.objectContaining({ value: "run_03", count: 1 }),
+    const rows = seriesLegendRows(catalog, state);
+    expect(rows.map((row) => row.series.path)).toEqual([
+      "run_01/temp",
+      "run_01/speed",
+      "run_02/temp",
+      "run_03/temp",
     ]);
+    expect(rows.map((row) => row.focused)).toEqual([false, false, true, false]);
     expect(
-      matrixLegendRows(catalog, state, "channel", "temp @ *").map(
-        (row) => row.value,
+      seriesLegendRows(catalog, state, "temp @ *").map(
+        (row) => row.series.path,
       ),
-    ).toEqual(["temp"]);
+    ).toEqual(["run_01/temp", "run_02/temp", "run_03/temp"]);
     expect(
-      matrixLegendRows(catalog, state, "source", "run_02").map(
-        (row) => row.value,
-      ),
-    ).toEqual(["run_02"]);
+      seriesLegendRows(catalog, state, "run_02").map((row) => row.series.path),
+    ).toEqual(["run_02/temp"]);
     expect(
-      matrixLegendRows(catalog, state, "source", "run_0*").map(
-        (row) => row.value,
-      ),
-    ).toEqual(["run_01", "run_02", "run_03"]);
+      seriesLegendRows(catalog, state, "run_0*").map((row) => row.series.path),
+    ).toEqual(["run_01/temp", "run_01/speed", "run_02/temp", "run_03/temp"]);
     expect(
-      matrixLegendRows(catalog, state, "channel", "/ spe").map(
-        (row) => row.value,
-      ),
-    ).toEqual(["speed"]);
+      seriesLegendRows(catalog, state, "/ spe").map((row) => row.series.path),
+    ).toEqual(["run_01/speed"]);
   });
 
   it("uses the in-plot keys as the only legend surface", () => {

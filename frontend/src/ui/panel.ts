@@ -200,17 +200,10 @@ export type RenderPanelState = PanelState & {
   series: RenderSeries[];
 };
 
-export type LegendDimension = "source" | "channel";
-
-export interface MatrixLegendRow {
+export interface SeriesLegendRow {
   value: string;
-  label: string;
-  count: number;
-  selector: string;
+  series: RenderSeries;
   focused: boolean;
-  ghosted: boolean;
-  overridden: boolean;
-  hue: number | null;
 }
 
 export interface BindingChipEntry {
@@ -230,12 +223,11 @@ export interface LegendStatValues {
   cursor: number | null;
 }
 
-export function matrixLegendRows(
+export function seriesLegendRows(
   catalog: Catalog,
-  state: Pick<RenderPanelState, "series" | "focus" | "color_by">,
-  dimension: LegendDimension,
+  state: Pick<RenderPanelState, "series" | "focus">,
   query = "",
-): MatrixLegendRow[] {
+): SeriesLegendRow[] {
   const trimmedQuery = query.trim().replace(/^\/\s*/, "");
   const selectorQuery = /(?:^|\s)@|(?:^|\s)(?:unit|kind):/.test(trimmedQuery);
   const evaluation =
@@ -254,51 +246,29 @@ export function matrixLegendRows(
             }),
           ),
         );
-  const rows = new Map<string, MatrixLegendRow>();
+  const rows: SeriesLegendRow[] = [];
   for (const series of state.series) {
-    const catalogSeries = catalog.get(series.ref);
     if (matching !== null && !matching.has(catalog.refKey(series.ref))) {
       continue;
     }
-    const value =
-      dimension === "source"
-        ? (catalogSeries?.sourceName ?? series.ref.source_key)
-        : series.ref.channel;
-    const existing = rows.get(value);
     const focus = state.focus.some((entry) => focusMatches(entry, series.ref));
-    if (existing === undefined) {
-      rows.set(value, {
-        value,
-        label: value,
-        count: 1,
-        selector: dimension === "source" ? `* @ ${value}` : `${value} @ *`,
-        focused: focus,
-        ghosted: series.display === "ghost",
-        overridden: series.overridden,
-        hue: state.color_by === dimension ? series.hue : null,
-      });
-    } else {
-      existing.count += 1;
-      existing.focused ||= focus;
-      existing.ghosted ||= series.display === "ghost";
-      existing.overridden ||= series.overridden;
-      if (existing.hue === null && state.color_by === dimension) {
-        existing.hue = series.hue;
-      }
-    }
+    rows.push({
+      value: catalog.refKey(series.ref),
+      series,
+      focused: focus,
+    });
   }
-  const result = [...rows.values()];
-  if (trimmedQuery === "" || selectorQuery) return result;
+  if (trimmedQuery === "" || selectorQuery) return rows;
   const glob = ["*", "?", "[", "|"].some((token) =>
     trimmedQuery.includes(token),
   )
     ? compileGlob(trimmedQuery)
     : null;
   const text = trimmedQuery.toLocaleLowerCase();
-  return result.filter((row) =>
+  return rows.filter((row) =>
     glob === null
-      ? row.label.toLocaleLowerCase().includes(text)
-      : glob.test(row.label),
+      ? row.series.path.toLocaleLowerCase().includes(text)
+      : glob.test(row.series.path),
   );
 }
 
@@ -1907,18 +1877,18 @@ export class PanelView {
   private plotLegendKeys(state: RenderPanelState): HTMLElement {
     const content = document.createElement("div");
     content.className = "plot-legend-content plot-legend-keys";
-    const dimension: LegendDimension =
-      state.color_by === "channel" ? "channel" : "source";
-    const all = matrixLegendRows(this.callbacks.catalog(), state, dimension);
+    const all = seriesLegendRows(this.callbacks.catalog(), state);
     const shown = this.focusOnly ? all.filter((row) => row.focused) : all;
-    const title = this.plotLegendGroupTitle(state, dimension, shown.length);
+    const title = this.plotLegendGroupTitle(
+      state,
+      shown.length,
+      all.filter((row) => row.focused).length,
+    );
     title.className = "plot-legend-section-title plot-legend-group-title";
     const rows = document.createElement("div");
     rows.className = "plot-legend-key-rows";
     rows.append(
-      ...shown.map((row) =>
-        this.plotLegendMatrixRow(state, dimension, row, shown),
-      ),
+      ...shown.map((row) => this.plotLegendSeriesRow(state, row, shown)),
     );
     rows.addEventListener("click", (event) => {
       if (event.target === rows) this.callbacks.onClearFocus(this.id);
@@ -1950,19 +1920,19 @@ export class PanelView {
 
   private plotLegendGroupTitle(
     state: RenderPanelState,
-    dimension: LegendDimension,
     count: number,
+    focusedCount: number,
   ): HTMLElement {
     const title = document.createElement("div");
     const label = document.createElement("span");
-    label.textContent = `▾ ${dimension.toUpperCase()}`;
+    label.textContent = "▾ SIGNALS";
     const focus = document.createElement("button");
     focus.type = "button";
     focus.className = "plot-legend-focus-filter";
     focus.textContent = this.focusOnly
       ? `focus only ✓ · ${String(count)}/${String(state.series.length)}`
-      : `${String(state.focus.length)} focused ⤴`;
-    focus.hidden = state.focus.length === 0;
+      : `${String(focusedCount)} focused ⤴`;
+    focus.hidden = focusedCount === 0;
     focus.title = this.focusOnly
       ? "Show all legend rows"
       : "Show focused rows only";
@@ -1976,84 +1946,64 @@ export class PanelView {
     return title;
   }
 
-  private plotLegendMatrixRow(
+  private plotLegendSeriesRow(
     state: RenderPanelState,
-    dimension: LegendDimension,
-    item: MatrixLegendRow,
-    selectionRows: readonly MatrixLegendRow[],
+    item: SeriesLegendRow,
+    selectionRows: readonly SeriesLegendRow[],
   ): HTMLElement {
     const block = document.createElement("div");
-    block.className = "plot-legend-row-block plot-legend-matrix-block";
+    block.className = "plot-legend-row-block plot-legend-series-block";
     const row = document.createElement("div");
     row.className = "plot-legend-roster-row";
     row.classList.toggle("focused", item.focused);
-    row.classList.toggle("ghosted", item.ghosted && !item.focused);
-    const matching = state.series.filter((series) =>
-      dimension === "source"
-        ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
-            series.ref.source_key) === item.value
-        : series.ref.channel === item.value,
+    row.classList.toggle(
+      "ghosted",
+      item.series.display === "ghost" && !item.focused,
     );
-    const paths = matching.map((series) => series.path);
-    row.dataset.paths = JSON.stringify(paths);
-    const single = matching.length === 1 ? matching[0] : undefined;
+    const series = item.series;
+    row.dataset.paths = JSON.stringify([series.path]);
     const swatch = document.createElement("button");
     swatch.type = "button";
     swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
+    swatch.style.setProperty("--plot-row-swatch-color", seriesColor(series));
     swatch.style.setProperty(
-      "--plot-row-swatch-color",
-      item.hue === null
-        ? "var(--fg-4)"
-        : `var(--series-${String(colorIndexForHue(item.hue) + 1)})`,
+      "--plot-row-swatch-width",
+      `${String(series.width + (series.focused ? 1 : 0))}px`,
     );
-    if (single !== undefined) {
-      swatch.style.setProperty(
-        "--plot-row-swatch-width",
-        `${String(single.width + (single.focused ? 1 : 0))}px`,
-      );
-    }
-    if (single === undefined) {
-      swatch.disabled = true;
-      swatch.title = "Group styles are edited with selector rules";
-    } else {
-      swatch.title = `Edit ${single.path} line properties`;
-      swatch.setAttribute(
-        "aria-expanded",
-        String(this.inspectorPath === single.path),
-      );
-      swatch.addEventListener("click", () => {
-        this.toggleInlineInspector(state, single.path);
-      });
-    }
+    swatch.title = `Edit ${series.path} line properties`;
+    swatch.setAttribute(
+      "aria-expanded",
+      String(this.inspectorPath === series.path),
+    );
+    swatch.addEventListener("click", () => {
+      this.toggleInlineInspector(state, series.path);
+    });
     const action = document.createElement("button");
     action.type = "button";
     action.className = "plot-legend-roster-action";
     const label = document.createElement("span");
     label.className = "plot-legend-label";
-    label.textContent = `${item.overridden ? "▍ " : ""}${item.label}`;
-    const count = document.createElement("span");
-    count.className = "plot-legend-count";
-    count.textContent = `×${String(item.count)}`;
-    action.append(label, count);
-    action.addEventListener("mouseenter", () => this.setEmphasis(paths));
+    label.textContent = `${series.overridden ? "▍ " : ""}${series.path}`;
+    action.append(label);
+    action.addEventListener("mouseenter", () => this.setEmphasis(series.path));
     action.addEventListener("mouseleave", () => this.setEmphasis(null));
     action.addEventListener("click", (event) => {
-      if (event.altKey) this.callbacks.onMuteSelector(this.id, item.selector);
+      if (event.altKey) this.callbacks.onMuteSeries(this.id, series.ref);
       else
         this.selectFocusRows(
           event,
-          dimension,
+          "legend",
           item.value,
           selectionRows,
           (row) => row.value,
-          (row) => this.focusEntryForRow(dimension, row, state),
+          (row) => this.focusEntryForSeries(row.series),
         );
     });
-    action.title = `Add ${item.label} to focus; Shift-click selects a range; Command/Ctrl-click toggles; Option-click mutes`;
+    action.title = `Add ${series.path} to focus; Shift-click selects a range; Command/Ctrl-click toggles; Option-click mutes`;
     row.append(swatch, action);
     block.append(row);
-    if (single !== undefined && this.inspectorPath === single.path) {
-      block.append(this.inlineSeriesInspector(state, single));
+    if (this.inspectorPath === series.path) {
+      block.append(this.inlineSeriesInspector(state, series));
     }
     return block;
   }
@@ -2077,8 +2027,6 @@ export class PanelView {
     searchMeta.className = "plot-legend-search-meta search-count";
     searchRow.append(searchPrefix, search);
     searchWrap.append(searchRow, searchMeta);
-    const dimension: LegendDimension =
-      state.color_by === "channel" ? "channel" : "source";
     const group = document.createElement("div");
     group.className = "plot-legend-group";
     const groupTitle = document.createElement("div");
@@ -2092,23 +2040,24 @@ export class PanelView {
         this.callbacks.onClearFocus(this.id);
     });
     const renderRows = (): void => {
-      const all = matrixLegendRows(
+      const all = seriesLegendRows(
         this.callbacks.catalog(),
         state,
-        dimension,
         search.value,
       );
       const shown = this.focusOnly ? all.filter((item) => item.focused) : all;
       groupTitle.replaceChildren(
-        ...this.plotLegendGroupTitle(state, dimension, shown.length).childNodes,
+        ...this.plotLegendGroupTitle(
+          state,
+          shown.length,
+          all.filter((item) => item.focused).length,
+        ).childNodes,
       );
       searchMeta.textContent = `${String(shown.length)} match · ⏎ focus · ⌥⏎ mute`;
       if (typeof this.inspectorPath === "string") {
         viewport.style.height = "auto";
         viewport.replaceChildren(
-          ...shown.map((item) =>
-            this.plotLegendMatrixRow(state, dimension, item, shown),
-          ),
+          ...shown.map((item) => this.plotLegendSeriesRow(state, item, shown)),
         );
         return;
       }
@@ -2121,7 +2070,7 @@ export class PanelView {
       viewport.style.height = `${String(slice.totalHeight)}px`;
       viewport.replaceChildren(
         ...shown.slice(slice.start, slice.end).map((item, offset) => {
-          const block = this.plotLegendMatrixRow(state, dimension, item, shown);
+          const block = this.plotLegendSeriesRow(state, item, shown);
           block.classList.add("virtual");
           block.style.top = `${String(slice.topPadding + offset * 24)}px`;
           return block;
@@ -2134,24 +2083,23 @@ export class PanelView {
     });
     search.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
-      const first = matrixLegendRows(
+      const first = seriesLegendRows(
         this.callbacks.catalog(),
         state,
-        dimension,
         search.value,
       )[0];
       if (first === undefined) return;
       event.preventDefault();
-      if (event.altKey) this.callbacks.onMuteSelector(this.id, first.selector);
+      if (event.altKey) this.callbacks.onMuteSeries(this.id, first.series.ref);
       else if (event.metaKey || event.ctrlKey)
         this.callbacks.onFocusToggle(
           this.id,
-          this.focusEntryForRow(dimension, first, state),
+          this.focusEntryForSeries(first.series),
         );
       else
         this.callbacks.onFocusAdd(
           this.id,
-          this.focusEntryForRow(dimension, first, state),
+          this.focusEntryForSeries(first.series),
         );
     });
     rows.addEventListener("scroll", renderRows);
@@ -3348,25 +3296,13 @@ export class PanelView {
     }
   }
 
-  private focusEntryForRow(
-    dimension: LegendDimension,
-    row: MatrixLegendRow,
-    state: RenderPanelState,
-  ): FocusEntry {
-    const series = state.series.find((entry) =>
-      dimension === "source"
-        ? (this.callbacks.catalog().get(entry.ref)?.sourceName ??
-            entry.ref.source_key) === row.value
-        : entry.ref.channel === row.value,
-    );
-    return dimension === "source"
-      ? {
-          kind: "source",
-          ref: null,
-          source_key: series?.ref.source_key ?? row.value,
-          channel: null,
-        }
-      : { kind: "channel", ref: null, source_key: null, channel: row.value };
+  private focusEntryForSeries(series: RenderSeries): FocusEntry {
+    return {
+      kind: "series",
+      ref: series.ref,
+      source_key: null,
+      channel: series.ref.channel,
+    };
   }
 
   private selectFocusRows<T>(

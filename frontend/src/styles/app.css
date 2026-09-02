@@ -1634,7 +1634,7 @@ button {
   position: relative;
 }
 
-.plot-legend-matrix-block.virtual {
+.plot-legend-series-block.virtual {
   position: absolute;
   left: 0;
   width: 100%;
