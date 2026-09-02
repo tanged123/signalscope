@@ -663,8 +663,9 @@ mod tests {
         let restored = from_json(&value.to_string()).expect("v25 migrates");
         let panel = &restored.tabs[0].panels[0];
         assert_eq!(panel.annotation_display, AnnotationDisplay::Labels);
-        assert_eq!(panel.annotations[0].offset, [10.0, -10.0]);
-        assert_eq!(panel.annotations[0].pinned_value, 3.25);
+        assert!((panel.annotations[0].offset[0] - 10.0).abs() < f64::EPSILON);
+        assert!((panel.annotations[0].offset[1] + 10.0).abs() < f64::EPSILON);
+        assert!((panel.annotations[0].pinned_value - 3.25).abs() < f64::EPSILON);
         assert_eq!(panel.legend_dock, None);
 
         let mut v26 = serde_json::to_value(restored).expect("serializes migrated session");
