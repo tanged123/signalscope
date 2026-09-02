@@ -36,8 +36,8 @@ The 26 px header is divided by hairline seams into stable groups:
 - Axes: the existing gutter/inline axis presentation control. Scale choices are
   not invented in this pass because the time-only ChartGPU path currently has
   one truthful linear scale.
-- Render defaults: editable line width and ghost opacity, plus the current
-  `curve linear` and `pts auto` facts.
+- Render defaults: editable line width and ghost opacity. Curve and point
+  density labels remain absent until they expose truthful controls.
 - Readout: statistics toggle and legend-size control.
 - Window: split, maximize, and close actions, always at the right edge.
 

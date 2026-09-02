@@ -634,8 +634,7 @@ button {
   background: var(--border);
 }
 
-.panel-toolbar-control,
-.panel-toolbar-fact {
+.panel-toolbar-control {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -654,8 +653,7 @@ button {
   color: var(--fg-1);
 }
 
-.panel-toolbar-control b,
-.panel-toolbar-fact b {
+.panel-toolbar-control b {
   color: var(--fg-1);
   font-weight: 500;
 }
@@ -760,14 +758,7 @@ button {
   color: var(--fg-1);
 }
 
-@container panel (width < 900px) {
-  .panel-points-fact {
-    display: none;
-  }
-}
-
 @container panel (width < 740px) {
-  .panel-toolbar-fact,
   .panel-toolbar-render .panel-ghost-opacity {
     display: none;
   }

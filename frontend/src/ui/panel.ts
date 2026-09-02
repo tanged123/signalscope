@@ -3744,9 +3744,7 @@ function panelMarkup(): string {
       <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-group panel-toolbar-render">
         <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
-        <span class="panel-toolbar-fact">curve <b>linear</b></span>
         <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Ghost visibility and strength">ghost <b class="panel-ghost-value">all</b> <span class="toolbar-caret">▾</span></button>
-        <span class="panel-toolbar-fact panel-points-fact">pts <b>auto</b></span>
       </span>
       <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-group panel-toolbar-readout">
