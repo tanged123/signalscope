@@ -180,6 +180,20 @@ function isNamedSet(value: unknown): boolean {
   );
 }
 
+function isStyleDimension(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    ["focus", "source", "channel", "set", "attr"].includes(value)
+  );
+}
+
+function isStatColumn(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    ["min", "max", "mean", "rms", "cursor", "n"].includes(value)
+  );
+}
+
 function isPanel(value: unknown): boolean {
   const stringOrNull = (item: unknown): item is string =>
     typeof item === "string";
@@ -190,9 +204,11 @@ function isPanel(value: unknown): boolean {
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
     Array.isArray(value.bindings) &&
     value.bindings.every(isBinding) &&
-    ["focus", "source", "channel", "set", "attr"].includes(
-      String(value.color_by),
-    ) &&
+    isNullable(value.color_by, isStyleDimension) &&
+    isNullable(value.dash_by, isStyleDimension) &&
+    isNullable(value.width_by, isStyleDimension) &&
+    typeof value.line_width === "number" &&
+    typeof value.ghost_opacity === "number" &&
     Array.isArray(value.overrides) &&
     value.overrides.every(isOverride) &&
     Array.isArray(value.focus) &&
@@ -215,7 +231,11 @@ function isPanel(value: unknown): boolean {
     isNullable(value.time_window, isNumberPair) &&
     Array.isArray(value.annotations) &&
     value.annotations.every(isAnnotation) &&
-    typeof value.show_stats === "boolean"
+    typeof value.show_stats === "boolean" &&
+    Array.isArray(value.stat_columns) &&
+    value.stat_columns.every(isStatColumn) &&
+    isNullable(value.stats_sort, isStatColumn) &&
+    typeof value.stats_sort_descending === "boolean"
   );
 }
 

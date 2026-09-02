@@ -794,12 +794,17 @@ export class PanelView {
         else this.callbacks.onClearFocus(this.id);
         this.closeBindingPopover();
         this.closePanelConfig();
+        const drawerOpen =
+          this.encodingDrawer !== null ||
+          this.overrideDrawer ||
+          this.statsColumnsDrawer;
+        const inspectorOpen = this.inspectorPath !== null;
         this.encodingDrawer = null;
         this.overrideDrawer = false;
         this.statsColumnsDrawer = false;
-        if (this.inspectorPath !== null) {
-          this.inspectorPath = null;
-          if (this.lastState !== null) this.updatePlotLegend(this.lastState);
+        this.inspectorPath = null;
+        if ((drawerOpen || inspectorOpen) && this.lastState !== null) {
+          this.updatePlotLegend(this.lastState);
         }
       } else if (
         event.target === this.element &&
@@ -1741,7 +1746,6 @@ export class PanelView {
         state: state.legend_state === "roster" ? "keys" : "roster",
       });
     });
-    if (state.show_stats) header.append(this.statsScopeLabel());
     const collapse = document.createElement("button");
     collapse.className = "plot-legend-collapse";
     collapse.type = "button";
@@ -1750,7 +1754,9 @@ export class PanelView {
     collapse.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, { state: "badge" });
     });
-    header.append(drag, title, collapse);
+    header.append(drag, title);
+    if (state.show_stats) header.append(this.statsScopeLabel());
+    header.append(collapse);
 
     const content = state.show_stats
       ? this.plotLegendStats(state)
@@ -1878,7 +1884,10 @@ export class PanelView {
         swatch.style.background = `var(--series-${String(slot)})`;
         palette.append(swatch);
       }
-      const count = active === null ? 1 : encodingValueCount(state, active);
+      const count =
+        active === null
+          ? 1
+          : encodingValueCount(state, active, this.callbacks.catalog());
       const note = document.createElement("div");
       note.className = "plot-encoding-note";
       note.textContent = `${String(count)} ${count === 1 ? "value" : "values"} → ${String(COLOR_SLOTS)} slots${count > COLOR_SLOTS ? " · repeats disclosed" : ""}`;
@@ -2591,9 +2600,14 @@ export class PanelView {
   }
 
   private updateLegendValues(): void {
-    if (this.lastState?.show_stats === true) {
-      this.updatePlotLegend(this.lastState);
-      return;
+    for (const cell of this.element.querySelectorAll<HTMLElement>(
+      '.plot-stat-cell[data-column="cursor"][data-path]',
+    )) {
+      setStatCellValue(
+        cell,
+        this.valueAtCursor(cell.dataset.path ?? ""),
+        cell.dataset.unit ?? null,
+      );
     }
     for (const value of this.element.querySelectorAll<HTMLElement>(
       ".plot-legend-value",
@@ -3480,6 +3494,7 @@ function formatToolbarNumber(value: number): string {
 function encodingValueCount(
   state: RenderPanelState,
   dimension: StyleDimension,
+  catalog: Catalog,
 ): number {
   if (dimension === "focus")
     return new Set(state.series.map((series) => series.focused)).size;
@@ -3488,7 +3503,9 @@ function encodingValueCount(
   if (dimension === "channel")
     return new Set(state.series.map((series) => series.ref.channel)).size;
   if (dimension === "set") return state.bindings.length;
-  return new Set(state.series.map((series) => series.path.split("/")[0])).size;
+  return new Set(
+    state.series.map((series) => catalog.get(series.ref)?.summary.unit ?? "—"),
+  ).size;
 }
 
 function seriesColor(series: Pick<RenderSeries, "hue">): string {
@@ -3622,14 +3639,23 @@ function statCell(
   const cell = document.createElement("span");
   cell.className = "plot-stat-cell";
   cell.dataset.column = column;
-  cell.textContent = formatStatValue(value);
+  if (unit !== null && unit !== "") cell.dataset.unit = unit;
+  setStatCellValue(cell, value, unit);
+  return cell;
+}
+
+function setStatCellValue(
+  cell: HTMLElement,
+  value: number | null,
+  unit: string | null,
+): void {
+  cell.replaceChildren(formatStatValue(value));
   if (value !== null && unit !== null && unit !== "") {
     const suffix = document.createElement("span");
     suffix.className = "plot-stat-unit";
     suffix.textContent = ` ${unit}`;
     cell.append(suffix);
   }
-  return cell;
 }
 
 function formatStatValue(value: number | null): string {

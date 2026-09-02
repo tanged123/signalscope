@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Catalog } from "../app/catalog";
+import { binColumnsFromWire } from "../app/bin-columns";
 import { resolvePanel } from "../app/resolution";
 import type { SignalSummary } from "../generated/protocol";
 import type { PanelState } from "../generated/session";
@@ -288,6 +289,15 @@ describe("PanelView chrome", () => {
       )
       ?.click();
     expect(legend?.querySelector(".plot-encoding-choices")).not.toBeNull();
+    view.element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(legend?.querySelector(".plot-encoding-choices")).toBeNull();
+    legend
+      ?.querySelector<HTMLButtonElement>(
+        '.plot-legend-encoding-chip[data-property="color"]',
+      )
+      ?.click();
     const channelChoice = [
       ...(legend?.querySelectorAll<HTMLButtonElement>(
         ".plot-encoding-choice",
@@ -295,6 +305,27 @@ describe("PanelView chrome", () => {
     ].find((choice) => choice.textContent === "channel");
     channelChoice?.click();
     expect(onSetEncoding).toHaveBeenCalledWith("panel", "color", "channel");
+  });
+
+  it("reports attribute encoding values by unit", () => {
+    const catalog = Catalog.build([
+      { ...signal("run-01", "temp"), unit: "°C" },
+      { ...signal("run-02", "temp"), unit: "°C" },
+    ]);
+    const panel = state();
+    panel.color_by = "attr";
+    const view = new PanelView("panel", callbacks(catalog));
+    view.update(panel, false);
+
+    view.element
+      .querySelector<HTMLButtonElement>(
+        '.plot-legend-encoding-chip[data-property="color"]',
+      )
+      ?.click();
+
+    expect(
+      view.element.querySelector(".plot-encoding-note")?.textContent,
+    ).toMatch(/^1 value → \d+ slots$/);
   });
 
   it("edits a series inline and exposes field-level revert without legacy actions", () => {
@@ -414,6 +445,18 @@ describe("PanelView chrome", () => {
     expect(legend.querySelector(".plot-legend-stats")).not.toBeNull();
     expect(view.element.querySelector(".panel-stats")).toBeNull();
     expect(
+      [
+        ...legend.querySelectorAll<HTMLElement>(
+          ".plot-legend-header > :not(.plot-legend-resize)",
+        ),
+      ].map((element) => element.className),
+    ).toEqual([
+      "plot-legend-drag",
+      "plot-legend-title",
+      "plot-legend-stats-scope",
+      "plot-legend-collapse",
+    ]);
+    expect(
       [...legend.querySelectorAll<HTMLElement>(".plot-stat-sort")].map(
         (button) => button.dataset.column,
       ),
@@ -438,6 +481,58 @@ describe("PanelView chrome", () => {
     ].find((button) => button.textContent.trim().replace(/^✓\s*/, "") === "N");
     nChoice?.click();
     expect(onSetStatColumns).toHaveBeenCalledWith("panel", ["min", "mean"]);
+  });
+
+  it("updates cursor statistic cells without rebuilding open drawers", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const panel = state();
+    panel.show_stats = true;
+    panel.stat_columns = ["cursor"];
+    const view = new PanelView("panel", callbacks(catalog));
+    view.update(panel, false);
+    view.element
+      .querySelector<HTMLButtonElement>(
+        '.plot-legend-encoding-chip[data-property="color"]',
+      )
+      ?.click();
+    const drawer = view.element.querySelector(".plot-encoding-drawer");
+    Object.assign(view, {
+      lastTiles: {
+        requestId: "cursor",
+        series: [
+          {
+            signalId: "run-01-temp",
+            signalPath: "run-01/temp",
+            unit: null,
+            level: 0,
+            bins: binColumnsFromWire([
+              {
+                t0: 0,
+                t1: 0,
+                first: 4,
+                last: 4,
+                min: 4,
+                max: 4,
+                sum: 4,
+                sum_sq: 16,
+                finite_count: "1",
+                sample_count: "1",
+                has_gap: false,
+              },
+            ]),
+          },
+        ],
+      },
+    });
+
+    view.setLocalCursor(0);
+
+    expect(view.element.querySelector(".plot-encoding-drawer")).toBe(drawer);
+    expect(
+      view.element.querySelector(
+        '.plot-stat-cell[data-column="cursor"][data-path="run-01/temp"]',
+      )?.textContent,
+    ).toBe("4");
   });
 
   it("does not intercept Tab or Enter from descendant controls", () => {
