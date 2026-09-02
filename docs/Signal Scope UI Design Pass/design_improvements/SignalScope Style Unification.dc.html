@@ -399,18 +399,15 @@ a{color:var(--amber-7);text-decoration:none}a:hover{color:var(--amber-9)}
         <span style="display:flex;align-items:center;gap:4px;padding:1px 4px"><span style="width:11px;height:0;border-top:1px dashed var(--fg-3)"></span>dash ← flat</span>
         <span style="display:flex;align-items:center;gap:4px;padding:1px 4px"><span style="width:11px;height:2px;background:var(--fg-3)"></span>1.5</span>
       </div>
-      <div style="padding:4px 7px 2px;color:var(--fg-4);font-size:9px;letter-spacing:.08em">FOCUS 2</div>
-      <div style="padding:0 7px 3px;display:flex;flex-direction:column;gap:2px">
-        <div style="display:flex;align-items:center;gap:6px;color:var(--fg-1)"><span style="width:12px;height:3px;background:var(--amber-7)"></span><span style="flex:1">run_02 / response <span style="color:var(--amber-7)">▍</span></span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.7481</span><span style="color:var(--fg-4)">✕</span></div>
-        <div style="display:flex;align-items:center;gap:6px;color:var(--fg-1)"><span style="width:12px;height:2px;background:var(--series-8)"></span><span style="flex:1">run_07 / response</span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.8670</span><span style="color:var(--fg-4)">✕</span></div>
-      </div>
-      <div style="padding:3px 7px;background:var(--surface-2);border-top:1px solid var(--border-faint);border-bottom:1px solid var(--border-faint);display:flex;color:var(--fg-3);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-2)">▾ SOURCE</span><span style="margin-left:auto">8</span></div>
+      <div style="padding:3px 7px;background:var(--surface-2);border-top:1px solid var(--border-faint);border-bottom:1px solid var(--border-faint);display:flex;align-items:center;gap:8px;color:var(--fg-3);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-2)">▾ SOURCE</span><span style="margin-left:auto;color:var(--amber-7);letter-spacing:0">2 focused ⤒</span><span>8</span></div>
       <div style="display:flex;flex-direction:column">
         <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-1)"></span><span style="flex:1">run_01</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7159</span></div>
+        <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--amber-3);box-shadow:inset 2px 0 0 var(--amber-7);color:var(--fg-1)"><span style="width:12px;height:3px;background:var(--amber-7)"></span><span style="flex:1">run_02 <span style="color:var(--amber-7)">▍</span></span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.7481</span></div>
         <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-3)"></span><span style="flex:1">run_03</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7702</span></div>
         <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-4)"></span><span style="flex:1">run_04</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7853</span></div>
         <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-5)"></span><span style="flex:1">run_05</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.8052</span></div>
         <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-6)"></span><span style="flex:1">run_06</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.8351</span></div>
+        <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--amber-3);box-shadow:inset 2px 0 0 var(--amber-7);color:var(--fg-1)"><span style="width:12px;height:2px;background:var(--series-8)"></span><span style="flex:1">run_07</span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.8670</span></div>
         <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-4)"><span style="width:12px;height:1px;background:var(--fg-4);opacity:.35"></span><span style="flex:1;text-decoration:line-through">run_08</span><span style="font-size:9px">muted</span></div>
       </div>
       <div style="padding:3px 7px;border-top:1px solid var(--border-faint);background:var(--surface-2);display:flex;color:var(--fg-3)"><span>1 ghost <span style="color:var(--fg-4)">▾</span></span><span style="margin-left:auto;color:var(--amber-7)">1 override ▾</span></div>
@@ -423,6 +420,313 @@ a{color:var(--amber-7);text-decoration:none}a:hover{color:var(--amber-9)}
 <div style="width:1440px;font:400 11px/1.6 var(--font-mono);color:var(--fg-3)">Reading the frame: the toolbar states four panel facts no per-series control can hold; the legend's second row states the encoding in plain words and owns the palette; <span style="color:var(--amber-7)">run_02</span> is amber at 3 px because it was overridden on purpose, and says so three times — thick swatch, <span style="color:var(--fg-2)">▍</span> tick, footer count. Nothing in this frame can be set from two places.</div>
 </div>
 
+
+<div style="max-width:1320px;margin:0 auto;padding:8px 44px 28px;display:flex;flex-direction:column;gap:28px;border-top:1px solid var(--border)">
+
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px;padding-top:26px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">10 · ANNOTATIONS<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">data tips · shot 22:49</div></div>
+  <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">A data tip is a label on a point. It is not a measurement, and it is not a table row.</b> The current build makes it all three: every tip carries a <span style="font-family:var(--font-mono);color:var(--fg-4)">Δt · Δy · slope</span> triplet that describes a <i>pair</i>, a bottom register re-prints each tip's numbers as a list row, and that register grows downward out of the plot's height. Three surfaces for one fact, and the plot shrinks each time you pin.</div>
+    <div style="box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;background:var(--surface-1);font-family:var(--font-mono);font-size:11px">
+      <div style="display:grid;grid-template-columns:186px 1fr 210px;padding:4px 10px;background:var(--surface-2);border-bottom:1px solid var(--border);color:var(--fg-4);font-size:9px;letter-spacing:.06em"><span>FAULT</span><span>WHY IT IS WRONG</span><span>RESOLUTION</span></div>
+      <div style="display:grid;grid-template-columns:186px 1fr 210px;padding:3px 10px;border-bottom:1px solid var(--border-faint)"><span style="color:var(--err-red)">Δt · Δy · slope on the tip</span><span>A delta is a relation between two tips. Printed on a single tip it is either meaningless or silently relative to whichever tip was placed first — an unstated reference. The footer line repeats it a third time.</span><span><span style="color:var(--fg-1)">delete outright.</span> Not moved elsewhere on the tip and not moved to the status bar. Derived quantities are §8 statistics over a set.</span></div>
+      <div style="display:grid;grid-template-columns:186px 1fr 210px;padding:3px 10px;border-bottom:1px solid var(--border-faint)"><span style="color:var(--err-red)">bottom register</span><span>Pinning a tip reflows the plot — the same fault §8 removed from the stats strip. Unbounded: 10 tips is 10 rows tall, 40 tips has no ceiling and no scroll.</span><span><span style="color:var(--fg-1)">delete.</span> Inventory moves into the legend, which is already the panel's tabular, scrolling surface.</span></div>
+      <div style="display:grid;grid-template-columns:186px 1fr 210px;padding:3px 10px;border-bottom:1px solid var(--border-faint)"><span style="color:var(--err-red)">the row duplicates the tip</span><span><span style="color:var(--fg-2)">⑩ t 9.8500 · 9.8500 · 1.1723</span> — x printed twice, and both are already on the label two inches above. Nothing in the row is new information.</span><span>The row earns its place only by carrying what the label cannot: series, scope, and the actions.</span></div>
+      <div style="display:grid;grid-template-columns:186px 1fr 210px;padding:3px 10px"><span style="color:var(--err-red)">no series identity</span><span>Ten tips over eight overlapping runs, and not one says which run it sits on. The one fact a tip cannot be read without.</span><span>Series color becomes the label's left rule; name appears on hover and in the row.</span></div>
+    </div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-2);background:var(--surface-1);border:1px solid var(--border);border-radius:2px;padding:8px 10px;display:flex;flex-direction:column;gap:3px">
+      <span style="color:var(--fg-1);font-size:10px;letter-spacing:.08em">THE LAW, RESTATED FOR TIPS</span>
+      <span>— <span style="color:var(--fg-1)">The label on the plot <i>is</i> the annotation.</span> There is no second representation that must be kept in sync. The legend's tips section is a <i>manifest</i> of them — it lists, sorts, and removes; it does not restate their numbers as the primary reading.</span>
+      <span>— <span style="color:var(--fg-1)">Pinning never changes layout.</span> Tips are absolutely positioned in plot space. Panel geometry is identical at 0 tips and at 400.</span>
+      <span>— <span style="color:var(--fg-1)">A tip holds only the sample it names:</span> the axis values in axis order, plus the series. Nothing computed — no delta, no slope, no fit. A slope between two points on an x/y plot is a <i>claim about the data</i>; a data tip makes no claims, it reads the record.</span>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">10.1 · THE LABEL<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">anatomy · states</div></div>
+  <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;line-height:1.55">
+    <div style="display:flex;gap:14px;align-items:flex-start;background:var(--surface-void);box-shadow:0 0 0 1px var(--border);border-radius:2px;padding:16px;flex-wrap:wrap">
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">NOW — 5 FIELDS, 3 REDUNDANT</div>
+        <div style="display:flex;align-items:center;gap:5px;width:fit-content;background:var(--surface-3);box-shadow:0 0 0 1px var(--border);border-radius:2px;padding:2px 7px;font-family:var(--font-mono);font-size:10px;color:var(--fg-1);font-variant-numeric:tabular-nums"><span style="color:var(--fg-4)">⊙</span><span>9.8500</span><span style="color:var(--fg-4)">·</span><span>1.1723</span></div>
+        <div style="display:flex;align-items:center;gap:5px;width:fit-content;background:var(--surface-3);box-shadow:0 0 0 1px var(--amber-5);border-radius:2px;padding:2px 7px;font-family:var(--font-mono);font-size:10px;color:var(--amber-9);font-variant-numeric:tabular-nums">Δt −0.7900 s <span style="color:var(--fg-4)">·</span> Δy −0.0357 <span style="color:var(--fg-4)">·</span> slope 0.0451/s</div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:250px">Relative to <i>what</i>? The reference is never named. This banner is also pinned to the plot's top-right corner, over data, for a value that belongs to a selection.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">PROPOSED — HOVER (EPHEMERAL)</div>
+        <div style="display:flex;align-items:stretch;gap:0;width:fit-content;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;overflow:hidden;font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums">
+          <span style="width:2px;background:var(--series-1)"></span>
+          <span style="display:flex;align-items:center;gap:7px;padding:2px 7px"><span style="color:var(--fg-1)">9.8500</span><span style="color:var(--fg-2)">1.1723</span></span>
+        </div>
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em;margin-top:4px">PINNED — HOVERED, ACTIONS REVEALED</div>
+        <div style="display:flex;align-items:stretch;width:fit-content;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;overflow:hidden;font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums">
+          <span style="width:2px;background:var(--series-1)"></span>
+          <span style="display:flex;align-items:center;gap:7px;padding:2px 7px"><span style="color:var(--fg-3);font-size:9px">run_01</span><span style="color:var(--fg-1)">9.8500</span><span style="color:var(--fg-2)">1.1723</span><span style="color:var(--fg-4);padding-left:2px">✕</span></span>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:250px">Two numbers, series as a 2 px rule. Units come from the axis header, not the label. Name and <span style="color:var(--fg-2)">✕</span> appear on hover only — resting state is the minimum.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">ONE LABEL, EVERY PLOT KIND</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:8px"><span style="font:400 9px var(--font-mono);color:var(--fg-4);width:74px">time series</span><span style="display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums"><span style="width:2px;background:var(--series-1)"></span><span style="display:flex;align-items:center;gap:7px;padding:2px 7px"><span style="color:var(--fg-1)">9.8500</span><span style="color:var(--fg-2)">1.1723</span></span></span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="font:400 9px var(--font-mono);color:var(--fg-4);width:74px">x / y</span><span style="display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums"><span style="width:2px;background:var(--series-4)"></span><span style="display:flex;align-items:center;gap:7px;padding:2px 7px"><span style="color:var(--fg-1)">0.8455</span><span style="color:var(--fg-2)">1.2080</span></span></span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="font:400 9px var(--font-mono);color:var(--fg-4);width:74px">log x</span><span style="display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums"><span style="width:2px;background:var(--series-7)"></span><span style="display:flex;align-items:center;gap:7px;padding:2px 7px"><span style="color:var(--fg-1)">1.2400e+03</span><span style="color:var(--fg-2)">8.4550</span></span></span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="font:400 9px var(--font-mono);color:var(--fg-4);width:74px">3rd channel</span><span style="display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums"><span style="width:2px;background:var(--series-6)"></span><span style="display:flex;align-items:center;gap:7px;padding:2px 7px"><span style="color:var(--fg-1)">0.8455</span><span style="color:var(--fg-2)">1.2080</span><span style="color:var(--fg-2)">312.40</span></span></span></div>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:262px">The same label on four plot kinds, because it is generic by construction: <span style="color:var(--fg-2)">one value per axis the point actually has</span>, in axis order, formatted by that axis's own precision and scale. A time axis is not special-cased and gets no <span style="color:var(--fg-4)">t</span> prefix; a log axis prints as the axis prints. Selection still exists — for delete, export, and highlight — but it computes nothing.</div>
+      </div>
+
+    </div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-2);background:var(--surface-1);border:1px solid var(--border);border-radius:2px;padding:8px 10px;display:flex;flex-direction:column;gap:3px">
+      <span style="color:var(--fg-1);font-size:10px;letter-spacing:.08em">PLACEMENT &amp; LIFECYCLE</span>
+      <span>— <span style="color:var(--fg-1)">Anchored to the datum, offset in pixels.</span> Default offset is 10 px up-right of the point; the label keeps that pixel offset through pan and zoom, so it never drifts off its point or grows with the data range. Drag the label to re-offset — a 1 px leader appears when the offset exceeds 24 px. The point marker never moves.</span>
+      <span>— <span style="color:var(--fg-1)">Auto-nudge on collision only.</span> Overlapping labels shift along the y axis by one label height, up to two steps, then the later tip renders as a bare marker and its numbers are read on hover. No connectors, no callout fan.</span>
+      <span>— <span style="color:var(--fg-1)">Hover is ephemeral, click pins.</span> One ephemeral tip at a time, snapped to the nearest sample of the hovered series (never interpolated — a data tip names a real sample). <span style="color:var(--fg-2)">Esc</span> clears selection, <span style="color:var(--fg-2)">⌫</span> deletes selected pins, double-click on empty plot clears all after a count-stating confirm.</span>
+      <span>— <span style="color:var(--fg-1)">Tips survive rebind and re-style</span>, since they key on <span style="color:var(--fg-2)">series id + sample index</span>. They gray out — not vanish — when their series is ghosted, and are dropped only when the series is unbound.</span>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">10.2 · SCALE<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">40 tips, no reflow</div></div>
+  <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">Density is a display mode on the toolbar, and the manifest is a legend section.</b> Both already exist as patterns: the toolbar holds panel-scope render facts (§3), the legend holds scrolling tabular truth (§8). Annotations add one chip and one section — no new surface.</div>
+    <div style="display:flex;gap:14px;align-items:flex-start;background:var(--surface-void);box-shadow:0 0 0 1px var(--border);border-radius:2px;padding:16px;flex-wrap:wrap">
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">TOOLBAR CHIP — DENSITY, OPEN</div>
+        <div style="width:200px;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;font-family:var(--font-mono);font-size:10px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:6px;padding:3px 7px;background:var(--surface-2);border-bottom:1px solid var(--border);color:var(--fg-1)">tips <span style="color:var(--fg-1)">12</span> <span style="color:var(--fg-4);margin-left:auto">▾</span></div>
+          <div style="display:flex;flex-direction:column;padding:2px 0">
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--amber-3);color:var(--fg-1)"><span style="color:var(--amber-9)">•</span>labels</div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="color:transparent">•</span>markers only</div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="color:transparent">•</span>hidden</div>
+          </div>
+          <div style="padding:3px 7px;border-top:1px solid var(--border-faint);color:var(--fg-3);display:flex"><span>clear all</span><span style="margin-left:auto;color:var(--fg-4)">⌫</span></div>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:200px"><span style="color:var(--fg-2)">markers only</span> keeps every pin and drops every label — the readable state at 40 tips. <span style="color:var(--fg-2)">hidden</span> keeps them without drawing. Neither deletes.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">LEGEND SECTION — 12 TIPS, SCROLL-CONTAINED, SORTED BY x ↓</div>
+        <div style="width:330px;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;font-family:var(--font-mono);font-size:10px;overflow:hidden;white-space:nowrap">
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 7px;border-bottom:1px solid var(--border);color:var(--fg-3)"><span style="color:var(--fg-4);letter-spacing:-2px">⠿</span><span style="color:var(--fg-1)">8 series <span style="color:var(--fg-4)">▾</span></span><span style="margin-left:auto;color:var(--fg-4)">⌄</span></div>
+          <div style="padding:2px 7px;color:var(--fg-4);font-size:9px;letter-spacing:.06em;display:flex;background:var(--surface-1);border-bottom:1px solid var(--border-faint)"><span>SERIES</span><span style="margin-left:auto">8 rows collapsed ▸</span></div>
+          <div style="display:flex;align-items:center;gap:6px;padding:3px 7px;background:var(--surface-2);border-top:1px solid var(--border);color:var(--fg-2);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-1)">▾ TIPS</span><span style="color:var(--fg-4)">12</span><span style="margin-left:auto;color:var(--fg-4)">⊞▾</span></div>
+          <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;padding:2px 7px;background:var(--surface-1);border-bottom:1px solid var(--border-faint);color:var(--fg-4);font-size:9px;letter-spacing:.06em"><span></span><span>SERIES</span><span style="text-align:right;color:var(--fg-2)">x ↓</span><span style="text-align:right">value</span><span></span></div>
+          <div style="max-height:132px;overflow:hidden;display:flex;flex-direction:column">
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-1);background:var(--amber-3);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-1)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_01</span><span style="text-align:right">9.8500</span><span style="text-align:right;color:var(--fg-2)">1.1723</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-1)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_01</span><span style="text-align:right">9.0600</span><span style="text-align:right;color:var(--fg-3)">1.2080</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-7)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_07</span><span style="text-align:right">8.3500</span><span style="text-align:right;color:var(--fg-3)">0.9754</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-5)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_05</span><span style="text-align:right">7.4900</span><span style="text-align:right;color:var(--fg-3)">0.7459</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-4);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--fg-4);opacity:.4"></span><span style="overflow:hidden;text-overflow:ellipsis;text-decoration:line-through">run_08</span><span style="text-align:right">7.2900</span><span style="text-align:right">0.8645</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-3)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_03</span><span style="text-align:right">6.7000</span><span style="text-align:right;color:var(--fg-3)">0.7102</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+          </div>
+          <div style="padding:3px 7px;border-top:1px solid var(--border-faint);background:var(--surface-2);display:flex;color:var(--fg-3)"><span>1 ghost <span style="color:var(--fg-4)">▾</span></span><span style="margin-left:auto;color:var(--fg-4)">⤓ csv</span></div>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:330px">A peer section to <span style="color:var(--fg-2)">▾ SOURCE</span>, collapsed by default, capped at ~6 rows and scrolled past that — so the rail's height is fixed whether there are 3 tips or 300. Sort by clicking a header, <span style="color:var(--fg-2)">⌖</span> pans the plot to the tip, <span style="color:var(--fg-2)">✕</span> deletes one, and <span style="color:var(--fg-2)">⤓ csv</span> is the same export the stats columns use. The hovered row highlights its label on the plot and vice versa.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">RAIL · 150 px — SAME SECTION, TWO COLUMNS DROPPED</div>
+        <div style="width:150px;background:var(--surface-1);box-shadow:0 0 0 1px var(--border);border-radius:2px;font-family:var(--font-mono);font-size:10px;overflow:hidden;white-space:nowrap">
+          <div style="display:flex;align-items:center;gap:5px;padding:3px 6px;border-bottom:1px solid var(--border);color:var(--fg-3)"><span style="color:var(--fg-1)">8 ▾</span><span style="margin-left:auto;color:var(--fg-4)">⌄</span></div>
+          <div style="display:flex;align-items:center;gap:5px;padding:2px 6px;background:var(--surface-2);border-bottom:1px solid var(--border-faint);color:var(--fg-2);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-1)">▾ TIPS</span><span style="margin-left:auto;color:var(--fg-4)">12</span></div>
+          <div style="display:flex;flex-direction:column">
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 12px;gap:4px;align-items:center;padding:2px 6px;background:var(--amber-3);color:var(--fg-1);font-variant-numeric:tabular-nums"><span style="width:2px;height:10px;background:var(--series-1)"></span><span style="text-align:right">9.8500</span><span style="color:var(--fg-4)">✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 12px;gap:4px;align-items:center;padding:2px 6px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:10px;background:var(--series-1)"></span><span style="text-align:right">9.0600</span><span style="color:var(--fg-4)">✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 12px;gap:4px;align-items:center;padding:2px 6px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:10px;background:var(--series-7)"></span><span style="text-align:right">8.3500</span><span style="color:var(--fg-4)">✕</span></div>
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 12px;gap:4px;align-items:center;padding:2px 6px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:10px;background:var(--series-5)"></span><span style="text-align:right">7.4900</span><span style="color:var(--fg-4)">✕</span></div>
+          </div>
+          <div style="padding:2px 6px;border-top:1px solid var(--border-faint);color:var(--fg-4);font-size:9px">+8 more</div>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:150px">Docked, the sort column survives and <span style="color:var(--fg-2)">value</span> drops — right-to-left, the §8 rule. The color rule is never dropped; it is the row's identity.</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div style="width:fit-content;margin:0 auto;padding:0 44px 64px;display:flex;flex-direction:column;gap:10px">
+<div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">10.3 · ALL-UP<span style="color:var(--fg-3);font-weight:400"> · 1440×540 · 12 tips pinned, two tips selected, panel geometry unchanged</span></div>
+<div style="width:1440px;height:540px;background:var(--surface-0);box-shadow:0 0 0 1px var(--border-strong);border-radius:2px;overflow:hidden;display:flex;flex-direction:column;font-family:var(--font-mono)">
+
+  <div style="display:flex;align-items:center;height:26px;flex:none;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10px;color:var(--fg-2)">
+    <span style="display:flex;align-items:center;gap:7px;padding:0 10px"><span style="color:var(--fg-4);letter-spacing:-2px">⠿</span><span style="color:var(--fg-1)">Panel 1</span><span style="border:1px solid var(--border-strong);border-radius:2px;padding:1px 6px;color:var(--fg-1)">response ×8 <span style="color:var(--fg-4)">▾</span></span></span>
+    <span style="width:1px;align-self:stretch;background:var(--border)"></span>
+    <span style="display:flex;align-items:center;gap:9px;padding:0 10px"><span>y <span style="color:var(--fg-1)">lin</span> <span style="color:var(--fg-4)">▾</span></span><span>x <span style="color:var(--fg-1)">lin</span> <span style="color:var(--fg-4)">▾</span></span></span>
+    <span style="width:1px;align-self:stretch;background:var(--border)"></span>
+    <span style="display:flex;align-items:center;gap:9px;padding:0 10px"><span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:2px;background:var(--fg-2)"></span><span style="color:var(--fg-1)">1.5</span> <span style="color:var(--fg-4)">▾</span></span><span>curve <span style="color:var(--fg-1)">linear</span> <span style="color:var(--fg-4)">▾</span></span><span>ghost <span style="color:var(--fg-1)">35%</span> <span style="color:var(--fg-4)">▾</span></span><span>pts <span style="color:var(--fg-1)">auto</span> <span style="color:var(--fg-4)">▾</span></span></span>
+    <span style="width:1px;align-self:stretch;background:var(--border)"></span>
+    <span style="display:flex;align-items:center;gap:9px;padding:0 10px"><span>Σ <span style="color:var(--fg-1)">stats</span></span><span>tips <span style="color:var(--fg-1)">12</span> <span style="color:var(--fg-4)">▾</span></span><span>legend <span style="color:var(--fg-1)">keys</span> <span style="color:var(--fg-4)">▾</span></span></span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:12px;padding:0 12px;color:var(--fg-4)"><span>⤢</span><span>✕</span></span>
+  </div>
+
+  <div style="flex:1;position:relative;min-height:0">
+    <div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 59px,var(--grid) 59px 60px),repeating-linear-gradient(90deg,transparent 0 119px,var(--grid) 119px 120px)"></div>
+    <svg viewBox="0 0 1440 490" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+      <g fill="none" stroke-width="1.5">
+        <path d="M60 430 C240 404 300 258 420 180 560 92 760 258 900 284 1080 316 1240 164 1400 104" stroke="var(--series-1)"></path>
+        <path d="M60 442 C240 418 300 274 420 196 560 108 760 274 900 300 1080 332 1240 180 1400 120" stroke="var(--series-3)"></path>
+        <path d="M60 454 C240 432 300 290 420 212 560 124 760 290 900 316 1080 348 1240 198 1400 138" stroke="var(--series-4)"></path>
+        <path d="M60 466 C240 446 300 306 420 228 560 140 760 306 900 332 1080 364 1240 216 1400 156" stroke="var(--series-5)"></path>
+        <path d="M60 478 C240 460 300 322 420 244 560 156 760 322 900 348 1080 380 1240 234 1400 174" stroke="var(--series-6)"></path>
+        <path d="M60 418 C240 390 300 242 420 164 560 76 760 242 900 268 1080 300 1240 146 1400 88" stroke="var(--series-7)"></path>
+        <path d="M60 406 C240 376 300 226 420 148 560 60 760 226 900 252 1080 284 1240 128 1400 72" stroke="var(--series-8)"></path>
+        <path d="M60 394 C240 362 300 210 420 132 560 44 760 210 900 236 1080 112 1240 110 1400 56" stroke="var(--fg-4)" stroke-width="1" opacity=".35"></path>
+      </g>
+    </svg>
+    <div style="position:absolute;left:16px;bottom:10px;font-size:10px;color:var(--fg-3)">time (s)</div>
+    <div style="position:absolute;left:16px;top:10px;font-size:10px;color:var(--fg-3)">value</div>
+
+    <div style="position:absolute;left:249px;top:332px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-1);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:262px;top:313px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-1)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">2.4800</span><span style="color:var(--fg-2)">0.6112</span></span></div>
+
+    <div style="position:absolute;left:400px;top:221px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-4);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:413px;top:202px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-4)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">3.4400</span><span style="color:var(--fg-2)">0.8455</span></span></div>
+
+    <div style="position:absolute;left:520px;top:136px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-7);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:533px;top:117px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-7)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">4.1600</span><span style="color:var(--fg-2)">1.0417</span></span></div>
+
+    <div style="position:absolute;left:520px;top:200px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-5);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:533px;top:181px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-5)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">4.1600</span><span style="color:var(--fg-2)">0.9163</span></span></div>
+
+    <div style="position:absolute;left:700px;top:220px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-3);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:713px;top:201px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-3)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">5.6200</span><span style="color:var(--fg-2)">0.7913</span></span></div>
+
+    <div style="position:absolute;left:820px;top:321px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-6);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:833px;top:302px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-6)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">6.4100</span><span style="color:var(--fg-2)">0.8021</span></span></div>
+
+    <div style="position:absolute;left:940px;top:317px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-4);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:953px;top:298px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-4)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">7.2900</span><span style="color:var(--fg-2)">0.8645</span></span></div>
+
+    <div style="position:absolute;left:620px;top:124px;width:5px;height:5px;border-radius:999px;border:1px solid var(--fg-4);background:var(--surface-0);opacity:.5"></div>
+    <div style="position:absolute;left:635px;top:108px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border-faint);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.55"><span style="width:2px;background:var(--fg-4)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-3)">7.4900</span><span style="color:var(--fg-4)">0.7459</span></span></div>
+
+    <div style="position:absolute;left:1000px;top:346px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-6);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:882px;top:340px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-6)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">8.3500</span><span style="color:var(--fg-2)">0.9754</span></span></div>
+
+    <div style="position:absolute;left:1000px;top:281px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-1);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:882px;top:268px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--amber-7);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-1)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-1)">9.0600</span><span style="color:var(--fg-2)">1.2080</span></span></div>
+
+    <div style="position:absolute;left:1080px;top:259px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-1);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:890px;top:236px;display:flex;align-items:stretch;background:var(--surface-overlay);box-shadow:0 0 0 1px var(--amber-7);border-radius:2px;overflow:hidden;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap"><span style="width:2px;background:var(--series-1)"></span><span style="display:flex;align-items:center;gap:7px;padding:1px 6px"><span style="color:var(--fg-3);font-size:9px">run_01</span><span style="color:var(--fg-1)">9.8500</span><span style="color:var(--fg-2)">1.1723</span><span style="color:var(--fg-4)">✕</span></span></div>
+    <svg style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none"><line x1="1038" y1="246" x2="1082" y2="260" stroke="var(--fg-4)" stroke-width="1"></line></svg>
+
+    <div style="position:absolute;left:1058px;top:234px;width:5px;height:5px;border-radius:999px;border:1px solid var(--series-8);background:var(--surface-0)"></div>
+    <div style="position:absolute;left:1069px;top:228px;font-size:9px;color:var(--fg-4)">⌄</div>
+
+    <div style="position:absolute;right:14px;top:14px;width:330px;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;font-size:10px;overflow:hidden;white-space:nowrap">
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 7px;border-bottom:1px solid var(--border);color:var(--fg-3)"><span style="color:var(--fg-4);letter-spacing:-2px">⠿</span><span style="color:var(--fg-1)">8 series <span style="color:var(--fg-4)">▾</span></span><span style="margin-left:auto;color:var(--fg-4)">⌄</span></div>
+      <div style="display:flex;align-items:center;gap:5px;padding:3px 7px;border-bottom:1px solid var(--border);background:var(--surface-1);color:var(--fg-3)">
+        <span style="display:flex;align-items:center;gap:4px;background:var(--surface-3);border-radius:2px;padding:1px 5px;color:var(--fg-1)"><span style="width:7px;height:7px;border-radius:999px;background:var(--series-2)"></span>color ← source</span>
+        <span style="display:flex;align-items:center;gap:4px;padding:1px 4px"><span style="width:11px;height:0;border-top:1px dashed var(--fg-3)"></span>dash ← flat</span>
+        <span style="display:flex;align-items:center;gap:4px;padding:1px 4px"><span style="width:11px;height:2px;background:var(--fg-3)"></span>1.5</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--surface-2);border-bottom:1px solid var(--border-faint);color:var(--fg-2);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-2)">▸ SOURCE</span><span style="color:var(--fg-4)">8</span></div>
+      <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--surface-2);border-bottom:1px solid var(--border-faint);color:var(--fg-2);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-1)">▾ TIPS</span><span style="color:var(--fg-4)">12</span><span style="margin-left:auto;color:var(--fg-4)">⊞▾</span></div>
+      <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;padding:2px 7px;background:var(--surface-1);border-bottom:1px solid var(--border-faint);color:var(--fg-4);font-size:9px;letter-spacing:.06em"><span></span><span>SERIES</span><span style="text-align:right;color:var(--fg-2)">x ↓</span><span style="text-align:right">value</span><span></span></div>
+      <div style="max-height:126px;overflow:hidden;display:flex;flex-direction:column">
+        <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-1);background:var(--amber-3);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-1)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_01</span><span style="text-align:right">9.8500</span><span style="text-align:right;color:var(--fg-2)">1.1723</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+        <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-1);background:var(--amber-3);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-1)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_01</span><span style="text-align:right">9.0600</span><span style="text-align:right;color:var(--fg-2)">1.2080</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+        <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-6)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_06</span><span style="text-align:right">8.3500</span><span style="text-align:right;color:var(--fg-3)">0.9754</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+        <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-4);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--fg-4);opacity:.4"></span><span style="overflow:hidden;text-overflow:ellipsis;text-decoration:line-through">run_08</span><span style="text-align:right">7.4900</span><span style="text-align:right">0.7459</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+        <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-4)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_04</span><span style="text-align:right">7.2900</span><span style="text-align:right;color:var(--fg-3)">0.8645</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+        <div style="display:grid;grid-template-columns:14px minmax(0,1fr) 62px 62px 34px;gap:6px;align-items:center;padding:2px 7px;color:var(--fg-2);font-variant-numeric:tabular-nums"><span style="width:2px;height:11px;background:var(--series-6)"></span><span style="overflow:hidden;text-overflow:ellipsis">run_06</span><span style="text-align:right">6.4100</span><span style="text-align:right;color:var(--fg-3)">0.8021</span><span style="text-align:right;color:var(--fg-4)">⌖ ✕</span></div>
+      </div>
+      <div style="padding:3px 7px;border-top:1px solid var(--border-faint);background:var(--surface-2);display:flex;color:var(--fg-3)"><span>1 ghost <span style="color:var(--fg-4)">▾</span></span><span style="margin-left:auto;color:var(--fg-4)">⤓ csv</span></div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;height:22px;flex:none;padding:0 12px;background:var(--surface-2);border-top:1px solid var(--border);font-size:10px;color:var(--fg-3);gap:14px">
+    <span>2023 pts · render 0.3 ms</span><span style="color:var(--fg-4)">|</span><span>12 tips</span><span style="color:var(--amber-7)">2 selected</span><span style="margin-left:auto;color:var(--fg-4)">Esc clears selection</span>  </div>
+</div>
+<div style="width:1440px;font:400 11px/1.6 var(--font-mono);color:var(--fg-3)">Twelve tips and the plot is exactly the height it was at zero — nothing was pushed. The two <span style="color:var(--amber-7)">outlined</span> tips are selected — for delete, export and highlight, nothing more; no quantity anywhere in this frame is derived from them; the ghosted <span style="color:var(--fg-3)">run_08</span> tip at 7.49 s is dimmed rather than removed; the tip on the top trace at ≈9.6 s collided twice and fell back to a bare marker with a <span style="color:var(--fg-2)">⌄</span> — hover to read it. The rail lists the same twelve, capped and scrolled, with the selection mirrored.</div>
+</div>
+
+<div style="max-width:1320px;margin:0 auto;padding:8px 44px 64px;display:flex;flex-direction:column;gap:28px;border-top:1px solid var(--border)">
+
+<div style="display:grid;grid-template-columns:200px 1fr;gap:24px;padding-top:26px">
+  <div style="font:600 11px var(--font-mono);color:var(--fg-1);letter-spacing:.06em">11 · FOCUS IS A HIGHLIGHT<div style="font:400 10px var(--font-mono);color:var(--fg-3);margin-top:4px">the focus stack, deleted</div></div>
+  <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;line-height:1.55">
+    <div><b style="color:var(--fg-1)">The focus stack is the annotations register again: a second copy of a row, pinned above the list it was copied from.</b> A focused series then exists twice — twice to keep in sync, twice to paint its override mark, twice to carry its stat columns — and pinning one reflows the roster below it. The tip highlight solved the same problem without a second surface: the thing stays where it is and is <i>marked</i>. Use that treatment for rows and delete the stack.</div>
+    <div style="display:flex;gap:14px;align-items:flex-start;background:var(--surface-void);box-shadow:0 0 0 1px var(--border);border-radius:2px;padding:16px;flex-wrap:wrap">
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--err-red);letter-spacing:.08em">NOW — STACK, ROWS DUPLICATED</div>
+        <div style="width:250px;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;font-family:var(--font-mono);font-size:10px;overflow:hidden">
+          <div style="padding:4px 7px 2px;color:var(--fg-4);font-size:9px;letter-spacing:.08em">FOCUS 2</div>
+          <div style="padding:0 7px 3px;display:flex;flex-direction:column;gap:2px">
+            <div style="display:flex;align-items:center;gap:6px;color:var(--fg-1)"><span style="width:12px;height:3px;background:var(--amber-7)"></span><span style="flex:1">run_02 / response</span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.7481</span><span style="color:var(--fg-4)">✕</span></div>
+            <div style="display:flex;align-items:center;gap:6px;color:var(--fg-1)"><span style="width:12px;height:2px;background:var(--series-8)"></span><span style="flex:1">run_07 / response</span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.8670</span><span style="color:var(--fg-4)">✕</span></div>
+          </div>
+          <div style="padding:3px 7px;background:var(--surface-2);border-top:1px solid var(--border-faint);border-bottom:1px solid var(--border-faint);display:flex;color:var(--fg-3);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-2)">▾ SOURCE</span><span style="margin-left:auto">8</span></div>
+          <div style="display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-1)"></span><span style="flex:1">run_01</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7159</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2);box-shadow:inset 0 0 0 1px var(--err-red)"><span style="width:12px;height:3px;background:var(--amber-7)"></span><span style="flex:1">run_02</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7481</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-3)"></span><span style="flex:1">run_03</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7702</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2);box-shadow:inset 0 0 0 1px var(--err-red)"><span style="width:12px;height:2px;background:var(--series-8)"></span><span style="flex:1">run_07</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.8670</span></div>
+          </div>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:250px"><span style="color:var(--err-red)">run_02</span> and <span style="color:var(--err-red)">run_07</span> are printed twice, and the two copies disagree about what they carry — the stack has <span style="color:var(--fg-2)">✕</span> and the long path, the roster has the sort position and the stat columns. Which one do you sort? Which one do you click?</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">PROPOSED — MARKED IN PLACE</div>
+        <div style="width:250px;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;font-family:var(--font-mono);font-size:10px;overflow:hidden">
+          <div style="padding:3px 7px;background:var(--surface-2);border-bottom:1px solid var(--border-faint);display:flex;align-items:center;gap:8px;color:var(--fg-3);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-2)">▾ SOURCE</span><span style="margin-left:auto;color:var(--amber-7);letter-spacing:0">2 focused ⤒</span><span>8</span></div>
+          <div style="display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-1)"></span><span style="flex:1">run_01</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7159</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--amber-3);box-shadow:inset 2px 0 0 var(--amber-7);color:var(--fg-1)"><span style="width:12px;height:3px;background:var(--amber-7)"></span><span style="flex:1">run_02 <span style="color:var(--amber-7)">▍</span></span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.7481</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-3)"></span><span style="flex:1">run_03</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7702</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-2)"><span style="width:12px;height:2px;background:var(--series-4)"></span><span style="flex:1">run_04</span><span style="color:var(--fg-3);font-variant-numeric:tabular-nums">0.7853</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--amber-3);box-shadow:inset 2px 0 0 var(--amber-7);color:var(--fg-1)"><span style="width:12px;height:2px;background:var(--series-8)"></span><span style="flex:1">run_07</span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.8670</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;color:var(--fg-4)"><span style="width:12px;height:1px;background:var(--fg-4);opacity:.35"></span><span style="flex:1;text-decoration:line-through">run_08</span><span style="font-size:9px">muted</span></div>
+          </div>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:250px">Each series appears exactly once. Focus is <span style="color:var(--amber-7)">amber-3 tint + a 2 px amber left rule + fg-1 text</span> — the same paint a focused data tip carries, so the operator learns one mark. Sort order, stat columns, override tick and the ✕ all stay where they already are, and nothing moves when focus changes.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font:400 9px var(--font-mono);color:var(--fg-4);letter-spacing:.08em">GATHERING, RECOVERED — HEADER FILTER</div>
+        <div style="width:250px;background:var(--surface-overlay);box-shadow:var(--elev-2);border-radius:2px;font-family:var(--font-mono);font-size:10px;overflow:hidden">
+          <div style="padding:3px 7px;background:var(--surface-2);border-bottom:1px solid var(--border-faint);display:flex;align-items:center;gap:8px;color:var(--fg-3);font-size:9px;letter-spacing:.06em"><span style="color:var(--fg-2)">▾ SOURCE</span><span style="margin-left:auto;background:var(--amber-3);color:var(--amber-9);border-radius:2px;padding:1px 5px;letter-spacing:0">focus only ✓</span><span>2/8</span></div>
+          <div style="display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--amber-3);box-shadow:inset 2px 0 0 var(--amber-7);color:var(--fg-1)"><span style="width:12px;height:3px;background:var(--amber-7)"></span><span style="flex:1">run_02 <span style="color:var(--amber-7)">▍</span></span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.7481</span></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:2px 7px;background:var(--amber-3);box-shadow:inset 2px 0 0 var(--amber-7);color:var(--fg-1)"><span style="width:12px;height:2px;background:var(--series-8)"></span><span style="flex:1">run_07</span><span style="color:var(--fg-2);font-variant-numeric:tabular-nums">0.8670</span></div>
+          </div>
+          <div style="padding:3px 7px;border-top:1px solid var(--border-faint);background:var(--surface-2);color:var(--fg-4);font-size:9px">6 rows hidden by filter</div>
+        </div>
+        <div style="font:400 10px/1.5 var(--font-mono);color:var(--fg-3);width:250px">The one thing the stack did well was <i>collect</i> the focused rows. Recover it as a <span style="color:var(--fg-2)">filter</span>, not a copy: <span style="color:var(--fg-2)">focus only</span> hides the rest, states how many it hid, and is one click to leave. <span style="color:var(--fg-2)">⤒</span> in the header scrolls to the next focused row without filtering — the answer at 1000 series, where a stack would have been a second unbounded list.</div>
+      </div>
+
+    </div>
+    <div><b style="color:var(--fg-1)">One highlight vocabulary, panel-wide.</b> Every state a row or a tip can be in gets exactly one paint, and no two states share one — which is what makes the amber legible as "this is the thing I am looking at" rather than as decoration.</div>
+    <div style="box-shadow:0 0 0 1px var(--border);border-radius:2px;overflow:hidden;background:var(--surface-1);font-family:var(--font-mono);font-size:11px">
+      <div style="display:grid;grid-template-columns:120px 176px 1fr;padding:4px 10px;background:var(--surface-2);border-bottom:1px solid var(--border);color:var(--fg-4);font-size:9px;letter-spacing:.06em"><span>STATE</span><span>PAINT</span><span>APPLIES TO</span></div>
+      <div style="display:grid;grid-template-columns:120px 176px 1fr;padding:3px 10px;border-bottom:1px solid var(--border-faint);align-items:center"><span style="color:var(--fg-1)">focused</span><span style="display:flex;align-items:center;gap:6px;background:var(--amber-3);box-shadow:inset 2px 0 0 var(--amber-7);color:var(--fg-1);padding:1px 6px;border-radius:2px">tint + 2 px rule</span><span>legend rows, tips, group headers, and the trace itself (drawn at +1 px, others at ghost strength). Persistent — survives sort, filter, rebind.</span></div>
+      <div style="display:grid;grid-template-columns:120px 176px 1fr;padding:3px 10px;border-bottom:1px solid var(--border-faint);align-items:center"><span style="color:var(--fg-1)">selected</span><span style="display:flex;align-items:center;gap:6px;box-shadow:0 0 0 1px var(--amber-7);color:var(--fg-1);padding:1px 6px;border-radius:2px">1 px amber outline</span><span>a transient set an action is about to act on (delete, export). No fill, so it reads as a boundary and can sit on top of a focused row without either mark being lost.</span></div>
+      <div style="display:grid;grid-template-columns:120px 176px 1fr;padding:3px 10px;border-bottom:1px solid var(--border-faint);align-items:center"><span style="color:var(--fg-1)">hovered</span><span style="display:flex;align-items:center;gap:6px;background:var(--surface-3);color:var(--fg-1);padding:1px 6px;border-radius:2px">surface raise, no color</span><span>anything pointable. Never amber — hover is not a state of the data. Cross-highlights its counterpart on the other surface (row ⇄ trace ⇄ tip).</span></div>
+      <div style="display:grid;grid-template-columns:120px 176px 1fr;padding:3px 10px;border-bottom:1px solid var(--border-faint);align-items:center"><span style="color:var(--fg-1)">overridden</span><span style="display:flex;align-items:center;gap:6px;color:var(--fg-2);padding:1px 6px">tick <span style="color:var(--amber-7)">▍</span> + footer count</span><span>a mark, not a highlight — it must be readable on a row that is simultaneously focused, hovered and selected. §5.</span></div>
+      <div style="display:grid;grid-template-columns:120px 176px 1fr;padding:3px 10px;align-items:center"><span style="color:var(--fg-1)">muted · ghost</span><span style="display:flex;align-items:center;gap:6px;color:var(--fg-4);padding:1px 6px"><span style="text-decoration:line-through">strike</span> + fg-4</span><span>subtraction, so it cannot be confused with any of the above. A focused row that is then muted keeps the tint and gains the strike — both facts are true.</span></div>
+    </div>
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-2);background:var(--surface-1);border:1px solid var(--border);border-radius:2px;padding:8px 10px;display:flex;flex-direction:column;gap:3px">
+      <span style="color:var(--fg-1);font-size:10px;letter-spacing:.08em">MECHANICS</span>
+      <span>— <span style="color:var(--fg-1)">Focus is a set, not a mode.</span> Click focuses one and clears the rest; ⌘-click adds; click on empty legend clears. The count in the section header is the only global readout it needs.</span>
+      <span>— <span style="color:var(--fg-1)">Focusing a series highlights its tips, and focusing a tip highlights its series row</span> — the same amber, both directions. That reciprocity is what replaces the stack: you can always find the other end of a focus without a list of them.</span>
+      <span>— <span style="color:var(--fg-1)">Docked at 150 px the mark is unchanged</span> — the 2 px rule and tint cost no width, which a stack could not claim. §6.</span>
+      <span>— <span style="color:var(--fg-1)">Focus never reorders.</span> If the operator wants the focused rows together, that is <span style="color:var(--fg-2)">focus only</span> or a sort — both reversible, both stated in the header.</span>
+    </div>
+  </div>
+</div>
+
+</div>
 </x-dc>
 </body>
 </html>
