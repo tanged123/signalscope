@@ -40,7 +40,8 @@ region`; unavailable scopes are not advertised.
 Panel defaults, encoding bindings, visible statistic columns, and sort state
 are serialized. The session schema advances with a migration that reproduces
 the previous color-by rule, solid dash, 1.4 px width, 50% ghost opacity, and
-unsorted default statistic columns.
+unsorted default statistic columns. New panels use a 2 px line-width default;
+the migration retains 1.4 px only to preserve existing session appearance.
 
 ## Consequences
 

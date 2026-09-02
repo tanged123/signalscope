@@ -7,6 +7,7 @@ import type {
   SeriesRef,
 } from "../generated/session";
 import type { Catalog, CatalogSeries } from "./catalog";
+import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 import { parseSelector, seriesMatches, type Selector } from "./selector";
 
 type SeriesDisplay = "focus" | "rule" | "ghost";
@@ -102,7 +103,6 @@ export function resolvePanel(
     if (display[index] === "ghost") {
       hue = null;
       dash = "solid";
-      width = 1;
       opacity = panel.ghost_opacity;
     }
 
@@ -266,7 +266,7 @@ function assignWidths(
   const base =
     Number.isFinite(panel.line_width) && panel.line_width > 0
       ? panel.line_width
-      : 1.4;
+      : DEFAULT_PANEL_LINE_WIDTH;
   if (panel.width_by === null) return refs.map(() => base);
   const dimension = panel.width_by;
   const values = new Map<string, number>();

@@ -21,6 +21,7 @@ import type {
   WorkspaceTab,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
+import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
 const MIN_FRACTION = 0.1;
 
@@ -1080,7 +1081,7 @@ export class WorkspaceModel {
       color_by: "source",
       dash_by: null,
       width_by: null,
-      line_width: 1.4,
+      line_width: DEFAULT_PANEL_LINE_WIDTH,
       ghost_opacity: 0.5,
       overrides: [],
       focus: [],

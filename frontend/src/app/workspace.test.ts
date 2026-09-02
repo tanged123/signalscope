@@ -42,7 +42,7 @@ function legacySeries(panel: PanelState | undefined): TestSeries[] {
         path: pathForRef(ref),
         color_slot: override?.color_slot ?? 1,
         dash: override?.dash ?? "solid",
-        width: override?.width ?? 1.4,
+        width: override?.width ?? panel.line_width,
         visible: override?.visible ?? true,
       };
     });
@@ -490,12 +490,12 @@ describe("WorkspaceModel", () => {
     expect(model.focusEntries(panel.id)).toEqual([]);
   });
 
-  it("keeps the user dash default solid and writes the spec width", () => {
+  it("creates series with the solid 2 px panel default", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
     model.addSeriesRef(panel.id, refForPath("rocket/velocity_body/x"));
     expect(legacySeries(model.panels()[0])[0]?.dash).toBe("solid");
-    expect(legacySeries(model.panels()[0])[0]?.width).toBe(1.4);
+    expect(legacySeries(model.panels()[0])[0]?.width).toBe(2);
   });
 
   it("toggles series visibility", () => {

@@ -6,6 +6,7 @@ import {
 } from "@chartgpu/chartgpu";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
+import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import { createRangeTickFormatter, hueIndex } from "./plot-theme";
 import type { Palette, SeriesStroke, TickFormatter } from "./plot-theme";
 import { cachedFeed, responseTimeReference } from "./m4-feed";
@@ -122,7 +123,7 @@ export class ChartHost {
       const style = request.styles[index] ?? {
         hue: null,
         dash: "solid",
-        width: 1.4,
+        width: DEFAULT_PANEL_LINE_WIDTH,
         alpha: 1,
       };
       const isEmphasized = emphasis.has(index);
@@ -286,7 +287,9 @@ export class ChartHost {
         lod:
           request.palette.lineWidthScale !== 1 ||
           request.styles.some(
-            (style) => style.width !== 1.4 || style.dash !== "solid",
+            (style) =>
+              style.width !== DEFAULT_PANEL_LINE_WIDTH ||
+              style.dash !== "solid",
           )
             ? "strict"
             : "auto",

@@ -4,6 +4,7 @@ import {
 } from "../app/bin-columns";
 import type { Catalog } from "../app/catalog";
 import { appliedOverrides, type ResolvedSeries } from "../app/resolution";
+import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import { virtualSlice } from "../app/outline-model";
 import { compileGlob, evaluateSelector } from "../app/selector";
 import type {
@@ -41,6 +42,7 @@ import {
 } from "../app/plot-capabilities";
 import {
   COLOR_SLOTS,
+  hueIndex,
   invalidatePalette,
   resolvePalette,
 } from "../render/plot-theme";
@@ -81,7 +83,7 @@ interface ResolvedAnnotations {
 
 function colorIndexForHue(hue: number | null): number {
   if (hue === null) return 0;
-  return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
+  return hueIndex(hue);
 }
 
 export type EncodingProperty = "color" | "dash" | "width";
@@ -1049,7 +1051,7 @@ export class PanelView {
       return {
         hue: series?.hue ?? null,
         dash: series?.dash ?? "solid",
-        width: series?.width ?? 1.4,
+        width: series?.width ?? DEFAULT_PANEL_LINE_WIDTH,
         alpha: series?.opacity ?? 1,
       };
     });
@@ -3741,7 +3743,7 @@ function panelMarkup(): string {
       </span>
       <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-group panel-toolbar-render">
-        <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">1.4</span> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
         <span class="panel-toolbar-fact">curve <b>linear</b></span>
         <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Ghost visibility and strength">ghost <b class="panel-ghost-value">all</b> <span class="toolbar-caret">▾</span></button>
         <span class="panel-toolbar-fact panel-points-fact">pts <b>auto</b></span>

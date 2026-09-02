@@ -329,6 +329,36 @@ describe("PanelView chrome", () => {
     expect(view.element.querySelector(".plot-row-inspector")).not.toBeNull();
   });
 
+  it("wraps legend hues through the same palette slots as the plot", () => {
+    const sources = Array.from(
+      { length: 8 },
+      (_, index) => `run-${String(index + 1).padStart(2, "0")}`,
+    );
+    const catalog = Catalog.build(
+      sources.map((source) => signal(source, "temp")),
+    );
+    const panel = state();
+    panel.focus = sources.map((source) => ({
+      kind: "series",
+      ref: { source_key: source, channel: "temp" },
+      source_key: null,
+      channel: null,
+    }));
+    const view = new PanelView("panel", callbacks(catalog));
+    view.update(panel, false);
+
+    const swatches = view.element.querySelectorAll<HTMLElement>(
+      ".plot-legend-row .plot-legend-swatch",
+    );
+    expect(swatches).toHaveLength(8);
+    expect(swatches[0]?.style.getPropertyValue("--plot-row-swatch-color")).toBe(
+      "var(--series-1)",
+    );
+    expect(swatches[7]?.style.getPropertyValue("--plot-row-swatch-color")).toBe(
+      "var(--series-1)",
+    );
+  });
+
   it("reports attribute encoding values by unit", () => {
     const catalog = Catalog.build([
       { ...signal("run-01", "temp"), unit: "°C" },
