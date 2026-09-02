@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog } from "electron";
 import { BackendProcess } from "./backend";
+import { configureCommandLine } from "./command-line";
 import { resolveDesktopResources } from "./resources";
 import { createWindow } from "./window";
 
-app.commandLine.appendSwitch("disable-features", "AutofillServerCommunication");
+configureCommandLine(app.commandLine, process.platform);
 app.enableSandbox();
 
 let backend: BackendProcess | null = null;
