@@ -209,8 +209,17 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
       onMaximize: () => {},
       onDropSignals: () => {},
       onDropSet: () => {},
-      onFocusToggle: () => {},
-      onFocusSolo: () => {},
+      onFocusToggle: (_id, entry) => {
+        host.dataset.focusToggle = entry.source_key ?? entry.channel ?? "";
+      },
+      onFocusSolo: (_id, entry) => {
+        host.dataset.focusSolo = entry.source_key ?? entry.channel ?? "";
+      },
+      onFocusRange: (_id, entries) => {
+        host.dataset.focusRange = entries
+          .map((entry) => entry.source_key ?? entry.channel ?? "")
+          .join(",");
+      },
       onClearFocus: () => {},
       onMuteSelector: () => {},
       onMuteSeries: () => {},
@@ -218,6 +227,10 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
       onToggleGhostMode: () => {},
       onLegendLayout: (_id, layout) => {
         if (layout.state !== undefined) host.dataset.legendState = layout.state;
+        if (layout.dock !== undefined) {
+          if (layout.dock === null) delete host.dataset.legendDock;
+          else host.dataset.legendDock = layout.dock;
+        }
       },
       onSetEncoding: (_id, property, dimension) => {
         host.dataset.encoding = `${property}:${dimension ?? "flat"}`;
@@ -304,13 +317,39 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
         legend_position: null,
         legend_size: null,
         legend_anchor: null,
+        legend_dock: null,
         legend_hint_dismissed: false,
         y_range: null,
         x_range: null,
         x_label: null,
         y_label: null,
         time_window: null,
-        annotations: [],
+        annotations: [
+          {
+            id: "tip-1",
+            series_path: "run_01/temp",
+            anchor: 5.12,
+            pinned_value: 1.0565,
+            label: "",
+            offset: [10, -10] as [number, number],
+          },
+          {
+            id: "tip-2",
+            series_path: "run_02/temp",
+            anchor: 4.33,
+            pinned_value: 1.1528,
+            label: "",
+            offset: [10, -10] as [number, number],
+          },
+          {
+            id: "tip-3",
+            series_path: "run_03/temp",
+            anchor: 3.43,
+            pinned_value: 1.1482,
+            label: "",
+            offset: [10, -10] as [number, number],
+          },
+        ],
         annotation_display: "labels",
         show_stats: false,
         stat_columns: ["min", "max", "mean", "rms", "cursor"],
@@ -326,7 +365,12 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
   await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
   await expect(panel.locator(".panel-actions")).toBeVisible();
   const plotLegend = panel.locator(".plot-series-legend");
-  await expect(plotLegend.locator(".plot-legend-roster-row")).toHaveCount(10);
+  await expect
+    .poll(() => plotLegend.locator(".plot-legend-roster-row").count())
+    .toBeLessThan(100);
+  await expect
+    .poll(() => plotLegend.locator(".plot-legend-roster-row").count())
+    .toBeGreaterThan(4);
   await expect
     .poll(() =>
       plotLegend.evaluate((element) => {
@@ -340,8 +384,44 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
       }),
     )
     .toEqual({ plotFamilyApplied: true, plotSizeApplied: true });
+  const rosterActions = plotLegend.locator(".plot-legend-roster-action");
+  await rosterActions.nth(0).click();
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-focus-solo",
+    "run_01",
+  );
+  await rosterActions.nth(3).click({ modifiers: ["Shift"] });
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-focus-range",
+    "run_01,run_02,run_03,run_04",
+  );
+  await rosterActions.nth(4).click({ modifiers: ["Control"] });
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-focus-toggle",
+    "run_05",
+  );
+  await plotLegend.locator(".plot-legend-tips-heading button").first().click();
+  await expect(plotLegend.locator(".plot-tip-reading").nth(1)).toHaveText(
+    "5.1200 · 1.0565",
+  );
+  await expect
+    .poll(() =>
+      plotLegend.evaluate((element) => {
+        const group = element
+          .querySelector(".plot-legend-group")
+          ?.getBoundingClientRect();
+        const tips = element
+          .querySelector(".plot-legend-tips")
+          ?.getBoundingClientRect();
+        return group !== undefined && tips !== undefined
+          ? group.bottom <= tips.top + 1
+          : false;
+      }),
+    )
+    .toBe(true);
+  await plotLegend.locator(".plot-legend-tips-heading button").first().click();
   const beforeResize = await plotLegend.boundingBox();
-  const resizeHandle = plotLegend.locator(".plot-legend-resize-corner");
+  const resizeHandle = plotLegend.locator(".plot-legend-resize-right");
   const resizeBox = await resizeHandle.boundingBox();
   if (beforeResize === null || resizeBox === null)
     throw new Error("Plot legend resize handle is not laid out");
@@ -350,11 +430,18 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
     resizeBox.y + resizeBox.height / 2,
   );
   await page.mouse.down();
-  await page.mouse.move(resizeBox.x, resizeBox.y + 80);
+  await page.mouse.move(resizeBox.x + 80, resizeBox.y);
   await page.mouse.up();
   await expect
-    .poll(async () => (await plotLegend.boundingBox())?.height ?? 0)
-    .toBeGreaterThan(beforeResize.height + 50);
+    .poll(async () => (await plotLegend.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(beforeResize.width + 50);
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-legend-state",
+    "roster",
+  );
+  await expect(page.locator("#legend-probe")).not.toHaveAttribute(
+    "data-legend-dock",
+  );
   const beforeDrag = await plotLegend.boundingBox();
   const dragHandle = plotLegend.locator(".plot-legend-drag");
   const handleBox = await dragHandle.boundingBox();
@@ -906,11 +993,15 @@ test("legend console replaces the strip and supports workspace-wide states", asy
     dragX + wrapBox.x + wrapBox.width - legendBox.x - legendBox.width - 8,
     dragBox.y,
   );
-  await expect(wrap).toHaveClass(/legend-dock-preview/);
+  await expect(wrap).toHaveAttribute("data-legend-dock-preview", "right");
   await page.mouse.up();
   await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
     "data-state",
     "rail",
+  );
+  await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
+    "data-dock",
+    "right",
   );
   await expect(wrap).toHaveClass(/legend-rail/);
   await expect

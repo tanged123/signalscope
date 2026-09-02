@@ -227,6 +227,12 @@ function isPanel(value: unknown): boolean {
         typeof item === "string" &&
         ["top_left", "top_right", "bottom_left", "bottom_right"].includes(item),
     ) &&
+    isNullable(
+      value.legend_dock,
+      (item): item is string =>
+        typeof item === "string" &&
+        ["left", "right", "top", "bottom"].includes(item),
+    ) &&
     typeof value.legend_hint_dismissed === "boolean" &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&

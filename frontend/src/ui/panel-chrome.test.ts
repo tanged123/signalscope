@@ -44,6 +44,7 @@ function state(): PanelState {
     legend_position: null,
     legend_size: null,
     legend_anchor: null,
+    legend_dock: null,
     legend_hint_dismissed: false,
     y_range: null,
     x_range: null,
@@ -70,6 +71,7 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onDropSet: vi.fn(),
     onFocusToggle: vi.fn(),
     onFocusSolo: vi.fn(),
+    onFocusRange: vi.fn(),
     onClearFocus: vi.fn(),
     onMuteSelector: vi.fn(),
     onMuteSeries: vi.fn(),
@@ -259,9 +261,106 @@ describe("PanelView chrome", () => {
     );
     expect(
       view.element.querySelector(".panel-ghost-opacity")?.textContent,
-    ).toBe("ghost all ▾");
+    ).toBe("dim none ▾");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
+  });
+
+  it("uses plain click for solo focus, Ctrl-click to toggle, and Shift-click for ranges", () => {
+    const catalog = Catalog.build([
+      signal("run-01", "temp"),
+      signal("run-02", "temp"),
+      signal("run-03", "temp"),
+    ]);
+    const panelCallbacks = callbacks(catalog);
+    const onFocusSolo = vi.fn();
+    const onFocusToggle = vi.fn();
+    const onFocusRange = vi.fn();
+    panelCallbacks.onFocusSolo = onFocusSolo;
+    panelCallbacks.onFocusToggle = onFocusToggle;
+    panelCallbacks.onFocusRange = onFocusRange;
+    const view = new PanelView("panel", panelCallbacks);
+    view.update(state(), false);
+    const rows = view.element.querySelectorAll<HTMLButtonElement>(
+      ".plot-legend-roster-action",
+    );
+
+    rows[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    rows[2]?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, shiftKey: true }),
+    );
+    rows[1]?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, ctrlKey: true }),
+    );
+
+    expect(onFocusSolo).toHaveBeenCalledTimes(1);
+    expect(onFocusRange).toHaveBeenCalledTimes(1);
+    expect(
+      (onFocusRange.mock.calls[0]?.[1] as Array<{ source_key: string }>).map(
+        (entry) => entry.source_key,
+      ),
+    ).toEqual(["run-01", "run-02", "run-03"]);
+    expect(onFocusToggle).toHaveBeenCalledTimes(1);
+    expect(onFocusToggle.mock.calls[0]?.[1]).toMatchObject({
+      kind: "source",
+      source_key: "run-02",
+    });
+  });
+
+  it("keeps tip coordinates visible in a docked rail", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const view = new PanelView("panel", callbacks(catalog));
+    const panel = state();
+    panel.legend_state = "rail";
+    panel.legend_dock = "right";
+    panel.annotations = [
+      {
+        id: "tip-1",
+        series_path: "run-01/temp",
+        anchor: 5.12,
+        pinned_value: 1.0565,
+        label: "",
+        offset: [10, -10],
+      },
+    ];
+    view.update(panel, false);
+
+    view.element
+      .querySelector<HTMLButtonElement>(".plot-legend-tips-heading button")
+      ?.click();
+
+    expect(view.element.querySelector(".plot-tip-reading")?.textContent).toBe(
+      "x · value",
+    );
+    expect(
+      view.element.querySelectorAll<HTMLElement>(".plot-tip-reading")[1]
+        ?.textContent,
+    ).toBe("5.1200 · 1.0565");
+  });
+
+  it("lays rails out on every persisted dock edge", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const view = new PanelView("panel", callbacks(catalog));
+    const panel = state();
+    panel.legend_state = "rail";
+
+    for (const dock of ["left", "right", "top", "bottom"] as const) {
+      panel.legend_dock = dock;
+      panel.legend_size =
+        dock === "left" || dock === "right" ? [180, 300] : [500, 160];
+      view.update(panel, false);
+      const wrap = view.element.querySelector<HTMLElement>(".plot-wrap");
+      const legend = view.element.querySelector<HTMLElement>(
+        ".plot-series-legend",
+      );
+      expect(wrap?.dataset.legendDock).toBe(dock);
+      expect(legend?.dataset.dock).toBe(dock);
+      expect(legend?.style.width).toBe(
+        dock === "left" || dock === "right" ? "140px" : "100%",
+      );
+      if (dock === "top" || dock === "bottom")
+        expect(legend?.style.height).toBe("120px");
+    }
   });
 
   it("keeps the style cascade visible in the legend and routes encoding edits", () => {

@@ -64,9 +64,19 @@ achromatic and cross-highlights the corresponding trace and legend row.
 Focus remains a serialized set and remains available as an encoding dimension,
 but it has no duplicate stack. Canonical legend and statistic rows receive the
 amber tint and left rule in place. A focused trace retains its series hue and is
-drawn one pixel wider while non-focused traces use ghost strength. Plain row
-click replaces the focus set, Command/Ctrl-click adds or removes, and the
-focused-only control filters the existing list without reordering it.
+drawn one pixel wider. The user-facing `dim` control determines whether
+non-focused traces retain full color or use the serialized ghost opacity; the
+legacy schema field names remain unchanged. Plain row click replaces the focus
+set, Command/Ctrl-click adds or removes, Shift-click selects the contiguous
+visible range from the last anchor, and the focused-only control filters the
+existing list without reordering it.
+
+The legend's `rail` state is independent from its dock edge. Session schema 27
+persists left, right, top, and bottom rails; schema 26 rails migrate to the
+previous right edge. Only dragging the legend to an edge docks it. Resizing a
+floating legend changes its floating dimensions and never implicitly docks it.
+The bounded tip manifest yields height to the series roster in compact layouts,
+and rails retain a combined x/value readout instead of hiding both numbers.
 
 ## Consequences
 

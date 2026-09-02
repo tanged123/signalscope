@@ -21,6 +21,7 @@ function panel(id: string, title: string): PanelState {
     legend_position: null,
     legend_size: null,
     legend_anchor: null,
+    legend_dock: null,
     legend_hint_dismissed: false,
     y_range: null,
     x_range: null,

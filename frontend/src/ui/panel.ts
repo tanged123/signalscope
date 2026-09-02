@@ -14,6 +14,7 @@ import type {
   DashStyle,
   FocusEntry,
   LegendAnchor,
+  LegendDock,
   LegendState,
   NamedSet,
   PanelState,
@@ -95,6 +96,7 @@ export interface PanelCallbacks {
   onDropSet(id: string, setId: string): void;
   onFocusToggle(id: string, entry: FocusEntry): void;
   onFocusSolo(id: string, entry: FocusEntry): void;
+  onFocusRange(id: string, entries: readonly FocusEntry[]): void;
   onClearFocus(id: string): void;
   onMuteSelector(id: string, selector: string): void;
   onMuteSeries(id: string, ref: SeriesRef): void;
@@ -107,6 +109,7 @@ export interface PanelCallbacks {
       position?: [number, number] | null;
       size?: [number, number] | null;
       anchor?: LegendAnchor | null;
+      dock?: LegendDock | null;
       hintDismissed?: boolean;
     },
   ): void;
@@ -505,6 +508,7 @@ export class PanelView {
   private annotationsExpanded = false;
   private annotationDragId: string | null = null;
   private focusOnly = false;
+  private focusRangeAnchor: { scope: string; value: string } | null = null;
   private inspectorPath: string | null = null;
   private encodingDrawer: EncodingProperty | null = null;
   private overrideDrawer = false;
@@ -514,6 +518,7 @@ export class PanelView {
   private plotLegendPosition: { x: number; y: number } | null = null;
   private plotLegendSize: { width: number; height: number } | null = null;
   private plotLegendAnchor: LegendAnchor | null = null;
+  private plotLegendDock: LegendDock | null = null;
 
   constructor(
     private readonly id: string,
@@ -994,7 +999,7 @@ export class PanelView {
       formatToolbarNumber(rendered.line_width);
     required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
       rendered.ghost_mode === "all"
-        ? "all"
+        ? "none"
         : `${String(Math.round(rendered.ghost_opacity * 100))}%`;
     required<HTMLElement>(this.element, ".panel-legend-value").textContent =
       rendered.legend_state;
@@ -1657,14 +1662,18 @@ export class PanelView {
       delete legend.dataset.state;
       delete legend.dataset.collapsed;
       wrap.classList.remove("legend-dock-preview");
+      delete wrap.dataset.legendDockPreview;
       wrap.classList.remove("legend-rail");
       wrap.classList.remove("legend-rail-collapsed");
+      delete wrap.dataset.legendDock;
       wrap.style.removeProperty("--plot-legend-rail-width");
+      wrap.style.removeProperty("--plot-legend-rail-height");
       return;
     }
     legend.hidden = false;
     legend.classList.toggle("stats-visible", state.show_stats);
     wrap.classList.remove("legend-dock-preview");
+    delete wrap.dataset.legendDockPreview;
     legend.dataset.state = state.legend_state;
     wrap.classList.toggle("legend-rail", state.legend_state === "rail");
     this.plotLegendPosition =
@@ -1676,6 +1685,7 @@ export class PanelView {
         ? null
         : { width: state.legend_size[0], height: state.legend_size[1] };
     this.plotLegendAnchor = state.legend_anchor;
+    this.plotLegendDock = state.legend_dock;
 
     if (state.legend_state === "badge") {
       const badge = document.createElement("div");
@@ -1687,7 +1697,8 @@ export class PanelView {
       drag.className = "plot-legend-drag plot-legend-badge-drag";
       drag.type = "button";
       drag.textContent = "⬓";
-      drag.title = "Drag plot legend; End docks it right";
+      drag.title =
+        "Drag plot legend to any edge; End docks to the nearest edge";
       this.bindPlotLegendDrag(drag, legend);
       const summary = document.createElement("button");
       summary.className = "plot-legend-badge-summary";
@@ -1698,7 +1709,7 @@ export class PanelView {
         state.focus.length,
       );
       required<HTMLElement>(summary, "span:nth-of-type(2)").textContent =
-        `${String(ghosts)} ghosts`;
+        `${String(ghosts)} dimmed`;
       summary.title = "Expand legend keys";
       summary.addEventListener("click", () => {
         this.callbacks.onLegendLayout(this.id, { state: "keys" });
@@ -1712,10 +1723,11 @@ export class PanelView {
     const header = document.createElement("div");
     header.className = "plot-legend-header";
     if (state.legend_state === "rail") {
+      const dock = state.legend_dock ?? "right";
       header.classList.add("plot-legend-rail-header");
       const title = document.createElement("span");
       title.className = "plot-legend-title";
-      title.textContent = `${String(state.series.length)} ▾`;
+      title.textContent = `${String(state.series.length)} · ${dock} ▾`;
       const undock = document.createElement("button");
       undock.className = "plot-legend-undock";
       undock.type = "button";
@@ -1732,7 +1744,16 @@ export class PanelView {
         state.show_stats
           ? this.plotLegendStats(state)
           : this.plotLegendRoster(state),
-        this.legendResizeHandle("left", legend),
+        this.legendResizeHandle(
+          dock === "right"
+            ? "left"
+            : dock === "left"
+              ? "right"
+              : dock === "top"
+                ? "bottom"
+                : "top",
+          legend,
+        ),
       );
       this.positionPlotLegend();
       return;
@@ -1741,7 +1762,8 @@ export class PanelView {
     drag.className = "plot-legend-drag";
     drag.type = "button";
     drag.textContent = "⠿";
-    drag.title = "Drag plot legend; arrow keys move it; End docks it right";
+    drag.title =
+      "Drag plot legend to any edge; arrow keys move it; End docks to the nearest edge";
     this.bindPlotLegendDrag(drag, legend);
     const title = document.createElement("button");
     title.className = "plot-legend-title";
@@ -1918,7 +1940,9 @@ export class PanelView {
     const rows = document.createElement("div");
     rows.className = "plot-legend-key-rows";
     rows.append(
-      ...shown.map((row) => this.plotLegendMatrixRow(state, dimension, row)),
+      ...shown.map((row) =>
+        this.plotLegendMatrixRow(state, dimension, row, shown),
+      ),
     );
     rows.addEventListener("click", (event) => {
       if (event.target === rows) this.callbacks.onClearFocus(this.id);
@@ -1938,7 +1962,7 @@ export class PanelView {
       const hint = document.createElement("button");
       hint.className = "plot-legend-hint";
       hint.type = "button";
-      hint.textContent = "hover a ghost to explore · click to focus  ×";
+      hint.textContent = "hover a dimmed line to explore · click to focus  ×";
       hint.title = "Dismiss hint";
       hint.addEventListener("click", () => {
         this.callbacks.onLegendLayout(this.id, { hintDismissed: true });
@@ -1980,6 +2004,7 @@ export class PanelView {
     state: RenderPanelState,
     dimension: LegendDimension,
     item: MatrixLegendRow,
+    selectionRows: readonly MatrixLegendRow[],
   ): HTMLElement {
     const block = document.createElement("div");
     block.className = "plot-legend-row-block plot-legend-matrix-block";
@@ -2037,13 +2062,18 @@ export class PanelView {
     action.addEventListener("mouseenter", () => this.setEmphasis(paths));
     action.addEventListener("mouseleave", () => this.setEmphasis(null));
     action.addEventListener("click", (event) => {
-      const entry = this.focusEntryForRow(dimension, item, state);
       if (event.altKey) this.callbacks.onMuteSelector(this.id, item.selector);
-      else if (event.metaKey || event.ctrlKey || event.shiftKey)
-        this.callbacks.onFocusToggle(this.id, entry);
-      else this.callbacks.onFocusSolo(this.id, entry);
+      else
+        this.selectFocusRows(
+          event,
+          dimension,
+          item.value,
+          selectionRows,
+          (row) => row.value,
+          (row) => this.focusEntryForRow(dimension, row, state),
+        );
     });
-    action.title = `Focus ${item.label}; Command-click adds; Option-click mutes`;
+    action.title = `Focus ${item.label}; Shift-click selects a range; Command/Ctrl-click toggles; Option-click mutes`;
     row.append(swatch, action);
     block.append(row);
     if (single !== undefined && this.inspectorPath === single.path) {
@@ -2101,7 +2131,7 @@ export class PanelView {
         viewport.style.height = "auto";
         viewport.replaceChildren(
           ...shown.map((item) =>
-            this.plotLegendMatrixRow(state, dimension, item),
+            this.plotLegendMatrixRow(state, dimension, item, shown),
           ),
         );
         return;
@@ -2115,7 +2145,7 @@ export class PanelView {
       viewport.style.height = `${String(slice.totalHeight)}px`;
       viewport.replaceChildren(
         ...shown.slice(slice.start, slice.end).map((item, offset) => {
-          const block = this.plotLegendMatrixRow(state, dimension, item);
+          const block = this.plotLegendMatrixRow(state, dimension, item, shown);
           block.classList.add("virtual");
           block.style.top = `${String(slice.topPadding + offset * 24)}px`;
           return block;
@@ -2137,7 +2167,7 @@ export class PanelView {
       if (first === undefined) return;
       event.preventDefault();
       if (event.altKey) this.callbacks.onMuteSelector(this.id, first.selector);
-      else if (event.metaKey || event.ctrlKey || event.shiftKey)
+      else if (event.metaKey || event.ctrlKey)
         this.callbacks.onFocusToggle(
           this.id,
           this.focusEntryForRow(dimension, first, state),
@@ -2193,7 +2223,7 @@ export class PanelView {
     const columns = document.createElement("div");
     columns.className = "plot-tip-columns";
     columns.innerHTML =
-      "<span></span><span>SERIES</span><span>x ↓</span><span>value</span><span></span>";
+      '<span></span><span>SERIES</span><span class="plot-tip-x">x ↓</span><span class="plot-tip-value">value</span><span class="plot-tip-reading">x · value</span><span></span>';
     const body = document.createElement("div");
     body.className = "plot-tip-rows";
     const byPath = new Map(state.series.map((series) => [series.path, series]));
@@ -2236,9 +2266,14 @@ export class PanelView {
         );
       });
       const x = document.createElement("span");
+      x.className = "plot-tip-x";
       x.textContent = formatValue(annotation.anchor);
       const value = document.createElement("span");
+      value.className = "plot-tip-value";
       value.textContent = formatValue(annotation.pinned_value);
+      const reading = document.createElement("span");
+      reading.className = "plot-tip-reading";
+      reading.textContent = `${formatValue(annotation.anchor)} · ${formatValue(annotation.pinned_value)}`;
       const actions = document.createElement("span");
       actions.className = "plot-tip-actions";
       const locate = document.createElement("button");
@@ -2256,7 +2291,7 @@ export class PanelView {
         this.callbacks.onRemoveAnnotation(this.id, annotation.id);
       });
       actions.append(locate, remove);
-      row.append(rule, name, x, value, actions);
+      row.append(rule, name, x, value, reading, actions);
       row.addEventListener("click", (event) => {
         if (event.target instanceof HTMLButtonElement) return;
         this.selectAnnotation(
@@ -2322,7 +2357,7 @@ export class PanelView {
     footer.className = "plot-legend-footer";
     const ghostButton = document.createElement("button");
     ghostButton.type = "button";
-    ghostButton.textContent = `${String(ghosts)} ghosts ▾`;
+    ghostButton.textContent = `${String(ghosts)} dimmed ▾`;
     ghostButton.addEventListener("click", showGhosts);
     footer.append(ghostButton);
     if (exportStats) {
@@ -2592,20 +2627,20 @@ export class PanelView {
       label.addEventListener("mouseleave", () => this.setEmphasis(null));
       label.addEventListener("click", (event) => {
         if (event.altKey) this.callbacks.onMuteSeries(this.id, row.series.ref);
-        else if (event.metaKey || event.ctrlKey || event.shiftKey)
-          this.callbacks.onFocusToggle(this.id, {
-            kind: "series",
-            ref: row.series.ref,
-            source_key: null,
-            channel: row.series.ref.channel,
-          });
         else
-          this.callbacks.onFocusSolo(this.id, {
-            kind: "series",
-            ref: row.series.ref,
-            source_key: null,
-            channel: row.series.ref.channel,
-          });
+          this.selectFocusRows(
+            event,
+            "stats",
+            row.series.path,
+            rows,
+            (entry) => entry.series.path,
+            (entry) => ({
+              kind: "series",
+              ref: entry.series.ref,
+              source_key: null,
+              channel: entry.series.ref.channel,
+            }),
+          );
       });
       identity.append(swatch, label);
       element.append(
@@ -2777,15 +2812,16 @@ export class PanelView {
   }
 
   private legendResizeHandle(
-    edge: "left" | "right" | "bottom" | "corner",
+    edge: "left" | "right" | "top" | "bottom" | "corner",
     legend: HTMLElement,
   ): HTMLButtonElement {
     const resize = document.createElement("button");
     resize.className = `plot-legend-resize plot-legend-resize-${edge}`;
-    if (edge === "left") resize.classList.add("dock-resize-handle");
+    if (legend.dataset.state === "rail")
+      resize.classList.add("dock-resize-handle");
     resize.type = "button";
     resize.title =
-      edge === "left"
+      legend.dataset.state === "rail"
         ? "Resize or collapse docked legend"
         : `Resize plot legend from the ${edge}`;
     resize.setAttribute("aria-label", resize.title);
@@ -2796,69 +2832,65 @@ export class PanelView {
   private bindPlotLegendResize(
     handle: HTMLButtonElement,
     legend: HTMLElement,
-    edge: "left" | "right" | "bottom" | "corner",
+    edge: "left" | "right" | "top" | "bottom" | "corner",
   ): void {
-    let railRequested = edge === "left";
-    let requestedWidth: number | null = null;
+    const dock = this.plotLegendDock ?? "right";
+    const docked = legend.dataset.state === "rail";
+    const verticalDock = dock === "left" || dock === "right";
+    let requestedThickness: number | null = null;
     const resize = (width: number, height: number): void => {
       const box = legend.getBoundingClientRect();
       const bounds = legend.parentElement?.getBoundingClientRect();
-      requestedWidth = width;
-      if (edge !== "left") {
+      if (docked) {
+        requestedThickness = verticalDock ? width : height;
+      } else {
         this.plotLegendPosition = this.currentPlotLegendPosition(legend);
         this.plotLegendAnchor = null;
-        railRequested ||=
-          bounds !== undefined &&
-          (width > bounds.width * 0.4 || height > bounds.height * 0.6);
       }
       this.plotLegendSize = {
-        width:
-          edge === "bottom"
-            ? box.width
-            : edge === "left" && width < LEGEND_RAIL_COLLAPSE
-              ? 0
-              : width || box.width,
+        width: docked && !verticalDock ? (bounds?.width ?? box.width) : width,
         height:
-          edge === "right" || edge === "left"
-            ? box.height
-            : height || box.height,
+          docked && verticalDock ? (bounds?.height ?? box.height) : height,
       };
       this.positionPlotLegend();
     };
     const commit = (): void => {
       if (this.plotLegendSize === null) return;
-      if (edge === "left") {
+      if (docked) {
         const bounds = legend.parentElement?.getBoundingClientRect();
-        const rawWidth = requestedWidth ?? legend.getBoundingClientRect().width;
-        const width =
-          rawWidth < LEGEND_RAIL_COLLAPSE
+        const box = legend.getBoundingClientRect();
+        const raw =
+          requestedThickness ?? (verticalDock ? box.width : box.height);
+        const minimum = verticalDock ? LEGEND_RAIL_MIN : 120;
+        const available = verticalDock
+          ? (bounds?.width ?? raw)
+          : (bounds?.height ?? raw);
+        const thickness =
+          raw < LEGEND_RAIL_COLLAPSE
             ? 0
-            : clamp(
-                rawWidth,
-                LEGEND_RAIL_MIN,
-                Math.max(LEGEND_RAIL_MIN, (bounds?.width ?? rawWidth) * 0.45),
-              );
+            : clamp(raw, minimum, Math.max(minimum, available * 0.45));
         this.callbacks.onLegendLayout(this.id, {
           state: "rail",
           position: null,
-          size: [width, bounds?.height ?? this.plotLegendSize.height],
+          size: verticalDock
+            ? [thickness, bounds?.height ?? this.plotLegendSize.height]
+            : [bounds?.width ?? this.plotLegendSize.width, thickness],
           anchor: null,
+          dock,
         });
         return;
       }
-      const nextState: LegendState = railRequested
-        ? "rail"
-        : this.plotLegendSize.height >= 150
-          ? "roster"
-          : "keys";
+      const nextState: LegendState =
+        this.plotLegendSize.height >= 150 ? "roster" : "keys";
       this.callbacks.onLegendLayout(this.id, {
         state: nextState,
         position:
-          nextState === "rail" || this.plotLegendPosition === null
+          this.plotLegendPosition === null
             ? null
             : [this.plotLegendPosition.x, this.plotLegendPosition.y],
         size: [this.plotLegendSize.width, this.plotLegendSize.height],
         anchor: null,
+        dock: null,
       });
     };
     handle.addEventListener("keydown", (event) => {
@@ -2872,25 +2904,54 @@ export class PanelView {
       if (direction === undefined) return;
       event.preventDefault();
       const box = legend.getBoundingClientRect();
+      const expandKey =
+        dock === "right"
+          ? "ArrowLeft"
+          : dock === "left"
+            ? "ArrowRight"
+            : dock === "top"
+              ? "ArrowDown"
+              : "ArrowUp";
+      const collapseKey =
+        dock === "right"
+          ? "ArrowRight"
+          : dock === "left"
+            ? "ArrowLeft"
+            : dock === "top"
+              ? "ArrowUp"
+              : "ArrowDown";
+      const minimum = verticalDock ? LEGEND_RAIL_MIN : 120;
+      const thickness = verticalDock ? box.width : box.height;
       if (
-        edge === "left" &&
-        ((legend.dataset.collapsed === "true" && event.key === "ArrowLeft") ||
+        docked &&
+        ((legend.dataset.collapsed === "true" && event.key === expandKey) ||
           (legend.dataset.collapsed !== "true" &&
-            event.key === "ArrowRight" &&
-            box.width <= LEGEND_RAIL_MIN))
+            thickness <= minimum &&
+            event.key === collapseKey))
       ) {
+        const next =
+          legend.dataset.collapsed === "true" ? LEGEND_RAIL_DEFAULT : 0;
         resize(
-          legend.dataset.collapsed === "true" ? LEGEND_RAIL_DEFAULT : 0,
-          box.height,
+          verticalDock ? next : box.width,
+          verticalDock ? box.height : next,
         );
         commit();
         return;
       }
       const step = event.shiftKey ? 48 : 16;
-      resize(
-        box.width + direction[0] * step * (edge === "left" ? -1 : 1),
-        box.height + direction[1] * step,
-      );
+      const widthDelta =
+        edge === "left"
+          ? -direction[0] * step
+          : edge === "right" || edge === "corner"
+            ? direction[0] * step
+            : 0;
+      const heightDelta =
+        edge === "top"
+          ? -direction[1] * step
+          : edge === "bottom" || edge === "corner"
+            ? direction[1] * step
+            : 0;
+      resize(box.width + widthDelta, box.height + heightDelta);
       commit();
     });
     handle.addEventListener("pointerdown", (event) => {
@@ -2900,9 +2961,21 @@ export class PanelView {
       const start = { x: event.clientX, y: event.clientY };
       const move = (next: PointerEvent): void => {
         if (next.pointerId !== event.pointerId) return;
+        const dx = next.clientX - start.x;
+        const dy = next.clientY - start.y;
         resize(
-          box.width + (next.clientX - start.x) * (edge === "left" ? -1 : 1),
-          box.height + next.clientY - start.y,
+          box.width +
+            (edge === "left"
+              ? -dx
+              : edge === "right" || edge === "corner"
+                ? dx
+                : 0),
+          box.height +
+            (edge === "top"
+              ? -dy
+              : edge === "bottom" || edge === "corner"
+                ? dy
+                : 0),
         );
       };
       const end = (next: PointerEvent): void => {
@@ -2925,7 +2998,10 @@ export class PanelView {
     handle.addEventListener("keydown", (event) => {
       if (event.key === "End") {
         event.preventDefault();
-        this.dockPlotLegend(legend);
+        this.dockPlotLegend(
+          legend,
+          this.nearestPlotLegendEdge(legend) ?? "right",
+        );
         return;
       }
       const directions: Record<string, [number, number]> = {
@@ -2978,19 +3054,23 @@ export class PanelView {
         };
         this.plotLegendAnchor = null;
         this.positionPlotLegend();
-        legend.parentElement?.classList.toggle(
-          "legend-dock-preview",
-          this.plotLegendNearRightEdge(legend),
-        );
+        const wrap = legend.parentElement;
+        if (wrap !== null) {
+          const preview = this.nearestPlotLegendEdge(legend, 56);
+          if (preview === null) delete wrap.dataset.legendDockPreview;
+          else wrap.dataset.legendDockPreview = preview;
+        }
       };
       const end = (next: PointerEvent): void => {
         if (next.pointerId !== event.pointerId) return;
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", end);
         document.removeEventListener("pointercancel", end);
-        legend.parentElement?.classList.remove("legend-dock-preview");
-        if (this.plotLegendTouchesRightEdge(legend)) {
-          this.dockPlotLegend(legend);
+        const wrap = legend.parentElement;
+        if (wrap !== null) delete wrap.dataset.legendDockPreview;
+        const dock = this.nearestPlotLegendEdge(legend, 20);
+        if (dock !== null) {
+          this.dockPlotLegend(legend, dock);
           return;
         }
         this.commitPlotLegendPosition();
@@ -3006,34 +3086,43 @@ export class PanelView {
     this.callbacks.onLegendLayout(this.id, {
       position: [this.plotLegendPosition.x, this.plotLegendPosition.y],
       anchor: null,
+      dock: null,
     });
   }
 
-  private dockPlotLegend(legend: HTMLElement): void {
+  private dockPlotLegend(legend: HTMLElement, dock: LegendDock): void {
     const box = legend.getBoundingClientRect();
+    const bounds = legend.parentElement?.getBoundingClientRect();
+    const vertical = dock === "left" || dock === "right";
     this.callbacks.onLegendLayout(this.id, {
       state: "rail",
       position: null,
-      size: [box.width, box.height],
+      size: vertical
+        ? [box.width, bounds?.height ?? box.height]
+        : [bounds?.width ?? box.width, box.height],
       anchor: null,
+      dock,
     });
   }
 
-  private plotLegendTouchesRightEdge(legend: HTMLElement): boolean {
-    return this.plotLegendRightEdgeDistance(legend) <= 20;
-  }
-
-  private plotLegendNearRightEdge(legend: HTMLElement): boolean {
-    return this.plotLegendRightEdgeDistance(legend) <= 56;
-  }
-
-  private plotLegendRightEdgeDistance(legend: HTMLElement): number {
+  private nearestPlotLegendEdge(
+    legend: HTMLElement,
+    threshold = Number.POSITIVE_INFINITY,
+  ): LegendDock | null {
     const wrap = legend.parentElement;
-    if (wrap === null) return Number.POSITIVE_INFINITY;
+    if (wrap === null) return null;
     const bounds = wrap.getBoundingClientRect();
     const box = legend.getBoundingClientRect();
     const position = this.currentPlotLegendPosition(legend);
-    return bounds.width - position.x - box.width;
+    const distances: Array<[LegendDock, number]> = [
+      ["left", position.x],
+      ["right", bounds.width - position.x - box.width],
+      ["top", position.y],
+      ["bottom", bounds.height - position.y - box.height],
+    ];
+    distances.sort((left, right) => left[1] - right[1]);
+    const nearest = distances[0];
+    return nearest !== undefined && nearest[1] <= threshold ? nearest[0] : null;
   }
 
   private floatPlotLegend(legend: HTMLElement): void {
@@ -3045,6 +3134,7 @@ export class PanelView {
       position: null,
       size: [box.width, clamp(280, 150, maxHeight)],
       anchor: "top_right",
+      dock: null,
     });
   }
 
@@ -3080,35 +3170,51 @@ export class PanelView {
     const bounds = wrap.getBoundingClientRect();
     const state = legend.dataset.state as LegendState | undefined;
     if (state === "rail") {
-      const requestedWidth = this.plotLegendSize?.width ?? LEGEND_RAIL_DEFAULT;
-      const collapsed = requestedWidth < LEGEND_RAIL_COLLAPSE;
-      const width = collapsed
+      const dock = this.plotLegendDock ?? "right";
+      const vertical = dock === "left" || dock === "right";
+      const requested = vertical
+        ? (this.plotLegendSize?.width ?? LEGEND_RAIL_DEFAULT)
+        : (this.plotLegendSize?.height ?? LEGEND_RAIL_DEFAULT);
+      const collapsed = requested < LEGEND_RAIL_COLLAPSE;
+      const minimum = vertical ? LEGEND_RAIL_MIN : 120;
+      const available = vertical ? bounds.width : bounds.height;
+      const thickness = collapsed
         ? DOCK_SEAM_WIDTH
-        : clamp(
-            requestedWidth,
-            LEGEND_RAIL_MIN,
-            Math.max(LEGEND_RAIL_MIN, bounds.width * 0.45),
-          );
+        : clamp(requested, minimum, Math.max(minimum, available * 0.45));
       this.plotLegendSize = {
-        width: collapsed ? 0 : width,
-        height: bounds.height,
+        width: vertical ? (collapsed ? 0 : thickness) : bounds.width,
+        height: vertical ? bounds.height : collapsed ? 0 : thickness,
       };
       wrap.classList.add("legend-rail");
       wrap.classList.toggle("legend-rail-collapsed", collapsed);
-      wrap.style.setProperty("--plot-legend-rail-width", `${String(width)}px`);
+      wrap.dataset.legendDock = dock;
+      wrap.style.setProperty(
+        "--plot-legend-rail-width",
+        `${String(vertical ? thickness : 0)}px`,
+      );
+      wrap.style.setProperty(
+        "--plot-legend-rail-height",
+        `${String(vertical ? 0 : thickness)}px`,
+      );
+      legend.dataset.dock = dock;
       legend.dataset.collapsed = String(collapsed);
-      legend.style.width = `${String(width)}px`;
-      legend.style.height = "100%";
-      legend.style.left = "auto";
-      legend.style.top = "0";
-      legend.style.right = "0";
+      legend.style.width = vertical ? `${String(thickness)}px` : "100%";
+      legend.style.height = vertical ? "100%" : `${String(thickness)}px`;
+      legend.style.left = dock === "right" ? "auto" : "0";
+      legend.style.right = dock === "left" ? "auto" : "0";
+      legend.style.top = dock === "bottom" ? "auto" : "0";
+      legend.style.bottom = dock === "top" ? "auto" : "0";
       this.refreshPlotLegendRoster();
       return;
     }
     wrap.classList.remove("legend-rail");
     wrap.classList.remove("legend-rail-collapsed");
+    delete wrap.dataset.legendDock;
     wrap.style.removeProperty("--plot-legend-rail-width");
+    wrap.style.removeProperty("--plot-legend-rail-height");
+    delete legend.dataset.dock;
     delete legend.dataset.collapsed;
+    legend.style.removeProperty("bottom");
     if (state === "badge") {
       legend.style.removeProperty("width");
       legend.style.removeProperty("height");
@@ -3236,6 +3342,42 @@ export class PanelView {
       : { kind: "channel", ref: null, source_key: null, channel: row.value };
   }
 
+  private selectFocusRows<T>(
+    event: MouseEvent,
+    scope: string,
+    value: string,
+    rows: readonly T[],
+    rowValue: (row: T) => string,
+    focusEntry: (row: T) => FocusEntry,
+  ): void {
+    if (event.shiftKey) {
+      const target = rows.findIndex((row) => rowValue(row) === value);
+      const anchor =
+        this.focusRangeAnchor?.scope === scope
+          ? rows.findIndex(
+              (row) => rowValue(row) === this.focusRangeAnchor?.value,
+            )
+          : -1;
+      if (anchor !== -1 && target !== -1) {
+        const start = Math.min(anchor, target);
+        const end = Math.max(anchor, target);
+        this.callbacks.onFocusRange(
+          this.id,
+          rows.slice(start, end + 1).map(focusEntry),
+        );
+        return;
+      }
+    }
+
+    this.focusRangeAnchor = { scope, value };
+    const row = rows.find((candidate) => rowValue(candidate) === value);
+    if (row === undefined) return;
+    const entry = focusEntry(row);
+    if (event.metaKey || event.ctrlKey)
+      this.callbacks.onFocusToggle(this.id, entry);
+    else this.callbacks.onFocusSolo(this.id, entry);
+  }
+
   private openBindingPopover(
     entry: BindingChipEntry,
     anchor: HTMLElement,
@@ -3343,9 +3485,9 @@ export class PanelView {
   }
 
   private openGhostMenu(state: RenderPanelState, anchor: HTMLElement): void {
-    this.openPanelMenu(anchor, "GHOST POOL", [
+    this.openPanelMenu(anchor, "DIM OTHER SERIES", [
       {
-        label: "all series · no ghosts",
+        label: "none · show full color",
         active: state.ghost_mode === "all",
         run: () => {
           if (state.ghost_mode !== "all")
@@ -3353,7 +3495,7 @@ export class PanelView {
         },
       },
       ...[0.2, 0.35, 0.5].map((opacity) => ({
-        label: `${String(Math.round(opacity * 100))}% opacity`,
+        label: `to ${String(Math.round(opacity * 100))}% opacity`,
         active:
           state.ghost_mode === "ghost" &&
           Math.abs(state.ghost_opacity - opacity) < 0.001,
@@ -3955,7 +4097,7 @@ function panelMarkup(): string {
       <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-group panel-toolbar-render">
         <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
-        <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Ghost visibility and strength">ghost <b class="panel-ghost-value">all</b> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-selected series">dim <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
       </span>
       <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-group panel-toolbar-readout">

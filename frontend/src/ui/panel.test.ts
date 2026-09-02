@@ -155,6 +155,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     legend_position: null,
     legend_size: null,
     legend_anchor: null,
+    legend_dock: null,
     legend_hint_dismissed: false,
     bindings: [],
     overrides: [],
@@ -422,6 +423,7 @@ describe("panel series", () => {
         | "catalog"
         | "onFocusToggle"
         | "onFocusSolo"
+        | "onFocusRange"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -436,6 +438,7 @@ describe("panel series", () => {
       catalog: () => catalog,
       onFocusToggle: vi.fn(),
       onFocusSolo: vi.fn(),
+      onFocusRange: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout,
@@ -453,7 +456,7 @@ describe("panel series", () => {
       view.element.querySelector(".plot-legend-roster-row")?.textContent,
     ).toContain("run_07");
     expect(view.element.querySelector(".plot-legend-footer")?.textContent).toBe(
-      "1 ghosts ▾0 overrides ▾",
+      "1 dimmed ▾0 overrides ▾",
     );
     view.element
       .querySelector<HTMLButtonElement>(".plot-legend-footer button")
@@ -489,8 +492,7 @@ describe("panel series", () => {
       plotLegendPosition: { x: number; y: number } | null;
       plotLegendSize: { width: number; height: number } | null;
       plotLegendAnchor: null;
-      plotLegendNearRightEdge(legend: HTMLElement): boolean;
-      plotLegendTouchesRightEdge(legend: HTMLElement): boolean;
+      nearestPlotLegendEdge(legend: HTMLElement, threshold?: number): string;
       updatePlotLegend(current: RenderPanelState): void;
     };
     view.callbacks = {
@@ -529,14 +531,14 @@ describe("panel series", () => {
     view.updatePlotLegend(state);
     expect(legend.querySelectorAll(".plot-legend-roster-row")).toHaveLength(8);
     expect(legend.querySelector(".plot-legend-focus-rows")).toBeNull();
-    expect(view.plotLegendNearRightEdge(legend)).toBe(true);
-    expect(view.plotLegendTouchesRightEdge(legend)).toBe(true);
+    expect(view.nearestPlotLegendEdge(legend, 56)).toBe("right");
+    expect(view.nearestPlotLegendEdge(legend, 20)).toBe("right");
     legend
       .querySelector<HTMLButtonElement>(".plot-legend-resize-bottom")
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
     expect(onLegendLayout).toHaveBeenCalledWith(
       "panel",
-      expect.objectContaining({ state: "rail", size: [160, 196] }),
+      expect.objectContaining({ state: "roster", size: [160, 196] }),
     );
     legend
       .querySelector<HTMLButtonElement>(".plot-legend-drag")
@@ -560,6 +562,7 @@ describe("panel series", () => {
     const state = timeState(paths.map(visible));
     state.legend_state = "rail";
     state.legend_size = [180, 240];
+    state.legend_dock = "right";
     const onLegendLayout = vi.fn();
     const view = Object.create(PanelView.prototype) as unknown as {
       id: string;
@@ -630,6 +633,7 @@ describe("panel series", () => {
       position: null,
       size: [180, 180],
       anchor: "top_right",
+      dock: null,
     });
 
     state.legend_size = [0, 300];
@@ -646,6 +650,7 @@ describe("panel series", () => {
       position: null,
       size: [225, 300],
       anchor: null,
+      dock: "right",
     });
 
     onLegendLayout.mockClear();

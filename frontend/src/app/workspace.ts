@@ -6,6 +6,7 @@ import type {
   DerivedSignal,
   GhostMode,
   LegendAnchor,
+  LegendDock,
   LegendState,
   LayoutRow,
   LinkedTime,
@@ -627,6 +628,7 @@ export class WorkspaceModel {
       position?: [number, number] | null;
       size?: [number, number] | null;
       anchor?: LegendAnchor | null;
+      dock?: LegendDock | null;
       hintDismissed?: boolean;
     },
   ): void {
@@ -636,6 +638,7 @@ export class WorkspaceModel {
     if (layout.position !== undefined) panel.legend_position = layout.position;
     if (layout.size !== undefined) panel.legend_size = layout.size;
     if (layout.anchor !== undefined) panel.legend_anchor = layout.anchor;
+    if (layout.dock !== undefined) panel.legend_dock = layout.dock;
     if (layout.hintDismissed !== undefined)
       panel.legend_hint_dismissed = layout.hintDismissed;
     this.touch(true);
@@ -735,6 +738,14 @@ export class WorkspaceModel {
     if (panel === undefined) return;
     panel.focus = [structuredClone(entry)];
     panel.legend_hint_dismissed = true;
+    this.touch(true);
+  }
+
+  setFocusRange(panelId: string, entries: readonly FocusEntry[]): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.focus = entries.map((entry) => structuredClone(entry));
+    if (panel.focus.length > 0) panel.legend_hint_dismissed = true;
     this.touch(true);
   }
 
@@ -1127,6 +1138,7 @@ export class WorkspaceModel {
       legend_position: null,
       legend_size: null,
       legend_anchor: null,
+      legend_dock: null,
       legend_hint_dismissed: false,
       y_range: null,
       x_range: null,

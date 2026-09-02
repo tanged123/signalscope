@@ -101,3 +101,11 @@ sessions migrate to visible labels with the prior default label offset. Focus
 remains the serialized series/source/channel set, but its presentation now
 marks the canonical legend rows instead of creating a duplicate focus stack.
 See [ADR 0051](0051-style-cascade-and-legend-statistics.md).
+
+## Amendment (2026-09-02, four-edge legend docking)
+
+Schema version 27 stores the legend dock edge independently from its `rail`
+presentation state. Version 26 rails migrate to `right`, preserving their prior
+geometry, while floating legends migrate with no dock edge. New rails may be
+persisted on the left, right, top, or bottom. See
+[ADR 0051](0051-style-cascade-and-legend-statistics.md).

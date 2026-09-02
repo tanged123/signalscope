@@ -62,7 +62,7 @@ export function resolvePanel(
   const display = focused.map((isFocused) =>
     isFocused
       ? ("focus" as const)
-      : panel.focus.length > 0 || panel.ghost_mode === "ghost"
+      : panel.ghost_mode === "ghost"
         ? ("ghost" as const)
         : ("rule" as const),
   );

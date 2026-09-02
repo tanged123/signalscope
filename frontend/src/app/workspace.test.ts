@@ -492,6 +492,22 @@ describe("WorkspaceModel", () => {
     expect(model.focusEntries(panel.id)).toEqual([]);
   });
 
+  it("replaces focus with a contiguous range in one update", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const entries = ["run_01", "run_02", "run_03"].map((source_key) => ({
+      kind: "source" as const,
+      ref: null,
+      source_key,
+      channel: null,
+    }));
+
+    model.setFocusRange(panel.id, entries);
+
+    expect(model.focusEntries(panel.id)).toEqual(entries);
+    expect(model.panel(panel.id)?.legend_hint_dismissed).toBe(true);
+  });
+
   it("creates series with the solid 2 px panel default", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -635,12 +651,14 @@ describe("WorkspaceModel", () => {
       position: null,
       size: [180, 300],
       anchor: null,
+      dock: "right",
     });
     expect(model.panel(first.id)).toMatchObject({
       legend_state: "rail",
       legend_position: null,
       legend_size: [180, 300],
       legend_anchor: null,
+      legend_dock: "right",
     });
   });
 
@@ -962,6 +980,7 @@ describe("WorkspaceModel", () => {
       legend_position: null,
       legend_size: null,
       legend_anchor: null,
+      legend_dock: null,
       legend_hint_dismissed: false,
       y_range: null,
       x_range: null,

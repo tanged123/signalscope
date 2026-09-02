@@ -1,5 +1,5 @@
 {
-  "schema_version": 26,
+  "schema_version": 27,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -91,6 +91,10 @@
       "kind": "enum",
       "variants": ["top_left", "top_right", "bottom_left", "bottom_right"]
     },
+    "LegendDock": {
+      "kind": "enum",
+      "variants": ["left", "right", "top", "bottom"]
+    },
     "NamedSetKind": { "kind": "enum", "variants": ["query", "pick"] },
     "AnnotationDisplay": {
       "kind": "enum",
@@ -137,6 +141,7 @@
         "legend_position": "f64[2]?",
         "legend_size": "f64[2]?",
         "legend_anchor": "LegendAnchor?",
+        "legend_dock": "LegendDock?",
         "legend_hint_dismissed": "bool",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",

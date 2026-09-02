@@ -696,6 +696,7 @@ mod tests {
             legend_position: None,
             legend_size: None,
             legend_anchor: None,
+            legend_dock: None,
             legend_hint_dismissed: false,
             y_range: None,
             x_range: None,

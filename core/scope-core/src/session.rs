@@ -71,10 +71,11 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     }
     let current = match head.schema_version {
         SESSION_SCHEMA_VERSION => value,
-        25 => migrate_v25(value),
-        24 => migrate_v25(migrate_v24(value)),
-        23 => migrate_v25(migrate_v24(migrate_v23(value))),
-        22 => migrate_v25(migrate_v24(migrate_v23(migrate_v22(value)))),
+        26 => migrate_v26(value),
+        25 => migrate_v26(migrate_v25(value)),
+        24 => migrate_v26(migrate_v25(migrate_v24(value))),
+        23 => migrate_v26(migrate_v25(migrate_v24(migrate_v23(value)))),
+        22 => migrate_v26(migrate_v25(migrate_v24(migrate_v23(migrate_v22(value))))),
         version => return Err(SessionError::UnsupportedVersion(version)),
     };
     Ok(serde_json::from_value(current)?)
@@ -180,7 +181,7 @@ fn migrate_v24(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 fn migrate_v25(mut value: serde_json::Value) -> serde_json::Value {
-    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["schema_version"] = 26.into();
     if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
         for tab in tabs {
             let Some(panels) = tab
@@ -208,6 +209,33 @@ fn migrate_v25(mut value: serde_json::Value) -> serde_json::Value {
                         }
                     }
                 }
+            }
+        }
+    }
+    value
+}
+
+fn migrate_v26(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
+        for tab in tabs {
+            let Some(panels) = tab
+                .get_mut("panels")
+                .and_then(|panels| panels.as_array_mut())
+            else {
+                continue;
+            };
+            for panel in panels {
+                let Some(panel) = panel.as_object_mut() else {
+                    continue;
+                };
+                let dock =
+                    if panel.get("legend_state").and_then(|state| state.as_str()) == Some("rail") {
+                        serde_json::Value::String("right".into())
+                    } else {
+                        serde_json::Value::Null
+                    };
+                panel.entry("legend_dock").or_insert(dock);
             }
         }
     }
@@ -405,6 +433,7 @@ mod tests {
                     legend_position: None,
                     legend_size: None,
                     legend_anchor: None,
+                    legend_dock: None,
                     legend_hint_dismissed: false,
                     y_range: None,
                     x_range: None,
@@ -636,5 +665,19 @@ mod tests {
         assert_eq!(panel.annotation_display, AnnotationDisplay::Labels);
         assert_eq!(panel.annotations[0].offset, [10.0, -10.0]);
         assert_eq!(panel.annotations[0].pinned_value, 3.25);
+        assert_eq!(panel.legend_dock, None);
+
+        let mut v26 = serde_json::to_value(restored).expect("serializes migrated session");
+        v26["schema_version"] = 26.into();
+        let legacy_panel = v26["tabs"][0]["panels"][0]
+            .as_object_mut()
+            .expect("panel object");
+        legacy_panel.insert("legend_state".into(), "rail".into());
+        legacy_panel.remove("legend_dock");
+        let docked = from_json(&v26.to_string()).expect("v26 rail migrates");
+        assert_eq!(
+            docked.tabs[0].panels[0].legend_dock,
+            Some(LegendDock::Right)
+        );
     }
 }

@@ -397,6 +397,12 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
+        onFocusRange: (id, entries) => {
+          this.workspace.setFocusRange(id, entries);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
         onClearFocus: (id) => {
           this.workspace.clearFocus(id);
           this.commitHistory();

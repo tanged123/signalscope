@@ -19,7 +19,7 @@ are recorded in [ADRs](adr/README.md).
   linked time, per-panel axes, cursor/annotation interactions, derived signals,
   named sets, and a serialized legend console that owns the line-style cascade,
   visible-region statistic columns, bounded data-tip manifests, and in-place
-  series focus.
+  series focus. Legend rails persist independently on any plot edge.
 - Live queries use adaptive pyramid resolution and retained overview/detail
   responses. The renderer remains deterministic from tiles, viewport, and
   design tokens. Snapshots embed selected tile data and session state without

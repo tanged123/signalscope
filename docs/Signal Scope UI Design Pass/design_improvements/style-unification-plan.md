@@ -36,7 +36,7 @@ The 26 px header is divided by hairline seams into stable groups:
 - Axes: the existing gutter/inline axis presentation control. Scale choices are
   not invented in this pass because the time-only ChartGPU path currently has
   one truthful linear scale.
-- Render defaults: editable line width and ghost opacity. Curve and point
+- Render defaults: editable line width and dim opacity. Curve and point
   density labels remain absent until they expose truthful controls.
 - Readout: statistics toggle and legend-size control.
 - Window: split, maximize, and close actions, always at the right edge.
@@ -46,18 +46,19 @@ editable pointer control remains a native button with a keyboard path.
 
 ### Legend
 
-The existing serialized badge → keys → roster → rail size ladder remains. Every
-state above badge gains a permanent encoding row directly below the header. In
-the rail the three chips wrap without dropping their `property ← source`
-labels. Chip editors are in-legend drawers that push content down, keeping both
-the affected rows and plot visible.
+The existing serialized badge → keys → roster → rail size ladder remains. A
+rail may dock left, right, top, or bottom; resizing a floating legend never
+implicitly docks it. Every state above badge gains a permanent encoding row
+directly below the header. In the rail the three chips wrap without dropping
+their `property ← source` labels. Chip editors are in-legend drawers that push
+content down, keeping both the affected rows and plot visible.
 
 Clicking a singular row swatch expands that row in place. The inspector contains
 only color and line fields, inherited provenance, field-level revert, mute, and
 escape/close affordances. Only one row is expanded. The former floating series
 card, quick-transform buttons, and remove action are deleted.
 
-The footer is the resting discrepancy ledger: ghost count on the left, style
+The footer is the resting discrepancy ledger: dimmed count on the left, style
 override count on the right. Opening the override count shows affected paths,
 fields, and per-series/all-series reverts inside the legend.
 
@@ -106,10 +107,12 @@ before identity and actions.
 
 Focus is the persistent series highlight set. It is painted on the canonical
 legend/statistic row with an amber tint and 2 px left rule; the trace retains
-its series hue, gains 1 px of presentation width, and the other traces use ghost
-strength. No focused row is copied into a separate stack.
+its series hue and gains 1 px of presentation width. The user-facing `dim`
+control independently chooses whether other traces retain full color or use the
+serialized ghost opacity. No focused row is copied into a separate stack.
 
-Plain row click replaces the focus set, Command/Ctrl-click adds or removes, and
+Plain row click replaces the focus set, Command/Ctrl-click adds or removes,
+Shift-click selects the contiguous visible range from the last anchor, and
 clicking empty legend space clears it. `focus only` filters the existing rows
 without reordering. Hover remains an achromatic surface raise and cross-links
 row, trace, and tips. Tip selection is a separate transient amber outline used

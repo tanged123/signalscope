@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 26;
+pub const SESSION_SCHEMA_VERSION: u32 = 27;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -169,6 +169,15 @@ pub enum LegendAnchor {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum LegendDock {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NamedSetKind {
     Query,
     Pick,
@@ -227,6 +236,8 @@ pub struct PanelState {
     pub legend_size: Option<[f64; 2]>,
     #[serde(default)]
     pub legend_anchor: Option<LegendAnchor>,
+    #[serde(default)]
+    pub legend_dock: Option<LegendDock>,
     pub legend_hint_dismissed: bool,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,

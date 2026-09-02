@@ -47,6 +47,7 @@ function panel(): PanelState {
     legend_position: null,
     legend_size: null,
     legend_anchor: null,
+    legend_dock: null,
     legend_hint_dismissed: false,
     y_range: null,
     x_range: null,
@@ -178,9 +179,9 @@ describe("resolvePanel", () => {
     expect(resolvePanel(catalog, state, [])).toEqual([
       expect.objectContaining({
         path: "a/temp",
-        hue: null,
-        display: "ghost",
-        opacity: 0.5,
+        hue: 1,
+        display: "rule",
+        opacity: 1,
         focused: false,
         overridden: false,
       }),
@@ -311,7 +312,7 @@ describe("resolvePanel", () => {
   it.each([
     ["all", [], ["rule", "rule"]],
     ["ghost", [], ["ghost", "ghost"]],
-    ["all", ["b"], ["ghost", "focus"]],
+    ["all", ["b"], ["rule", "focus"]],
     ["ghost", ["b"], ["ghost", "focus"]],
   ] as const)("resolves %s display state", (ghostMode, sources, expected) => {
     const state = panel();

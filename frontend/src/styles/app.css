@@ -941,18 +941,44 @@ button {
   isolation: isolate;
 }
 
-.plot-wrap.legend-dock-preview::after {
+.plot-wrap[data-legend-dock-preview]::after {
   position: absolute;
   z-index: 2;
-  top: 8px;
-  right: 3px;
-  bottom: 8px;
-  width: 12px;
   background: var(--surface-2);
   border: 1px solid var(--amber-5);
   content: "";
   opacity: 0.72;
   pointer-events: none;
+}
+
+.plot-wrap[data-legend-dock-preview="left"]::after,
+.plot-wrap[data-legend-dock-preview="right"]::after {
+  top: 8px;
+  bottom: 8px;
+  width: 12px;
+}
+
+.plot-wrap[data-legend-dock-preview="left"]::after {
+  left: 3px;
+}
+
+.plot-wrap[data-legend-dock-preview="right"]::after {
+  right: 3px;
+}
+
+.plot-wrap[data-legend-dock-preview="top"]::after,
+.plot-wrap[data-legend-dock-preview="bottom"]::after {
+  right: 8px;
+  left: 8px;
+  height: 12px;
+}
+
+.plot-wrap[data-legend-dock-preview="top"]::after {
+  top: 3px;
+}
+
+.plot-wrap[data-legend-dock-preview="bottom"]::after {
+  bottom: 3px;
 }
 
 .plot-hover-tag {
@@ -994,14 +1020,38 @@ button {
   touch-action: none;
 }
 
-.plot-wrap.legend-rail .chart-host,
-.plot-wrap.legend-rail .overlay-canvas,
-.plot-wrap.legend-rail .panel-empty {
+.plot-wrap.legend-rail[data-legend-dock="right"] .chart-host,
+.plot-wrap.legend-rail[data-legend-dock="right"] .overlay-canvas,
+.plot-wrap.legend-rail[data-legend-dock="right"] .panel-empty {
   right: var(--plot-legend-rail-width);
 }
 
-.plot-wrap.legend-rail .overlay-canvas {
+.plot-wrap.legend-rail[data-legend-dock="left"] .chart-host,
+.plot-wrap.legend-rail[data-legend-dock="left"] .overlay-canvas,
+.plot-wrap.legend-rail[data-legend-dock="left"] .panel-empty {
+  left: var(--plot-legend-rail-width);
+}
+
+.plot-wrap.legend-rail[data-legend-dock="top"] .chart-host,
+.plot-wrap.legend-rail[data-legend-dock="top"] .overlay-canvas,
+.plot-wrap.legend-rail[data-legend-dock="top"] .panel-empty {
+  top: var(--plot-legend-rail-height);
+}
+
+.plot-wrap.legend-rail[data-legend-dock="bottom"] .chart-host,
+.plot-wrap.legend-rail[data-legend-dock="bottom"] .overlay-canvas,
+.plot-wrap.legend-rail[data-legend-dock="bottom"] .panel-empty {
+  bottom: var(--plot-legend-rail-height);
+}
+
+.plot-wrap.legend-rail[data-legend-dock="left"] .overlay-canvas,
+.plot-wrap.legend-rail[data-legend-dock="right"] .overlay-canvas {
   width: calc(100% - var(--plot-legend-rail-width));
+}
+
+.plot-wrap.legend-rail[data-legend-dock="top"] .overlay-canvas,
+.plot-wrap.legend-rail[data-legend-dock="bottom"] .overlay-canvas {
+  height: calc(100% - var(--plot-legend-rail-height));
 }
 
 .plot-series-legend {
@@ -1036,7 +1086,7 @@ button {
 
 .plot-series-legend[data-state="roster"] {
   width: min(252px, calc(100% - 16px));
-  height: min(280px, 60%);
+  height: min(280px, calc(100% - 16px));
   min-height: 150px;
 }
 
@@ -1046,20 +1096,34 @@ button {
 }
 
 .plot-series-legend[data-state="rail"] {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: auto;
-  width: var(--plot-legend-rail-width);
   min-width: 140px;
-  max-width: 45%;
-  height: 100%;
   min-height: 0;
   background: var(--surface-0);
-  border-width: 0 0 0 1px;
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
+}
+
+.plot-series-legend[data-state="rail"][data-dock="left"],
+.plot-series-legend[data-state="rail"][data-dock="right"] {
+  max-width: 45%;
+  border-width: 0 1px 0 0;
+}
+
+.plot-series-legend[data-state="rail"][data-dock="right"] {
+  border-width: 0 0 0 1px;
+}
+
+.plot-series-legend[data-state="rail"][data-dock="top"],
+.plot-series-legend[data-state="rail"][data-dock="bottom"] {
+  width: 100%;
+  max-width: none;
+  max-height: 45%;
+  border-width: 0 0 1px;
+}
+
+.plot-series-legend[data-state="rail"][data-dock="bottom"] {
+  border-width: 1px 0 0;
 }
 
 .plot-series-legend[data-state="rail"][data-collapsed="true"] {
@@ -1069,7 +1133,7 @@ button {
 }
 
 .plot-series-legend[data-state="rail"][data-collapsed="true"]
-  > :not(.plot-legend-resize-left) {
+  > :not(.dock-resize-handle) {
   display: none;
 }
 
@@ -1335,7 +1399,15 @@ button {
   cursor: ew-resize;
 }
 
-.plot-series-legend[data-collapsed="true"] .plot-legend-resize-left {
+.plot-legend-resize-top {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 5px;
+  cursor: ns-resize;
+}
+
+.plot-series-legend[data-collapsed="true"] .dock-resize-handle {
   top: 0;
 }
 
@@ -1517,6 +1589,7 @@ button {
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .plot-legend-group-title {
@@ -1551,7 +1624,7 @@ button {
 }
 
 .plot-legend-roster-rows {
-  min-height: 48px;
+  min-height: 0;
   flex: 1;
   overflow-y: auto;
 }
@@ -1790,7 +1863,12 @@ button {
 }
 
 .plot-legend-tips {
-  flex: none;
+  display: flex;
+  min-height: 22px;
+  max-height: min(154px, 50%);
+  flex: 0 1 auto;
+  flex-direction: column;
+  overflow: hidden;
   border-top: 1px solid var(--border-faint);
 }
 
@@ -1836,13 +1914,18 @@ button {
   letter-spacing: 0.06em;
 }
 
-.plot-tip-columns > :nth-child(n + 3),
-.plot-tip-row > :nth-child(3),
-.plot-tip-row > :nth-child(4) {
+.plot-tip-x,
+.plot-tip-value,
+.plot-tip-reading {
   text-align: right;
 }
 
+.plot-tip-reading {
+  display: none;
+}
+
 .plot-tip-rows {
+  min-height: 0;
   max-height: 132px;
   overflow-y: auto;
 }
@@ -1901,16 +1984,15 @@ button {
 
 .plot-series-legend[data-state="rail"] .plot-tip-columns,
 .plot-series-legend[data-state="rail"] .plot-tip-row {
-  grid-template-columns: 8px minmax(0, 1fr) 16px;
+  grid-template-columns: 8px minmax(0, 1fr) minmax(82px, auto) 34px;
 }
 
-.plot-series-legend[data-state="rail"]
-  :is(.plot-tip-columns, .plot-tip-row)
-  > :nth-child(3),
-.plot-series-legend[data-state="rail"]
-  :is(.plot-tip-columns, .plot-tip-row)
-  > :nth-child(4) {
+.plot-series-legend[data-state="rail"] :is(.plot-tip-x, .plot-tip-value) {
   display: none;
+}
+
+.plot-series-legend[data-state="rail"] .plot-tip-reading {
+  display: block;
 }
 
 .plot-row-inspector {
