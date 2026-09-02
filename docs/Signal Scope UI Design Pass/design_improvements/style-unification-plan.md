@@ -33,9 +33,9 @@ drawer.
 The 26 px header is divided by hairline seams into stable groups:
 
 - Binding: drag handle, editable title, binding chips, and add affordance.
-- Axes: the existing gutter/inline axis presentation control. Scale choices are
-  not invented in this pass because the time-only ChartGPU path currently has
-  one truthful linear scale.
+- Axes: the existing gutter/inline axis presentation control, with inline axes
+  as the default for new panels. Scale choices are not invented in this pass
+  because the time-only ChartGPU path currently has one truthful linear scale.
 - Render defaults: editable line width and dim opacity. Curve and point
   density labels remain absent until they expose truthful controls.
 - Readout: statistics toggle and legend-size control.
@@ -97,11 +97,13 @@ most two label heights before falling back to a marker that reveals its label on
 hover. The toolbar `tips n` control selects labels, markers-only, or hidden
 display without deleting pins and provides the explicit clear-all action.
 
-The legend contains one bounded `TIPS` manifest, collapsed by default and
-scrolling after approximately six rows. It is sorted by x descending and adds
-series identity, locate, delete, selection, cross-highlight, and CSV actions;
-it is an inventory, not a second primary readout. The rail drops numeric columns
-before identity and actions.
+The legend contains one `TIPS` manifest, collapsed by default, with a scrolling
+list. Its top seam is a vertical resize handle, with arrow-key resizing as the
+keyboard path, so the manifest can grow without resizing or redocking the whole
+legend. It is sorted by x descending and adds series identity, locate, delete,
+selection, cross-highlight, and CSV actions; it is an inventory, not a second
+primary readout. The rail combines the numeric columns before dropping identity
+or actions.
 
 ### Focus and selection
 

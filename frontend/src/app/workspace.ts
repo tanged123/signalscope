@@ -1124,7 +1124,7 @@ export class WorkspaceModel {
     const panel: PanelState = {
       id: `panel-${String(this.nextPanelNumber)}`,
       title: `Panel ${String(this.nextPanelNumber)}`,
-      axis_style: "gutter",
+      axis_style: "inline",
       bindings: [],
       color_by: "source",
       dash_by: null,

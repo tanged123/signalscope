@@ -752,10 +752,11 @@ describe("WorkspaceModel", () => {
   it("toggles statistics and axis style", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
+    expect(model.panel(panel.id)?.axis_style).toBe("inline");
     model.toggleStats(panel.id);
     model.toggleAxisStyle(panel.id);
     expect(model.panel(panel.id)?.show_stats).toBe(true);
-    expect(model.panel(panel.id)?.axis_style).toBe("inline");
+    expect(model.panel(panel.id)?.axis_style).toBe("gutter");
   });
 
   it("updates series style and prunes annotations when removing it", () => {

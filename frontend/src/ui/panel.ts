@@ -506,6 +506,7 @@ export class PanelView {
     { x: number; y: number }
   >();
   private annotationsExpanded = false;
+  private plotTipsHeight: number | null = null;
   private annotationDragId: string | null = null;
   private focusOnly = false;
   private focusRangeAnchor: { scope: string; value: string } | null = null;
@@ -947,31 +948,6 @@ export class PanelView {
       if (!this.interactions.isDragging() && this.annotationDragId === null) {
         this.clearHover();
         this.callbacks.onCursor(this.id, null, null);
-      }
-    });
-    this.overlay.addEventListener("dblclick", (event) => {
-      const layout = this.activeLayout();
-      const state = this.lastState;
-      if (
-        layout === null ||
-        state === null ||
-        state.annotations.length === 0 ||
-        !insidePlot(layout, event.offsetX, event.offsetY) ||
-        this.overlayRenderer.annotationAt(event.offsetX, event.offsetY) !==
-          null ||
-        this.seriesHit(event.offsetX, event.offsetY, 6) !== null
-      ) {
-        return;
-      }
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (
-        window.confirm(
-          `Clear all ${String(state.annotations.length)} pinned tips?`,
-        )
-      ) {
-        this.selectedAnnotationIds.clear();
-        this.callbacks.onClearAnnotations?.(this.id);
       }
     });
     this.overlay.addEventListener("contextmenu", (event) => {
@@ -2220,6 +2196,12 @@ export class PanelView {
     if (!this.annotationsExpanded || state.annotations.length === 0)
       return section;
 
+    heading.classList.add("resizable");
+    heading.tabIndex = 0;
+    heading.setAttribute("role", "group");
+    heading.setAttribute("aria-label", "Tips controls and resize handle");
+    heading.title = "Drag vertically to resize tips; use Up and Down arrows";
+
     const columns = document.createElement("div");
     columns.className = "plot-tip-columns";
     columns.innerHTML =
@@ -2312,7 +2294,52 @@ export class PanelView {
       body.append(row);
     }
     section.append(columns, body);
+    if (this.plotTipsHeight !== null)
+      section.style.height = `${String(this.plotTipsHeight)}px`;
+    this.bindPlotTipsResize(heading, section);
     return section;
+  }
+
+  private bindPlotTipsResize(handle: HTMLElement, section: HTMLElement): void {
+    const resize = (height: number): void => {
+      const parentHeight =
+        section.parentElement?.getBoundingClientRect().height ?? height;
+      const next = clamp(height, 22, Math.max(22, parentHeight * 0.75));
+      this.plotTipsHeight = next;
+      section.style.height = `${String(next)}px`;
+    };
+    handle.addEventListener("keydown", (event) => {
+      if (event.target !== handle) return;
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const step = event.shiftKey ? 48 : 16;
+      const height = section.getBoundingClientRect().height;
+      resize(height + (event.key === "ArrowUp" ? step : -step));
+    });
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("button") !== null
+      )
+        return;
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = section.getBoundingClientRect().height;
+      const move = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        resize(startHeight + startY - next.clientY);
+      };
+      const end = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", end);
+        document.removeEventListener("pointercancel", end);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", end);
+      document.addEventListener("pointercancel", end);
+    });
   }
 
   private panToAnnotation(anchor: number): void {
@@ -3536,16 +3563,10 @@ export class PanelView {
       {
         label: "clear all",
         active: false,
+        action: true,
         run: () => {
-          if (
-            state.annotations.length === 0 ||
-            window.confirm(
-              `Clear all ${String(state.annotations.length)} pinned tips?`,
-            )
-          ) {
-            this.selectedAnnotationIds.clear();
-            this.callbacks.onClearAnnotations?.(this.id);
-          }
+          this.selectedAnnotationIds.clear();
+          this.callbacks.onClearAnnotations?.(this.id);
         },
       },
     ]);
@@ -3557,6 +3578,7 @@ export class PanelView {
     options: readonly {
       label: string;
       active: boolean;
+      action?: boolean;
       run: () => void;
     }[],
   ): void {
@@ -3572,9 +3594,13 @@ export class PanelView {
     for (const option of options) {
       const button = document.createElement("button");
       button.type = "button";
-      button.setAttribute("role", "menuitemradio");
-      button.setAttribute("aria-checked", String(option.active));
-      button.textContent = `${option.active ? "✓ " : "  "}${option.label}`;
+      button.setAttribute(
+        "role",
+        option.action === true ? "menuitem" : "menuitemradio",
+      );
+      if (option.action !== true)
+        button.setAttribute("aria-checked", String(option.active));
+      button.textContent = `${option.active ? "✓ " : option.action === true ? "" : "  "}${option.label}`;
       button.addEventListener("click", () => {
         option.run();
         this.closePanelConfig();

@@ -338,6 +338,37 @@ describe("PanelView chrome", () => {
     ).toBe("5.1200 · 1.0565");
   });
 
+  it("clears all tips directly from the toolbar menu", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const panelCallbacks = callbacks(catalog);
+    const onClearAnnotations = vi.fn();
+    panelCallbacks.onClearAnnotations = onClearAnnotations;
+    const view = new PanelView("panel", panelCallbacks);
+    const panel = state();
+    panel.annotations = [
+      {
+        id: "tip-1",
+        series_path: "run-01/temp",
+        anchor: 5.12,
+        pinned_value: 1.0565,
+        label: "",
+        offset: [10, -10],
+      },
+    ];
+    view.update(panel, false);
+
+    view.element.querySelector<HTMLButtonElement>(".panel-tips")?.click();
+    const clear = [
+      ...view.element.querySelectorAll<HTMLButtonElement>(
+        ".panel-config-popover button",
+      ),
+    ].find((button) => button.textContent.trim() === "clear all");
+    clear?.click();
+
+    expect(onClearAnnotations).toHaveBeenCalledWith("panel");
+    expect(view.element.querySelector(".panel-config-popover")).toBeNull();
+  });
+
   it("lays rails out on every persisted dock edge", () => {
     const catalog = Catalog.build([signal("run-01", "temp")]);
     const view = new PanelView("panel", callbacks(catalog));

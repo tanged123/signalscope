@@ -168,6 +168,9 @@ test("command palette edits focused-panel axis labels", async ({ page }) => {
 test("panel matrix legend keeps rosters virtual and exposes unified styles", async ({
   page,
 }) => {
+  await page.route("**/api/health", (route) =>
+    route.fulfill({ status: 503, body: "offline for isolated UI probe" }),
+  );
   await gotoApp(page);
   await page.evaluate(async () => {
     const modulePath = "/src/ui/panel.ts";
@@ -271,6 +274,9 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
       onXRange: () => {},
       onPinAnnotation: () => {},
       onRemoveAnnotation: () => {},
+      onClearAnnotations: () => {
+        host.dataset.tipsCleared = "true";
+      },
       onEditAnnotationLabel: () => {},
       onFitView: () => {},
       onToggleStats: () => {},
@@ -384,6 +390,46 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
       }),
     )
     .toEqual({ plotFamilyApplied: true, plotSizeApplied: true });
+  for (const selector of [
+    ".panel-line-width",
+    ".panel-tips",
+    ".panel-legend-state",
+  ]) {
+    await panel.locator(selector).click();
+    const menu = panel.locator(".panel-config-popover");
+    await expect(menu).toBeVisible();
+    await expect
+      .poll(() =>
+        menu.evaluate((element) => {
+          const title = getComputedStyle(
+            element.querySelector(".panel-config-title") as HTMLElement,
+          );
+          const option = getComputedStyle(
+            element.querySelector("button") as HTMLButtonElement,
+          );
+          return {
+            titleFamily: title.fontFamily.includes("JetBrains Mono"),
+            titleSize: Math.round(Number.parseFloat(title.fontSize)),
+            optionFamily: option.fontFamily.includes("JetBrains Mono"),
+            optionSize: Math.round(Number.parseFloat(option.fontSize)),
+          };
+        }),
+      )
+      .toEqual({
+        titleFamily: true,
+        titleSize: 9,
+        optionFamily: true,
+        optionSize: 10,
+      });
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+  }
+  await panel.locator(".panel-tips").click();
+  await panel.getByRole("menuitem", { name: "clear all" }).click();
+  await expect(page.locator("#legend-probe")).toHaveAttribute(
+    "data-tips-cleared",
+    "true",
+  );
   const rosterActions = plotLegend.locator(".plot-legend-roster-action");
   await rosterActions.nth(0).click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(
@@ -404,6 +450,28 @@ test("panel matrix legend keeps rosters virtual and exposes unified styles", asy
   await expect(plotLegend.locator(".plot-tip-reading").nth(1)).toHaveText(
     "5.1200 · 1.0565",
   );
+  const tips = plotLegend.locator(".plot-legend-tips");
+  const tipsHeading = plotLegend.locator(".plot-legend-tips-heading");
+  const beforeTipsResize = await tips.boundingBox();
+  const tipsHeadingBox = await tipsHeading.boundingBox();
+  if (beforeTipsResize === null || tipsHeadingBox === null)
+    throw new Error("Tips resize handle is not laid out");
+  await page.mouse.move(
+    tipsHeadingBox.x + tipsHeadingBox.width * 0.55,
+    tipsHeadingBox.y + tipsHeadingBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(tipsHeadingBox.x, tipsHeadingBox.y - 48);
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await tips.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(beforeTipsResize.height + 30);
+  const beforeKeyboardResize = await tips.boundingBox();
+  await tipsHeading.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect
+    .poll(async () => (await tips.boundingBox())?.height ?? 0)
+    .toBeLessThan((beforeKeyboardResize?.height ?? 0) - 10);
   await expect
     .poll(() =>
       plotLegend.evaluate((element) => {

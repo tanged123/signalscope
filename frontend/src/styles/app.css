@@ -859,6 +859,7 @@ button {
   width: 100%;
   padding: 4px;
   color: var(--fg-2);
+  font: inherit;
   text-align: left;
 }
 
@@ -1865,8 +1866,8 @@ button {
 .plot-legend-tips {
   display: flex;
   min-height: 22px;
-  max-height: min(154px, 50%);
-  flex: 0 1 auto;
+  max-height: 75%;
+  flex: 0 0 auto;
   flex-direction: column;
   overflow: hidden;
   border-top: 1px solid var(--border-faint);
@@ -1882,6 +1883,15 @@ button {
   color: var(--fg-4);
   font-size: 9px;
   letter-spacing: 0.06em;
+}
+
+.plot-legend-tips-heading.resizable {
+  cursor: row-resize;
+}
+
+.plot-legend-tips-heading.resizable:focus-visible {
+  outline: 1px solid var(--fg-1);
+  outline-offset: -1px;
 }
 
 .plot-legend-tips-heading button {
@@ -1926,7 +1936,7 @@ button {
 
 .plot-tip-rows {
   min-height: 0;
-  max-height: 132px;
+  flex: 1;
   overflow-y: auto;
 }
 
