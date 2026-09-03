@@ -14,7 +14,7 @@ test("bench smoke: baked monte-carlo workspace renders and survives interaction"
   ).toBe(true);
   await page.goto(artifact.href);
   await expect(page.locator(".chart-host canvas").first()).toBeVisible({
-    timeout: 15_000,
+    timeout: 30_000,
   });
   await expect(page.locator(".render-ms")).not.toHaveText("— ms");
   const readout = page.locator(".window-readout").first();

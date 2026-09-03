@@ -1127,6 +1127,7 @@ test("legend console replaces the strip and supports workspace-wide states", asy
     .toEqual({ plotReflowed: true, fullHeight: true });
   const rail = panel.locator(".plot-series-legend");
   const railResize = rail.locator(".plot-legend-resize-left");
+  await expect(railResize).toBeVisible();
   const [railBox, railResizeBox] = await Promise.all([
     rail.boundingBox(),
     railResize.boundingBox(),

@@ -83,7 +83,12 @@ async function latestAxisLabels(
 test.describe("desktop plot interactions", () => {
   test.beforeEach(async ({ page }) => {
     await gotoApp(page);
-    await expect(page.locator(".panel").first()).toBeVisible();
+    const panel = page.locator(".panel").first();
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".chart-host canvas").first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.locator(".render-ms").first()).not.toHaveText("— ms");
   });
 
   test("cursor readout, tooltip, linked zoom and stats update", async ({
