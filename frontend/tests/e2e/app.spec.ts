@@ -135,6 +135,9 @@ test("application menu mirrors commands and marks planned work", async ({
 
 test("tabbing out of the application menu dismisses it", async ({ page }) => {
   await gotoApp(page);
+  await expect(page.locator(".chart-host canvas").first()).toBeVisible({
+    timeout: 20_000,
+  });
   await page.locator(".menu-button").click();
   const menu = page.locator(".app-menu");
   await expect(menu).toBeVisible();
