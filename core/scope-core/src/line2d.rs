@@ -95,19 +95,23 @@ impl LinePyramid {
     }
 
     fn from_shared_samples(anchor: Arc<[f64]>, x: Arc<[f64]>, ys: Vec<Arc<[f64]>>) -> Self {
-        let previous = (0..anchor.len())
-            .map(|index| sample_bin(index, &x, &ys))
-            .collect::<Vec<_>>();
         let mut levels: Vec<Vec<LineBin>> = Vec::new();
-        if previous.len() > 1 {
+        if anchor.len() > 1 {
             levels.push(
-                previous
-                    .chunks(2)
-                    .map(|pair| {
-                        pair.get(1).map_or_else(
-                            || pair[0].clone(),
-                            |right| merge_bins(&pair[0], right, &x, &ys),
-                        )
+                (0..anchor.len())
+                    .step_by(2)
+                    .map(|left_index| {
+                        let left = sample_bin(left_index, &x, &ys);
+                        match left_index
+                            .checked_add(1)
+                            .filter(|right_index| *right_index < anchor.len())
+                        {
+                            Some(right_index) => {
+                                let right = sample_bin(right_index, &x, &ys);
+                                merge_bins(&left, &right, &x, &ys)
+                            }
+                            None => left,
+                        }
                     })
                     .collect(),
             );

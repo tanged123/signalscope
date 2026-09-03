@@ -13,6 +13,7 @@ export function parseBakedSession(sessionJson: string): Session {
       `snapshot session schema ${String(parsed.schema_version)} does not match this build (${String(SESSION_SCHEMA_VERSION)})`,
     );
   }
+  normalizeOptionalAnnotationFields(parsed);
   if (!isSession(parsed)) {
     throw new Error("snapshot session has an invalid structure");
   }
@@ -151,11 +152,27 @@ function isAnnotation(value: unknown): boolean {
     typeof value.id === "string" &&
     typeof value.series_path === "string" &&
     typeof value.anchor === "number" &&
-    isNullable(value.pinned_x, (item) => typeof item === "number") &&
+    (value.pinned_x === undefined ||
+      isNullable(value.pinned_x, (item) => typeof item === "number")) &&
     typeof value.pinned_value === "number" &&
     typeof value.label === "string" &&
     isNumberPair(value.offset)
   );
+}
+
+function normalizeOptionalAnnotationFields(session: JsonObject): void {
+  if (!Array.isArray(session.tabs)) return;
+  for (const tab of session.tabs) {
+    if (!isRecord(tab) || !Array.isArray(tab.panels)) continue;
+    for (const panel of tab.panels) {
+      if (!isRecord(panel) || !Array.isArray(panel.annotations)) continue;
+      for (const annotation of panel.annotations) {
+        if (isRecord(annotation) && annotation.pinned_x === undefined) {
+          annotation.pinned_x = null;
+        }
+      }
+    }
+  }
 }
 
 function isFocus(value: unknown): boolean {

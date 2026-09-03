@@ -70,25 +70,22 @@ pub struct OwnedBinaryLineResponse {
 ///          then each Y f64[row_count]
 /// ```
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics when metadata or column lengths cannot be represented by the wire
-/// format, or when a response has no Y columns.
-pub fn encode_line_response(response: &BinaryLineResponse<'_>) -> Vec<u8> {
-    validate_response(response);
+/// Returns an error when response columns or metadata exceed the binary
+/// framing limits, have mismatched lengths, or the response has no Y columns.
+pub fn encode_line_response(response: &BinaryLineResponse<'_>) -> Result<Vec<u8>, LineBinaryError> {
+    validate_response(response)?;
     let row_count = response.anchor.len();
-    let mut bytes = Vec::with_capacity(response_bytes(response));
+    let mut bytes = Vec::with_capacity(response_bytes(response)?);
     put_u32(&mut bytes, LINE_BINARY_MAGIC);
     put_u32(&mut bytes, LINE_BINARY_VERSION);
     put_u32(&mut bytes, response.level);
     put_u32(
         &mut bytes,
-        u32::try_from(response.ys.len()).expect("Y column count fits in u32"),
+        u32::try_from(response.ys.len()).unwrap_or(u32::MAX),
     );
-    put_u32(
-        &mut bytes,
-        u32::try_from(row_count).expect("row count fits in u32"),
-    );
+    put_u32(&mut bytes, u32::try_from(row_count).unwrap_or(u32::MAX));
     put_u32(&mut bytes, 0);
 
     append_metadata(&mut bytes, &response.x);
@@ -100,7 +97,7 @@ pub fn encode_line_response(response: &BinaryLineResponse<'_>) -> Vec<u8> {
     for column in response.ys {
         append_f64s(&mut bytes, column.values);
     }
-    bytes
+    Ok(bytes)
 }
 
 /// Decodes a versioned, little-endian `Line2D` response.
@@ -179,45 +176,79 @@ pub fn decode_line_response(bytes: &[u8]) -> Result<OwnedBinaryLineResponse, Lin
     })
 }
 
-fn response_bytes(response: &BinaryLineResponse<'_>) -> usize {
-    let metadata =
-        metadata_bytes(&response.x) + response.ys.iter().map(metadata_bytes).sum::<usize>();
-    24 + metadata
-        + response
-            .anchor
-            .len()
-            .checked_mul(8 + 8 * (1 + response.ys.len()))
-            .expect("Line2D column size overflow")
+fn response_bytes(response: &BinaryLineResponse<'_>) -> Result<usize, LineBinaryError> {
+    let metadata = response
+        .ys
+        .iter()
+        .try_fold(metadata_bytes(&response.x)?, |total, column| {
+            total
+                .checked_add(metadata_bytes(column)?)
+                .ok_or(LineBinaryError::Malformed("Line2D payload size overflow"))
+        })?;
+    let columns = response
+        .anchor
+        .len()
+        .checked_mul(8 + 8 * (1 + response.ys.len()))
+        .ok_or(LineBinaryError::Malformed("Line2D column size overflow"))?;
+    24usize
+        .checked_add(metadata)
+        .and_then(|size| size.checked_add(columns))
+        .ok_or(LineBinaryError::Malformed("Line2D payload size overflow"))
 }
 
-fn validate_response(response: &BinaryLineResponse<'_>) {
-    assert!(
-        !response.ys.is_empty(),
-        "Line2D requires at least one Y column"
-    );
-    assert!(u32::try_from(response.ys.len()).is_ok());
-    assert!(u32::try_from(response.anchor.len()).is_ok());
-    assert_eq!(response.anchor.len(), response.x.values.len());
-    assert!(u16::try_from(response.x.signal_path.len()).is_ok());
-    assert!(
-        response
-            .x
-            .unit
-            .is_none_or(|unit| unit.len() < usize::from(u16::MAX))
-    );
-    for column in response.ys {
-        assert!(u16::try_from(column.signal_path.len()).is_ok());
-        assert!(
-            column
-                .unit
-                .is_none_or(|unit| unit.len() < usize::from(u16::MAX))
-        );
-        assert_eq!(response.anchor.len(), column.values.len());
+fn validate_response(response: &BinaryLineResponse<'_>) -> Result<(), LineBinaryError> {
+    if response.ys.is_empty() {
+        return Err(LineBinaryError::Malformed(
+            "Line2D requires at least one Y column",
+        ));
     }
+    if u32::try_from(response.ys.len()).is_err() {
+        return Err(LineBinaryError::Malformed("Y column count exceeds u32"));
+    }
+    if u32::try_from(response.anchor.len()).is_err() {
+        return Err(LineBinaryError::Malformed("row count exceeds u32"));
+    }
+    if response.anchor.len() != response.x.values.len() {
+        return Err(LineBinaryError::Malformed("X column length mismatch"));
+    }
+    if u16::try_from(response.x.signal_path.len()).is_err() {
+        return Err(LineBinaryError::Malformed("signal path exceeds u16"));
+    }
+    if response
+        .x
+        .unit
+        .is_some_and(|unit| unit.len() >= usize::from(u16::MAX))
+    {
+        return Err(LineBinaryError::Malformed("unit exceeds u16"));
+    }
+    for column in response.ys {
+        if u16::try_from(column.signal_path.len()).is_err() {
+            return Err(LineBinaryError::Malformed("signal path exceeds u16"));
+        }
+        if column
+            .unit
+            .is_some_and(|unit| unit.len() >= usize::from(u16::MAX))
+        {
+            return Err(LineBinaryError::Malformed("unit exceeds u16"));
+        }
+        if response.anchor.len() != column.values.len() {
+            return Err(LineBinaryError::Malformed("Y column length mismatch"));
+        }
+    }
+    Ok(())
 }
 
-fn metadata_bytes(column: &BinaryLineColumn<'_>) -> usize {
-    16 + align8(column.signal_path.len() + column.unit.map_or(0, str::len))
+fn metadata_bytes(column: &BinaryLineColumn<'_>) -> Result<usize, LineBinaryError> {
+    let payload = column
+        .signal_path
+        .len()
+        .checked_add(column.unit.map_or(0, str::len))
+        .and_then(|size| size.checked_add(7))
+        .ok_or(LineBinaryError::Malformed("Line2D metadata size overflow"))?
+        & !7;
+    16usize
+        .checked_add(payload)
+        .ok_or(LineBinaryError::Malformed("Line2D metadata size overflow"))
 }
 
 fn append_metadata(bytes: &mut Vec<u8>, column: &BinaryLineColumn<'_>) {
@@ -392,7 +423,7 @@ mod tests {
     #[test]
     fn round_trip_preserves_metadata_order_rows_and_nan_gaps() {
         let expected = response();
-        let bytes = encode_line_response(&expected);
+        let bytes = encode_line_response(&expected).unwrap();
         let actual = decode_line_response(&bytes).expect("decode");
         assert_eq!(actual.level, expected.level);
         assert_eq!(actual.anchor, expected.anchor);
@@ -412,28 +443,28 @@ mod tests {
     #[test]
     fn rejects_bad_version_and_empty_y_columns() {
         let expected = response();
-        let mut bytes = encode_line_response(&expected);
+        let mut bytes = encode_line_response(&expected).unwrap();
         bytes[4..8].copy_from_slice(&2_u32.to_le_bytes());
         assert!(matches!(
             decode_line_response(&bytes),
             Err(LineBinaryError::Version { .. })
         ));
 
-        let mut bytes = encode_line_response(&expected);
+        let mut bytes = encode_line_response(&expected).unwrap();
         bytes[12..16].copy_from_slice(&0_u32.to_le_bytes());
         assert_eq!(
             decode_line_response(&bytes),
             Err(LineBinaryError::Malformed("missing Y columns"))
         );
 
-        let mut bytes = encode_line_response(&expected);
+        let mut bytes = encode_line_response(&expected).unwrap();
         bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(
             decode_line_response(&bytes),
             Err(LineBinaryError::Malformed("Y column count exceeds payload"))
         );
 
-        let mut bytes = encode_line_response(&expected);
+        let mut bytes = encode_line_response(&expected).unwrap();
         bytes[46] = 1;
         assert_eq!(
             decode_line_response(&bytes),
@@ -458,7 +489,33 @@ mod tests {
             ys: base.ys,
         };
 
-        assert!(std::panic::catch_unwind(|| encode_line_response(&invalid)).is_err());
+        assert_eq!(
+            encode_line_response(&invalid),
+            Err(LineBinaryError::Malformed("unit exceeds u16"))
+        );
+    }
+
+    #[test]
+    fn rejects_an_oversized_signal_path_without_panicking() {
+        let base = response();
+        let path = "p".repeat(usize::from(u16::MAX) + 1);
+        let x = BinaryLineColumn {
+            signal_id: base.x.signal_id,
+            signal_path: &path,
+            unit: base.x.unit,
+            values: base.x.values,
+        };
+        let invalid = BinaryLineResponse {
+            level: base.level,
+            anchor: base.anchor,
+            x,
+            ys: base.ys,
+        };
+
+        assert_eq!(
+            encode_line_response(&invalid),
+            Err(LineBinaryError::Malformed("signal path exceeds u16"))
+        );
     }
 
     fn assert_f64s(actual: &[f64], expected: &[f64]) {

@@ -4,7 +4,9 @@ import type { Line2DResponse } from "./line-binary";
 import {
   autoPresentationBudgets,
   CPU_BYTES_PER_BIN,
+  CPU_BYTES_PER_LINE2D_VALUE,
   GPU_BYTES_PER_BIN,
+  GPU_BYTES_PER_LINE2D_VALUE,
   planPresentationDensity,
   type DensityPlan,
 } from "./presentation-budget";
@@ -202,8 +204,8 @@ export class LinePresentationController {
       (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
     );
     const replacing = new Set(panels.map((panel) => panel.id));
-    const retainedBins =
-      this.cache.retainedBinCount(replacing) +
+    const retainedTileUnits = this.cache.retainedBinCount(replacing);
+    const retainedLineUnits =
       this.signalXCache.retainedResourceUnitCount(replacing);
     const densityPlan = planPresentationDensity({
       demands: panelInputs.map((input) => ({
@@ -217,10 +219,22 @@ export class LinePresentationController {
           input.panel.x_axis.kind === "signal"
             ? 4 + 2 * input.signals.ids.length
             : 1,
+        cpuBytesPerUnit:
+          input.panel.x_axis.kind === "signal"
+            ? CPU_BYTES_PER_LINE2D_VALUE
+            : CPU_BYTES_PER_BIN,
+        gpuBytesPerUnit:
+          input.panel.x_axis.kind === "signal"
+            ? GPU_BYTES_PER_LINE2D_VALUE
+            : GPU_BYTES_PER_BIN,
       })),
       budgets,
-      retainedCpuBytes: retainedBins * CPU_BYTES_PER_BIN,
-      retainedGpuBytes: retainedBins * GPU_BYTES_PER_BIN,
+      retainedCpuBytes:
+        retainedTileUnits * CPU_BYTES_PER_BIN +
+        retainedLineUnits * CPU_BYTES_PER_LINE2D_VALUE,
+      retainedGpuBytes:
+        retainedTileUnits * GPU_BYTES_PER_BIN +
+        retainedLineUnits * GPU_BYTES_PER_LINE2D_VALUE,
     });
     this.callbacks.onPlan(densityPlan);
     const nextResponses = new Map<string, PanelLineResponse>();

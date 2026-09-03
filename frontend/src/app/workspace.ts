@@ -283,7 +283,7 @@ export class WorkspaceModel {
       .filter((set) => set.kind !== "pick" || set.refs.length > 0);
     for (const tab of this.session.tabs) {
       for (const panel of tab.panels) {
-        this.removeSeriesRef(panel.id, ref, path);
+        this.removeSeriesRef(panel.id, ref, path, true);
       }
     }
     this.touch(true);
@@ -454,7 +454,12 @@ export class WorkspaceModel {
     );
   }
 
-  removeSeriesRef(panelId: string, ref: SeriesRef, path?: string): void {
+  removeSeriesRef(
+    panelId: string,
+    ref: SeriesRef,
+    path?: string,
+    deletingSignal = false,
+  ): void {
     const panel = this.session.tabs
       .flatMap((tab) => tab.panels)
       .find((entry) => entry.id === panelId);
@@ -475,6 +480,19 @@ export class WorkspaceModel {
     panel.focus = panel.focus.filter(
       (entry) => entry.ref === null || !sameRef(entry.ref, ref),
     );
+    if (
+      deletingSignal &&
+      panel.x_axis.kind === "signal" &&
+      sameRef(panel.x_axis.ref, ref)
+    ) {
+      panel.x_axis = { kind: "time", ref: null };
+      panel.x_range = null;
+      panel.x_label = null;
+      panel.annotations = panel.annotations.map((annotation) => ({
+        ...annotation,
+        pinned_x: null,
+      }));
+    }
     if (path !== undefined) {
       panel.annotations = panel.annotations.filter(
         (annotation) => annotation.series_path !== path,

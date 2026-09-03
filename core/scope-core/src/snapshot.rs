@@ -421,10 +421,7 @@ fn signal_plan<'a>(
     }
 }
 
-fn line_combinations(
-    session: &Session,
-    store: &SignalStore,
-) -> Result<Vec<(SignalId, Vec<SignalId>)>, SnapshotError> {
+fn line_combinations(session: &Session, store: &SignalStore) -> Vec<(SignalId, Vec<SignalId>)> {
     let mut combinations = BTreeSet::new();
     for tab in &session.tabs {
         for panel in &tab.panels {
@@ -434,20 +431,21 @@ fn line_combinations(
             let Some(reference) = &panel.x_axis.r#ref else {
                 continue;
             };
-            let x_signal = signal_from_ref(session, store, reference)
-                .ok_or_else(|| SnapshotError::MissingLineXReference(reference.channel.clone()))?;
+            let Some(x_signal) = signal_from_ref(session, store, reference) else {
+                continue;
+            };
             let mut y_signals = panel_y_signal_ids(session, store, panel)
                 .into_iter()
                 .filter(|id| *id != x_signal.id)
                 .collect::<Vec<_>>();
             if y_signals.is_empty() {
-                return Err(SnapshotError::EmptyLineYSignals);
+                continue;
             }
             y_signals.sort_unstable();
             combinations.insert((x_signal.id, y_signals));
         }
     }
-    Ok(combinations.into_iter().collect())
+    combinations.into_iter().collect()
 }
 
 fn line_plan<'a>(
@@ -459,12 +457,16 @@ fn line_plan<'a>(
     if y_signals.is_empty() {
         return Err(SnapshotError::EmptyLineYSignals);
     }
-    let pyramid = LinePyramid::from_signals(x_signal, &y_signals).map_err(|error| match error {
+    let effective_window = window.unwrap_or_else(|| x_signal.time_bounds());
+    let pyramid = match window {
+        Some((t0, t1)) => LinePyramid::from_signals_window(x_signal, &y_signals, t0, t1),
+        None => LinePyramid::from_signals(x_signal, &y_signals),
+    }
+    .map_err(|error| match error {
         Line2dError::EmptyYSignals => SnapshotError::EmptyLineYSignals,
         Line2dError::TimebaseMismatch => SnapshotError::LineTimebaseMismatch,
         Line2dError::ColumnRead => SnapshotError::LineColumnRead(x_signal.id),
     })?;
-    let effective_window = window.unwrap_or_else(|| x_signal.time_bounds());
     let finest = match ceiling(fidelity) {
         None => 0,
         Some(limit) => (0..pyramid.level_count())
@@ -624,7 +626,7 @@ fn line_plans<'a>(
     window: Option<(f64, f64)>,
     fidelity: ExportFidelity,
 ) -> Result<Vec<LinePlan<'a>>, SnapshotError> {
-    line_combinations(session, store)?
+    line_combinations(session, store)
         .into_iter()
         .filter(|(x_id, y_ids)| {
             std::iter::once(x_id).chain(y_ids.iter()).all(|id| {
@@ -1050,6 +1052,38 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![SignalId(2), SignalId(3)]
         );
+    }
+
+    #[test]
+    fn signal_x_snapshot_skips_unresolved_and_empty_line_panels() {
+        let (store, pyramids) = store_with(&[("y", 64)]);
+        let mut unresolved = panel("unresolved", &["y"]);
+        unresolved.x_axis = XAxisSource {
+            kind: XAxisKind::Signal,
+            r#ref: Some(SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "missing".to_owned(),
+            }),
+        };
+        let mut only_x = panel("only-x", &["y"]);
+        only_x.x_axis = XAxisSource {
+            kind: XAxisKind::Signal,
+            r#ref: Some(SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "y".to_owned(),
+            }),
+        };
+
+        let export = plan(
+            &session_with(vec![unresolved, only_x]),
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Full,
+        )
+        .expect("unresolved line panels are skipped");
+
+        assert!(export.lines.is_empty());
     }
 
     #[test]

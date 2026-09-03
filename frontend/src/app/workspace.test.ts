@@ -140,6 +140,33 @@ describe("panel X axis", () => {
     expect(model.panel(panel.id)?.x_axis).toEqual({ kind: "signal", ref });
   });
 
+  it("resets a signal X binding when that signal is deleted", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("run-01/position");
+    model.setPanelXAxis(panel.id, { kind: "signal", ref });
+    model.setPanelXRange(panel.id, [10, 20]);
+    model.setAxisLabel(panel.id, "x", "position");
+    model.addAnnotation(panel.id, {
+      id: "ann-1",
+      series_path: "run-01/other",
+      anchor: 1,
+      pinned_x: 10,
+      pinned_value: 2,
+      label: "tip",
+      offset: [10, -10],
+    });
+
+    model.removeSignalRef(ref);
+
+    expect(model.panel(panel.id)).toMatchObject({
+      x_axis: { kind: "time", ref: null },
+      x_range: null,
+      x_label: null,
+    });
+    expect(model.panel(panel.id)?.annotations[0]?.pinned_x).toBeNull();
+  });
+
   it("does not reset coordinate state when reselecting the current X", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

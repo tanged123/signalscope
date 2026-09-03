@@ -253,7 +253,11 @@ test("Line2D resolves annotations by source anchor to current plotted values", (
     colorIndex: 0,
     summary: "2.0000 · 4.0000",
   });
-  expect(plot.resolveAnnotation(lineAnnotation(9, 100))).toBeNull();
+  expect(plot.resolveAnnotation(lineAnnotation(9, 100))).toMatchObject({
+    x: 4,
+    y: 8,
+    summary: "4.0000 · 8.0000",
+  });
 });
 
 test("Line2D reports exact reduced extrema but no raw aggregate statistics", () => {

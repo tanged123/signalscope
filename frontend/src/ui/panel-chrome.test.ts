@@ -427,6 +427,27 @@ describe("PanelView chrome", () => {
     view.element.remove();
   });
 
+  it("keeps a data error visible across state refresh and deduplication", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const view = new PanelView("panel", callbacks(catalog));
+    const panel = state();
+
+    view.renderData(panel, null, { t0: 0, t1: 1 }, [], "query failed");
+    expect(view.element.querySelector(".panel-empty")?.textContent).toBe(
+      "query failed",
+    );
+
+    view.update(panel, false);
+    expect(view.element.querySelector(".panel-empty")?.textContent).toBe(
+      "query failed",
+    );
+
+    view.renderData(panel, null, { t0: 0, t1: 1 }, [], "query failed");
+    expect(view.element.querySelector(".panel-empty")?.textContent).toBe(
+      "query failed",
+    );
+  });
+
   it("collapses signal rows independently from tips", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),

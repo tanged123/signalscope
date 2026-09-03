@@ -10,6 +10,32 @@ describe("parseBakedSession", () => {
     expect(parseBakedSession(json).schema_version).toBe(SESSION_SCHEMA_VERSION);
   });
 
+  it("normalizes omitted optional annotation X pins", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.annotations = [
+      {
+        id: "tip-1",
+        series_path: "run/y",
+        anchor: 1,
+        pinned_x: null,
+        pinned_value: 2,
+        label: "tip",
+        offset: [10, -10],
+      },
+    ];
+    const parsed = JSON.parse(JSON.stringify(model.snapshot())) as {
+      tabs: { panels: { annotations: Record<string, unknown>[] }[] }[];
+    };
+    const annotation = parsed.tabs[0]?.panels[0]?.annotations[0];
+    if (annotation === undefined) throw new Error("annotation is missing");
+    delete annotation.pinned_x;
+
+    const restored = parseBakedSession(JSON.stringify(parsed));
+
+    expect(restored.tabs[0]?.panels[0]?.annotations[0]?.pinned_x).toBeNull();
+  });
+
   it("round-trips current panel style and statistic fields", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

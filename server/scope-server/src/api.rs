@@ -694,7 +694,7 @@ pub async fn query_line2d_bin(
             x,
             ys: &ys,
         };
-        Ok::<_, String>(scope_protocol::encode_line_response(&response))
+        scope_protocol::encode_line_response(&response).map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| err(error.to_string()))?

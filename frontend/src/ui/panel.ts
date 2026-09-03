@@ -884,7 +884,9 @@ export class PanelView {
     ) {
       this.inspectorPath = null;
     }
-    if (rendered.series.length === 0) {
+    if (this.lastError !== null) {
+      this.shell.setStatus({ kind: "error", message: this.lastError });
+    } else if (rendered.series.length === 0) {
       this.shell.setStatus({
         kind: "empty",
         message: "Empty panel — drag a signal here.",
@@ -917,6 +919,9 @@ export class PanelView {
       this.lastMissingEmpty &&
       error === this.lastError
     ) {
+      if (this.lastError !== null) {
+        this.shell.setStatus({ kind: "error", message: this.lastError });
+      }
       return 0;
     }
     const windowChanged =

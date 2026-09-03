@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   autoPresentationBudgets,
+  CPU_BYTES_PER_LINE2D_VALUE,
+  GPU_BYTES_PER_LINE2D_VALUE,
   MIB,
   planPresentationDensity,
   type PanelDemand,
@@ -123,6 +125,23 @@ describe("planPresentationDensity", () => {
 
     expect(paired.estimatedCpuBytes).toBe(ordinary.estimatedCpuBytes * 24);
     expect(paired.estimatedGpuBytes).toBe(ordinary.estimatedGpuBytes * 24);
+  });
+
+  it("charges Line2D units with their column widths", () => {
+    const plan = planPresentationDensity({
+      demands: [
+        demand({
+          cpuBytesPerUnit: CPU_BYTES_PER_LINE2D_VALUE,
+          gpuBytesPerUnit: GPU_BYTES_PER_LINE2D_VALUE,
+        }),
+      ],
+      budgets: { cpuBytes: 512 * MIB, gpuBytes: 256 * MIB },
+      retainedCpuBytes: 0,
+      retainedGpuBytes: 0,
+    });
+
+    expect(plan.estimatedCpuBytes).toBe(32_000);
+    expect(plan.estimatedGpuBytes).toBe(16_000);
   });
 
   it("reports an impossible one-pixel minimum instead of rejecting unevenly", () => {

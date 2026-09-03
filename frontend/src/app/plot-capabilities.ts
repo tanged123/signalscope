@@ -305,13 +305,22 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
         series.colorIndex,
       );
     }
+    let nearestIndex = -1;
+    let nearestDistance = Number.POSITIVE_INFINITY;
     for (let index = 0; index < input.anchor.length; index += 1) {
-      if ((input.anchor[index] as number) !== annotation.anchor) continue;
-      const row = rowFor(series, index);
-      if (row === null) continue;
-      return resolved(annotation, row.x, row.y, series.colorIndex);
+      const anchor = input.anchor[index] as number;
+      if (!Number.isFinite(anchor)) continue;
+      const distance = Math.abs(anchor - annotation.anchor);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
     }
-    return null;
+    if (nearestIndex < 0) return null;
+    const row = rowFor(series, nearestIndex);
+    return row === null
+      ? null
+      : resolved(annotation, row.x, row.y, series.colorIndex);
   };
   return {
     interaction: LINE2D_POLICY,
