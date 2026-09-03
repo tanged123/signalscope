@@ -49,6 +49,7 @@ implementation choices remain explainable.
 41. [Electron distribution shell](0049-electron-distribution-shell.md)
 42. [Retire obsolete compatibility seams](0050-retire-obsolete-compatibility-seams.md)
 43. [Style cascade, legend analysis, and inspection state](0051-style-cascade-and-legend-statistics.md)
+44. [Typed plot families and the explicit-X Line2D foundation](0052-typed-plot-families-and-explicit-x-line2d.md)
 
 ## Superseded decisions
 

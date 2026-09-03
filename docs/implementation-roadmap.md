@@ -15,8 +15,9 @@ are recorded in [ADRs](adr/README.md).
 - The frontend consumes the versioned `DataPlane` contract. `HttpPlane` serves
   live workspaces; `BakedPlane` serves self-contained snapshots. UI and
   renderer code do not branch on host identity.
-- Presentation is time-series only. ChartGPU is the single plotter, with
-  linked time, per-panel axes, cursor/annotation interactions, derived signals,
+- Line2D presentation supports linked time or an explicit signal X on an exact
+  shared timebase. ChartGPU is the Line2D plotter behind the SignalScope-owned
+  renderer boundary, with per-panel axes, cursor/annotation interactions, derived signals,
   named sets, and a serialized legend console that owns the line-style cascade,
   visible-region statistic columns, bounded data-tip manifests, and in-place
   series focus. Legend rails persist independently on any plot edge.
@@ -27,9 +28,10 @@ are recorded in [ADRs](adr/README.md).
 
 ## Deliberate limits
 
-- XY, FFT, histogram, and 3D presentation are withdrawn. Reintroducing a mode
-  requires a current data contract and an ADR; old mode records remain only as
-  superseded history.
+- Scatter, histogram, FFT-specific UI, spectrogram, contour, and 3D
+  presentation are not current capabilities. ADR 0052 defines typed
+  plot-family seams; each future family needs a current data contract and an
+  ADR.
 - Input is desktop-only. Touch gestures and mobile-specific browser coverage
   are out of scope.
 - Live streaming, remote data planes, layout-preset UI, and richer
@@ -46,10 +48,19 @@ Prioritize measured, user-visible work in this order:
    reduction or GPU policy.
 2. Improve ingest and snapshot boundary coverage (large/corrupt inputs,
    cache reuse, session round trips, no-network and size-budget checks).
-3. If XY or another mode returns, design correspondence-preserving reduction
-   and binary sample transport first. Do not revive the withdrawn mode stack or
-   its historical plans as an implementation shortcut.
-4. Consider remote/live sources only after the local `DataPlane` contract and
+3. Keep the reusable panel shell, SignalScope-owned Line2D render model,
+   ChartGPU host, presentation controller, and response cache boundaries small
+   as Line2D evolves.
+4. Measure the explicit-X reducer and paired transport on large and gap-heavy
+   data. The live path currently reads a bounded padded window and builds its
+   paired pyramid on demand; use measurements to decide whether page-native
+   reduction or another bounded cache is warranted. Preserve source-row
+   correspondence; do not interpolate, independently reduce X and Y columns,
+   or add an unbounded X/Y-combination cache.
+5. When another plot family arrives, design its typed data contract, reduction,
+   interaction, and snapshot payload before implementation. Do not revive the
+   withdrawn mode stack or its historical plans as an implementation shortcut.
+6. Consider remote/live sources only after the local `DataPlane` contract and
    snapshot parity remain stable.
 
 Use the smallest relevant script for local iteration, then `./scripts/ci.sh all`

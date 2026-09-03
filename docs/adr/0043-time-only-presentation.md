@@ -62,3 +62,20 @@ chosen here; both are recorded so the constraint is not rediscovered.
 Time-series behavior is unchanged: full resolution under ADR 0041, and the
 padded render feed, windowed presentation math, interleaved
 single-precision vertices, and time rebase under ADR 0042.
+
+## Amendment (2026-09-03)
+
+ADR 0052 records the deliberate extension seam. Line2D remains the only
+current presentation family, and “single plotter” describes the current
+implementation rather than a requirement that every future plot family use
+ChartGPU. A second concrete content type must earn its own typed render and
+data contract; speculative mode fields and a universal plot API remain out of
+scope.
+
+The first extension is Line2D state with an explicit X-axis source. A `time`
+source is the existing linked-time coordinate; a `signal` source carries its
+`SeriesRef`. An arbitrary signal X is permitted only for Y signals on the same
+exact timebase (equal length and bit-for-bit identical timestamps), with
+correspondence-preserving paired reduction and binary transport. It does not
+reintroduce the withdrawn XY mode stack or allow implicit interpolation and
+resampling.

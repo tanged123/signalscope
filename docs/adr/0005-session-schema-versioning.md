@@ -109,3 +109,13 @@ presentation state. Version 26 rails migrate to `right`, preserving their prior
 geometry, while floating legends migrate with no dock edge. New rails may be
 persisted on the left, right, top, or bottom. See
 [ADR 0051](0051-style-cascade-and-legend-statistics.md).
+
+## Amendment (2026-09-03, explicit Line2D X-axis source)
+
+Schema version 28 stores an explicit `x_axis` source on each panel. The source
+kind is `time` or `signal`; time sources have no series reference, while signal
+sources carry the referenced `SeriesRef`. Version 27 panels migrate to the
+time source default. Session parsing rejects a source whose kind and reference
+do not satisfy that invariant. Annotations also store an optional `pinned_x`
+so a tip remains at its plotted coordinate when X is not time; old annotations
+default it to null and retain their time anchor behavior.
