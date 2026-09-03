@@ -77,6 +77,24 @@ describe("parseBakedSession", () => {
     );
   });
 
+  it("rejects an X axis source whose kind and reference disagree", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.x_axis = {
+      kind: "time",
+      ref: { source_key: "run", channel: "x" },
+    };
+
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+      /structure/,
+    );
+
+    panel.x_axis = { kind: "signal", ref: null };
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+      /structure/,
+    );
+  });
+
   it("rejects a foreign app", () => {
     const json = JSON.stringify({ ...emptySession(), app: "other" });
     expect(() => parseBakedSession(json)).toThrow(/app/);

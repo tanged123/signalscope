@@ -157,6 +157,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     legend_anchor: null,
     legend_dock: null,
     legend_hint_dismissed: false,
+    x_axis: { kind: "time", ref: null },
     bindings: [],
     overrides: [],
     focus: [],
@@ -286,6 +287,7 @@ describe("panel series", () => {
       annotationAt: () => ({
         path: series.path,
         anchor: 1,
+        x: 1,
         pinnedValue: 2,
       }),
       resolveAnnotation: () => null,

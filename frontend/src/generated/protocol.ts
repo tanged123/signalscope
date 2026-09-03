@@ -127,6 +127,14 @@ export interface TileRequest {
   pixel_width: number;
 }
 
+export interface Line2DRequest {
+  request_id: string;
+  x_signal_id: string;
+  y_signal_ids: string[];
+  window: TimeWindow;
+  pixel_width: number;
+}
+
 export interface EnvelopeBin {
   t0: number;
   t1: number;
@@ -308,7 +316,21 @@ export interface BakedSignal {
   levels: EnvelopeBin[][];
 }
 
+export interface BakedLine2DLevel {
+  level: number;
+  anchor: number[];
+  x: (number | null)[];
+  ys: ((number | null)[])[];
+}
+
+export interface BakedLine2D {
+  x_signal_id: string;
+  y_signal_ids: string[];
+  levels: BakedLine2DLevel[];
+}
+
 export interface SnapshotManifest {
   session_json: string;
   signals: BakedSignal[];
+  line2d: BakedLine2D[] | null;
 }

@@ -5,6 +5,7 @@ import { binColumnsFromWire } from "../app/bin-columns";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Palette, SeriesStroke } from "./plot-theme";
 import type { GpuContext } from "./gpu-context";
+import { line2DFromTimeTiles } from "./time-adapter";
 
 const state = vi.hoisted(() => ({
   charts: [] as Array<{
@@ -105,17 +106,27 @@ function request(
   data: ColumnarTileResponse = response(),
   styles: readonly SeriesStroke[] = [stroke(0)],
   emphasisIndices: readonly number[] = [],
+  overrides: Partial<{
+    xRange: { min: number; max: number };
+    yRange: readonly [number, number];
+    xLabel: string;
+    yLabel: string;
+    axisStyle: "gutter" | "inline";
+  }> = {},
 ) {
+  const xRange = overrides.xRange ?? { min: 10, max: 12 };
+  const yRange = overrides.yRange ?? ([0, 4] as const);
   return {
-    response: data,
-    xRange: { min: 10, max: 12 },
-    yRange: [0, 4] as const,
-    xLabel: "time (s)",
-    yLabel: "value",
-    styles,
+    ...line2DFromTimeTiles(data, {
+      xRange,
+      yRange,
+      xLabel: overrides.xLabel ?? "time (s)",
+      yLabel: overrides.yLabel ?? "value",
+      styles,
+      axisStyle: overrides.axisStyle ?? "gutter",
+    }),
     emphasisIndices,
     palette,
-    axisStyle: "gutter" as const,
   };
 }
 
@@ -147,11 +158,11 @@ describe("ChartHost", () => {
 
   it("publishes dash styles and switches axes into the inline plot", async () => {
     const host = await hostFixture();
-    host.render({
-      ...request(),
-      styles: [{ ...stroke(0), dash: "dash" }],
-      axisStyle: "inline",
-    });
+    host.render(
+      request(undefined, [{ ...stroke(0), dash: "dash" }], [], {
+        axisStyle: "inline",
+      }),
+    );
 
     const options = state.charts.at(-1)?.options ?? {};
     expect(
@@ -202,15 +213,17 @@ describe("ChartHost", () => {
       ),
     });
 
-    host.render({
-      ...request(),
-      response: {
-        requestId: "rebase",
-        series: [series("late", [40, 50, 60]), series("early", [25, 35, 45])],
-      },
-      styles: [stroke(0), stroke(1)],
-      xRange: { min: 25, max: 60 },
-    });
+    host.render(
+      request(
+        {
+          requestId: "rebase",
+          series: [series("late", [40, 50, 60]), series("early", [25, 35, 45])],
+        },
+        [stroke(0), stroke(1)],
+        [],
+        { xRange: { min: 25, max: 60 } },
+      ),
+    );
 
     const xAxis = (state.charts.at(-1)?.options ?? {}).xAxis as {
       min: number;
@@ -421,7 +434,7 @@ describe("ChartHost", () => {
 
     host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
 
-    expect(chart?.setOption).toHaveBeenCalledOnce();
+    expect(chart?.setOption).not.toHaveBeenCalled();
     expect(chart?.setViewRange).toHaveBeenCalledWith({
       x: { min: 1, max: 2 },
       y: { min: -1, max: 5 },
@@ -456,10 +469,15 @@ describe("ChartHost", () => {
 
     host.render(request(data));
     const first = seriesOf();
+    const chart = state.charts.at(-1);
+    chart?.setOption.mockClear();
+    chart?.setViewRange.mockClear();
 
     host.render({ ...request(data), xRange: { min: 11, max: 13 } });
 
     expect(seriesOf()).toBe(first);
+    expect(chart?.setOption).not.toHaveBeenCalled();
+    expect(chart?.setViewRange).toHaveBeenCalledOnce();
     const xAxis = (state.charts.at(-1)?.options ?? {}).xAxis as { min: number };
     expect(xAxis.min).toBe(1);
   });
@@ -472,7 +490,7 @@ describe("ChartHost", () => {
     host.render(request(data));
     const first = seriesOf();
 
-    host.render({ ...request(data), yLabel: "amps" });
+    host.render(request(data, [stroke(0)], [], { yLabel: "amps" }));
 
     expect(seriesOf()).not.toBe(first);
     const yAxis = (state.charts.at(-1)?.options ?? {}).yAxis as {

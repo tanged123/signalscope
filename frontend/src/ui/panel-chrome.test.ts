@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Catalog } from "../app/catalog";
 import { binColumnsFromWire } from "../app/bin-columns";
 import { resolvePanel } from "../app/resolution";
+import type { Line2DResponse } from "../app/line-binary";
 import type { SignalSummary } from "../generated/protocol";
 import type { PanelState } from "../generated/session";
 import { ChartHost } from "../render/chart-host";
@@ -46,6 +47,7 @@ function state(): PanelState {
     legend_anchor: null,
     legend_dock: null,
     legend_hint_dismissed: false,
+    x_axis: { kind: "time", ref: null },
     y_range: null,
     x_range: null,
     x_label: null,
@@ -266,6 +268,165 @@ describe("PanelView chrome", () => {
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });
 
+  it("offers a labeled keyboard-accessible X axis chooser", () => {
+    const catalog = Catalog.build([signal("run-01", "temp")]);
+    const panelCallbacks = callbacks(catalog);
+    const onSetXAxis = vi.fn();
+    panelCallbacks.onSetXAxis = onSetXAxis;
+    const view = new PanelView("panel", panelCallbacks);
+    const panel = state();
+    view.update(panel, false);
+
+    const chooser =
+      view.element.querySelector<HTMLButtonElement>(".panel-x-axis");
+    expect(chooser?.textContent).toBe("x: time ▾");
+    expect(chooser?.ariaLabel).toBe("X axis: time");
+    expect(chooser?.tabIndex).toBe(0);
+
+    chooser?.click();
+    const signalOption = [
+      ...view.element.querySelectorAll<HTMLButtonElement>(
+        ".panel-config-popover button",
+      ),
+    ].find((button) => button.textContent.includes("run-01/temp"));
+    signalOption?.click();
+    expect(onSetXAxis).toHaveBeenCalledWith("panel", {
+      kind: "signal",
+      ref: { source_key: "run-01", channel: "temp" },
+    });
+
+    panel.x_axis = {
+      kind: "signal",
+      ref: { source_key: "run-01", channel: "temp" },
+    };
+    view.update(panel, false);
+    expect(chooser?.textContent).toBe("x: run-01/temp ▾");
+    chooser?.click();
+    const timeOption = [
+      ...view.element.querySelectorAll<HTMLButtonElement>(
+        ".panel-config-popover button",
+      ),
+    ].find((button) => button.textContent.includes("time · linked"));
+    timeOption?.click();
+    expect(onSetXAxis).toHaveBeenLastCalledWith("panel", {
+      kind: "time",
+      ref: null,
+    });
+  });
+
+  it("renders signal-X responses with local ranges and axis labels", async () => {
+    const catalog = Catalog.build([
+      signal("run-01", "temp"),
+      signal("run-01", "speed"),
+    ]);
+    const render = vi.fn<ChartHost["render"]>(() => 0);
+    const dispose = vi.fn();
+    const setRangesOnly = vi.fn();
+    vi.spyOn(ChartHost, "create").mockResolvedValue({
+      render,
+      resize: vi.fn(),
+      dispose,
+      setRangesOnly,
+      layout: () => ({
+        plot: { x: 0, y: 0, width: 100, height: 100 },
+        xRange: { min: -5, max: 25 },
+        yRange: { min: 0, max: 3 },
+      }),
+    } as unknown as ChartHost);
+    const panelCallbacks = callbacks(catalog);
+    const onCursor = vi.fn();
+    panelCallbacks.onCursor = onCursor;
+    const onXRange = vi.fn();
+    panelCallbacks.onXRange = onXRange;
+    const view = new PanelView("panel", panelCallbacks, {} as GpuContext);
+    document.body.appendChild(view.element);
+    view.mount();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const panel = state();
+    panel.x_axis = {
+      kind: "signal",
+      ref: { source_key: "run-01", channel: "temp" },
+    };
+    panel.x_range = [-5, 25];
+    panel.x_label = "distance (m)";
+    panel.y_label = "velocity (m/s)";
+    panel.legend_state = "rail";
+    panel.legend_dock = "right";
+    panel.annotations = [
+      {
+        id: "tip-1",
+        series_path: "run-01/speed",
+        anchor: 1,
+        pinned_x: 20,
+        pinned_value: 2,
+        label: "",
+        offset: [10, -10],
+      },
+    ];
+    const response: Line2DResponse = {
+      requestId: "line",
+      level: 0,
+      anchor: new Float64Array([0, 1]),
+      x: {
+        signalId: "run-01-temp",
+        signalPath: "run-01/temp",
+        unit: "m",
+        values: new Float64Array([10, 20]),
+      },
+      ys: [
+        {
+          signalId: "run-01-speed",
+          signalPath: "run-01/speed",
+          unit: "m/s",
+          values: new Float64Array([1, 2]),
+        },
+      ],
+    };
+
+    view.renderData(panel, { kind: "signal", response }, { t0: 0, t1: 1 });
+
+    expect(render).toHaveBeenCalledOnce();
+    const request = render.mock.calls[0]?.[0];
+    expect(request?.xRange).toEqual({ min: -5, max: 25 });
+    expect(request?.axes).toEqual({
+      x: { label: "distance (m)" },
+      y: { label: "velocity (m/s)" },
+      style: "gutter",
+    });
+    expect(request?.series).toHaveLength(1);
+    expect(request?.series[0]?.name).toBe("run-01/speed");
+    expect([...((request?.series[0]?.data ?? []) as Float32Array)]).toEqual([
+      0, 1, 10, 2,
+    ]);
+    view.element
+      .querySelector<HTMLButtonElement>(".plot-legend-tips-heading button")
+      ?.click();
+    view.element
+      .querySelector<HTMLButtonElement>('[title="Pan to tip"]')
+      ?.click();
+    expect(onXRange).toHaveBeenCalledWith("panel", [5, 35]);
+
+    view.setLocalCursor({
+      x: 20,
+      heading: "x = 20",
+      rows: [],
+      markers: [],
+      link: "local",
+    });
+    view.renderData(
+      panel,
+      { kind: "signal", response: { ...response, requestId: "replacement" } },
+      { t0: 0, t1: 1 },
+    );
+    expect(onCursor).toHaveBeenCalledWith("panel", null, null);
+
+    view.dispose();
+    view.element.remove();
+  });
+
   it("collapses signal rows independently from tips", () => {
     const catalog = Catalog.build([
       signal("run-01", "temp"),
@@ -365,6 +526,7 @@ describe("PanelView chrome", () => {
         id: "tip-1",
         series_path: "run-01/temp",
         anchor: 5.12,
+        pinned_x: null,
         pinned_value: 1.0565,
         label: "",
         offset: [10, -10],
@@ -397,6 +559,7 @@ describe("PanelView chrome", () => {
         id: "tip-1",
         series_path: "run-01/temp",
         anchor: 5.12,
+        pinned_x: null,
         pinned_value: 1.0565,
         label: "",
         offset: [10, -10],
@@ -753,7 +916,21 @@ describe("PanelView chrome", () => {
       },
     });
 
-    view.setLocalCursor(0);
+    view.setLocalCursor({
+      x: 0,
+      heading: "x = 0",
+      rows: [
+        {
+          path: "run-01/temp",
+          label: "run-01/temp",
+          value: 4,
+          unit: null,
+          colorIndex: 0,
+        },
+      ],
+      markers: [{ x: 0, y: 4, colorIndex: 0 }],
+      link: "local",
+    });
 
     expect(view.element.querySelector(".plot-encoding-drawer")).toBe(drawer);
     expect(

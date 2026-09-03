@@ -71,14 +71,24 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     }
     let current = match head.schema_version {
         SESSION_SCHEMA_VERSION => value,
-        26 => migrate_v26(value),
-        25 => migrate_v26(migrate_v25(value)),
-        24 => migrate_v26(migrate_v25(migrate_v24(value))),
-        23 => migrate_v26(migrate_v25(migrate_v24(migrate_v23(value)))),
-        22 => migrate_v26(migrate_v25(migrate_v24(migrate_v23(migrate_v22(value))))),
+        27 => migrate_v27(value),
+        26 => migrate_v27(migrate_v26(value)),
+        25 => migrate_v27(migrate_v26(migrate_v25(value))),
+        24 => migrate_v27(migrate_v26(migrate_v25(migrate_v24(value)))),
+        23 => migrate_v27(migrate_v26(migrate_v25(migrate_v24(migrate_v23(value))))),
+        22 => {
+            let value = migrate_v22(value);
+            let value = migrate_v23(value);
+            let value = migrate_v24(value);
+            let value = migrate_v25(value);
+            let value = migrate_v26(value);
+            migrate_v27(value)
+        }
         version => return Err(SessionError::UnsupportedVersion(version)),
     };
-    Ok(serde_json::from_value(current)?)
+    let session: Session = serde_json::from_value(current)?;
+    validate(&session)?;
+    Ok(session)
 }
 
 fn migrate_v22(mut value: serde_json::Value) -> serde_json::Value {
@@ -216,7 +226,7 @@ fn migrate_v25(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 fn migrate_v26(mut value: serde_json::Value) -> serde_json::Value {
-    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["schema_version"] = 27.into();
     if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
         for tab in tabs {
             let Some(panels) = tab
@@ -240,6 +250,44 @@ fn migrate_v26(mut value: serde_json::Value) -> serde_json::Value {
         }
     }
     value
+}
+
+fn migrate_v27(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
+        for tab in tabs {
+            let Some(panels) = tab
+                .get_mut("panels")
+                .and_then(|panels| panels.as_array_mut())
+            else {
+                continue;
+            };
+            for panel in panels {
+                let Some(panel) = panel.as_object_mut() else {
+                    continue;
+                };
+                panel
+                    .entry("x_axis")
+                    .or_insert_with(|| serde_json::json!({"kind": "time", "ref": null}));
+            }
+        }
+    }
+    value
+}
+
+fn validate(session: &Session) -> Result<(), SessionError> {
+    for tab in &session.tabs {
+        for panel in &tab.panels {
+            let valid = match panel.x_axis.kind {
+                XAxisKind::Time => panel.x_axis.r#ref.is_none(),
+                XAxisKind::Signal => panel.x_axis.r#ref.is_some(),
+            };
+            if !valid {
+                return Err(SessionError::InvalidXAxisSource(panel.id.clone()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Serializes `session` to `path` through a sibling temporary file that is
@@ -277,6 +325,8 @@ pub enum SessionError {
     WrongApplication(String),
     #[error("unsupported session schema version: {0}")]
     UnsupportedVersion(u32),
+    #[error("panel has an invalid X axis source: {0}")]
+    InvalidXAxisSource(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -435,6 +485,10 @@ mod tests {
                     legend_anchor: None,
                     legend_dock: None,
                     legend_hint_dismissed: false,
+                    x_axis: XAxisSource {
+                        kind: XAxisKind::Time,
+                        r#ref: None,
+                    },
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -667,6 +721,8 @@ mod tests {
         assert!((panel.annotations[0].offset[1] + 10.0).abs() < f64::EPSILON);
         assert!((panel.annotations[0].pinned_value - 3.25).abs() < f64::EPSILON);
         assert_eq!(panel.legend_dock, None);
+        assert_eq!(panel.x_axis.kind, XAxisKind::Time);
+        assert_eq!(panel.x_axis.r#ref, None);
 
         let mut v26 = serde_json::to_value(restored).expect("serializes migrated session");
         v26["schema_version"] = 26.into();
@@ -679,6 +735,95 @@ mod tests {
         assert_eq!(
             docked.tabs[0].panels[0].legend_dock,
             Some(LegendDock::Right)
+        );
+    }
+
+    #[test]
+    fn v27_panels_migrate_to_time_x_axis() {
+        let session = Session {
+            tabs: vec![WorkspaceTab {
+                id: "workspace-1".into(),
+                title: "Workspace 1".into(),
+                cursor_mode: CursorMode::None,
+                focused_panel_id: None,
+                maximized_panel_id: None,
+                panels: vec![PanelState {
+                    id: "panel-a".into(),
+                    title: "Panel A".into(),
+                    axis_style: AxisStyle::Gutter,
+                    bindings: Vec::new(),
+                    color_by: Some(StyleDimension::Source),
+                    dash_by: None,
+                    width_by: None,
+                    line_width: 1.4,
+                    ghost_opacity: 0.5,
+                    overrides: Vec::new(),
+                    focus: Vec::new(),
+                    ghost_mode: GhostMode::All,
+                    legend_state: LegendState::Keys,
+                    legend_position: None,
+                    legend_size: None,
+                    legend_anchor: None,
+                    legend_dock: None,
+                    legend_hint_dismissed: false,
+                    x_axis: XAxisSource {
+                        kind: XAxisKind::Time,
+                        r#ref: None,
+                    },
+                    y_range: None,
+                    x_range: None,
+                    x_label: None,
+                    y_label: None,
+                    time_window: None,
+                    annotations: Vec::new(),
+                    annotation_display: AnnotationDisplay::Labels,
+                    show_stats: false,
+                    stat_columns: vec![
+                        StatColumn::Min,
+                        StatColumn::Max,
+                        StatColumn::Mean,
+                        StatColumn::Rms,
+                        StatColumn::Cursor,
+                    ],
+                    stats_sort: None,
+                    stats_sort_descending: false,
+                }],
+                layout: Vec::new(),
+            }],
+            ..Session::default()
+        };
+        let mut value = serde_json::to_value(session).expect("serializes session");
+        value["schema_version"] = 27.into();
+        value["tabs"][0]["panels"][0]
+            .as_object_mut()
+            .expect("panel object")
+            .remove("x_axis");
+
+        let restored = from_json(&value.to_string()).expect("v27 migrates");
+        let panel = &restored.tabs[0].panels[0];
+        assert_eq!(panel.x_axis.kind, XAxisKind::Time);
+        assert_eq!(panel.x_axis.r#ref, None);
+
+        value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+        value["tabs"][0]["panels"][0]["x_axis"] = serde_json::json!({
+            "kind": "time",
+            "ref": {"source_key": "source", "channel": "x"}
+        });
+        let error = from_json(&value.to_string()).expect_err("invalid axis source");
+        assert!(matches!(error, SessionError::InvalidXAxisSource(id) if id == "panel-a"));
+
+        value["tabs"][0]["panels"][0]["x_axis"] = serde_json::json!({
+            "kind": "signal",
+            "ref": {"source_key": "source", "channel": "x"}
+        });
+        let signal_axis = from_json(&value.to_string()).expect("signal axis source");
+        assert_eq!(signal_axis.tabs[0].panels[0].x_axis.kind, XAxisKind::Signal);
+        assert_eq!(
+            signal_axis.tabs[0].panels[0].x_axis.r#ref,
+            Some(SeriesRef {
+                source_key: "source".into(),
+                channel: "x".into(),
+            })
         );
     }
 }

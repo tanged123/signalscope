@@ -1,5 +1,6 @@
 import { formatCombo } from "../app/commands";
-import type { ColumnarTileResponse } from "../app/bin-columns";
+import type { PanelLineResponse } from "../app/line-presentation-controller";
+import type { PlotCursor } from "../app/plot-capabilities";
 import { MAX_RESIDENT_SERIES } from "../app/render-limits";
 import type { WorkspaceModel } from "../app/workspace";
 import { bindPointerDrag } from "./dom";
@@ -148,9 +149,10 @@ export class WorkspaceView {
   }
 
   renderData(
-    tilesByPanel: ReadonlyMap<string, ColumnarTileResponse>,
+    dataByPanel: ReadonlyMap<string, PanelLineResponse>,
     windowFor: (panelId: string) => { t0: number; t1: number },
     missingFor: (panelId: string) => readonly string[],
+    errorFor: (panelId: string) => string | null,
   ): number {
     const maximized = this.model.maximizedPanelId();
     let total = 0;
@@ -161,9 +163,10 @@ export class WorkspaceView {
           .get(panel.id)
           ?.renderData(
             panel,
-            tilesByPanel.get(panel.id) ?? null,
+            dataByPanel.get(panel.id) ?? null,
             windowFor(panel.id),
             missingFor(panel.id),
+            errorFor(panel.id),
           ) ?? 0;
     }
     return total;
@@ -177,8 +180,8 @@ export class WorkspaceView {
     for (const view of this.views.values()) view.setCursor(cursorT);
   }
 
-  setLocalCursor(id: string, cursorValue: number | null): void {
-    this.views.get(id)?.setLocalCursor(cursorValue);
+  setLocalCursor(id: string, cursor: PlotCursor | null): void {
+    this.views.get(id)?.setLocalCursor(cursor);
   }
 
   clearCursors(): void {
@@ -205,6 +208,10 @@ export class WorkspaceView {
   /** The rendered plot width of a panel in CSS pixels, 0 when unmounted. */
   panelWidth(id: string): number {
     return this.views.get(id)?.plotWidth() ?? 0;
+  }
+
+  panelXRange(id: string): { min: number; max: number } | null {
+    return this.views.get(id)?.plotXRange() ?? null;
   }
 
   async capturePanel(

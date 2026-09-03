@@ -18,6 +18,8 @@ export interface PanelDemand {
   physicalPixels: number;
   paddingRatio: number;
   visibleSeries: number;
+  /** Worst-case response rows emitted for one reducer bin. */
+  reductionExpansion: number;
 }
 
 export interface DensityPlan {
@@ -79,7 +81,7 @@ export function planPresentationDensity(input: {
     for (const demand of demands) {
       const request = requestPixels(demand, density);
       requests.set(demand.panelId, request);
-      bins += 2 * request * demand.visibleSeries;
+      bins += 2 * request * demand.visibleSeries * demand.reductionExpansion;
     }
     return {
       requests,
@@ -158,6 +160,7 @@ function normalizeDemand(demand: PanelDemand): PanelDemand {
       0,
       Math.ceil(nonNegativeFinite(demand.visibleSeries)),
     ),
+    reductionExpansion: positiveOr(demand.reductionExpansion, 1),
   };
 }
 

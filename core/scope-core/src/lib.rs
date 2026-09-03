@@ -11,6 +11,7 @@ pub mod compute;
 pub mod derived_bundle;
 pub mod expr;
 pub mod ingest;
+pub mod line2d;
 pub mod naming;
 pub mod paging;
 pub mod preferences;

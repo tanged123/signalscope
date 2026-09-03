@@ -1,4 +1,5 @@
 import {
+  type BakedLine2DLevel,
   type BatchDetail,
   type BatchJob,
   type BatchStatus,
@@ -12,6 +13,7 @@ import {
   type ExportSelection,
   type FormatDescriptor,
   type LoadedSession,
+  type Line2DRequest,
   type RestoreFinalizeResponse,
   type RecipeDestination,
   type SaveRecipeResponse,
@@ -36,6 +38,7 @@ import { open, seal, type Envelope } from "./envelope";
 import { queryAdaptivePyramidRange } from "./pyramid-query";
 import { binsToSamples, sampleWindow, sampleWindowFull } from "./samples";
 import { decodeTileResponse } from "./tile-binary";
+import { decodeLineResponse, type Line2DResponse } from "./line-binary";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
@@ -126,10 +129,14 @@ export interface DataPlane {
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(request: TileRequest): Promise<ColumnarTileResponse>;
+  queryLine2D(request: Line2DRequest): Promise<Line2DResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
 type BakedManifest = Envelope<SnapshotManifest>;
+type BakedManifestInput = Envelope<
+  Omit<SnapshotManifest, "line2d"> & Partial<Pick<SnapshotManifest, "line2d">>
+>;
 
 export class HttpPlane implements DataPlane {
   readonly sourceLabel = "native data plane";
@@ -291,6 +298,13 @@ export class HttpPlane implements DataPlane {
     );
   }
 
+  async queryLine2D(request: Line2DRequest): Promise<Line2DResponse> {
+    return decodeLineResponse(
+      await this.postBinary("query_line2d_bin", request),
+      request.request_id,
+    );
+  }
+
   async querySamples(request: SampleRequest): Promise<SampleResponse> {
     const response = await this.post<SampleResponse>("query_samples", request);
     return {
@@ -366,8 +380,8 @@ export class BakedPlane implements DataPlane {
 
   private readonly levelColumns = new Map<string, Map<number, BinColumns>>();
 
-  constructor(manifest: BakedManifest) {
-    this.payload = open(manifest);
+  constructor(manifest: BakedManifestInput) {
+    this.payload = open(manifest) as BakedManifest["payload"];
     this.bakedSessionJson = this.payload.session_json;
   }
 
@@ -439,6 +453,90 @@ export class BakedPlane implements DataPlane {
             bins,
           };
         }),
+      };
+    });
+  }
+
+  queryLine2D(request: Line2DRequest): Promise<Line2DResponse> {
+    return Promise.resolve().then(() => {
+      const line = (this.payload.line2d ?? []).find(
+        (candidate) =>
+          candidate.x_signal_id === request.x_signal_id &&
+          sameSignalSet(candidate.y_signal_ids, request.y_signal_ids),
+      );
+      if (line === undefined) {
+        throw new Error(
+          `no baked Line2D data for X ${request.x_signal_id} and Y ${request.y_signal_ids.join(",")}`,
+        );
+      }
+
+      const summaries = new Map(
+        this.payload.signals.map((signal) => [
+          signal.summary.signal_id,
+          signal.summary,
+        ]),
+      );
+      const xSummary = summaries.get(line.x_signal_id);
+      if (xSummary === undefined) {
+        throw new Error(`unknown baked X signal id: ${line.x_signal_id}`);
+      }
+      const ySummaries = request.y_signal_ids.map((signalId) => {
+        const summary = summaries.get(signalId);
+        if (summary === undefined) {
+          throw new Error(`unknown baked Y signal id: ${signalId}`);
+        }
+        return summary;
+      });
+      const target = Math.max(1, Math.floor(request.pixel_width)) * 2;
+      const selected = selectLineLevel(
+        line.levels,
+        request.window.t0,
+        request.window.t1,
+        target,
+      );
+      const range = lineRange(
+        selected.anchor,
+        request.window.t0,
+        request.window.t1,
+      );
+      const anchor = Float64Array.from(
+        selected.anchor.slice(range.start, range.end),
+      );
+      const xValues = Float64Array.from(
+        selected.x
+          .slice(range.start, range.end)
+          .map((value) => value ?? Number.NaN),
+      );
+      const bakedYIndices = new Map(
+        line.y_signal_ids.map((signalId, index) => [signalId, index]),
+      );
+      const ys = ySummaries.map((summary) => {
+        const bakedIndex = bakedYIndices.get(summary.signal_id);
+        if (bakedIndex === undefined) {
+          throw new Error(`missing baked Y column: ${summary.signal_id}`);
+        }
+        return {
+          signalId: summary.signal_id,
+          signalPath: summary.path,
+          unit: summary.unit,
+          values: Float64Array.from(
+            (selected.ys[bakedIndex] ?? [])
+              .slice(range.start, range.end)
+              .map((value) => value ?? Number.NaN),
+          ),
+        };
+      });
+      return {
+        requestId: request.request_id,
+        level: selected.level,
+        anchor,
+        x: {
+          signalId: xSummary.signal_id,
+          signalPath: xSummary.path,
+          unit: xSummary.unit,
+          values: xValues,
+        },
+        ys,
       };
     });
   }
@@ -524,6 +622,73 @@ export class BakedPlane implements DataPlane {
     }
     return raw;
   }
+}
+
+function sameSignalSet(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    new Set(right).size === right.length &&
+    right.every((id) => left.includes(id))
+  );
+}
+
+function selectLineLevel(
+  levels: readonly BakedLine2DLevel[],
+  t0: number,
+  t1: number,
+  target: number,
+): BakedLine2DLevel {
+  const last = levels[levels.length - 1];
+  if (last === undefined)
+    throw new Error("baked Line2D combination has no levels");
+  for (const level of levels) {
+    const range = lineRange(level.anchor, t0, t1);
+    if (range.end - range.start <= target) return level;
+  }
+  return last;
+}
+
+function lineRange(
+  anchor: readonly number[],
+  t0: number,
+  t1: number,
+): { start: number; end: number } {
+  if (
+    anchor.length === 0 ||
+    t1 < (anchor[0] as number) ||
+    t0 > (anchor[anchor.length - 1] as number)
+  ) {
+    return { start: 0, end: 0 };
+  }
+  const start = Math.max(0, lowerBound(anchor, t0) - 1);
+  const end = Math.min(anchor.length, upperBound(anchor, t1) + 1);
+  return { start, end };
+}
+
+function lowerBound(values: readonly number[], target: number): number {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if ((values[middle] as number) < target) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+function upperBound(values: readonly number[], target: number): number {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if ((values[middle] as number) <= target) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 export async function selectDataPlane(): Promise<DataPlane> {
@@ -638,6 +803,7 @@ function createDemoManifest(): BakedManifest {
       summary: { ...summary, last_value: generate(summary.t_max) },
       levels: buildDemoLevels(makeBins(generate)),
     })),
+    line2d: null,
   });
 }
 

@@ -80,6 +80,13 @@ function isSeriesRef(value: unknown): boolean {
   );
 }
 
+function isXAxisSource(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === "time") return value.ref === null;
+  if (value.kind === "signal") return isSeriesRef(value.ref);
+  return false;
+}
+
 function isBinding(value: unknown): boolean {
   return (
     isRecord(value) &&
@@ -144,6 +151,7 @@ function isAnnotation(value: unknown): boolean {
     typeof value.id === "string" &&
     typeof value.series_path === "string" &&
     typeof value.anchor === "number" &&
+    isNullable(value.pinned_x, (item) => typeof item === "number") &&
     typeof value.pinned_value === "number" &&
     typeof value.label === "string" &&
     isNumberPair(value.offset)
@@ -234,6 +242,7 @@ function isPanel(value: unknown): boolean {
         ["left", "right", "top", "bottom"].includes(item),
     ) &&
     typeof value.legend_hint_dismissed === "boolean" &&
+    isXAxisSource(value.x_axis) &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&

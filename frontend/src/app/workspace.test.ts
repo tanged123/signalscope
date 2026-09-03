@@ -105,6 +105,56 @@ describe("linked time", () => {
   });
 });
 
+describe("panel X axis", () => {
+  it("stores a signal X binding and restores linked time", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("run-01/position");
+    model.setPanelXRange(panel.id, [10, 20]);
+    model.setAxisLabel(panel.id, "x", "old coordinate");
+
+    model.setPanelXAxis(panel.id, { kind: "signal", ref });
+    expect(model.panel(panel.id)?.x_axis).toEqual({
+      kind: "signal",
+      ref,
+    });
+    expect(model.panel(panel.id)?.x_range).toBeNull();
+    expect(model.panel(panel.id)?.x_label).toBeNull();
+
+    model.setPanelXAxis(panel.id, { kind: "time", ref: null });
+    expect(model.panel(panel.id)?.x_axis).toEqual({
+      kind: "time",
+      ref: null,
+    });
+  });
+
+  it("keeps a signal X binding when it is removed from the Y roster", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("run-01/position");
+    model.addSeriesRef(panel.id, ref);
+    model.setPanelXAxis(panel.id, { kind: "signal", ref });
+
+    model.removeSeriesRef(panel.id, ref);
+
+    expect(model.panel(panel.id)?.x_axis).toEqual({ kind: "signal", ref });
+  });
+
+  it("does not reset coordinate state when reselecting the current X", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("run-01/position");
+    model.setPanelXAxis(panel.id, { kind: "signal", ref });
+    model.setPanelXRange(panel.id, [10, 20]);
+    model.setAxisLabel(panel.id, "x", "position");
+
+    model.setPanelXAxis(panel.id, { kind: "signal", ref });
+
+    expect(model.panel(panel.id)?.x_range).toEqual([10, 20]);
+    expect(model.panel(panel.id)?.x_label).toBe("position");
+  });
+});
+
 describe("derived definitions", () => {
   it("records definitions in order and removes them by path", () => {
     const model = new WorkspaceModel();
@@ -150,6 +200,7 @@ describe("derived definitions", () => {
       id: "ann-1",
       series_path: path,
       anchor: 0,
+      pinned_x: null,
       pinned_value: 1,
       label: "",
       offset: [10, -10],
@@ -170,6 +221,7 @@ describe("derived definitions", () => {
       id: "ann-2",
       series_path: path,
       anchor: 1,
+      pinned_x: null,
       pinned_value: 2,
       label: "",
       offset: [10, -10],
@@ -762,6 +814,7 @@ describe("WorkspaceModel", () => {
       id: "ann-1",
       series_path: "a/b",
       anchor: 1,
+      pinned_x: null,
       pinned_value: 2,
       label: "before",
       offset: [10, -10],
@@ -796,6 +849,7 @@ describe("WorkspaceModel", () => {
       id: "ann-1",
       series_path: "a/b",
       anchor: 0,
+      pinned_x: null,
       pinned_value: 0,
       label: "",
       offset: [10, -10],
@@ -1006,6 +1060,7 @@ describe("WorkspaceModel", () => {
       legend_anchor: null,
       legend_dock: null,
       legend_hint_dismissed: false,
+      x_axis: { kind: "time", ref: null },
       y_range: null,
       x_range: null,
       x_label: null,

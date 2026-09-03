@@ -20,6 +20,7 @@ import type {
   NamedSet,
   SourceRecord,
   WorkspaceTab,
+  XAxisSource,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
@@ -479,6 +480,34 @@ export class WorkspaceModel {
         (annotation) => annotation.series_path !== path,
       );
     }
+    this.touch(true);
+  }
+
+  setPanelXAxis(panelId: string, xAxis: XAxisSource): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    let next: XAxisSource;
+    if (xAxis.kind === "time") {
+      next = { kind: "time", ref: null };
+    } else {
+      if (xAxis.ref === null) return;
+      next = { kind: "signal", ref: { ...xAxis.ref } };
+    }
+    if (
+      next.kind === panel.x_axis.kind &&
+      (next.ref === null
+        ? panel.x_axis.ref === null
+        : panel.x_axis.ref !== null && sameRef(next.ref, panel.x_axis.ref))
+    ) {
+      return;
+    }
+    panel.x_axis = next;
+    panel.x_range = null;
+    panel.x_label = null;
+    panel.annotations = panel.annotations.map((annotation) => ({
+      ...annotation,
+      pinned_x: null,
+    }));
     this.touch(true);
   }
 
@@ -1141,6 +1170,7 @@ export class WorkspaceModel {
       legend_anchor: null,
       legend_dock: null,
       legend_hint_dismissed: false,
+      x_axis: { kind: "time", ref: null },
       y_range: null,
       x_range: null,
       x_label: null,

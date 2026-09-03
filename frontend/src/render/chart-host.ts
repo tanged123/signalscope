@@ -4,13 +4,12 @@ import {
   type ChartGPUOptions,
   type LineSeriesConfig,
 } from "@chartgpu/chartgpu";
-import type { ColumnarTileResponse } from "../app/bin-columns";
 import type { Range, PlotLayout } from "../app/plot-math";
 import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import { createRangeTickFormatter, hueIndex } from "./plot-theme";
 import type { Palette, SeriesStroke, TickFormatter } from "./plot-theme";
-import { cachedFeed, responseTimeReference } from "./m4-feed";
 import type { GpuContext } from "./gpu-context";
+import type { Line2DRenderRequest } from "./line2d";
 
 export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
 export const INLINE_CHART_GRID = {
@@ -22,20 +21,12 @@ export const INLINE_CHART_GRID = {
 const FULL_OPACITY_GHOST_COUNT = 16;
 const MIN_DENSE_GHOST_OPACITY = 0.06;
 
-export interface ChartRenderRequest {
-  response: ColumnarTileResponse;
-  xRange: Range;
-  yRange: readonly [number, number];
-  xLabel: string;
-  yLabel: string;
-  styles: readonly SeriesStroke[];
-  emphasisIndices: readonly number[];
-  palette: Palette;
-  axisStyle: "gutter" | "inline";
-}
+export type ChartRenderRequest = Line2DRenderRequest;
 
 interface SeriesElement {
-  columns: object;
+  id: string;
+  name: string;
+  data: Float32Array;
   style: SeriesStroke;
   emphasis: boolean;
   /** Opacity depends on whether any series is emphasized, not only this one. */
@@ -48,7 +39,7 @@ interface SeriesElement {
 export class ChartHost {
   private readonly chart: ChartGPUInstance;
   private readonly unregister: () => void;
-  private tRef = 0;
+  private xOrigin = 0;
   private seriesIds: string[] = [];
   private elements: SeriesElement[] = [];
   private options: ChartGPUOptions | null = null;
@@ -101,36 +92,32 @@ export class ChartHost {
 
   render(request: ChartRenderRequest): number {
     const started = performance.now();
-    const ids = request.response.series.map((series) => series.signalId);
-    const nextTRef = responseTimeReference(request.response);
+    const ids = request.series.map((series) => series.id);
     let rebuilt = false;
-    if (!sameStrings(ids, this.seriesIds) || nextTRef !== this.tRef) {
+    if (!sameStrings(ids, this.seriesIds) || request.xOrigin !== this.xOrigin) {
       this.seriesIds = ids;
-      this.tRef = nextTRef;
+      this.xOrigin = request.xOrigin;
       this.elements = [];
       rebuilt = true;
     }
     const emphasis = new Set(request.emphasisIndices);
     const emphasisActive = request.emphasisIndices.length > 0;
-    const ghostCount = request.response.series.filter(
-      (_, index) => (request.styles[index]?.hue ?? null) === null,
+    const ghostCount = request.series.filter(
+      (series) => series.style.hue === null,
     ).length;
     const ghostOpacityScale = Math.min(
       1,
       Math.sqrt(FULL_OPACITY_GHOST_COUNT / Math.max(1, ghostCount)),
     );
-    const series = request.response.series.map((tile, index) => {
-      const style = request.styles[index] ?? {
-        hue: null,
-        dash: "solid",
-        width: DEFAULT_PANEL_LINE_WIDTH,
-        alpha: 1,
-      };
+    const series = request.series.map((line, index) => {
+      const style = line.style;
       const isEmphasized = emphasis.has(index);
       const previous = this.elements[index];
       if (
         previous !== undefined &&
-        previous.columns === tile.bins &&
+        previous.id === line.id &&
+        previous.name === line.name &&
+        previous.data === line.data &&
         sameStyle(previous.style, style) &&
         previous.emphasis === isEmphasized &&
         previous.emphasisActive === emphasisActive &&
@@ -157,8 +144,8 @@ export class ChartHost {
         request.palette.lineWidthScale;
       const element: LineSeriesConfig = {
         type: "line",
-        name: tile.signalPath,
-        data: cachedFeed(tile.bins, this.tRef),
+        name: line.name,
+        data: line.data,
         sampling: "none",
         color,
         lineStyle: {
@@ -169,7 +156,9 @@ export class ChartHost {
         },
       };
       this.elements[index] = {
-        columns: tile.bins,
+        id: line.id,
+        name: line.name,
+        data: line.data,
         style,
         emphasis: isEmphasized,
         emphasisActive,
@@ -182,19 +171,22 @@ export class ChartHost {
     this.elements.length = series.length;
     const labelsChanged =
       this.lastLabels === null ||
-      this.lastLabels.x !== request.xLabel ||
-      this.lastLabels.y !== request.yLabel ||
-      this.lastAxisStyle !== request.axisStyle;
+      this.lastLabels.x !== request.axes.x.label ||
+      this.lastLabels.y !== request.axes.y.label ||
+      this.lastAxisStyle !== request.axes.style;
     if (!rebuilt && !labelsChanged && this.options !== null) {
-      this.setRangesOnly(request.xRange, request.yRange);
+      this.setRangesOnly(request.xRange, request.yRange, request.xOrigin);
       return performance.now() - started;
     }
-    this.lastLabels = { x: request.xLabel, y: request.yLabel };
-    this.lastAxisStyle = request.axisStyle;
+    this.lastLabels = {
+      x: request.axes.x.label,
+      y: request.axes.y.label,
+    };
+    this.lastAxisStyle = request.axes.style;
     const orderedSeries = series
       .map((element, index) => ({
         element,
-        ghost: (request.styles[index]?.hue ?? null) === null,
+        ghost: request.series[index]?.style.hue === null,
       }))
       .sort((left, right) => Number(right.ghost) - Number(left.ghost))
       .map(({ element }) => element);
@@ -205,8 +197,13 @@ export class ChartHost {
     return performance.now() - started;
   }
 
-  setRangesOnly(xRange: Range, yRange: readonly [number, number]): void {
+  setRangesOnly(
+    xRange: Range,
+    yRange: readonly [number, number],
+    xOrigin = this.xOrigin,
+  ): void {
     if (this.options === null) return;
+    this.xOrigin = xOrigin;
     this.options = {
       ...this.options,
       xAxis: this.xAxis(
@@ -220,9 +217,8 @@ export class ChartHost {
         this.options.yAxis?.inside === true,
       ),
     };
-    this.chart.setOption(this.options);
     this.chart.setViewRange({
-      x: { min: xRange.min - this.tRef, max: xRange.max - this.tRef },
+      x: { min: xRange.min - xOrigin, max: xRange.max - xOrigin },
       y: { min: yRange[0], max: yRange[1] },
     });
     this.renderPendingFrame();
@@ -286,8 +282,8 @@ export class ChartHost {
       performance: {
         lod:
           request.palette.lineWidthScale !== 1 ||
-          request.styles.some(
-            (style) =>
+          request.series.some(
+            ({ style }) =>
               style.width !== DEFAULT_PANEL_LINE_WIDTH ||
               style.dash !== "solid",
           )
@@ -308,15 +304,15 @@ export class ChartHost {
       gridLines: { show: true, color: request.palette.grid },
       xAxis: this.xAxis(
         request.xRange,
-        request.xLabel,
-        request.axisStyle === "inline",
+        request.axes.x.label,
+        request.axes.style === "inline",
       ),
       yAxis: this.yAxis(
         request.yRange,
-        request.yLabel,
-        request.axisStyle === "inline",
+        request.axes.y.label,
+        request.axes.style === "inline",
       ),
-      grid: request.axisStyle === "inline" ? INLINE_CHART_GRID : CHART_GRID,
+      grid: request.axes.style === "inline" ? INLINE_CHART_GRID : CHART_GRID,
       series,
     };
   }
@@ -326,15 +322,15 @@ export class ChartHost {
     label: string,
     inside = false,
   ): NonNullable<ChartGPUOptions["xAxis"]> {
-    this.xTickRange.min = range.min - this.tRef;
-    this.xTickRange.max = range.max - this.tRef;
+    this.xTickRange.min = range.min - this.xOrigin;
+    this.xTickRange.max = range.max - this.xOrigin;
     return {
       type: "value",
       name: label,
       inside,
       min: this.xTickRange.min,
       max: this.xTickRange.max,
-      tickFormatter: (value) => this.xTickFormatter(value + this.tRef),
+      tickFormatter: (value) => this.xTickFormatter(value + this.xOrigin),
     };
   }
 

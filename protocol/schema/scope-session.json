@@ -1,5 +1,5 @@
 {
-  "schema_version": 27,
+  "schema_version": 28,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -36,6 +36,14 @@
     "SeriesRef": {
       "kind": "object",
       "fields": { "source_key": "string", "channel": "string" }
+    },
+    "XAxisKind": { "kind": "enum", "variants": ["time", "signal"] },
+    "XAxisSource": {
+      "kind": "object",
+      "fields": {
+        "kind": "XAxisKind",
+        "ref": "SeriesRef?"
+      }
     },
     "BindingKind": { "kind": "enum", "variants": ["query", "pick", "set"] },
     "Binding": {
@@ -117,6 +125,7 @@
         "id": "string",
         "series_path": "string",
         "anchor": "f64",
+        "pinned_x": "f64?",
         "pinned_value": "f64",
         "label": "string",
         "offset": "f64[2]"
@@ -143,6 +152,7 @@
         "legend_anchor": "LegendAnchor?",
         "legend_dock": "LegendDock?",
         "legend_hint_dismissed": "bool",
+        "x_axis": "XAxisSource",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
         "x_label": "string?",

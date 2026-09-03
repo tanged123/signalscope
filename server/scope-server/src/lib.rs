@@ -129,6 +129,7 @@ pub fn build_router(ctx: AppContext) -> Router {
         .route("/list_sources", post(api::list_sources))
         .route("/list_signals", post(api::list_signals))
         .route("/query_tiles_bin", post(api::query_tiles_bin))
+        .route("/query_line2d_bin", post(api::query_line2d_bin))
         .route("/query_samples", post(api::query_samples))
         .route("/create_derived", post(api::create_derived))
         .route("/create_derived_bundle", post(api::create_derived_bundle))

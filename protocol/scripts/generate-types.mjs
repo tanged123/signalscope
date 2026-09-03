@@ -111,7 +111,7 @@ const rustForms = {
 };
 
 const typeScriptForms = {
-  array: (value) => `${value}[]`,
+  array: (value) => (value.includes(" | ") ? `(${value})[]` : `${value}[]`),
   optional: (value) => `${value} | null`,
   pair: (value) => `[${value}, ${value}]`,
 };

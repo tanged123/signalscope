@@ -9,17 +9,8 @@ import {
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
-import {
-  autoPresentationBudgets,
-  CPU_BYTES_PER_BIN,
-  GPU_BYTES_PER_BIN,
-  planPresentationDensity,
-  type DensityPlan,
-} from "../app/presentation-budget";
-import {
-  columnsValueAtTime,
-  type ColumnarTileResponse,
-} from "../app/bin-columns";
+import type { DensityPlan } from "../app/presentation-budget";
+import { columnsValueAtTime } from "../app/bin-columns";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
@@ -47,7 +38,7 @@ import {
   UI_FONT_SIZE,
 } from "../app/preferences";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
-import { TileWindowCache } from "../app/tile-window-cache";
+import { LinePresentationController } from "../app/line-presentation-controller";
 import { Catalog } from "../app/catalog";
 import { resolvePanel, type ResolvedSeries } from "../app/resolution";
 import { SelectionModel } from "../app/selection";
@@ -71,6 +62,7 @@ import type {
   PanelState,
   SeriesRef,
   Session,
+  XAxisSource,
 } from "../generated/session";
 import type { Preferences } from "../generated/preferences";
 import {
@@ -93,7 +85,6 @@ import { WorkspaceTabsView } from "./workspace-tabs";
 import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import type { GpuContext, GpuFailure } from "../render/gpu-context";
-import { prepareResponseFeeds } from "../render/m4-feed";
 
 export function formatPresentationStatus(
   plan: Pick<DensityPlan, "density" | "targetDensity" | "limited" | "fits">,
@@ -101,6 +92,10 @@ export function formatPresentationStatus(
   if (!plan.limited) return "";
   if (!plan.fits) return "resolution constrained by presentation memory";
   return `resolution ${plan.density.toFixed(2)}/${plan.targetDensity.toFixed(0)} bins/px`;
+}
+
+function sameSeriesRef(left: SeriesRef, right: SeriesRef): boolean {
+  return left.source_key === right.source_key && left.channel === right.channel;
 }
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
@@ -171,7 +166,7 @@ export class AppShell {
   private readonly usage = new CommandUsage(browserStorage(), () => Date.now());
   private readonly history = new HistoryStack();
   private readonly selection = new SelectionModel();
-  private readonly tileWindowCache = new TileWindowCache();
+  private readonly presentation: LinePresentationController;
   private selectionWorkspaceId: string | null = null;
   private signals: SignalSummary[] = [];
   private catalog = Catalog.empty();
@@ -192,15 +187,7 @@ export class AppShell {
   private exportPng: Uint8Array | null = null;
   private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
   private exportGeneration = 0;
-  private tilesByPanel = new Map<string, ColumnarTileResponse>();
-  private missingByPanel = new Map<string, string[]>();
   private signalTreeWidth: number = TREE_WIDTH.default;
-  private refreshToken = 0;
-  private presentationPlan: DensityPlan | null = null;
-  private refreshPromise: Promise<void> | null = null;
-  private refreshQueued = false;
-  private renderScheduled = false;
-  private refreshTimer: number | null = null;
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
   private pendingCursorT: number | null = null;
@@ -221,7 +208,34 @@ export class AppShell {
     private readonly plane: DataPlane,
     private gpu: GpuContext | null = null,
     private readonly requestGpuRecovery: (() => void) | null = null,
-  ) {}
+  ) {
+    this.presentation = new LinePresentationController(this.plane, {
+      panels: () => this.workspace.panels(),
+      workspaceWidth: () =>
+        required<HTMLElement>(this.root, ".workspace").clientWidth,
+      panelWidth: (panelId) => this.workspaceView?.panelWidth(panelId) ?? 0,
+      signalIds: (panel) => this.panelSignalIds(panel),
+      windowFor: (panel) => this.effectiveWindow(panel),
+      defaultWindow: () => {
+        const linked = this.workspace.linkedTime();
+        return { t0: linked.t0, t1: linked.t1 };
+      },
+      gpu: () => this.gpu,
+      render: (responses, windowFor, missingFor, errorFor) =>
+        this.workspaceView?.renderData(
+          responses,
+          windowFor,
+          missingFor,
+          errorFor,
+        ) ?? 0,
+      onPlan: (plan) => this.renderPresentationStatus(plan),
+      onRender: (elapsed) => {
+        required(this.root, ".render-ms").textContent =
+          `${elapsed.toFixed(1)} ms`;
+      },
+      onError: (error) => this.reportError(error),
+    });
+  }
 
   setGpu(gpu: GpuContext): void {
     if (this.gpu !== null) return;
@@ -344,7 +358,7 @@ export class AppShell {
             !this.workspace.tabs().some((entry) => entry.id === id)
           ) {
             for (const panelId of panelIds) {
-              this.tileWindowCache.invalidate(panelId);
+              this.presentation.invalidate(panelId);
             }
           }
           this.afterLayoutChange();
@@ -356,7 +370,7 @@ export class AppShell {
       this.workspace,
       {
         onEvictPanel: (id) => {
-          this.tileWindowCache.invalidate(id);
+          this.presentation.invalidate(id);
         },
         onFocus: (id) => {
           this.workspace.focusPanel(id);
@@ -364,7 +378,7 @@ export class AppShell {
         onClose: (id) => {
           const panelExisted = this.workspace.panel(id) !== undefined;
           this.workspace.closePanel(id);
-          if (panelExisted) this.tileWindowCache.invalidate(id);
+          if (panelExisted) this.presentation.invalidate(id);
           this.afterLayoutChange();
         },
         onSplitRight: (id) => {
@@ -535,6 +549,7 @@ export class AppShell {
             id: crypto.randomUUID(),
             series_path: hit.path,
             anchor: hit.anchor,
+            pinned_x: hit.x,
             pinned_value: hit.pinnedValue,
             label: "",
             offset: [10, -10],
@@ -612,6 +627,16 @@ export class AppShell {
           this.workspace.removeSeriesRef(id, ref, this.catalog.get(ref)?.path);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        onSetXAxis: (id, xAxis: XAxisSource) => {
+          this.workspace.setPanelXAxis(id, xAxis);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.workspaceView?.clearCursors();
+          this.workspaceView?.setCursor(this.workspace.linkedTime().cursorT);
+          this.presentation.invalidate(id);
+          this.renderTiles();
           void this.refreshTiles();
         },
         onLayoutChanged: () => {
@@ -713,18 +738,28 @@ export class AppShell {
       const id = this.workspace.focusedPanelId();
       const panel = id === null ? undefined : this.workspace.panel(id);
       if (id === null || panel === undefined) return;
-      const window = this.effectiveWindow(panel);
-      const pivot = (window.t0 + window.t1) / 2;
-      const next = zoomRange({ min: window.t0, max: window.t1 }, factor, pivot);
-      this.applyTimeWindow(id, next.min, next.max);
+      const range = this.navigationXRange(panel, id);
+      if (range === null) return;
+      const pivot = (range.min + range.max) / 2;
+      const next = zoomRange(range, factor, pivot);
+      if (panel.x_axis.kind === "signal") {
+        this.applyXRange(id, [next.min, next.max]);
+      } else {
+        this.applyTimeWindow(id, next.min, next.max);
+      }
     };
     const panFocusedPanel = (direction: -1 | 1): void => {
       const id = this.workspace.focusedPanelId();
       const panel = id === null ? undefined : this.workspace.panel(id);
       if (id === null || panel === undefined) return;
-      const window = this.effectiveWindow(panel);
-      const delta = (window.t1 - window.t0) * 0.1 * direction;
-      this.applyTimeWindow(id, window.t0 + delta, window.t1 + delta);
+      const range = this.navigationXRange(panel, id);
+      if (range === null) return;
+      const delta = (range.max - range.min) * 0.1 * direction;
+      if (panel.x_axis.kind === "signal") {
+        this.applyXRange(id, [range.min + delta, range.max + delta]);
+      } else {
+        this.applyTimeWindow(id, range.min + delta, range.max + delta);
+      }
     };
     const undoCommand: Command = {
       id: "undo",
@@ -858,20 +893,12 @@ export class AppShell {
         this.renderTiles();
       },
     });
-    this.registerFocusedPanelCommand(
-      "zoom-in-time",
-      "Panel: zoom in (time)",
-      () => {
-        zoomFocusedPanel(0.8);
-      },
-    );
-    this.registerFocusedPanelCommand(
-      "zoom-out-time",
-      "Panel: zoom out (time)",
-      () => {
-        zoomFocusedPanel(1.25);
-      },
-    );
+    this.registerFocusedPanelCommand("zoom-in-time", "Panel: zoom in", () => {
+      zoomFocusedPanel(0.8);
+    });
+    this.registerFocusedPanelCommand("zoom-out-time", "Panel: zoom out", () => {
+      zoomFocusedPanel(1.25);
+    });
     this.registerFocusedPanelCommand("pan-left", "Panel: pan left", () => {
       panFocusedPanel(-1);
     });
@@ -2367,8 +2394,7 @@ export class AppShell {
       this.selection.clear();
       this.history.reset(historySnapshot(this.workspace.snapshot()));
       this.workspacePath = null;
-      this.tilesByPanel.clear();
-      this.missingByPanel.clear();
+      this.presentation.clear();
       clearIngestProgress(this.root);
       this.workspace.setTheme(this.prefs.theme);
       applyPreferences(this.prefs, document.documentElement);
@@ -2597,7 +2623,7 @@ export class AppShell {
     this.signals = await this.plane.listSignals();
     this.catalog = Catalog.build(this.signals);
     this.catalogRevision += 1;
-    this.tileWindowCache.invalidate();
+    this.presentation.invalidate();
     this.reconcileSelection();
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
@@ -2615,167 +2641,38 @@ export class AppShell {
   }
 
   private refreshTiles(): Promise<void> {
-    this.refreshQueued = true;
-    this.refreshToken += 1;
-    if (this.refreshPromise !== null) {
-      return this.refreshPromise;
-    }
-    this.refreshPromise = (async () => {
-      try {
-        while (this.hasQueuedRefresh()) {
-          this.refreshQueued = false;
-          await this.refreshTilesPass(this.refreshToken);
-        }
-      } finally {
-        this.refreshPromise = null;
-      }
-    })();
-    return this.refreshPromise;
-  }
-
-  private hasQueuedRefresh(): boolean {
-    return this.refreshQueued;
-  }
-
-  private async refreshTilesPass(refreshToken: number): Promise<void> {
-    const panels = this.workspace.panels();
-    const width = Math.max(
-      1,
-      Math.round(required(this.root, ".workspace").clientWidth),
-    );
-    const devicePixelRatio = Number.isFinite(window.devicePixelRatio)
-      ? window.devicePixelRatio
-      : 1;
-    const panelInputs = panels.map((panel) => {
-      const signals = this.panelSignalIds(panel);
-      const window = this.effectiveWindow(panel);
-      const panelWidth = this.workspaceView?.panelWidth(panel.id) ?? 0;
-      const pixelWidth = panelWidth > 0 ? Math.round(panelWidth) : width;
-      const paddedWindow = TileWindowCache.padWindow(window.t0, window.t1);
-      const span = window.t1 - window.t0;
-      const paddingRatio =
-        span > 0 ? (paddedWindow.t1 - paddedWindow.t0) / span : 1;
-      return { panel, signals, window, paddedWindow, pixelWidth, paddingRatio };
-    });
-    const gpu = this.gpu as GpuContext | null | undefined;
-    const adapterLimits =
-      gpu === null || gpu === undefined
-        ? undefined
-        : (
-            gpu.adapter as unknown as {
-              limits?: { maxBufferSize?: unknown };
-            }
-          ).limits;
-    const budgets = autoPresentationBudgets(
-      Number(adapterLimits?.maxBufferSize ?? 0),
-      (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
-    );
-    const retainedBins = this.tileWindowCache.retainedBinCount(
-      new Set(panels.map((panel) => panel.id)),
-    );
-    const densityPlan = planPresentationDensity({
-      demands: panelInputs.map((input) => ({
-        panelId: input.panel.id,
-        physicalPixels: input.pixelWidth * devicePixelRatio,
-        paddingRatio: input.paddingRatio,
-        visibleSeries: input.signals.ids.length,
-      })),
-      budgets,
-      retainedCpuBytes: retainedBins * CPU_BYTES_PER_BIN,
-      retainedGpuBytes: retainedBins * GPU_BYTES_PER_BIN,
-    });
-    this.presentationPlan = densityPlan;
-    this.renderPresentationStatus();
-    const nextTiles = new Map<string, ColumnarTileResponse>();
-    const nextMissing = new Map<string, string[]>();
-    const replacements = new Map<
-      string,
-      {
-        response: ColumnarTileResponse;
-        window: { t0: number; t1: number };
-        pixelWidth: number;
-        requestedDevicePixels: number;
-        idsKey: string;
-      }
-    >();
-    await Promise.all(
-      panelInputs.map(async (input) => {
-        const { panel, signals, window, paddedWindow, pixelWidth } = input;
-        const { ids, missing } = signals;
-        nextMissing.set(panel.id, missing);
-        if (ids.length === 0) return;
-        const desiredDevicePixels = Math.max(
-          1,
-          Math.ceil((pixelWidth * devicePixelRatio * densityPlan.density) / 2),
-        );
-        const idsKey = [...ids].sort().join("\u0000");
-        const lookup = this.tileWindowCache.lookup(
-          panel.id,
-          idsKey,
-          window,
-          desiredDevicePixels,
-        );
-        if (lookup.kind === "current") {
-          nextTiles.set(panel.id, lookup.response);
-          return;
-        }
-        const fallback = lookup.kind === "stale" ? lookup.response : null;
-        const requestedDevicePixels = densityPlan.requests.get(panel.id) ?? 1;
-        try {
-          const response = await this.plane.queryTiles({
-            request_id: crypto.randomUUID(),
-            signal_ids: ids,
-            window: paddedWindow,
-            pixel_width: requestedDevicePixels,
-          });
-          if (refreshToken !== this.refreshToken) return;
-          replacements.set(panel.id, {
-            response,
-            window: paddedWindow,
-            pixelWidth,
-            requestedDevicePixels,
-            idsKey,
-          });
-          nextTiles.set(panel.id, response);
-        } catch (error: unknown) {
-          if (refreshToken !== this.refreshToken) return;
-          this.reportError(error);
-          if (fallback !== null) nextTiles.set(panel.id, fallback);
-        }
-      }),
-    );
-    if (refreshToken !== this.refreshToken) return;
-    try {
-      for (const replacement of replacements.values()) {
-        prepareResponseFeeds(replacement.response);
-      }
-    } catch (error: unknown) {
-      if (refreshToken === this.refreshToken) this.reportError(error);
-      return;
-    }
-    for (const [panelId, replacement] of replacements) {
-      this.tileWindowCache.store(panelId, replacement);
-    }
-    this.tilesByPanel = nextTiles;
-    this.missingByPanel = nextMissing;
-    this.renderTiles();
+    return this.presentation.refresh();
   }
 
   /** Signal ids a panel needs for its plotted series. */
   private panelSignalIds(panel: PanelState): {
     ids: string[];
+    xId: string | null;
     missing: string[];
   } {
     const resolved = this.resolvedFor(panel);
-    const paths = resolved.map((series) => series.path);
+    const xRef = panel.x_axis.kind === "signal" ? panel.x_axis.ref : null;
+    const xSeries = xRef === null ? undefined : this.catalog.get(xRef);
+    const paths = resolved
+      .filter((series) => xRef === null || !sameSeriesRef(series.ref, xRef))
+      .map((series) => series.path);
     const ids: string[] = [];
     const missing: string[] = [];
+    if (panel.x_axis.kind === "signal" && xSeries === undefined) {
+      missing.push(
+        xRef === null ? "X axis source" : `${xRef.source_key}/${xRef.channel}`,
+      );
+    }
     for (const path of new Set(paths)) {
       const id = this.signalsByPath.get(path)?.signal_id;
       if (id === undefined) missing.push(path);
       else ids.push(id);
     }
-    return { ids, missing };
+    return {
+      ids,
+      xId: xSeries?.summary.signal_id ?? null,
+      missing,
+    };
   }
 
   private resolvedFor(panel: PanelState): ResolvedSeries[] {
@@ -2797,7 +2694,13 @@ export class AppShell {
       for (const panel of tab.panels) {
         counts.set(
           panel.id,
-          this.resolvedFor(panel).filter((series) => series.visible).length,
+          this.resolvedFor(panel).filter(
+            (series) =>
+              series.visible &&
+              (panel.x_axis.kind !== "signal" ||
+                panel.x_axis.ref === null ||
+                !sameSeriesRef(series.ref, panel.x_axis.ref)),
+          ).length,
         );
       }
     }
@@ -2809,39 +2712,15 @@ export class AppShell {
   }
 
   private handlePanelResize(): void {
-    this.scheduleRender();
-    this.scheduleRefresh();
+    this.presentation.resized();
   }
 
-  /** Coalesces bursts of per-panel resize renders into one frame. */
   private scheduleRender(): void {
-    if (this.renderScheduled) return;
-    this.renderScheduled = true;
-    requestAnimationFrame(() => {
-      this.renderScheduled = false;
-      this.renderTiles();
-    });
+    this.presentation.scheduleRender();
   }
 
   private renderTiles(): void {
-    try {
-      const state = this.workspace.linkedTime();
-      const elapsed =
-        this.workspaceView?.renderData(
-          this.tilesByPanel,
-          (panelId) => {
-            const panel = this.workspace.panel(panelId);
-            return panel === undefined
-              ? { t0: state.t0, t1: state.t1 }
-              : this.effectiveWindow(panel);
-          },
-          (panelId) => this.missingByPanel.get(panelId) ?? [],
-        ) ?? 0;
-      required(this.root, ".render-ms").textContent =
-        `${elapsed.toFixed(1)} ms`;
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
+    this.presentation.render();
   }
 
   private applyTimeWindow(panelId: string, t0: number, t1: number): void {
@@ -2874,19 +2753,7 @@ export class AppShell {
   }
 
   private publishCachedCoverage(): void {
-    let next: Map<string, ColumnarTileResponse> | null = null;
-    for (const panel of this.workspace.panels()) {
-      const response = this.tileWindowCache.coveringCurrent(
-        panel.id,
-        this.effectiveWindow(panel),
-      );
-      if (response === null || this.tilesByPanel.get(panel.id) === response) {
-        continue;
-      }
-      next ??= new Map(this.tilesByPanel);
-      next.set(panel.id, response);
-    }
-    if (next !== null) this.tilesByPanel = next;
+    this.presentation.publishCachedCoverage();
   }
 
   private effectiveWindow(panel: PanelState): { t0: number; t1: number } {
@@ -2900,12 +2767,19 @@ export class AppShell {
       : { t0: local[0], t1: local[1] };
   }
 
+  private navigationXRange(
+    panel: PanelState,
+    panelId: string,
+  ): { min: number; max: number } | null {
+    if (panel.x_axis.kind === "signal") {
+      return this.workspaceView?.panelXRange(panelId) ?? null;
+    }
+    const window = this.effectiveWindow(panel);
+    return { min: window.t0, max: window.t1 };
+  }
+
   private scheduleRefresh(delay = 50): void {
-    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
-    this.refreshTimer = window.setTimeout(() => {
-      this.refreshTimer = null;
-      void this.refreshTiles();
-    }, delay);
+    this.presentation.scheduleRefresh(delay);
   }
 
   private fitPanelView(panelId: string): void {
@@ -2913,6 +2787,12 @@ export class AppShell {
     if (panel === undefined) return;
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
+    if (panel.x_axis.kind === "signal") {
+      this.workspace.clearPanelXRange(panelId);
+      this.commitHistory();
+      this.renderTiles();
+      return;
+    }
     const extent = this.timeExtent(
       this.resolvedFor(panel).map((series) => series.path),
     );
@@ -2933,6 +2813,20 @@ export class AppShell {
   ): void {
     const mode = this.workspace.cursorMode();
     if (mode === "none") cursor = null;
+    const local = this.workspace.panel(panelId)?.x_axis.kind === "signal";
+    if (local) {
+      this.workspace.setCursorT(null);
+      this.workspaceView?.clearCursors();
+      this.workspaceView?.setLocalCursor(panelId, cursor);
+      this.renderCursorTime(cursor?.heading);
+      this.renderTooltip(
+        panelId,
+        mode === "track" ? cursor : null,
+        mode === "track" ? client : null,
+      );
+      this.scheduleLiveValues(null);
+      return;
+    }
     const cursorT = cursor?.x ?? null;
     this.workspace.setCursorT(cursorT);
     const state = this.workspace.linkedTime();
@@ -3057,7 +2951,9 @@ export class AppShell {
       this.liveValuesScheduled = false;
       const values = new Map<string, string>();
       if (this.pendingCursorT !== null) {
-        for (const tiles of this.tilesByPanel.values()) {
+        for (const data of this.presentation.responses()) {
+          if (data.kind !== "time") continue;
+          const tiles = data.response;
           for (const tile of tiles.series) {
             if (!values.has(tile.signalPath)) {
               values.set(
@@ -3080,13 +2976,10 @@ export class AppShell {
     void this.updateSources(pointCount);
   }
 
-  private renderPresentationStatus(): void {
+  private renderPresentationStatus(plan: DensityPlan): void {
     const status = this.root.querySelector<HTMLElement>(".presentation-status");
     if (status === null) return;
-    const text =
-      this.presentationPlan === null
-        ? ""
-        : formatPresentationStatus(this.presentationPlan);
+    const text = formatPresentationStatus(plan);
     status.textContent = text.length > 0 ? ` · ${text}` : "";
     status.hidden = text.length === 0;
   }

@@ -12,6 +12,7 @@ const demand = (overrides: Partial<PanelDemand> = {}): PanelDemand => ({
   physicalPixels: 1000,
   paddingRatio: 2,
   visibleSeries: 1,
+  reductionExpansion: 1,
   ...overrides,
 });
 
@@ -103,6 +104,25 @@ describe("planPresentationDensity", () => {
     expect(unretained.density).toBe(2);
     expect(retained.density).toBeLessThan(unretained.density);
     expect(retained.fits).toBe(true);
+  });
+
+  it("charges family-specific worst-case reducer expansion", () => {
+    const base = {
+      budgets: { cpuBytes: 512 * MIB, gpuBytes: 256 * MIB },
+      retainedCpuBytes: 0,
+      retainedGpuBytes: 0,
+    };
+    const ordinary = planPresentationDensity({
+      ...base,
+      demands: [demand({ visibleSeries: 12 })],
+    });
+    const paired = planPresentationDensity({
+      ...base,
+      demands: [demand({ visibleSeries: 12, reductionExpansion: 24 })],
+    });
+
+    expect(paired.estimatedCpuBytes).toBe(ordinary.estimatedCpuBytes * 24);
+    expect(paired.estimatedGpuBytes).toBe(ordinary.estimatedGpuBytes * 24);
   });
 
   it("reports an impossible one-pixel minimum instead of rejecting unevenly", () => {

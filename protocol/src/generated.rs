@@ -236,6 +236,17 @@ pub struct TileRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Line2DRequest {
+    pub request_id: String,
+    #[serde(with = "u64_string")]
+    pub x_signal_id: u64,
+    #[serde(with = "u64_vec_string")]
+    pub y_signal_ids: Vec<u64>,
+    pub window: TimeWindow,
+    pub pixel_width: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct EnvelopeBin {
     pub t0: f64,
     pub t1: f64,
@@ -504,7 +515,26 @@ pub struct BakedSignal {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BakedLine2DLevel {
+    pub level: u32,
+    pub anchor: Vec<f64>,
+    pub x: Vec<Option<f64>>,
+    pub ys: Vec<Vec<Option<f64>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BakedLine2D {
+    #[serde(with = "u64_string")]
+    pub x_signal_id: u64,
+    #[serde(with = "u64_vec_string")]
+    pub y_signal_ids: Vec<u64>,
+    pub levels: Vec<BakedLine2DLevel>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SnapshotManifest {
     pub session_json: String,
     pub signals: Vec<BakedSignal>,
+    #[serde(default)]
+    pub line2d: Option<Vec<BakedLine2D>>,
 }

@@ -1,6 +1,7 @@
 #![allow(clippy::missing_errors_doc)]
 
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -16,11 +17,12 @@ use scope_core::{compute, ingest::batch::JobId, preferences, session, snapshot, 
 use scope_protocol::{
     BatchDetail, BatchDetailRequest, BatchJob, CreateDerivedBundleRequest, DerivedRequest,
     Envelope, ExportEstimate, ExportEstimateRequest, ExportFileKind, ExportRange,
-    ExportWriteRequest, IngestBatchRequest, IntrospectRequest, LoadSessionRequest, LoadedSession,
-    PickSessionRequest, RecipeDestination, RemoveDerivedBundleRequest, RemoveSignalRequest,
-    RestoreFinalizeRequest, RestoreFinalizeResponse, RestoreSourcesRequest, SampleRequest,
-    SampleResponse, SampleSeries, SaveExportFileRequest, SaveExportFileToDirectoryRequest,
-    SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest, ScanSourcesRequest, TileRequest,
+    ExportWriteRequest, IngestBatchRequest, IntrospectRequest, Line2DRequest, LoadSessionRequest,
+    LoadedSession, PickSessionRequest, RecipeDestination, RemoveDerivedBundleRequest,
+    RemoveSignalRequest, RestoreFinalizeRequest, RestoreFinalizeResponse, RestoreSourcesRequest,
+    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
+    SaveExportFileToDirectoryRequest, SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest,
+    ScanSourcesRequest, TileRequest,
 };
 
 use crate::{AppContext, host};
@@ -605,6 +607,101 @@ pub async fn query_tiles_bin(
     Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes))
 }
 
+pub async fn query_line2d_bin(
+    State(ctx): State<AppContext>,
+    Json(request): Json<Envelope<Line2DRequest>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let request = request.open().map_err(|error| err(error.to_string()))?;
+    if request.y_signal_ids.is_empty() {
+        return Err(err("line plot requires at least one y signal"));
+    }
+    if request.y_signal_ids.contains(&request.x_signal_id) {
+        return Err(err("Line2D X signal cannot also be a Y signal"));
+    }
+    if request.y_signal_ids.iter().collect::<BTreeSet<_>>().len() != request.y_signal_ids.len() {
+        return Err(err("Line2D Y signals must be unique"));
+    }
+    if !request.window.t0.is_finite()
+        || !request.window.t1.is_finite()
+        || request.window.t1 <= request.window.t0
+    {
+        return Err(err("Line2D window must be finite and increasing"));
+    }
+    if request.pixel_width == 0 {
+        return Err(err("Line2D pixel width must be positive"));
+    }
+    let state = Arc::clone(&ctx.state);
+    let bytes = tokio::task::spawn_blocking(move || {
+        let (x_signal, y_signals) = {
+            let data = state.lock().map_err(|error| error.to_string())?;
+            let x_signal = data
+                .store
+                .signal(SignalId(request.x_signal_id))
+                .cloned()
+                .ok_or_else(|| format!("unknown x signal id: {}", request.x_signal_id))?;
+            let y_signals = request
+                .y_signal_ids
+                .iter()
+                .map(|raw_id| {
+                    data.store
+                        .signal(SignalId(*raw_id))
+                        .cloned()
+                        .ok_or_else(|| format!("unknown y signal id: {raw_id}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            (x_signal, y_signals)
+        };
+        let y_refs = y_signals.iter().collect::<Vec<_>>();
+        let pyramid = scope_core::line2d::LinePyramid::from_signals_window(
+            &x_signal,
+            &y_refs,
+            request.window.t0,
+            request.window.t1,
+        )
+        .map_err(|error| error.to_string())?;
+        let query = pyramid.query(request.window.t0, request.window.t1, request.pixel_width);
+        let mut anchor = Vec::with_capacity(query.points.len());
+        let mut x_values = Vec::with_capacity(query.points.len());
+        let mut y_values = (0..y_signals.len())
+            .map(|_| Vec::with_capacity(query.points.len()))
+            .collect::<Vec<_>>();
+        for point in query.points {
+            anchor.push(point.anchor);
+            x_values.push(point.x);
+            for (values, value) in y_values.iter_mut().zip(point.ys) {
+                values.push(value);
+            }
+        }
+        let x = scope_protocol::BinaryLineColumn {
+            signal_id: x_signal.id.0,
+            signal_path: &x_signal.path,
+            unit: x_signal.unit.as_deref(),
+            values: &x_values,
+        };
+        let ys = y_signals
+            .iter()
+            .zip(&y_values)
+            .map(|(signal, values)| scope_protocol::BinaryLineColumn {
+                signal_id: signal.id.0,
+                signal_path: &signal.path,
+                unit: signal.unit.as_deref(),
+                values,
+            })
+            .collect::<Vec<_>>();
+        let response = scope_protocol::BinaryLineResponse {
+            level: query.level,
+            anchor: &anchor,
+            x,
+            ys: &ys,
+        };
+        Ok::<_, String>(scope_protocol::encode_line_response(&response))
+    })
+    .await
+    .map_err(|error| err(error.to_string()))?
+    .map_err(err)?;
+    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes))
+}
+
 const AUTOSAVE_FILE: &str = "session.autosave.json";
 
 fn session_path(ctx: &AppContext, path: Option<String>) -> PathBuf {
@@ -1109,6 +1206,167 @@ mod tests {
         let detail = request_tiles(&router, signal_id.0, 4_900.0, 5_100.0, 400).await;
         assert_eq!(detail.level, 0);
         assert!(detail.sample_count.iter().all(|count| *count == 1));
+    }
+
+    #[tokio::test]
+    async fn query_line2d_bin_keeps_x_y_rows_and_metadata_ordered() {
+        let ctx = crate::AppContext::for_tests(None);
+        let (x_signal_id, y0_signal_id, y1_signal_id) = {
+            let mut data = ctx.state.lock().unwrap();
+            let source = data
+                .store
+                .register_source(
+                    "/tmp/line2d-query.csv",
+                    scope_core::store::SourceKey(uuid::Uuid::new_v4()),
+                    "line2d-query",
+                )
+                .unwrap();
+            let time = (0..4).map(f64::from).collect::<Vec<_>>();
+            let x = data
+                .store
+                .insert_signal(
+                    source,
+                    "x",
+                    Some("s".into()),
+                    time.clone(),
+                    vec![10.0, 11.0, f64::NAN, 13.0],
+                )
+                .unwrap();
+            let y0 = data
+                .store
+                .insert_signal(
+                    source,
+                    "y0",
+                    Some("V".into()),
+                    time.clone(),
+                    vec![20.0, 21.0, 22.0, 23.0],
+                )
+                .unwrap();
+            let y1 = data
+                .store
+                .insert_signal(source, "y1", None, time, vec![30.0, 31.0, 32.0, f64::NAN])
+                .unwrap();
+            (x.0, y0.0, y1.0)
+        };
+        let router = crate::build_router(ctx);
+        let request = Envelope::new(Line2DRequest {
+            request_id: "line2d".into(),
+            x_signal_id,
+            y_signal_ids: vec![y1_signal_id, y0_signal_id],
+            window: scope_protocol::TimeWindow { t0: 0.0, t1: 3.0 },
+            pixel_width: 100,
+        });
+        let response = router
+            .oneshot(
+                Request::post("/api/query_line2d_bin")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let response = scope_protocol::decode_line_response(&body).unwrap();
+        assert_eq!(response.level, 0);
+        assert_eq!(response.anchor, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(response.x.signal_id, x_signal_id);
+        assert_eq!(response.x.signal_path, "line2d-query/x");
+        assert_eq!(response.x.unit.as_deref(), Some("s"));
+        assert!(response.x.values[2].is_nan());
+        assert_eq!(
+            response
+                .ys
+                .iter()
+                .map(|series| series.signal_id)
+                .collect::<Vec<_>>(),
+            vec![y1_signal_id, y0_signal_id]
+        );
+        assert!(response.ys[0].values[3].is_nan());
+        assert_eq!(response.ys[1].values, vec![20.0, 21.0, 22.0, 23.0]);
+    }
+
+    #[tokio::test]
+    async fn query_line2d_bin_rejects_invalid_bindings_and_unknown_ids() {
+        let ctx = crate::AppContext::for_tests(None);
+        let (x_signal_id, y_signal_id) = {
+            let mut data = ctx.state.lock().unwrap();
+            let source = data
+                .store
+                .register_source(
+                    "/tmp/line2d-errors.csv",
+                    scope_core::store::SourceKey(uuid::Uuid::new_v4()),
+                    "line2d-errors",
+                )
+                .unwrap();
+            let x = data
+                .store
+                .insert_signal(source, "x", None, vec![0.0, 1.0], vec![10.0, 11.0])
+                .unwrap();
+            let y = data
+                .store
+                .insert_signal(source, "y", None, vec![0.0, 2.0], vec![20.0, 21.0])
+                .unwrap();
+            (x.0, y.0)
+        };
+        let router = crate::build_router(ctx);
+        let request = |x_signal_id, y_signal_ids| {
+            Envelope::new(Line2DRequest {
+                request_id: "line2d-errors".into(),
+                x_signal_id,
+                y_signal_ids,
+                window: scope_protocol::TimeWindow { t0: 0.0, t1: 2.0 },
+                pixel_width: 100,
+            })
+        };
+        for (request, message) in [
+            (request(x_signal_id, Vec::new()), "at least one y signal"),
+            (
+                request(x_signal_id, vec![x_signal_id]),
+                "cannot also be a Y signal",
+            ),
+            (
+                request(x_signal_id, vec![y_signal_id, y_signal_id]),
+                "must be unique",
+            ),
+            (request(x_signal_id, vec![y_signal_id]), "exact timebase"),
+            (request(999_999, vec![y_signal_id]), "unknown x signal id"),
+            (request(x_signal_id, vec![999_999]), "unknown y signal id"),
+            (
+                Envelope::new(Line2DRequest {
+                    request_id: "line2d-errors".into(),
+                    x_signal_id,
+                    y_signal_ids: vec![y_signal_id],
+                    window: scope_protocol::TimeWindow { t0: 2.0, t1: 0.0 },
+                    pixel_width: 100,
+                }),
+                "finite and increasing",
+            ),
+            (
+                Envelope::new(Line2DRequest {
+                    request_id: "line2d-errors".into(),
+                    x_signal_id,
+                    y_signal_ids: vec![y_signal_id],
+                    window: scope_protocol::TimeWindow { t0: 0.0, t1: 2.0 },
+                    pixel_width: 0,
+                }),
+                "must be positive",
+            ),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/api/query_line2d_bin")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(String::from_utf8_lossy(&body).contains(message));
+        }
     }
 
     #[tokio::test]

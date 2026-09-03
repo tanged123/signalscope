@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 27;
+pub const SESSION_SCHEMA_VERSION: u32 = 28;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -71,6 +71,21 @@ pub struct LinkedTime {
 pub struct SeriesRef {
     pub source_key: String,
     pub channel: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum XAxisKind {
+    Time,
+    Signal,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct XAxisSource {
+    pub kind: XAxisKind,
+    #[serde(default)]
+    #[serde(rename = "ref")]
+    pub r#ref: Option<SeriesRef>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -207,6 +222,8 @@ pub struct Annotation {
     pub id: String,
     pub series_path: String,
     pub anchor: f64,
+    #[serde(default)]
+    pub pinned_x: Option<f64>,
     pub pinned_value: f64,
     pub label: String,
     pub offset: [f64; 2],
@@ -239,6 +256,7 @@ pub struct PanelState {
     #[serde(default)]
     pub legend_dock: Option<LegendDock>,
     pub legend_hint_dismissed: bool,
+    pub x_axis: XAxisSource,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
     #[serde(default)]

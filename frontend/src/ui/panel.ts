@@ -22,6 +22,7 @@ import type {
   SeriesOverride,
   StyleDimension,
   StatColumn,
+  XAxisSource,
 } from "../generated/session";
 import {
   clamp,
@@ -32,6 +33,7 @@ import {
 } from "../app/plot-math";
 import { resolveRanges } from "../app/plot-gestures";
 import {
+  prepareLine2DPlot,
   prepareTimePlot,
   type AnnotationAnchor,
   type PlotCursor,
@@ -39,13 +41,18 @@ import {
   type ResolvedAnnotation,
   type SeriesHitAdapter,
 } from "../app/plot-capabilities";
+import type { PanelLineResponse } from "../app/line-presentation-controller";
 import {
   COLOR_SLOTS,
   hueIndex,
   invalidatePalette,
   resolvePalette,
+  type SeriesStroke,
 } from "../render/plot-theme";
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
+import type { Line2DRenderInput } from "../render/line2d";
+import { line2DFromTimeTiles } from "../render/time-adapter";
+import { line2DFromSignalX } from "../render/signal-x-adapter";
 import type { GpuContext } from "../render/gpu-context";
 
 const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 5_000;
@@ -58,16 +65,25 @@ import {
 } from "../render/overlay-renderer";
 import { YAxisPolicy } from "../render/y-axis";
 import { required } from "./dom";
+import { PanelShell } from "./panel-shell";
 import {
   PlotInteractionController,
   type InteractionBox,
 } from "./plot-interactions";
 
-export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
-export const SET_DRAG_TYPE = "application/x-signalscope-set";
-export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
+export {
+  dragData,
+  hasDragType,
+  MAXIMIZE_GLYPH,
+  PANEL_DRAG_TYPE,
+  parseSetPayload,
+  parseSignalPayload,
+  parseSignalRefsPayload,
+  SET_DRAG_TYPE,
+  SIGNAL_DRAG_TYPE,
+} from "./panel-shell";
+
 export const MAX_SERIES_PER_PANEL = 64;
-export const MAXIMIZE_GLYPH = "↗";
 const LEGEND_RAIL_COLLAPSE = 100;
 const LEGEND_RAIL_MIN = 140;
 const LEGEND_RAIL_DEFAULT = 236;
@@ -170,16 +186,7 @@ export interface PanelCallbacks {
     },
   ): void;
   onRemoveSeries(id: string, ref: SeriesRef): void;
-}
-
-export function hasDragType(event: DragEvent, type: string): boolean {
-  return event.dataTransfer?.types.includes(type) ?? false;
-}
-
-/** The non-empty payload carried for `type` on a drop event, or null. */
-export function dragData(event: DragEvent, type: string): string | null {
-  const value = event.dataTransfer?.getData(type);
-  return value !== undefined && value !== "" ? value : null;
+  onSetXAxis?(id: string, xAxis: XAxisSource): void;
 }
 
 export interface RenderSeries {
@@ -357,6 +364,10 @@ function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
     : entry.channel === ref.channel;
 }
 
+function sameSeriesRef(left: SeriesRef, right: SeriesRef): boolean {
+  return left.source_key === right.source_key && left.channel === right.channel;
+}
+
 function renderState(
   state: PanelState,
   callbacks: Pick<PanelCallbacks, "resolveSeries">,
@@ -380,71 +391,9 @@ function renderState(
   };
 }
 
-export function parseSignalPayload(data: string): string[] {
-  try {
-    const payload: unknown = JSON.parse(data);
-    if (
-      typeof payload === "object" &&
-      payload !== null &&
-      "paths" in payload &&
-      Array.isArray(payload.paths) &&
-      payload.paths.every((path) => typeof path === "string")
-    ) {
-      return payload.paths;
-    }
-    return [];
-  } catch {
-    // Malformed external drag payloads are ignored.
-  }
-  return data === "" ? [] : [data];
-}
-
-export function parseSignalRefsPayload(data: string): SeriesRef[] {
-  try {
-    const payload: unknown = JSON.parse(data);
-    if (typeof payload !== "object" || payload === null) return [];
-    const refs = (payload as { refs?: unknown }).refs;
-    if (!Array.isArray(refs)) return [];
-    if (
-      refs.every((ref: unknown) => {
-        if (typeof ref !== "object" || ref === null) return false;
-        const candidate = ref as {
-          source_key?: unknown;
-          channel?: unknown;
-        };
-        return (
-          typeof candidate.source_key === "string" &&
-          typeof candidate.channel === "string"
-        );
-      })
-    ) {
-      return refs as SeriesRef[];
-    }
-  } catch {
-    return [];
-  }
-  return [];
-}
-
-export function parseSetPayload(data: string): string | null {
-  try {
-    const payload: unknown = JSON.parse(data);
-    if (
-      typeof payload === "object" &&
-      payload !== null &&
-      "set_id" in payload &&
-      typeof payload.set_id === "string"
-    ) {
-      return payload.set_id;
-    }
-  } catch {
-    // Malformed external drag payloads are ignored.
-  }
-  return null;
-}
-
 export class PanelView {
   readonly element: HTMLElement;
+  private readonly shell: PanelShell;
   private readonly overlay: HTMLCanvasElement;
   private readonly chartHostElement: HTMLElement;
   private readonly overlayRenderer: OverlayRenderer;
@@ -459,12 +408,15 @@ export class PanelView {
   private lastState: RenderPanelState | null = null;
   private lastInputState: PanelState | null = null;
   private lastStateKey: string | null = null;
+  private lastData: PanelLineResponse | null = null;
   private lastTiles: ColumnarTileResponse | null = null;
   private lastWindow: { t0: number; t1: number } | null = null;
   private lastMissingEmpty = true;
+  private lastError: string | null = null;
   private preparedPlot: PreparedPlot | null = null;
   private hitAdapter: SeriesHitAdapter | null = null;
   private cursorT: number | null = null;
+  private localCursor: PlotCursor | null = null;
   private cursorMode: CursorMode = "none";
   private box: InteractionBox | null = null;
   private emphasizePaths: ReadonlySet<string> | null = null;
@@ -497,13 +449,28 @@ export class PanelView {
     private readonly callbacks: PanelCallbacks,
     private gpu: GpuContext | null = null,
   ) {
-    this.element = document.createElement("article");
-    this.element.className = "panel";
-    this.element.dataset.panelId = id;
-    this.element.tabIndex = 0;
-    this.element.innerHTML = panelMarkup();
-    this.chartHostElement = required<HTMLElement>(this.element, ".chart-host");
-    this.overlay = required<HTMLCanvasElement>(this.element, ".overlay-canvas");
+    this.shell = new PanelShell(id, {
+      onFocus: (panelId) => callbacks.onFocus(panelId),
+      onClose: (panelId) => callbacks.onClose(panelId),
+      onSplitRight: (panelId) => callbacks.onSplitRight(panelId),
+      onSplitDown: (panelId) => callbacks.onSplitDown(panelId),
+      onMaximize: (panelId) => callbacks.onMaximize(panelId),
+      onDropSignals: (panelId, paths) =>
+        callbacks.onDropSignals(panelId, paths),
+      onDropSet: (panelId, setId) => callbacks.onDropSet(panelId, setId),
+      onRenameTitle: (panelId, title) =>
+        callbacks.onRenameTitle(panelId, title),
+    });
+    this.element = this.shell.element;
+    this.shell.slots.controls.innerHTML = lineToolbarMarkup();
+    this.chartHostElement = document.createElement("div");
+    this.chartHostElement.className = "chart-host";
+    this.chartHostElement.hidden = true;
+    this.shell.appendContent(this.chartHostElement);
+    this.overlay = document.createElement("canvas");
+    this.overlay.className = "overlay-canvas";
+    this.overlay.setAttribute("aria-hidden", "true");
+    this.shell.appendContent(this.overlay);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
     this.interactions = new PlotInteractionController(this.overlay, {
@@ -661,33 +628,6 @@ export class PanelView {
   }
 
   private bind(): void {
-    this.element.addEventListener("pointerdown", () => {
-      this.callbacks.onFocus(this.id);
-    });
-    required(this.element, ".plot-series-legend").addEventListener(
-      "pointerdown",
-      (event) => {
-        event.stopPropagation();
-      },
-    );
-    required(this.element, ".panel-close").addEventListener("click", () => {
-      this.callbacks.onClose(this.id);
-    });
-    required(this.element, ".panel-split-right").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onSplitRight(this.id);
-      },
-    );
-    required(this.element, ".panel-split-down").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onSplitDown(this.id);
-      },
-    );
-    required(this.element, ".panel-maximize").addEventListener("click", () => {
-      this.callbacks.onMaximize(this.id);
-    });
     required(this.element, ".panel-stats-toggle").addEventListener(
       "click",
       () => {
@@ -698,6 +638,17 @@ export class PanelView {
       "click",
       () => {
         this.callbacks.onToggleAxisStyle(this.id);
+      },
+    );
+    required(this.element, ".panel-x-axis").addEventListener(
+      "click",
+      (event) => {
+        if (this.lastState !== null) {
+          this.openXAxisMenu(
+            this.lastState,
+            event.currentTarget as HTMLElement,
+          );
+        }
       },
     );
     required(this.element, ".panel-line-width").addEventListener(
@@ -791,45 +742,6 @@ export class PanelView {
           });
         }
       }
-    });
-    const header = required<HTMLElement>(this.element, ".panel-header");
-    required<HTMLElement>(this.element, ".panel-title").addEventListener(
-      "dblclick",
-      () => {
-        this.beginTitleEdit();
-      },
-    );
-    header.draggable = true;
-    header.addEventListener("dragstart", (event) => {
-      event.dataTransfer?.setData(PANEL_DRAG_TYPE, this.id);
-    });
-    this.element.addEventListener("dragover", (event) => {
-      const signalDrag = hasDragType(event, SIGNAL_DRAG_TYPE);
-      const setDrag = hasDragType(event, SET_DRAG_TYPE);
-      if (!signalDrag && !setDrag) return;
-      event.preventDefault();
-      this.element.classList.add("drop-target");
-    });
-    this.element.addEventListener("dragleave", () => {
-      this.element.classList.remove("drop-target", "drop-x");
-    });
-    this.element.addEventListener("drop", (event) => {
-      this.element.classList.remove("drop-target", "drop-x");
-      const setPayload = dragData(event, SET_DRAG_TYPE);
-      if (setPayload !== null) {
-        event.preventDefault();
-        event.stopPropagation();
-        const setId = parseSetPayload(setPayload);
-        if (setId !== null) this.callbacks.onDropSet(this.id, setId);
-        return;
-      }
-      const path = dragData(event, SIGNAL_DRAG_TYPE);
-      if (path === null) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const paths = parseSignalPayload(path);
-      if (paths.length === 0) return;
-      this.callbacks.onDropSignals(this.id, paths);
     });
     this.overlay.addEventListener("pointermove", (event) => {
       if (this.interactions.isDragging() || this.annotationDragId !== null)
@@ -930,11 +842,7 @@ export class PanelView {
     const rendered = renderState(state, this.callbacks);
     this.lastInputState = state;
     this.lastState = rendered;
-    this.element.classList.toggle("maximized", maximized);
-    this.element.setAttribute("aria-label", `${rendered.title} panel`);
-    required(this.element, ".panel-title").textContent = rendered.title;
-    required<HTMLButtonElement>(this.element, ".panel-maximize").title =
-      maximized ? "Restore panel" : "Maximize panel";
+    this.shell.setTitle(rendered.title, maximized);
     const axisToggle = required<HTMLButtonElement>(
       this.element,
       ".panel-axis-toggle",
@@ -942,6 +850,15 @@ export class PanelView {
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
     axisToggle.hidden = false;
+    const xAxis = required<HTMLButtonElement>(this.element, ".panel-x-axis");
+    const xAxisLabel = this.xAxisLabel(rendered);
+    xAxis.textContent = `x: ${xAxisLabel} ▾`;
+    xAxis.title =
+      rendered.x_axis.kind === "time"
+        ? "Choose a resolved signal for the X axis"
+        : `X axis signal: ${xAxisLabel}`;
+    xAxis.setAttribute("aria-label", `X axis: ${xAxisLabel}`);
+    xAxis.hidden = false;
     required<HTMLElement>(this.element, ".panel-line-width-value").textContent =
       formatToolbarNumber(rendered.line_width);
     required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
@@ -967,47 +884,66 @@ export class PanelView {
     ) {
       this.inspectorPath = null;
     }
-    const empty = required<HTMLElement>(this.element, ".panel-empty");
     if (rendered.series.length === 0) {
-      empty.hidden = false;
-      empty.textContent = "Empty panel — drag a signal here.";
+      this.shell.setStatus({
+        kind: "empty",
+        message: "Empty panel — drag a signal here.",
+      });
     } else if (this.gpu === null) {
-      empty.hidden = false;
-      empty.textContent = "WebGPU unavailable — time-series rendering disabled";
+      this.shell.setStatus({
+        kind: "unavailable",
+        message: "WebGPU unavailable — plot rendering disabled",
+      });
     } else {
-      empty.hidden = true;
+      this.shell.setStatus({ kind: "ready" });
     }
   }
 
   renderData(
     state: PanelState,
-    tiles: ColumnarTileResponse | null,
+    data: PanelLineResponse | null,
     window: { t0: number; t1: number },
     missing: readonly string[] = [],
+    error: string | null = null,
   ): number {
     const stateKey = JSON.stringify(state);
     if (
       stateKey === this.lastStateKey &&
-      tiles === this.lastTiles &&
+      data === this.lastData &&
       this.lastWindow !== null &&
       window.t0 === this.lastWindow.t0 &&
       window.t1 === this.lastWindow.t1 &&
       missing.length === 0 &&
-      this.lastMissingEmpty
+      this.lastMissingEmpty &&
+      error === this.lastError
     ) {
       return 0;
+    }
+    const windowChanged =
+      this.lastWindow === null ||
+      window.t0 !== this.lastWindow.t0 ||
+      window.t1 !== this.lastWindow.t1;
+    if (
+      this.localCursor !== null &&
+      (data !== this.lastData || windowChanged)
+    ) {
+      this.localCursor = null;
+      this.cursorT = null;
+      this.callbacks.onCursor(this.id, null, null);
     }
     const rendered = renderState(state, this.callbacks);
     this.lastInputState = state;
     this.lastStateKey = stateKey;
     this.lastState = rendered;
-    this.lastTiles = tiles;
+    this.lastData = data;
+    this.lastTiles = data?.kind === "time" ? data.response : null;
     this.lastWindow = { ...window };
     this.lastMissingEmpty = missing.length === 0;
+    this.lastError = error;
     this.preparedPlot = null;
     this.hitAdapter = null;
     this.updateLegendValues();
-    const elapsed = this.renderForMode(rendered, tiles, window);
+    const elapsed = this.renderForMode(rendered, data, window);
     this.hitAdapter =
       (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
     this.interactions.setPolicy(
@@ -1017,15 +953,20 @@ export class PanelView {
     this.pruneAnnotationUiState(rendered);
     const annotations = this.resolvedAnnotations(rendered);
     this.drawOverlay(annotations);
-    if (missing.length > 0) {
-      this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
+    if (error !== null) {
+      this.shell.setStatus({ kind: "error", message: error });
+    } else if (missing.length > 0) {
+      this.shell.setStatus({
+        kind: "error",
+        message: `unknown signals: ${missing.join(", ")}`,
+      });
     }
     return elapsed;
   }
 
   private renderForMode(
     state: RenderPanelState,
-    tiles: ColumnarTileResponse | null,
+    data: PanelLineResponse | null,
     window: { t0: number; t1: number },
   ): number {
     if (this.gpu === null) {
@@ -1036,26 +977,102 @@ export class PanelView {
       this.chartHostElement.hidden = true;
       return 0;
     }
+    if (data === null) {
+      this.chartHostElement.hidden = true;
+      const xRef = state.x_axis.ref;
+      const hasSignalY =
+        state.x_axis.kind !== "signal" ||
+        xRef === null ||
+        state.series.some((series) => !sameSeriesRef(series.ref, xRef));
+      this.shell.setStatus(
+        hasSignalY
+          ? { kind: "loading", message: "Loading plot data…" }
+          : { kind: "empty", message: "Choose at least one Y signal." },
+      );
+      return 0;
+    }
     this.chartHostElement.hidden = false;
-    if (tiles === null) return 0;
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
     );
-    const shown = tiles.series.filter(
-      (tile) => bySeries.get(tile.signalPath)?.visible ?? true,
-    );
-    const response = { requestId: tiles.requestId, series: shown };
-    this.preparedPlot = prepareTimePlot({
-      series: shown.map((tile) => {
-        const series = bySeries.get(tile.signalPath);
-        return {
-          path: tile.signalPath,
-          colorIndex: colorIndexForHue(series?.hue ?? 1),
-          bins: tile.bins,
-        };
-      }),
-      window,
-    });
+    let plotted: readonly { signalPath: string; unit: string | null }[];
+    let makeInput: (
+      ranges: { x: Range; y: Range },
+      styles: readonly SeriesStroke[],
+    ) => Line2DRenderInput;
+    if (data.kind === "time") {
+      const shown = data.response.series.filter(
+        (series) => bySeries.get(series.signalPath)?.visible ?? true,
+      );
+      plotted = shown;
+      this.preparedPlot = prepareTimePlot({
+        series: shown.map((tile) => {
+          const series = bySeries.get(tile.signalPath);
+          return {
+            path: tile.signalPath,
+            colorIndex: colorIndexForHue(series?.hue ?? 1),
+            bins: tile.bins,
+          };
+        }),
+        window,
+      });
+      makeInput = (ranges, styles) =>
+        line2DFromTimeTiles(
+          { requestId: data.response.requestId, series: shown },
+          {
+            xRange: ranges.x,
+            yRange: [ranges.y.min, ranges.y.max],
+            xLabel: state.x_label ?? "time (s)",
+            yLabel: state.y_label ?? yLabel(shown.map((item) => item.unit)),
+            styles,
+            axisStyle: state.axis_style,
+          },
+        );
+    } else {
+      const shown = data.response.ys.filter(
+        (series) => bySeries.get(series.signalPath)?.visible ?? true,
+      );
+      plotted = shown;
+      this.preparedPlot = prepareLine2DPlot({
+        anchor: data.response.anchor,
+        x: data.response.x.values,
+        series: shown.map((column) => {
+          const series = bySeries.get(column.signalPath);
+          return {
+            path: column.signalPath,
+            label: column.signalPath,
+            unit: column.unit,
+            colorIndex: colorIndexForHue(series?.hue ?? 1),
+            values: column.values,
+          };
+        }),
+        window,
+      });
+      makeInput = (ranges, styles) =>
+        line2DFromSignalX(
+          { ...data.response, ys: shown },
+          {
+            window,
+            xRange: ranges.x,
+            yRange: [ranges.y.min, ranges.y.max],
+            xLabel:
+              state.x_label ??
+              axisLabel(data.response.x.signalPath, data.response.x.unit),
+            yLabel: state.y_label ?? yLabel(shown.map((item) => item.unit)),
+            styles,
+            axisStyle: state.axis_style,
+          },
+        );
+    }
+    if (plotted.length === 0) {
+      this.chartHostElement.hidden = true;
+      this.shell.setStatus({
+        kind: "empty",
+        message: "Choose at least one Y signal.",
+      });
+      return 0;
+    }
+    this.shell.setStatus({ kind: "ready" });
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
     const ranges = this.resolvePlotRanges(
       state,
@@ -1064,8 +1081,8 @@ export class PanelView {
       seriesKey,
     );
     if (ranges === null) return 0;
-    const styles = shown.map((tile) => {
-      const series = bySeries.get(tile.signalPath);
+    const styles: SeriesStroke[] = plotted.map((item) => {
+      const series = bySeries.get(item.signalPath);
       return {
         hue: series?.hue ?? null,
         dash: series?.dash ?? "solid",
@@ -1078,19 +1095,13 @@ export class PanelView {
     const emphasisIndices =
       this.emphasizePaths === null
         ? []
-        : shown.flatMap((tile, index) =>
-            this.emphasizePaths?.has(tile.signalPath) ? [index] : [],
+        : plotted.flatMap((item, index) =>
+            this.emphasizePaths?.has(item.signalPath) ? [index] : [],
           );
     const request: ChartRenderRequest = {
-      response,
-      xRange: ranges.x,
-      yRange: [ranges.y.min, ranges.y.max],
-      xLabel: state.x_label ?? "time (s)",
-      yLabel: state.y_label ?? yLabel(response.series.map((tile) => tile.unit)),
-      styles,
+      ...makeInput(ranges, styles),
       emphasisIndices,
       palette: resolvePalette(),
-      axisStyle: state.axis_style,
     };
     if (this.chartHost === null) {
       this.pendingChartRender = request;
@@ -1125,40 +1136,32 @@ export class PanelView {
     );
   }
 
-  /**
-   * Shows or clears a mode-specific empty message. Always assigns `hidden`,
-   * so a panel that starts empty and then gets data does not keep a stale
-   * message over its plot.
-   */
-  private setModeEmpty(show: boolean, message: string): void {
-    const empty = required<HTMLElement>(this.element, ".panel-empty");
-    empty.hidden = !show;
-    if (show) empty.textContent = message;
-  }
-
   invalidateTheme(): void {
     invalidatePalette();
     this.overlayRenderer.invalidateTheme();
     if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderForMode(this.lastState, this.lastTiles, this.lastWindow);
+      this.renderForMode(this.lastState, this.lastData, this.lastWindow);
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
   }
 
   setCursor(cursorT: number | null): void {
     if (this.preparedPlot?.interaction.cursorLink !== "time") return;
+    this.localCursor = null;
     this.cursorT = cursorT;
     this.updateLegendValues();
     this.drawOverlay();
   }
 
-  setLocalCursor(cursorValue: number | null): void {
-    this.cursorT = cursorValue;
+  setLocalCursor(cursor: PlotCursor | null): void {
+    this.localCursor = cursor;
+    this.cursorT = cursor?.x ?? null;
     this.updateLegendValues();
     this.drawOverlay();
   }
 
   clearCursor(): void {
+    this.localCursor = null;
     this.cursorT = null;
     this.updateLegendValues();
     this.drawOverlay();
@@ -1178,6 +1181,11 @@ export class PanelView {
     return this.chartHostElement.clientWidth;
   }
 
+  plotXRange(): Range | null {
+    const range = this.activeLayout()?.xRange;
+    return range === undefined ? null : { ...range };
+  }
+
   async capturePlot(): Promise<{
     plot: HTMLCanvasElement;
     overlay: HTMLCanvasElement;
@@ -1191,6 +1199,7 @@ export class PanelView {
     this.disposed = true;
     this.releaseGpu();
     this.interactions.dispose();
+    this.shell.dispose();
   }
 
   releaseGpu(): void {
@@ -1318,14 +1327,19 @@ export class PanelView {
   private walkHover(direction: -1 | 1): void {
     const state = this.lastState;
     if (state === null) return;
-    const values = new Map(
-      (this.lastTiles?.series ?? []).map((tile) => [
-        tile.signalPath,
-        this.cursorT === null
-          ? null
-          : columnsValueAtTime(tile.bins, this.cursorT),
-      ]),
-    );
+    const values =
+      this.localCursor === null
+        ? new Map(
+            (this.lastTiles?.series ?? []).map((tile) => [
+              tile.signalPath,
+              this.cursorT === null
+                ? null
+                : columnsValueAtTime(tile.bins, this.cursorT),
+            ]),
+          )
+        : new Map(
+            this.localCursor.rows.map((row) => [row.path, row.value] as const),
+          );
     const series = state.series
       .filter((entry) => entry.visible)
       .map((entry, index) => ({
@@ -1393,12 +1407,14 @@ export class PanelView {
       (state?.series ?? []).map((series) => [series.path, series]),
     );
     const cursorT = this.cursorT;
-    const xyMarkers: never[] = [];
+    const xyMarkers = this.localCursor?.markers ?? [];
     this.overlayRenderer.draw(this.activeLayout(), {
       cursorT,
       cursorMode: this.cursorMode,
       cursorPoints:
-        this.cursorMode === "track" && cursorT !== null
+        this.localCursor === null &&
+        this.cursorMode === "track" &&
+        cursorT !== null
           ? this.cursorPointsAt(cursorT, bySeries)
           : [],
       xyMarkers,
@@ -1454,13 +1470,13 @@ export class PanelView {
       {
         id: null,
         path: tip.path,
-        x: tip.anchor,
+        x: tip.x,
         y: tip.pinnedValue,
         colorIndex:
           series?.hue === null || series === undefined
             ? null
             : colorIndexForHue(series.hue),
-        label: `${formatValue(tip.anchor)} · ${formatValue(tip.pinnedValue)}`,
+        label: `${formatValue(tip.x)} · ${formatValue(tip.pinnedValue)}`,
         focused: false,
         selected: false,
         hovered: false,
@@ -1507,50 +1523,6 @@ export class PanelView {
     } else {
       this.callbacks.onXRange(this.id, [min, max]);
     }
-  }
-
-  private beginTitleEdit(): void {
-    const header = required<HTMLElement>(this.element, ".panel-header");
-    const title = required<HTMLElement>(this.element, ".panel-title");
-    const previous = title.textContent;
-    header.draggable = false;
-    try {
-      title.contentEditable = "plaintext-only";
-    } catch {
-      title.contentEditable = "true";
-    }
-    const finish = (commit: boolean): void => {
-      title.removeEventListener("keydown", onKey);
-      title.removeEventListener("blur", onBlur);
-      title.contentEditable = "false";
-      header.draggable = true;
-      if (commit) {
-        this.callbacks.onRenameTitle(this.id, title.textContent.trim());
-      } else {
-        title.textContent = previous;
-      }
-    };
-    const onKey = (event: KeyboardEvent): void => {
-      event.stopPropagation();
-      if (event.key === "Enter") {
-        event.preventDefault();
-        finish(true);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        finish(false);
-      }
-    };
-    const onBlur = (): void => {
-      finish(true);
-    };
-    title.addEventListener("keydown", onKey);
-    title.addEventListener("blur", onBlur);
-    title.focus();
-    const range = document.createRange();
-    range.selectNodeContents(title);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
   }
 
   canEditAxis(axis: "x" | "y"): boolean {
@@ -2170,7 +2142,8 @@ export class PanelView {
     body.className = "plot-tip-rows";
     const byPath = new Map(state.series.map((series) => [series.path, series]));
     const annotations = [...state.annotations].sort(
-      (left, right) => right.anchor - left.anchor,
+      (left, right) =>
+        (right.pinned_x ?? right.anchor) - (left.pinned_x ?? left.anchor),
     );
     for (const annotation of annotations) {
       const series = byPath.get(annotation.series_path);
@@ -2209,13 +2182,14 @@ export class PanelView {
       });
       const x = document.createElement("span");
       x.className = "plot-tip-x";
-      x.textContent = formatValue(annotation.anchor);
+      const plottedX = annotation.pinned_x ?? annotation.anchor;
+      x.textContent = formatValue(plottedX);
       const value = document.createElement("span");
       value.className = "plot-tip-value";
       value.textContent = formatValue(annotation.pinned_value);
       const reading = document.createElement("span");
       reading.className = "plot-tip-reading";
-      reading.textContent = `${formatValue(annotation.anchor)} · ${formatValue(annotation.pinned_value)}`;
+      reading.textContent = `${formatValue(plottedX)} · ${formatValue(annotation.pinned_value)}`;
       const actions = document.createElement("span");
       actions.className = "plot-tip-actions";
       const locate = document.createElement("button");
@@ -2223,7 +2197,7 @@ export class PanelView {
       locate.textContent = "⌖";
       locate.title = "Pan to tip";
       locate.addEventListener("click", () =>
-        this.panToAnnotation(annotation.anchor),
+        this.panToAnnotation(annotation.pinned_x ?? annotation.anchor),
       );
       const remove = document.createElement("button");
       remove.type = "button";
@@ -2319,11 +2293,14 @@ export class PanelView {
     const lines = [
       "series,x,value,label",
       ...[...selected]
-        .sort((left, right) => right.anchor - left.anchor)
+        .sort(
+          (left, right) =>
+            (right.pinned_x ?? right.anchor) - (left.pinned_x ?? left.anchor),
+        )
         .map((annotation) =>
           [
             annotation.series_path,
-            String(annotation.anchor),
+            String(annotation.pinned_x ?? annotation.anchor),
             String(annotation.pinned_value),
             annotation.label,
           ]
@@ -2686,6 +2663,8 @@ export class PanelView {
   }
 
   private valueAtCursor(path: string): number | null {
+    const local = this.localCursor?.rows.find((row) => row.path === path);
+    if (local !== undefined) return local.value;
     const tile = this.lastTiles?.series.find(
       (series) => series.signalPath === path,
     );
@@ -2772,13 +2751,7 @@ export class PanelView {
 
   private updateLegendValue(value: HTMLElement): void {
     const path = value.dataset.path;
-    const tile = this.lastTiles?.series.find(
-      (series) => series.signalPath === path,
-    );
-    value.textContent =
-      tile === undefined || this.cursorT === null
-        ? "—"
-        : formatValue(columnsValueAtTime(tile.bins, this.cursorT));
+    value.textContent = formatValue(this.valueAtCursor(path ?? ""));
   }
 
   private updateLegendValues(): void {
@@ -3272,7 +3245,7 @@ export class PanelView {
     this.emphasizePaths = next;
     this.updateEmphasisChrome();
     if (this.lastState !== null && this.lastWindow !== null) {
-      this.renderForMode(this.lastState, this.lastTiles, this.lastWindow);
+      this.renderForMode(this.lastState, this.lastData, this.lastWindow);
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
   }
@@ -3488,6 +3461,39 @@ export class PanelView {
           this.callbacks.onLegendLayout(this.id, { state: legendState }),
       })),
     );
+  }
+
+  private xAxisLabel(state: RenderPanelState): string {
+    if (state.x_axis.kind === "time" || state.x_axis.ref === null)
+      return "time";
+    return (
+      this.callbacks.pathForRef(state.x_axis.ref) ??
+      `${state.x_axis.ref.source_key}/${state.x_axis.ref.channel}`
+    );
+  }
+
+  private openXAxisMenu(state: RenderPanelState, anchor: HTMLElement): void {
+    const current = state.x_axis;
+    this.openPanelMenu(anchor, "X AXIS", [
+      {
+        label: "time · linked",
+        active: current.kind === "time",
+        run: () =>
+          this.callbacks.onSetXAxis?.(this.id, { kind: "time", ref: null }),
+      },
+      ...state.series.map((series) => ({
+        label: series.path,
+        active:
+          current.kind === "signal" &&
+          current.ref !== null &&
+          sameSeriesRef(current.ref, series.ref),
+        run: () =>
+          this.callbacks.onSetXAxis?.(this.id, {
+            kind: "signal",
+            ref: { ...series.ref },
+          }),
+      })),
+    ]);
   }
 
   private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
@@ -3813,6 +3819,10 @@ function yLabel(units: readonly (string | null)[]): string {
     : "value";
 }
 
+function axisLabel(path: string, unit: string | null): string {
+  return unit === null ? path : `${path} (${unit})`;
+}
+
 function axisEditZone(
   layout: PlotLayout,
   axisStyle: AxisStyle,
@@ -4048,41 +4058,20 @@ function downloadText(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
-function panelMarkup(): string {
-  return `<header class="panel-header">
-      <span class="panel-toolbar-group panel-toolbar-binding">
-        <span class="drag-handle" aria-hidden="true">⠿</span>
-        <span class="panel-title"></span>
-        <span class="panel-bindings"></span>
-      </span>
-      <span class="panel-toolbar-separator" aria-hidden="true"></span>
-      <span class="panel-toolbar-group panel-toolbar-axes">
-        <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
-      </span>
-      <span class="panel-toolbar-separator" aria-hidden="true"></span>
-      <span class="panel-toolbar-group panel-toolbar-render">
-        <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
-        <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-selected series">dim <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
-      </span>
-      <span class="panel-toolbar-separator" aria-hidden="true"></span>
-      <span class="panel-toolbar-group panel-toolbar-readout">
-        <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
-        <button class="panel-toolbar-control panel-tips" type="button" title="Tip density and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
-        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend type">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
-      </span>
-      <span class="panel-actions">
-        <span class="panel-split-actions" aria-label="Split panel" role="group">
-          <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right — new panel">→</button>
-          <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down — new panel">↓</button>
-        </span>
-        <button class="panel-action panel-maximize" title="Maximize panel">${MAXIMIZE_GLYPH}</button>
-        <button class="panel-action panel-close" title="Close panel">✕</button>
-      </span>
-    </header>
-    <div class="plot-wrap">
-      <div class="chart-host" hidden></div>
-      <canvas class="overlay-canvas" aria-hidden="true"></canvas>
-      <div class="plot-series-legend" aria-label="Plot legend"></div>
-      <div class="panel-empty" hidden></div>
-    </div>`;
+function lineToolbarMarkup(): string {
+  return `<span class="panel-toolbar-group panel-toolbar-axes">
+      <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
+      <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
+    </span>
+    <span class="panel-toolbar-separator" aria-hidden="true"></span>
+    <span class="panel-toolbar-group panel-toolbar-render">
+      <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
+      <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-selected series">dim <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
+    </span>
+    <span class="panel-toolbar-separator" aria-hidden="true"></span>
+    <span class="panel-toolbar-group panel-toolbar-readout">
+      <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
+      <button class="panel-toolbar-control panel-tips" type="button" title="Tip density and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
+      <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend type">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
+    </span>`;
 }
