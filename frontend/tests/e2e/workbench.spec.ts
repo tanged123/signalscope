@@ -1132,30 +1132,29 @@ test("legend console replaces the strip and supports workspace-wide states", asy
   const rail = panel.locator(".plot-series-legend");
   const railResize = rail.locator(".plot-legend-resize-left");
   await expect(railResize).toBeVisible();
-  const [railBox, railResizeBox] = await Promise.all([
-    rail.boundingBox(),
-    railResize.boundingBox(),
-  ]);
-  if (railBox === null || railResizeBox === null)
-    throw new Error("Legend rail seam is not laid out");
-  await page.mouse.move(
-    railResizeBox.x + railResizeBox.width / 2,
-    railResizeBox.y + railResizeBox.height / 2,
-  );
+  const railBox = await rail.boundingBox();
+  if (railBox === null) throw new Error("Legend rail seam is not laid out");
+  await page.mouse.move(railBox.x + 2, railBox.y + railBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(railBox.x + railBox.width - 2, railResizeBox.y);
+  await page.mouse.move(
+    railBox.x + railBox.width - 2,
+    railBox.y + railBox.height / 2,
+  );
   await page.mouse.up();
   await expect(wrap).toHaveClass(/legend-rail-collapsed/);
   await expect(rail).toHaveAttribute("data-collapsed", "true");
-  const collapsedResizeBox = await railResize.boundingBox();
-  if (collapsedResizeBox === null)
+  const collapsedRailBox = await rail.boundingBox();
+  if (collapsedRailBox === null)
     throw new Error("Collapsed legend rail seam is not laid out");
   await page.mouse.move(
-    collapsedResizeBox.x + collapsedResizeBox.width / 2,
-    collapsedResizeBox.y + collapsedResizeBox.height / 2,
+    collapsedRailBox.x + 2,
+    collapsedRailBox.y + collapsedRailBox.height / 2,
   );
   await page.mouse.down();
-  await page.mouse.move(collapsedResizeBox.x - 180, collapsedResizeBox.y);
+  await page.mouse.move(
+    collapsedRailBox.x - 180,
+    collapsedRailBox.y + collapsedRailBox.height / 2,
+  );
   await page.mouse.up();
   await expect(wrap).not.toHaveClass(/legend-rail-collapsed/);
   await panel.locator(".plot-legend-undock").click();
