@@ -159,16 +159,30 @@ export class AppMenu {
       this.close(true);
       return;
     } else if (event.key === "Tab") {
-      // Tab leaves the menu, so the popover must not linger over whatever the
-      // focus moved to. Focus returns to the trigger first so the browser
-      // resumes sequential navigation from the menu button rather than from a
-      // hidden item, which would drop focus to the document.
-      this.close(true);
+      event.preventDefault();
+      this.close(false);
+      this.focusAdjacentToButton(event.shiftKey);
       return;
     }
     if (next !== null) {
       event.preventDefault();
       items[next]?.focus();
     }
+  }
+
+  private focusAdjacentToButton(reverse: boolean): void {
+    const focusable = [
+      ...document.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter(
+      (element) =>
+        element.tabIndex >= 0 &&
+        element.closest("[hidden]") === null &&
+        !this.popover.contains(element),
+    );
+    const current = focusable.indexOf(this.button);
+    const next = focusable[current + (reverse ? -1 : 1)] ?? this.button;
+    next.focus();
   }
 }
