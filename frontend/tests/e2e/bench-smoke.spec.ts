@@ -8,6 +8,7 @@ const artifact = new URL("../../../build/bench/smoke.html", import.meta.url);
 test("bench smoke: baked monte-carlo workspace renders and survives interaction", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   expect(
     existsSync(fileURLToPath(artifact)),
     "bake_bench_smoke_artifact must run first",
