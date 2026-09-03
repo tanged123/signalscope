@@ -10,6 +10,73 @@ describe("parseBakedSession", () => {
     expect(parseBakedSession(json).schema_version).toBe(SESSION_SCHEMA_VERSION);
   });
 
+  it("round-trips current panel style and statistic fields", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.color_by = null;
+    panel.dash_by = "channel";
+    panel.width_by = "attr";
+    panel.line_width = 2.5;
+    panel.ghost_opacity = 0.25;
+    panel.stat_columns = ["min", "cursor", "n"];
+    panel.stats_sort = "n";
+    panel.stats_sort_descending = true;
+
+    const restored = parseBakedSession(JSON.stringify(model.snapshot()));
+
+    expect(restored.tabs[0]?.panels[0]).toMatchObject({
+      color_by: null,
+      dash_by: "channel",
+      width_by: "attr",
+      line_width: 2.5,
+      ghost_opacity: 0.25,
+      stat_columns: ["min", "cursor", "n"],
+      stats_sort: "n",
+      stats_sort_descending: true,
+    });
+  });
+
+  it.each([0, 1])("accepts ghost opacity at boundary %s", (opacity) => {
+    const model = new WorkspaceModel();
+    model.addPanelRow().ghost_opacity = opacity;
+
+    expect(() =>
+      parseBakedSession(JSON.stringify(model.snapshot())),
+    ).not.toThrow();
+  });
+
+  it.each([-0.1, 1.1])(
+    "rejects ghost opacity outside [0, 1]: %s",
+    (opacity) => {
+      const model = new WorkspaceModel();
+      model.addPanelRow().ghost_opacity = opacity;
+
+      expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+        /structure/,
+      );
+    },
+  );
+
+  it("rejects duplicate statistic columns", () => {
+    const model = new WorkspaceModel();
+    model.addPanelRow().stat_columns = ["min", "min"];
+
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+      /structure/,
+    );
+  });
+
+  it("rejects a statistic sort column not in the selected columns", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.stat_columns = ["min"];
+    panel.stats_sort = "max";
+
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+      /structure/,
+    );
+  });
+
   it("rejects a foreign app", () => {
     const json = JSON.stringify({ ...emptySession(), app: "other" });
     expect(() => parseBakedSession(json)).toThrow(/app/);
@@ -37,6 +104,16 @@ describe("parseBakedSession", () => {
     expect(() => parseBakedSession(JSON.stringify(invalidPanel))).toThrow(
       /structure/,
     );
+
+    const incompletePanel = new WorkspaceModel();
+    const panel = incompletePanel.addPanelRow() as unknown as Record<
+      string,
+      unknown
+    >;
+    delete panel.stat_columns;
+    expect(() =>
+      parseBakedSession(JSON.stringify(incompletePanel.snapshot())),
+    ).toThrow(/structure/);
   });
 
   it.each([

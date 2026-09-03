@@ -2,7 +2,6 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { SignalSummary } from "../generated/protocol";
-import type { FocusEntry, PanelState } from "../generated/session";
 import { Catalog } from "../app/catalog";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
@@ -12,12 +11,12 @@ import {
   MAX_SERIES_PER_PANEL,
   MAXIMIZE_GLYPH,
   PanelView,
+  aggregateLegendStats,
   bindingChipEntries,
-  focusChips,
-  matrixLegendRows,
   parseSetPayload,
   parseSignalPayload,
   parseSignalRefsPayload,
+  seriesLegendRows,
   type RenderPanelState,
   type RenderSeries,
 } from "./panel";
@@ -137,6 +136,7 @@ function visible(path: string): RenderSeries {
     visible: true,
     focused: true,
     overridden: false,
+    overrideFields: { color: false, dash: false, width: false },
   };
 }
 
@@ -146,11 +146,16 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     title: "Time",
     axis_style: "gutter",
     color_by: "source",
+    dash_by: null,
+    width_by: null,
+    line_width: 1.4,
+    ghost_opacity: 0.5,
     ghost_mode: "all",
     legend_state: "keys",
     legend_position: null,
     legend_size: null,
     legend_anchor: null,
+    legend_dock: null,
     legend_hint_dismissed: false,
     bindings: [],
     overrides: [],
@@ -162,11 +167,41 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     y_label: null,
     time_window: null,
     annotations: [],
+    annotation_display: "labels",
     show_stats: false,
+    stat_columns: ["min", "max", "mean", "rms", "cursor"],
+    stats_sort: null,
+    stats_sort_descending: false,
   };
 }
 
 describe("panel series", () => {
+  it("weights aggregate mean and RMS by each series sample count", () => {
+    const aggregate = aggregateLegendStats([
+      { min: 0, max: 4, mean: 2, rms: 2, n: 1, cursor: null },
+      { min: 0, max: 8, mean: 6, rms: 6, n: 3, cursor: null },
+    ]);
+
+    expect(aggregate.mean).toBe(5);
+    expect(aggregate.rms).toBeCloseTo(Math.sqrt(28), 12);
+    expect(aggregate.n).toBe(4);
+  });
+
+  it("does not aggregate value statistics across mixed units", () => {
+    const aggregate = aggregateLegendStats(
+      [
+        { min: 0, max: 4, mean: 2, rms: 2, n: 1, cursor: 2 },
+        { min: 0, max: 8, mean: 6, rms: 6, n: 3, cursor: 6 },
+      ],
+      true,
+    );
+
+    expect(aggregate.mean).toBeNull();
+    expect(aggregate.rms).toBeNull();
+    expect(aggregate.cursor).toBeNull();
+    expect(aggregate.n).toBe(4);
+  });
+
   it("uses a fallback-safe maximize glyph", () => {
     expect(MAXIMIZE_GLYPH).toBe("↗");
   });
@@ -176,11 +211,13 @@ describe("panel series", () => {
   });
 
   describe("plot gestures", () => {
-    it("uses shift-click for focus and alt-click for mute", () => {
+    it("adds line focus on click, toggles with shift, and mutes with alt", () => {
       const onFocusToggle = vi.fn();
+      const onFocusAdd = vi.fn();
       const onMuteSeries = vi.fn();
       const callbacks = {
         onFocusToggle,
+        onFocusAdd,
         onMuteSeries,
       } as unknown as PanelCallbacks;
       const view = Object.create(PanelView.prototype) as unknown as {
@@ -209,6 +246,7 @@ describe("panel series", () => {
 
       view.plotClick(50, 50, { alt: false, shift: false });
       expect(onFocusToggle).not.toHaveBeenCalled();
+      expect(onFocusAdd).toHaveBeenCalledTimes(1);
       expect(onMuteSeries).not.toHaveBeenCalled();
 
       view.plotClick(50, 50, { alt: false, shift: true });
@@ -219,12 +257,14 @@ describe("panel series", () => {
     });
   });
 
-  it("keeps annotation pinning on plain click while shift-click bypasses it", () => {
+  it("routes plain-click pinning atomically while shift-click only adds focus", () => {
     const onPinAnnotation = vi.fn();
     const onFocusToggle = vi.fn();
+    const onFocusAdd = vi.fn();
     const callbacks = {
       onPinAnnotation,
       onFocusToggle,
+      onFocusAdd,
     } as unknown as PanelCallbacks;
     const series = visible("run_01/temp");
     const view = Object.create(PanelView.prototype) as unknown as {
@@ -256,6 +296,7 @@ describe("panel series", () => {
     view.plotClick(50, 50, { alt: false, shift: false });
     expect(onPinAnnotation).toHaveBeenCalledTimes(1);
     expect(onFocusToggle).not.toHaveBeenCalled();
+    expect(onFocusAdd).not.toHaveBeenCalled();
 
     view.plotClick(50, 50, { alt: false, shift: true });
     expect(onPinAnnotation).toHaveBeenCalledTimes(1);
@@ -291,7 +332,7 @@ describe("panel series", () => {
     expect(parseSetPayload("not json")).toBeNull();
   });
 
-  it("builds bounded matrix roster rows with selector filtering", () => {
+  it("builds one roster row per signal with selector filtering", () => {
     const catalog = Catalog.build(
       ["run_01", "run_02", "run_03"].flatMap((source) =>
         ["temp", "speed"].map((channel) => ({
@@ -322,72 +363,28 @@ describe("panel series", () => {
         channel: null,
       },
     ];
-    expect(matrixLegendRows(catalog, state, "source")).toEqual([
-      expect.objectContaining({
-        value: "run_01",
-        count: 2,
-        selector: "* @ run_01",
-      }),
-      expect.objectContaining({
-        value: "run_02",
-        count: 1,
-        focused: true,
-      }),
-      expect.objectContaining({ value: "run_03", count: 1 }),
+    const rows = seriesLegendRows(catalog, state);
+    expect(rows.map((row) => row.series.path)).toEqual([
+      "run_01/temp",
+      "run_01/speed",
+      "run_02/temp",
+      "run_03/temp",
     ]);
+    expect(rows.map((row) => row.focused)).toEqual([false, false, true, false]);
     expect(
-      matrixLegendRows(catalog, state, "channel", "temp @ *").map(
-        (row) => row.value,
+      seriesLegendRows(catalog, state, "temp @ *").map(
+        (row) => row.series.path,
       ),
-    ).toEqual(["temp"]);
+    ).toEqual(["run_01/temp", "run_02/temp", "run_03/temp"]);
     expect(
-      matrixLegendRows(catalog, state, "source", "run_02").map(
-        (row) => row.value,
-      ),
-    ).toEqual(["run_02"]);
+      seriesLegendRows(catalog, state, "run_02").map((row) => row.series.path),
+    ).toEqual(["run_02/temp"]);
     expect(
-      matrixLegendRows(catalog, state, "source", "run_0*").map(
-        (row) => row.value,
-      ),
-    ).toEqual(["run_01", "run_02", "run_03"]);
+      seriesLegendRows(catalog, state, "run_0*").map((row) => row.series.path),
+    ).toEqual(["run_01/temp", "run_01/speed", "run_02/temp", "run_03/temp"]);
     expect(
-      matrixLegendRows(catalog, state, "channel", "/ spe").map(
-        (row) => row.value,
-      ),
-    ).toEqual(["speed"]);
-  });
-
-  it("keeps only the first eight focus chips and reports overflow", () => {
-    const catalog = Catalog.build(
-      Array.from({ length: 10 }, (_, index) => ({
-        signal_id: `run_0${String(index + 1)}-temp`,
-        source_id: `k${String(index + 1)}`,
-        source_key: `k${String(index + 1)}`,
-        local_path: "temp",
-        path: `run_0${String(index + 1)}/temp`,
-        unit: null,
-        point_count: "2",
-        t_min: 0,
-        t_max: 1,
-        last_value: null,
-      })),
-    );
-    const state = timeState(
-      Array.from({ length: 10 }, (_, index) =>
-        visible(`run_0${String(index + 1)}/temp`),
-      ),
-    );
-    state.focus = state.series.map(
-      (series): FocusEntry => ({
-        kind: "series",
-        ref: series.ref,
-        source_key: null,
-        channel: null,
-      }),
-    );
-    const result = focusChips(catalog, state);
-    expect(result.chips).toHaveLength(8);
-    expect(result.overflow).toBe(2);
+      seriesLegendRows(catalog, state, "/ spe").map((row) => row.series.path),
+    ).toEqual(["run_01/speed"]);
   });
 
   it("uses the in-plot keys as the only legend surface", () => {
@@ -414,7 +411,8 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
+        | "onFocusRange"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -428,7 +426,8 @@ describe("panel series", () => {
     view.callbacks = {
       catalog: () => catalog,
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
+      onFocusRange: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout,
@@ -443,13 +442,13 @@ describe("panel series", () => {
     view.updateLegend(state);
     expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
     expect(
-      view.element.querySelector(".plot-legend-row")?.textContent,
+      view.element.querySelector(".plot-legend-roster-row")?.textContent,
     ).toContain("run_07");
     expect(view.element.querySelector(".plot-legend-footer")?.textContent).toBe(
-      "1 ghosts ▾",
+      "1 dimmed ▾0 overrides ▾",
     );
     view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-footer")
+      .querySelector<HTMLButtonElement>(".plot-legend-footer button")
       ?.click();
     expect(onLegendLayout).toHaveBeenCalledWith("panel", { state: "roster" });
   });
@@ -473,7 +472,7 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -482,14 +481,13 @@ describe("panel series", () => {
       plotLegendPosition: { x: number; y: number } | null;
       plotLegendSize: { width: number; height: number } | null;
       plotLegendAnchor: null;
-      plotLegendNearRightEdge(legend: HTMLElement): boolean;
-      plotLegendTouchesRightEdge(legend: HTMLElement): boolean;
+      nearestPlotLegendEdge(legend: HTMLElement, threshold?: number): string;
       updatePlotLegend(current: RenderPanelState): void;
     };
     view.callbacks = {
       catalog: () => catalog,
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout,
@@ -520,18 +518,16 @@ describe("panel series", () => {
     } as DOMRect);
 
     view.updatePlotLegend(state);
-    expect(legend.querySelectorAll(".plot-legend-row")).toHaveLength(8);
-    expect(
-      legend.querySelector(".plot-legend-focus-rows")?.children,
-    ).toHaveLength(8);
-    expect(view.plotLegendNearRightEdge(legend)).toBe(true);
-    expect(view.plotLegendTouchesRightEdge(legend)).toBe(true);
+    expect(legend.querySelectorAll(".plot-legend-roster-row")).toHaveLength(8);
+    expect(legend.querySelector(".plot-legend-focus-rows")).toBeNull();
+    expect(view.nearestPlotLegendEdge(legend, 56)).toBe("right");
+    expect(view.nearestPlotLegendEdge(legend, 20)).toBe("right");
     legend
       .querySelector<HTMLButtonElement>(".plot-legend-resize-bottom")
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
     expect(onLegendLayout).toHaveBeenCalledWith(
       "panel",
-      expect.objectContaining({ state: "rail", size: [160, 196] }),
+      expect.objectContaining({ state: "roster", size: [160, 196] }),
     );
     legend
       .querySelector<HTMLButtonElement>(".plot-legend-drag")
@@ -555,6 +551,7 @@ describe("panel series", () => {
     const state = timeState(paths.map(visible));
     state.legend_state = "rail";
     state.legend_size = [180, 240];
+    state.legend_dock = "right";
     const onLegendLayout = vi.fn();
     const view = Object.create(PanelView.prototype) as unknown as {
       id: string;
@@ -562,7 +559,7 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -577,7 +574,7 @@ describe("panel series", () => {
     view.callbacks = {
       catalog: () => Catalog.build(paths.map(summary)),
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout,
@@ -625,6 +622,7 @@ describe("panel series", () => {
       position: null,
       size: [180, 180],
       anchor: "top_right",
+      dock: null,
     });
 
     state.legend_size = [0, 300];
@@ -641,6 +639,7 @@ describe("panel series", () => {
       position: null,
       size: [225, 300],
       anchor: null,
+      dock: "right",
     });
 
     onLegendLayout.mockClear();
@@ -675,7 +674,7 @@ describe("panel series", () => {
         PanelCallbacks,
         | "catalog"
         | "onFocusToggle"
-        | "onFocusSolo"
+        | "onFocusAdd"
         | "onMuteSeries"
         | "onMuteSelector"
         | "onLegendLayout"
@@ -691,7 +690,7 @@ describe("panel series", () => {
     view.callbacks = {
       catalog: () => Catalog.build(paths.map(summary)),
       onFocusToggle: vi.fn(),
-      onFocusSolo: vi.fn(),
+      onFocusAdd: vi.fn(),
       onMuteSeries: vi.fn(),
       onMuteSelector: vi.fn(),
       onLegendLayout: vi.fn(),
@@ -730,99 +729,6 @@ describe("panel series", () => {
       1,
     );
     expect(viewport.textContent).toContain("run_100");
-  });
-
-  it("lays out style rules with a palette, static line rules, and override actions", () => {
-    const catalog = Catalog.build([summary("run_07/temp")]);
-    const state = timeState([visible("run_07/temp")]);
-    state.overrides = [
-      {
-        target_ref: { source_key: "k7", channel: "temp" },
-        target_selector: null,
-        color_slot: 2,
-        dash: null,
-        width: 2.5,
-        opacity: null,
-        visible: null,
-      },
-    ];
-    const onSetColorBy = vi.fn();
-    const onRemoveOverride = vi.fn();
-    const onClearOverrides = vi.fn();
-    const view = Object.create(PanelView.prototype) as unknown as {
-      id: string;
-      callbacks: Pick<
-        PanelCallbacks,
-        | "catalog"
-        | "namedSets"
-        | "pathForRef"
-        | "onSetColorBy"
-        | "onRemoveOverride"
-        | "onClearOverrides"
-      >;
-      element: HTMLElement;
-      lastInputState: PanelState;
-      openRulesPopover(current: RenderPanelState, anchor: HTMLElement): void;
-    };
-    view.id = "panel-1";
-    view.callbacks = {
-      catalog: () => catalog,
-      namedSets: () => [],
-      pathForRef: (ref) => `${ref.source_key}/${ref.channel}`,
-      onSetColorBy,
-      onRemoveOverride,
-      onClearOverrides,
-    };
-    view.element = document.createElement("article");
-    const anchor = document.createElement("button");
-    view.element.append(anchor);
-    view.lastInputState = {
-      ...state,
-    } as unknown as PanelState;
-    view.openRulesPopover(state, anchor);
-
-    expect(
-      view.element.querySelector(".rules-popover-title")?.textContent,
-    ).toBe("STYLE RULES — PANEL 1");
-    expect(view.element.querySelectorAll(".rules-rule-row")).toHaveLength(3);
-    expect(view.element.querySelectorAll(".rules-palette-swatch")).toHaveLength(
-      8,
-    );
-    expect(view.element.querySelector(".rules-rule-static")?.textContent).toBe(
-      "dash ← — flat",
-    );
-    expect(view.element.querySelector(".rules-override-key")?.textContent).toBe(
-      "color",
-    );
-    expect(
-      view.element.querySelector(".rules-override-target")?.textContent,
-    ).toBe("k7/temp");
-    expect(
-      view.element.querySelector(".rules-override-fields")?.textContent,
-    ).toBe("width 2.5 · highlight");
-    view.element
-      .querySelector<HTMLButtonElement>(".rules-override-row button")
-      ?.click();
-    expect(onRemoveOverride).toHaveBeenCalledWith("panel-1", 0);
-    view.openRulesPopover(state, anchor);
-    view.element.querySelector<HTMLButtonElement>(".rules-revert-all")?.click();
-    expect(onClearOverrides).toHaveBeenCalledWith("panel-1");
-    view.openRulesPopover(state, anchor);
-    view.element
-      .querySelector<HTMLButtonElement>(".rules-color-dimension")
-      ?.click();
-    expect(view.element.querySelectorAll(".rules-dimension")).toHaveLength(5);
-    view.element
-      .querySelector<HTMLButtonElement>(
-        '.rules-dimension[data-dimension="channel"]',
-      )
-      ?.click();
-    expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
-    view.openRulesPopover(state, anchor);
-    view.element
-      .querySelector<HTMLButtonElement>(".rules-channel-shortcut")
-      ?.click();
-    expect(onSetColorBy).toHaveBeenCalledWith("panel-1", "channel");
   });
 
   it("groups pick bindings and counts live query and set members", () => {

@@ -21,6 +21,7 @@ function annotation(
     anchor,
     pinned_value: pinnedValue,
     label: "",
+    offset: [10, -10],
   };
 }
 

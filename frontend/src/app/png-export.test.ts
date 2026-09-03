@@ -10,6 +10,10 @@ function panel(id: string, title: string): PanelState {
     axis_style: "gutter",
     bindings: [],
     color_by: "source",
+    dash_by: null,
+    width_by: null,
+    line_width: 1.4,
+    ghost_opacity: 0.5,
     overrides: [],
     focus: [],
     ghost_mode: "all",
@@ -17,6 +21,7 @@ function panel(id: string, title: string): PanelState {
     legend_position: null,
     legend_size: null,
     legend_anchor: null,
+    legend_dock: null,
     legend_hint_dismissed: false,
     y_range: null,
     x_range: null,
@@ -24,7 +29,11 @@ function panel(id: string, title: string): PanelState {
     y_label: null,
     time_window: null,
     annotations: [],
+    annotation_display: "labels",
     show_stats: false,
+    stat_columns: ["min", "max", "mean", "rms", "cursor"],
+    stats_sort: null,
+    stats_sort_descending: false,
   };
 }
 

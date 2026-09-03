@@ -1,0 +1,1 @@
+export const DEFAULT_PANEL_LINE_WIDTH = 2;

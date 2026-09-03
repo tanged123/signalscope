@@ -135,6 +135,9 @@ test("application menu mirrors commands and marks planned work", async ({
 
 test("tabbing out of the application menu dismisses it", async ({ page }) => {
   await gotoApp(page);
+  await expect(page.locator(".chart-host canvas").first()).toBeVisible({
+    timeout: 20_000,
+  });
   await page.locator(".menu-button").click();
   const menu = page.locator(".app-menu");
   await expect(menu).toBeVisible();
@@ -144,10 +147,10 @@ test("tabbing out of the application menu dismisses it", async ({ page }) => {
     "aria-expanded",
     "false",
   );
-  // Focus returns to the trigger before Tab's default action runs, so the
-  // browser resumes from the menu button instead of dropping focus to the body.
+  // The menu advances focus explicitly because browsers disagree about where
+  // Tab lands when its focused item becomes hidden during keydown.
   await expect(page.locator(".menu-button")).not.toBeFocused();
-  await expect(page.locator("body")).not.toBeFocused();
+  await expect(page.locator(".workspace-tab-select")).toBeFocused();
 });
 
 test("export dialog is modal and restores focus after a document Escape", async ({

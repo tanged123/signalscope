@@ -36,6 +36,10 @@ function panel(): PanelState {
     axis_style: "gutter",
     bindings: [],
     color_by: "source",
+    dash_by: null,
+    width_by: null,
+    line_width: 1.4,
+    ghost_opacity: 0.5,
     overrides: [],
     focus: [],
     ghost_mode: "all",
@@ -43,6 +47,7 @@ function panel(): PanelState {
     legend_position: null,
     legend_size: null,
     legend_anchor: null,
+    legend_dock: null,
     legend_hint_dismissed: false,
     y_range: null,
     x_range: null,
@@ -50,7 +55,11 @@ function panel(): PanelState {
     y_label: null,
     time_window: null,
     annotations: [],
+    annotation_display: "labels",
     show_stats: false,
+    stat_columns: ["min", "max", "mean", "rms", "cursor"],
+    stats_sort: null,
+    stats_sort_descending: false,
   };
 }
 
@@ -171,6 +180,8 @@ describe("resolvePanel", () => {
       expect.objectContaining({
         path: "a/temp",
         hue: 1,
+        display: "rule",
+        opacity: 1,
         focused: false,
         overridden: false,
       }),
@@ -221,7 +232,7 @@ describe("resolvePanel", () => {
     ).toEqual([1, 2, 1, 2, 1, 2]);
   });
 
-  it("assigns focus hues in focus-stack order", () => {
+  it("assigns focus hues in focus-set order", () => {
     const state = panel();
     state.color_by = "focus";
     state.bindings = [
@@ -252,6 +263,50 @@ describe("resolvePanel", () => {
     expect(resolvePanel(catalog, state, []).map((entry) => entry.hue)).toEqual([
       1, 2,
     ]);
+  });
+
+  it("cascades panel defaults, dimension rules, and field overrides", () => {
+    const state = panel();
+    state.line_width = 2;
+    state.color_by = null;
+    state.dash_by = "channel";
+    state.width_by = "source";
+    state.bindings = [
+      {
+        kind: "pick",
+        selector: null,
+        refs: [
+          { source_key: "a", channel: "temp" },
+          { source_key: "b", channel: "temp" },
+          { source_key: "a", channel: "speed" },
+        ],
+        set_id: null,
+      },
+    ];
+    state.overrides = [
+      {
+        target_ref: { source_key: "b", channel: "temp" },
+        target_selector: null,
+        color_slot: 4,
+        dash: null,
+        width: 5,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    const result = resolvePanel(catalog, state, []);
+    expect(
+      result.map(({ dash, width, hue }) => ({ dash, width, hue })),
+    ).toEqual([
+      { dash: "solid", width: 2, hue: 1 },
+      { dash: "solid", width: 5, hue: 4 },
+      { dash: "dash", width: 2, hue: 1 },
+    ]);
+    expect(result[1]?.overrideFields).toEqual({
+      color: true,
+      dash: false,
+      width: true,
+    });
   });
 
   it.each([
@@ -404,7 +459,7 @@ describe("resolvePanel", () => {
       expect.objectContaining({
         hue: null,
         dash: "solid",
-        width: 1,
+        width: 3,
         opacity: 0.5,
         visible: false,
         overridden: true,

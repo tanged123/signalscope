@@ -15,7 +15,10 @@ test("time panels use ChartGPU with WebGPU enabled", async ({ page }) => {
 
   const bounds = await chart.boundingBox();
   expect(bounds).not.toBeNull();
-  await page.mouse.move((bounds?.x ?? 0) + 220, (bounds?.y ?? 0) + 120);
+  await page.mouse.move(
+    (bounds?.x ?? 0) + (bounds?.width ?? 0) * 0.65,
+    (bounds?.y ?? 0) + (bounds?.height ?? 0) * 0.65,
+  );
   await page.mouse.wheel(0, 500);
   await expect
     .poll(
@@ -30,4 +33,41 @@ test("time panels use ChartGPU with WebGPU enabled", async ({ page }) => {
     )
     .toBe(false);
   await expect(page.locator(".render-ms").first()).not.toHaveText("— ms");
+});
+
+test("line style changes submit valid WebGPU command buffers", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  await gotoApp(page);
+
+  const panel = page.locator(".panel").first();
+  await panel.locator(".panel-stats-toggle").click();
+  await panel
+    .locator(".plot-stat-row .plot-row-inspector-toggle")
+    .first()
+    .click();
+  const inspector = panel.locator(".plot-row-inspector");
+  for (const dash of ["dash", "dot", "solid"]) {
+    await inspector.locator(".plot-row-dashes").getByText(dash).click();
+  }
+
+  const width = inspector.getByLabel("Line width");
+  await width.fill("0.5");
+  await width.dispatchEvent("change");
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  expect(
+    consoleErrors.filter((message) =>
+      /WGSL|WebGPU|ShaderModule|RenderPipeline|CommandBuffer/i.test(message),
+    ),
+  ).toEqual([]);
+  await expect(page.locator(".render-ms")).not.toHaveText(/^error:/);
 });

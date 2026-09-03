@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 24;
+pub const SESSION_SCHEMA_VERSION: u32 = 27;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -42,6 +42,17 @@ pub enum DashStyle {
     Solid,
     Dash,
     Dot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StatColumn {
+    Min,
+    Max,
+    Mean,
+    Rms,
+    Cursor,
+    N,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -158,9 +169,27 @@ pub enum LegendAnchor {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum LegendDock {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NamedSetKind {
     Query,
     Pick,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnnotationDisplay {
+    #[default]
+    Labels,
+    Markers,
+    Hidden,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -180,6 +209,7 @@ pub struct Annotation {
     pub anchor: f64,
     pub pinned_value: f64,
     pub label: String,
+    pub offset: [f64; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -188,7 +218,14 @@ pub struct PanelState {
     pub title: String,
     pub axis_style: AxisStyle,
     pub bindings: Vec<Binding>,
-    pub color_by: StyleDimension,
+    #[serde(default)]
+    pub color_by: Option<StyleDimension>,
+    #[serde(default)]
+    pub dash_by: Option<StyleDimension>,
+    #[serde(default)]
+    pub width_by: Option<StyleDimension>,
+    pub line_width: f32,
+    pub ghost_opacity: f32,
     pub overrides: Vec<SeriesOverride>,
     pub focus: Vec<FocusEntry>,
     pub ghost_mode: GhostMode,
@@ -199,6 +236,8 @@ pub struct PanelState {
     pub legend_size: Option<[f64; 2]>,
     #[serde(default)]
     pub legend_anchor: Option<LegendAnchor>,
+    #[serde(default)]
+    pub legend_dock: Option<LegendDock>,
     pub legend_hint_dismissed: bool,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
@@ -211,7 +250,12 @@ pub struct PanelState {
     #[serde(default)]
     pub time_window: Option<[f64; 2]>,
     pub annotations: Vec<Annotation>,
+    pub annotation_display: AnnotationDisplay,
     pub show_stats: bool,
+    pub stat_columns: Vec<StatColumn>,
+    #[serde(default)]
+    pub stats_sort: Option<StatColumn>,
+    pub stats_sort_descending: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

@@ -684,7 +684,11 @@ mod tests {
                     .collect(),
                 set_id: None,
             }],
-            color_by: crate::session::StyleDimension::Source,
+            color_by: Some(crate::session::StyleDimension::Source),
+            dash_by: None,
+            width_by: None,
+            line_width: 1.4,
+            ghost_opacity: 0.5,
             overrides: Vec::new(),
             focus: Vec::new(),
             ghost_mode: crate::session::GhostMode::All,
@@ -692,6 +696,7 @@ mod tests {
             legend_position: None,
             legend_size: None,
             legend_anchor: None,
+            legend_dock: None,
             legend_hint_dismissed: false,
             y_range: None,
             x_range: None,
@@ -699,7 +704,17 @@ mod tests {
             y_label: None,
             time_window: None,
             annotations: Vec::new(),
+            annotation_display: crate::session::AnnotationDisplay::Labels,
             show_stats: false,
+            stat_columns: vec![
+                crate::session::StatColumn::Min,
+                crate::session::StatColumn::Max,
+                crate::session::StatColumn::Mean,
+                crate::session::StatColumn::Rms,
+                crate::session::StatColumn::Cursor,
+            ],
+            stats_sort: None,
+            stats_sort_descending: false,
         }
     }
 

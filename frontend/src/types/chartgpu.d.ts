@@ -29,7 +29,12 @@ declare module "@chartgpu/chartgpu" {
     name?: string;
     data: XYArraysData | ArrayBufferView;
     sampling?: "none" | "lttb" | "average" | "max" | "min";
-    lineStyle?: { width?: number; opacity?: number; color?: string };
+    lineStyle?: {
+      width?: number;
+      opacity?: number;
+      color?: string;
+      dash?: "solid" | "dash" | "dot";
+    };
     color?: string;
     visible?: boolean;
   }
@@ -37,6 +42,7 @@ declare module "@chartgpu/chartgpu" {
   export interface AxisOptions {
     type: "value";
     name?: string;
+    inside?: boolean;
     min?: number;
     max?: number;
     tickFormatter?: (value: number) => string | null;

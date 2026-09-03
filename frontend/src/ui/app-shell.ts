@@ -46,7 +46,6 @@ import {
   PLOT_LINE_WIDTH_SCALE,
   UI_FONT_SIZE,
 } from "../app/preferences";
-import { quickTransform } from "../app/quick-transform";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { TileWindowCache } from "../app/tile-window-cache";
 import { Catalog } from "../app/catalog";
@@ -87,7 +86,6 @@ import {
   type ExportFormat,
   type PngScope,
 } from "./export-dialog";
-import { type QuickTransform } from "./panel";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalOutlineView } from "./signal-outline";
 import { SetsListView } from "./sets-list";
@@ -393,8 +391,14 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onFocusSolo: (id, entry) => {
-          this.workspace.setFocus(id, entry);
+        onFocusAdd: (id, entry) => {
+          this.workspace.addFocus(id, entry);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onFocusRange: (id, entries) => {
+          this.workspace.setFocusRange(id, entries);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -441,20 +445,42 @@ export class AppShell {
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
-        onSetColorBy: (id, dimension) => {
-          this.workspace.setColorBy(id, dimension);
+        onSetEncoding: (id, property, dimension) => {
+          this.workspace.setEncoding(id, property, dimension);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onRemoveOverride: (id, index) => {
-          this.workspace.removeOverride(id, index);
+        onSetPanelLineWidth: (id, width) => {
+          this.workspace.setPanelLineWidth(id, width);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetGhostOpacity: (id, opacity) => {
+          this.workspace.setGhostOpacity(id, opacity);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+        onSetStatColumns: (id, columns) => {
+          this.workspace.setStatColumns(id, columns);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onSetStatsSort: (id, column, descending) => {
+          this.workspace.setStatsSort(id, column, descending);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onRevertStyleOverride: (id, index) => {
+          this.workspace.clearStyleOverride(id, index);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
         onClearOverrides: (id) => {
-          this.workspace.clearOverrides(id);
+          this.workspace.clearStyleOverrides(id);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -511,12 +537,38 @@ export class AppShell {
             anchor: hit.anchor,
             pinned_value: hit.pinnedValue,
             label: "",
+            offset: [10, -10],
           });
+          const ref = this.catalog.refFromPath(hit.path);
+          if (ref !== undefined) {
+            this.workspace.addFocus(id, {
+              kind: "series",
+              ref,
+              source_key: null,
+              channel: ref.channel,
+            });
+          }
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
         },
         onRemoveAnnotation: (id, annotationId) => {
           this.workspace.removeAnnotation(id, annotationId);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onClearAnnotations: (id) => {
+          this.workspace.clearAnnotations(id);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onSetAnnotationDisplay: (id, display) => {
+          this.workspace.setAnnotationDisplay(id, display);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+        },
+        onSetAnnotationOffset: (id, annotationId, offset) => {
+          this.workspace.setAnnotationOffset(id, annotationId, offset);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
         },
@@ -550,8 +602,8 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onSetSeriesStyle: (id, ref, style) => {
-          this.workspace.setSeriesOverride(id, ref, style);
+        onPatchSeriesStyle: (id, ref, style) => {
+          this.workspace.patchSeriesOverride(id, ref, style);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
@@ -561,9 +613,6 @@ export class AppShell {
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
-        },
-        onQuickTransform: (_id, path, kind) => {
-          void this.applyQuickTransform(path, kind);
         },
         onLayoutChanged: () => {
           this.commitHistory();
@@ -840,10 +889,7 @@ export class AppShell {
       "clear-annotations",
       "Panel: clear annotations",
       (id) => {
-        const panel = this.workspace.panel(id);
-        for (const annotation of [...(panel?.annotations ?? [])]) {
-          this.workspace.removeAnnotation(id, annotation.id);
-        }
+        this.workspace.clearAnnotations(id);
       },
     );
     this.registerFocusedPanelCommand(
@@ -1061,7 +1107,7 @@ export class AppShell {
       section: "help",
       group: "about",
       run: () => {
-        this.showModeHelp("SignalScope 2.0.1");
+        this.showModeHelp("SignalScope 2.1.0");
       },
     });
     this.commands.register({
@@ -1143,7 +1189,6 @@ export class AppShell {
     });
     for (const planned of [
       ["open-recent", "Open Recent ▸", "file", "open"],
-      ["annotations-dock", "Annotations dock", "view", "docks"],
       ["axes-default", "Axes default ▸", "view", "display"],
       ["series-palette", "Series palette ▸", "view", "display"],
       ["duplicate-workspace", "Duplicate Workspace", "workspace", "new"],
@@ -2537,17 +2582,6 @@ export class AppShell {
     return false;
   }
 
-  private async applyQuickTransform(
-    path: string,
-    kind: QuickTransform,
-  ): Promise<void> {
-    try {
-      await this.createDerived(...quickTransform(path, kind));
-    } catch (error: unknown) {
-      this.reportError(error);
-    }
-  }
-
   private showModeHelp(text: string): void {
     const help = required<HTMLElement>(this.root, ".mode-help");
     help.textContent = text;
@@ -3431,10 +3465,11 @@ export function shellMarkup(): string {
       <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
       <button class="layout-slot" aria-haspopup="menu" aria-expanded="false">layout ▾</button>
       <div class="legend-layout-menu" role="menu" hidden>
-        <span>LEGENDS</span>
+        <span>LEGEND TYPE</span>
         <button type="button" role="menuitem" data-legend-state="badge">badge</button>
         <button type="button" role="menuitem" data-legend-state="keys">keys</button>
         <button type="button" role="menuitem" data-legend-state="roster">roster</button>
+        <button type="button" role="menuitem" data-legend-state="rail">rail</button>
       </div>
     </div>
 

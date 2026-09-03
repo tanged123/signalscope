@@ -44,10 +44,9 @@ test.describe("exported snapshot round trip", () => {
         "alpha ×1",
         "beta ×1",
       ]);
-      const annotations = panel.locator(".panel-annotations");
-      await expect(annotations).toBeVisible();
-      await expect(annotations).toContainText('"peak"');
-      await expect(annotations.locator(".annotation-action")).toHaveCount(2);
+      await expect(panel.locator(".panel-annotations")).toHaveCount(0);
+      await panel.locator(".plot-legend-tips-heading button").first().click();
+      await expect(panel.locator(".plot-tip-row")).toHaveCount(1);
       const session = JSON.parse(bakedManifest(artifact).session_json) as {
         tabs: Array<{
           panels: Array<{ annotations: Array<{ label: string }> }>;
@@ -57,10 +56,18 @@ test.describe("exported snapshot round trip", () => {
       await expect(page.locator(".window-readout")).toHaveText(
         "window 0.000 → 7.500 s",
       );
-      const stats = panel.locator(".panel-stats");
+      const stats = panel.locator(".plot-legend-stats");
       await expect(stats).toBeVisible();
-      await expect(stats).toContainText("max8.0000");
-      await expect(stats).toContainText("min0.5000");
+      const betaStats = stats
+        .locator(".plot-stat-row")
+        .filter({ hasText: "roundtrip/beta" });
+      await expect(
+        betaStats.locator('.plot-stat-cell[data-column="max"]'),
+      ).toContainText("8");
+      await expect(
+        betaStats.locator('.plot-stat-cell[data-column="min"]'),
+      ).toContainText("0.5");
+      await expect(panel.locator(".panel-stats")).toHaveCount(0);
       expect(networkRequests).toEqual([]);
     });
   }

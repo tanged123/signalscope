@@ -10,8 +10,8 @@ import { CanvasSurface } from "./surface";
 
 const ANNOTATION_PAD = 7;
 const ANNOTATION_HEIGHT = 16;
-const DELTA_PAD = 8;
-const DELTA_HEIGHT = 18;
+const ANNOTATION_OFFSET = 10;
+const ANNOTATION_RULE_WIDTH = 2;
 
 export interface OverlayPalette {
   amber: string;
@@ -27,17 +27,19 @@ export interface OverlayPalette {
   series: string[];
 }
 
-interface OverlayAnnotation {
+export interface OverlayAnnotation {
+  id?: string | null;
+  path?: string;
   x: number;
   y: number;
   colorIndex: number | null;
   label: string;
-}
-
-export interface OverlayDelta {
-  label: string;
-  first: XyMarker;
-  second: XyMarker;
+  focused?: boolean;
+  selected?: boolean;
+  hovered?: boolean;
+  ghosted?: boolean;
+  ephemeral?: boolean;
+  offset?: { x: number; y: number };
 }
 
 export interface OverlayState {
@@ -49,8 +51,7 @@ export interface OverlayState {
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   /** Mode-resolved plot coordinates and readouts. */
   annotations: readonly OverlayAnnotation[];
-  /** Mode-native delta geometry and copy. */
-  delta: OverlayDelta | null;
+  annotationMode?: "labels" | "markers" | "hidden";
 }
 
 export type CursorMode = SessionCursorMode;
@@ -66,9 +67,24 @@ export interface XyMarker {
   ghost?: boolean;
 }
 
+export interface AnnotationHit {
+  id: string;
+  path: string;
+  part: "marker" | "label" | "delete";
+}
+
+interface AnnotationPlacement {
+  id: string;
+  path: string;
+  marker: { x: number; y: number; radius: number };
+  label: { x: number; y: number; width: number; height: number } | null;
+  delete: { x: number; y: number; width: number; height: number } | null;
+}
+
 export class OverlayRenderer {
   private palette: OverlayPalette | null = null;
   private readonly surface: CanvasSurface;
+  private annotationPlacements: AnnotationPlacement[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.surface = new CanvasSurface(canvas);
@@ -82,9 +98,34 @@ export class OverlayRenderer {
     this.palette = null;
   }
 
+  annotationAt(x: number, y: number): AnnotationHit | null {
+    for (
+      let index = this.annotationPlacements.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      const placement = this.annotationPlacements[index];
+      if (placement === undefined) continue;
+      if (placement.delete !== null && insideRect(placement.delete, x, y)) {
+        return { id: placement.id, path: placement.path, part: "delete" };
+      }
+      if (placement.label !== null && insideRect(placement.label, x, y)) {
+        return { id: placement.id, path: placement.path, part: "label" };
+      }
+      if (
+        Math.hypot(placement.marker.x - x, placement.marker.y - y) <=
+        placement.marker.radius + 4
+      ) {
+        return { id: placement.id, path: placement.path, part: "marker" };
+      }
+    }
+    return null;
+  }
+
   draw(layout: PlotLayout | null, state: OverlayState): void {
     const { context, width, height } = this.surface.prepare();
     context.clearRect(0, 0, width, height);
+    this.annotationPlacements = [];
     if (layout === null) return;
     const palette = this.resolvePalette();
     context.save();
@@ -221,9 +262,12 @@ export class OverlayRenderer {
     state: OverlayState,
     palette: OverlayPalette,
   ): void {
+    if (state.annotationMode === "hidden") return;
     context.save();
     context.font = `${String(palette.fontSize + 1)}px ${palette.fontPlot}`;
-    state.annotations.forEach((annotation, index) => {
+    const occupied: { x: number; y: number; width: number; height: number }[] =
+      [];
+    state.annotations.forEach((annotation) => {
       if (
         annotation.x < layout.xRange.min ||
         annotation.x > layout.xRange.max
@@ -233,6 +277,7 @@ export class OverlayRenderer {
       const x = projectX(layout, annotation.x);
       const y = projectY(layout, annotation.y);
       if (!insidePlot(layout, x, y)) return;
+      context.globalAlpha = annotation.ghosted === true ? 0.45 : 1;
       context.beginPath();
       context.fillStyle = palette.surface0;
       context.strokeStyle =
@@ -244,88 +289,128 @@ export class OverlayRenderer {
       context.arc(x, y, 3.5, 0, Math.PI * 2);
       context.fill();
       context.stroke();
+      if (annotation.selected === true) {
+        context.beginPath();
+        context.strokeStyle = palette.amber;
+        context.lineWidth = 1;
+        context.arc(x, y, 5.5, 0, Math.PI * 2);
+        context.stroke();
+      }
+      const placement: AnnotationPlacement | null =
+        annotation.id === null || annotation.id === undefined
+          ? null
+          : {
+              id: annotation.id,
+              path: annotation.path ?? "",
+              marker: { x, y, radius: 3.5 },
+              label: null,
+              delete: null,
+            };
+      if (placement !== null) this.annotationPlacements.push(placement);
+      if (state.annotationMode === "markers") return;
       const text = fitText(
         context,
-        `${marker(index)} ${annotation.label}`,
-        layout.plot.width - ANNOTATION_PAD * 2,
+        annotation.hovered === true && annotation.ephemeral !== true
+          ? `${shortPath(annotation.path ?? "")}  ${annotation.label}  ✕`
+          : annotation.label,
+        layout.plot.width - ANNOTATION_PAD * 2 - ANNOTATION_RULE_WIDTH,
       );
-      const plateWidth = context.measureText(text).width + ANNOTATION_PAD * 2;
+      const plateWidth =
+        context.measureText(text).width +
+        ANNOTATION_PAD * 2 +
+        ANNOTATION_RULE_WIDTH;
       const right = layout.plot.x + layout.plot.width;
       const bottom = layout.plot.y + layout.plot.height;
-      const preferredX =
-        x + 7 + plateWidth > right ? x - plateWidth - 7 : x + 7;
+      const offset = annotation.offset ?? {
+        x: ANNOTATION_OFFSET,
+        y: -ANNOTATION_OFFSET,
+      };
+      const preferredX = x + offset.x;
+      const preferredY = y + offset.y - ANNOTATION_HEIGHT;
       const plateX = clampToBand(preferredX, layout.plot.x, right, plateWidth);
-      const plateY = clampToBand(
-        y - 20 < layout.plot.y ? y + 4 : y - 20,
+      let plateY = clampToBand(
+        preferredY,
         layout.plot.y,
         bottom,
         ANNOTATION_HEIGHT,
       );
-      context.fillStyle = palette.surface2;
+      let collisionSteps = 0;
+      let plate = {
+        x: plateX,
+        y: plateY,
+        width: plateWidth,
+        height: ANNOTATION_HEIGHT,
+      };
+      while (occupied.some((item) => overlaps(item, plate))) {
+        collisionSteps += 1;
+        if (collisionSteps > 2) {
+          if (annotation.hovered !== true) return;
+          break;
+        }
+        plateY = clampToBand(
+          preferredY + collisionSteps * ANNOTATION_HEIGHT,
+          layout.plot.y,
+          bottom,
+          ANNOTATION_HEIGHT,
+        );
+        plate = { ...plate, y: plateY };
+      }
+      occupied.push(plate);
+      if (Math.hypot(offset.x, offset.y) > 24) {
+        context.save();
+        context.globalAlpha *= 0.7;
+        context.strokeStyle = palette.fg4;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(x, y);
+        context.lineTo(
+          clampToBand(x, plateX, plateX + plateWidth, 0),
+          clampToBand(y, plateY, plateY + ANNOTATION_HEIGHT, 0),
+        );
+        context.stroke();
+        context.restore();
+      }
+      context.fillStyle =
+        annotation.focused === true ? palette.amberFill : palette.surface2;
       context.fillRect(plateX, plateY, plateWidth, ANNOTATION_HEIGHT);
+      context.fillStyle =
+        annotation.colorIndex === null
+          ? palette.fg4
+          : (palette.series[annotation.colorIndex] ?? palette.fg2);
+      context.fillRect(
+        plateX,
+        plateY,
+        ANNOTATION_RULE_WIDTH,
+        ANNOTATION_HEIGHT,
+      );
+      if (annotation.selected === true) {
+        context.strokeStyle = palette.amber;
+        context.lineWidth = 1;
+        context.strokeRect(
+          plateX + 0.5,
+          plateY + 0.5,
+          Math.max(0, plateWidth - 1),
+          ANNOTATION_HEIGHT - 1,
+        );
+      }
       context.fillStyle = palette.fg1;
-      context.fillText(text, plateX + ANNOTATION_PAD, plateY + 12);
+      context.fillText(
+        text,
+        plateX + ANNOTATION_PAD + ANNOTATION_RULE_WIDTH,
+        plateY + 12,
+      );
+      if (placement !== null) {
+        placement.label = plate;
+        if (annotation.hovered === true) {
+          placement.delete = {
+            x: plateX + plateWidth - 16,
+            y: plateY,
+            width: 16,
+            height: ANNOTATION_HEIGHT,
+          };
+        }
+      }
     });
-    if (state.delta !== null) {
-      this.drawDelta(context, layout, state.delta, palette);
-    }
-    context.restore();
-  }
-
-  private drawDelta(
-    context: CanvasRenderingContext2D,
-    layout: PlotLayout,
-    delta: OverlayDelta,
-    palette: OverlayPalette,
-  ): void {
-    context.save();
-    context.strokeStyle = palette.fg3;
-    context.globalAlpha = 0.6;
-    context.lineWidth = 1;
-    context.setLineDash([3, 3]);
-    context.beginPath();
-    context.moveTo(
-      projectX(layout, delta.first.x),
-      projectY(layout, delta.first.y),
-    );
-    context.lineTo(
-      projectX(layout, delta.second.x),
-      projectY(layout, delta.second.y),
-    );
-    context.stroke();
-    context.restore();
-    context.save();
-    context.font = `${String(palette.fontSize + 1)}px ${palette.fontPlot}`;
-    const text = fitText(
-      context,
-      delta.label,
-      layout.plot.width - DELTA_PAD * 2,
-    );
-    const width = context.measureText(text).width + DELTA_PAD * 2;
-    const right = layout.plot.x + layout.plot.width;
-    const bottom = layout.plot.y + layout.plot.height;
-    const x = clampToBand(right - width - 8, layout.plot.x, right, width);
-    const y = clampToBand(
-      layout.plot.y + 6,
-      layout.plot.y,
-      bottom,
-      DELTA_HEIGHT,
-    );
-    context.fillStyle = palette.surface2;
-    context.fillRect(x, y, width, DELTA_HEIGHT);
-    context.strokeStyle = palette.amber;
-    context.globalAlpha = 0.4;
-    context.lineWidth = 1;
-    context.setLineDash([]);
-    context.strokeRect(
-      x + 0.5,
-      y + 0.5,
-      Math.max(0, width - 1),
-      DELTA_HEIGHT - 1,
-    );
-    context.globalAlpha = 1;
-    context.fillStyle = palette.amber;
-    context.fillText(text, x + DELTA_PAD, y + 13);
     context.restore();
   }
 
@@ -357,6 +442,35 @@ export class OverlayRenderer {
 function overlayPlotFontSize(styles: CSSStyleDeclaration): number {
   const parsed = Number.parseFloat(styles.getPropertyValue("--plot-font-size"));
   return Number.isFinite(parsed) ? parsed : 9;
+}
+
+function insideRect(
+  rect: { x: number; y: number; width: number; height: number },
+  x: number,
+  y: number,
+): boolean {
+  return (
+    x >= rect.x &&
+    x <= rect.x + rect.width &&
+    y >= rect.y &&
+    y <= rect.y + rect.height
+  );
+}
+
+function overlaps(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): boolean {
+  return !(
+    left.x + left.width <= right.x ||
+    right.x + right.width <= left.x ||
+    left.y + left.height <= right.y ||
+    right.y + right.height <= left.y
+  );
+}
+
+function shortPath(path: string): string {
+  return path.split("/").at(-2) ?? path;
 }
 
 /**
@@ -392,11 +506,4 @@ function clampToBand(
   span: number,
 ): number {
   return Math.max(low, Math.min(preferred, high - span));
-}
-
-/** Annotation badge glyph: circled digits ①–⑳, then parenthesised numbers. */
-export function marker(index: number): string {
-  return index < 20
-    ? String.fromCodePoint(0x2460 + index)
-    : `(${String(index + 1)})`;
 }

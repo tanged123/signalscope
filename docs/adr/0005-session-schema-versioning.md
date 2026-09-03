@@ -84,3 +84,28 @@ Schema version 23 stores each panel's legend state, including the docked rail,
 position, size, snapped corner, and empty-focus hint dismissal. Version 22
 sessions migrate to the default keys state with no custom geometry. See
 [ADR 0048](0048-legend-console.md).
+
+## Amendment (2026-09-01, style cascade and legend statistics)
+
+Schema version 25 stores panel line defaults, color/dash/width encoding
+bindings, visible statistic columns, and statistic sort state. Version 24
+sessions migrate to the prior source-color rule, flat dash and width rules,
+1.4 px lines, 50% ghost opacity, and the prior visible statistic set. See
+[ADR 0051](0051-style-cascade-and-legend-statistics.md).
+
+## Amendment (2026-09-02, data tips and unified focus)
+
+Schema version 26 stores each data tip's panel-local pixel offset and each
+panel's tip display mode (`labels`, `markers`, or `hidden`). Version 25
+sessions migrate to visible labels with the prior default label offset. Focus
+remains the serialized series/source/channel set, but its presentation now
+marks the canonical legend rows instead of creating a duplicate focus stack.
+See [ADR 0051](0051-style-cascade-and-legend-statistics.md).
+
+## Amendment (2026-09-02, four-edge legend docking)
+
+Schema version 27 stores the legend dock edge independently from its `rail`
+presentation state. Version 26 rails migrate to `right`, preserving their prior
+geometry, while floating legends migrate with no dock edge. New rails may be
+persisted on the left, right, top, or bottom. See
+[ADR 0051](0051-style-cascade-and-legend-statistics.md).

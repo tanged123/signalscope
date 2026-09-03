@@ -48,6 +48,7 @@ implementation choices remain explainable.
 40. [Legend console and serialized overlay state](0048-legend-console.md)
 41. [Electron distribution shell](0049-electron-distribution-shell.md)
 42. [Retire obsolete compatibility seams](0050-retire-obsolete-compatibility-seams.md)
+43. [Style cascade, legend analysis, and inspection state](0051-style-cascade-and-legend-statistics.md)
 
 ## Superseded decisions
 

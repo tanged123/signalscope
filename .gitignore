@@ -21,3 +21,4 @@
 .worktrees/
 /refs/
 *.html
+!docs/**

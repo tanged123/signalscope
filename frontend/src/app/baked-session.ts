@@ -145,7 +145,8 @@ function isAnnotation(value: unknown): boolean {
     typeof value.series_path === "string" &&
     typeof value.anchor === "number" &&
     typeof value.pinned_value === "number" &&
-    typeof value.label === "string"
+    typeof value.label === "string" &&
+    isNumberPair(value.offset)
   );
 }
 
@@ -180,6 +181,20 @@ function isNamedSet(value: unknown): boolean {
   );
 }
 
+function isStyleDimension(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    ["focus", "source", "channel", "set", "attr"].includes(value)
+  );
+}
+
+function isStatColumn(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    ["min", "max", "mean", "rms", "cursor", "n"].includes(value)
+  );
+}
+
 function isPanel(value: unknown): boolean {
   const stringOrNull = (item: unknown): item is string =>
     typeof item === "string";
@@ -190,9 +205,14 @@ function isPanel(value: unknown): boolean {
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
     Array.isArray(value.bindings) &&
     value.bindings.every(isBinding) &&
-    ["focus", "source", "channel", "set", "attr"].includes(
-      String(value.color_by),
-    ) &&
+    isNullable(value.color_by, isStyleDimension) &&
+    isNullable(value.dash_by, isStyleDimension) &&
+    isNullable(value.width_by, isStyleDimension) &&
+    typeof value.line_width === "number" &&
+    typeof value.ghost_opacity === "number" &&
+    Number.isFinite(value.ghost_opacity) &&
+    value.ghost_opacity >= 0 &&
+    value.ghost_opacity <= 1 &&
     Array.isArray(value.overrides) &&
     value.overrides.every(isOverride) &&
     Array.isArray(value.focus) &&
@@ -207,6 +227,12 @@ function isPanel(value: unknown): boolean {
         typeof item === "string" &&
         ["top_left", "top_right", "bottom_left", "bottom_right"].includes(item),
     ) &&
+    isNullable(
+      value.legend_dock,
+      (item): item is string =>
+        typeof item === "string" &&
+        ["left", "right", "top", "bottom"].includes(item),
+    ) &&
     typeof value.legend_hint_dismissed === "boolean" &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
@@ -215,7 +241,17 @@ function isPanel(value: unknown): boolean {
     isNullable(value.time_window, isNumberPair) &&
     Array.isArray(value.annotations) &&
     value.annotations.every(isAnnotation) &&
-    typeof value.show_stats === "boolean"
+    ["labels", "markers", "hidden"].includes(
+      String(value.annotation_display),
+    ) &&
+    typeof value.show_stats === "boolean" &&
+    Array.isArray(value.stat_columns) &&
+    value.stat_columns.every(isStatColumn) &&
+    new Set(value.stat_columns).size === value.stat_columns.length &&
+    (value.stats_sort === null ||
+      (isStatColumn(value.stats_sort) &&
+        value.stat_columns.includes(value.stats_sort))) &&
+    typeof value.stats_sort_descending === "boolean"
   );
 }
 

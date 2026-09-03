@@ -6,11 +6,13 @@ import type {
   DerivedSignal,
   GhostMode,
   LegendAnchor,
+  LegendDock,
   LegendState,
   LayoutRow,
   LinkedTime,
   PanelState,
   Session,
+  StatColumn,
   SeriesOverride,
   SeriesRef,
   StyleDimension,
@@ -20,6 +22,7 @@ import type {
   WorkspaceTab,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
+import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
 const MIN_FRACTION = 0.1;
 
@@ -484,12 +487,43 @@ export class WorkspaceModel {
     ref: SeriesRef,
     style: { color_slot: number; dash: DashStyle; width: number },
   ): void {
+    this.patchSeriesOverride(panelId, ref, style);
+  }
+
+  patchSeriesOverride(
+    panelId: string,
+    ref: SeriesRef,
+    patch: Partial<Pick<SeriesOverride, "color_slot" | "dash" | "width">>,
+  ): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
     const override = this.ensureSeriesOverride(panel, ref);
-    override.color_slot = style.color_slot;
-    override.dash = style.dash;
-    override.width = style.width;
+    if (patch.color_slot !== undefined) override.color_slot = patch.color_slot;
+    if (patch.dash !== undefined) override.dash = patch.dash;
+    if (patch.width !== undefined) override.width = patch.width;
+    this.pruneEmptySeriesOverride(panel, override);
+    this.touch(true);
+  }
+
+  revertSeriesOverrideField(
+    panelId: string,
+    ref: SeriesRef,
+    field: "color_slot" | "dash" | "width",
+  ): void {
+    this.patchSeriesOverride(panelId, ref, { [field]: null });
+  }
+
+  revertSeriesOverride(panelId: string, ref: SeriesRef): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    const override = panel.overrides.find(
+      (entry) => entry.target_ref !== null && sameRef(entry.target_ref, ref),
+    );
+    if (override === undefined) return;
+    override.color_slot = null;
+    override.dash = null;
+    override.width = null;
+    this.pruneEmptySeriesOverride(panel, override);
     this.touch(true);
   }
 
@@ -501,12 +535,74 @@ export class WorkspaceModel {
     this.touch(true);
   }
 
-  setColorBy(panelId: string, dimension: StyleDimension): void {
+  setEncoding(
+    panelId: string,
+    property: "color" | "dash" | "width",
+    dimension: StyleDimension | null,
+  ): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) {
-      panel.color_by = dimension;
-      this.touch(true);
+    if (panel === undefined) return;
+    const keys = {
+      color: "color_by",
+      dash: "dash_by",
+      width: "width_by",
+    } as const;
+    const key = keys[property];
+    const previous = panel[key];
+    if (previous === dimension) return;
+    if (dimension !== null) {
+      const other = (Object.keys(keys) as (keyof typeof keys)[]).find(
+        (candidate) =>
+          candidate !== property && panel[keys[candidate]] === dimension,
+      );
+      if (other !== undefined) panel[keys[other]] = previous;
     }
+    panel[key] = dimension;
+    this.touch(true);
+  }
+
+  setColorBy(panelId: string, dimension: StyleDimension | null): void {
+    this.setEncoding(panelId, "color", dimension);
+  }
+
+  setPanelLineWidth(panelId: string, width: number): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || !Number.isFinite(width) || width <= 0) return;
+    panel.line_width = width;
+    this.touch(true);
+  }
+
+  setGhostOpacity(panelId: string, opacity: number): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || !Number.isFinite(opacity)) return;
+    panel.ghost_opacity = Math.min(1, Math.max(0, opacity));
+    this.touch(true);
+  }
+
+  setStatColumns(panelId: string, columns: StatColumn[]): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.stat_columns = [...new Set(columns)];
+    if (
+      panel.stats_sort !== null &&
+      !panel.stat_columns.includes(panel.stats_sort)
+    ) {
+      panel.stats_sort = null;
+      panel.stats_sort_descending = false;
+    }
+    this.touch();
+  }
+
+  setStatsSort(
+    panelId: string,
+    column: StatColumn | null,
+    descending: boolean,
+  ): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.stats_sort = column;
+    panel.stats_sort_descending = column === null ? false : descending;
+    this.touch();
   }
 
   setGhostMode(panelId: string, mode: GhostMode): void {
@@ -532,6 +628,7 @@ export class WorkspaceModel {
       position?: [number, number] | null;
       size?: [number, number] | null;
       anchor?: LegendAnchor | null;
+      dock?: LegendDock | null;
       hintDismissed?: boolean;
     },
   ): void {
@@ -541,6 +638,7 @@ export class WorkspaceModel {
     if (layout.position !== undefined) panel.legend_position = layout.position;
     if (layout.size !== undefined) panel.legend_size = layout.size;
     if (layout.anchor !== undefined) panel.legend_anchor = layout.anchor;
+    if (layout.dock !== undefined) panel.legend_dock = layout.dock;
     if (layout.hintDismissed !== undefined)
       panel.legend_hint_dismissed = layout.hintDismissed;
     this.touch(true);
@@ -592,6 +690,31 @@ export class WorkspaceModel {
     }
   }
 
+  clearStyleOverrides(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    for (const override of panel.overrides) {
+      override.color_slot = null;
+      override.dash = null;
+      override.width = null;
+    }
+    panel.overrides = panel.overrides.filter(
+      (override) => override.opacity !== null || override.visible !== null,
+    );
+    this.touch(true);
+  }
+
+  clearStyleOverride(panelId: string, index: number): void {
+    const panel = this.panel(panelId);
+    const override = panel?.overrides[index];
+    if (panel === undefined || override === undefined) return;
+    override.color_slot = null;
+    override.dash = null;
+    override.width = null;
+    this.pruneEmptySeriesOverride(panel, override);
+    this.touch(true);
+  }
+
   toggleFocus(panelId: string, entry: FocusEntry): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
@@ -610,11 +733,20 @@ export class WorkspaceModel {
     }
   }
 
-  setFocus(panelId: string, entry: FocusEntry): void {
+  addFocus(panelId: string, entry: FocusEntry): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    panel.focus = [structuredClone(entry)];
+    if (panel.focus.some((current) => sameFocus(current, entry))) return;
+    panel.focus.push(structuredClone(entry));
     panel.legend_hint_dismissed = true;
+    this.touch(true);
+  }
+
+  setFocusRange(panelId: string, entries: readonly FocusEntry[]): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    panel.focus = entries.map((entry) => structuredClone(entry));
+    if (panel.focus.length > 0) panel.legend_hint_dismissed = true;
     this.touch(true);
   }
 
@@ -746,6 +878,23 @@ export class WorkspaceModel {
     return created;
   }
 
+  private pruneEmptySeriesOverride(
+    panel: PanelState,
+    override: SeriesOverride,
+  ): void {
+    if (
+      override.color_slot !== null ||
+      override.dash !== null ||
+      override.width !== null ||
+      override.opacity !== null ||
+      override.visible !== null
+    ) {
+      return;
+    }
+    const index = panel.overrides.indexOf(override);
+    if (index !== -1) panel.overrides.splice(index, 1);
+  }
+
   setPanelYRange(panelId: string, range: [number, number]): void {
     const panel = this.panel(panelId);
     if (panel !== undefined) {
@@ -806,7 +955,14 @@ export class WorkspaceModel {
 
   addAnnotation(panelId: string, annotation: Annotation): void {
     const panel = this.panel(panelId);
-    if (panel !== undefined) {
+    if (
+      panel !== undefined &&
+      !panel.annotations.some(
+        (entry) =>
+          entry.series_path === annotation.series_path &&
+          entry.anchor === annotation.anchor,
+      )
+    ) {
       panel.annotations.push({ ...annotation });
       this.touch();
     }
@@ -818,6 +974,36 @@ export class WorkspaceModel {
     panel.annotations = panel.annotations.filter(
       (annotation) => annotation.id !== annotationId,
     );
+    this.touch();
+  }
+
+  clearAnnotations(panelId: string): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || panel.annotations.length === 0) return;
+    panel.annotations = [];
+    this.touch();
+  }
+
+  setAnnotationDisplay(
+    panelId: string,
+    display: PanelState["annotation_display"],
+  ): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || panel.annotation_display === display) return;
+    panel.annotation_display = display;
+    this.touch();
+  }
+
+  setAnnotationOffset(
+    panelId: string,
+    annotationId: string,
+    offset: readonly [number, number],
+  ): void {
+    const annotation = this.panel(panelId)?.annotations.find(
+      (entry) => entry.id === annotationId,
+    );
+    if (annotation === undefined) return;
+    annotation.offset = [offset[0], offset[1]];
     this.touch();
   }
 
@@ -939,9 +1125,13 @@ export class WorkspaceModel {
     const panel: PanelState = {
       id: `panel-${String(this.nextPanelNumber)}`,
       title: `Panel ${String(this.nextPanelNumber)}`,
-      axis_style: "gutter",
+      axis_style: "inline",
       bindings: [],
       color_by: "source",
+      dash_by: null,
+      width_by: null,
+      line_width: DEFAULT_PANEL_LINE_WIDTH,
+      ghost_opacity: 0.5,
       overrides: [],
       focus: [],
       ghost_mode: "all",
@@ -949,6 +1139,7 @@ export class WorkspaceModel {
       legend_position: null,
       legend_size: null,
       legend_anchor: null,
+      legend_dock: null,
       legend_hint_dismissed: false,
       y_range: null,
       x_range: null,
@@ -956,7 +1147,11 @@ export class WorkspaceModel {
       y_label: null,
       time_window: null,
       annotations: [],
+      annotation_display: "labels",
       show_stats: false,
+      stat_columns: ["min", "max", "mean", "rms", "cursor"],
+      stats_sort: null,
+      stats_sort_descending: false,
     };
     this.nextPanelNumber += 1;
     this.activeTab().panels.push(panel);

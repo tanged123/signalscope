@@ -3,32 +3,30 @@ import {
   type ColumnarTileResponse,
 } from "../app/bin-columns";
 import type { Catalog } from "../app/catalog";
-import {
-  appliedOverrides,
-  overrideFor,
-  type ResolvedSeries,
-} from "../app/resolution";
+import { appliedOverrides, type ResolvedSeries } from "../app/resolution";
+import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import { virtualSlice } from "../app/outline-model";
 import { compileGlob, evaluateSelector } from "../app/selector";
 import type {
   AxisStyle,
+  AnnotationDisplay,
   Binding,
   DashStyle,
   FocusEntry,
   LegendAnchor,
+  LegendDock,
   LegendState,
   NamedSet,
   PanelState,
   SeriesRef,
   SeriesOverride,
   StyleDimension,
+  StatColumn,
 } from "../generated/session";
 import {
   clamp,
   formatValue,
   insidePlot,
-  projectX,
-  projectY,
   type PlotLayout,
   type Range,
 } from "../app/plot-math";
@@ -37,13 +35,13 @@ import {
   prepareTimePlot,
   type AnnotationAnchor,
   type PlotCursor,
-  type PlotDelta,
   type PreparedPlot,
   type ResolvedAnnotation,
   type SeriesHitAdapter,
 } from "../app/plot-capabilities";
 import {
   COLOR_SLOTS,
+  hueIndex,
   invalidatePalette,
   resolvePalette,
 } from "../render/plot-theme";
@@ -54,7 +52,7 @@ const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 5_000;
 const CHART_HOST_RETRY_DELAYS_MS = [100] as const;
 import {
   OverlayRenderer,
-  marker,
+  type OverlayAnnotation,
   type CursorMode,
   type CursorPoint,
 } from "../render/overlay-renderer";
@@ -79,15 +77,14 @@ export type PanelCursor = PlotCursor;
 
 interface ResolvedAnnotations {
   resolved: readonly ResolvedAnnotation[];
-  delta: PlotDelta | null;
 }
 
 function colorIndexForHue(hue: number | null): number {
   if (hue === null) return 0;
-  return Math.max(0, Math.min(COLOR_SLOTS - 1, Math.trunc(hue) - 1));
+  return hueIndex(hue);
 }
 
-export type QuickTransform = "gradient" | "cumtrapz" | "movmean" | "abs";
+export type EncodingProperty = "color" | "dash" | "width";
 
 export interface PanelCallbacks {
   onFocus(id: string): void;
@@ -98,7 +95,8 @@ export interface PanelCallbacks {
   onDropSignals(id: string, paths: string[]): void;
   onDropSet(id: string, setId: string): void;
   onFocusToggle(id: string, entry: FocusEntry): void;
-  onFocusSolo(id: string, entry: FocusEntry): void;
+  onFocusAdd(id: string, entry: FocusEntry): void;
+  onFocusRange(id: string, entries: readonly FocusEntry[]): void;
   onClearFocus(id: string): void;
   onMuteSelector(id: string, selector: string): void;
   onMuteSeries(id: string, ref: SeriesRef): void;
@@ -111,6 +109,7 @@ export interface PanelCallbacks {
       position?: [number, number] | null;
       size?: [number, number] | null;
       anchor?: LegendAnchor | null;
+      dock?: LegendDock | null;
       hintDismissed?: boolean;
     },
   ): void;
@@ -133,22 +132,44 @@ export interface PanelCallbacks {
   onXRange(id: string, range: readonly [number, number]): void;
   onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
+  onClearAnnotations?(id: string): void;
+  onSetAnnotationDisplay?(id: string, display: AnnotationDisplay): void;
+  onSetAnnotationOffset?(
+    id: string,
+    annotationId: string,
+    offset: readonly [number, number],
+  ): void;
   onEditAnnotationLabel(id: string, annotationId: string, label: string): void;
   onFitView(id: string): void;
   onToggleStats(id: string): void;
   onToggleAxisStyle(id: string): void;
   onRenameTitle(id: string, title: string): void;
   onEditAxisLabel(id: string, axis: "x" | "y", label: string | null): void;
-  onSetColorBy(id: string, dimension: StyleDimension): void;
-  onRemoveOverride(id: string, index: number): void;
+  onSetEncoding(
+    id: string,
+    property: EncodingProperty,
+    dimension: StyleDimension | null,
+  ): void;
+  onSetPanelLineWidth(id: string, width: number): void;
+  onSetGhostOpacity(id: string, opacity: number): void;
+  onSetStatColumns(id: string, columns: StatColumn[]): void;
+  onSetStatsSort(
+    id: string,
+    column: StatColumn | null,
+    descending: boolean,
+  ): void;
+  onRevertStyleOverride(id: string, index: number): void;
   onClearOverrides(id: string): void;
-  onSetSeriesStyle(
+  onPatchSeriesStyle(
     id: string,
     ref: SeriesRef,
-    style: { color_slot: number; dash: DashStyle; width: number },
+    style: {
+      color_slot?: number | null;
+      dash?: DashStyle | null;
+      width?: number | null;
+    },
   ): void;
   onRemoveSeries(id: string, ref: SeriesRef): void;
-  onQuickTransform(id: string, path: string, kind: QuickTransform): void;
 }
 
 export function hasDragType(event: DragEvent, type: string): boolean {
@@ -172,30 +193,17 @@ export interface RenderSeries {
   visible: boolean;
   focused: boolean;
   overridden: boolean;
+  overrideFields: { color: boolean; dash: boolean; width: boolean };
 }
 
 export type RenderPanelState = PanelState & {
   series: RenderSeries[];
 };
 
-export type LegendDimension = "source" | "channel";
-
-export interface MatrixLegendRow {
+export interface SeriesLegendRow {
   value: string;
-  label: string;
-  count: number;
-  selector: string;
+  series: RenderSeries;
   focused: boolean;
-  ghosted: boolean;
-  overridden: boolean;
-  hue: number | null;
-}
-
-export interface FocusChip {
-  entry: FocusEntry;
-  label: string;
-  hue: number | null;
-  overridden: boolean;
 }
 
 export interface BindingChipEntry {
@@ -206,12 +214,20 @@ export interface BindingChipEntry {
   selector: string | null;
 }
 
-export function matrixLegendRows(
+export interface LegendStatValues {
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  rms: number | null;
+  n: number | null;
+  cursor: number | null;
+}
+
+export function seriesLegendRows(
   catalog: Catalog,
-  state: Pick<RenderPanelState, "series" | "focus" | "color_by">,
-  dimension: LegendDimension,
+  state: Pick<RenderPanelState, "series" | "focus">,
   query = "",
-): MatrixLegendRow[] {
+): SeriesLegendRow[] {
   const trimmedQuery = query.trim().replace(/^\/\s*/, "");
   const selectorQuery = /(?:^|\s)@|(?:^|\s)(?:unit|kind):/.test(trimmedQuery);
   const evaluation =
@@ -230,85 +246,30 @@ export function matrixLegendRows(
             }),
           ),
         );
-  const rows = new Map<string, MatrixLegendRow>();
+  const rows: SeriesLegendRow[] = [];
   for (const series of state.series) {
-    const catalogSeries = catalog.get(series.ref);
     if (matching !== null && !matching.has(catalog.refKey(series.ref))) {
       continue;
     }
-    const value =
-      dimension === "source"
-        ? (catalogSeries?.sourceName ?? series.ref.source_key)
-        : series.ref.channel;
-    const existing = rows.get(value);
     const focus = state.focus.some((entry) => focusMatches(entry, series.ref));
-    if (existing === undefined) {
-      rows.set(value, {
-        value,
-        label: value,
-        count: 1,
-        selector: dimension === "source" ? `* @ ${value}` : `${value} @ *`,
-        focused: focus,
-        ghosted: series.display === "ghost",
-        overridden: series.overridden,
-        hue: state.color_by === dimension ? series.hue : null,
-      });
-    } else {
-      existing.count += 1;
-      existing.focused ||= focus;
-      existing.ghosted ||= series.display === "ghost";
-      existing.overridden ||= series.overridden;
-      if (existing.hue === null && state.color_by === dimension) {
-        existing.hue = series.hue;
-      }
-    }
+    rows.push({
+      value: catalog.refKey(series.ref),
+      series,
+      focused: focus,
+    });
   }
-  const result = [...rows.values()];
-  if (trimmedQuery === "" || selectorQuery) return result;
+  if (trimmedQuery === "" || selectorQuery) return rows;
   const glob = ["*", "?", "[", "|"].some((token) =>
     trimmedQuery.includes(token),
   )
     ? compileGlob(trimmedQuery)
     : null;
   const text = trimmedQuery.toLocaleLowerCase();
-  return result.filter((row) =>
+  return rows.filter((row) =>
     glob === null
-      ? row.label.toLocaleLowerCase().includes(text)
-      : glob.test(row.label),
+      ? row.series.path.toLocaleLowerCase().includes(text)
+      : glob.test(row.series.path),
   );
-}
-
-export function focusChips(
-  catalog: Catalog,
-  state: Pick<RenderPanelState, "series" | "focus">,
-  limit = 8,
-): { chips: FocusChip[]; overflow: number } {
-  const chips = state.focus.map((entry) => {
-    const matching = state.series.filter((series) =>
-      focusMatches(entry, series.ref),
-    );
-    const first = matching[0];
-    const label =
-      entry.kind === "series"
-        ? (first?.path ?? entry.ref?.channel ?? "series")
-        : entry.kind === "source"
-          ? (catalog.get(
-              first?.ref ?? { source_key: entry.source_key ?? "", channel: "" },
-            )?.sourceName ??
-            entry.source_key ??
-            "source")
-          : (entry.channel ?? "channel");
-    return {
-      entry,
-      label,
-      hue: first?.hue ?? null,
-      overridden: matching.some((series) => series.overridden),
-    };
-  });
-  return {
-    chips: chips.slice(0, limit),
-    overflow: Math.max(0, chips.length - limit),
-  };
 }
 
 export function bindingChipEntries(
@@ -396,15 +357,6 @@ function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
     : entry.channel === ref.channel;
 }
 
-function focusSelector(entry: FocusEntry, sourceName?: string): string {
-  if (entry.kind === "source")
-    return `* @ ${sourceName ?? entry.source_key ?? "*"}`;
-  if (entry.kind === "channel") return `${entry.channel ?? "*"} @ *`;
-  return entry.ref === null
-    ? "*"
-    : `${entry.ref.channel} @ ${entry.ref.source_key}`;
-}
-
 function renderState(
   state: PanelState,
   callbacks: Pick<PanelCallbacks, "resolveSeries">,
@@ -423,6 +375,7 @@ function renderState(
       visible: entry.visible,
       focused: entry.focused,
       overridden: entry.overridden,
+      overrideFields: entry.overrideFields,
     })),
   };
 }
@@ -515,16 +468,29 @@ export class PanelView {
   private cursorMode: CursorMode = "none";
   private box: InteractionBox | null = null;
   private emphasizePaths: ReadonlySet<string> | null = null;
-  private hoverPoint: { x: number; y: number } | null = null;
-  private hoverTag: HTMLElement | null = null;
+  private hoverTip: AnnotationAnchor | null = null;
+  private hoveredAnnotationId: string | null = null;
+  private readonly selectedAnnotationIds = new Set<string>();
+  private readonly annotationOffsets = new Map<
+    string,
+    { x: number; y: number }
+  >();
+  private annotationsExpanded = false;
+  private signalsExpanded = true;
+  private plotTipsHeight: number | null = null;
+  private annotationDragId: string | null = null;
+  private focusOnly = false;
+  private focusRangeAnchor: { scope: string; value: string } | null = null;
   private inspectorPath: string | null = null;
-  private inspectorCleanup: (() => void) | null = null;
+  private encodingDrawer: EncodingProperty | null = null;
+  private overrideDrawer = false;
+  private statsColumnsDrawer = false;
   private bindingCleanup: (() => void) | null = null;
-  private rulesCleanup: (() => void) | null = null;
   private panelConfigCleanup: (() => void) | null = null;
   private plotLegendPosition: { x: number; y: number } | null = null;
   private plotLegendSize: { width: number; height: number } | null = null;
   private plotLegendAnchor: LegendAnchor | null = null;
+  private plotLegendDock: LegendDock | null = null;
 
   constructor(
     private readonly id: string,
@@ -734,28 +700,71 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
-    required(this.element, ".panel-ghost-toggle").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onToggleGhostMode(this.id);
-      },
-    );
-    required(this.element, ".panel-config-toggle").addEventListener(
+    required(this.element, ".panel-line-width").addEventListener(
       "click",
       (event) => {
         if (this.lastState !== null)
-          this.openPanelConfig(
+          this.openLineWidthMenu(
             this.lastState,
             event.currentTarget as HTMLElement,
           );
       },
     );
+    required(this.element, ".panel-ghost-opacity").addEventListener(
+      "click",
+      (event) => {
+        if (this.lastState !== null)
+          this.openGhostMenu(
+            this.lastState,
+            event.currentTarget as HTMLElement,
+          );
+      },
+    );
+    required(this.element, ".panel-legend-state").addEventListener(
+      "click",
+      (event) => {
+        if (this.lastState !== null)
+          this.openLegendStateMenu(
+            this.lastState,
+            event.currentTarget as HTMLElement,
+          );
+      },
+    );
+    required(this.element, ".panel-tips").addEventListener("click", (event) => {
+      if (this.lastState !== null)
+        this.openTipsMenu(this.lastState, event.currentTarget as HTMLElement);
+    });
     this.element.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
-        if (this.emphasizePaths !== null) this.clearHover();
+        if (this.selectedAnnotationIds.size > 0) {
+          this.selectedAnnotationIds.clear();
+          this.drawOverlay();
+          this.updatePlotLegend(this.lastState as RenderPanelState);
+        } else if (this.emphasizePaths !== null) this.clearHover();
         else this.callbacks.onClearFocus(this.id);
         this.closeBindingPopover();
         this.closePanelConfig();
+        const drawerOpen =
+          this.encodingDrawer !== null ||
+          this.overrideDrawer ||
+          this.statsColumnsDrawer;
+        const inspectorOpen = this.inspectorPath !== null;
+        this.encodingDrawer = null;
+        this.overrideDrawer = false;
+        this.statsColumnsDrawer = false;
+        this.inspectorPath = null;
+        if ((drawerOpen || inspectorOpen) && this.lastState !== null) {
+          this.updatePlotLegend(this.lastState);
+        }
+      } else if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        this.selectedAnnotationIds.size > 0
+      ) {
+        event.preventDefault();
+        for (const id of this.selectedAnnotationIds) {
+          this.callbacks.onRemoveAnnotation(this.id, id);
+        }
+        this.selectedAnnotationIds.clear();
       } else if (
         event.target === this.element &&
         event.key === "Tab" &&
@@ -823,7 +832,8 @@ export class PanelView {
       this.callbacks.onDropSignals(this.id, paths);
     });
     this.overlay.addEventListener("pointermove", (event) => {
-      if (this.interactions.isDragging()) return;
+      if (this.interactions.isDragging() || this.annotationDragId !== null)
+        return;
       const layout = this.activeLayout();
       const inside =
         layout !== null && insidePlot(layout, event.offsetX, event.offsetY);
@@ -832,12 +842,7 @@ export class PanelView {
           ? this.cursorAt(layout, event.offsetX, event.offsetY, 40)
           : null;
       if (layout !== null && inside) {
-        this.updateHover(
-          event.offsetX,
-          event.offsetY,
-          event.clientX,
-          event.clientY,
-        );
+        this.updateHover(event.offsetX, event.offsetY);
       } else {
         this.clearHover();
       }
@@ -847,8 +852,71 @@ export class PanelView {
         cursor === null ? null : { x: event.clientX, y: event.clientY },
       );
     });
+    this.overlay.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const hit = this.overlayRenderer.annotationAt(
+        event.offsetX,
+        event.offsetY,
+      );
+      if (hit === null) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (hit.part === "delete") {
+        this.callbacks.onRemoveAnnotation(this.id, hit.id);
+        return;
+      }
+      const start = { x: event.offsetX, y: event.offsetY };
+      const saved = this.lastState?.annotations.find(
+        (annotation) => annotation.id === hit.id,
+      )?.offset;
+      const initial = this.annotationOffsets.get(hit.id) ?? {
+        x: saved?.[0] ?? 10,
+        y: saved?.[1] ?? -10,
+      };
+      let moved = false;
+      this.annotationDragId = hit.id;
+      this.overlay.setPointerCapture(event.pointerId);
+      const move = (next: PointerEvent): void => {
+        if (hit.part !== "label") return;
+        const dx = next.offsetX - start.x;
+        const dy = next.offsetY - start.y;
+        if (!moved && Math.hypot(dx, dy) <= 3) return;
+        moved = true;
+        this.annotationOffsets.set(hit.id, {
+          x: initial.x + dx,
+          y: initial.y + dy,
+        });
+        this.drawOverlay();
+      };
+      const finish = (next: PointerEvent): void => {
+        cleanup();
+        if (!moved) {
+          this.selectAnnotation(
+            hit.id,
+            next.metaKey || next.ctrlKey || next.shiftKey,
+          );
+        } else {
+          const offset = this.annotationOffsets.get(hit.id);
+          if (offset !== undefined) {
+            this.callbacks.onSetAnnotationOffset?.(this.id, hit.id, [
+              offset.x,
+              offset.y,
+            ]);
+          }
+        }
+      };
+      const cleanup = (): void => {
+        this.overlay.removeEventListener("pointermove", move);
+        this.overlay.removeEventListener("pointerup", finish);
+        this.overlay.removeEventListener("pointercancel", cleanup);
+        this.annotationDragId = null;
+      };
+      this.overlay.addEventListener("pointermove", move);
+      this.overlay.addEventListener("pointerup", finish);
+      this.overlay.addEventListener("pointercancel", cleanup);
+    });
     this.overlay.addEventListener("pointerleave", () => {
-      if (!this.interactions.isDragging()) {
+      if (!this.interactions.isDragging() && this.annotationDragId === null) {
         this.clearHover();
         this.callbacks.onCursor(this.id, null, null);
       }
@@ -873,19 +941,31 @@ export class PanelView {
     );
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
-    axisToggle.hidden = true;
+    axisToggle.hidden = false;
+    required<HTMLElement>(this.element, ".panel-line-width-value").textContent =
+      formatToolbarNumber(rendered.line_width);
+    required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
+      rendered.ghost_mode === "all"
+        ? "none"
+        : `${String(Math.round(rendered.ghost_opacity * 100))}%`;
+    required<HTMLElement>(this.element, ".panel-legend-value").textContent =
+      rendered.legend_state;
+    required<HTMLElement>(this.element, ".panel-tips-value").textContent =
+      String(rendered.annotations.length);
+    required<HTMLButtonElement>(
+      this.element,
+      ".panel-stats-toggle",
+    ).setAttribute("aria-pressed", String(rendered.show_stats));
     this.updateBindings(rendered);
-    this.updateGhostToggle(rendered);
     this.updateLegend(rendered);
+    this.pruneAnnotationUiState(rendered);
     const annotations = this.resolvedAnnotations(rendered);
-    this.renderAnnotationList(rendered, annotations);
-    this.renderStats();
     this.drawOverlay(annotations);
     if (
       this.inspectorPath !== null &&
       !rendered.series.some((series) => series.path === this.inspectorPath)
     ) {
-      this.closeInspector();
+      this.inspectorPath = null;
     }
     const empty = required<HTMLElement>(this.element, ".panel-empty");
     if (rendered.series.length === 0) {
@@ -933,9 +1013,9 @@ export class PanelView {
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
-    this.renderStats();
+    this.updatePlotLegend(rendered);
+    this.pruneAnnotationUiState(rendered);
     const annotations = this.resolvedAnnotations(rendered);
-    this.renderAnnotationList(rendered, annotations);
     this.drawOverlay(annotations);
     if (missing.length > 0) {
       this.setModeEmpty(true, `unknown signals: ${missing.join(", ")}`);
@@ -989,7 +1069,9 @@ export class PanelView {
       return {
         hue: series?.hue ?? null,
         dash: series?.dash ?? "solid",
-        width: series?.width ?? 1.4,
+        width:
+          (series?.width ?? DEFAULT_PANEL_LINE_WIDTH) +
+          (series?.focused === true ? 1 : 0),
         alpha: series?.opacity ?? 1,
       };
     });
@@ -1008,6 +1090,7 @@ export class PanelView {
       styles,
       emphasisIndices,
       palette: resolvePalette(),
+      axisStyle: state.axis_style,
     };
     if (this.chartHost === null) {
       this.pendingChartRender = request;
@@ -1140,8 +1223,23 @@ export class PanelView {
     },
   ): void {
     if (!modifiers.alt && !modifiers.shift) {
-      if (this.removeAt(offsetX, offsetY, 9)) return;
-      if (this.pinAt(offsetX, offsetY, 14)) return;
+      const hit = this.annotationAt(offsetX, offsetY, 14);
+      if (hit !== null) {
+        this.callbacks.onPinAnnotation(this.id, hit);
+        return;
+      }
+      const path = this.seriesHit(offsetX, offsetY, 6)?.path ?? null;
+      const series = this.lastState?.series.find(
+        (entry) => entry.path === path,
+      );
+      if (series !== undefined) {
+        this.callbacks.onFocusAdd(this.id, {
+          kind: "series",
+          ref: series.ref,
+          source_key: null,
+          channel: series.ref.channel,
+        });
+      }
       return;
     }
     const hit = this.seriesHit(offsetX, offsetY, 6);
@@ -1175,57 +1273,46 @@ export class PanelView {
       : this.hitAdapter.seriesAt(layout, offsetX, offsetY, threshold);
   }
 
-  private updateHover(
-    offsetX: number,
-    offsetY: number,
-    clientX: number,
-    clientY: number,
-  ): void {
+  private updateHover(offsetX: number, offsetY: number): void {
+    const annotationHit = this.overlayRenderer.annotationAt(offsetX, offsetY);
+    if (annotationHit !== null) {
+      const changed = this.hoveredAnnotationId !== annotationHit.id;
+      this.hoveredAnnotationId = annotationHit.id;
+      this.hoverTip = null;
+      this.setEmphasis(annotationHit.path);
+      if (changed) {
+        this.drawOverlay();
+        if (this.lastState !== null) this.updatePlotLegend(this.lastState);
+      }
+      return;
+    }
     const hit = this.seriesHit(offsetX, offsetY, 6);
     if (hit === null) {
       this.clearHover();
       return;
     }
-    this.hoverPoint = { x: offsetX, y: offsetY };
+    const layout = this.activeLayout();
+    this.hoveredAnnotationId = null;
+    this.hoverTip =
+      layout === null
+        ? null
+        : (this.preparedPlot?.annotationAt(
+            layout,
+            { x: offsetX, y: offsetY },
+            14,
+          ) ?? null);
     this.setEmphasis(hit.path);
-    this.showHoverTag(hit.path, clientX, clientY);
-  }
-
-  private showHoverTag(path: string, clientX: number, clientY: number): void {
-    const series = this.lastState?.series.find((entry) => entry.path === path);
-    if (series === undefined) return;
-    const panelRect = this.element.getBoundingClientRect();
-    const tag = this.hoverTag ?? document.createElement("div");
-    this.hoverTag = tag;
-    tag.className = "plot-hover-tag";
-    tag.textContent = `${series.path} — ⇧click to focus`;
-    tag.hidden = false;
-    this.element.append(tag);
-    const tagRect = tag.getBoundingClientRect();
-    tag.style.left = `${String(
-      clamp(
-        clientX - panelRect.left + 10,
-        4,
-        Math.max(4, panelRect.width - tagRect.width - 4),
-      ),
-    )}px`;
-    tag.style.top = `${String(
-      clamp(
-        clientY - panelRect.top + 10,
-        4,
-        Math.max(4, panelRect.height - tagRect.height - 4),
-      ),
-    )}px`;
+    this.drawOverlay();
   }
 
   private clearHover(): void {
-    this.hoverPoint = null;
+    const hadAnnotation = this.hoveredAnnotationId !== null;
+    this.hoverTip = null;
+    this.hoveredAnnotationId = null;
     this.setEmphasis(null);
-    if (this.hoverTag !== null) {
-      this.hoverTag.hidden = true;
-      this.hoverTag.remove();
-      this.hoverTag = null;
-    }
+    if (hadAnnotation && this.lastState !== null)
+      this.updatePlotLegend(this.lastState);
+    this.drawOverlay();
   }
 
   private walkHover(direction: -1 | 1): void {
@@ -1259,51 +1346,21 @@ export class PanelView {
     const wrapped = next ?? series[direction === 1 ? 0 : series.length - 1];
     if (wrapped === undefined) return;
     this.setEmphasis(wrapped.entry.path);
-    if (this.hoverPoint !== null) {
-      const canvasRect = this.overlay.getBoundingClientRect();
-      this.showHoverTag(
-        wrapped.entry.path,
-        canvasRect.left + this.hoverPoint.x,
-        canvasRect.top + this.hoverPoint.y,
-      );
-    }
   }
 
-  /** Removes the annotation under the pixel; true when one was removed. */
-  private removeAt(offsetX: number, offsetY: number, radius: number): boolean {
+  private annotationAt(
+    offsetX: number,
+    offsetY: number,
+    radius: number,
+  ): AnnotationAnchor | null {
     const layout = this.activeLayout();
-    const state = this.lastState;
-    const prepared = this.preparedPlot;
-    if (layout === null || state === null || prepared === null) return false;
-    const annotation = state.annotations
-      .map((entry) => prepared.resolveAnnotation(entry))
-      .filter((entry) => entry !== null)
-      .find(
-        (entry) =>
-          Math.hypot(
-            projectX(layout, entry.x) - offsetX,
-            projectY(layout, entry.y) - offsetY,
-          ) <= radius,
-      );
-    if (annotation === undefined) return false;
-    this.callbacks.onRemoveAnnotation(this.id, annotation.annotation.id);
-    return true;
-  }
-
-  /** Pins the nearest plotted vertex under the pixel, when one is in range. */
-  private pinAt(offsetX: number, offsetY: number, radius: number): boolean {
-    const layout = this.activeLayout();
-    if (layout === null) return false;
-    const hit = this.preparedPlot?.annotationAt(
-      layout,
-      { x: offsetX, y: offsetY },
-      radius,
-    );
-    if (hit !== null && hit !== undefined) {
-      this.callbacks.onPinAnnotation(this.id, hit);
-      return true;
-    }
-    return false;
+    return layout === null
+      ? null
+      : (this.preparedPlot?.annotationAt(
+          layout,
+          { x: offsetX, y: offsetY },
+          radius,
+        ) ?? null);
   }
 
   private cursorAt(
@@ -1320,20 +1377,18 @@ export class PanelView {
 
   private resolvedAnnotations(state: RenderPanelState): ResolvedAnnotations {
     const prepared = this.preparedPlot;
-    if (prepared === null) return { resolved: [], delta: null };
+    if (prepared === null) return { resolved: [] };
     const resolved = state.annotations
       .map((annotation) => prepared.resolveAnnotation(annotation))
       .filter((annotation) => annotation !== null);
-    return { resolved, delta: prepared.delta(resolved) };
+    return { resolved };
   }
 
   private drawOverlay(resolution?: ResolvedAnnotations): void {
     const state = this.lastState;
-    const { resolved, delta } =
+    const { resolved } =
       resolution ??
-      (state === null
-        ? { resolved: [], delta: null }
-        : this.resolvedAnnotations(state));
+      (state === null ? { resolved: [] } : this.resolvedAnnotations(state));
     const bySeries = new Map(
       (state?.series ?? []).map((series) => [series.path, series]),
     );
@@ -1348,22 +1403,71 @@ export class PanelView {
           : [],
       xyMarkers,
       box: this.box,
-      annotations: resolved.map((annotation) => {
-        const series = bySeries.get(annotation.annotation.series_path);
-        return {
-          x: annotation.x,
-          y: annotation.y,
-          colorIndex:
-            series === undefined
-              ? annotation.colorIndex
-              : series.hue === null
-                ? null
-                : colorIndexForHue(series.hue),
-          label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label} `}${annotation.summary}`,
-        };
-      }),
-      delta,
+      annotations: [
+        ...resolved.map((annotation) => {
+          const series = bySeries.get(annotation.annotation.series_path);
+          return {
+            id: annotation.annotation.id,
+            path: annotation.annotation.series_path,
+            x: annotation.x,
+            y: annotation.y,
+            colorIndex:
+              series === undefined
+                ? annotation.colorIndex
+                : series.hue === null
+                  ? null
+                  : colorIndexForHue(series.hue),
+            label: `${annotation.annotation.label === "" ? "" : `${annotation.annotation.label}  `}${annotation.summary}`,
+            focused: series?.focused ?? false,
+            selected: this.selectedAnnotationIds.has(annotation.annotation.id),
+            hovered:
+              this.hoveredAnnotationId === annotation.annotation.id ||
+              this.emphasizePaths?.has(annotation.annotation.series_path) ===
+                true,
+            ghosted: series?.display === "ghost" || series?.visible === false,
+            ephemeral: false,
+            offset: this.annotationOffsets.get(annotation.annotation.id) ?? {
+              x: annotation.annotation.offset[0],
+              y: annotation.annotation.offset[1],
+            },
+          };
+        }),
+        ...this.overlayHoverTip(bySeries),
+      ],
+      annotationMode: state?.annotation_display ?? "labels",
     });
+  }
+
+  private overlayHoverTip(
+    bySeries: ReadonlyMap<string, RenderSeries>,
+  ): OverlayAnnotation[] {
+    const tip = this.hoverTip;
+    if (tip === null || this.lastState?.annotation_display === "hidden")
+      return [];
+    const duplicate = this.lastState?.annotations.some(
+      (annotation) =>
+        annotation.series_path === tip.path && annotation.anchor === tip.anchor,
+    );
+    if (duplicate === true) return [];
+    const series = bySeries.get(tip.path);
+    return [
+      {
+        id: null,
+        path: tip.path,
+        x: tip.anchor,
+        y: tip.pinnedValue,
+        colorIndex:
+          series?.hue === null || series === undefined
+            ? null
+            : colorIndexForHue(series.hue),
+        label: `${formatValue(tip.anchor)} · ${formatValue(tip.pinnedValue)}`,
+        focused: false,
+        selected: false,
+        hovered: false,
+        ghosted: series?.display === "ghost",
+        ephemeral: true,
+      },
+    ];
   }
 
   /** The dots the cursor puts on each series, in that mode's own domain. */
@@ -1403,125 +1507,6 @@ export class PanelView {
     } else {
       this.callbacks.onXRange(this.id, [min, max]);
     }
-  }
-
-  private renderStats(): void {
-    const strip = required<HTMLElement>(this.element, ".panel-stats");
-    const state = this.lastState;
-    const show = state !== null && state.show_stats;
-    strip.hidden = !show;
-    if (!show) {
-      strip.replaceChildren();
-      return;
-    }
-    const groups = this.preparedPlot?.stats() ?? [];
-    if (groups.length === 0) {
-      strip.hidden = true;
-      strip.replaceChildren();
-      return;
-    }
-    const rows = groups.map((group) => {
-      const row = document.createElement("span");
-      row.className = "stats-series";
-      row.append(
-        statsName(group.label),
-        ...group.items.map((item) =>
-          statsItem(
-            item.label === "mean" ? "μ" : item.label,
-            item.value,
-            item.unit,
-          ),
-        ),
-      );
-      return row;
-    });
-    const hint = document.createElement("span");
-    hint.className = "stats-hint";
-    hint.textContent = "visible region · S toggles";
-    strip.replaceChildren(...rows, hint);
-  }
-
-  private renderAnnotationList(
-    state: RenderPanelState,
-    resolution: ResolvedAnnotations,
-  ): void {
-    const list = required<HTMLElement>(this.element, ".panel-annotations");
-    const prepared = this.preparedPlot;
-    const annotations = prepared === null ? [] : state.annotations;
-    list.hidden = annotations.length === 0;
-    if (annotations.length === 0) {
-      list.replaceChildren();
-      return;
-    }
-    const heading = document.createElement("div");
-    heading.className = "annotations-heading";
-    heading.textContent = `ANNOTATIONS — ${state.title.toUpperCase()}`;
-    const resolvedById = new Map(
-      resolution.resolved.map((entry) => [entry.annotation.id, entry]),
-    );
-    const rows = annotations.map((annotation, index) => {
-      const row = document.createElement("div");
-      row.className = "annotation-row";
-      const text = document.createElement("span");
-      text.className = "annotation-text";
-      const current = resolvedById.get(annotation.id);
-      text.textContent =
-        `${marker(index)} t ${formatValue(annotation.anchor)} · ${current?.summary ?? "unavailable"}` +
-        (annotation.label === "" ? "" : ` "${annotation.label}"`);
-      const edit = document.createElement("button");
-      edit.className = "annotation-action";
-      edit.textContent = "✎";
-      edit.title = "Edit label";
-      edit.addEventListener("click", () => {
-        this.openAnnotationLabelEditor(row, annotation.id, annotation.label);
-      });
-      const remove = document.createElement("button");
-      remove.className = "annotation-action";
-      remove.textContent = "✕";
-      remove.title = "Delete annotation";
-      remove.addEventListener("click", () => {
-        this.callbacks.onRemoveAnnotation(this.id, annotation.id);
-      });
-      row.append(text, edit, remove);
-      return row;
-    });
-    const deltaRow = document.createElement("div");
-    deltaRow.className = "annotation-delta";
-    deltaRow.textContent = resolution.delta?.label ?? "";
-    list.replaceChildren(
-      heading,
-      ...rows,
-      ...(resolution.delta === null ? [] : [deltaRow]),
-    );
-  }
-
-  private openAnnotationLabelEditor(
-    row: HTMLElement,
-    annotationId: string,
-    current: string,
-  ): void {
-    const input = document.createElement("input");
-    input.className = "annotation-label-input";
-    input.value = current;
-    input.setAttribute("aria-label", "Annotation label");
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") input.blur();
-      if (event.key === "Escape") {
-        input.value = current;
-        input.blur();
-      }
-      event.stopPropagation();
-    });
-    input.addEventListener("blur", () => {
-      this.callbacks.onEditAnnotationLabel(
-        this.id,
-        annotationId,
-        input.value.trim(),
-      );
-    });
-    row.append(input);
-    input.focus();
-    input.select();
   }
 
   private beginTitleEdit(): void {
@@ -1615,6 +1600,7 @@ export class PanelView {
   }
 
   private updatePlotLegend(state: RenderPanelState): void {
+    if (state.focus.length === 0) this.focusOnly = false;
     const legend = required<HTMLElement>(this.element, ".plot-series-legend");
     const wrap = required<HTMLElement>(this.element, ".plot-wrap");
     if (state.series.length === 0) {
@@ -1623,13 +1609,18 @@ export class PanelView {
       delete legend.dataset.state;
       delete legend.dataset.collapsed;
       wrap.classList.remove("legend-dock-preview");
+      delete wrap.dataset.legendDockPreview;
       wrap.classList.remove("legend-rail");
       wrap.classList.remove("legend-rail-collapsed");
+      delete wrap.dataset.legendDock;
       wrap.style.removeProperty("--plot-legend-rail-width");
+      wrap.style.removeProperty("--plot-legend-rail-height");
       return;
     }
     legend.hidden = false;
+    legend.classList.toggle("stats-visible", state.show_stats);
     wrap.classList.remove("legend-dock-preview");
+    delete wrap.dataset.legendDockPreview;
     legend.dataset.state = state.legend_state;
     wrap.classList.toggle("legend-rail", state.legend_state === "rail");
     this.plotLegendPosition =
@@ -1641,6 +1632,7 @@ export class PanelView {
         ? null
         : { width: state.legend_size[0], height: state.legend_size[1] };
     this.plotLegendAnchor = state.legend_anchor;
+    this.plotLegendDock = state.legend_dock;
 
     if (state.legend_state === "badge") {
       const badge = document.createElement("div");
@@ -1652,7 +1644,8 @@ export class PanelView {
       drag.className = "plot-legend-drag plot-legend-badge-drag";
       drag.type = "button";
       drag.textContent = "⬓";
-      drag.title = "Drag plot legend; End docks it right";
+      drag.title =
+        "Drag plot legend to any edge; End docks to the nearest edge";
       this.bindPlotLegendDrag(drag, legend);
       const summary = document.createElement("button");
       summary.className = "plot-legend-badge-summary";
@@ -1663,7 +1656,7 @@ export class PanelView {
         state.focus.length,
       );
       required<HTMLElement>(summary, "span:nth-of-type(2)").textContent =
-        `${String(ghosts)} ghosts`;
+        `${String(ghosts)} dimmed`;
       summary.title = "Expand legend keys";
       summary.addEventListener("click", () => {
         this.callbacks.onLegendLayout(this.id, { state: "keys" });
@@ -1677,21 +1670,37 @@ export class PanelView {
     const header = document.createElement("div");
     header.className = "plot-legend-header";
     if (state.legend_state === "rail") {
+      const dock = state.legend_dock ?? "right";
       header.classList.add("plot-legend-rail-header");
       const title = document.createElement("span");
       title.className = "plot-legend-title";
-      title.textContent = `${String(state.series.length)} ▾`;
+      title.textContent = `${String(state.series.length)} · ${dock} ▾`;
       const undock = document.createElement("button");
       undock.className = "plot-legend-undock";
       undock.type = "button";
       undock.textContent = "⇥";
       undock.title = "Return legend to floating roster";
       undock.addEventListener("click", () => this.floatPlotLegend(legend));
-      header.append(title, undock);
+      header.append(title);
+      if (state.show_stats) header.append(this.statsScopeLabel());
+      header.append(undock);
       legend.replaceChildren(
         header,
-        this.plotLegendRoster(state),
-        this.legendResizeHandle("left", legend),
+        this.plotLegendEncodingRow(state),
+        ...this.plotLegendDrawers(state),
+        state.show_stats
+          ? this.plotLegendStats(state)
+          : this.plotLegendRoster(state),
+        this.legendResizeHandle(
+          dock === "right"
+            ? "left"
+            : dock === "left"
+              ? "right"
+              : dock === "top"
+                ? "bottom"
+                : "top",
+          legend,
+        ),
       );
       this.positionPlotLegend();
       return;
@@ -1700,7 +1709,8 @@ export class PanelView {
     drag.className = "plot-legend-drag";
     drag.type = "button";
     drag.textContent = "⠿";
-    drag.title = "Drag plot legend; arrow keys move it; End docks it right";
+    drag.title =
+      "Drag plot legend to any edge; arrow keys move it; End docks to the nearest edge";
     this.bindPlotLegendDrag(drag, legend);
     const title = document.createElement("button");
     title.className = "plot-legend-title";
@@ -1709,14 +1719,12 @@ export class PanelView {
       state.legend_state === "roster" ? " series" : ""
     } ▾`;
     title.title =
-      state.legend_state === "roster" ? "Show focused keys" : "Show roster";
+      state.legend_state === "roster" ? "Show compact keys" : "Show roster";
     title.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, {
         state: state.legend_state === "roster" ? "keys" : "roster",
       });
     });
-    const rules = this.colorRuleToken(state);
-    rules.textContent += " ▾";
     const collapse = document.createElement("button");
     collapse.className = "plot-legend-collapse";
     collapse.type = "button";
@@ -1725,10 +1733,13 @@ export class PanelView {
     collapse.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, { state: "badge" });
     });
-    header.append(drag, title, rules, collapse);
+    header.append(drag, title);
+    if (state.show_stats) header.append(this.statsScopeLabel());
+    header.append(collapse);
 
-    const content =
-      state.legend_state === "roster"
+    const content = state.show_stats
+      ? this.plotLegendStats(state)
+      : state.legend_state === "roster"
         ? this.plotLegendRoster(state)
         : this.plotLegendKeys(state);
     const rightResize = this.legendResizeHandle("right", legend);
@@ -1736,6 +1747,8 @@ export class PanelView {
     const cornerResize = this.legendResizeHandle("corner", legend);
     legend.replaceChildren(
       header,
+      this.plotLegendEncodingRow(state),
+      ...this.plotLegendDrawers(state),
       content,
       rightResize,
       bottomResize,
@@ -1744,30 +1757,151 @@ export class PanelView {
     this.positionPlotLegend();
   }
 
+  private statsScopeLabel(): HTMLElement {
+    const scope = document.createElement("span");
+    scope.className = "plot-legend-stats-scope";
+    scope.textContent = "Σ visible region";
+    scope.title = "Statistics recompute for the visible time region";
+    return scope;
+  }
+
+  private plotLegendEncodingRow(state: RenderPanelState): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "plot-legend-encoding";
+    for (const property of ["color", "dash", "width"] as const) {
+      const dimension =
+        property === "color"
+          ? state.color_by
+          : property === "dash"
+            ? state.dash_by
+            : state.width_by;
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "plot-legend-encoding-chip";
+      chip.dataset.property = property;
+      chip.setAttribute(
+        "aria-expanded",
+        String(this.encodingDrawer === property),
+      );
+      const sample = document.createElement("span");
+      sample.className = `encoding-sample encoding-sample-${property}`;
+      if (property === "color") sample.style.background = "var(--series-1)";
+      if (property === "width") {
+        sample.style.height = `${String(Math.max(1, state.line_width))}px`;
+      }
+      const label = document.createElement("span");
+      label.textContent = `${property} ← ${dimension ?? "flat"}`;
+      if (property === "width" && dimension === null) {
+        label.textContent += ` · ${formatToolbarNumber(state.line_width)}`;
+      }
+      chip.append(sample, label);
+      chip.addEventListener("click", () => {
+        this.encodingDrawer =
+          this.encodingDrawer === property ? null : property;
+        this.overrideDrawer = false;
+        this.statsColumnsDrawer = false;
+        this.updatePlotLegend(state);
+      });
+      row.append(chip);
+    }
+    return row;
+  }
+
+  private plotLegendDrawers(state: RenderPanelState): HTMLElement[] {
+    const drawers: HTMLElement[] = [];
+    if (typeof this.encodingDrawer === "string") {
+      drawers.push(this.plotEncodingDrawer(state, this.encodingDrawer));
+    }
+    if (this.overrideDrawer) drawers.push(this.plotOverrideDrawer());
+    if (this.statsColumnsDrawer)
+      drawers.push(this.plotStatsColumnsDrawer(state));
+    return drawers;
+  }
+
+  private plotEncodingDrawer(
+    state: RenderPanelState,
+    property: EncodingProperty,
+  ): HTMLElement {
+    const drawer = document.createElement("div");
+    drawer.className = "plot-legend-drawer plot-encoding-drawer";
+    const title = document.createElement("div");
+    title.className = "plot-legend-drawer-title";
+    title.textContent = `${property.toUpperCase()} · BIND TO`;
+    const choices = document.createElement("div");
+    choices.className = "plot-encoding-choices";
+    const active =
+      property === "color"
+        ? state.color_by
+        : property === "dash"
+          ? state.dash_by
+          : state.width_by;
+    for (const dimension of [
+      null,
+      "focus",
+      "source",
+      "channel",
+      "set",
+      "attr",
+    ] as const) {
+      const choice = document.createElement("button");
+      choice.type = "button";
+      choice.className = "plot-encoding-choice";
+      choice.classList.toggle("active", active === dimension);
+      choice.textContent = dimension ?? "flat";
+      choice.addEventListener("click", () => {
+        this.encodingDrawer = null;
+        this.callbacks.onSetEncoding(this.id, property, dimension);
+      });
+      choices.append(choice);
+    }
+    drawer.append(title, choices);
+    if (property === "color") {
+      const palette = document.createElement("div");
+      palette.className = "plot-encoding-palette";
+      for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
+        const swatch = document.createElement("span");
+        swatch.style.background = `var(--series-${String(slot)})`;
+        palette.append(swatch);
+      }
+      const count =
+        active === null
+          ? 1
+          : encodingValueCount(state, active, this.callbacks.catalog());
+      const note = document.createElement("div");
+      note.className = "plot-encoding-note";
+      note.textContent = `${String(count)} ${count === 1 ? "value" : "values"} → ${String(COLOR_SLOTS)} slots${count > COLOR_SLOTS ? " · repeats disclosed" : ""}`;
+      drawer.append(palette, note);
+    }
+    return drawer;
+  }
+
   private plotLegendKeys(state: RenderPanelState): HTMLElement {
     const content = document.createElement("div");
     content.className = "plot-legend-content plot-legend-keys";
-    const focusRows = document.createElement("div");
-    focusRows.className = "plot-legend-focus-rows";
-    const focus = focusChips(
-      this.callbacks.catalog(),
+    const all = seriesLegendRows(this.callbacks.catalog(), state);
+    const shown = this.focusOnly ? all.filter((row) => row.focused) : all;
+    const title = this.plotLegendGroupTitle(
       state,
-      Number.POSITIVE_INFINITY,
+      shown.length,
+      all.filter((row) => row.focused).length,
     );
-    for (const entry of focus.chips) {
-      focusRows.append(this.plotLegendFocusRow(state, entry));
-    }
+    title.className = "plot-legend-section-title plot-legend-group-title";
+    const rows = document.createElement("div");
+    rows.className = "plot-legend-key-rows";
+    rows.hidden = !this.signalsExpanded;
+    rows.append(
+      ...shown.map((row) => this.plotLegendSeriesRow(state, row, shown)),
+    );
+    rows.addEventListener("click", (event) => {
+      if (event.target === rows) this.callbacks.onClearFocus(this.id);
+    });
     const ghosts = state.series.filter(
       (series) => series.visible && series.display === "ghost",
     ).length;
-    const footer = document.createElement("button");
-    footer.className = "plot-legend-footer";
-    footer.type = "button";
-    footer.textContent = `${String(ghosts)} ghosts ▾`;
-    footer.addEventListener("click", () => {
+    const footer = this.plotLegendFooter(state, ghosts, () => {
       this.callbacks.onLegendLayout(this.id, { state: "roster" });
     });
-    content.append(focusRows, footer);
+    content.append(title, rows, this.plotLegendTips(state), footer);
     if (
       state.focus.length === 0 &&
       ghosts > 0 &&
@@ -1776,7 +1910,7 @@ export class PanelView {
       const hint = document.createElement("button");
       hint.className = "plot-legend-hint";
       hint.type = "button";
-      hint.textContent = "hover a ghost to explore · click to focus  ×";
+      hint.textContent = "hover a dimmed line to explore · click to focus  ×";
       hint.title = "Dismiss hint";
       hint.addEventListener("click", () => {
         this.callbacks.onLegendLayout(this.id, { hintDismissed: true });
@@ -1786,66 +1920,101 @@ export class PanelView {
     return content;
   }
 
-  private plotLegendFocusRow(
+  private plotLegendGroupTitle(
     state: RenderPanelState,
-    entry: FocusChip,
+    count: number,
+    focusedCount: number,
   ): HTMLElement {
+    const title = document.createElement("div");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "plot-legend-signals-toggle";
+    toggle.textContent = `${this.signalsExpanded ? "▾" : "▸"} SIGNALS`;
+    toggle.setAttribute("aria-expanded", String(this.signalsExpanded));
+    toggle.addEventListener("click", () => {
+      this.signalsExpanded = !this.signalsExpanded;
+      this.updatePlotLegend(state);
+    });
+    const focus = document.createElement("button");
+    focus.type = "button";
+    focus.className = "plot-legend-focus-filter";
+    focus.textContent = this.focusOnly
+      ? `focus only ✓ · ${String(count)}/${String(state.series.length)}`
+      : `${String(focusedCount)} focused ⤴`;
+    focus.hidden = focusedCount === 0;
+    focus.title = this.focusOnly
+      ? "Show all legend rows"
+      : "Show focused rows only";
+    focus.addEventListener("click", () => {
+      this.focusOnly = !this.focusOnly;
+      this.updatePlotLegend(state);
+    });
+    const total = document.createElement("span");
+    total.textContent = String(count);
+    title.append(toggle, focus, total);
+    return title;
+  }
+
+  private plotLegendSeriesRow(
+    state: RenderPanelState,
+    item: SeriesLegendRow,
+    selectionRows: readonly SeriesLegendRow[],
+  ): HTMLElement {
+    const block = document.createElement("div");
+    block.className = "plot-legend-row-block plot-legend-series-block";
     const row = document.createElement("div");
-    row.className = "plot-legend-row";
-    const matching = state.series.filter(
-      (series) => series.visible && focusMatches(entry.entry, series.ref),
+    row.className = "plot-legend-roster-row";
+    row.classList.toggle("focused", item.focused);
+    row.classList.toggle(
+      "ghosted",
+      item.series.display === "ghost" && !item.focused,
     );
-    const paths = matching.map((series) => series.path);
-    const primary = matching.length === 1 ? matching[0] : undefined;
+    const series = item.series;
+    row.dataset.paths = JSON.stringify([series.path]);
+    const swatch = document.createElement("button");
+    swatch.type = "button";
+    swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
+    swatch.style.setProperty("--plot-row-swatch-color", seriesColor(series));
+    swatch.style.setProperty(
+      "--plot-row-swatch-width",
+      `${String(series.width + (series.focused ? 1 : 0))}px`,
+    );
+    swatch.title = `Edit ${series.path} line properties`;
+    swatch.setAttribute(
+      "aria-expanded",
+      String(this.inspectorPath === series.path),
+    );
+    swatch.addEventListener("click", () => {
+      this.toggleInlineInspector(state, series.path);
+    });
     const action = document.createElement("button");
-    action.className = "plot-legend-row-action";
     action.type = "button";
-    action.innerHTML =
-      '<span class="plot-legend-swatch"></span><span class="plot-legend-label"></span><span class="plot-legend-value">—</span><span class="plot-legend-unit"></span>';
-    const swatch = required<HTMLElement>(action, ".plot-legend-swatch");
-    swatch.style.background =
-      entry.hue === null
-        ? "var(--fg-4)"
-        : `var(--series-${String(colorIndexForHue(entry.hue) + 1)})`;
-    required<HTMLElement>(action, ".plot-legend-label").textContent =
-      `${entry.overridden ? "◆ " : ""}${entry.label}`;
-    const value = required<HTMLElement>(action, ".plot-legend-value");
-    if (primary !== undefined) value.dataset.path = primary.path;
-    required<HTMLElement>(action, ".plot-legend-unit").textContent =
-      primary === undefined
-        ? ""
-        : (this.callbacks.catalog().get(primary.ref)?.summary.unit ?? "");
-    action.addEventListener("mouseenter", () => this.setEmphasis(paths));
+    action.className = "plot-legend-roster-action";
+    const label = document.createElement("span");
+    label.className = "plot-legend-label";
+    label.textContent = `${series.overridden ? "▍ " : ""}${series.path}`;
+    action.append(label);
+    action.addEventListener("mouseenter", () => this.setEmphasis(series.path));
     action.addEventListener("mouseleave", () => this.setEmphasis(null));
     action.addEventListener("click", (event) => {
-      if (event.altKey) {
-        if (entry.entry.kind === "series" && entry.entry.ref !== null)
-          this.callbacks.onMuteSeries(this.id, entry.entry.ref);
-        else
-          this.callbacks.onMuteSelector(
-            this.id,
-            focusSelector(
-              entry.entry,
-              primary === undefined
-                ? undefined
-                : this.callbacks.catalog().get(primary.ref)?.sourceName,
-            ),
-          );
-      } else {
-        this.callbacks.onFocusSolo(this.id, entry.entry);
-      }
+      if (event.altKey) this.callbacks.onMuteSeries(this.id, series.ref);
+      else
+        this.selectFocusRows(
+          event,
+          "legend",
+          item.value,
+          selectionRows,
+          (row) => row.value,
+          (row) => this.focusEntryForSeries(row.series),
+        );
     });
-    const remove = document.createElement("button");
-    remove.className = "plot-legend-remove";
-    remove.type = "button";
-    remove.textContent = "✕";
-    remove.title = `Remove focus: ${entry.label}`;
-    remove.addEventListener("click", () => {
-      this.callbacks.onFocusToggle(this.id, entry.entry);
-    });
-    row.append(action, remove);
-    this.updateLegendValue(value);
-    return row;
+    action.title = `Add ${series.path} to focus; Shift-click selects a range; Command/Ctrl-click toggles; Option-click mutes`;
+    row.append(swatch, action);
+    block.append(row);
+    if (this.inspectorPath === series.path) {
+      block.append(this.inlineSeriesInspector(state, series));
+    }
+    return block;
   }
 
   private plotLegendRoster(state: RenderPanelState): HTMLElement {
@@ -1867,80 +2036,58 @@ export class PanelView {
     searchMeta.className = "plot-legend-search-meta search-count";
     searchRow.append(searchPrefix, search);
     searchWrap.append(searchRow, searchMeta);
-    const focusTitle = document.createElement("div");
-    focusTitle.className = "plot-legend-section-title";
-    focusTitle.textContent = `FOCUS ${String(state.focus.length)}`;
-    const focusRows = document.createElement("div");
-    focusRows.className = "plot-legend-focus-rows";
-    for (const entry of focusChips(
-      this.callbacks.catalog(),
-      state,
-      Number.POSITIVE_INFINITY,
-    ).chips) {
-      focusRows.append(this.plotLegendFocusRow(state, entry));
-    }
-    const dimension: LegendDimension =
-      state.color_by === "channel" ? "channel" : "source";
+    searchWrap.hidden = !this.signalsExpanded;
     const group = document.createElement("div");
     group.className = "plot-legend-group";
+    group.classList.toggle("collapsed", !this.signalsExpanded);
     const groupTitle = document.createElement("div");
     groupTitle.className = "plot-legend-section-title plot-legend-group-title";
     const rows = document.createElement("div");
     rows.className = "plot-legend-roster-rows";
+    rows.hidden = !this.signalsExpanded;
     const viewport = document.createElement("div");
     viewport.className = "plot-legend-roster-viewport";
+    rows.addEventListener("click", (event) => {
+      if (event.target === rows || event.target === viewport)
+        this.callbacks.onClearFocus(this.id);
+    });
     const renderRows = (): void => {
-      const all = matrixLegendRows(
+      const all = seriesLegendRows(
         this.callbacks.catalog(),
         state,
-        dimension,
         search.value,
       );
-      groupTitle.textContent = `▾ ${dimension.toUpperCase()} · ${String(all.length)}`;
-      searchMeta.textContent = `${String(all.length)} match · ⏎ focus · ⌥⏎ mute`;
+      const shown = this.focusOnly ? all.filter((item) => item.focused) : all;
+      groupTitle.replaceChildren(
+        ...this.plotLegendGroupTitle(
+          state,
+          shown.length,
+          all.filter((item) => item.focused).length,
+        ).childNodes,
+      );
+      searchMeta.textContent = `${String(shown.length)} match · ⏎ focus · ⌥⏎ mute`;
+      if (typeof this.inspectorPath === "string") {
+        viewport.style.height = "auto";
+        viewport.replaceChildren(
+          ...shown.map((item) => this.plotLegendSeriesRow(state, item, shown)),
+        );
+        return;
+      }
       const slice = virtualSlice(
-        all.length,
+        shown.length,
         rows.scrollTop,
         rows.clientHeight || 168,
         24,
       );
-      viewport.replaceChildren();
       viewport.style.height = `${String(slice.totalHeight)}px`;
-      for (const [offset, item] of all
-        .slice(slice.start, slice.end)
-        .entries()) {
-        const button = document.createElement("button");
-        button.className = "plot-legend-roster-row";
-        button.type = "button";
-        button.style.top = `${String(slice.topPadding + offset * 24)}px`;
-        button.innerHTML =
-          '<span class="plot-legend-swatch"></span><span class="plot-legend-label"></span><span class="plot-legend-count"></span>';
-        const swatch = required<HTMLElement>(button, ".plot-legend-swatch");
-        swatch.style.background =
-          item.hue === null
-            ? "var(--fg-4)"
-            : `var(--series-${String(colorIndexForHue(item.hue) + 1)})`;
-        required<HTMLElement>(button, ".plot-legend-label").textContent =
-          `${item.overridden ? "◆ " : ""}${item.label}`;
-        required<HTMLElement>(button, ".plot-legend-count").textContent =
-          `×${String(item.count)}`;
-        const matching = state.series.filter((series) =>
-          dimension === "source"
-            ? (this.callbacks.catalog().get(series.ref)?.sourceName ??
-                series.ref.source_key) === item.value
-            : series.ref.channel === item.value,
-        );
-        const paths = matching.map((series) => series.path);
-        button.addEventListener("mouseenter", () => this.setEmphasis(paths));
-        button.addEventListener("mouseleave", () => this.setEmphasis(null));
-        button.addEventListener("click", (event) => {
-          const entry = this.focusEntryForRow(dimension, item, state);
-          if (event.altKey)
-            this.callbacks.onMuteSelector(this.id, item.selector);
-          else this.callbacks.onFocusToggle(this.id, entry);
-        });
-        viewport.append(button);
-      }
+      viewport.replaceChildren(
+        ...shown.slice(slice.start, slice.end).map((item, offset) => {
+          const block = this.plotLegendSeriesRow(state, item, shown);
+          block.classList.add("virtual");
+          block.style.top = `${String(slice.topPadding + offset * 24)}px`;
+          return block;
+        }),
+      );
     };
     search.addEventListener("input", () => {
       rows.scrollTop = 0;
@@ -1948,39 +2095,679 @@ export class PanelView {
     });
     search.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
-      const first = matrixLegendRows(
+      const first = seriesLegendRows(
         this.callbacks.catalog(),
         state,
-        dimension,
         search.value,
       )[0];
       if (first === undefined) return;
       event.preventDefault();
-      if (event.altKey) this.callbacks.onMuteSelector(this.id, first.selector);
-      else
+      if (event.altKey) this.callbacks.onMuteSeries(this.id, first.series.ref);
+      else if (event.metaKey || event.ctrlKey)
         this.callbacks.onFocusToggle(
           this.id,
-          this.focusEntryForRow(dimension, first, state),
+          this.focusEntryForSeries(first.series),
+        );
+      else
+        this.callbacks.onFocusAdd(
+          this.id,
+          this.focusEntryForSeries(first.series),
         );
     });
     rows.addEventListener("scroll", renderRows);
     rows.append(viewport);
     group.append(groupTitle, rows);
-    const footer = document.createElement("button");
-    footer.className = "plot-legend-footer";
-    footer.type = "button";
     const ghosts = state.series.filter(
       (series) => series.visible && series.display === "ghost",
     ).length;
-    footer.textContent = `${String(ghosts)} ghosts ▾`;
-    footer.addEventListener("click", () => {
+    const footer = this.plotLegendFooter(state, ghosts, () => {
       search.value = "";
       search.focus();
       renderRows();
     });
-    content.append(searchWrap, focusTitle, focusRows, group, footer);
+    content.append(searchWrap, group, this.plotLegendTips(state), footer);
     renderRows();
     return content;
+  }
+
+  private plotLegendTips(state: RenderPanelState): HTMLElement {
+    const section = document.createElement("section");
+    section.className = "plot-legend-tips";
+    const heading = document.createElement("div");
+    heading.className = "plot-legend-tips-heading";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = `${this.annotationsExpanded ? "▾" : "▸"} TIPS`;
+    toggle.setAttribute("aria-expanded", String(this.annotationsExpanded));
+    toggle.addEventListener("click", () => {
+      this.annotationsExpanded = !this.annotationsExpanded;
+      this.updatePlotLegend(state);
+    });
+    const count = document.createElement("span");
+    count.textContent = String(state.annotations.length);
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.className = "plot-tip-export";
+    exportButton.textContent = "⤓ csv";
+    exportButton.title = "Export pinned tips as CSV";
+    exportButton.addEventListener("click", () => this.exportAnnotations(state));
+    heading.append(toggle, count, exportButton);
+    section.append(heading);
+    if (!this.annotationsExpanded || state.annotations.length === 0)
+      return section;
+
+    heading.classList.add("resizable");
+    heading.tabIndex = 0;
+    heading.setAttribute("role", "group");
+    heading.setAttribute("aria-label", "Tips controls and resize handle");
+    heading.title = "Drag vertically to resize tips; use Up and Down arrows";
+
+    const columns = document.createElement("div");
+    columns.className = "plot-tip-columns";
+    columns.innerHTML =
+      '<span></span><span>SERIES</span><span class="plot-tip-x">x ↓</span><span class="plot-tip-value">value</span><span class="plot-tip-reading">x · value</span><span></span>';
+    const body = document.createElement("div");
+    body.className = "plot-tip-rows";
+    const byPath = new Map(state.series.map((series) => [series.path, series]));
+    const annotations = [...state.annotations].sort(
+      (left, right) => right.anchor - left.anchor,
+    );
+    for (const annotation of annotations) {
+      const series = byPath.get(annotation.series_path);
+      const row = document.createElement("div");
+      row.className = "plot-tip-row";
+      row.dataset.paths = JSON.stringify([annotation.series_path]);
+      row.classList.toggle("focused", series?.focused ?? false);
+      row.classList.toggle(
+        "selected",
+        this.selectedAnnotationIds.has(annotation.id),
+      );
+      row.classList.toggle(
+        "ghosted",
+        series?.display === "ghost" || series?.visible === false,
+      );
+      row.classList.toggle(
+        "hovered",
+        this.hoveredAnnotationId === annotation.id,
+      );
+      const rule = document.createElement("span");
+      rule.className = "plot-tip-rule";
+      rule.style.background =
+        series === undefined ? "var(--fg-4)" : seriesColor(series);
+      const name = document.createElement("button");
+      name.type = "button";
+      name.className = "plot-tip-name";
+      name.textContent =
+        this.callbacks.localPathFor(annotation.series_path) ??
+        annotation.series_path;
+      name.title = annotation.series_path;
+      name.addEventListener("click", (event) => {
+        this.selectAnnotation(
+          annotation.id,
+          event.metaKey || event.ctrlKey || event.shiftKey,
+        );
+      });
+      const x = document.createElement("span");
+      x.className = "plot-tip-x";
+      x.textContent = formatValue(annotation.anchor);
+      const value = document.createElement("span");
+      value.className = "plot-tip-value";
+      value.textContent = formatValue(annotation.pinned_value);
+      const reading = document.createElement("span");
+      reading.className = "plot-tip-reading";
+      reading.textContent = `${formatValue(annotation.anchor)} · ${formatValue(annotation.pinned_value)}`;
+      const actions = document.createElement("span");
+      actions.className = "plot-tip-actions";
+      const locate = document.createElement("button");
+      locate.type = "button";
+      locate.textContent = "⌖";
+      locate.title = "Pan to tip";
+      locate.addEventListener("click", () =>
+        this.panToAnnotation(annotation.anchor),
+      );
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "✕";
+      remove.title = "Delete tip";
+      remove.addEventListener("click", () => {
+        this.callbacks.onRemoveAnnotation(this.id, annotation.id);
+      });
+      actions.append(locate, remove);
+      row.append(rule, name, x, value, reading, actions);
+      row.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLButtonElement) return;
+        this.selectAnnotation(
+          annotation.id,
+          event.metaKey || event.ctrlKey || event.shiftKey,
+        );
+      });
+      row.addEventListener("mouseenter", () => {
+        this.hoveredAnnotationId = annotation.id;
+        this.setEmphasis(annotation.series_path);
+        this.drawOverlay();
+      });
+      row.addEventListener("mouseleave", () => {
+        this.hoveredAnnotationId = null;
+        this.setEmphasis(null);
+        this.drawOverlay();
+      });
+      body.append(row);
+    }
+    section.append(columns, body);
+    if (this.plotTipsHeight !== null)
+      section.style.height = `${String(this.plotTipsHeight)}px`;
+    this.bindPlotTipsResize(heading, section);
+    return section;
+  }
+
+  private bindPlotTipsResize(handle: HTMLElement, section: HTMLElement): void {
+    const resize = (height: number): void => {
+      const parentHeight =
+        section.parentElement?.getBoundingClientRect().height ?? height;
+      const next = clamp(height, 22, Math.max(22, parentHeight * 0.75));
+      this.plotTipsHeight = next;
+      section.style.height = `${String(next)}px`;
+    };
+    handle.addEventListener("keydown", (event) => {
+      if (event.target !== handle) return;
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const step = event.shiftKey ? 48 : 16;
+      const height = section.getBoundingClientRect().height;
+      resize(height + (event.key === "ArrowUp" ? step : -step));
+    });
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("button") !== null
+      )
+        return;
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = section.getBoundingClientRect().height;
+      const move = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        resize(startHeight + startY - next.clientY);
+      };
+      const end = (next: PointerEvent): void => {
+        if (next.pointerId !== event.pointerId) return;
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", end);
+        document.removeEventListener("pointercancel", end);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", end);
+      document.addEventListener("pointercancel", end);
+    });
+  }
+
+  private panToAnnotation(anchor: number): void {
+    const range = this.activeLayout()?.xRange;
+    if (range === undefined) return;
+    const span = range.max - range.min;
+    this.applyXRange(anchor - span / 2, anchor + span / 2);
+  }
+
+  private exportAnnotations(state: RenderPanelState): void {
+    const selected =
+      this.selectedAnnotationIds.size === 0
+        ? state.annotations
+        : state.annotations.filter((annotation) =>
+            this.selectedAnnotationIds.has(annotation.id),
+          );
+    const lines = [
+      "series,x,value,label",
+      ...[...selected]
+        .sort((left, right) => right.anchor - left.anchor)
+        .map((annotation) =>
+          [
+            annotation.series_path,
+            String(annotation.anchor),
+            String(annotation.pinned_value),
+            annotation.label,
+          ]
+            .map(csvCell)
+            .join(","),
+        ),
+    ];
+    downloadText(`${safeFilename(state.title)}-tips.csv`, lines.join("\n"));
+  }
+
+  private plotLegendFooter(
+    state: RenderPanelState,
+    ghosts: number,
+    showGhosts: () => void,
+    exportStats = false,
+  ): HTMLElement {
+    const footer = document.createElement("div");
+    footer.className = "plot-legend-footer";
+    const ghostButton = document.createElement("button");
+    ghostButton.type = "button";
+    ghostButton.textContent = `${String(ghosts)} dimmed ▾`;
+    ghostButton.addEventListener("click", showGhosts);
+    footer.append(ghostButton);
+    if (exportStats) {
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = "plot-legend-stats-export";
+      exportButton.textContent = "⤓ csv";
+      exportButton.title = "Export visible statistic columns as CSV";
+      exportButton.addEventListener("click", () =>
+        this.exportLegendStats(state),
+      );
+      footer.append(exportButton);
+    }
+    const overrides = this.styleOverrides();
+    const overrideButton = document.createElement("button");
+    overrideButton.type = "button";
+    overrideButton.className = "plot-legend-overrides";
+    overrideButton.classList.toggle("active", overrides.length > 0);
+    overrideButton.textContent = `${String(overrides.length)} ${overrides.length === 1 ? "override" : "overrides"} ▾`;
+    overrideButton.addEventListener("click", () => {
+      this.overrideDrawer = !this.overrideDrawer;
+      this.encodingDrawer = null;
+      this.statsColumnsDrawer = false;
+      this.updatePlotLegend(state);
+    });
+    footer.append(overrideButton);
+    return footer;
+  }
+
+  private styleOverrides(): ReturnType<typeof appliedOverrides> {
+    const input = this.lastInputState;
+    if (
+      !input?.overrides.some((override) =>
+        [override.color_slot, override.dash, override.width].some(
+          (value) => value !== null,
+        ),
+      )
+    ) {
+      return [];
+    }
+    return appliedOverrides(
+      this.callbacks.catalog(),
+      input,
+      this.callbacks.namedSets(),
+    ).filter(({ override }) =>
+      [override.color_slot, override.dash, override.width].some(
+        (value) => value !== null,
+      ),
+    );
+  }
+
+  private plotOverrideDrawer(): HTMLElement {
+    const drawer = document.createElement("div");
+    drawer.className = "plot-legend-drawer plot-override-drawer";
+    const overrides = this.styleOverrides();
+    const heading = document.createElement("div");
+    heading.className = "plot-legend-drawer-title";
+    heading.textContent = `${String(overrides.length)} ${overrides.length === 1 ? "OVERRIDE" : "OVERRIDES"}`;
+    const revertAll = document.createElement("button");
+    revertAll.type = "button";
+    revertAll.textContent = "⟲ revert all";
+    revertAll.disabled = overrides.length === 0;
+    revertAll.addEventListener("click", () => {
+      this.callbacks.onClearOverrides(this.id);
+      this.overrideDrawer = false;
+    });
+    const titleRow = document.createElement("div");
+    titleRow.className = "plot-override-heading";
+    titleRow.append(heading, revertAll);
+    drawer.append(titleRow);
+    for (const item of overrides) {
+      const row = document.createElement("div");
+      row.className = "plot-override-row";
+      const target = document.createElement("span");
+      target.textContent = overrideTarget(item.override, this.callbacks);
+      target.title = target.textContent;
+      const fields = document.createElement("span");
+      fields.textContent = overrideFields(item.override);
+      const revert = document.createElement("button");
+      revert.type = "button";
+      revert.textContent = "⟲";
+      revert.title = `Revert ${target.textContent}`;
+      revert.addEventListener("click", () => {
+        this.callbacks.onRevertStyleOverride(this.id, item.index);
+      });
+      row.append(target, fields, revert);
+      drawer.append(row);
+    }
+    return drawer;
+  }
+
+  private plotStatsColumnsDrawer(state: RenderPanelState): HTMLElement {
+    const drawer = document.createElement("div");
+    drawer.className = "plot-legend-drawer plot-stats-columns-drawer";
+    const title = document.createElement("div");
+    title.className = "plot-legend-drawer-title";
+    title.textContent = "STAT COLUMNS · VISIBLE REGION";
+    drawer.append(title);
+    for (const column of [
+      "min",
+      "max",
+      "mean",
+      "rms",
+      "n",
+      "cursor",
+    ] as const satisfies readonly StatColumn[]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      const active = state.stat_columns.includes(column);
+      button.setAttribute("aria-pressed", String(active));
+      button.textContent = `${active ? "✓ " : "  "}${statColumnLabel(column)}`;
+      button.addEventListener("click", () => {
+        const columns = active
+          ? state.stat_columns.filter((entry) => entry !== column)
+          : [...state.stat_columns, column];
+        if (columns.length > 0)
+          this.callbacks.onSetStatColumns(this.id, columns);
+      });
+      drawer.append(button);
+    }
+    return drawer;
+  }
+
+  private plotLegendStats(state: RenderPanelState): HTMLElement {
+    const content = document.createElement("div");
+    content.className = "plot-legend-content plot-legend-stats";
+    const columns = this.visibleStatColumns(state);
+    const { units, mixedUnits, sharedUnit } = this.legendStatUnits(state);
+    const grid = statGridTemplate(columns.length);
+    const header = document.createElement("div");
+    header.className = "plot-stat-header";
+    header.style.gridTemplateColumns = grid;
+    const seriesHeader = document.createElement("span");
+    seriesHeader.className = "plot-stat-series-header";
+    seriesHeader.textContent = "SERIES";
+    const picker = document.createElement("button");
+    picker.type = "button";
+    picker.className = "plot-stat-column-picker";
+    picker.textContent = "⊞▾";
+    picker.title = "Choose statistic columns";
+    picker.setAttribute("aria-expanded", String(this.statsColumnsDrawer));
+    picker.addEventListener("click", () => {
+      this.statsColumnsDrawer = !this.statsColumnsDrawer;
+      this.encodingDrawer = null;
+      this.overrideDrawer = false;
+      this.updatePlotLegend(state);
+    });
+    seriesHeader.append(picker);
+    header.append(seriesHeader);
+    const spanHeader = document.createElement("span");
+    spanHeader.className = "plot-stat-span-header";
+    spanHeader.setAttribute("aria-label", "Minimum to maximum span");
+    header.append(spanHeader);
+    for (const column of columns) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "plot-stat-sort";
+      button.dataset.column = column;
+      const sorted = state.stats_sort === column;
+      const sortable = column === "n" || !mixedUnits;
+      button.classList.toggle("active", sorted);
+      button.disabled = !sortable;
+      button.title = sortable
+        ? `Sort by ${statColumnLabel(column)}`
+        : "Sorting is unavailable because these series have mixed units";
+      button.textContent = `${statColumnLabel(column, column === "n" ? null : sharedUnit)}${sorted ? (state.stats_sort_descending ? " ↓" : " ↑") : ""}`;
+      button.addEventListener("click", () => {
+        const descending =
+          state.stats_sort === column ? !state.stats_sort_descending : true;
+        this.callbacks.onSetStatsSort(this.id, column, descending);
+      });
+      header.append(button);
+    }
+
+    const values = this.legendStatsByPath();
+    const rows = state.series.map((series, index) => ({
+      series,
+      index,
+      values: values.get(series.path) ?? emptyLegendStats(),
+    }));
+    if (
+      state.stats_sort !== null &&
+      (state.stats_sort === "n" || !mixedUnits)
+    ) {
+      const column = state.stats_sort;
+      const direction = state.stats_sort_descending ? -1 : 1;
+      rows.sort((left, right) => {
+        const a = left.values[column];
+        const b = right.values[column];
+        if (a === null && b === null) return left.index - right.index;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return a === b ? left.index - right.index : (a - b) * direction;
+      });
+    }
+    const aggregate = aggregateLegendStats(
+      rows.map((row) => row.values),
+      mixedUnits,
+    );
+    const spanDomain = mixedUnits
+      ? null
+      : statSpanDomain(rows.map((row) => row.values));
+    const aggregateRow = document.createElement("div");
+    aggregateRow.className = "plot-stat-row plot-stat-aggregate";
+    aggregateRow.style.gridTemplateColumns = grid;
+    const aggregateLabel = document.createElement("span");
+    aggregateLabel.textContent = `∑ ${String(rows.length)} series`;
+    aggregateRow.append(
+      aggregateLabel,
+      statHistogram(
+        mixedUnits && state.stats_sort !== "n"
+          ? []
+          : rows.map((row) => row.values[state.stats_sort ?? "mean"]),
+      ),
+    );
+    for (const column of columns) {
+      aggregateRow.append(statCell(aggregate[column], column));
+    }
+
+    const body = document.createElement("div");
+    body.className = "plot-stat-body";
+    body.addEventListener("click", (event) => {
+      if (event.target === body) this.callbacks.onClearFocus(this.id);
+    });
+    for (const row of rows) {
+      const element = document.createElement("div");
+      element.className = "plot-stat-row";
+      element.dataset.paths = JSON.stringify([row.series.path]);
+      element.classList.toggle("muted", !row.series.visible);
+      element.classList.toggle("focused", row.series.focused);
+      element.classList.toggle("overridden", row.series.overridden);
+      element.style.gridTemplateColumns = grid;
+      const identity = document.createElement("span");
+      identity.className = "plot-stat-identity";
+      const swatch = document.createElement("button");
+      swatch.type = "button";
+      swatch.className = "plot-legend-swatch plot-row-inspector-toggle";
+      swatch.style.setProperty(
+        "--plot-row-swatch-color",
+        seriesColor(row.series),
+      );
+      swatch.style.setProperty(
+        "--plot-row-swatch-width",
+        `${String(Math.max(1, row.series.width + (row.series.focused ? 1 : 0)))}px`,
+      );
+      swatch.title = `Edit ${row.series.path} line properties`;
+      swatch.setAttribute(
+        "aria-expanded",
+        String(this.inspectorPath === row.series.path),
+      );
+      swatch.addEventListener("click", () => {
+        this.toggleInlineInspector(state, row.series.path);
+      });
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "plot-stat-label";
+      label.textContent = row.series.path;
+      if (row.series.overridden) {
+        const marker = document.createElement("span");
+        marker.className = "plot-row-override-marker";
+        marker.textContent = "▍";
+        label.append(marker);
+      }
+      label.addEventListener("mouseenter", () =>
+        this.setEmphasis(row.series.path),
+      );
+      label.addEventListener("mouseleave", () => this.setEmphasis(null));
+      label.addEventListener("click", (event) => {
+        if (event.altKey) this.callbacks.onMuteSeries(this.id, row.series.ref);
+        else
+          this.selectFocusRows(
+            event,
+            "stats",
+            row.series.path,
+            rows,
+            (entry) => entry.series.path,
+            (entry) => ({
+              kind: "series",
+              ref: entry.series.ref,
+              source_key: null,
+              channel: entry.series.ref.channel,
+            }),
+          );
+      });
+      identity.append(swatch, label);
+      element.append(
+        identity,
+        statSpan(row.values, spanDomain, seriesColor(row.series)),
+      );
+      for (const column of columns) {
+        const cell = statCell(
+          row.values[column],
+          column,
+          mixedUnits && column !== "n" ? units.get(row.series.path) : null,
+        );
+        if (column === "cursor") cell.dataset.path = row.series.path;
+        element.append(cell);
+      }
+      body.append(element);
+      if (this.inspectorPath === row.series.path) {
+        body.append(this.inlineSeriesInspector(state, row.series));
+      }
+    }
+    const ghosts = state.series.filter(
+      (series) => series.visible && series.display === "ghost",
+    ).length;
+    content.append(
+      header,
+      aggregateRow,
+      body,
+      this.plotLegendTips(state),
+      this.plotLegendFooter(
+        state,
+        ghosts,
+        () => {
+          this.callbacks.onLegendLayout(this.id, { state: "roster" });
+        },
+        true,
+      ),
+    );
+    return content;
+  }
+
+  private legendStatsByPath(): Map<string, LegendStatValues> {
+    const values = new Map<string, LegendStatValues>();
+    for (const group of this.preparedPlot?.stats() ?? []) {
+      const row = emptyLegendStats();
+      for (const item of group.items) {
+        if (item.label === "min") row.min = item.value;
+        else if (item.label === "max") row.max = item.value;
+        else if (item.label === "mean") row.mean = item.value;
+        else if (item.label === "rms") row.rms = item.value;
+        else if (item.label === "n") row.n = item.value;
+      }
+      row.cursor = this.valueAtCursor(group.label);
+      values.set(group.label, row);
+    }
+    return values;
+  }
+
+  private valueAtCursor(path: string): number | null {
+    const tile = this.lastTiles?.series.find(
+      (series) => series.signalPath === path,
+    );
+    return tile === undefined || this.cursorT === null
+      ? null
+      : columnsValueAtTime(tile.bins, this.cursorT);
+  }
+
+  private exportLegendStats(state: RenderPanelState): void {
+    const values = this.legendStatsByPath();
+    const columns = this.visibleStatColumns(state);
+    const { units, mixedUnits, sharedUnit } = this.legendStatUnits(state);
+    const lines = [
+      [
+        "series",
+        ...columns.map((column) =>
+          statColumnLabel(column, column === "n" ? null : sharedUnit),
+        ),
+      ]
+        .map(csvCell)
+        .join(","),
+      ...state.series.map((series) => {
+        const row = values.get(series.path) ?? emptyLegendStats();
+        return [
+          series.path,
+          ...columns.map((column) => {
+            if (row[column] === null) return "";
+            const unit =
+              mixedUnits && column !== "n"
+                ? (units.get(series.path) ?? null)
+                : null;
+            return `${String(row[column])}${unit === null ? "" : ` ${unit}`}`;
+          }),
+        ]
+          .map(csvCell)
+          .join(",");
+      }),
+    ];
+    downloadText(
+      `${safeFilename(state.title)}-visible-stats.csv`,
+      lines.join("\n"),
+    );
+  }
+
+  private visibleStatColumns(state: RenderPanelState): StatColumn[] {
+    const width = required<HTMLElement>(
+      this.element,
+      ".plot-series-legend",
+    ).clientWidth;
+    if (width === 0) return state.stat_columns;
+    const capacity = Math.max(1, Math.floor((width - 184) / 64));
+    if (capacity >= state.stat_columns.length) return state.stat_columns;
+    const retained = state.stat_columns.slice(0, capacity);
+    const sorted = state.stats_sort;
+    if (
+      sorted !== null &&
+      state.stat_columns.includes(sorted) &&
+      !retained.includes(sorted)
+    ) {
+      retained[retained.length - 1] = sorted;
+    }
+    return state.stat_columns.filter((column) => retained.includes(column));
+  }
+
+  private legendStatUnits(state: RenderPanelState): {
+    units: Map<string, string | null>;
+    mixedUnits: boolean;
+    sharedUnit: string | null;
+  } {
+    const units = new Map(
+      state.series.map((series) => [
+        series.path,
+        this.callbacks.catalog().get(series.ref)?.summary.unit ?? null,
+      ]),
+    );
+    const distinctUnits = new Set(units.values());
+    const mixedUnits = distinctUnits.size > 1;
+    const sharedUnit =
+      distinctUnits.size === 1
+        ? (distinctUnits.values().next().value ?? null)
+        : null;
+    return { units, mixedUnits, sharedUnit };
   }
 
   private updateLegendValue(value: HTMLElement): void {
@@ -1995,6 +2782,15 @@ export class PanelView {
   }
 
   private updateLegendValues(): void {
+    for (const cell of this.element.querySelectorAll<HTMLElement>(
+      '.plot-stat-cell[data-column="cursor"][data-path]',
+    )) {
+      setStatCellValue(
+        cell,
+        this.valueAtCursor(cell.dataset.path ?? ""),
+        cell.dataset.unit ?? null,
+      );
+    }
     for (const value of this.element.querySelectorAll<HTMLElement>(
       ".plot-legend-value",
     )) {
@@ -2003,15 +2799,16 @@ export class PanelView {
   }
 
   private legendResizeHandle(
-    edge: "left" | "right" | "bottom" | "corner",
+    edge: "left" | "right" | "top" | "bottom" | "corner",
     legend: HTMLElement,
   ): HTMLButtonElement {
     const resize = document.createElement("button");
     resize.className = `plot-legend-resize plot-legend-resize-${edge}`;
-    if (edge === "left") resize.classList.add("dock-resize-handle");
+    if (legend.dataset.state === "rail")
+      resize.classList.add("dock-resize-handle");
     resize.type = "button";
     resize.title =
-      edge === "left"
+      legend.dataset.state === "rail"
         ? "Resize or collapse docked legend"
         : `Resize plot legend from the ${edge}`;
     resize.setAttribute("aria-label", resize.title);
@@ -2022,69 +2819,65 @@ export class PanelView {
   private bindPlotLegendResize(
     handle: HTMLButtonElement,
     legend: HTMLElement,
-    edge: "left" | "right" | "bottom" | "corner",
+    edge: "left" | "right" | "top" | "bottom" | "corner",
   ): void {
-    let railRequested = edge === "left";
-    let requestedWidth: number | null = null;
+    const dock = this.plotLegendDock ?? "right";
+    const docked = legend.dataset.state === "rail";
+    const verticalDock = dock === "left" || dock === "right";
+    let requestedThickness: number | null = null;
     const resize = (width: number, height: number): void => {
       const box = legend.getBoundingClientRect();
       const bounds = legend.parentElement?.getBoundingClientRect();
-      requestedWidth = width;
-      if (edge !== "left") {
+      if (docked) {
+        requestedThickness = verticalDock ? width : height;
+      } else {
         this.plotLegendPosition = this.currentPlotLegendPosition(legend);
         this.plotLegendAnchor = null;
-        railRequested ||=
-          bounds !== undefined &&
-          (width > bounds.width * 0.4 || height > bounds.height * 0.6);
       }
       this.plotLegendSize = {
-        width:
-          edge === "bottom"
-            ? box.width
-            : edge === "left" && width < LEGEND_RAIL_COLLAPSE
-              ? 0
-              : width || box.width,
+        width: docked && !verticalDock ? (bounds?.width ?? box.width) : width,
         height:
-          edge === "right" || edge === "left"
-            ? box.height
-            : height || box.height,
+          docked && verticalDock ? (bounds?.height ?? box.height) : height,
       };
       this.positionPlotLegend();
     };
     const commit = (): void => {
       if (this.plotLegendSize === null) return;
-      if (edge === "left") {
+      if (docked) {
         const bounds = legend.parentElement?.getBoundingClientRect();
-        const rawWidth = requestedWidth ?? legend.getBoundingClientRect().width;
-        const width =
-          rawWidth < LEGEND_RAIL_COLLAPSE
+        const box = legend.getBoundingClientRect();
+        const raw =
+          requestedThickness ?? (verticalDock ? box.width : box.height);
+        const minimum = verticalDock ? LEGEND_RAIL_MIN : 120;
+        const available = verticalDock
+          ? (bounds?.width ?? raw)
+          : (bounds?.height ?? raw);
+        const thickness =
+          raw < LEGEND_RAIL_COLLAPSE
             ? 0
-            : clamp(
-                rawWidth,
-                LEGEND_RAIL_MIN,
-                Math.max(LEGEND_RAIL_MIN, (bounds?.width ?? rawWidth) * 0.45),
-              );
+            : clamp(raw, minimum, Math.max(minimum, available * 0.45));
         this.callbacks.onLegendLayout(this.id, {
           state: "rail",
           position: null,
-          size: [width, bounds?.height ?? this.plotLegendSize.height],
+          size: verticalDock
+            ? [thickness, bounds?.height ?? this.plotLegendSize.height]
+            : [bounds?.width ?? this.plotLegendSize.width, thickness],
           anchor: null,
+          dock,
         });
         return;
       }
-      const nextState: LegendState = railRequested
-        ? "rail"
-        : this.plotLegendSize.height >= 150
-          ? "roster"
-          : "keys";
+      const nextState: LegendState =
+        this.plotLegendSize.height >= 150 ? "roster" : "keys";
       this.callbacks.onLegendLayout(this.id, {
         state: nextState,
         position:
-          nextState === "rail" || this.plotLegendPosition === null
+          this.plotLegendPosition === null
             ? null
             : [this.plotLegendPosition.x, this.plotLegendPosition.y],
         size: [this.plotLegendSize.width, this.plotLegendSize.height],
         anchor: null,
+        dock: null,
       });
     };
     handle.addEventListener("keydown", (event) => {
@@ -2098,25 +2891,54 @@ export class PanelView {
       if (direction === undefined) return;
       event.preventDefault();
       const box = legend.getBoundingClientRect();
+      const expandKey =
+        dock === "right"
+          ? "ArrowLeft"
+          : dock === "left"
+            ? "ArrowRight"
+            : dock === "top"
+              ? "ArrowDown"
+              : "ArrowUp";
+      const collapseKey =
+        dock === "right"
+          ? "ArrowRight"
+          : dock === "left"
+            ? "ArrowLeft"
+            : dock === "top"
+              ? "ArrowUp"
+              : "ArrowDown";
+      const minimum = verticalDock ? LEGEND_RAIL_MIN : 120;
+      const thickness = verticalDock ? box.width : box.height;
       if (
-        edge === "left" &&
-        ((legend.dataset.collapsed === "true" && event.key === "ArrowLeft") ||
+        docked &&
+        ((legend.dataset.collapsed === "true" && event.key === expandKey) ||
           (legend.dataset.collapsed !== "true" &&
-            event.key === "ArrowRight" &&
-            box.width <= LEGEND_RAIL_MIN))
+            thickness <= minimum &&
+            event.key === collapseKey))
       ) {
+        const next =
+          legend.dataset.collapsed === "true" ? LEGEND_RAIL_DEFAULT : 0;
         resize(
-          legend.dataset.collapsed === "true" ? LEGEND_RAIL_DEFAULT : 0,
-          box.height,
+          verticalDock ? next : box.width,
+          verticalDock ? box.height : next,
         );
         commit();
         return;
       }
       const step = event.shiftKey ? 48 : 16;
-      resize(
-        box.width + direction[0] * step * (edge === "left" ? -1 : 1),
-        box.height + direction[1] * step,
-      );
+      const widthDelta =
+        edge === "left"
+          ? -direction[0] * step
+          : edge === "right" || edge === "corner"
+            ? direction[0] * step
+            : 0;
+      const heightDelta =
+        edge === "top"
+          ? -direction[1] * step
+          : edge === "bottom" || edge === "corner"
+            ? direction[1] * step
+            : 0;
+      resize(box.width + widthDelta, box.height + heightDelta);
       commit();
     });
     handle.addEventListener("pointerdown", (event) => {
@@ -2126,9 +2948,21 @@ export class PanelView {
       const start = { x: event.clientX, y: event.clientY };
       const move = (next: PointerEvent): void => {
         if (next.pointerId !== event.pointerId) return;
+        const dx = next.clientX - start.x;
+        const dy = next.clientY - start.y;
         resize(
-          box.width + (next.clientX - start.x) * (edge === "left" ? -1 : 1),
-          box.height + next.clientY - start.y,
+          box.width +
+            (edge === "left"
+              ? -dx
+              : edge === "right" || edge === "corner"
+                ? dx
+                : 0),
+          box.height +
+            (edge === "top"
+              ? -dy
+              : edge === "bottom" || edge === "corner"
+                ? dy
+                : 0),
         );
       };
       const end = (next: PointerEvent): void => {
@@ -2151,7 +2985,10 @@ export class PanelView {
     handle.addEventListener("keydown", (event) => {
       if (event.key === "End") {
         event.preventDefault();
-        this.dockPlotLegend(legend);
+        this.dockPlotLegend(
+          legend,
+          this.nearestPlotLegendEdge(legend) ?? "right",
+        );
         return;
       }
       const directions: Record<string, [number, number]> = {
@@ -2204,19 +3041,23 @@ export class PanelView {
         };
         this.plotLegendAnchor = null;
         this.positionPlotLegend();
-        legend.parentElement?.classList.toggle(
-          "legend-dock-preview",
-          this.plotLegendNearRightEdge(legend),
-        );
+        const wrap = legend.parentElement;
+        if (wrap !== null) {
+          const preview = this.nearestPlotLegendEdge(legend, 56);
+          if (preview === null) delete wrap.dataset.legendDockPreview;
+          else wrap.dataset.legendDockPreview = preview;
+        }
       };
       const end = (next: PointerEvent): void => {
         if (next.pointerId !== event.pointerId) return;
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", end);
         document.removeEventListener("pointercancel", end);
-        legend.parentElement?.classList.remove("legend-dock-preview");
-        if (this.plotLegendTouchesRightEdge(legend)) {
-          this.dockPlotLegend(legend);
+        const wrap = legend.parentElement;
+        if (wrap !== null) delete wrap.dataset.legendDockPreview;
+        const dock = this.nearestPlotLegendEdge(legend, 20);
+        if (dock !== null) {
+          this.dockPlotLegend(legend, dock);
           return;
         }
         this.commitPlotLegendPosition();
@@ -2232,34 +3073,43 @@ export class PanelView {
     this.callbacks.onLegendLayout(this.id, {
       position: [this.plotLegendPosition.x, this.plotLegendPosition.y],
       anchor: null,
+      dock: null,
     });
   }
 
-  private dockPlotLegend(legend: HTMLElement): void {
+  private dockPlotLegend(legend: HTMLElement, dock: LegendDock): void {
     const box = legend.getBoundingClientRect();
+    const bounds = legend.parentElement?.getBoundingClientRect();
+    const vertical = dock === "left" || dock === "right";
     this.callbacks.onLegendLayout(this.id, {
       state: "rail",
       position: null,
-      size: [box.width, box.height],
+      size: vertical
+        ? [box.width, bounds?.height ?? box.height]
+        : [bounds?.width ?? box.width, box.height],
       anchor: null,
+      dock,
     });
   }
 
-  private plotLegendTouchesRightEdge(legend: HTMLElement): boolean {
-    return this.plotLegendRightEdgeDistance(legend) <= 20;
-  }
-
-  private plotLegendNearRightEdge(legend: HTMLElement): boolean {
-    return this.plotLegendRightEdgeDistance(legend) <= 56;
-  }
-
-  private plotLegendRightEdgeDistance(legend: HTMLElement): number {
+  private nearestPlotLegendEdge(
+    legend: HTMLElement,
+    threshold = Number.POSITIVE_INFINITY,
+  ): LegendDock | null {
     const wrap = legend.parentElement;
-    if (wrap === null) return Number.POSITIVE_INFINITY;
+    if (wrap === null) return null;
     const bounds = wrap.getBoundingClientRect();
     const box = legend.getBoundingClientRect();
     const position = this.currentPlotLegendPosition(legend);
-    return bounds.width - position.x - box.width;
+    const distances: Array<[LegendDock, number]> = [
+      ["left", position.x],
+      ["right", bounds.width - position.x - box.width],
+      ["top", position.y],
+      ["bottom", bounds.height - position.y - box.height],
+    ];
+    distances.sort((left, right) => left[1] - right[1]);
+    const nearest = distances[0];
+    return nearest !== undefined && nearest[1] <= threshold ? nearest[0] : null;
   }
 
   private floatPlotLegend(legend: HTMLElement): void {
@@ -2271,6 +3121,7 @@ export class PanelView {
       position: null,
       size: [box.width, clamp(280, 150, maxHeight)],
       anchor: "top_right",
+      dock: null,
     });
   }
 
@@ -2283,20 +3134,11 @@ export class PanelView {
     if (wrap === null) return { x: 8, y: 8 };
     const bounds = wrap.getBoundingClientRect();
     const box = legend.getBoundingClientRect();
-    if (this.plotLegendAnchor !== null) {
-      return {
-        x: this.plotLegendAnchor.endsWith("right")
-          ? bounds.width - box.width - 8
-          : 8,
-        y: this.plotLegendAnchor.startsWith("bottom")
-          ? bounds.height - box.height - 8
-          : 8,
-      };
-    }
-    const measured = { x: box.left - bounds.left, y: box.top - bounds.top };
-    return Number.isFinite(measured.x) && Number.isFinite(measured.y)
-      ? measured
-      : { x: 8, y: 8 };
+    const anchor = this.plotLegendAnchor ?? "top_right";
+    return {
+      x: anchor.endsWith("right") ? bounds.width - box.width - 8 : 8,
+      y: anchor.startsWith("bottom") ? bounds.height - box.height - 8 : 8,
+    };
   }
 
   private positionPlotLegend(): void {
@@ -2306,35 +3148,51 @@ export class PanelView {
     const bounds = wrap.getBoundingClientRect();
     const state = legend.dataset.state as LegendState | undefined;
     if (state === "rail") {
-      const requestedWidth = this.plotLegendSize?.width ?? LEGEND_RAIL_DEFAULT;
-      const collapsed = requestedWidth < LEGEND_RAIL_COLLAPSE;
-      const width = collapsed
+      const dock = this.plotLegendDock ?? "right";
+      const vertical = dock === "left" || dock === "right";
+      const requested = vertical
+        ? (this.plotLegendSize?.width ?? LEGEND_RAIL_DEFAULT)
+        : (this.plotLegendSize?.height ?? LEGEND_RAIL_DEFAULT);
+      const collapsed = requested < LEGEND_RAIL_COLLAPSE;
+      const minimum = vertical ? LEGEND_RAIL_MIN : 120;
+      const available = vertical ? bounds.width : bounds.height;
+      const thickness = collapsed
         ? DOCK_SEAM_WIDTH
-        : clamp(
-            requestedWidth,
-            LEGEND_RAIL_MIN,
-            Math.max(LEGEND_RAIL_MIN, bounds.width * 0.45),
-          );
+        : clamp(requested, minimum, Math.max(minimum, available * 0.45));
       this.plotLegendSize = {
-        width: collapsed ? 0 : width,
-        height: bounds.height,
+        width: vertical ? (collapsed ? 0 : thickness) : bounds.width,
+        height: vertical ? bounds.height : collapsed ? 0 : thickness,
       };
       wrap.classList.add("legend-rail");
       wrap.classList.toggle("legend-rail-collapsed", collapsed);
-      wrap.style.setProperty("--plot-legend-rail-width", `${String(width)}px`);
+      wrap.dataset.legendDock = dock;
+      wrap.style.setProperty(
+        "--plot-legend-rail-width",
+        `${String(vertical ? thickness : 0)}px`,
+      );
+      wrap.style.setProperty(
+        "--plot-legend-rail-height",
+        `${String(vertical ? 0 : thickness)}px`,
+      );
+      legend.dataset.dock = dock;
       legend.dataset.collapsed = String(collapsed);
-      legend.style.width = `${String(width)}px`;
-      legend.style.height = "100%";
-      legend.style.left = "auto";
-      legend.style.top = "0";
-      legend.style.right = "0";
+      legend.style.width = vertical ? `${String(thickness)}px` : "100%";
+      legend.style.height = vertical ? "100%" : `${String(thickness)}px`;
+      legend.style.left = dock === "right" ? "auto" : "0";
+      legend.style.right = dock === "left" ? "auto" : "0";
+      legend.style.top = dock === "bottom" ? "auto" : "0";
+      legend.style.bottom = dock === "top" ? "auto" : "0";
       this.refreshPlotLegendRoster();
       return;
     }
     wrap.classList.remove("legend-rail");
     wrap.classList.remove("legend-rail-collapsed");
+    delete wrap.dataset.legendDock;
     wrap.style.removeProperty("--plot-legend-rail-width");
+    wrap.style.removeProperty("--plot-legend-rail-height");
+    delete legend.dataset.dock;
     delete legend.dataset.collapsed;
+    legend.style.removeProperty("bottom");
     if (state === "badge") {
       legend.style.removeProperty("width");
       legend.style.removeProperty("height");
@@ -2382,18 +3240,7 @@ export class PanelView {
     this.element
       .querySelector<HTMLElement>(".plot-legend-roster-rows")
       ?.dispatchEvent(new Event("scroll"));
-  }
-
-  private colorRuleToken(state: RenderPanelState): HTMLButtonElement {
-    const token = document.createElement("button");
-    token.className = "color-rule-token";
-    token.type = "button";
-    token.textContent = `color ← ${state.color_by}`;
-    token.title = "Choose a color rule and review overrides";
-    token.addEventListener("click", (event) => {
-      this.openRulesPopover(state, event.currentTarget as HTMLElement);
-    });
-    return token;
+    this.updateEmphasisChrome();
   }
 
   private updateBindings(state: RenderPanelState): void {
@@ -2416,19 +3263,6 @@ export class PanelView {
     }
   }
 
-  private updateGhostToggle(state: RenderPanelState): void {
-    const toggle = required<HTMLButtonElement>(
-      this.element,
-      ".panel-ghost-toggle",
-    );
-    const ghost = state.ghost_mode === "ghost";
-    toggle.textContent = ghost ? "ghost" : "all";
-    toggle.title = ghost
-      ? "Show all series"
-      : "Show focused and rule-matched series only";
-    toggle.setAttribute("aria-pressed", String(ghost));
-  }
-
   private setEmphasis(paths: readonly string[] | string | null): void {
     const next =
       paths === null
@@ -2436,31 +3270,78 @@ export class PanelView {
         : new Set(typeof paths === "string" ? [paths] : paths);
     if (setsEqual(this.emphasizePaths, next)) return;
     this.emphasizePaths = next;
+    this.updateEmphasisChrome();
     if (this.lastState !== null && this.lastWindow !== null) {
       this.renderForMode(this.lastState, this.lastTiles, this.lastWindow);
       this.drawOverlay(this.resolvedAnnotations(this.lastState));
     }
   }
 
-  private focusEntryForRow(
-    dimension: LegendDimension,
-    row: MatrixLegendRow,
-    state: RenderPanelState,
-  ): FocusEntry {
-    const series = state.series.find((entry) =>
-      dimension === "source"
-        ? (this.callbacks.catalog().get(entry.ref)?.sourceName ??
-            entry.ref.source_key) === row.value
-        : entry.ref.channel === row.value,
-    );
-    return dimension === "source"
-      ? {
-          kind: "source",
-          ref: null,
-          source_key: series?.ref.source_key ?? row.value,
-          channel: null,
-        }
-      : { kind: "channel", ref: null, source_key: null, channel: row.value };
+  private updateEmphasisChrome(): void {
+    for (const row of this.element.querySelectorAll<HTMLElement>(
+      "[data-paths]",
+    )) {
+      let paths: string[] = [];
+      try {
+        const value: unknown = JSON.parse(row.dataset.paths ?? "[]");
+        if (Array.isArray(value))
+          paths = value.filter(
+            (path): path is string => typeof path === "string",
+          );
+      } catch {
+        paths = [];
+      }
+      row.classList.toggle(
+        "cross-highlight",
+        this.emphasizePaths !== null &&
+          paths.some((path) => this.emphasizePaths?.has(path) === true),
+      );
+    }
+  }
+
+  private focusEntryForSeries(series: RenderSeries): FocusEntry {
+    return {
+      kind: "series",
+      ref: series.ref,
+      source_key: null,
+      channel: series.ref.channel,
+    };
+  }
+
+  private selectFocusRows<T>(
+    event: MouseEvent,
+    scope: string,
+    value: string,
+    rows: readonly T[],
+    rowValue: (row: T) => string,
+    focusEntry: (row: T) => FocusEntry,
+  ): void {
+    if (event.shiftKey) {
+      const target = rows.findIndex((row) => rowValue(row) === value);
+      const anchor =
+        this.focusRangeAnchor?.scope === scope
+          ? rows.findIndex(
+              (row) => rowValue(row) === this.focusRangeAnchor?.value,
+            )
+          : -1;
+      if (anchor !== -1 && target !== -1) {
+        const start = Math.min(anchor, target);
+        const end = Math.max(anchor, target);
+        this.callbacks.onFocusRange(
+          this.id,
+          rows.slice(start, end + 1).map(focusEntry),
+        );
+        return;
+      }
+    }
+
+    this.focusRangeAnchor = { scope, value };
+    const row = rows.find((candidate) => rowValue(candidate) === value);
+    if (row === undefined) return;
+    const entry = focusEntry(row);
+    if (event.metaKey || event.ctrlKey)
+      this.callbacks.onFocusToggle(this.id, entry);
+    else this.callbacks.onFocusAdd(this.id, entry);
   }
 
   private openBindingPopover(
@@ -2480,7 +3361,8 @@ export class PanelView {
     const removeBinding = document.createElement("button");
     removeBinding.className = "binding-popover-remove";
     removeBinding.type = "button";
-    removeBinding.textContent = "remove binding";
+    removeBinding.textContent = "remove all";
+    removeBinding.title = "Remove all series in this binding";
     removeBinding.addEventListener("click", () => {
       this.callbacks.onRemoveBinding(this.id, entry.bindingIndex);
       this.closeBindingPopover();
@@ -2500,9 +3382,8 @@ export class PanelView {
           this.callbacks.pathForRef(ref) ?? `${ref.source_key}/${ref.channel}`;
         path.addEventListener("click", (event) => {
           event.stopPropagation();
-          const rect = path.getBoundingClientRect();
           this.closeBindingPopover();
-          this.openInspector(path.textContent, rect.left, rect.bottom);
+          this.openInspector(path.textContent);
         });
         const remove = document.createElement("button");
         remove.type = "button";
@@ -2554,35 +3435,117 @@ export class PanelView {
     this.bindingCleanup = null;
   }
 
-  private openPanelConfig(state: RenderPanelState, anchor: HTMLElement): void {
+  private openLineWidthMenu(
+    state: RenderPanelState,
+    anchor: HTMLElement,
+  ): void {
+    this.openPanelMenu(
+      anchor,
+      "LINE WIDTH · PANEL DEFAULT",
+      [1, 1.4, 1.5, 2, 3].map((width) => ({
+        label: `${formatToolbarNumber(width)} px`,
+        active: Math.abs(state.line_width - width) < 0.001,
+        run: () => this.callbacks.onSetPanelLineWidth(this.id, width),
+      })),
+    );
+  }
+
+  private openGhostMenu(state: RenderPanelState, anchor: HTMLElement): void {
+    this.openPanelMenu(anchor, "DIM OTHER SERIES", [
+      {
+        label: "none · show full color",
+        active: state.ghost_mode === "all",
+        run: () => {
+          if (state.ghost_mode !== "all")
+            this.callbacks.onToggleGhostMode(this.id);
+        },
+      },
+      ...[0.2, 0.35, 0.5].map((opacity) => ({
+        label: `to ${String(Math.round(opacity * 100))}% opacity`,
+        active:
+          state.ghost_mode === "ghost" &&
+          Math.abs(state.ghost_opacity - opacity) < 0.001,
+        run: () => {
+          this.callbacks.onSetGhostOpacity(this.id, opacity);
+          if (state.ghost_mode !== "ghost")
+            this.callbacks.onToggleGhostMode(this.id);
+        },
+      })),
+    ]);
+  }
+
+  private openLegendStateMenu(
+    state: RenderPanelState,
+    anchor: HTMLElement,
+  ): void {
+    this.openPanelMenu(
+      anchor,
+      "LEGEND TYPE",
+      (["badge", "keys", "roster", "rail"] as const).map((legendState) => ({
+        label: legendState,
+        active: state.legend_state === legendState,
+        run: () =>
+          this.callbacks.onLegendLayout(this.id, { state: legendState }),
+      })),
+    );
+  }
+
+  private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
+    this.openPanelMenu(anchor, `TIPS · ${String(state.annotations.length)}`, [
+      ...(["labels", "markers", "hidden"] as const).map((mode) => ({
+        label: mode === "markers" ? "markers only" : mode,
+        active: state.annotation_display === mode,
+        run: () => {
+          this.callbacks.onSetAnnotationDisplay?.(this.id, mode);
+        },
+      })),
+      {
+        label: "clear all",
+        active: false,
+        action: true,
+        run: () => {
+          this.selectedAnnotationIds.clear();
+          this.callbacks.onClearAnnotations?.(this.id);
+        },
+      },
+    ]);
+  }
+
+  private openPanelMenu(
+    anchor: HTMLElement,
+    label: string,
+    options: readonly {
+      label: string;
+      active: boolean;
+      action?: boolean;
+      run: () => void;
+    }[],
+  ): void {
     this.closePanelConfig();
     const popover = document.createElement("div");
     popover.className = "panel-config-popover";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Panel configuration");
+    popover.setAttribute("role", "menu");
+    popover.setAttribute("aria-label", label);
     const title = document.createElement("div");
     title.className = "panel-config-title";
-    title.textContent = "PANEL CONFIG";
-    const lineStyle = document.createElement("button");
-    lineStyle.type = "button";
-    const overridden = state.overrides.some(
-      (override) => override.dash !== null || override.width !== null,
-    );
-    lineStyle.textContent = overridden
-      ? "line style ◆ overridden"
-      : "line style flat";
-    lineStyle.addEventListener("click", () => {
-      this.closePanelConfig();
-      this.openRulesPopover(state, anchor);
-    });
-    const stats = document.createElement("button");
-    stats.type = "button";
-    stats.textContent = `statistics ${state.show_stats ? "on" : "off"}`;
-    stats.addEventListener("click", () => {
-      this.callbacks.onToggleStats(this.id);
-      this.closePanelConfig();
-    });
-    popover.append(title, lineStyle, stats);
+    title.textContent = label;
+    popover.append(title);
+    for (const option of options) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute(
+        "role",
+        option.action === true ? "menuitem" : "menuitemradio",
+      );
+      if (option.action !== true)
+        button.setAttribute("aria-checked", String(option.active));
+      button.textContent = `${option.active ? "✓ " : option.action === true ? "" : "  "}${option.label}`;
+      button.addEventListener("click", () => {
+        option.run();
+        this.closePanelConfig();
+      });
+      popover.append(button);
+    }
     this.element.append(popover);
     const panelRect = this.element.getBoundingClientRect();
     const anchorRect = anchor.getBoundingClientRect();
@@ -2613,218 +3576,137 @@ export class PanelView {
     this.panelConfigCleanup = null;
   }
 
-  private openRulesPopover(state: RenderPanelState, anchor: HTMLElement): void {
-    this.closeRulesPopover();
-    const popover = document.createElement("div");
-    popover.className = "rules-popover";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Color rules");
-    const heading = document.createElement("div");
-    heading.className = "rules-popover-title";
-    const panelNumber = /^panel-(\d+)$/.exec(this.id)?.[1] ?? this.id;
-    heading.textContent = `STYLE RULES — PANEL ${panelNumber}`;
-    const rules = document.createElement("div");
-    rules.className = "rules-rule-list";
-    const colorRow = document.createElement("div");
-    colorRow.className = "rules-rule-row rules-color-rule";
-    const colorDimension = document.createElement("button");
-    colorDimension.type = "button";
-    colorDimension.className = "rules-color-dimension";
-    colorDimension.textContent = `color ← ${state.color_by}`;
-    colorDimension.setAttribute("aria-expanded", "false");
-    const palette = document.createElement("span");
-    palette.className = "rules-palette";
-    for (let index = 1; index <= 8; index += 1) {
-      const swatch = document.createElement("span");
-      swatch.className = "rules-palette-swatch";
-      swatch.style.background = `var(--series-${String(index)})`;
-      swatch.setAttribute("aria-hidden", "true");
-      palette.append(swatch);
-    }
-    const dimensions = document.createElement("div");
-    dimensions.className = "rules-dimension-choice";
-    dimensions.hidden = true;
-    for (const dimension of [
-      "focus",
-      "source",
-      "channel",
-      "set",
-      "attr",
-    ] as const) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "rules-dimension";
-      button.dataset.dimension = dimension;
-      button.textContent = dimension;
-      button.classList.toggle("active", state.color_by === dimension);
-      button.addEventListener("click", () => {
-        this.callbacks.onSetColorBy(this.id, dimension);
-        this.closeRulesPopover();
-      });
-      dimensions.append(button);
-    }
-    const channelShortcut = document.createElement("button");
-    channelShortcut.type = "button";
-    channelShortcut.className = "rules-channel-shortcut";
-    channelShortcut.textContent = "color ← channel";
-    channelShortcut.addEventListener("click", () => {
-      this.callbacks.onSetColorBy(this.id, "channel");
-      this.closeRulesPopover();
-    });
-    colorDimension.addEventListener("click", () => {
-      dimensions.hidden = !dimensions.hidden;
-      colorDimension.setAttribute("aria-expanded", String(!dimensions.hidden));
-    });
-    colorRow.append(colorDimension, channelShortcut, palette, dimensions);
-    rules.append(colorRow);
-    for (const text of ["dash ← — flat", "width ← — flat"]) {
-      const row = document.createElement("div");
-      row.className = "rules-rule-row rules-rule-static";
-      row.textContent = text;
-      rules.append(row);
-    }
-    const overridesTitle = document.createElement("div");
-    overridesTitle.className = "rules-overrides-title";
-    const input = this.lastInputState;
-    const overrides =
-      input === null
-        ? []
-        : appliedOverrides(
-            this.callbacks.catalog(),
-            input,
-            this.callbacks.namedSets(),
-          );
-    overridesTitle.textContent = `OVERRIDES · ${String(overrides.length)}`;
-    const rows = document.createElement("div");
-    rows.className = "rules-overrides";
-    const renderOverrides = (): void => {
-      const slice = virtualSlice(overrides.length, rows.scrollTop, 224, 28);
-      rows.replaceChildren();
-      rows.style.height = `${String(slice.totalHeight)}px`;
-      rows.style.paddingTop = `${String(slice.topPadding)}px`;
-      for (const item of overrides.slice(slice.start, slice.end)) {
-        const row = document.createElement("div");
-        row.className = "rules-override-row";
-        const key = document.createElement("span");
-        key.className = "rules-override-key";
-        key.textContent = overrideKey(item.override);
-        const target = document.createElement("span");
-        target.className = "rules-override-target";
-        target.textContent = overrideTarget(item.override, this.callbacks);
-        target.title = target.textContent;
-        const fields = document.createElement("span");
-        fields.className = "rules-override-fields";
-        fields.textContent = overrideFields(item.override);
-        const revert = document.createElement("button");
-        revert.type = "button";
-        revert.textContent = "revert";
-        revert.title = `Revert ${target.textContent}`;
-        revert.addEventListener("click", () => {
-          this.callbacks.onRemoveOverride(this.id, item.index);
-          this.closeRulesPopover();
-        });
-        row.append(key, target, fields, revert);
-        rows.append(row);
-      }
-    };
-    rows.addEventListener("scroll", renderOverrides);
-    const footer = document.createElement("button");
-    footer.type = "button";
-    footer.className = "rules-revert-all";
-    footer.textContent = "revert all";
-    footer.disabled = overrides.length === 0;
-    footer.addEventListener("click", () => {
-      this.callbacks.onClearOverrides(this.id);
-      this.closeRulesPopover();
-    });
-    popover.append(heading, rules, overridesTitle, rows, footer);
-    this.element.append(popover);
-    const panelRect = this.element.getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
-    popover.style.left = `${String(
-      clamp(
-        anchorRect.left - panelRect.left,
-        4,
-        Math.max(4, panelRect.width - 280),
-      ),
-    )}px`;
-    popover.style.top = `${String(
-      clamp(
-        anchorRect.bottom - panelRect.top + 4,
-        4,
-        Math.max(4, panelRect.height - 340),
-      ),
-    )}px`;
-    renderOverrides();
-    const onPointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && popover.contains(event.target))
-        return;
-      this.closeRulesPopover();
-    };
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") this.closeRulesPopover();
-    };
-    document.addEventListener("pointerdown", onPointer, { capture: true });
-    document.addEventListener("keydown", onKey);
-    this.rulesCleanup = () => {
-      document.removeEventListener("pointerdown", onPointer, { capture: true });
-      document.removeEventListener("keydown", onKey);
-      popover.remove();
-    };
-  }
-
-  private closeRulesPopover(): void {
-    this.rulesCleanup?.();
-    this.rulesCleanup = null;
-  }
-
-  openInspector(path: string, clientX: number, clientY: number): void {
-    this.closeInspector();
+  openInspector(path: string): void {
     const series = this.lastState?.series.find((entry) => entry.path === path);
     if (series === undefined) return;
     this.inspectorPath = path;
-    const popover = document.createElement("div");
-    popover.className = "series-inspector";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", `${path} series inspector`);
-    const pathRow = document.createElement("div");
-    pathRow.className = "inspector-path";
-    pathRow.textContent = path;
-    const slots = document.createElement("div");
-    slots.className = "inspector-slots";
+    this.updatePlotLegend(this.lastState as RenderPanelState);
+  }
+
+  private selectAnnotation(id: string, additive: boolean): void {
+    if (!additive) this.selectedAnnotationIds.clear();
+    if (additive && this.selectedAnnotationIds.has(id))
+      this.selectedAnnotationIds.delete(id);
+    else this.selectedAnnotationIds.add(id);
+    const annotation = this.lastState?.annotations.find(
+      (entry) => entry.id === id,
+    );
+    const series = this.lastState?.series.find(
+      (entry) => entry.path === annotation?.series_path,
+    );
+    if (series !== undefined) {
+      const focus: FocusEntry = {
+        kind: "series",
+        ref: series.ref,
+        source_key: null,
+        channel: series.ref.channel,
+      };
+      if (additive) this.callbacks.onFocusToggle(this.id, focus);
+      else this.callbacks.onFocusAdd(this.id, focus);
+    }
+    this.drawOverlay();
+    if (this.lastState !== null) this.updatePlotLegend(this.lastState);
+  }
+
+  private pruneAnnotationUiState(state: RenderPanelState): void {
+    const ids = new Set(state.annotations.map((annotation) => annotation.id));
+    for (const id of this.selectedAnnotationIds) {
+      if (!ids.has(id)) this.selectedAnnotationIds.delete(id);
+    }
+    for (const id of this.annotationOffsets.keys()) {
+      if (!ids.has(id)) this.annotationOffsets.delete(id);
+    }
+    if (
+      this.hoveredAnnotationId !== null &&
+      !ids.has(this.hoveredAnnotationId)
+    ) {
+      this.hoveredAnnotationId = null;
+    }
+  }
+
+  private toggleInlineInspector(state: RenderPanelState, path: string): void {
+    this.inspectorPath = this.inspectorPath === path ? null : path;
+    this.updatePlotLegend(state);
+  }
+
+  private inlineSeriesInspector(
+    state: RenderPanelState,
+    series: RenderSeries,
+  ): HTMLElement {
+    const inspector = document.createElement("div");
+    inspector.className = "plot-row-inspector";
+    inspector.setAttribute("role", "group");
+    inspector.setAttribute("aria-label", `${series.path} line properties`);
+    const heading = document.createElement("div");
+    heading.className = "plot-row-inspector-heading";
+    const sample = document.createElement("span");
+    sample.className = "plot-legend-swatch";
+    sample.style.background = seriesColor(series);
+    sample.style.height = `${String(Math.max(1, series.width))}px`;
+    const path = document.createElement("span");
+    path.textContent = series.path;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "✕";
+    close.title = "Close line inspector";
+    close.addEventListener("click", () =>
+      this.toggleInlineInspector(state, series.path),
+    );
+    heading.append(sample, path, close);
+
+    const color = document.createElement("div");
+    color.className = "plot-row-inspector-field";
+    color.classList.toggle("overridden", series.overrideFields.color);
+    const colorLabel = document.createElement("span");
+    colorLabel.textContent = "color";
+    const slots = document.createElement("span");
+    slots.className = "plot-row-color-slots";
     for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
       const swatch = document.createElement("button");
-      swatch.className = "inspector-slot";
+      swatch.type = "button";
       swatch.style.background = `var(--series-${String(slot)})`;
-      swatch.setAttribute("aria-label", `Colour slot ${String(slot)}`);
       swatch.classList.toggle(
         "active",
         colorIndexForHue(series.hue) + 1 === slot,
       );
+      swatch.setAttribute("aria-label", `Color slot ${String(slot)}`);
       swatch.addEventListener("click", () => {
-        this.callbacks.onSetSeriesStyle(this.id, series.ref, {
+        this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
           color_slot: slot,
-          dash: series.dash,
-          width: series.width,
         });
-        this.closeInspector();
       });
       slots.append(swatch);
     }
-    const dashes = document.createElement("div");
-    dashes.className = "inspector-dashes";
+    color.append(
+      colorLabel,
+      slots,
+      this.inspectorProvenance(
+        series.overrideFields.color,
+        `← ${state.color_by ?? "flat"}`,
+        () =>
+          this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
+            color_slot: null,
+          }),
+      ),
+    );
+
+    const line = document.createElement("div");
+    line.className = "plot-row-inspector-field";
+    line.classList.toggle(
+      "overridden",
+      series.overrideFields.dash || series.overrideFields.width,
+    );
+    const lineLabel = document.createElement("span");
+    lineLabel.textContent = "line";
+    const dashes = document.createElement("span");
+    dashes.className = "plot-row-dashes";
     for (const dash of ["solid", "dash", "dot"] as const) {
       const button = document.createElement("button");
-      button.className = "inspector-dash";
+      button.type = "button";
       button.textContent = dash;
       button.classList.toggle("active", series.dash === dash);
       button.addEventListener("click", () => {
-        this.callbacks.onSetSeriesStyle(this.id, series.ref, {
-          color_slot: series.hue ?? 1,
-          dash,
-          width: series.width,
-        });
-        this.closeInspector();
+        this.callbacks.onPatchSeriesStyle(this.id, series.ref, { dash });
       });
       dashes.append(button);
     }
@@ -2835,102 +3717,65 @@ export class PanelView {
     width.step = "0.25";
     width.value = String(series.width);
     width.setAttribute("aria-label", "Line width");
+    const widthValue = document.createElement("span");
+    widthValue.textContent = formatToolbarNumber(series.width);
+    width.addEventListener("input", () => {
+      widthValue.textContent = formatToolbarNumber(Number(width.value));
+    });
     width.addEventListener("change", () => {
-      this.callbacks.onSetSeriesStyle(this.id, series.ref, {
-        color_slot: series.hue ?? 1,
-        dash: series.dash,
+      this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
         width: Number(width.value),
       });
     });
-    dashes.append(width);
-    const transforms = document.createElement("div");
-    transforms.className = "inspector-transforms";
-    for (const [label, kind] of [
-      ["d/dt", "gradient"],
-      ["∫dt", "cumtrapz"],
-      ["smooth", "movmean"],
-      ["|x|", "abs"],
-    ] as const) {
-      const button = document.createElement("button");
-      button.className = "inspector-transform";
-      button.textContent = label;
-      button.addEventListener("click", () => {
-        this.closeInspector();
-        this.callbacks.onQuickTransform(this.id, path, kind);
-      });
-      transforms.append(button);
-    }
-    const override =
-      this.lastInputState === null
-        ? undefined
-        : overrideFor(this.lastInputState, series.ref);
-    let overrideAction: HTMLDivElement | null = null;
-    if (override !== undefined) {
-      const selectedOverride = override;
-      overrideAction = document.createElement("div");
-      overrideAction.className = "inspector-override";
-      overrideAction.textContent = `◆ override · ${overrideTarget(selectedOverride, this.callbacks)}`;
-      const revert = document.createElement("button");
-      revert.type = "button";
-      revert.textContent = "revert";
-      const overrideIndex =
-        this.lastInputState?.overrides.indexOf(selectedOverride) ?? -1;
-      revert.addEventListener("click", () => {
-        if (overrideIndex !== -1)
-          this.callbacks.onRemoveOverride(this.id, overrideIndex);
-        this.closeInspector();
-      });
-      overrideAction.append(revert);
-    }
-    const remove = document.createElement("button");
-    remove.className = "inspector-remove";
-    remove.textContent = "remove";
-    remove.addEventListener("click", () => {
-      this.closeInspector();
-      this.callbacks.onRemoveSeries(this.id, series.ref);
-    });
-    popover.append(
-      pathRow,
-      slots,
+    line.append(
+      lineLabel,
       dashes,
-      transforms,
-      ...(overrideAction === null ? [] : [overrideAction]),
-      remove,
-    );
-    this.element.append(popover);
-    const panelRect = this.element.getBoundingClientRect();
-    popover.style.left = `${String(
-      clamp(
-        clientX - panelRect.left - 8,
-        4,
-        Math.max(4, panelRect.width - 204),
+      width,
+      widthValue,
+      this.inspectorProvenance(
+        series.overrideFields.dash || series.overrideFields.width,
+        `← ${state.dash_by ?? "flat"} · ${state.width_by ?? "flat"}`,
+        () =>
+          this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
+            dash: null,
+            width: null,
+          }),
       ),
-    )}px`;
-    popover.style.top = `${String(
-      clamp(clientY - panelRect.top + 8, 4, Math.max(4, panelRect.height - 40)),
-    )}px`;
-    const dismiss = (event: PointerEvent): void => {
-      if (event.target instanceof Node && popover.contains(event.target)) {
-        return;
-      }
-      this.closeInspector();
-    };
-    const onEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") this.closeInspector();
-    };
-    document.addEventListener("pointerdown", dismiss, { capture: true });
-    document.addEventListener("keydown", onEscape);
-    this.inspectorCleanup = () => {
-      document.removeEventListener("pointerdown", dismiss, { capture: true });
-      document.removeEventListener("keydown", onEscape);
-    };
+    );
+
+    const footer = document.createElement("div");
+    footer.className = "plot-row-inspector-footer";
+    const count = Object.values(series.overrideFields).filter(Boolean).length;
+    const summary = document.createElement("span");
+    summary.textContent =
+      count === 0 ? "no overrides" : `${String(count)} overrides`;
+    summary.classList.toggle("active", count > 0);
+    const mute = document.createElement("button");
+    mute.type = "button";
+    mute.textContent = series.visible ? "⌫ mute" : "restore";
+    mute.addEventListener("click", () =>
+      this.callbacks.onMuteSeries(this.id, series.ref),
+    );
+    footer.append(summary, mute);
+    inspector.append(heading, color, line, footer);
+    return inspector;
   }
 
-  private closeInspector(): void {
-    this.inspectorCleanup?.();
-    this.inspectorCleanup = null;
-    this.inspectorPath = null;
-    this.element.querySelector(".series-inspector")?.remove();
+  private inspectorProvenance(
+    overridden: boolean,
+    inherited: string,
+    revert: () => void,
+  ): HTMLElement {
+    const control = document.createElement("button");
+    control.type = "button";
+    control.className = "plot-row-provenance";
+    control.textContent = overridden ? "⟲" : inherited;
+    control.disabled = !overridden;
+    control.title = overridden
+      ? "Revert field to its encoding rule"
+      : inherited;
+    if (overridden) control.addEventListener("click", revert);
+    return control;
   }
 }
 
@@ -2948,20 +3793,11 @@ function overrideTarget(
   return "unknown target";
 }
 
-function overrideKey(override: SeriesOverride): string {
-  if (override.color_slot !== null) return "color";
-  if (override.dash !== null) return "dash";
-  if (override.width !== null) return "width";
-  return "style";
-}
-
 function overrideFields(override: SeriesOverride): string {
   return [
-    override.width === null ? null : `width ${String(override.width)}`,
-    override.dash === null ? null : `dash ${override.dash}`,
-    override.opacity === null ? null : `opacity ${String(override.opacity)}`,
-    override.visible === null ? null : override.visible ? "visible" : "hidden",
-    override.color_slot === null ? null : "highlight",
+    override.color_slot === null ? null : "color",
+    override.dash === null ? null : "dash",
+    override.width === null ? null : "width",
   ]
     .filter((field): field is string => field !== null)
     .join(" · ");
@@ -2996,39 +3832,245 @@ function axisEditZone(
   return null;
 }
 
-function statsName(text: string): HTMLElement {
-  const name = document.createElement("span");
-  name.className = "stats-name";
-  name.textContent = text;
-  return name;
+function formatToolbarNumber(value: number): string {
+  return Number.isInteger(value) ? value.toFixed(1) : String(value);
 }
 
-function statsItem(
-  label: string,
+function encodingValueCount(
+  state: RenderPanelState,
+  dimension: StyleDimension,
+  catalog: Catalog,
+): number {
+  if (dimension === "focus")
+    return new Set(state.series.map((series) => series.focused)).size;
+  if (dimension === "source")
+    return new Set(state.series.map((series) => series.ref.source_key)).size;
+  if (dimension === "channel")
+    return new Set(state.series.map((series) => series.ref.channel)).size;
+  if (dimension === "set") return state.bindings.length;
+  return new Set(
+    state.series.map((series) => catalog.get(series.ref)?.summary.unit ?? "—"),
+  ).size;
+}
+
+function seriesColor(series: Pick<RenderSeries, "hue">): string {
+  return series.hue === null
+    ? "var(--fg-4)"
+    : `var(--series-${String(colorIndexForHue(series.hue) + 1)})`;
+}
+
+function emptyLegendStats(): LegendStatValues {
+  return { min: null, max: null, mean: null, rms: null, n: null, cursor: null };
+}
+
+export function aggregateLegendStats(
+  rows: readonly LegendStatValues[],
+  mixedUnits = false,
+): LegendStatValues {
+  const finite = (column: StatColumn): number[] =>
+    rows.flatMap((row) => {
+      const value = row[column];
+      return value === null ? [] : [value];
+    });
+  const min = finite("min");
+  const max = finite("max");
+  const weighted = (column: "mean" | "rms"): number | null => {
+    let total = 0;
+    let weight = 0;
+    for (const row of rows) {
+      const value = row[column];
+      const count = row.n;
+      if (
+        value === null ||
+        count === null ||
+        !Number.isFinite(value) ||
+        !Number.isFinite(count) ||
+        count <= 0
+      )
+        continue;
+      total += column === "rms" ? count * value ** 2 : count * value;
+      weight += count;
+    }
+    if (weight === 0) return null;
+    return column === "rms" ? Math.sqrt(total / weight) : total / weight;
+  };
+  const n = finite("n");
+  const cursor = finite("cursor");
+  return {
+    min: mixedUnits || min.length === 0 ? null : Math.min(...min),
+    max: mixedUnits || max.length === 0 ? null : Math.max(...max),
+    mean: mixedUnits ? null : weighted("mean"),
+    rms: mixedUnits ? null : weighted("rms"),
+    n: n.length === 0 ? null : n.reduce((total, value) => total + value, 0),
+    cursor: mixedUnits ? null : average(cursor),
+  };
+}
+
+function average(values: readonly number[]): number | null {
+  return values.length === 0
+    ? null
+    : values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function statGridTemplate(columns: number): string {
+  return `minmax(128px, 1fr) minmax(56px, 1fr) repeat(${String(columns)}, 64px)`;
+}
+
+function statSpanDomain(
+  rows: readonly LegendStatValues[],
+): readonly [number, number] | null {
+  const minima = rows.flatMap((row) => (row.min === null ? [] : [row.min]));
+  const maxima = rows.flatMap((row) => (row.max === null ? [] : [row.max]));
+  return minima.length === 0 || maxima.length === 0
+    ? null
+    : [Math.min(...minima), Math.max(...maxima)];
+}
+
+function statSpan(
+  values: LegendStatValues,
+  domain: readonly [number, number] | null,
+  color: string,
+): HTMLElement {
+  const cell = document.createElement("span");
+  cell.className = "plot-stat-span";
+  const track = document.createElement("span");
+  track.className = "plot-stat-span-track";
+  cell.append(track);
+  if (values.min === null || values.max === null || domain === null)
+    return cell;
+  cell.title = `min ${formatStatValue(values.min)} · max ${formatStatValue(values.max)} · μ ${formatStatValue(values.mean)}`;
+  const extent = domain[1] - domain[0];
+  const position = (value: number): number =>
+    extent === 0 ? 50 : ((value - domain[0]) / extent) * 100;
+  const band = document.createElement("span");
+  band.className = "plot-stat-span-band";
+  band.style.background = color;
+  band.style.left = `${String(position(values.min))}%`;
+  band.style.right = `${String(100 - position(values.max))}%`;
+  track.append(band);
+  if (values.mean !== null) {
+    const mean = document.createElement("span");
+    mean.className = "plot-stat-span-mean";
+    mean.style.left = `${String(position(values.mean))}%`;
+    track.append(mean);
+  }
+  return cell;
+}
+
+function statHistogram(values: readonly (number | null)[]): HTMLElement {
+  const cell = document.createElement("span");
+  cell.className = "plot-stat-histogram";
+  const finite = values.filter((value): value is number => value !== null);
+  if (finite.length === 0) return cell;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const bins = Array.from({ length: 7 }, () => 0);
+  for (const value of finite) {
+    const index =
+      max === min
+        ? 3
+        : Math.min(6, Math.floor(((value - min) / (max - min)) * 7));
+    bins[index] = (bins[index] ?? 0) + 1;
+  }
+  const peak = Math.max(...bins);
+  for (const count of bins) {
+    const bar = document.createElement("span");
+    bar.style.height = `${String((count / peak) * 100)}%`;
+    cell.append(bar);
+  }
+  return cell;
+}
+
+function statColumnLabel(
+  column: StatColumn,
+  unit: string | null = null,
+): string {
+  const label =
+    column === "mean"
+      ? "μ"
+      : column === "cursor"
+        ? "@CUR"
+        : column.toUpperCase();
+  return unit === null || unit === "" ? label : `${label} (${unit})`;
+}
+
+function statCell(
   value: number | null,
+  column: StatColumn,
   unit: string | null = null,
 ): HTMLElement {
-  const item = document.createElement("span");
-  item.className = "stats-item";
-  const key = document.createElement("span");
-  key.textContent = label;
-  const reading = document.createElement("b");
-  reading.textContent =
-    unit === null ? formatValue(value) : `${formatValue(value)} ${unit}`;
-  item.append(key, reading);
-  return item;
+  const cell = document.createElement("span");
+  cell.className = "plot-stat-cell";
+  cell.dataset.column = column;
+  if (unit !== null && unit !== "") cell.dataset.unit = unit;
+  setStatCellValue(cell, value, unit);
+  return cell;
+}
+
+function setStatCellValue(
+  cell: HTMLElement,
+  value: number | null,
+  unit: string | null,
+): void {
+  cell.replaceChildren(formatStatValue(value));
+  if (value !== null && unit !== null && unit !== "") {
+    const suffix = document.createElement("span");
+    suffix.className = "plot-stat-unit";
+    suffix.textContent = ` ${unit}`;
+    cell.append(suffix);
+  }
+}
+
+function formatStatValue(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (value === 0) return "0.000";
+  const absolute = Math.abs(value);
+  if (absolute >= 10_000 || absolute < 0.001) return value.toExponential(3);
+  return Number(value.toPrecision(4)).toString();
+}
+
+function csvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
+
+function safeFilename(value: string): string {
+  const safe = value.trim().replaceAll(/[^a-zA-Z0-9._-]+/g, "-");
+  return safe === "" ? "panel" : safe;
+}
+
+function downloadText(filename: string, text: string): void {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function panelMarkup(): string {
   return `<header class="panel-header">
-      <span class="drag-handle" aria-hidden="true">⠿</span>
-      <span class="panel-title"></span>
-      <span class="panel-bindings"></span>
-      <button class="panel-ghost-toggle" type="button" aria-pressed="false">all</button>
-      <button class="panel-action panel-axis-toggle" title="Switch axis style">axes: gutter</button>
-      <button class="panel-action panel-config-toggle" type="button" title="Panel configuration" aria-haspopup="dialog">▾</button>
+      <span class="panel-toolbar-group panel-toolbar-binding">
+        <span class="drag-handle" aria-hidden="true">⠿</span>
+        <span class="panel-title"></span>
+        <span class="panel-bindings"></span>
+      </span>
+      <span class="panel-toolbar-separator" aria-hidden="true"></span>
+      <span class="panel-toolbar-group panel-toolbar-axes">
+        <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
+      </span>
+      <span class="panel-toolbar-separator" aria-hidden="true"></span>
+      <span class="panel-toolbar-group panel-toolbar-render">
+        <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-selected series">dim <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
+      </span>
+      <span class="panel-toolbar-separator" aria-hidden="true"></span>
+      <span class="panel-toolbar-group panel-toolbar-readout">
+        <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
+        <button class="panel-toolbar-control panel-tips" type="button" title="Tip density and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend type">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
+      </span>
       <span class="panel-actions">
-        <button class="panel-action panel-stats-toggle" title="Toggle statistics (S)" aria-pressed="false">Σ</button>
         <span class="panel-split-actions" aria-label="Split panel" role="group">
           <button class="panel-action panel-split-right" aria-label="Split panel right" title="Split panel right — new panel">→</button>
           <button class="panel-action panel-split-down" aria-label="Split panel down" title="Split panel down — new panel">↓</button>
@@ -3042,7 +4084,5 @@ function panelMarkup(): string {
       <canvas class="overlay-canvas" aria-hidden="true"></canvas>
       <div class="plot-series-legend" aria-label="Plot legend"></div>
       <div class="panel-empty" hidden></div>
-    </div>
-    <div class="panel-stats" hidden></div>
-    <div class="panel-annotations" hidden></div>`;
+    </div>`;
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": 24,
+  "schema_version": 27,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -18,6 +18,10 @@
     },
     "AxisStyle": { "kind": "enum", "variants": ["gutter", "inline"] },
     "DashStyle": { "kind": "enum", "variants": ["solid", "dash", "dot"] },
+    "StatColumn": {
+      "kind": "enum",
+      "variants": ["min", "max", "mean", "rms", "cursor", "n"]
+    },
     "LinkedTime": {
       "kind": "object",
       "fields": {
@@ -87,7 +91,16 @@
       "kind": "enum",
       "variants": ["top_left", "top_right", "bottom_left", "bottom_right"]
     },
+    "LegendDock": {
+      "kind": "enum",
+      "variants": ["left", "right", "top", "bottom"]
+    },
     "NamedSetKind": { "kind": "enum", "variants": ["query", "pick"] },
+    "AnnotationDisplay": {
+      "kind": "enum",
+      "variants": ["labels", "markers", "hidden"],
+      "default": "labels"
+    },
     "NamedSet": {
       "kind": "object",
       "fields": {
@@ -105,7 +118,8 @@
         "series_path": "string",
         "anchor": "f64",
         "pinned_value": "f64",
-        "label": "string"
+        "label": "string",
+        "offset": "f64[2]"
       }
     },
     "PanelState": {
@@ -115,7 +129,11 @@
         "title": "string",
         "axis_style": "AxisStyle",
         "bindings": "Binding[]",
-        "color_by": "StyleDimension",
+        "color_by": "StyleDimension?",
+        "dash_by": "StyleDimension?",
+        "width_by": "StyleDimension?",
+        "line_width": "f32",
+        "ghost_opacity": "f32",
         "overrides": "SeriesOverride[]",
         "focus": "FocusEntry[]",
         "ghost_mode": "GhostMode",
@@ -123,6 +141,7 @@
         "legend_position": "f64[2]?",
         "legend_size": "f64[2]?",
         "legend_anchor": "LegendAnchor?",
+        "legend_dock": "LegendDock?",
         "legend_hint_dismissed": "bool",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
@@ -130,7 +149,11 @@
         "y_label": "string?",
         "time_window": "f64[2]?",
         "annotations": "Annotation[]",
-        "show_stats": "bool"
+        "annotation_display": "AnnotationDisplay",
+        "show_stats": "bool",
+        "stat_columns": "StatColumn[]",
+        "stats_sort": "StatColumn?",
+        "stats_sort_descending": "bool"
       }
     },
     "LayoutCell": {

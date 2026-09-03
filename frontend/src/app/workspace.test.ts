@@ -42,7 +42,7 @@ function legacySeries(panel: PanelState | undefined): TestSeries[] {
         path: pathForRef(ref),
         color_slot: override?.color_slot ?? 1,
         dash: override?.dash ?? "solid",
-        width: override?.width ?? 1.4,
+        width: override?.width ?? panel.line_width,
         visible: override?.visible ?? true,
       };
     });
@@ -152,6 +152,7 @@ describe("derived definitions", () => {
       anchor: 0,
       pinned_value: 1,
       label: "",
+      offset: [10, -10],
     });
     model.addNamedSet({
       id: "set-1",
@@ -171,6 +172,7 @@ describe("derived definitions", () => {
       anchor: 1,
       pinned_value: 2,
       label: "",
+      offset: [10, -10],
     });
 
     model.removeSignalRef(refForPath(path), path);
@@ -464,6 +466,29 @@ describe("WorkspaceModel", () => {
     expect(model.panel(panel.id)?.focus).toEqual([]);
   });
 
+  it("adds focus without removing prior entries", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const first = {
+      kind: "series" as const,
+      ref: refForPath("run_01/alt"),
+      source_key: null,
+      channel: null,
+    };
+    const second = {
+      kind: "series" as const,
+      ref: refForPath("run_02/alt"),
+      source_key: null,
+      channel: null,
+    };
+
+    model.addFocus(panel.id, first);
+    model.addFocus(panel.id, second);
+    model.addFocus(panel.id, first);
+
+    expect(model.focusEntries(panel.id)).toEqual([first, second]);
+  });
+
   it("removes source and channel focus entries when toggled again", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
@@ -490,12 +515,28 @@ describe("WorkspaceModel", () => {
     expect(model.focusEntries(panel.id)).toEqual([]);
   });
 
-  it("keeps the user dash default solid and writes the spec width", () => {
+  it("replaces focus with a contiguous range in one update", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const entries = ["run_01", "run_02", "run_03"].map((source_key) => ({
+      kind: "source" as const,
+      ref: null,
+      source_key,
+      channel: null,
+    }));
+
+    model.setFocusRange(panel.id, entries);
+
+    expect(model.focusEntries(panel.id)).toEqual(entries);
+    expect(model.panel(panel.id)?.legend_hint_dismissed).toBe(true);
+  });
+
+  it("creates series with the solid 2 px panel default", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
     model.addSeriesRef(panel.id, refForPath("rocket/velocity_body/x"));
     expect(legacySeries(model.panels()[0])[0]?.dash).toBe("solid");
-    expect(legacySeries(model.panels()[0])[0]?.width).toBe(1.4);
+    expect(legacySeries(model.panels()[0])[0]?.width).toBe(2);
   });
 
   it("toggles series visibility", () => {
@@ -542,6 +583,68 @@ describe("WorkspaceModel", () => {
     ]);
   });
 
+  it("swaps encoding dimensions atomically and supports flat rules", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setEncoding(panel.id, "color", "channel");
+    model.setEncoding(panel.id, "dash", "source");
+    model.setEncoding(panel.id, "width", "channel");
+    expect(model.panel(panel.id)).toMatchObject({
+      color_by: null,
+      dash_by: "source",
+      width_by: "channel",
+    });
+    model.setEncoding(panel.id, "width", null);
+    expect(model.panel(panel.id)?.width_by).toBeNull();
+  });
+
+  it("patches style fields without dropping mute overrides", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    const ref = refForPath("a/one");
+    model.setSeriesVisible(panel.id, ref, false);
+    model.patchSeriesOverride(panel.id, ref, { width: 3 });
+    model.revertSeriesOverrideField(panel.id, ref, "width");
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      expect.objectContaining({
+        target_ref: ref,
+        width: null,
+        visible: false,
+      }),
+    ]);
+    model.clearStyleOverrides(panel.id);
+    expect(model.panel(panel.id)?.overrides[0]?.visible).toBe(false);
+    model.patchSeriesOverride(panel.id, ref, { dash: "dash" });
+    model.clearStyleOverride(panel.id, 0);
+    expect(model.panel(panel.id)?.overrides[0]?.visible).toBe(false);
+    model.revertSeriesOverride(panel.id, ref);
+    expect(model.panel(panel.id)?.overrides).toEqual([
+      expect.objectContaining({ target_ref: ref, visible: false }),
+    ]);
+  });
+
+  it("stores panel render defaults and statistic state", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    model.setPanelLineWidth(panel.id, 2.2);
+    model.setGhostOpacity(panel.id, 0.25);
+    model.setStatColumns(panel.id, ["max", "min", "max"]);
+    model.setStatsSort(panel.id, "max", true);
+    expect(model.panel(panel.id)).toMatchObject({
+      line_width: 2.2,
+      ghost_opacity: 0.25,
+      stat_columns: ["max", "min"],
+      stats_sort: "max",
+      stats_sort_descending: true,
+    });
+    model.setStatColumns(panel.id, ["min"]);
+    expect(model.panel(panel.id)).toMatchObject({
+      stat_columns: ["min"],
+      stats_sort: null,
+      stats_sort_descending: false,
+    });
+  });
+
   it("stores per-panel and workspace-wide legend layouts", () => {
     const model = new WorkspaceModel();
     const first = model.addPanelRow();
@@ -571,12 +674,14 @@ describe("WorkspaceModel", () => {
       position: null,
       size: [180, 300],
       anchor: null,
+      dock: "right",
     });
     expect(model.panel(first.id)).toMatchObject({
       legend_state: "rail",
       legend_position: null,
       legend_size: [180, 300],
       legend_anchor: null,
+      legend_dock: "right",
     });
   });
 
@@ -659,6 +764,7 @@ describe("WorkspaceModel", () => {
       anchor: 1,
       pinned_value: 2,
       label: "before",
+      offset: [10, -10],
     });
 
     model.setAnnotationLabel(panel.id, "ann-1", "after");
@@ -669,10 +775,11 @@ describe("WorkspaceModel", () => {
   it("toggles statistics and axis style", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();
+    expect(model.panel(panel.id)?.axis_style).toBe("inline");
     model.toggleStats(panel.id);
     model.toggleAxisStyle(panel.id);
     expect(model.panel(panel.id)?.show_stats).toBe(true);
-    expect(model.panel(panel.id)?.axis_style).toBe("inline");
+    expect(model.panel(panel.id)?.axis_style).toBe("gutter");
   });
 
   it("updates series style and prunes annotations when removing it", () => {
@@ -691,6 +798,7 @@ describe("WorkspaceModel", () => {
       anchor: 0,
       pinned_value: 0,
       label: "",
+      offset: [10, -10],
     });
     expect(legacySeries(model.panel(panel.id))[0]).toMatchObject({
       color_slot: 5,
@@ -885,6 +993,10 @@ describe("WorkspaceModel", () => {
       axis_style: "gutter",
       bindings: [],
       color_by: "source",
+      dash_by: null,
+      width_by: null,
+      line_width: 1.4,
+      ghost_opacity: 0.5,
       overrides: [],
       focus: [],
       ghost_mode: "all",
@@ -892,6 +1004,7 @@ describe("WorkspaceModel", () => {
       legend_position: null,
       legend_size: null,
       legend_anchor: null,
+      legend_dock: null,
       legend_hint_dismissed: false,
       y_range: null,
       x_range: null,
@@ -899,7 +1012,11 @@ describe("WorkspaceModel", () => {
       y_label: null,
       time_window: null,
       annotations: [],
+      annotation_display: "labels",
       show_stats: false,
+      stat_columns: ["min", "max", "mean", "rms", "cursor"],
+      stats_sort: null,
+      stats_sort_descending: false,
     });
     tab.layout.push({
       height: 1,
