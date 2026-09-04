@@ -18,6 +18,8 @@
 //! Any structural mismatch is a cache miss (`Ok(None)`), never an error:
 //! the caller rebuilds and rewrites.
 
+mod codec;
+
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -44,6 +46,9 @@ use crate::{
     pyramid::{CachedBinLevel, PagedBinLevel, Pyramid},
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
+use codec::{CacheSection, append_section, digest_bytes, encode_bins, encode_column, pad_to_8};
+#[cfg(test)]
+use codec::{decode_bins, section_bytes};
 
 pub const CACHE_VERSION: u32 = 4;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
@@ -177,13 +182,6 @@ struct CacheSignal {
     time_section: u32,
     value_section: CacheSection,
     levels: Vec<CacheSection>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-struct CacheSection {
-    offset: u64,
-    len: u64,
-    crc32: u32,
 }
 
 #[derive(Debug, Error)]
@@ -656,17 +654,6 @@ struct DecodedSignal {
     merged: Vec<CachedBinLevel>,
 }
 
-fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
-    if digest.len() != 64 {
-        return None;
-    }
-    let mut bytes = [0; 32];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16).ok()?;
-    }
-    Some(bytes)
-}
-
 fn decode_paged_signal(
     path: &Path,
     payload_base: u64,
@@ -749,71 +736,6 @@ fn valid_time(handle: &PageHandle) -> bool {
         }
     }
     true
-}
-
-#[cfg(test)]
-fn section_bytes(payload: &[u8], section: CacheSection) -> Option<&[u8]> {
-    let start = usize::try_from(section.offset).ok()?;
-    let len = usize::try_from(section.len).ok()?;
-    let bytes = payload.get(start..start.checked_add(len)?)?;
-    (crc32fast::hash(bytes) == section.crc32).then_some(bytes)
-}
-
-fn append_section(payload: &mut Vec<u8>, bytes: &[u8]) -> CacheSection {
-    pad_to_8(payload);
-    let section = CacheSection {
-        offset: payload.len() as u64,
-        len: bytes.len() as u64,
-        crc32: crc32fast::hash(bytes),
-    };
-    payload.extend_from_slice(bytes);
-    section
-}
-
-fn encode_column(values: &[f64]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(values.len() * 8);
-    for value in values {
-        out.extend_from_slice(&value.to_le_bytes());
-    }
-    out
-}
-
-fn encode_bins(bins: &BinLevel) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8 + bins.len() * BinLevel::BYTES_PER_BIN);
-    out.extend_from_slice(&(bins.len() as u64).to_le_bytes());
-    for values in [
-        bins.t0_column(),
-        bins.t1_column(),
-        bins.first_column(),
-        bins.last_column(),
-        bins.min_column(),
-        bins.max_column(),
-        bins.sum_column(),
-        bins.sum_sq_column(),
-    ] {
-        for value in values {
-            out.extend_from_slice(&value.to_le_bytes());
-        }
-    }
-    for values in [bins.sample_count_column(), bins.finite_count_column()] {
-        for value in values {
-            out.extend_from_slice(&value.to_le_bytes());
-        }
-    }
-    out.extend_from_slice(bins.flags_column());
-    pad_to_8(&mut out);
-    out
-}
-
-#[cfg(test)]
-fn decode_bins(bytes: &[u8]) -> Option<BinLevel> {
-    BinLevel::decode_cache(bytes)
-}
-
-fn pad_to_8(bytes: &mut Vec<u8>) {
-    while bytes.len() % 8 != 0 {
-        bytes.push(0);
-    }
 }
 
 #[allow(clippy::cast_precision_loss)]
