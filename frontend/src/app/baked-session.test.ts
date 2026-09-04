@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SESSION_SCHEMA_VERSION } from "../generated/session";
+import { SESSION_SCHEMA_VERSION, type XAxisSource } from "../generated/session";
 import { parseBakedSession } from "./baked-session";
 import { emptySession, WorkspaceModel } from "./workspace";
 
@@ -109,13 +109,13 @@ describe("parseBakedSession", () => {
     panel.x_axis = {
       kind: "time",
       ref: { source_key: "run", channel: "x" },
-    };
+    } as unknown as XAxisSource;
 
     expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
       /structure/,
     );
 
-    panel.x_axis = { kind: "signal", ref: null };
+    panel.x_axis = { kind: "signal", ref: null } as unknown as XAxisSource;
     expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
       /structure/,
     );

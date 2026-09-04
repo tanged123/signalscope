@@ -1,17 +1,14 @@
 import type { Line2DResponse } from "../app/line-binary";
-import type { Range } from "../app/plot-math";
-import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import type { Line2DRenderInput } from "./line2d";
-import type { SeriesStroke } from "./plot-theme";
+import {
+  createFeedCache,
+  line2DAxes,
+  strokeAt,
+  type Line2DAdapterOptions,
+} from "./line2d-adapter";
 
-export interface SignalXLine2DInputOptions {
+export interface SignalXLine2DInputOptions extends Line2DAdapterOptions {
   window: { t0: number; t1: number };
-  xRange: Range;
-  yRange: readonly [number, number];
-  xLabel: string;
-  yLabel: string;
-  styles?: readonly SeriesStroke[];
-  axisStyle: "gutter" | "inline";
 }
 
 export function line2DFromSignalX(
@@ -33,21 +30,12 @@ export function line2DFromSignalX(
         id: column.signalId,
         name: column.signalPath,
         data,
-        style: options.styles?.[index] ?? {
-          hue: null,
-          dash: "solid",
-          width: DEFAULT_PANEL_LINE_WIDTH,
-          alpha: 1,
-        },
+        style: strokeAt(options, index),
       };
     }),
     xRange: options.xRange,
     yRange: options.yRange,
-    axes: {
-      x: { label: options.xLabel },
-      y: { label: options.yLabel },
-      style: options.axisStyle,
-    },
+    axes: line2DAxes(options),
   };
 }
 
@@ -74,17 +62,22 @@ function signalXReference(values: Float64Array): number {
   return 0;
 }
 
-const feedCache = new WeakMap<
-  Float64Array,
-  {
-    anchor: Float64Array;
-    x: Float64Array;
-    xOrigin: number;
-    t0: number;
-    t1: number;
-    feed: Float32Array;
-  }
->();
+interface SignalXFeedDescriptor {
+  anchor: Float64Array;
+  x: Float64Array;
+  xOrigin: number;
+  t0: number;
+  t1: number;
+}
+
+const feed = createFeedCache<Float64Array, SignalXFeedDescriptor, Float32Array>(
+  (left, right) =>
+    left.anchor === right.anchor &&
+    left.x === right.x &&
+    left.xOrigin === right.xOrigin &&
+    left.t0 === right.t0 &&
+    left.t1 === right.t1,
+);
 
 function cachedSignalXFeed(
   anchor: Float64Array,
@@ -93,17 +86,19 @@ function cachedSignalXFeed(
   xOrigin: number,
   window: { t0: number; t1: number },
 ): Float32Array {
-  const cached = feedCache.get(y);
-  if (
-    cached?.anchor === anchor &&
-    cached.x === x &&
-    cached.xOrigin === xOrigin &&
-    cached.t0 === window.t0 &&
-    cached.t1 === window.t1
-  ) {
-    return cached.feed;
-  }
-  const feed = new Float32Array(x.length * 2);
+  return feed(y, { anchor, x, xOrigin, t0: window.t0, t1: window.t1 }, () =>
+    buildSignalXFeed(anchor, x, y, xOrigin, window),
+  );
+}
+
+function buildSignalXFeed(
+  anchor: Float64Array,
+  x: Float64Array,
+  y: Float64Array,
+  xOrigin: number,
+  window: { t0: number; t1: number },
+): Float32Array {
+  const result = new Float32Array(x.length * 2);
   let previousX = 0;
   for (let index = 0; index < x.length; index += 1) {
     const anchorValue = anchor[index] as number;
@@ -111,19 +106,11 @@ function cachedSignalXFeed(
     const yValue = y[index] as number;
     const inWindow = anchorValue >= window.t0 && anchorValue <= window.t1;
     if (inWindow && Number.isFinite(xValue)) previousX = xValue - xOrigin;
-    feed[index * 2] = previousX;
-    feed[index * 2 + 1] =
+    result[index * 2] = previousX;
+    result[index * 2 + 1] =
       inWindow && Number.isFinite(xValue) && Number.isFinite(yValue)
         ? yValue
         : Number.NaN;
   }
-  feedCache.set(y, {
-    anchor,
-    x,
-    xOrigin,
-    t0: window.t0,
-    t1: window.t1,
-    feed,
-  });
-  return feed;
+  return result;
 }

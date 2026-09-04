@@ -29,6 +29,9 @@ interface DeviceEvents {
   addEventListener(type: string, listener: EventListener): void;
 }
 
+// Chromium can expose WebGPU before a hardware or software adapter is ready.
+// Keep startup recovery bounded; exhausting this window is the product's
+// transition to the explicit WebGPU-unavailable state.
 const ADAPTER_RETRY_DELAYS_MS = [0, 100, 250, 500, 1_000, 2_000] as const;
 
 async function requestAdapterAndDevice(

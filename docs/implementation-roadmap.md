@@ -17,10 +17,12 @@ are recorded in [ADRs](adr/README.md).
   renderer code do not branch on host identity.
 - Line2D presentation supports linked time or an explicit signal X on an exact
   shared timebase. ChartGPU is the Line2D plotter behind the SignalScope-owned
-  renderer boundary, with per-panel axes, cursor/annotation interactions, derived signals,
-  named sets, and a serialized legend console that owns the line-style cascade,
-  visible-region statistic columns, bounded data-tip manifests, and in-place
-  series focus. Legend rails persist independently on any plot edge.
+  renderer boundary. Family dispatch owns preparation and render-input
+  construction; the two Line2D adapters share options, defaults, axes, and feed
+  caching. Per-panel axes, derived signals, named sets, and a serialized legend
+  console retain the line-style cascade and series focus. Legend rail geometry,
+  transient annotation UI state, and visible-region statistic rendering
+  primitives are independent UI components, and rails persist on any plot edge.
 - Live queries use adaptive pyramid resolution and retained overview/detail
   responses. The renderer remains deterministic from tiles, viewport, and
   design tokens. Snapshots embed selected tile data and session state without
@@ -60,6 +62,9 @@ Prioritize measured, user-visible work in this order:
 5. When another plot family arrives, design its typed data contract, reduction,
    interaction, and snapshot payload before implementation. Do not revive the
    withdrawn mode stack or its historical plans as an implementation shortcut.
+   Use the generated tagged-union schema construct for variant-specific state.
+   Budget native reducer, transport, API, and snapshot work per family; the
+   explicit-X Line2D path required roughly two thousand Rust lines.
 6. Consider remote/live sources only after the local `DataPlane` contract and
    snapshot parity remain stable.
 

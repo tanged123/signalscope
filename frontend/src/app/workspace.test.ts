@@ -121,10 +121,9 @@ describe("panel X axis", () => {
     expect(model.panel(panel.id)?.x_range).toBeNull();
     expect(model.panel(panel.id)?.x_label).toBeNull();
 
-    model.setPanelXAxis(panel.id, { kind: "time", ref: null });
+    model.setPanelXAxis(panel.id, { kind: "time" });
     expect(model.panel(panel.id)?.x_axis).toEqual({
       kind: "time",
-      ref: null,
     });
   });
 
@@ -160,7 +159,7 @@ describe("panel X axis", () => {
     model.removeSignalRef(ref);
 
     expect(model.panel(panel.id)).toMatchObject({
-      x_axis: { kind: "time", ref: null },
+      x_axis: { kind: "time" },
       x_range: null,
       x_label: null,
     });
@@ -1087,7 +1086,7 @@ describe("WorkspaceModel", () => {
       legend_anchor: null,
       legend_dock: null,
       legend_hint_dismissed: false,
-      x_axis: { kind: "time", ref: null },
+      x_axis: { kind: "time" },
       y_range: null,
       x_range: null,
       x_label: null,

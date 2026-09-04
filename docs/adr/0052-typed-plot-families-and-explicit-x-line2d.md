@@ -100,8 +100,9 @@ interaction semantics stay with each data family.
 Line2D persists its X binding and coordinate state. A generated tagged union
 for panel content is deferred until a second real content type exists; at that
 point the session schema gets a discriminated union and an explicit migration.
-Until then, correlated nullable fields and speculative panel kinds are not
-added.
+The schema generator nevertheless supports tagged unions now, and
+`XAxisSource` uses one because time and signal-X are already two real variants
+with correlated fields. Speculative panel kinds are not added.
 
 Current line tile admission, overview/detail retention, and one-host-per-panel
 behavior remain authoritative. A future family supplies its own quality-to-
@@ -138,3 +139,22 @@ offline snapshot.
   that any of them is implemented.
 - A second concrete content type is the trigger for a session union and any
   genuinely shared cross-family resource planner.
+
+## Amendment (2026-09-04, implementation follow-up)
+
+Line2D family dispatch is centralized: response-kind registration owns data
+preparation and render-input construction. The time and signal-X adapters share
+their options, default stroke, axes construction, and immutable feed-cache
+mechanism. Panel code does not open-code the two adapter paths.
+
+Common legend rail geometry, annotation interaction state, and statistic
+rendering/export helpers are separate UI components rather than responsibilities
+of the Line2D panel view. This keeps those surfaces reusable by another concrete
+panel without copying their state machines.
+
+The presentation seam does not make reducers or wire payloads universal.
+Explicit-X Line2D added roughly two thousand lines of family-specific Rust
+across reduction, binary transport, snapshots, and API integration. A future
+plot family should budget comparable native work unless its reduction and
+payload invariants genuinely match an existing family; the frontend adapter
+boundary does not reduce that work to a small registration-only change.

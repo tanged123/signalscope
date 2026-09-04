@@ -2698,7 +2698,6 @@ export class AppShell {
             (series) =>
               series.visible &&
               (panel.x_axis.kind !== "signal" ||
-                panel.x_axis.ref === null ||
                 !sameSeriesRef(series.ref, panel.x_axis.ref)),
           ).length,
         );

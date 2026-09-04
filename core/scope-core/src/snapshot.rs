@@ -115,11 +115,9 @@ fn panel_signal_ids(
     let mut ids = panel_y_signal_ids(session, store, panel)
         .into_iter()
         .collect::<BTreeSet<_>>();
-    if panel.x_axis.kind == crate::session::XAxisKind::Signal {
-        if let Some(reference) = &panel.x_axis.r#ref {
-            if let Some(signal) = signal_from_ref(session, store, reference) {
-                ids.insert(signal.id);
-            }
+    if let crate::session::XAxisSource::Signal { r#ref } = &panel.x_axis {
+        if let Some(signal) = signal_from_ref(session, store, r#ref) {
+            ids.insert(signal.id);
         }
     }
     ids
@@ -425,13 +423,10 @@ fn line_combinations(session: &Session, store: &SignalStore) -> Vec<(SignalId, V
     let mut combinations = BTreeSet::new();
     for tab in &session.tabs {
         for panel in &tab.panels {
-            if panel.x_axis.kind != crate::session::XAxisKind::Signal {
-                continue;
-            }
-            let Some(reference) = &panel.x_axis.r#ref else {
+            let crate::session::XAxisSource::Signal { r#ref } = &panel.x_axis else {
                 continue;
             };
-            let Some(x_signal) = signal_from_ref(session, store, reference) else {
+            let Some(x_signal) = signal_from_ref(session, store, r#ref) else {
                 continue;
             };
             let mut y_signals = panel_y_signal_ids(session, store, panel)
@@ -868,7 +863,7 @@ mod tests {
     use crate::pyramid::Pyramid;
     use crate::session::{
         AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SeriesRef, Session,
-        XAxisKind, XAxisSource,
+        XAxisSource,
     };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
@@ -923,10 +918,7 @@ mod tests {
             legend_anchor: None,
             legend_dock: None,
             legend_hint_dismissed: false,
-            x_axis: XAxisSource {
-                kind: XAxisKind::Time,
-                r#ref: None,
-            },
+            x_axis: XAxisSource::Time,
             y_range: None,
             x_range: None,
             x_label: None,
@@ -982,12 +974,11 @@ mod tests {
     fn visible_signal_x_export_bakes_shared_paired_levels() {
         let (store, pyramids) = store_with(&[("x", 64), ("y", 64)]);
         let mut panel = panel("panel-1", &["x", "y"]);
-        panel.x_axis = XAxisSource {
-            kind: XAxisKind::Signal,
-            r#ref: Some(SeriesRef {
+        panel.x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "x".to_owned(),
-            }),
+            },
         };
         let session = session_with(vec![panel]);
         let export = plan(
@@ -1022,12 +1013,11 @@ mod tests {
     #[test]
     fn signal_x_snapshot_deduplicates_reordered_y_bindings() {
         let (store, pyramids) = store_with(&[("x", 64), ("a", 64), ("b", 64)]);
-        let x_axis = XAxisSource {
-            kind: XAxisKind::Signal,
-            r#ref: Some(SeriesRef {
+        let x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "x".to_owned(),
-            }),
+            },
         };
         let mut first = panel("panel-1", &["x", "a", "b"]);
         first.x_axis = x_axis.clone();
@@ -1058,20 +1048,18 @@ mod tests {
     fn signal_x_snapshot_skips_unresolved_and_empty_line_panels() {
         let (store, pyramids) = store_with(&[("y", 64)]);
         let mut unresolved = panel("unresolved", &["y"]);
-        unresolved.x_axis = XAxisSource {
-            kind: XAxisKind::Signal,
-            r#ref: Some(SeriesRef {
+        unresolved.x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "missing".to_owned(),
-            }),
+            },
         };
         let mut only_x = panel("only-x", &["y"]);
-        only_x.x_axis = XAxisSource {
-            kind: XAxisKind::Signal,
-            r#ref: Some(SeriesRef {
+        only_x.x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "y".to_owned(),
-            }),
+            },
         };
 
         let export = plan(

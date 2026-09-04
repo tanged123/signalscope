@@ -1,5 +1,5 @@
 {
-  "schema_version": 28,
+  "schema_version": 29,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -37,12 +37,12 @@
       "kind": "object",
       "fields": { "source_key": "string", "channel": "string" }
     },
-    "XAxisKind": { "kind": "enum", "variants": ["time", "signal"] },
     "XAxisSource": {
-      "kind": "object",
-      "fields": {
-        "kind": "XAxisKind",
-        "ref": "SeriesRef?"
+      "kind": "tagged_union",
+      "tag": "kind",
+      "variants": {
+        "time": {},
+        "signal": { "fields": { "ref": "SeriesRef" } }
       }
     },
     "BindingKind": { "kind": "enum", "variants": ["query", "pick", "set"] },

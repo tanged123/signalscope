@@ -100,7 +100,7 @@ type ControllerProbe = {
 };
 
 function panel(id: string): PanelState {
-  return { id, x_axis: { kind: "time", ref: null } } as PanelState;
+  return { id, x_axis: { kind: "time" } } as PanelState;
 }
 
 function controllerProbe(

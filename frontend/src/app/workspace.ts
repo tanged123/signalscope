@@ -485,7 +485,7 @@ export class WorkspaceModel {
       panel.x_axis.kind === "signal" &&
       sameRef(panel.x_axis.ref, ref)
     ) {
-      panel.x_axis = { kind: "time", ref: null };
+      panel.x_axis = { kind: "time" };
       panel.x_range = null;
       panel.x_label = null;
       panel.annotations = panel.annotations.map((annotation) => ({
@@ -506,16 +506,14 @@ export class WorkspaceModel {
     if (panel === undefined) return;
     let next: XAxisSource;
     if (xAxis.kind === "time") {
-      next = { kind: "time", ref: null };
+      next = { kind: "time" };
     } else {
-      if (xAxis.ref === null) return;
       next = { kind: "signal", ref: { ...xAxis.ref } };
     }
     if (
       next.kind === panel.x_axis.kind &&
-      (next.ref === null
-        ? panel.x_axis.ref === null
-        : panel.x_axis.ref !== null && sameRef(next.ref, panel.x_axis.ref))
+      (next.kind === "time" ||
+        (panel.x_axis.kind === "signal" && sameRef(next.ref, panel.x_axis.ref)))
     ) {
       return;
     }
@@ -1188,7 +1186,7 @@ export class WorkspaceModel {
       legend_anchor: null,
       legend_dock: null,
       legend_hint_dismissed: false,
-      x_axis: { kind: "time", ref: null },
+      x_axis: { kind: "time" },
       y_range: null,
       x_range: null,
       x_label: null,

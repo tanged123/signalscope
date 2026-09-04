@@ -119,3 +119,14 @@ time source default. Session parsing rejects a source whose kind and reference
 do not satisfy that invariant. Annotations also store an optional `pinned_x`
 so a tip remains at its plotted coordinate when X is not time; old annotations
 default it to null and retain their time anchor behavior.
+
+## Amendment (2026-09-04, generated X-axis union)
+
+Schema version 29 changes `XAxisSource` from the correlated `{kind, ref?}`
+object into a generated tagged union. The `time` variant has no reference and
+the `signal` variant requires one, so invalid combinations are not
+representable in Rust or TypeScript and no handwritten post-deserialization
+validator is needed. Version 28 sessions migrate by removing the legacy null
+`ref` field from time variants. The migration entry point applies an ordered
+list of one-version functions, replacing the nested call chain while retaining
+the same oldest-supported version.

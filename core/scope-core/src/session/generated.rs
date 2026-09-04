@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 28;
+pub const SESSION_SCHEMA_VERSION: u32 = 29;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -73,19 +73,14 @@ pub struct SeriesRef {
     pub channel: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum XAxisKind {
-    Time,
-    Signal,
-}
-
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct XAxisSource {
-    pub kind: XAxisKind,
-    #[serde(default)]
-    #[serde(rename = "ref")]
-    pub r#ref: Option<SeriesRef>,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum XAxisSource {
+    Time,
+    Signal {
+        #[serde(rename = "ref")]
+        r#ref: SeriesRef,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]

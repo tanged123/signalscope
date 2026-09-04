@@ -1,22 +1,17 @@
 import type { ColumnarTileResponse } from "../app/bin-columns";
-import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import {
   cachedFeed,
   prepareResponseFeeds,
   responseTimeReference,
 } from "./m4-feed";
 import type { Line2DRenderInput } from "./line2d";
-import type { SeriesStroke } from "./plot-theme";
+import {
+  line2DAxes,
+  strokeAt,
+  type Line2DAdapterOptions,
+} from "./line2d-adapter";
 
-export interface TimeLine2DInputOptions extends Pick<
-  Line2DRenderInput,
-  "xRange" | "yRange"
-> {
-  xLabel: string;
-  yLabel: string;
-  styles?: readonly SeriesStroke[];
-  axisStyle: "gutter" | "inline";
-}
+export type TimeLine2DInputOptions = Line2DAdapterOptions;
 
 /** Convert the current time-tile response into the generic line input. */
 export function line2DFromTimeTiles(
@@ -30,20 +25,11 @@ export function line2DFromTimeTiles(
       id: tile.signalId,
       name: tile.signalPath,
       data: cachedFeed(tile.bins, xOrigin),
-      style: options.styles?.[index] ?? {
-        hue: null,
-        dash: "solid",
-        width: DEFAULT_PANEL_LINE_WIDTH,
-        alpha: 1,
-      },
+      style: strokeAt(options, index),
     })),
     xRange: options.xRange,
     yRange: options.yRange,
-    axes: {
-      x: { label: options.xLabel },
-      y: { label: options.yLabel },
-      style: options.axisStyle,
-    },
+    axes: line2DAxes(options),
   };
 }
 

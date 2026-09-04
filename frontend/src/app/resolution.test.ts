@@ -49,7 +49,7 @@ function panel(): PanelState {
     legend_anchor: null,
     legend_dock: null,
     legend_hint_dismissed: false,
-    x_axis: { kind: "time", ref: null },
+    x_axis: { kind: "time" },
     y_range: null,
     x_range: null,
     x_label: null,
