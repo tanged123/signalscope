@@ -50,38 +50,52 @@ function doubleClick(target: HTMLElement, x: number, y: number): void {
 
 function fixture(): {
   overlay: HTMLCanvasElement;
-  host: PlotInteractionHost;
-  controller: PlotInteractionController;
+  calls: {
+    applyXRange: ReturnType<typeof vi.fn>;
+    applyYRange: ReturnType<typeof vi.fn>;
+    fitView: ReturnType<typeof vi.fn>;
+    setGesture: ReturnType<typeof vi.fn>;
+    setBox: ReturnType<typeof vi.fn>;
+    beginAxisEdit: ReturnType<typeof vi.fn>;
+  };
 } {
   const overlay = document.createElement("canvas");
   overlay.setPointerCapture = vi.fn();
-  const host: PlotInteractionHost = {
-    layout: vi.fn(() => layout),
+  const calls = {
     applyXRange: vi.fn(),
     applyYRange: vi.fn(),
     fitView: vi.fn(),
-    plotClick: vi.fn(),
     setGesture: vi.fn(),
     setBox: vi.fn(),
-    axisEditZone: vi.fn(() => null),
     beginAxisEdit: vi.fn(),
+  };
+  const host: PlotInteractionHost = {
+    layout: vi.fn(() => layout),
+    applyXRange: calls.applyXRange,
+    applyYRange: calls.applyYRange,
+    fitView: calls.fitView,
+    plotClick: vi.fn(),
+    setGesture: calls.setGesture,
+    setBox: calls.setBox,
+    axisEditZone: vi.fn(() => null),
+    beginAxisEdit: calls.beginAxisEdit,
   };
   const controller = new PlotInteractionController(overlay, host);
   controller.setPolicy(TIME_POLICY);
-  return { overlay, host, controller };
+  return { overlay, calls };
 }
 
 describe("PlotInteractionController", () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it("locks horizontal drags to X and applies the selected range", () => {
-    const { overlay, host } = fixture();
+    const { overlay, calls } = fixture();
 
     pointer(overlay, "pointerdown", 20, 50);
     pointer(overlay, "pointermove", 80, 52);
 
-    expect(host.setGesture).toHaveBeenLastCalledWith("drag: zoom X");
-    expect(host.setBox).toHaveBeenLastCalledWith({
+    expect(calls.setGesture).toHaveBeenLastCalledWith("drag: zoom X");
+    expect(calls.setBox).toHaveBeenLastCalledWith({
       x0: 20,
       y0: 0,
       x1: 80,
@@ -90,29 +104,29 @@ describe("PlotInteractionController", () => {
 
     pointer(overlay, "pointerup", 80, 52);
 
-    expect(host.applyXRange).toHaveBeenCalledWith(2, 8);
-    expect(host.applyYRange).not.toHaveBeenCalled();
-    expect(host.setGesture).toHaveBeenLastCalledWith(null);
-    expect(host.setBox).toHaveBeenLastCalledWith(null);
+    expect(calls.applyXRange).toHaveBeenCalledWith(2, 8);
+    expect(calls.applyYRange).not.toHaveBeenCalled();
+    expect(calls.setGesture).toHaveBeenLastCalledWith(null);
+    expect(calls.setBox).toHaveBeenLastCalledWith(null);
   });
 
   it("locks vertical drags to Y without changing X", () => {
-    const { overlay, host } = fixture();
+    const { overlay, calls } = fixture();
 
     pointer(overlay, "pointerdown", 50, 20);
     pointer(overlay, "pointermove", 52, 80);
     pointer(overlay, "pointerup", 52, 80);
 
-    expect(host.applyXRange).not.toHaveBeenCalled();
-    expect(host.applyYRange).toHaveBeenCalledWith(-3, 3);
+    expect(calls.applyXRange).not.toHaveBeenCalled();
+    expect(calls.applyYRange).toHaveBeenCalledWith(-3, 3);
   });
 
   it("fits on a double click inside the plot", () => {
-    const { overlay, host } = fixture();
+    const { overlay, calls } = fixture();
 
     doubleClick(overlay, 50, 50);
 
-    expect(host.fitView).toHaveBeenCalledOnce();
-    expect(host.beginAxisEdit).not.toHaveBeenCalled();
+    expect(calls.fitView).toHaveBeenCalledOnce();
+    expect(calls.beginAxisEdit).not.toHaveBeenCalled();
   });
 });
