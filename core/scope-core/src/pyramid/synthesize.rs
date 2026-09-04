@@ -1,5 +1,5 @@
 use super::build::{level_len, merge_bins, sample_bin};
-use super::*;
+use super::{BinLevel, EnvelopeBin, HAS_FIRST, HAS_GAP, HAS_LAST, HAS_MAX, HAS_MIN, Pyramid};
 
 impl Pyramid {
     #[must_use]

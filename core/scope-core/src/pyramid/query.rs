@@ -1,5 +1,5 @@
 use super::build::level_len;
-use super::*;
+use super::{BinLevel, CachedBinLevel, EnvelopeBin, Pyramid};
 
 impl Pyramid {
     /// Materializes one complete logical level. Level 0 is synthesized from

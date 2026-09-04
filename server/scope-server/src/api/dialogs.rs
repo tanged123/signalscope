@@ -1,4 +1,6 @@
-use super::*;
+use super::{
+    ApiError, AppContext, Arc, Envelope, IntoResponse, Json, PickSessionRequest, State, err, host,
+};
 
 pub async fn pick_sources(State(ctx): State<AppContext>) -> Result<impl IntoResponse, ApiError> {
     let descriptors = scope_core::ingest::registry::ProviderRegistry::builtin();
