@@ -65,7 +65,12 @@ Prioritize measured, user-visible work in this order:
    Use the generated tagged-union schema construct for variant-specific state.
    Budget native reducer, transport, API, and snapshot work per family; the
    explicit-X Line2D path required roughly two thousand Rust lines.
-6. Consider remote/live sources only after the local `DataPlane` contract and
+6. Burn down the module-size violations recorded in
+   [ADR 0053](adr/0053-module-boundaries-and-shared-primitives.md), starting
+   with the legend console in `panel.ts` and `registerCommands`/`mount` in
+   `app-shell.ts`. Land each named seam independently and move its tests with
+   it.
+7. Consider remote/live sources only after the local `DataPlane` contract and
    snapshot parity remain stable.
 
 Use the smallest relevant script for local iteration, then `./scripts/ci.sh all`

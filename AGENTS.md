@@ -11,7 +11,8 @@ changes and inspect before editing.
   and `SignalScope Final Spec.dc.html` in that directory. The Final Spec owns
   visuals and interaction. The reference prototype is behavioral context, not
   production code.
-- For architecture or data work, read `docs/adr/README.md`, the relevant
+- For architecture or data work, read `docs/architecture.md` for module
+  placement and shared primitives, then `docs/adr/README.md`, the relevant
   accepted ADRs, and `docs/implementation-roadmap.md`. Superseded ADRs and
   historical design explorations are not requirements.
 - If requirements are ambiguous, state a small proposal before expanding
@@ -21,7 +22,9 @@ changes and inspect before editing.
 
 Prefer deletion and the shortest correct implementation. Do not add
 speculative abstractions, wrappers, defensive scaffolding, or comments that
-restate code. Keep commands and logs quiet. Use `apply_patch` for edits. Never
+restate code. Modules have a soft budget of 600 lines; a module over 1,000
+lines is split before new behavior is added to it, per ADR 0053. Check the
+shared-primitives table in `docs/architecture.md` before writing a helper. Keep commands and logs quiet. Use `apply_patch` for edits. Never
 reset, overwrite, or stage unrelated work; review staged and unstaged diffs
 separately.
 

@@ -4,6 +4,9 @@ ADRs are the durable architecture record. A later ADR amends or supersedes an
 earlier decision; the historical file stays in place so old sessions and
 implementation choices remain explainable.
 
+ADRs record _why_. For _where code goes_ and _what to reuse_, read
+[architecture.md](../architecture.md).
+
 ## Current decisions
 
 1. [Product shape and two-host frontend](0001-product-shape-and-two-host-frontend.md)
@@ -50,6 +53,7 @@ implementation choices remain explainable.
 42. [Retire obsolete compatibility seams](0050-retire-obsolete-compatibility-seams.md)
 43. [Style cascade, legend analysis, and inspection state](0051-style-cascade-and-legend-statistics.md)
 44. [Typed plot families and the explicit-X Line2D foundation](0052-typed-plot-families-and-explicit-x-line2d.md)
+45. [Module boundaries and shared primitives](0053-module-boundaries-and-shared-primitives.md)
 
 ## Superseded decisions
 
