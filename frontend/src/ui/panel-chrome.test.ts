@@ -131,6 +131,12 @@ function mockCanvas(): void {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
 }
 
+function showChartHost(view: PanelView): void {
+  const chartHost = view.element.querySelector<HTMLElement>(".chart-host");
+  if (chartHost === null) throw new Error("chart host missing");
+  chartHost.hidden = false;
+}
+
 beforeEach(() => {
   mockCanvas();
   globalThis.ResizeObserver = class {
@@ -160,10 +166,13 @@ describe("PanelView chrome", () => {
     document.body.appendChild(view.element);
     view.mount();
 
-    expect(create).toHaveBeenCalledWith(
-      view.element.querySelector(".chart-host"),
-      expect.anything(),
-    );
+    expect(create).not.toHaveBeenCalled();
+    const chartHost = view.element.querySelector<HTMLElement>(".chart-host");
+    if (chartHost === null) throw new Error("chart host missing");
+    chartHost.hidden = false;
+    view.mount();
+
+    expect(create).toHaveBeenCalledWith(chartHost, expect.anything());
   });
 
   it("resizes an existing chart after its panel is remounted", async () => {
@@ -177,6 +186,7 @@ describe("PanelView chrome", () => {
       {} as GpuContext,
     );
     document.body.appendChild(view.element);
+    showChartHost(view);
     view.mount();
     await Promise.resolve();
     await Promise.resolve();
@@ -201,6 +211,7 @@ describe("PanelView chrome", () => {
       {} as GpuContext,
     );
     document.body.appendChild(view.element);
+    showChartHost(view);
 
     view.mount();
     await vi.runAllTimersAsync();
@@ -219,11 +230,12 @@ describe("PanelView chrome", () => {
     const gpu = { reportFailure } as unknown as GpuContext;
     const view = new PanelView("panel", callbacks(Catalog.build([])), gpu);
     document.body.appendChild(view.element);
+    showChartHost(view);
 
     view.mount();
     await vi.runAllTimersAsync();
 
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(5);
     expect(reportFailure).toHaveBeenCalledWith({
       kind: "host-initialization",
       message: "ChartGPU initialization timed out",
@@ -387,6 +399,8 @@ describe("PanelView chrome", () => {
     };
 
     view.renderData(panel, { kind: "signal", response }, { t0: 0, t1: 1 });
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(render).toHaveBeenCalledOnce();
     const request = render.mock.calls[0]?.[0];

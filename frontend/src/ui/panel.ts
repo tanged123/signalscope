@@ -56,7 +56,7 @@ import { line2DFromSignalX } from "../render/signal-x-adapter";
 import type { GpuContext } from "../render/gpu-context";
 
 const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 5_000;
-const CHART_HOST_RETRY_DELAYS_MS = [100] as const;
+const CHART_HOST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
 import {
   OverlayRenderer,
   type OverlayAnnotation,
@@ -532,7 +532,12 @@ export class PanelView {
   }
 
   mount(): void {
-    if (this.gpu === null || this.disposed || !this.element.isConnected) {
+    if (
+      this.gpu === null ||
+      this.disposed ||
+      !this.element.isConnected ||
+      this.chartHostElement.hidden
+    ) {
       return;
     }
     if (this.chartHostReady !== null || this.chartHostRetryTimer !== null) {
@@ -997,6 +1002,7 @@ export class PanelView {
       return 0;
     }
     this.chartHostElement.hidden = false;
+    this.mount();
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
     );

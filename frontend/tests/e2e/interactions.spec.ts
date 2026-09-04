@@ -186,8 +186,8 @@ test.describe("desktop plot interactions", () => {
       position: { x: box.width * 0.25, y: box.height * 0.55 },
     });
     await page.mouse.down();
-    await overlay.hover({
-      position: { x: box.width * 0.55, y: box.height * 0.56 },
+    await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.56, {
+      steps: 6,
     });
     await expect(page.locator(".gesture-hint")).toHaveText("drag: zoom X");
     await page.mouse.up();
