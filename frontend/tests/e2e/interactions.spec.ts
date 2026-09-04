@@ -193,7 +193,9 @@ test.describe("desktop plot interactions", () => {
     await page.mouse.up();
     await expect(page.locator(".gesture-hint")).toBeEmpty();
     await expect(readout).not.toHaveText(fitted ?? "");
-    await overlay.dblclick({ position: { x: 300, y: 120 } });
+    await overlay.dblclick({
+      position: { x: box.width * 0.5, y: box.height * 0.5 },
+    });
     await expect(readout).toHaveText(fitted ?? "");
   });
 

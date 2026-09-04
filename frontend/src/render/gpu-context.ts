@@ -29,7 +29,7 @@ interface DeviceEvents {
   addEventListener(type: string, listener: EventListener): void;
 }
 
-const ADAPTER_RETRY_DELAYS_MS = [0, 100, 250, 500] as const;
+const ADAPTER_RETRY_DELAYS_MS = [0, 100, 250, 500, 1_000, 2_000] as const;
 
 async function requestAdapterAndDevice(
   gpu: GPU,

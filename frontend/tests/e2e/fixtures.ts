@@ -2,7 +2,7 @@ import { devices, expect, test as base, type Page } from "@playwright/test";
 
 const testBase = base.extend({
   page: async ({ playwright }, use, testInfo) => {
-    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    await new Promise<void>((resolve) => setTimeout(resolve, 1_500));
     const browser = await playwright.chromium.launch(
       testInfo.project.use.launchOptions,
     );
