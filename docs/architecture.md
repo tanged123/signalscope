@@ -72,6 +72,7 @@ other UI module receives a narrow port or callback interface instead.
 | `expr`               | expression lexing, parsing, evaluation            |
 | `session`            | schema versioning, ordered migrations             |
 | `snapshot`           | export planning, baking, HTML injection           |
+| `selector`           | snapshot selector parsing and character globs     |
 | `cache`              | on-disk sidecars, paging, column codecs           |
 | `scope-server::api`  | HTTP handlers, one per operation                  |
 | `scope-server::host` | OS dialogs, filesystem, process concerns          |
@@ -289,20 +290,20 @@ Soft budget **600 lines** per module; **1,000 lines triggers a split** before ne
 behavior is added. Rust files are measured on implementation lines, excluding
 the inline `#[cfg(test)]` module.
 
-Current state, measured on this branch:
+Current state, measured after the first ADR 0053 burn-down pass:
 
-| File                                  | Lines | Impl | Largest cluster                     |
-| ------------------------------------- | ----- | ---- | ----------------------------------- |
-| `frontend/src/ui/app-shell.ts`        | 3,531 | —    | `registerCommands` 503, `mount` 417 |
-| `frontend/src/ui/panel.ts`            | 3,452 | —    | legend console 1,011, `bind` 214    |
-| `frontend/src/styles/app.css`         | 3,244 | —    | 481 rule blocks, no sections        |
-| `core/scope-core/src/snapshot.rs`     | 1,591 | 857  | selector/glob engine ~180           |
-| `server/scope-server/src/api.rs`      | 1,384 | 936  | ~35 handlers, 7 concerns            |
-| `frontend/src/app/workspace.ts`       | 1,266 | —    | ~100 small cohesive methods         |
-| `core/scope-core/src/cache.rs`        | 1,258 | 753  | column codec ~100                   |
-| `core/scope-core/src/pyramid.rs`      | 1,247 | 824  | reduction + query                   |
-| `core/scope-core/src/expr.rs`         | 1,212 | 795  | lex / parse / eval                  |
-| `core/scope-core/src/ingest/batch.rs` | 1,127 | 23   | test-only; not a violation          |
+| File                                  | Lines | Impl | Status                                 |
+| ------------------------------------- | ----- | ---- | -------------------------------------- |
+| `frontend/src/ui/app-shell.ts`        | 3,547 | —    | mount staged; command registry remains |
+| `frontend/src/ui/panel.ts`            | 3,452 | —    | legend and menu extractions remain     |
+| `frontend/src/styles/app.css`         | 3,244 | —    | split remains                          |
+| `core/scope-core/src/snapshot.rs`     | 1,406 | 672  | selector engine extracted              |
+| `frontend/src/app/workspace.ts`       | 1,266 | —    | cohesive data model; do not split      |
+| `core/scope-core/src/cache.rs`        | 1,180 | 745  | byte-layout codec extracted            |
+| `core/scope-core/src/ingest/batch.rs` | 1,127 | 23   | test-only; not a violation             |
+| `server/scope-server/src/api/*.rs`    | ≤521  | —    | split by endpoint concern              |
+| `core/scope-core/src/pyramid/*.rs`    | ≤568  | —    | split into build/query/synthesis       |
+| `core/scope-core/src/expr/*.rs`       | ≤471  | —    | split into lex/parse/eval              |
 
 The split plan and the duplication inventory are recorded in
 [ADR 0053](adr/0053-module-boundaries-and-shared-primitives.md).

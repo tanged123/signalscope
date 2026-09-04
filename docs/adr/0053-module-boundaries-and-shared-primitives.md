@@ -42,6 +42,24 @@ methods form clusters that share no state with each other.
 The following splits are accepted. They are staged, not yet performed, and each
 is independently landable. Line counts are measured on this branch.
 
+### Implementation status
+
+The first burn-down pass landed the shared TypeScript binary search, the shared
+slice-backed Rust padded-window helper, staged `AppShell.mount`, the snapshot
+selector extraction, and the API, cache-codec, expression, and pyramid splits.
+The fallible paged-column window calculation remains in `scope-server::host`
+because sharing the slice helper would change its error handling.
+
+Recipe globs were not switched to the snapshot matcher. A comparison test locks
+the discovered semantic difference: snapshot `*` is a character wildcard that
+can cross `/`, while recipe `*` matches exactly one path segment and `**`
+matches multiple segments. Unifying those meanings requires a product decision.
+
+The panel, command-registry, remaining shell clusters, fixtures, and stylesheet
+splits remain staged work. The stylesheet task must preserve source order with
+ordered chunks or cascade layers; its selector families are interleaved, so a
+simple one-file-per-family import order is not behavior-preserving.
+
 **`frontend/src/ui/panel.ts` (3,452)**
 
 | Extract                     | Lines | Into                   |
@@ -117,10 +135,11 @@ times: `app/samples.ts`, `app/data-plane.ts`, and `app/tile-window-cache.ts`,
 differing only in whether they take `readonly number[]` or `Float64Array`.
 Consolidate into `app/binary-search.ts` over `ArrayLike<number>`.
 
-**D3 — glob matching.** `snapshot.rs` implements a parsed glob with backtracking
+**D3 — glob matching.** `snapshot.rs` implemented a parsed glob with backtracking
 and `ingest/recipe/decode.rs` implements a separate string glob. Two engines
 means `*` can mean two things depending on where a user types it. The extracted
-`selector.rs` becomes the single implementation, and recipe decoding uses it.
+`selector.rs` owns snapshot matching. Recipe decoding remains separate until
+the documented wildcard-semantic difference is resolved.
 
 **D4 — anchored dismissible menu.** Implemented three times: `panel.ts`
 `openPanelMenu` (60 lines, already a good primitive, but private to
@@ -153,8 +172,9 @@ file. The budget exists to force the question, not to answer it.
   named seams. Both remain above the soft budget; further splitting waits for a
   second concrete panel type to show where the boundary belongs, consistent with
   ADR 0052's rule that the second implementation drives the abstraction.
-- Four duplicated helpers become one implementation each. D3 additionally closes
-  a semantic inconsistency, not only duplication.
+- Binary search and slice-backed padded-window bounds each have one shared
+  implementation. The selector comparison makes the remaining glob semantic
+  inconsistency explicit instead of silently choosing one behavior.
 - Tests move with the code they cover. A split that reduces coverage is
   rejected.
 - `docs/architecture.md` is the standing construction guide and is updated when
