@@ -27,6 +27,7 @@ import {
   type TileRequest,
 } from "../generated/protocol";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
+import { lowerBound, upperBound } from "./binary-search";
 import {
   binColumnsFromWire,
   binColumnsFromWireRange,
@@ -667,28 +668,6 @@ function lineRange(
   const start = Math.max(0, lowerBound(anchor, t0) - 1);
   const end = Math.min(anchor.length, upperBound(anchor, t1) + 1);
   return { start, end };
-}
-
-function lowerBound(values: readonly number[], target: number): number {
-  let low = 0;
-  let high = values.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if ((values[middle] as number) < target) low = middle + 1;
-    else high = middle;
-  }
-  return low;
-}
-
-function upperBound(values: readonly number[], target: number): number {
-  let low = 0;
-  let high = values.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if ((values[middle] as number) <= target) low = middle + 1;
-    else high = middle;
-  }
-  return low;
 }
 
 export async function selectDataPlane(): Promise<DataPlane> {

@@ -1,4 +1,5 @@
 import type { BinColumns, ColumnarTileResponse } from "./bin-columns";
+import { lowerBound, upperBound } from "./binary-search";
 import type { Line2DResponse } from "./line-binary";
 
 export interface WindowBounds {
@@ -414,26 +415,4 @@ function countVisibleAnchors(
   const start = lowerBound(anchor, visible.t0);
   const end = upperBound(anchor, visible.t1);
   return Math.max(0, end - start);
-}
-
-function lowerBound(values: Float64Array, target: number): number {
-  let low = 0;
-  let high = values.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if ((values[middle] as number) < target) low = middle + 1;
-    else high = middle;
-  }
-  return low;
-}
-
-function upperBound(values: Float64Array, target: number): number {
-  let low = 0;
-  let high = values.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if ((values[middle] as number) <= target) low = middle + 1;
-    else high = middle;
-  }
-  return low;
 }
