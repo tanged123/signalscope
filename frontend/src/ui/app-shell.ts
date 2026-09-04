@@ -317,6 +317,13 @@ export class AppShell {
   }
 
   async mount(): Promise<void> {
+    await this.prepareMount();
+    this.mountWorkspaceViews();
+    this.mountChromeControllers();
+    await this.loadMountedWorkspace();
+  }
+
+  private async prepareMount(): Promise<void> {
     delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
     this.bindGpuWarning();
@@ -338,6 +345,9 @@ export class AppShell {
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
     }
+  }
+
+  private mountWorkspaceViews(): void {
     this.workspaceTabs = new WorkspaceTabsView(
       required(this.root, ".workspace-tabs"),
       {
@@ -672,6 +682,9 @@ export class AppShell {
       },
       this.gpu,
     );
+  }
+
+  private mountChromeControllers(): void {
     this.setsList = new SetsListView(required(this.root, ".tree-sets"), {
       onSetBind: (setId) => this.bindSetToPanel(setId),
       onSignalDrop: (refs) => this.openSetNameRow(refs),
@@ -719,6 +732,9 @@ export class AppShell {
     );
     this.bindControls();
     this.renderWindowReadout();
+  }
+
+  private async loadMountedWorkspace(): Promise<void> {
     await this.reloadSignals();
     this.root.dataset.ready = "true";
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
