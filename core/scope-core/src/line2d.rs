@@ -252,7 +252,8 @@ impl LinePyramid {
         if level >= self.level_count() {
             return None;
         }
-        let Some((start, end)) = window_bounds(&self.anchor, t0, t1) else {
+        let Some((start, end)) = crate::time_window::padded_time_window(&self.anchor, t0, t1)
+        else {
             return Some(LineQuery {
                 level: u32::try_from(level).unwrap_or(u32::MAX),
                 points: Vec::new(),
@@ -271,7 +272,8 @@ impl LinePyramid {
         if level >= self.level_count() {
             return None;
         }
-        let Some((start, end)) = window_bounds(&self.anchor, t0, t1) else {
+        let Some((start, end)) = crate::time_window::padded_time_window(&self.anchor, t0, t1)
+        else {
             return Some(0);
         };
         self.level_indices(level, start, end, t0, t1)
@@ -283,7 +285,8 @@ impl LinePyramid {
     /// soft bound because dropping a gap start would reconnect a stroke.
     #[must_use]
     pub fn query(&self, t0: f64, t1: f64, pixel_width: u32) -> LineQuery {
-        let Some((start, end)) = window_bounds(&self.anchor, t0, t1) else {
+        let Some((start, end)) = crate::time_window::padded_time_window(&self.anchor, t0, t1)
+        else {
             return LineQuery {
                 level: 0,
                 points: Vec::new(),
@@ -532,17 +535,6 @@ fn push_index(indices: &mut Vec<usize>, value: u64, start: usize, end: usize) {
 
 fn index(value: u64) -> usize {
     usize::try_from(value).expect("sample index fits in usize")
-}
-
-fn window_bounds(anchor: &[f64], t0: f64, t1: f64) -> Option<(usize, usize)> {
-    if anchor.is_empty() || t1 < anchor[0] || t0 > anchor[anchor.len() - 1] {
-        return None;
-    }
-    let start = anchor
-        .partition_point(|value| *value < t0)
-        .saturating_sub(1);
-    let end = (anchor.partition_point(|value| *value <= t1) + 1).min(anchor.len());
-    (start < end).then_some((start, end))
 }
 
 #[cfg(test)]

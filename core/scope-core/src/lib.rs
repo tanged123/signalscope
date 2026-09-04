@@ -23,6 +23,7 @@ pub mod snapshot;
 pub mod sources;
 pub mod store;
 pub mod tile_wire;
+pub mod time_window;
 
 #[cfg(test)]
 mod benchmarks;

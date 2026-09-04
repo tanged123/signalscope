@@ -117,15 +117,6 @@ pub struct SampleSlice {
     pub stride: u32,
 }
 
-fn sample_window_bounds(time: &[f64], t0: f64, t1: f64) -> Option<(usize, usize)> {
-    if time.is_empty() || t1 < time[0] || t0 > time[time.len() - 1] {
-        return None;
-    }
-    let start = time.partition_point(|value| *value < t0).saturating_sub(1);
-    let end = (time.partition_point(|value| *value <= t1) + 1).min(time.len());
-    (start < end).then_some((start, end))
-}
-
 /// Selects at most `max_points` samples inside `[t0, t1]`, plus one
 /// neighbour past each edge so strokes reach the plot border.
 ///
@@ -145,7 +136,7 @@ pub fn sample_window(
     max_points: u32,
 ) -> SampleSlice {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
-    let Some((start, end)) = sample_window_bounds(time, t0, t1) else {
+    let Some((start, end)) = crate::time_window::padded_time_window(time, t0, t1) else {
         return SampleSlice {
             time: Vec::new(),
             values: Vec::new(),
@@ -185,7 +176,7 @@ pub fn sample_window(
 #[must_use]
 pub fn sample_window_full(time: &[f64], values: &[f64], t0: f64, t1: f64) -> SampleSlice {
     assert_eq!(time.len(), values.len(), "time/value lengths differ");
-    let Some((start, end)) = sample_window_bounds(time, t0, t1) else {
+    let Some((start, end)) = crate::time_window::padded_time_window(time, t0, t1) else {
         return SampleSlice {
             time: Vec::new(),
             values: Vec::new(),
