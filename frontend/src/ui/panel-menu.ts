@@ -130,7 +130,10 @@ export function showPanelMenu(
         next = (index + 1) % buttons.length;
         break;
       case "ArrowUp":
-        next = (index - 1 + buttons.length) % buttons.length;
+        next =
+          index < 0
+            ? buttons.length - 1
+            : (index - 1 + buttons.length) % buttons.length;
         break;
       case "Home":
         next = 0;

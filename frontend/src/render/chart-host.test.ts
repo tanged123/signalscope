@@ -593,3 +593,24 @@ it("keeps continuous color attributes across viewport updates and restores categ
     getContext.mockRestore();
   }
 });
+
+it("excludes continuous colors from ghost density and draws them in the foreground", async () => {
+  const host = await hostFixture();
+  const base = request(
+    response(Array.from({ length: 33 }, (_, i) => String(i))),
+    Array.from({ length: 33 }, () => ({ ...stroke(null), alpha: 0.5 })),
+  );
+  const pointColors = new Float32Array(4);
+  host.render({
+    ...base,
+    series: base.series.map((line, i) =>
+      i === 32 ? line : { ...line, pointColors },
+    ),
+  });
+  const series = state.charts.at(-1)?.options.series as Array<{
+    name: string;
+    lineStyle: { opacity: number };
+  }>;
+  expect(series[0]?.name).toBe("signal_32");
+  expect(series.every((line) => line.lineStyle.opacity === 0.5)).toBe(true);
+});

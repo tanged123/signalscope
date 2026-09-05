@@ -17,6 +17,14 @@ export function parseBakedSession(sessionJson: string): Session {
   if (!isSession(parsed)) {
     throw new Error("snapshot session has an invalid structure");
   }
+  for (const tab of parsed.tabs) {
+    for (const panel of tab.panels) {
+      if (panel.color_axis != null) {
+        panel.color_axis.range ??= null;
+        panel.color_axis.label ??= null;
+      }
+    }
+  }
   return parsed;
 }
 
@@ -100,12 +108,12 @@ function isColorAxis(value: unknown): boolean {
   return (
     isRecord(value) &&
     isSampleAxisSource(value.source) &&
-    (value.range === null ||
+    (value.range == null ||
       (isNumberPair(value.range) &&
         Number.isFinite(value.range[0]) &&
         Number.isFinite(value.range[1]) &&
         value.range[0] < value.range[1])) &&
-    (value.label === null || typeof value.label === "string")
+    (value.label == null || typeof value.label === "string")
   );
 }
 

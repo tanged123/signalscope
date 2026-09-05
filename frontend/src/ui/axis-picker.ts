@@ -30,6 +30,7 @@ export function showAxisPicker(
   addY: (paths: string[]) => void,
   clearColor?: () => void,
   colorActive = false,
+  addYSet?: (id: string) => void,
 ): () => void {
   const refFor = (series: CatalogSeries): SeriesRef => ({
     source_key: series.sourceKey,
@@ -97,11 +98,11 @@ export function showAxisPicker(
               .filter((series) => seriesMatches(selector.selector, series))
               .map(refFor)
           : [];
-    if (refs.length > 0)
+    if (refs.length > 0 || axis === "y")
       options.push({
         label: `${set.name} · set · ${String(refs.length)} signals`,
         active: false,
-        run: () => choose(refs),
+        run: () => (axis === "y" ? addYSet?.(set.id) : choose(refs)),
       });
   }
   for (const series of all) {

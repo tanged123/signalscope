@@ -140,13 +140,20 @@ fn migrate_v29(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 fn migrate_v30(mut value: serde_json::Value) -> serde_json::Value {
-    for panel in value["tabs"]
-        .as_array_mut()
+    for panel in value
+        .get_mut("tabs")
+        .and_then(serde_json::Value::as_array_mut)
         .into_iter()
         .flatten()
-        .flat_map(|tab| tab["panels"].as_array_mut().into_iter().flatten())
+        .flat_map(|tab| {
+            tab.get_mut("panels")
+                .and_then(serde_json::Value::as_array_mut)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(serde_json::Value::as_object_mut)
     {
-        panel["color_axis"] = serde_json::Value::Null;
+        panel.insert("color_axis".into(), serde_json::Value::Null);
     }
     value["schema_version"] = SESSION_SCHEMA_VERSION.into();
     value
@@ -871,6 +878,22 @@ mod tests {
         let migrated = from_json(&value.to_string()).unwrap();
         assert_eq!(migrated.schema_version, SESSION_SCHEMA_VERSION);
         assert_eq!(migrated.linked_time, LinkedTime::default());
+    }
+
+    #[test]
+    fn malformed_v30_tabs_and_panels_return_errors_without_panicking() {
+        for tabs in [
+            serde_json::json!([42]),
+            serde_json::json!([{ "panels": [42] }]),
+        ] {
+            let mut value = serde_json::to_value(Session::default()).unwrap();
+            value["schema_version"] = 30.into();
+            value["tabs"] = tabs;
+            assert!(matches!(
+                from_json(&value.to_string()),
+                Err(SessionError::Json(_))
+            ));
+        }
     }
 
     #[test]

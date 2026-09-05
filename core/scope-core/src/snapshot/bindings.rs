@@ -115,11 +115,7 @@ pub(super) fn line_combinations(
                 let y = store
                     .signal(y_id)
                     .ok_or(SnapshotError::MissingSignal(y_id))?;
-                let source_key = if y.path.starts_with("derived/") {
-                    "derived".to_owned()
-                } else {
-                    super::source_key(store, y)?.0.to_string()
-                };
+                let source_key = super::source_key(store, y)?.0.to_string();
                 let x_id = if matches!(panel.x_axis, SampleAxisSource::Time) {
                     y_id
                 } else {
@@ -168,18 +164,23 @@ fn axis_signal<'a>(
     role: &str,
     required: bool,
 ) -> Result<Option<&'a Signal>, SnapshotError> {
-    let candidates = x_refs(axis)
-        .into_iter()
-        .filter(|reference| {
-            !matches!(axis, SampleAxisSource::Bundle { .. }) || reference.source_key == source_key
-        })
-        .collect::<Vec<_>>();
+    let mut candidates = Vec::new();
+    for reference in x_refs(axis) {
+        let signal = signal_from_ref(session, store, reference);
+        if !matches!(axis, SampleAxisSource::Bundle { .. })
+            || signal.is_some_and(|signal| {
+                super::source_key(store, signal).is_ok_and(|key| key.0.to_string() == source_key)
+            })
+        {
+            candidates.push(signal);
+        }
+    }
     if candidates.len() != 1 {
         return Err(SnapshotError::MissingLineXReference(format!(
             "{role}: expected one member for source {source_key}"
         )));
     }
-    let signal = signal_from_ref(session, store, candidates[0]);
+    let signal = candidates[0];
     if signal.is_none() && (required || matches!(axis, SampleAxisSource::Bundle { .. })) {
         return Err(SnapshotError::MissingLineXReference(format!(
             "{role}: signal unavailable for source {source_key}"
@@ -263,6 +264,41 @@ mod tests {
             label: None,
         });
         (session, store, pyramids, cs)
+    }
+
+    #[test]
+    fn bundles_match_canonical_sources_for_prefix_refs_and_derived_display_prefix() {
+        let (mut session, _, _, _) = colored_fixture();
+        let mut store = SignalStore::new();
+        let key = SourceKey(uuid::Uuid::from_bytes([7; 16]));
+        let source = store.register_source("run.csv", key, "derived").unwrap();
+        let x = store
+            .insert_signal(source, "x", None, vec![0.0, 1.0], vec![1.0, 2.0])
+            .unwrap();
+        let y = store
+            .insert_signal(source, "y", None, vec![0.0, 1.0], vec![3.0, 4.0])
+            .unwrap();
+        for source_key in [key.0.to_string(), "derived".into()] {
+            let reference = SeriesRef {
+                source_key,
+                channel: "x".into(),
+            };
+            let panel = &mut session.tabs[0].panels[0];
+            panel.bindings[0].refs = vec![SeriesRef {
+                source_key: key.0.to_string(),
+                channel: "y".into(),
+            }];
+            panel.x_axis = SampleAxisSource::Bundle {
+                refs: vec![reference.clone()],
+            };
+            panel.color_axis.as_mut().unwrap().source = SampleAxisSource::Bundle {
+                refs: vec![reference],
+            };
+            assert_eq!(
+                line_combinations(&session, &store).unwrap(),
+                vec![(x, vec![y])]
+            );
+        }
     }
 
     #[test]

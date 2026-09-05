@@ -279,6 +279,18 @@
         }
       },
       "session": {}
+    },
+    {
+      "name": "C axis with default range and label",
+      "session": {},
+      "panel": {
+        "color_axis": {
+          "source": {
+            "kind": "time"
+          }
+        }
+      },
+      "valid": true
     }
   ]
 }

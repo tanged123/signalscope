@@ -191,3 +191,17 @@ describe("parseBakedSession", () => {
     );
   });
 });
+
+it("normalizes omitted C-axis limits and labels to their runtime defaults", () => {
+  const model = new WorkspaceModel();
+  const panel = model.addPanelRow();
+  Object.assign(panel, { color_axis: { source: { kind: "time" } } });
+  expect(
+    parseBakedSession(JSON.stringify(model.snapshot())).tabs[0]?.panels[0]
+      ?.color_axis,
+  ).toEqual({
+    source: { kind: "time" },
+    range: null,
+    label: null,
+  });
+});

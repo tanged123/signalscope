@@ -42,6 +42,26 @@ export function setColorAxis(
   return bindingChanged ? "binding" : "scale";
 }
 
+export function removeAxisRef(panel: PanelState, deleted: SeriesRef): void {
+  const prune = (axis: SampleAxisSource): SampleAxisSource | null => {
+    const refs = axisRefs(axis).filter(
+      (ref) =>
+        ref.source_key !== deleted.source_key ||
+        ref.channel !== deleted.channel,
+    );
+    if (refs.length === axisRefs(axis).length) return axis;
+    return refs.length === 0 ? null : { kind: "bundle", refs };
+  };
+  setXAxis(panel, prune(panel.x_axis) ?? { kind: "time" });
+  if (panel.color_axis != null) {
+    const source = prune(panel.color_axis.source);
+    setColorAxis(
+      panel,
+      source === null ? null : { ...panel.color_axis, source },
+    );
+  }
+}
+
 export interface LineGroup {
   xId: string;
   ids: string[];

@@ -15,6 +15,7 @@ export interface PanelAxisActions {
   selectX(axis: SampleAxisSource): void;
   selectColor(axis: PanelState["color_axis"]): void;
   addY(paths: string[]): void;
+  addYSet(id: string): void;
   limits(values: AxisLimits): void;
   visibleRanges(): { x: [number, number] | null; y: [number, number] | null };
   beforeOpen(): void;
@@ -104,6 +105,7 @@ export class PanelAxes {
       (paths) => this.actions.addY(paths),
       () => this.actions.selectColor(null),
       state.color_axis != null,
+      (id) => this.actions.addYSet(id),
     );
   }
 

@@ -73,6 +73,11 @@ No schema or renderer attribute contract changes are needed.
 Categorical choices remain saved and become effective again when C is cleared;
 legend text, dash, focus, and picking continue to identify traces.
 
+Deleting a signal prunes its explicit X and C bundle references, preserving
+unaffected members. Exhausted X bindings reset to time with coordinate cleanup;
+exhausted C bindings clear the scale. The existing line-binding state owner
+handles this cleanup for workspace deletion paths.
+
 Binding/range changes invalidate the appropriate prepared state. The controller
 retains one overview and latest detail; its generation and abort rules govern
 the entire colored response. Budget accounting includes auxiliary F64 columns,

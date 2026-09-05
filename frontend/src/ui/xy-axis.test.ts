@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
 import { Catalog } from "../app/catalog";
+import { resolvePanel } from "../app/resolution";
 import { resolveLineBindings } from "../app/line-bindings";
 import { queryLineGroups } from "../app/line-query";
 import { line2dFamily } from "../app/line2d-family";
@@ -10,6 +11,7 @@ import { parseBakedSession } from "../app/baked-session";
 import type { DataPlane } from "../app/data-plane";
 import type { Line2DResponse } from "../app/line-binary";
 import type { SampleAxisSource } from "../generated/session";
+import { required } from "./dom";
 import { showAxisPicker } from "./axis-picker";
 import { bindAxisDrop } from "./axis-drop";
 import { SIGNAL_DRAG_TYPE } from "./panel-shell";
@@ -373,4 +375,60 @@ test("C attributes survive save and clear without changing the categorical palet
   workspace.setPanelColorAxis(panel.id, null);
   expect(panel.color_axis).toBeNull();
   expect(panel.color_by).toBe(categorical);
+});
+
+test("Y named sets stay live when the selector changes, while X captures references", () => {
+  const model = new WorkspaceModel();
+  const panel = model.addPanelRow();
+  model.addNamedSet({
+    id: "set",
+    name: "Selected",
+    kind: "query",
+    selector: "y",
+    refs: [],
+  });
+  const container = document.createElement("div");
+  const anchor = document.createElement("button");
+  container.append(anchor);
+  document.body.append(container);
+  const selectX = vi.fn();
+  const addY = vi.fn();
+  const chooseSet = (axis: "x" | "y") => {
+    const close = showAxisPicker(
+      container,
+      anchor,
+      axis,
+      { kind: "time" },
+      catalog,
+      model.namedSets(),
+      selectX,
+      addY,
+      undefined,
+      false,
+      (id) => {
+        model.addSetBinding(panel.id, id);
+      },
+    );
+    const search = required<HTMLInputElement>(container, "input");
+    search.value = "Selected · set";
+    search.dispatchEvent(new Event("input"));
+    search.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    close();
+  };
+  chooseSet("y");
+  expect(panel.bindings).toMatchObject([{ kind: "set", set_id: "set" }]);
+  expect(addY).not.toHaveBeenCalled();
+  expect(
+    resolvePanel(catalog, panel, model.namedSets()).map((s) => s.path),
+  ).toEqual(["one/y", "two/y"]);
+  const set = model.namedSets()[0];
+  if (set === undefined) throw new Error("missing set");
+  set.selector = "x";
+  expect(
+    resolvePanel(catalog, panel, model.namedSets()).map((s) => s.path),
+  ).toEqual(["one/x", "two/x"]);
+  chooseSet("x");
+  expect(selectX).toHaveBeenCalledWith(bundle);
 });

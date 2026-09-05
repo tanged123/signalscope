@@ -49,6 +49,35 @@ describe("presentation status", () => {
   });
 });
 
+it("schedules autosave for explicit-X navigation and fit", () => {
+  const workspace = new WorkspaceModel();
+  const panel = workspace.addPanelRow();
+  workspace.setPanelXAxis(panel.id, {
+    kind: "signal",
+    ref: { source_key: "run", channel: "x" },
+  });
+  const shell = Object.assign(Object.create(AppShell.prototype), {
+    workspace,
+    workspaceView: { resetYAxis: vi.fn() },
+    markHistoryDirty: vi.fn(),
+    commitHistory: vi.fn(),
+    scheduleAutosave: vi.fn(),
+    scheduleRender: vi.fn(),
+    renderTiles: vi.fn(),
+  }) as {
+    applyXRange(id: string, range: [number, number]): void;
+    fitPanelView(id: string): void;
+    scheduleAutosave: ReturnType<typeof vi.fn>;
+  };
+  shell.applyXRange(panel.id, [10, 20]);
+  expect(panel.x_range).toEqual([10, 20]);
+  expect(shell.scheduleAutosave).toHaveBeenCalledOnce();
+  shell.scheduleAutosave.mockClear();
+  shell.fitPanelView(panel.id);
+  expect(panel.x_range).toBeNull();
+  expect(shell.scheduleAutosave).toHaveBeenCalledOnce();
+});
+
 describe("GPU failure handling", () => {
   it("stops presentation work and releases hosts before the device", () => {
     const disposePresentation = vi.fn();

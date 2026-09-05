@@ -99,3 +99,41 @@ describe("signal-X line adapter", () => {
     ]);
   });
 });
+
+it("rebases overridden epoch coordinates and preserves feed identity during pan", () => {
+  const base = response();
+  const epoch = 1_700_000_000;
+  const source = {
+    ...base,
+    ys: base.ys.map((column) => ({
+      ...column,
+      coordinates: {
+        level: base.level,
+        anchor: base.anchor,
+        x: {
+          ...base.x,
+          values: new Float64Array([epoch, epoch + 0.001, epoch + 0.002]),
+        },
+      },
+    })),
+  };
+  const options = {
+    window: { t0: 0, t1: 2 },
+    xRange: { min: epoch, max: epoch + 1 },
+    yRange: [0, 6] as const,
+    xLabel: "time",
+    yLabel: "y",
+    axisStyle: "gutter" as const,
+  };
+  prepareSignalXLine(source, options.window);
+  const input = line2DFromSignalX(source, options);
+  expect(input.xOrigin).toBe(epoch);
+  expect(input.series[0]?.data[2]).toBeCloseTo(0.001, 6);
+  expect(input.series[0]?.data[4]).toBeCloseTo(0.002, 6);
+  expect(
+    line2DFromSignalX(source, {
+      ...options,
+      xRange: { min: epoch + 1, max: epoch + 2 },
+    }).series[0]?.data,
+  ).toBe(input.series[0]?.data);
+});

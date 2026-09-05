@@ -18,7 +18,7 @@ export function line2DFromSignalX(
   response: Line2DResponse,
   options: SignalXLine2DInputOptions,
 ): Line2DRenderInput {
-  const xOrigin = signalXReference(response.x.values);
+  const xOrigin = signalXReference(response);
   return {
     xOrigin,
     colorScale: options.colorScale,
@@ -51,7 +51,7 @@ export function prepareSignalXLine(
   response: Line2DResponse,
   window: { t0: number; t1: number },
 ): void {
-  const xOrigin = signalXReference(response.x.values);
+  const xOrigin = signalXReference(response);
   for (const column of response.ys) {
     cachedSignalXFeed(
       column.coordinates?.anchor ?? response.anchor,
@@ -63,9 +63,11 @@ export function prepareSignalXLine(
   }
 }
 
-function signalXReference(values: Float64Array): number {
-  for (const value of values) {
-    if (Number.isFinite(value)) return value;
+function signalXReference(response: Line2DResponse): number {
+  for (const column of response.ys) {
+    for (const value of column.coordinates?.x.values ?? response.x.values) {
+      if (Number.isFinite(value)) return value;
+    }
   }
   return 0;
 }

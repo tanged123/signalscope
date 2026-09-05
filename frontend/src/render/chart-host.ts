@@ -109,9 +109,7 @@ export class ChartHost {
     }
     const emphasis = new Set(request.emphasisIndices);
     const emphasisActive = request.emphasisIndices.length > 0;
-    const ghostCount = request.series.filter(
-      (series) => series.style.hue === null,
-    ).length;
+    const ghostCount = request.series.filter(isGhost).length;
     const ghostOpacityScale = Math.min(
       1,
       Math.sqrt(FULL_OPACITY_GHOST_COUNT / Math.max(1, ghostCount)),
@@ -136,7 +134,7 @@ export class ChartHost {
       }
       rebuilt = true;
       const hue = style.hue;
-      const ghost = hue === null && line.pointColors === undefined;
+      const ghost = isGhost(line);
       const color =
         line.pointColors !== undefined || hue === null
           ? request.palette.fg4
@@ -197,7 +195,7 @@ export class ChartHost {
     const orderedSeries = series
       .map((element, index) => ({
         element,
-        ghost: request.series[index]?.style.hue === null,
+        ghost: isGhost(request.series[index]),
       }))
       .sort((left, right) => Number(right.ghost) - Number(left.ghost))
       .map(({ element }) => element);
@@ -424,4 +422,10 @@ function sameStyle(left: SeriesStroke, right: SeriesStroke): boolean {
     left.width === right.width &&
     left.alpha === right.alpha
   );
+}
+
+function isGhost(
+  line: Line2DRenderRequest["series"][number] | undefined,
+): boolean {
+  return line?.style.hue === null && line.pointColors === undefined;
 }

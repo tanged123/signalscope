@@ -25,7 +25,9 @@ ambiguous matches are errors, never an implicit Cartesian product. X can also
 be Y. Exact timebase validation remains in the native paired reducer.
 
 The axis picker owns search, signal/channel-bundle choices, named-set choices,
-and dismissal. It uses catalog values and mutation callbacks. Both axes have
+and dismissal. Y named-set choices retain the set ID so query membership and
+later selector edits remain live; X choices capture explicit references.
+It uses catalog values and mutation callbacks. Both axes have
 keyboard-accessible controls. Bundles are captured as explicit references so
 their membership survives save and offline export.
 

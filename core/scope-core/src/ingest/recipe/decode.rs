@@ -120,7 +120,7 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
             return Err(RecipeError::NoMatches(selection.datasets.clone()).into());
         }
         for entry in matches {
-            selected_datasets.insert(entry.path.clone());
+            selected_datasets.insert(entry.path.trim_start_matches('/').to_owned());
             context.check()?;
             let values = container
                 .read_f64(&entry.path)
@@ -459,6 +459,20 @@ name = "strip:run/"
 kind = "dataset"
 path = "run/time"
 "#;
+
+    #[test]
+    fn slash_prefixed_selected_time_is_not_registered_twice() {
+        let mut container = fake_container(&[("/run/time", vec![0.0, 1.0])]);
+        container.columns.insert("run/time".into(), vec![0.0, 1.0]);
+        let recipe = recipe(
+            &SHARED_TIME
+                .replace("run/telemetry/*", "**/time")
+                .replace("strip:run/", "keep"),
+        );
+        let decoded = decode_with(&container, &recipe, &mut context()).unwrap();
+        assert_eq!(decoded.signals.len(), 1);
+        assert_eq!(decoded.signals[0].local_path, "run/time");
+    }
 
     const INDEX_TIME: &str = r#"
 id = "index"

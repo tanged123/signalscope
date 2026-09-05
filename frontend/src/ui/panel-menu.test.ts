@@ -71,3 +71,25 @@ it("closes on an outside pointer without taking focus", () => {
   expect(document.activeElement).toBe(outside);
   close();
 });
+
+it("ArrowUp from search selects the last filtered result", () => {
+  const { container, anchor } = fixture();
+  const close = showPanelMenu(
+    container,
+    anchor,
+    "Search",
+    ["a", "b", "c"].map((label) => ({ label, active: false, run: vi.fn() })),
+    true,
+  );
+  container
+    .querySelector("input")
+    ?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }),
+    );
+  expect(document.activeElement?.textContent.trim()).toBe("c");
+  document.activeElement?.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+  );
+  expect(document.activeElement?.textContent.trim()).toBe("a");
+  close();
+});

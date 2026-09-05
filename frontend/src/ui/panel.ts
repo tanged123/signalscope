@@ -498,6 +498,7 @@ export class PanelView {
         };
       },
       addY: (paths) => callbacks.onDropSignals(this.id, paths),
+      addYSet: (id) => callbacks.onDropSet(this.id, id),
       beforeOpen: () => this.closePanelConfig(),
     });
     this.interactions = new PlotInteractionController(this.overlay, {

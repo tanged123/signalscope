@@ -2691,6 +2691,7 @@ export class AppShell {
     }
     this.workspace.setPanelXRange(panelId, [range[0], range[1]]);
     this.markHistoryDirty(`range:${panelId}`);
+    this.scheduleAutosave();
     this.scheduleRender();
   }
 
@@ -2732,6 +2733,7 @@ export class AppShell {
     if (panel.x_axis.kind !== "time") {
       this.workspace.clearPanelXRange(panelId);
       this.commitHistory();
+      this.scheduleAutosave();
       this.renderTiles();
       return;
     }

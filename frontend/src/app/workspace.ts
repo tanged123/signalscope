@@ -25,7 +25,7 @@ import type {
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
-import { setXAxis, setColorAxis } from "./line-bindings";
+import { setXAxis, setColorAxis, removeAxisRef } from "./line-bindings";
 
 const MIN_FRACTION = 0.1;
 
@@ -482,19 +482,7 @@ export class WorkspaceModel {
     panel.focus = panel.focus.filter(
       (entry) => entry.ref === null || !sameRef(entry.ref, ref),
     );
-    if (
-      deletingSignal &&
-      panel.x_axis.kind === "signal" &&
-      sameRef(panel.x_axis.ref, ref)
-    ) {
-      panel.x_axis = { kind: "time" };
-      panel.x_range = null;
-      panel.x_label = null;
-      panel.annotations = panel.annotations.map((annotation) => ({
-        ...annotation,
-        pinned_x: null,
-      }));
-    }
+    if (deletingSignal) removeAxisRef(panel, ref);
     if (path !== undefined) {
       panel.annotations = panel.annotations.filter(
         (annotation) => annotation.series_path !== path,
