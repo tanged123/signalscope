@@ -79,9 +79,9 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     );
     await panel.screenshot({ path: testInfo.outputPath("xy-bundle.png") });
     await panel.locator(".panel-x-axis").click();
-    await panel.locator(".axis-picker input").fill("one/time");
+    await panel.locator(".axis-picker input").fill("two/time");
     await panel.locator(".axis-picker input").press("Enter");
-    await expect(panel.locator(".panel-x-axis")).toContainText("one/time");
+    await expect(panel.locator(".panel-x-axis")).toContainText("two/time");
     await expect(panel.locator(".panel-y-axis")).toBeVisible();
   } finally {
     if (server.exitCode === null) {
