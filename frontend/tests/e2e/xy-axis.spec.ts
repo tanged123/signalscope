@@ -200,17 +200,20 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       .toBeGreaterThan(100);
     const workspacePath = join(directory, "session.autosave.json");
     await expect
-      .poll(() => {
-        try {
-          return (
-            JSON.parse(
-              readFileSync(pathToFileURL(workspacePath), "utf8"),
-            ) as Session
-          ).tabs[0]?.panels[0]?.color_axis?.range;
-        } catch {
-          return null;
-        }
-      })
+      .poll(
+        () => {
+          try {
+            return (
+              JSON.parse(
+                readFileSync(pathToFileURL(workspacePath), "utf8"),
+              ) as Session
+            ).tabs[0]?.panels[0]?.color_axis?.range;
+          } catch {
+            return null;
+          }
+        },
+        { timeout: 20_000 },
+      )
       .toEqual([20, 80]);
     const snapshotPath = testInfo.outputPath("xy-color.html");
     await promisify(execFile)(

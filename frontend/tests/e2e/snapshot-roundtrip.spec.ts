@@ -76,9 +76,12 @@ test.describe("exported snapshot round trip", () => {
     const preview = JSON.stringify(
       bakedManifest(artifacts.preview).signals,
     ).length;
-    const full = JSON.stringify(bakedManifest(artifacts.full).signals).length;
+    const signals = bakedManifest(artifacts.full).signals;
+    const full = JSON.stringify(signals).length;
     expect(preview).toBeLessThan(full / 2);
-    expect(full).toBeLessThan(2_000_000);
+    // Time is now retained alongside alpha and beta, with the same per-signal budget.
+    expect(signals).toHaveLength(3);
+    expect(full).toBeLessThan(3_000_000);
   });
 
   test("rejects an unsupported session instead of partially restoring", async ({
