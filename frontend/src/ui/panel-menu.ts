@@ -1,10 +1,26 @@
 import { clamp } from "../app/plot-math";
 
-interface MenuOption {
+export interface MenuOption {
   label: string;
   active: boolean;
   action?: boolean;
   run(): void;
+}
+
+export function positionPanelPopover(
+  container: HTMLElement,
+  anchor: HTMLElement,
+  popover: HTMLElement,
+): void {
+  const panelRect = container.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  const width = popover.getBoundingClientRect().width;
+  popover.style.left = `${String(clamp(anchorRect.right - panelRect.left - container.clientLeft - width, 4, Math.max(4, container.clientWidth - width - 4)))}px`;
+  popover.style.top = `${String(anchorRect.bottom - panelRect.top - container.clientTop + 4)}px`;
+  popover.style.setProperty(
+    "--panel-popover-space",
+    `${String(Math.max(48, panelRect.bottom - anchorRect.bottom - 8))}px`,
+  );
 }
 
 /** Owns one anchored menu and its document listeners; returns its teardown. */
@@ -13,9 +29,12 @@ export function showPanelMenu(
   anchor: HTMLElement,
   label: string,
   options: readonly MenuOption[],
+  searchable = false,
 ): () => void {
   const popover = document.createElement("div");
-  popover.className = "panel-config-popover";
+  popover.className = searchable
+    ? "panel-config-popover axis-picker"
+    : "panel-config-popover";
   popover.setAttribute("role", "menu");
   popover.setAttribute("aria-label", label);
   const title = document.createElement("div");
@@ -35,24 +54,53 @@ export function showPanelMenu(
     if (event.target instanceof Node && popover.contains(event.target)) return;
     close();
   };
-  const buttons = options.map((option) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.tabIndex = -1;
-    button.setAttribute(
-      "role",
-      option.action === true ? "menuitem" : "menuitemradio",
+  const search = document.createElement("input");
+  search.type = "search";
+  search.placeholder = "Search signals and bundles";
+  search.setAttribute("aria-label", `Search ${label.toLowerCase()}`);
+  if (searchable) popover.append(search);
+  const list = document.createElement("div");
+  popover.append(list);
+  let buttons: HTMLButtonElement[] = [];
+  const render = (): void => {
+    list.replaceChildren();
+    const query = search.value.toLowerCase();
+    const matches = options.filter((option) =>
+      option.label.toLowerCase().includes(query),
     );
-    if (option.action !== true)
-      button.setAttribute("aria-checked", String(option.active));
-    button.textContent = `${option.active ? "✓ " : option.action === true ? "" : "  "}${option.label}`;
-    button.addEventListener("click", () => {
-      close(true);
-      option.run();
+    buttons = (searchable ? matches.slice(0, 100) : matches).map((option) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.tabIndex = -1;
+      button.setAttribute(
+        "role",
+        option.action === true ? "menuitem" : "menuitemradio",
+      );
+      if (option.action !== true)
+        button.setAttribute("aria-checked", String(option.active));
+      button.textContent = `${option.active ? "✓ " : option.action === true ? "" : "  "}${option.label}`;
+      button.addEventListener("click", () => {
+        close(true);
+        option.run();
+      });
+      list.append(button);
+      return button;
     });
-    popover.append(button);
-    return button;
-  });
+    if (searchable) {
+      const status = document.createElement("div");
+      status.className = "panel-config-title";
+      status.setAttribute("role", "status");
+      status.textContent =
+        matches.length > 100
+          ? `${String(matches.length)} matches · refine search`
+          : matches.length === 0
+            ? "No matching signals"
+            : "";
+      list.append(status);
+    }
+  };
+  render();
+  search.addEventListener("input", render);
   popover.addEventListener("keydown", (event) => {
     if (event.key === "Escape" || event.key === "Tab") {
       close(true);
@@ -65,6 +113,17 @@ export function showPanelMenu(
     const index = buttons.findIndex(
       (button) => button === document.activeElement,
     );
+    if (
+      event.target === search &&
+      !["ArrowDown", "ArrowUp", "Enter"].includes(event.key)
+    )
+      return;
+    if (event.target === search && event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      buttons[0]?.click();
+      return;
+    }
     let next: number;
     switch (event.key) {
       case "ArrowDown":
@@ -87,13 +146,11 @@ export function showPanelMenu(
     buttons[next]?.focus();
   });
   container.append(popover);
-  const panelRect = container.getBoundingClientRect();
-  const anchorRect = anchor.getBoundingClientRect();
-  popover.style.left = `${String(clamp(anchorRect.right - panelRect.left - 190, 4, Math.max(4, panelRect.width - 194)))}px`;
-  popover.style.top = `${String(anchorRect.bottom - panelRect.top + 4)}px`;
+  positionPanelPopover(container, anchor, popover);
   anchor.setAttribute("aria-haspopup", "menu");
   anchor.setAttribute("aria-expanded", "true");
   document.addEventListener("pointerdown", onPointer, true);
-  buttons[0]?.focus();
+  if (searchable) search.focus();
+  else buttons[0]?.focus();
   return close;
 }

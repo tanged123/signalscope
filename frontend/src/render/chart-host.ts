@@ -1,3 +1,4 @@
+import { Colorbar } from "./colorbar";
 import {
   ChartGPU,
   type ChartGPUInstance,
@@ -27,6 +28,7 @@ interface SeriesElement {
   id: string;
   name: string;
   data: Float32Array;
+  pointColors: Float32Array | undefined;
   style: SeriesStroke;
   emphasis: boolean;
   /** Opacity depends on whether any series is emphasized, not only this one. */
@@ -38,6 +40,8 @@ interface SeriesElement {
 
 export class ChartHost {
   private readonly chart: ChartGPUInstance;
+  private readonly colorbar: Colorbar;
+  private lastRequest: ChartRenderRequest | null = null;
   private readonly unregister: () => void;
   private xOrigin = 0;
   private seriesIds: string[] = [];
@@ -61,6 +65,7 @@ export class ChartHost {
     private readonly gpu: GpuContext,
   ) {
     this.chart = chart;
+    this.colorbar = new Colorbar(container);
     this.unregister = gpu.register({
       needsRender: () => this.chart.needsRender(),
       renderFrame: () => this.renderPendingFrame(),
@@ -94,6 +99,8 @@ export class ChartHost {
     const started = performance.now();
     const ids = request.series.map((series) => series.id);
     let rebuilt = false;
+    this.lastRequest = request;
+    this.drawColorbar();
     if (!sameStrings(ids, this.seriesIds) || request.xOrigin !== this.xOrigin) {
       this.seriesIds = ids;
       this.xOrigin = request.xOrigin;
@@ -118,6 +125,7 @@ export class ChartHost {
         previous.id === line.id &&
         previous.name === line.name &&
         previous.data === line.data &&
+        previous.pointColors === line.pointColors &&
         sameStyle(previous.style, style) &&
         previous.emphasis === isEmphasized &&
         previous.emphasisActive === emphasisActive &&
@@ -128,10 +136,11 @@ export class ChartHost {
       }
       rebuilt = true;
       const hue = style.hue;
-      const ghost = hue === null;
-      const color = ghost
-        ? request.palette.fg4
-        : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
+      const ghost = hue === null && line.pointColors === undefined;
+      const color =
+        line.pointColors !== undefined || hue === null
+          ? request.palette.fg4
+          : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
       const baseOpacity = ghost
         ? Math.max(MIN_DENSE_GHOST_OPACITY, style.alpha * ghostOpacityScale)
         : style.alpha;
@@ -146,6 +155,7 @@ export class ChartHost {
         type: "line",
         name: line.name,
         data: line.data,
+        pointColors: line.pointColors,
         sampling: "none",
         color,
         lineStyle: {
@@ -159,6 +169,7 @@ export class ChartHost {
         id: line.id,
         name: line.name,
         data: line.data,
+        pointColors: line.pointColors,
         style,
         emphasis: isEmphasized,
         emphasisActive,
@@ -234,7 +245,9 @@ export class ChartHost {
     return new Promise((resolve) => {
       requestAnimationFrame(() => {
         this.renderPendingFrame();
-        const sources = Array.from(this.container.querySelectorAll("canvas"));
+        const sources = Array.from(
+          this.container.querySelectorAll("canvas"),
+        ).filter((canvas) => !canvas.hidden && canvas !== this.colorbar.canvas);
         const target = document.createElement("canvas");
         target.width = sources[0]?.width ?? 1;
         target.height = sources[0]?.height ?? 1;
@@ -242,6 +255,7 @@ export class ChartHost {
         if (context !== null) {
           for (const source of sources) context.drawImage(source, 0, 0);
         }
+        this.colorbar.capture(target, this.grid(this.lastAxisStyle).bottom);
         resolve(target);
       });
     });
@@ -249,6 +263,7 @@ export class ChartHost {
 
   resize(): void {
     this.chart.resize();
+    this.drawColorbar();
     if (this.lastLayout !== null) {
       this.lastLayout = this.makeLayout(this.lastLayout.xRange, [
         this.lastLayout.yRange.min,
@@ -259,6 +274,7 @@ export class ChartHost {
 
   dispose(): void {
     this.unregister();
+    this.colorbar.dispose();
     this.chart.dispose();
   }
 
@@ -312,7 +328,7 @@ export class ChartHost {
         request.axes.y.label,
         request.axes.style === "inline",
       ),
-      grid: request.axes.style === "inline" ? INLINE_CHART_GRID : CHART_GRID,
+      grid: this.grid(request.axes.style),
       series,
     };
   }
@@ -351,12 +367,30 @@ export class ChartHost {
     };
   }
 
+  private grid(style: "gutter" | "inline") {
+    return style === "inline" ? INLINE_CHART_GRID : CHART_GRID;
+  }
+
+  setColorbarTarget(target: HTMLElement | null): void {
+    this.colorbar.attach(target);
+    this.drawColorbar();
+  }
+
+  private drawColorbar(): void {
+    if (this.lastRequest === null) return;
+    const grid = this.grid(this.lastRequest.axes.style);
+    this.colorbar.render(
+      this.lastRequest.colorScale,
+      this.lastRequest.palette,
+      grid.bottom,
+    );
+  }
+
   private makeLayout(
     xRange: Range,
     yRange: readonly [number, number],
   ): PlotLayout {
-    const grid =
-      this.lastAxisStyle === "inline" ? INLINE_CHART_GRID : CHART_GRID;
+    const grid = this.grid(this.lastAxisStyle);
     return {
       plot: {
         x: grid.left,

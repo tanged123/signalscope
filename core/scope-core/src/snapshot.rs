@@ -7,9 +7,10 @@ use std::{
 
 use crate::line2d::{Line2dError, LinePyramid};
 use crate::pyramid::Pyramid;
-use crate::series_ref::path_from_ref;
-use crate::session::{BindingKind, LinkedTime, NamedSetKind, PanelState, SeriesRef, Session};
+use crate::session::{LinkedTime, PanelState, Session};
+mod bindings;
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
+use bindings::{line_combinations, panel_signal_ids};
 use scope_protocol::{
     BakedLine2D, BakedLine2DLevel, BakedSignal, ExportFidelity, ExportRange, ExportSelection,
     SignalSummary, SnapshotManifest,
@@ -107,97 +108,6 @@ fn effective_window(panel: &PanelState, linked: &LinkedTime) -> (f64, f64) {
     }
 }
 
-fn panel_signal_ids(
-    session: &Session,
-    store: &SignalStore,
-    panel: &PanelState,
-) -> BTreeSet<SignalId> {
-    let mut ids = panel_y_signal_ids(session, store, panel)
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    if let crate::session::XAxisSource::Signal { r#ref } = &panel.x_axis {
-        if let Some(signal) = signal_from_ref(session, store, r#ref) {
-            ids.insert(signal.id);
-        }
-    }
-    ids
-}
-
-fn panel_y_signal_ids(session: &Session, store: &SignalStore, panel: &PanelState) -> Vec<SignalId> {
-    let mut ids = Vec::new();
-    for binding in &panel.bindings {
-        match binding.kind {
-            BindingKind::Pick => append_refs(&mut ids, session, store, &binding.refs),
-            BindingKind::Query => {
-                if let Some(selector) = &binding.selector {
-                    if let Some(signals) = matching_signals(store, selector) {
-                        ids.extend(signals.map(|signal| signal.id));
-                    }
-                }
-            }
-            BindingKind::Set => {
-                let Some(set) = session
-                    .named_sets
-                    .iter()
-                    .find(|set| Some(set.id.as_str()) == binding.set_id.as_deref())
-                else {
-                    continue;
-                };
-                match set.kind {
-                    NamedSetKind::Pick => append_refs(&mut ids, session, store, &set.refs),
-                    NamedSetKind::Query => {
-                        if let Some(selector) = &set.selector {
-                            if let Some(signals) = matching_signals(store, selector) {
-                                ids.extend(signals.map(|signal| signal.id));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    let mut seen = BTreeSet::new();
-    ids.into_iter().filter(|id| seen.insert(*id)).collect()
-}
-
-fn append_refs(
-    ids: &mut Vec<SignalId>,
-    session: &Session,
-    store: &SignalStore,
-    refs: &[SeriesRef],
-) {
-    ids.extend(
-        refs.iter()
-            .filter_map(|reference| signal_from_ref(session, store, reference))
-            .map(|signal| signal.id),
-    );
-}
-
-fn signal_from_ref<'a>(
-    session: &Session,
-    store: &'a SignalStore,
-    reference: &SeriesRef,
-) -> Option<&'a Signal> {
-    path_from_ref(&session.sources, reference)
-        .and_then(|path| store.signal_by_path(&path))
-        .or_else(|| {
-            let source = store.sources().find(|source| {
-                source.key.0.to_string() == reference.source_key
-                    || source.prefix == reference.source_key
-            })?;
-            store
-                .signals_of(source.id)
-                .find(|signal| signal.local_path == reference.channel)
-        })
-}
-
-fn matching_signals<'a>(
-    store: &'a SignalStore,
-    selector: &'a str,
-) -> Option<impl Iterator<Item = &'a Signal>> {
-    crate::selector::matching_signals(store, selector)
-}
-
 fn signal_plan<'a>(
     signal: &'a Signal,
     source_key: SourceKey,
@@ -232,30 +142,6 @@ fn signal_plan<'a>(
         window,
         levels,
     }
-}
-
-fn line_combinations(session: &Session, store: &SignalStore) -> Vec<(SignalId, Vec<SignalId>)> {
-    let mut combinations = BTreeSet::new();
-    for tab in &session.tabs {
-        for panel in &tab.panels {
-            let crate::session::XAxisSource::Signal { r#ref } = &panel.x_axis else {
-                continue;
-            };
-            let Some(x_signal) = signal_from_ref(session, store, r#ref) else {
-                continue;
-            };
-            let mut y_signals = panel_y_signal_ids(session, store, panel)
-                .into_iter()
-                .filter(|id| *id != x_signal.id)
-                .collect::<Vec<_>>();
-            if y_signals.is_empty() {
-                continue;
-            }
-            y_signals.sort_unstable();
-            combinations.insert((x_signal.id, y_signals));
-        }
-    }
-    combinations.into_iter().collect()
 }
 
 fn line_plan<'a>(
@@ -436,7 +322,7 @@ fn line_plans<'a>(
     window: Option<(f64, f64)>,
     fidelity: ExportFidelity,
 ) -> Result<Vec<LinePlan<'a>>, SnapshotError> {
-    line_combinations(session, store)
+    line_combinations(session, store)?
         .into_iter()
         .filter(|(x_id, y_ids)| {
             std::iter::once(x_id).chain(y_ids.iter()).all(|id| {
@@ -677,8 +563,8 @@ mod tests {
     use super::*;
     use crate::pyramid::Pyramid;
     use crate::session::{
-        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SeriesRef, Session,
-        XAxisSource,
+        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SampleAxisSource,
+        SeriesRef, Session,
     };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
@@ -733,7 +619,8 @@ mod tests {
             legend_anchor: None,
             legend_dock: None,
             legend_hint_dismissed: false,
-            x_axis: XAxisSource::Time,
+            x_axis: SampleAxisSource::Time,
+            color_axis: None,
             y_range: None,
             x_range: None,
             x_label: None,
@@ -788,8 +675,8 @@ mod tests {
     #[test]
     fn visible_signal_x_export_bakes_shared_paired_levels() {
         let (store, pyramids) = store_with(&[("x", 64), ("y", 64)]);
-        let mut panel = panel("panel-1", &["x", "y"]);
-        panel.x_axis = XAxisSource::Signal {
+        let mut panel = panel("panel-1", &["y"]);
+        panel.x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "x".to_owned(),
@@ -828,7 +715,7 @@ mod tests {
     #[test]
     fn signal_x_snapshot_deduplicates_reordered_y_bindings() {
         let (store, pyramids) = store_with(&[("x", 64), ("a", 64), ("b", 64)]);
-        let x_axis = XAxisSource::Signal {
+        let x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "x".to_owned(),
@@ -855,22 +742,22 @@ mod tests {
                 .iter()
                 .map(|signal| signal.id)
                 .collect::<Vec<_>>(),
-            vec![SignalId(2), SignalId(3)]
+            vec![SignalId(1), SignalId(2), SignalId(3)]
         );
     }
 
     #[test]
-    fn signal_x_snapshot_skips_unresolved_and_empty_line_panels() {
+    fn signal_x_snapshot_skips_unresolved_and_captures_a_signal_against_itself() {
         let (store, pyramids) = store_with(&[("y", 64)]);
         let mut unresolved = panel("unresolved", &["y"]);
-        unresolved.x_axis = XAxisSource::Signal {
+        unresolved.x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "missing".to_owned(),
             },
         };
         let mut only_x = panel("only-x", &["y"]);
-        only_x.x_axis = XAxisSource::Signal {
+        only_x.x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "y".to_owned(),
@@ -886,7 +773,8 @@ mod tests {
         )
         .expect("unresolved line panels are skipped");
 
-        assert!(export.lines.is_empty());
+        assert_eq!(export.lines.len(), 1);
+        assert_eq!(export.lines[0].x_signal.id, export.lines[0].y_signals[0].id);
     }
 
     #[test]

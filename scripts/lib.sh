@@ -25,6 +25,7 @@ frontend_checks() {
   pnpm lint
   node --test frontend/scripts/check-architecture.mjs
   pnpm codegen:check
+  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
   pnpm test
 }
 

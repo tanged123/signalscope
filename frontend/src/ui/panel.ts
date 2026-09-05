@@ -1,3 +1,6 @@
+import { PanelAxes, axisControlsMarkup } from "./panel-axes";
+import { legendColorControls, legendColorTarget } from "./legend-color-scale";
+import type { AxisLimits } from "./axis-limits";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
@@ -22,7 +25,7 @@ import type {
   SeriesOverride,
   StyleDimension,
   StatColumn,
-  XAxisSource,
+  SampleAxisSource,
 } from "../generated/session";
 import {
   clamp,
@@ -165,6 +168,7 @@ export interface PanelCallbacks {
   onTimeWindow(id: string, t0: number, t1: number): void;
   onYRange(id: string, range: readonly [number, number]): void;
   onXRange(id: string, range: readonly [number, number]): void;
+  onSetAxisLimits?(id: string, limits: AxisLimits): void;
   onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
   onClearAnnotations?(id: string): void;
@@ -205,7 +209,8 @@ export interface PanelCallbacks {
     },
   ): void;
   onRemoveSeries(id: string, ref: SeriesRef): void;
-  onSetXAxis?(id: string, xAxis: XAxisSource): void;
+  onSetXAxis?(id: string, xAxis: SampleAxisSource): void;
+  onSetColorAxis?(id: string, axis: PanelState["color_axis"]): void;
 }
 
 export interface RenderSeries {
@@ -376,10 +381,6 @@ function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
     : entry.channel === ref.channel;
 }
 
-function sameSeriesRef(left: SeriesRef, right: SeriesRef): boolean {
-  return left.source_key === right.source_key && left.channel === right.channel;
-}
-
 function renderState(
   state: PanelState,
   callbacks: Pick<PanelCallbacks, "resolveSeries">,
@@ -452,6 +453,8 @@ export class PanelView {
     return (this.annotationState ??= new PanelAnnotationState());
   }
 
+  private readonly axes: PanelAxes;
+
   constructor(
     private readonly id: string,
     private readonly callbacks: PanelCallbacks,
@@ -481,6 +484,22 @@ export class PanelView {
     this.shell.appendContent(this.overlay);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
+    this.axes = new PanelAxes(this.element, {
+      catalog: () => callbacks.catalog(),
+      namedSets: () => callbacks.namedSets(),
+      selectX: (axis) => callbacks.onSetXAxis?.(this.id, axis),
+      selectColor: (axis) => callbacks.onSetColorAxis?.(this.id, axis),
+      limits: (values) => callbacks.onSetAxisLimits?.(this.id, values),
+      visibleRanges: () => {
+        const layout = this.activeLayout();
+        return {
+          x: layout === null ? null : [layout.xRange.min, layout.xRange.max],
+          y: layout === null ? null : [layout.yRange.min, layout.yRange.max],
+        };
+      },
+      addY: (paths) => callbacks.onDropSignals(this.id, paths),
+      beforeOpen: () => this.closePanelConfig(),
+    });
     this.interactions = new PlotInteractionController(this.overlay, {
       layout: () => this.activeLayout(),
       applyXRange: (min, max) => {
@@ -583,6 +602,7 @@ export class PanelView {
           return null;
         }
         this.chartHost = host;
+        this.positionPlotLegend();
         if (this.pendingChartRender !== null) {
           host.render(this.pendingChartRender);
           this.pendingChartRender = null;
@@ -651,17 +671,6 @@ export class PanelView {
       "click",
       () => {
         this.callbacks.onToggleAxisStyle(this.id);
-      },
-    );
-    required(this.element, ".panel-x-axis").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null) {
-          this.openXAxisMenu(
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-        }
       },
     );
     required(this.element, ".panel-line-width").addEventListener(
@@ -866,15 +875,7 @@ export class PanelView {
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
     axisToggle.hidden = false;
-    const xAxis = required<HTMLButtonElement>(this.element, ".panel-x-axis");
-    const xAxisLabel = this.xAxisLabel(rendered);
-    xAxis.textContent = `x: ${xAxisLabel} ▾`;
-    xAxis.title =
-      rendered.x_axis.kind === "time"
-        ? "Choose a resolved signal for the X axis"
-        : `X axis signal: ${xAxisLabel}`;
-    xAxis.setAttribute("aria-label", `X axis: ${xAxisLabel}`);
-    xAxis.hidden = false;
+    this.axes.update(state);
     required<HTMLElement>(this.element, ".panel-line-width-value").textContent =
       formatToolbarNumber(rendered.line_width);
     required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
@@ -1000,15 +1001,7 @@ export class PanelView {
     }
     if (data === null) {
       this.chartHostElement.hidden = true;
-      const xRef = state.x_axis.kind === "signal" ? state.x_axis.ref : null;
-      const hasSignalY =
-        xRef === null ||
-        state.series.some((series) => !sameSeriesRef(series.ref, xRef));
-      this.shell.setStatus(
-        hasSignalY
-          ? { kind: "loading", message: "Loading plot data…" }
-          : { kind: "empty", message: "Choose at least one Y signal." },
-      );
+      this.shell.setStatus({ kind: "loading", message: "Loading plot data…" });
       return 0;
     }
     this.chartHostElement.hidden = false;
@@ -1022,6 +1015,7 @@ export class PanelView {
       axisStyle: state.axis_style,
       xLabel: state.x_label,
       yLabel: state.y_label,
+      colorAxis: state.color_axis,
     });
     const { plotted } = family;
     this.preparedPlot = family.plot;
@@ -1158,6 +1152,8 @@ export class PanelView {
 
   dispose(): void {
     this.disposed = true;
+    this.axes.dispose();
+    this.closePanelConfig();
     this.releaseGpu();
     this.interactions.dispose();
     this.shell.dispose();
@@ -1541,6 +1537,7 @@ export class PanelView {
     if (state.series.length === 0) {
       legend.hidden = true;
       legend.replaceChildren();
+      this.chartHost?.setColorbarTarget(null);
       delete legend.dataset.state;
       delete legend.dataset.collapsed;
       wrap.classList.remove("legend-dock-preview");
@@ -1621,7 +1618,9 @@ export class PanelView {
       header.append(undock);
       legend.replaceChildren(
         header,
-        this.plotLegendEncodingRow(state),
+        legendColorControls(state, this.plotLegendEncodingRow(state), () =>
+          this.axes.openColor(),
+        ),
         ...this.plotLegendDrawers(state),
         state.show_stats
           ? this.plotLegendStats(state)
@@ -1682,7 +1681,9 @@ export class PanelView {
     const cornerResize = this.legendResizeHandle("corner", legend);
     legend.replaceChildren(
       header,
-      this.plotLegendEncodingRow(state),
+      legendColorControls(state, this.plotLegendEncodingRow(state), () =>
+        this.axes.openColor(),
+      ),
       ...this.plotLegendDrawers(state),
       content,
       rightResize,
@@ -1704,6 +1705,7 @@ export class PanelView {
     const row = document.createElement("div");
     row.className = "plot-legend-encoding";
     for (const property of ["color", "dash", "width"] as const) {
+      if (property === "color" && state.color_axis != null) continue;
       const dimension =
         property === "color"
           ? state.color_by
@@ -1744,7 +1746,10 @@ export class PanelView {
 
   private plotLegendDrawers(state: RenderPanelState): HTMLElement[] {
     const drawers: HTMLElement[] = [];
-    if (typeof this.encodingDrawer === "string") {
+    if (
+      typeof this.encodingDrawer === "string" &&
+      !(this.encodingDrawer === "color" && state.color_axis != null)
+    ) {
       drawers.push(this.plotEncodingDrawer(state, this.encodingDrawer));
     }
     if (this.overrideDrawer) drawers.push(this.plotOverrideDrawer());
@@ -2808,6 +2813,7 @@ export class PanelView {
   }
 
   private refreshPlotLegendRoster(): void {
+    this.chartHost?.setColorbarTarget(legendColorTarget(this.element));
     this.element
       .querySelector<HTMLElement>(".plot-legend-roster-rows")
       ?.dispatchEvent(new Event("scroll"));
@@ -3060,35 +3066,6 @@ export class PanelView {
     );
   }
 
-  private xAxisLabel(state: RenderPanelState): string {
-    if (state.x_axis.kind === "time") return "time";
-    return (
-      this.callbacks.pathForRef(state.x_axis.ref) ??
-      `${state.x_axis.ref.source_key}/${state.x_axis.ref.channel}`
-    );
-  }
-
-  private openXAxisMenu(state: RenderPanelState, anchor: HTMLElement): void {
-    const current = state.x_axis;
-    this.openPanelMenu(anchor, "X AXIS", [
-      {
-        label: "time · linked",
-        active: current.kind === "time",
-        run: () => this.callbacks.onSetXAxis?.(this.id, { kind: "time" }),
-      },
-      ...state.series.map((series) => ({
-        label: series.path,
-        active:
-          current.kind === "signal" && sameSeriesRef(current.ref, series.ref),
-        run: () =>
-          this.callbacks.onSetXAxis?.(this.id, {
-            kind: "signal",
-            ref: { ...series.ref },
-          }),
-      })),
-    ]);
-  }
-
   private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
     this.openPanelMenu(anchor, `TIPS · ${String(state.annotations.length)}`, [
       ...(["labels", "markers", "hidden"] as const).map((mode) => ({
@@ -3256,7 +3233,7 @@ function seriesColor(series: Pick<RenderSeries, "hue">): string {
 function lineToolbarMarkup(): string {
   return `<span class="panel-toolbar-group panel-toolbar-axes">
       <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
-      <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
+      ${axisControlsMarkup()}
     </span>
     <span class="panel-toolbar-separator" aria-hidden="true"></span>
     <span class="panel-toolbar-group panel-toolbar-render">

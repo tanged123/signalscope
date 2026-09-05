@@ -18,7 +18,10 @@
     "legend_anchor": null,
     "legend_dock": null,
     "legend_hint_dismissed": false,
-    "x_axis": { "kind": "time" },
+    "x_axis": {
+      "kind": "time"
+    },
+    "color_axis": null,
     "y_range": null,
     "x_range": null,
     "x_label": null,
@@ -32,14 +35,64 @@
     "stats_sort_descending": false
   },
   "cases": [
-    { "name": "current time panel", "session": {}, "panel": {}, "valid": true },
+    {
+      "name": "bundle X",
+      "session": {},
+      "panel": {
+        "x_axis": {
+          "kind": "bundle",
+          "refs": [
+            {
+              "source_key": "one",
+              "channel": "x"
+            },
+            {
+              "source_key": "two",
+              "channel": "x"
+            }
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "empty bundle X",
+      "session": {},
+      "panel": {
+        "x_axis": {
+          "kind": "bundle",
+          "refs": []
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "time cannot carry bundle refs",
+      "session": {},
+      "panel": {
+        "x_axis": {
+          "kind": "time",
+          "refs": []
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "current time panel",
+      "session": {},
+      "panel": {},
+      "valid": true
+    },
     {
       "name": "explicit signal X",
       "session": {},
       "panel": {
         "x_axis": {
           "kind": "signal",
-          "ref": { "source_key": "run", "channel": "x" }
+          "ref": {
+            "source_key": "run",
+            "channel": "x"
+          }
         }
       },
       "valid": true
@@ -50,7 +103,10 @@
       "panel": {
         "x_axis": {
           "kind": "time",
-          "ref": { "source_key": "run", "channel": "x" }
+          "ref": {
+            "source_key": "run",
+            "channel": "x"
+          }
         }
       },
       "valid": false
@@ -58,49 +114,72 @@
     {
       "name": "signal X without a reference",
       "session": {},
-      "panel": { "x_axis": { "kind": "signal" } },
+      "panel": {
+        "x_axis": {
+          "kind": "signal"
+        }
+      },
       "valid": false
     },
     {
       "name": "signal X with a null reference",
       "session": {},
-      "panel": { "x_axis": { "kind": "signal", "ref": null } },
+      "panel": {
+        "x_axis": {
+          "kind": "signal",
+          "ref": null
+        }
+      },
       "valid": false
     },
     {
       "name": "unknown X variant",
       "session": {},
-      "panel": { "x_axis": { "kind": "future" } },
+      "panel": {
+        "x_axis": {
+          "kind": "future"
+        }
+      },
       "valid": false
     },
     {
       "name": "foreign app",
-      "session": { "app": "other" },
+      "session": {
+        "app": "other"
+      },
       "panel": {},
       "valid": false
     },
     {
       "name": "future version",
-      "session": { "schema_version": 999 },
+      "session": {
+        "schema_version": 999
+      },
       "panel": {},
       "valid": false
     },
     {
       "name": "unsupported old version",
-      "session": { "schema_version": 21 },
+      "session": {
+        "schema_version": 21
+      },
       "panel": {},
       "valid": false
     },
     {
       "name": "unknown theme",
-      "session": { "theme": "future" },
+      "session": {
+        "theme": "future"
+      },
       "panel": {},
       "valid": false
     },
     {
       "name": "wrong required field type",
       "session": {},
-      "panel": { "bindings": null },
+      "panel": {
+        "bindings": null
+      },
       "valid": false
     },
     {
@@ -119,6 +198,87 @@
         ]
       },
       "valid": true
+    },
+    {
+      "name": "valid color bundle",
+      "valid": true,
+      "panel": {
+        "color_axis": {
+          "source": {
+            "kind": "bundle",
+            "refs": [
+              {
+                "source_key": "run",
+                "channel": "c"
+              }
+            ]
+          },
+          "range": [0, 100],
+          "label": "temperature"
+        }
+      },
+      "session": {}
+    },
+    {
+      "name": "color bundle empty",
+      "valid": false,
+      "panel": {
+        "color_axis": {
+          "source": {
+            "kind": "bundle",
+            "refs": []
+          },
+          "range": null,
+          "label": null
+        }
+      },
+      "session": {}
+    },
+    {
+      "name": "color time carrying reference",
+      "valid": false,
+      "panel": {
+        "color_axis": {
+          "source": {
+            "kind": "time",
+            "ref": {
+              "source_key": "run",
+              "channel": "c"
+            }
+          },
+          "range": null,
+          "label": null
+        }
+      },
+      "session": {}
+    },
+    {
+      "name": "reversed color limits",
+      "valid": false,
+      "panel": {
+        "color_axis": {
+          "source": {
+            "kind": "time"
+          },
+          "range": [2, 1],
+          "label": null
+        }
+      },
+      "session": {}
+    },
+    {
+      "name": "constant fixed color limits",
+      "valid": false,
+      "panel": {
+        "color_axis": {
+          "source": {
+            "kind": "time"
+          },
+          "range": [1, 1],
+          "label": null
+        }
+      },
+      "session": {}
     }
   ]
 }

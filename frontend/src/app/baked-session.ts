@@ -81,11 +81,32 @@ function isSeriesRef(value: unknown): boolean {
   );
 }
 
-function isXAxisSource(value: unknown): boolean {
+function isSampleAxisSource(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  if (value.kind === "time") return !("ref" in value);
-  if (value.kind === "signal") return isSeriesRef(value.ref);
+  if (value.kind === "time") return !("ref" in value) && !("refs" in value);
+  if (value.kind === "signal")
+    return isSeriesRef(value.ref) && !("refs" in value);
+  if (value.kind === "bundle")
+    return (
+      !("ref" in value) &&
+      Array.isArray(value.refs) &&
+      value.refs.length > 0 &&
+      value.refs.every(isSeriesRef)
+    );
   return false;
+}
+
+function isColorAxis(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isSampleAxisSource(value.source) &&
+    (value.range === null ||
+      (isNumberPair(value.range) &&
+        Number.isFinite(value.range[0]) &&
+        Number.isFinite(value.range[1]) &&
+        value.range[0] < value.range[1])) &&
+    (value.label === null || typeof value.label === "string")
+  );
 }
 
 function isBinding(value: unknown): boolean {
@@ -259,7 +280,8 @@ function isPanel(value: unknown): boolean {
         ["left", "right", "top", "bottom"].includes(item),
     ) &&
     typeof value.legend_hint_dismissed === "boolean" &&
-    isXAxisSource(value.x_axis) &&
+    isSampleAxisSource(value.x_axis) &&
+    isNullable(value.color_axis, isColorAxis) &&
     isNullable(value.y_range, isNumberPair) &&
     isNullable(value.x_range, isNumberPair) &&
     isNullable(value.x_label, stringOrNull) &&

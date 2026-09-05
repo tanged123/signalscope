@@ -63,7 +63,9 @@ describe("panel markup", () => {
     );
     const panel = new PanelView("panel", {} as PanelCallbacks);
     expect(panel.element.querySelectorAll(".mode-pill")).toHaveLength(0);
-    expect(panel.element.querySelector(".xy-drop-strip")).toBeNull();
+    expect(
+      panel.element.querySelector<HTMLElement>(".xy-drop-strip")?.hidden,
+    ).toBe(true);
     vi.unstubAllGlobals();
   });
 
@@ -159,6 +161,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     legend_dock: null,
     legend_hint_dismissed: false,
     x_axis: { kind: "time" },
+    color_axis: null,
     bindings: [],
     overrides: [],
     focus: [],

@@ -1,4 +1,6 @@
+@import "./legend-color-scale.css";
 @import "./tokens.css";
+@import "./axis-picker.css";
 
 * {
   box-sizing: border-box;

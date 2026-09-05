@@ -132,6 +132,8 @@ interface Line2DPlotSeries {
   unit: string | null;
   colorIndex: number;
   values: Float64Array;
+  anchor?: Float64Array;
+  x?: Float64Array;
   visible?: boolean;
 }
 
@@ -141,6 +143,7 @@ interface Line2DPlotSeries {
  * rows are never joined by their plotted X values.
  */
 export interface Line2DPlotInput {
+  linkedTime?: boolean | undefined;
   anchor: Float64Array;
   x: Float64Array;
   series: readonly Line2DPlotSeries[];
@@ -278,8 +281,8 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
   validateLine2DInput(input);
   const visibleSeries = (): readonly Line2DPlotSeries[] =>
     input.series.filter((series) => series.visible !== false);
-  const inWindow = (index: number): boolean => {
-    const anchor = input.anchor[index] as number;
+  const inWindow = (series: Line2DPlotSeries, index: number): boolean => {
+    const anchor = (series.anchor ?? input.anchor)[index] as number;
     return (
       Number.isFinite(anchor) &&
       anchor >= input.window.t0 &&
@@ -287,8 +290,8 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
     );
   };
   const rowFor = (series: Line2DPlotSeries, index: number): XYPoint | null => {
-    if (!inWindow(index)) return null;
-    const x = input.x[index] as number;
+    if (!inWindow(series, index)) return null;
+    const x = (series.x ?? input.x)[index] as number;
     const y = series.values[index] as number;
     return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
   };
@@ -307,8 +310,8 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
     }
     let nearestIndex = -1;
     let nearestDistance = Number.POSITIVE_INFINITY;
-    for (let index = 0; index < input.anchor.length; index += 1) {
-      const anchor = input.anchor[index] as number;
+    for (let index = 0; index < series.values.length; index += 1) {
+      const anchor = (series.anchor ?? input.anchor)[index] as number;
       if (!Number.isFinite(anchor)) continue;
       const distance = Math.abs(anchor - annotation.anchor);
       if (distance < nearestDistance) {
@@ -323,14 +326,14 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       : resolved(annotation, row.x, row.y, series.colorIndex);
   };
   return {
-    interaction: LINE2D_POLICY,
+    interaction: input.linkedTime === true ? TIME_POLICY : LINE2D_POLICY,
     hitAdapter: {
       seriesAt(layout, x, y, threshold) {
         let best: SeriesHit | null = null;
         let bestSquared = threshold * threshold;
         for (const series of visibleSeries()) {
           let previous: ScreenXYPoint | null = null;
-          for (let index = 0; index < input.anchor.length; index += 1) {
+          for (let index = 0; index < series.values.length; index += 1) {
             const row = rowFor(series, index);
             if (row === null) {
               previous = null;
@@ -368,7 +371,7 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       let yMin = Number.POSITIVE_INFINITY;
       let yMax = Number.NEGATIVE_INFINITY;
       for (const series of input.series) {
-        for (let index = 0; index < input.anchor.length; index += 1) {
+        for (let index = 0; index < series.values.length; index += 1) {
           const row = rowFor(series, index);
           if (row === null) continue;
           xMin = Math.min(xMin, row.x);
@@ -383,11 +386,38 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       };
     },
     cursorAt(layout, point) {
+      if (input.linkedTime === true) {
+        const x = invertX(layout, point.x);
+        const rows = visibleSeries().flatMap((series) => {
+          let best: XYPoint | null = null;
+          for (let index = 0; index < series.values.length; index += 1) {
+            const row = rowFor(series, index);
+            if (
+              row !== null &&
+              (best === null || Math.abs(row.x - x) < Math.abs(best.x - x))
+            )
+              best = row;
+          }
+          return best === null
+            ? []
+            : [
+                reading(
+                  series.path,
+                  best.y,
+                  series.unit,
+                  series.colorIndex,
+                  series.label ?? series.path,
+                ),
+              ];
+        });
+        return cursor(x, `t = ${formatValue(x)} s`, rows, "time");
+      }
       let nearestX: number | null = null;
       let nearestDistance = Number.POSITIVE_INFINITY;
       let nearestIndex = -1;
+      let nearestSeries: Line2DPlotSeries | null = null;
       for (const series of visibleSeries()) {
-        for (let index = 0; index < input.anchor.length; index += 1) {
+        for (let index = 0; index < series.values.length; index += 1) {
           const row = rowFor(series, index);
           if (row === null) continue;
           const dx = projectX(layout, row.x) - point.x;
@@ -397,11 +427,19 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
             nearestDistance = distance;
             nearestX = row.x;
             nearestIndex = index;
+            nearestSeries = series;
           }
         }
       }
-      if (nearestX === null || nearestIndex < 0) return null;
+      if (nearestX === null || nearestIndex < 0 || nearestSeries === null)
+        return null;
       const rows = visibleSeries().flatMap((series) => {
+        if (
+          (series.anchor ?? input.anchor) !==
+            (nearestSeries.anchor ?? input.anchor) ||
+          (series.x ?? input.x) !== (nearestSeries.x ?? input.x)
+        )
+          return [];
         const row = rowFor(series, nearestIndex);
         return row === null
           ? []
@@ -431,7 +469,7 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       let best: AnnotationAnchor | null = null;
       let bestSquared = radius * radius;
       for (const series of input.series) {
-        for (let index = 0; index < input.anchor.length; index += 1) {
+        for (let index = 0; index < series.values.length; index += 1) {
           const row = rowFor(series, index);
           if (row === null) continue;
           const dx = projectX(layout, row.x) - point.x;
@@ -441,7 +479,7 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
             bestSquared = squared;
             best = {
               path: series.path,
-              anchor: input.anchor[index] as number,
+              anchor: (series.anchor ?? input.anchor)[index] as number,
               x: row.x,
               pinnedValue: row.y,
             };
@@ -455,7 +493,7 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       return input.series.map((series) => {
         let min: number | null = null;
         let max: number | null = null;
-        for (let index = 0; index < input.anchor.length; index += 1) {
+        for (let index = 0; index < series.values.length; index += 1) {
           const row = rowFor(series, index);
           if (row === null) continue;
           min = min === null ? row.y : Math.min(min, row.y);
@@ -488,7 +526,10 @@ function validateLine2DInput(input: Line2DPlotInput): void {
     throw new Error("Line2D anchor and X columns must have equal lengths");
   }
   for (const series of input.series) {
-    if (series.values.length !== input.anchor.length) {
+    if (
+      series.values.length !== (series.anchor ?? input.anchor).length ||
+      series.values.length !== (series.x ?? input.x).length
+    ) {
       throw new Error(`Line2D Y column ${series.path} has a mismatched length`);
     }
   }

@@ -1,3 +1,5 @@
+import { colorAttributes } from "./color-attributes";
+import type { ColorScale } from "../app/color-scale";
 import type { Line2DResponse } from "../app/line-binary";
 import type { Line2DRenderInput } from "./line2d";
 import {
@@ -9,6 +11,7 @@ import {
 
 export interface SignalXLine2DInputOptions extends Line2DAdapterOptions {
   window: { t0: number; t1: number };
+  colorScale?: ColorScale | undefined;
 }
 
 export function line2DFromSignalX(
@@ -18,10 +21,11 @@ export function line2DFromSignalX(
   const xOrigin = signalXReference(response.x.values);
   return {
     xOrigin,
+    colorScale: options.colorScale,
     series: response.ys.map((column, index) => {
       const data = cachedSignalXFeed(
-        response.anchor,
-        response.x.values,
+        column.coordinates?.anchor ?? response.anchor,
+        column.coordinates?.x.values ?? response.x.values,
         column.values,
         xOrigin,
         options.window,
@@ -30,6 +34,10 @@ export function line2DFromSignalX(
         id: column.signalId,
         name: column.signalPath,
         data,
+        pointColors:
+          column.color !== undefined && options.colorScale !== undefined
+            ? colorAttributes(column.color.values, options.colorScale)
+            : undefined,
         style: strokeAt(options, index),
       };
     }),
@@ -46,8 +54,8 @@ export function prepareSignalXLine(
   const xOrigin = signalXReference(response.x.values);
   for (const column of response.ys) {
     cachedSignalXFeed(
-      response.anchor,
-      response.x.values,
+      column.coordinates?.anchor ?? response.anchor,
+      column.coordinates?.x.values ?? response.x.values,
       column.values,
       xOrigin,
       window,

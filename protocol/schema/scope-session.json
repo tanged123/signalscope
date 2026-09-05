@@ -1,5 +1,5 @@
 {
-  "schema_version": 29,
+  "schema_version": 31,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -37,12 +37,21 @@
       "kind": "object",
       "fields": { "source_key": "string", "channel": "string" }
     },
-    "XAxisSource": {
+    "SampleAxisSource": {
       "kind": "tagged_union",
       "tag": "kind",
       "variants": {
         "time": {},
-        "signal": { "fields": { "ref": "SeriesRef" } }
+        "signal": { "fields": { "ref": "SeriesRef" } },
+        "bundle": { "fields": { "refs": "SeriesRef[]" } }
+      }
+    },
+    "ColorAxis": {
+      "kind": "object",
+      "fields": {
+        "source": "SampleAxisSource",
+        "range": "f64[2]?",
+        "label": "string?"
       }
     },
     "BindingKind": { "kind": "enum", "variants": ["query", "pick", "set"] },
@@ -152,7 +161,8 @@
         "legend_anchor": "LegendAnchor?",
         "legend_dock": "LegendDock?",
         "legend_hint_dismissed": "bool",
-        "x_axis": "XAxisSource",
+        "x_axis": "SampleAxisSource",
+        "color_axis": "ColorAxis?",
         "y_range": "f64[2]?",
         "x_range": "f64[2]?",
         "x_label": "string?",

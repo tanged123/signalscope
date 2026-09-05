@@ -221,14 +221,18 @@ fn finish(headers: Vec<String>, mut columns: Vec<Vec<f64>>) -> Result<DecodedSou
     let time: Arc<[f64]> = time.into();
     let mut signals = Vec::new();
     for (index, (header, values)) in headers.into_iter().zip(columns).enumerate() {
-        if Some(index) == time_index || !values.iter().any(|value| value.is_finite()) {
+        if !values.iter().any(|value| value.is_finite()) {
             continue;
         }
         signals.push(DecodedSignal {
             local_path: normalize_segment(&header),
             unit: None,
             time: Arc::clone(&time).into(),
-            values: values.into(),
+            values: if Some(index) == time_index {
+                Arc::clone(&time).into()
+            } else {
+                values.into()
+            },
         });
     }
     Ok(DecodedSource { row_count, signals })
@@ -253,20 +257,12 @@ fn detect_header(probe: &str, delimiter: u8) -> bool {
 }
 
 fn select_time_column(headers: &[String], columns: &[Vec<f64>]) -> Option<usize> {
-    headers
-        .iter()
-        .enumerate()
-        .find_map(|(index, header)| {
-            let matches_name = TIME_NAMES
-                .iter()
-                .any(|name| header.trim().eq_ignore_ascii_case(name));
-            (matches_name && columns[index].iter().all(|value| value.is_finite())).then_some(index)
-        })
-        .or_else(|| {
-            columns
-                .iter()
-                .position(|column| is_monotonic_finite(column))
-        })
+    headers.iter().enumerate().find_map(|(index, header)| {
+        let matches_name = TIME_NAMES
+            .iter()
+            .any(|name| header.trim().eq_ignore_ascii_case(name));
+        (matches_name && columns[index].iter().all(|value| value.is_finite())).then_some(index)
+    })
 }
 
 fn sort_columns_by_time(columns: &mut [Vec<f64>], time_index: usize) {
@@ -280,10 +276,6 @@ fn sort_columns_by_time(columns: &mut [Vec<f64>], time_index: usize) {
     for column in columns {
         apply_permutation_in_place(&order, column, &mut scratch);
     }
-}
-
-fn is_monotonic_finite(column: &[f64]) -> bool {
-    column.iter().all(|value| value.is_finite()) && column.windows(2).all(|pair| pair[1] >= pair[0])
 }
 
 #[cfg(test)]
@@ -385,9 +377,23 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(summary.row_count, 2);
-        assert_eq!(paths.len(), 2);
-        assert!(paths[0].ends_with("/motor_left_rpm"));
-        assert!(store.signals().nth(1).unwrap().values()[1].is_nan());
+        assert_eq!(paths.len(), 3);
+        assert!(paths[0].ends_with("/time_s"));
+        assert_eq!(store.signals().next().unwrap().values(), &[0.0, 0.1]);
+        assert!(paths[1].ends_with("/motor_left_rpm"));
+        assert!(store.signals().nth(2).unwrap().values()[1].is_nan());
+    }
+
+    #[test]
+    fn increasing_measurements_are_retained_and_do_not_become_time() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(file, "voltage,current\n10,4\n20,3\n30,2\n").unwrap();
+        let mut store = SignalStore::new();
+        ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
+        let voltage = store.signals().next().unwrap();
+        assert_eq!(store.signals().count(), 2);
+        assert_eq!(voltage.time(), &[0.0, 1.0, 2.0]);
+        assert_eq!(voltage.values(), &[10.0, 20.0, 30.0]);
     }
 
     #[test]
@@ -422,6 +428,12 @@ mod tests {
             .signals()
             .find(|signal| signal.path.ends_with("/other"))
             .unwrap();
+        let time = store
+            .signals()
+            .find(|signal| signal.local_path == "time")
+            .unwrap();
+        assert_eq!(time.values(), &[0.0, 1.0, 2.0]);
+        assert_eq!(time.time(), time.values());
         assert_eq!(value.time(), &[0.0, 1.0, 2.0]);
         assert_eq!(value.values(), &[0.0, 10.0, 20.0]);
         assert_eq!(other.values(), &[100.0, 150.0, 200.0]);
@@ -439,8 +451,8 @@ mod tests {
         let summary = ingest_for_test(file.path(), &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 1);
-        assert_eq!(summary.signals.len(), 1);
-        assert_eq!(store.signals().next().unwrap().values(), &[4.0]);
+        assert_eq!(summary.signals.len(), 2);
+        assert_eq!(store.signals().nth(1).unwrap().values(), &[4.0]);
     }
 
     #[test]

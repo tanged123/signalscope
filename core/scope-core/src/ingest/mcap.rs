@@ -126,6 +126,16 @@ impl Decoder for McapDecoder {
             let columns = columns.sorted();
             row_count += columns.time.len();
             let time: Arc<[f64]> = columns.time.into();
+            let mut time_name = "log_time".to_owned();
+            while columns.columns.contains_key(&time_name) {
+                time_name.insert(0, '_');
+            }
+            signals.push(DecodedSignal {
+                local_path: format!("{topic}/{time_name}"),
+                unit: Some("s".into()),
+                time: Arc::clone(&time).into(),
+                values: Arc::clone(&time).into(),
+            });
             for (field, values) in columns.columns {
                 if !values.iter().any(|value| value.is_finite()) {
                     continue;
@@ -267,6 +277,12 @@ mod tests {
             .unwrap();
         assert_eq!(x.time(), &[1.0, 2.0, 3.0]);
         assert_eq!(x.values(), &[0.5, 1.5, 2.5]);
+        let time = store
+            .signals()
+            .find(|signal| signal.path.ends_with("/vehicle/imu/log_time"))
+            .unwrap();
+        assert_eq!(time.values(), x.time());
+        assert_eq!(time.unit.as_deref(), Some("s"));
         let y = store
             .signals()
             .find(|signal| signal.path.ends_with("/vehicle/imu/accel/y"))

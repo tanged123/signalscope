@@ -6,7 +6,27 @@ decisions and alternatives; [the roadmap](implementation-roadmap.md) records
 unfinished work. [AGENTS.md](../AGENTS.md) is the short execution guide.
 
 The implementation decisions are recorded in
-[ADR 0055](adr/0055-core-policy-and-query-lifetimes.md).
+[ADR 0055](adr/0055-core-policy-and-query-lifetimes.md) and
+[ADR 0056](adr/0056-xy-axis-and-bundle-bindings.md), and
+[ADR 0057](adr/0057-continuous-line-color-axis.md).
+
+`app/line-bindings.ts` owns X/C binding transitions and source-matched bundle
+resolution. `ui/axis-picker.ts` owns searchable axis choices; `ui/axis-drop.ts`
+owns drag listeners and their teardown. `app/line-query.ts` queries paired
+groups sequentially within each panel and assembles one response without
+copying coordinate columns. `snapshot/bindings.rs` owns native capture binding
+resolution. Per-series coordinate views keep group-local anchors, X values and
+resolution; the existing panel cache charges all retained arrays.
+
+`app/color-scale.ts` owns shared continuous limits and the viridis mapping,
+separate from categorical theme colors. `render/color-attributes.ts` caches
+aligned RGBA feeds; the ChartGPU fork owns their GPU buffers and interpolation.
+`render/colorbar.ts` owns one horizontal scale canvas for both display and
+capture. `ui/legend-color-scale.ts` supplies its legend mount through ChartHost;
+collapsed legends use a plot inset. Placement never adds a chart gutter or
+republishes GPU series. Plot PNGs include an inset independently of the DOM mount.
+`ui/panel-axes.ts` owns axis controls and their lifetime; `ui/axis-actions.ts`
+coordinates binding changes and scale-only updates through narrow callbacks.
 
 ## System boundaries
 
@@ -134,7 +154,7 @@ large windows and gap-heavy data before adding caching or concurrency.
 Schema sources are `protocol/schema/scope-{protocol,session,preferences}.json`.
 Run `pnpm codegen`; never edit generated Rust or TypeScript. Choose `object`
 for independent fields, `enum` for a closed set, and `tagged_union` for
-correlated variants such as `XAxisSource`.
+correlated variants such as `SampleAxisSource`.
 
 Generated types protect typed construction, not arbitrary input. Rust Serde,
 binary decoders, `parseBakedSession`, and preferences parsing own runtime

@@ -339,6 +339,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
         legend_dock: null,
         legend_hint_dismissed: false,
         x_axis: { kind: "time" },
+        color_axis: null,
         y_range: null,
         x_range: null,
         x_label: null,
@@ -1045,8 +1046,9 @@ test("selector filter binds and saves a live set", async ({ page }) => {
     "rocket/velocity_body/",
   );
 
-  await first.locator(".panel-header").click();
+  await first.locator(".panel-title").click();
   await page.keyboard.press("n");
+  await expect(page.locator(".panel")).toHaveCount(2);
   const second = page.locator(".panel").last();
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
   await setRow.dispatchEvent("dragstart", { dataTransfer });

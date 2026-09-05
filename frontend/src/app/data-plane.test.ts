@@ -364,6 +364,17 @@ describe("BakedPlane.queryLine2D", () => {
     expect(Array.from(response.ys[1]?.values ?? [])).toEqual([
       100, 101, 102, 103,
     ]);
+    const projected = await plane.queryLine2D({
+      request_id: "cleared-color",
+      x_signal_id: "11",
+      y_signal_ids: ["7"],
+      window: { t0: 1, t1: 2 },
+      pixel_width: 100,
+    });
+    expect(projected.ys.map((series) => series.signalId)).toEqual(["7"]);
+    expect(Array.from(projected.ys[0]?.values ?? [])).toEqual([
+      200, 201, 202, 203,
+    ]);
   });
 
   it("rejects a combination absent from an old or time-only manifest", async () => {

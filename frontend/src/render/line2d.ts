@@ -1,3 +1,4 @@
+import type { ColorScale } from "../app/color-scale";
 import type { Range } from "../app/plot-math";
 import type { Palette, SeriesStroke } from "./plot-theme";
 
@@ -11,6 +12,7 @@ interface Line2DSeriesInput {
   id: string;
   name: string;
   data: Float32Array;
+  pointColors?: Float32Array | undefined;
   style: SeriesStroke;
 }
 
@@ -19,6 +21,7 @@ interface Line2DAxisInput {
 }
 
 export interface Line2DRenderInput {
+  colorScale?: ColorScale | undefined;
   xOrigin: number;
   series: readonly Line2DSeriesInput[];
   xRange: Range;

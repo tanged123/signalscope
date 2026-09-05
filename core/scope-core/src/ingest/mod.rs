@@ -273,7 +273,7 @@ mod tests {
         let summary = ingest_for_test(&path, &mut store, &mut |_| {}).unwrap();
 
         assert_eq!(summary.row_count, 201);
-        assert_eq!(summary.signals.len(), 16);
+        assert_eq!(summary.signals.len(), 17);
         let paths = store
             .signals()
             .map(|signal| signal.path.as_str())

@@ -1,6 +1,6 @@
 {
   "app": "signalscope",
-  "schema_version": 29,
+  "schema_version": 31,
   "theme": "dark",
   "linked_time": {
     "t0": 0.0,
