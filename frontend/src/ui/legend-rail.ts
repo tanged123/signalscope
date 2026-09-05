@@ -74,6 +74,7 @@ function bindLegendResize(
   };
   const commit = (): void => {
     if (host.size === null) return;
+    const focused = document.activeElement === handle;
     if (docked) {
       const bounds = legend.parentElement?.getBoundingClientRect();
       const box = legend.getBoundingClientRect();
@@ -95,6 +96,10 @@ function bindLegendResize(
         anchor: null,
         dock,
       });
+      if (focused)
+        host.root
+          .querySelector<HTMLButtonElement>(`.plot-legend-resize-${edge}`)
+          ?.focus();
       return;
     }
     host.commit({
@@ -116,6 +121,7 @@ function bindLegendResize(
     const direction = directions[event.key];
     if (direction === undefined) return;
     event.preventDefault();
+    event.stopPropagation();
     const box = legend.getBoundingClientRect();
     const expandKey =
       dock === "right"

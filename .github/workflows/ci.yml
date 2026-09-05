@@ -103,6 +103,12 @@ jobs:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: e2e
       - run: ./scripts/ci.sh e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-results
+          path: frontend/test-results
+          retention-days: 7
 
   coverage:
     if: >-

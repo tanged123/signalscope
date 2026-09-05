@@ -154,11 +154,9 @@ afterEach(() => {
 
 describe("PanelView chrome", () => {
   it("waits for a mounted panel before creating ChartGPU", () => {
-    const create = vi
-      .spyOn(ChartHost, "create")
-      .mockResolvedValue({
-        setColorbarTarget: vi.fn(),
-      } as unknown as ChartHost);
+    const create = vi.spyOn(ChartHost, "create").mockResolvedValue({
+      setColorbarTarget: vi.fn(),
+    } as unknown as ChartHost);
     const view = new PanelView(
       "panel",
       callbacks(Catalog.build([])),

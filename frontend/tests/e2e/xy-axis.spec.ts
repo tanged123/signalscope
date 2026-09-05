@@ -154,7 +154,9 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect
       .poll(() => replies.filter((status) => status === 200).length)
       .toBeGreaterThanOrEqual(2);
-    await expect(panel.locator(".chart-host canvas").first()).toBeVisible();
+    await expect(
+      panel.locator(".chart-host canvas:not(.colorbar-canvas)").first(),
+    ).toBeVisible();
     await expect(panel.locator('[data-panel-slot="status"]')).not.toContainText(
       /mismatch|unknown|unavailable/i,
     );
@@ -245,6 +247,8 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect(legend).toHaveAttribute("data-collapsed", "true");
     await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
     await seam.press("ArrowLeft");
+    await expect(legend).toHaveAttribute("data-collapsed", "false");
+    await expect(seam).toBeFocused();
     await expect(legend.locator(".colorbar-canvas")).toBeVisible();
     await legend.locator(".plot-legend-undock").click();
     await expect(legend).toHaveAttribute("data-state", "roster");
