@@ -4,8 +4,8 @@ use std::{fs::File, io::Read, path::Path, time::UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
-pub const CACHE_ABI_CSV: u32 = 1;
-pub const CACHE_ABI_MCAP: u32 = 1;
+pub const CACHE_ABI_CSV: u32 = 2;
+pub const CACHE_ABI_MCAP: u32 = 2;
 pub const CACHE_ABI_HDF5: u32 = 1;
 pub const CACHE_ABI_PARQUET: u32 = 1;
 
