@@ -130,7 +130,3 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.plot-wrap:not(.legend-rail):has(.colorbar-canvas:not([hidden]))
-  .plot-series-legend {
-  right: 72px;
-}

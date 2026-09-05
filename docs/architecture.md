@@ -21,7 +21,10 @@ resolution; the existing panel cache charges all retained arrays.
 `app/color-scale.ts` owns shared continuous limits and the viridis mapping,
 separate from categorical theme colors. `render/color-attributes.ts` caches
 aligned RGBA feeds; the ChartGPU fork owns their GPU buffers and interpolation.
-`render/colorbar.ts` draws the labeled scale for both display and capture.
+`render/colorbar.ts` owns one horizontal scale canvas for both display and
+capture. `ui/legend-color-scale.ts` supplies its legend mount through ChartHost;
+collapsed legends use a plot inset. Placement never adds a chart gutter or
+republishes GPU series. Plot PNGs include an inset independently of the DOM mount.
 `ui/panel-axes.ts` owns axis controls and their lifetime; `ui/axis-actions.ts`
 coordinates binding changes and scale-only updates through narrow callbacks.
 

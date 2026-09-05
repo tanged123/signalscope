@@ -10,8 +10,10 @@
 
 A trajectory needs to show a third measured quantity along its length. A
 categorical series color identifies a trace; it cannot express a changing
-measurement. The Final Spec requires a separate C binding and a labeled
-12px colorbar in a 64px right gutter.
+measurement. The Final Spec requires a separate C binding and labeled scale.
+The initial 64px right gutter compressed plots that already had a legend rail.
+The user explicitly requested moving the scale into the legend, including
+floating layouts; this supersedes the gutter placement in the visual reference.
 
 ## Decision
 
@@ -57,8 +59,17 @@ the existing panel fields. Time-X edits use the existing linked or local time
 window, with Fit data restoring its extent. Automatic Y resets the sticky
 extent. `ui/axis-limits.ts` owns the form and its listeners; `ui/panel-menu.ts`
 owns shared trigger-relative positioning. Every edit schedules persistence.
-The colorbar is a
-renderer-owned canvas so image capture and offline snapshots include it.
+The colorbar is one renderer-owned horizontal canvas. `ui/legend-color-scale.ts`
+creates its legend mount and replaces the categorical color control while C is
+active; the scale opens the C picker. The panel supplies the mount explicitly
+to ChartHost after legend layout. Colorbar owns reparenting and drawing; legend
+resize/placement refreshes it without republishing GPU series. Floating keys
+and rosters stack the scale above their controls; horizontal rails put the scale
+beside those controls. Badge, hidden, and collapsed-rail layouts use a compact
+plot inset, without a dedicated gutter. ChartHost disposes the canvas and clears
+its target reference. Plot PNGs retain a labeled inset even when the canvas is
+mounted outside the chart; offline snapshots use the same presentation.
+No schema or renderer attribute contract changes are needed.
 Categorical choices remain saved and become effective again when C is cleared;
 legend text, dash, focus, and picking continue to identify traces.
 
@@ -81,6 +92,9 @@ the still-oversized `ui/panel.ts`, `ui/app-shell.ts`, and `app/workspace.ts`.
 The existing axis controls move to `ui/panel-axes.ts` before C controls are
 added; scale, binding, attribute and buffer logic live in their named owners.
 The remaining parent edits are callbacks, state fields and render context.
+The legend-placement follow-up permits the same composition wiring for the
+extracted legend scale mount and ChartHost target port; resource and layout
+policy stay in those smaller owners.
 In the ChartGPU fork, `config/types.ts` adds the attribute field,
 `OptionResolver.ts` calls the extracted attribute validator, and
 `ChartGPU.ts` rejects unsupported append before mutation. These changes need
@@ -108,6 +122,8 @@ timebases/units, preservation of C-only extrema and gaps, shared and fixed
 limits, constant/empty data, no padded-domain pollution, attribute alignment
 and buffer lifetime, viewport publication, migration and malformed state,
 live/baked correspondence, keyboard controls, layout and offline capture.
+Legend placement coverage checks floating/rail/badge transitions, collapse,
+constant/empty scales, capture after reparenting, and unchanged plot gutters.
 Run the cross-layer CI gate after the complete vertical slice. Large-window
 peak-memory measurements remain a separate roadmap item, not a measured claim.
 

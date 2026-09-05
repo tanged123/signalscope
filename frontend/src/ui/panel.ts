@@ -1,4 +1,5 @@
 import { PanelAxes, axisControlsMarkup } from "./panel-axes";
+import { legendColorControls, legendColorTarget } from "./legend-color-scale";
 import type { AxisLimits } from "./axis-limits";
 import {
   columnsValueAtTime,
@@ -601,6 +602,7 @@ export class PanelView {
           return null;
         }
         this.chartHost = host;
+        this.positionPlotLegend();
         if (this.pendingChartRender !== null) {
           host.render(this.pendingChartRender);
           this.pendingChartRender = null;
@@ -1535,6 +1537,7 @@ export class PanelView {
     if (state.series.length === 0) {
       legend.hidden = true;
       legend.replaceChildren();
+      this.chartHost?.setColorbarTarget(null);
       delete legend.dataset.state;
       delete legend.dataset.collapsed;
       wrap.classList.remove("legend-dock-preview");
@@ -1615,7 +1618,9 @@ export class PanelView {
       header.append(undock);
       legend.replaceChildren(
         header,
-        this.plotLegendEncodingRow(state),
+        legendColorControls(state, this.plotLegendEncodingRow(state), () =>
+          this.axes.openColor(),
+        ),
         ...this.plotLegendDrawers(state),
         state.show_stats
           ? this.plotLegendStats(state)
@@ -1676,7 +1681,9 @@ export class PanelView {
     const cornerResize = this.legendResizeHandle("corner", legend);
     legend.replaceChildren(
       header,
-      this.plotLegendEncodingRow(state),
+      legendColorControls(state, this.plotLegendEncodingRow(state), () =>
+        this.axes.openColor(),
+      ),
       ...this.plotLegendDrawers(state),
       content,
       rightResize,
@@ -1698,6 +1705,7 @@ export class PanelView {
     const row = document.createElement("div");
     row.className = "plot-legend-encoding";
     for (const property of ["color", "dash", "width"] as const) {
+      if (property === "color" && state.color_axis != null) continue;
       const dimension =
         property === "color"
           ? state.color_by
@@ -1738,7 +1746,10 @@ export class PanelView {
 
   private plotLegendDrawers(state: RenderPanelState): HTMLElement[] {
     const drawers: HTMLElement[] = [];
-    if (typeof this.encodingDrawer === "string") {
+    if (
+      typeof this.encodingDrawer === "string" &&
+      !(this.encodingDrawer === "color" && state.color_axis != null)
+    ) {
       drawers.push(this.plotEncodingDrawer(state, this.encodingDrawer));
     }
     if (this.overrideDrawer) drawers.push(this.plotOverrideDrawer());
@@ -2802,6 +2813,7 @@ export class PanelView {
   }
 
   private refreshPlotLegendRoster(): void {
+    this.chartHost?.setColorbarTarget(legendColorTarget(this.element));
     this.element
       .querySelector<HTMLElement>(".plot-legend-roster-rows")
       ?.dispatchEvent(new Event("scroll"));

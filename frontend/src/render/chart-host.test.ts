@@ -566,12 +566,15 @@ it("keeps continuous color attributes across viewport updates and restores categ
     };
     host.render(colored);
     const chart = state.charts.at(-1);
-    expect(chart?.options.grid).toEqual({ ...CHART_GRID, right: 64 });
+    expect(chart?.options.grid).toEqual(CHART_GRID);
     expect(
       (chart?.options.series as { pointColors: Float32Array }[])[0]
         ?.pointColors,
     ).toBe(pointColors);
     const calls = chart?.setOption.mock.calls.length;
+    host.setColorbarTarget(document.createElement("button"));
+    host.setColorbarTarget(null);
+    expect(chart?.setOption.mock.calls.length).toBe(calls);
     host.render({ ...colored, xRange: { min: 10.5, max: 11.5 } });
     expect(chart?.setOption.mock.calls.length).toBe(calls);
     expect(chart?.setViewRange).toHaveBeenCalled();

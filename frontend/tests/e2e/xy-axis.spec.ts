@@ -209,6 +209,70 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await editor.screenshot({ path: testInfo.outputPath("axis-limits.png") });
     await panel.getByRole("button", { name: "Apply limits" }).click();
     await expect(colorbar).toHaveAttribute("aria-label", /20 to 80/);
+    const legend = panel.locator(".plot-series-legend");
+    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
+    await expect(legend.locator('[data-property="color"]')).toHaveCount(0);
+    await legend.locator(".legend-color-scale").focus();
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".axis-picker input")).toBeFocused();
+    await page.keyboard.press("Escape");
+    const setLegend = async (mode: string): Promise<void> => {
+      await panel.locator(".panel-legend-state").click();
+      await panel
+        .getByRole("menuitemradio", { name: mode, exact: false })
+        .click();
+      await expect(legend).toHaveAttribute("data-state", mode);
+    };
+    await setLegend("badge");
+    await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
+    await expect(colorbar).toHaveAttribute("data-placement", "plot");
+    await panel.screenshot({
+      path: testInfo.outputPath("color-scale-badge.png"),
+    });
+    await setLegend("rail");
+    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
+    await expect(colorbar).toHaveAttribute("data-placement", "legend");
+    await panel.screenshot({
+      path: testInfo.outputPath("color-scale-rail.png"),
+    });
+    const seam = legend.locator(".plot-legend-resize-left");
+    for (
+      let i = 0;
+      i < 12 && (await legend.getAttribute("data-collapsed")) !== "true";
+      i++
+    )
+      await seam.press("ArrowRight");
+    await expect(legend).toHaveAttribute("data-collapsed", "true");
+    await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
+    await seam.press("ArrowLeft");
+    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
+    await legend.locator(".plot-legend-undock").click();
+    await expect(legend).toHaveAttribute("data-state", "roster");
+    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
+    await panel.screenshot({
+      path: testInfo.outputPath("color-scale-roster.png"),
+    });
+    const dragLegend = legend.locator(".plot-legend-drag");
+    for (let i = 0; i < 12; i++) {
+      await dragLegend.press("Shift+ArrowLeft");
+      await dragLegend.press("Shift+ArrowDown");
+    }
+    await dragLegend.press("End");
+    await expect(legend).toHaveAttribute("data-dock", "bottom");
+    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
+    await panel.screenshot({
+      path: testInfo.outputPath("color-scale-bottom.png"),
+    });
+    await legend.locator(".plot-legend-undock").click();
+    for (let i = 0; i < 12; i++) await dragLegend.press("Shift+ArrowLeft");
+    await dragLegend.press("End");
+    await expect(legend).toHaveAttribute("data-dock", "top");
+    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
+    await panel.screenshot({
+      path: testInfo.outputPath("color-scale-top.png"),
+    });
+    await legend.locator(".plot-legend-undock").click();
+    await setLegend("keys");
     await expect(panel.locator('[data-panel-slot="status"]')).not.toContainText(
       /mismatch|unknown|unavailable|failed/i,
     );
@@ -299,6 +363,9 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await page.locator(".axis-picker input").fill("none");
     await page.locator(".axis-picker input").press("Enter");
     await expect(page.locator(".colorbar-canvas")).toBeHidden();
+    await expect(
+      page.locator('.plot-legend-encoding-chip[data-property="color"]'),
+    ).toContainText("color ← source");
     await expect(page.locator('[data-panel-slot="status"]')).not.toContainText(
       /mismatch|unknown|unavailable|failed/i,
     );

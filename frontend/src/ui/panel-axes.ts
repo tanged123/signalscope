@@ -74,6 +74,9 @@ export class PanelAxes {
     this.closeMenu?.();
     this.closeMenu = null;
   }
+  openColor(): void {
+    this.open("c");
+  }
   dispose(): void {
     this.close();
     this.abort.abort();

@@ -156,7 +156,9 @@ describe("PanelView chrome", () => {
   it("waits for a mounted panel before creating ChartGPU", () => {
     const create = vi
       .spyOn(ChartHost, "create")
-      .mockResolvedValue({} as ChartHost);
+      .mockResolvedValue({
+        setColorbarTarget: vi.fn(),
+      } as unknown as ChartHost);
     const view = new PanelView(
       "panel",
       callbacks(Catalog.build([])),
@@ -179,6 +181,7 @@ describe("PanelView chrome", () => {
   it("resizes an existing chart after its panel is remounted", async () => {
     const resize = vi.fn();
     vi.spyOn(ChartHost, "create").mockResolvedValue({
+      setColorbarTarget: vi.fn(),
       resize,
     } as unknown as ChartHost);
     const view = new PanelView(
@@ -205,7 +208,10 @@ describe("PanelView chrome", () => {
     const create = vi
       .spyOn(ChartHost, "create")
       .mockRejectedValueOnce(new Error("context unavailable"))
-      .mockResolvedValue({ resize: vi.fn() } as unknown as ChartHost);
+      .mockResolvedValue({
+        setColorbarTarget: vi.fn(),
+        resize: vi.fn(),
+      } as unknown as ChartHost);
     const view = new PanelView(
       "panel",
       callbacks(Catalog.build([])),
@@ -335,6 +341,7 @@ describe("PanelView chrome", () => {
     const dispose = vi.fn();
     const setRangesOnly = vi.fn();
     vi.spyOn(ChartHost, "create").mockResolvedValue({
+      setColorbarTarget: vi.fn(),
       render,
       resize: vi.fn(),
       dispose,

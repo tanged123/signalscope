@@ -12,7 +12,9 @@ members match by source, with missing or ambiguous matches reported explicitly.
 Pairs must share an exact sample timebase; no interpolation is performed.
 
 Use **c:** to color each line along its length by another signal, a source-matched
-bundle, or time. The separate colorbar shares one scale across the panel;
+bundle, or time. The labeled horizontal scale lives in the legend and shares
+one range across the panel. When the legend is collapsed it remains visible
+as a compact plot inset; neither placement adds a plot gutter.
 The shared **limits** dropdown edits X, Y, and C ranges and labels together,
 with automatic or fixed limits per axis. For time X, **Fit data** fits the
 source-time extent and fixed limits follow the panel's linked-time setting.
