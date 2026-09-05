@@ -21,6 +21,8 @@ pub enum ExprError {
     UnexpectedToken { start: usize, end: usize },
     #[error("expression ended early")]
     UnexpectedEnd,
+    #[error("expression nesting or tree depth exceeds {limit}")]
+    TooDeep { limit: usize },
     #[error(
         "unknown name {name:?}{}",
         suggestion

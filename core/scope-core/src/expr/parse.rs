@@ -5,6 +5,16 @@ use super::{
     lex::{Spanned, Token, tokenize},
 };
 
+const MAX_DEPTH: usize = 128;
+
+fn checked_depth(depth: usize) -> Result<usize, ExprError> {
+    if depth > MAX_DEPTH {
+        Err(ExprError::TooDeep { limit: MAX_DEPTH })
+    } else {
+        Ok(depth)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
@@ -120,7 +130,7 @@ fn suggest(name: &str) -> Option<String> {
 /// # Errors
 ///
 /// Returns [`ExprError`] for any lexical or syntactic problem, carrying the
-/// byte span of the offending token.
+/// byte span of the offending token, or when nesting/tree depth exceeds 128.
 pub fn parse(src: &str) -> Result<Expr, ExprError> {
     let tokens = tokenize(src)?;
     let mut parser = Parser {
@@ -128,7 +138,7 @@ pub fn parse(src: &str) -> Result<Expr, ExprError> {
         index: 0,
         next_call_id: 0,
     };
-    let expr = parser.expression(0)?;
+    let (expr, _) = parser.expression(0, 1)?;
     if let Some(extra) = parser.peek_spanned() {
         return Err(ExprError::UnexpectedToken {
             start: extra.start,
@@ -228,46 +238,52 @@ impl Parser<'_> {
         }
     }
 
-    fn expression(&mut self, minimum: u8) -> Result<Expr, ExprError> {
-        let mut lhs = self.prefix()?;
+    fn expression(&mut self, minimum: u8, nesting: usize) -> Result<(Expr, usize), ExprError> {
+        checked_depth(nesting)?;
+        let (mut lhs, mut depth) = self.prefix(nesting)?;
         while let Some((op, left, right)) = self.peek().and_then(infix_power) {
             if left < minimum {
                 break;
             }
             self.index += 1;
-            let rhs = self.expression(right)?;
+            let (rhs, rhs_depth) = self.expression(right, nesting + 1)?;
+            depth = checked_depth(depth.max(rhs_depth) + 1)?;
             lhs = Expr::Binary {
                 op,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
             };
         }
-        Ok(lhs)
+        Ok((lhs, depth))
     }
 
-    fn prefix(&mut self) -> Result<Expr, ExprError> {
+    fn prefix(&mut self, nesting: usize) -> Result<(Expr, usize), ExprError> {
         let entry = self.advance()?;
         match entry.token {
-            Token::Number(value) => Ok(Expr::Number(value)),
-            Token::Signal(path) => Ok(Expr::Signal(path)),
+            Token::Number(value) => Ok((Expr::Number(value), 1)),
+            Token::Signal(path) => Ok((Expr::Signal(path), 1)),
             Token::Minus | Token::Plus | Token::Not => {
                 let op = match entry.token {
                     Token::Minus => UnaryOp::Neg,
                     Token::Plus => UnaryOp::Pos,
                     _ => UnaryOp::Not,
                 };
-                let rhs = self.expression(UNARY_POWER)?;
-                Ok(Expr::Unary {
-                    op,
-                    rhs: Box::new(rhs),
-                })
+                let (rhs, depth) = self.expression(UNARY_POWER, nesting + 1)?;
+                let depth = checked_depth(depth + 1)?;
+                Ok((
+                    Expr::Unary {
+                        op,
+                        rhs: Box::new(rhs),
+                    },
+                    depth,
+                ))
             }
             Token::LParen => {
-                let inner = self.expression(0)?;
+                let inner = self.expression(0, nesting + 1)?;
                 self.eat(&Token::RParen)?;
                 Ok(inner)
             }
-            Token::Ident(name) => self.identifier(name, entry.start, entry.end),
+            Token::Ident(name) => self.identifier(name, entry.start, entry.end, nesting),
             _ => Err(ExprError::UnexpectedToken {
                 start: entry.start,
                 end: entry.end,
@@ -275,7 +291,13 @@ impl Parser<'_> {
         }
     }
 
-    fn identifier(&mut self, name: String, start: usize, end: usize) -> Result<Expr, ExprError> {
+    fn identifier(
+        &mut self,
+        name: String,
+        start: usize,
+        end: usize,
+        nesting: usize,
+    ) -> Result<(Expr, usize), ExprError> {
         if self.peek() != Some(&Token::LParen) {
             return match name.as_str() {
                 "t" => Ok(Expr::Time),
@@ -289,7 +311,8 @@ impl Parser<'_> {
                     start,
                     end,
                 }),
-            };
+            }
+            .map(|expr| (expr, 1));
         }
         let Some(expected) = arity_of(&name) else {
             return Err(ExprError::UnknownIdentifier {
@@ -301,9 +324,12 @@ impl Parser<'_> {
         };
         self.eat(&Token::LParen)?;
         let mut args = Vec::new();
+        let mut depth = 1;
         if self.peek() != Some(&Token::RParen) {
             loop {
-                args.push(self.expression(0)?);
+                let (arg, arg_depth) = self.expression(0, nesting + 1)?;
+                depth = depth.max(checked_depth(arg_depth + 1)?);
+                args.push(arg);
                 if self.peek() == Some(&Token::Comma) {
                     self.index += 1;
                 } else {
@@ -327,13 +353,16 @@ impl Parser<'_> {
         }
         let id = self.next_call_id;
         self.next_call_id += 1;
-        Ok(Expr::Call {
-            id,
-            name,
-            args,
-            start,
-            end: closing.end,
-        })
+        Ok((
+            Expr::Call {
+                id,
+                name,
+                args,
+                start,
+                end: closing.end,
+            },
+            depth,
+        ))
     }
 }
 
@@ -364,5 +393,59 @@ fn collect_references(expr: &Expr, found: &mut Vec<String>) {
             }
         }
         Expr::Number(_) | Expr::Time => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_expression_depth_accepts_the_limit_and_rejects_excess() {
+        for (prefix, suffix) in [("-", ""), ("(", ")"), ("sin(", ")"), ("1^", ""), ("", "+1")] {
+            let accepted = format!(
+                "{}'a'{}",
+                prefix.repeat(MAX_DEPTH - 1),
+                suffix.repeat(MAX_DEPTH - 1)
+            );
+            let expr = parse(&accepted).expect("boundary expression parses");
+            assert_eq!(references(&expr), vec!["a"]);
+            let rejected = format!(
+                "{}'a'{}",
+                prefix.repeat(MAX_DEPTH),
+                suffix.repeat(MAX_DEPTH)
+            );
+            assert!(
+                matches!(
+                    parse(&rejected),
+                    Err(ExprError::TooDeep { limit: MAX_DEPTH })
+                ),
+                "{prefix} / {suffix}"
+            );
+            let excessive = format!("{}'a'{}", prefix.repeat(10_000), suffix.repeat(10_000));
+            assert!(matches!(parse(&excessive), Err(ExprError::TooDeep { .. })));
+        }
+    }
+
+    #[test]
+    fn bounded_expression_depth_allows_large_balanced_trees() {
+        let mut expression = "'a'".to_owned();
+        for _ in 0..8 {
+            expression = format!("({expression}+{expression})");
+        }
+        let expr = parse(&expression).expect("node count is not nesting depth");
+        assert_eq!(references(&expr), vec!["a"]);
+    }
+
+    #[test]
+    fn bounded_expression_depth_counts_mixed_tree_paths() {
+        let left = format!("'a'{}", "+1".repeat(MAX_DEPTH - 1));
+        for expression in [
+            format!("-({left})"),
+            format!("sin({left})"),
+            format!("1+({left})"),
+        ] {
+            assert!(matches!(parse(&expression), Err(ExprError::TooDeep { .. })));
+        }
     }
 }

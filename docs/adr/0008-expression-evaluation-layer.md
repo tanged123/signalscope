@@ -40,3 +40,20 @@ and no `e` constant, because MATLAB has neither.
 The decision above is unchanged: evaluation happens in `scope-core`, and no
 JavaScript evaluation of user expressions runs in the webview. Only the syntax
 the parser accepts has changed.
+
+## Amendment (2026-09-05, bounded expression depth)
+
+Core parsing limits both active recursive expression calls and expression-tree
+depth to 128, rejecting excess with `ExprError::TooDeep` before evaluation or
+publication. Parentheses, unary operators, powers and function arguments count
+toward parser nesting. Left-associated binary chains also count toward tree
+depth, protecting recursive reference collection, evaluation and destruction.
+Depth is tracked during construction so rejection never has to destroy an
+already unbounded tree. Large balanced expressions remain allowed; this is not
+a token-count cap or a general compute-memory budget.
+
+This is an input-safety limit, not a protocol/session schema change. Existing
+expressions within the limit keep their semantics; deeper saved expressions
+now fail clearly on materialization. Parser boundary tests and an authenticated
+derived-endpoint test cover rejection without partial publication. Revisit the
+limit only with stack measurements or an iterative parser/evaluator design.

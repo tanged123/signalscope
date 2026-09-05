@@ -99,3 +99,61 @@ fn summary(
             .and_then(scope_core::pyramid::Pyramid::last_finite_value),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use http_body_util::BodyExt;
+    use scope_protocol::{DerivedRequest, Envelope};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn bounded_expression_depth_returns_bad_request_without_publication() {
+        let context = crate::AppContext::for_tests(Some("depth-test".into()));
+        let router = crate::build_router(context.clone());
+        for expression in [
+            format!("{}1", "-".repeat(10_000)),
+            format!("{}1{}", "(".repeat(10_000), ")".repeat(10_000)),
+            format!("1{}", "+1".repeat(10_000)),
+        ] {
+            let request = Envelope::new(DerivedRequest {
+                path: "too-deep".into(),
+                expr: expression,
+            });
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/api/create_derived")
+                        .header("authorization", "Bearer depth-test")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(
+                String::from_utf8_lossy(&bytes)
+                    .contains("expression nesting or tree depth exceeds 128")
+            );
+            let data = context.state.lock().unwrap();
+            assert_eq!(data.store.signals().count(), 0);
+            assert_eq!(data.store.sources().count(), 0);
+            assert!(data.pyramids.is_empty());
+        }
+        let response = router
+            .oneshot(
+                Request::post("/api/list_signals")
+                    .header("authorization", "Bearer depth-test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+}
