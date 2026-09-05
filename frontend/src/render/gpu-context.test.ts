@@ -248,6 +248,53 @@ describe("acquireGpuContext", () => {
     unregister?.();
   });
 
+  it.each(["unknown", "destroyed"])(
+    "replays early %s device loss after subscription setup",
+    async (reason) => {
+      const { loss } = installDevice();
+      const gpu = await acquireGpuContext();
+      loss.resolve({ reason, message: "startup loss" });
+      await Promise.resolve();
+      const onFailure = vi.fn();
+      gpu?.onFailure(onFailure);
+      expect(onFailure).not.toHaveBeenCalled();
+      await Promise.resolve();
+      expect(onFailure).toHaveBeenCalledExactlyOnceWith({
+        kind: "device-lost",
+        message: "startup loss",
+      });
+      gpu?.dispose();
+    },
+  );
+
+  it.each(["unsubscribe", "dispose"])(
+    "cancels queued device loss on %s",
+    async (cleanup) => {
+      const { loss } = installDevice();
+      const gpu = await acquireGpuContext();
+      loss.resolve({ reason: "unknown", message: "startup loss" });
+      await Promise.resolve();
+      const onFailure = vi.fn();
+      const unsubscribe = gpu?.onFailure(onFailure);
+      if (cleanup === "unsubscribe") unsubscribe?.();
+      else gpu?.dispose();
+      await Promise.resolve();
+      expect(onFailure).not.toHaveBeenCalled();
+      gpu?.dispose();
+    },
+  );
+
+  it("does not notify intentional disposal as device loss", async () => {
+    const { loss } = installDevice();
+    const gpu = await acquireGpuContext();
+    const onFailure = vi.fn();
+    gpu?.onFailure(onFailure);
+    gpu?.dispose();
+    loss.resolve({ reason: "destroyed", message: "" });
+    await Promise.resolve();
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
   it("reports uncaptured errors without stopping a healthy loop", async () => {
     const requestAnimationFrame = vi.fn(() => 1);
     const cancelAnimationFrame = vi.fn();
