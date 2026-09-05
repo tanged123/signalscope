@@ -801,56 +801,12 @@ mod tests {
 
     #[test]
     fn v27_panels_migrate_to_time_x_axis() {
-        let session = Session {
-            tabs: vec![WorkspaceTab {
-                id: "workspace-1".into(),
-                title: "Workspace 1".into(),
-                cursor_mode: CursorMode::None,
-                focused_panel_id: None,
-                maximized_panel_id: None,
-                panels: vec![PanelState {
-                    id: "panel-a".into(),
-                    title: "Panel A".into(),
-                    axis_style: AxisStyle::Gutter,
-                    bindings: Vec::new(),
-                    color_by: Some(StyleDimension::Source),
-                    dash_by: None,
-                    width_by: None,
-                    line_width: 1.4,
-                    ghost_opacity: 0.5,
-                    overrides: Vec::new(),
-                    focus: Vec::new(),
-                    ghost_mode: GhostMode::All,
-                    legend_state: LegendState::Keys,
-                    legend_position: None,
-                    legend_size: None,
-                    legend_anchor: None,
-                    legend_dock: None,
-                    legend_hint_dismissed: false,
-                    x_axis: XAxisSource::Time,
-                    y_range: None,
-                    x_range: None,
-                    x_label: None,
-                    y_label: None,
-                    time_window: None,
-                    annotations: Vec::new(),
-                    annotation_display: AnnotationDisplay::Labels,
-                    show_stats: false,
-                    stat_columns: vec![
-                        StatColumn::Min,
-                        StatColumn::Max,
-                        StatColumn::Mean,
-                        StatColumn::Rms,
-                        StatColumn::Cursor,
-                    ],
-                    stats_sort: None,
-                    stats_sort_descending: false,
-                }],
-                layout: Vec::new(),
-            }],
-            ..Session::default()
-        };
-        let mut value = serde_json::to_value(session).expect("serializes session");
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/testdata/session-parser-cases.json"
+        ))
+        .expect("valid shared panel fixture");
+        let mut value = serde_json::to_value(Session::default()).expect("serializes session");
+        value["tabs"][0]["panels"] = serde_json::json!([fixture["panel"]]);
         value["schema_version"] = 27.into();
         value["tabs"][0]["panels"][0]
             .as_object_mut()
