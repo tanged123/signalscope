@@ -10,7 +10,7 @@ pub(super) struct CacheSection {
 }
 
 pub(super) fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
-    if digest.len() != 64 {
+    if digest.len() != 64 || !digest.is_ascii() {
         return None;
     }
     let mut bytes = [0; 32];

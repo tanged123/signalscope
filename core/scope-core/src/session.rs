@@ -307,7 +307,9 @@ fn migrate_v28(mut value: serde_json::Value) -> serde_json::Value {
                 else {
                     continue;
                 };
-                if x_axis.get("kind").and_then(|kind| kind.as_str()) == Some("time") {
+                if x_axis.get("kind").and_then(|kind| kind.as_str()) == Some("time")
+                    && x_axis.get("ref").is_some_and(serde_json::Value::is_null)
+                {
                     x_axis.remove("ref");
                 }
             }
@@ -864,6 +866,26 @@ mod tests {
         v28["tabs"][0]["panels"][0]["x_axis"]["ref"] = serde_json::Value::Null;
         let migrated_v28 = from_json(&v28.to_string()).expect("v28 migrates");
         assert_eq!(migrated_v28.tabs[0].panels[0].x_axis, XAxisSource::Time);
+
+        for invalid_ref in [
+            serde_json::json!({"source_key": "source", "channel": "x"}),
+            serde_json::json!("x"),
+            serde_json::json!(false),
+        ] {
+            v28["tabs"][0]["panels"][0]["x_axis"]["ref"] = invalid_ref;
+            assert!(matches!(
+                from_json(&v28.to_string()),
+                Err(SessionError::Json(_))
+            ));
+        }
+        v28["tabs"][0]["panels"][0]["x_axis"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ref");
+        assert_eq!(
+            from_json(&v28.to_string()).unwrap().tabs[0].panels[0].x_axis,
+            XAxisSource::Time
+        );
 
         value["schema_version"] = SESSION_SCHEMA_VERSION.into();
         value["tabs"][0]["panels"][0]["x_axis"] = serde_json::json!({

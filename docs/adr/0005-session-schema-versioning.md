@@ -125,8 +125,9 @@ default it to null and retain their time anchor behavior.
 Schema version 29 changes `XAxisSource` from the correlated `{kind, ref?}`
 object into a generated tagged union. The `time` variant has no reference and
 the `signal` variant requires one, so invalid combinations are not
-representable in Rust or TypeScript and no handwritten post-deserialization
-validator is needed. Version 28 sessions migrate by removing the legacy null
+representable in Rust or TypeScript. Runtime parsing still explicitly rejects
+references on time variants because Serde accepts extra fields on tagged unit
+variants (ADR 0055). Version 28 sessions migrate by removing only the legacy null
 `ref` field from time variants. The migration entry point applies an ordered
 list of one-version functions, replacing the nested call chain while retaining
 the same oldest-supported version.

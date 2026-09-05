@@ -1001,6 +1001,20 @@ mod tests {
     }
 
     #[test]
+    fn malformed_digest_is_rejected_before_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = CacheRoot::app_owned(directory.path());
+        let unicode = format!("aé{}", "a".repeat(61));
+        assert_eq!(unicode.len(), 64);
+        for digest in [unicode, "g".repeat(64), "a".repeat(63)] {
+            let error = write_at(&root, &digest, 0, &[], &mut |_| {}).unwrap_err();
+            assert!(matches!(error, CacheError::InvalidProvenance(_)));
+        }
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        assert_eq!(digest_bytes(&"aF".repeat(32)), Some([0xaf; 32]));
+    }
+
+    #[test]
     fn root_write_failures_are_reported() {
         let directory = tempfile::NamedTempFile::new().unwrap();
         let root = CacheRoot::app_owned(directory.path());
