@@ -17,6 +17,11 @@ changes and inspect before editing.
   historical design explorations are not requirements.
 - If requirements are ambiguous, state a small proposal before expanding
   scope. Record architectural changes in a new or amended ADR.
+- For boundary changes, name the state/invariant owner, dependencies,
+  publication and cleanup points, compatibility impact, and validating test
+  or measurement before choosing an abstraction. Use `docs/adr/template.md`;
+  ordinary local changes do not need an ADR. Distinguish current code,
+  accepted policy, and pending work (ADR 0054).
 
 ## Working rules
 
@@ -24,7 +29,10 @@ Prefer deletion and the shortest correct implementation. Do not add
 speculative abstractions, wrappers, defensive scaffolding, or comments that
 restate code. Modules have a soft budget of 600 lines; a module over 1,000
 lines is split before new behavior is added to it, per ADR 0053. Check the
-shared-primitives table in `docs/architecture.md` before writing a helper. Keep commands and logs quiet. Use `apply_patch` for edits. Never
+shared-primitives table in `docs/architecture.md` before writing a helper.
+Extract around behavior, invariants, or resource lifetime; passing the whole
+previous owner into a new file does not establish a boundary. Keep commands
+and logs quiet. Use `apply_patch` for edits. Never
 reset, overwrite, or stage unrelated work; review staged and unstaged diffs
 separately.
 

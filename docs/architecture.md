@@ -1,323 +1,271 @@
 # SignalScope architecture
 
-This is the construction guide for the repository. [ADRs](adr/README.md) record
-_why_ a decision was made; this document records _where code goes_ and _what to
-reuse_ so an implementer does not have to rediscover either.
+This is the construction guide: where behavior belongs, who owns state, and
+which contracts an implementation must preserve. [ADRs](adr/README.md) record
+decisions and alternatives; [the roadmap](implementation-roadmap.md) records
+unfinished work. [AGENTS.md](../AGENTS.md) is the short execution guide.
 
-Read this with [AGENTS.md](../AGENTS.md) (rules) and
-[implementation-roadmap.md](implementation-roadmap.md) (current scope).
+The implementation decisions are recorded in
+[ADR 0055](adr/0055-core-policy-and-query-lifetimes.md).
 
-## System map
+## System boundaries
 
-```mermaid
-graph TB
-  subgraph contract["protocol — schema is the source of truth"]
-    SCHEMA["scope-protocol.json<br/>scope-session.json<br/>scope-preferences.json"]
-    GEN["generate-types.mjs"]
-    SCHEMA --> GEN
-  end
-
-  subgraph rust["Rust — owns data"]
-    CORE["scope-core<br/>store · ingest · pyramid · line2d<br/>compute · expr · session · snapshot · cache"]
-    SERVER["scope-server<br/>HTTP handlers · host adapters"]
-    CORE --> SERVER
-  end
-
-  subgraph web["TypeScript — owns presentation"]
-    APP["src/app<br/>data plane · caches · budget<br/>plot capabilities · family dispatch"]
-    RENDER["src/render<br/>render models · adapters<br/>ChartHost · overlay"]
-    UI["src/ui<br/>DOM · shells · controls"]
-    APP --> RENDER
-    APP --> UI
-    RENDER --> UI
-  end
-
-  DESKTOP["desktop — Electron lifecycle wrapper"]
-
-  GEN -->|generated.rs| CORE
-  GEN -->|generated/*.ts| APP
-  SERVER -->|HTTP + binary framing| APP
-  SERVER --> DESKTOP
-  UI --> DESKTOP
-```
-
-## Dependency rules
-
-These are enforced by review, and they currently hold with no exceptions.
-
-| Rule                                                                    | Status |
-| ----------------------------------------------------------------------- | ------ |
-| `src/render` never imports `src/ui`                                     | holds  |
-| `src/app` never imports `src/ui`                                        | holds  |
-| Only `app-shell`, `workspace-view`, and `import-wizard` reach app state | holds  |
-| `scope-core` never depends on `scope-server`                            | holds  |
-| Frontend never branches on host identity (Electron vs browser)          | holds  |
-| Generated files are outputs, never hand-edited                          | holds  |
-
-`src/ui/app-shell.ts` is the composition root: it is the one module allowed to
-know about `WorkspaceModel`, `DataPlane`, and the DOM at the same time. Every
-other UI module receives a narrow port or callback interface instead.
-
-## Backend
-
-### Crate map
-
-| Module               | Owns                                              |
-| -------------------- | ------------------------------------------------- |
-| `store`              | signals, sources, transactional registration      |
-| `ingest`             | streaming decoders, batch jobs, recipes           |
-| `pyramid`            | time-envelope min/max reduction (`EnvelopeBin`)   |
-| `line2d`             | paired X/Y reduction (`LinePyramid`, `LinePoint`) |
-| `compute`            | derived-signal materialization                    |
-| `expr`               | expression lexing, parsing, evaluation            |
-| `session`            | schema versioning, ordered migrations             |
-| `snapshot`           | export planning, baking, HTML injection           |
-| `selector`           | snapshot selector parsing and character globs     |
-| `cache`              | on-disk sidecars, paging, column codecs           |
-| `scope-server::api`  | HTTP handlers, one per operation                  |
-| `scope-server::host` | OS dialogs, filesystem, process concerns          |
-
-Dependencies point inward. `snapshot` may call `pyramid` and `line2d`; neither
-may call `snapshot`.
-
-### Request lifecycle
-
-```mermaid
-sequenceDiagram
-  participant FE as HttpPlane
-  participant R as build_router
-  participant A as api handler
-  participant S as SignalStore
-  participant P as Pyramid / LinePyramid
-
-  FE->>R: POST /query_line2d_bin
-  R->>A: typed request struct
-  A->>A: validate protocol version
-  A->>S: resolve signal ids
-  S-->>A: Signal handles
-  A->>P: reduce for window and pixel width
-  P-->>A: paired rows, one source-index set
-  A-->>FE: versioned binary frame
-  Note over A,P: reduction invariants live with the<br/>data family, not the transport
-```
-
-### Adding an endpoint
-
-1. Add the request/response types to `protocol/schema/scope-protocol.json`.
-2. Run `pnpm codegen`. Never hand-edit `generated.rs` or `generated/*.ts`.
-3. Add the handler to the matching `api` module (see the split in
-   [ADR 0053](adr/0053-module-boundaries-and-shared-primitives.md)).
-4. Register the route in `scope-server/src/lib.rs`.
-5. Add the method to the `DataPlane` interface **and to both implementations** —
-   `HttpPlane` and `BakedPlane`. A capability that only works online is a bug,
-   not a limitation.
-6. Add Rust handler tests and TypeScript data-plane tests.
-
-## Schema and codegen
+Arrows below mean **depends on**, not data flow. This is the crate/host boundary;
+frontend directories have the more qualified rules below.
 
 ```mermaid
 flowchart LR
-  J["scope-*.json"] --> G["generate-types.mjs"]
-  G --> RS["Rust structs / enums"]
-  G --> TS["TypeScript types"]
-  G --> V["SCHEMA_VERSION constants"]
-  V --> M["session.rs MIGRATIONS table"]
-  M --> S["from_json applies<br/>one function per version"]
+  Desktop[Electron lifecycle] --> Server[scope-server]
+  Server --> Core[scope-core]
+  Server --> Protocol[scope-protocol]
+  Core --> Protocol
+  Frontend[TypeScript presentation] --> Contract[generated protocol contract]
+  Frontend --> Renderer[ChartGPU via render host]
 ```
 
-The generator supports three constructs. Choose deliberately:
+Live data travels from Rust through HTTP JSON envelopes or binary frames to
+`HttpPlane`. Offline data travels from the baked manifest to `BakedPlane`.
+Both feed the same presentation code. Electron starts and presents the server;
+it provides no second native data API. Bootstrap selects the plane; views use
+capabilities, never host identity.
 
-| Construct      | Emits                                   | Use when                |
-| -------------- | --------------------------------------- | ----------------------- |
-| `object`       | struct / interface                      | fields are independent  |
-| `enum`         | unit enum / string union                | a closed set of names   |
-| `tagged_union` | serde-tagged enum / discriminated union | fields are _correlated_ |
+## Ownership and placement
 
-**Correlated fields are a tagged union, not an object with nullable fields.**
-`XAxisSource` is the reference example: the `time` variant carries no reference
-and the `signal` variant requires one, so the invalid pairing cannot be
-constructed in either language and no hand-written validator is needed.
+| Concern                                 | Current owner                                                   | Boundary to preserve                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Signal identity and registration        | `scope-core::store`, `sources`                                  | No HTTP, DOM, or source-format knowledge in the store                                                            |
+| Column access and page lifetime         | `columns`, `paging`, `bins`                                     | Fallible range access for paged data; a slice may materialize a whole column                                     |
+| Decode and admission                    | `ingest`, including `batch`, `admission`, `recipe`, `container` | Decode off the store lock; publish one complete source transaction                                               |
+| Reduction                               | `pyramid`, `line2d`                                             | Family-specific extrema, gaps, correspondence, and query quality                                                 |
+| Derived data                            | `compute`, `expr`, `derived_bundle`, `derived`                  | Core owns dependency checks, bundle definitions and materialization; API maps core results to protocol summaries |
+| Persistence                             | `session`, `preferences`; server selects paths                  | Parse/migrate before applying state; no source samples in sessions                                               |
+| Snapshot preparation                    | `snapshot`, `selector`, `tile_wire`                             | Bake selected presentation data and escape the exact HTML injection slot                                         |
+| HTTP and process integration            | server `lib`, `api/*`, `auth`, `host`, `dialogs`                | HTTP extraction/framing in API; OS integration at the host edge                                                  |
+| Durable frontend workspace              | `app/workspace.ts`                                              | One generated session document; views route mutation intent through callbacks                                    |
+| Query scheduling and retained responses | `app/line-presentation-controller.ts`, `tile-window-cache.ts`   | Generation checks, bounded retention, atomic publication                                                         |
+| Data preparation                        | `app/plot-capabilities.ts`, `line2d-family.ts`, render adapters | Keep domain interaction separate from renderer-specific publication                                              |
+| GPU resources                           | `render/gpu-context.ts`, `chart-host.ts`                        | Shared device context, one chart host per plot, explicit disposal                                                |
+| DOM composition                         | `ui/app-shell.ts`, `workspace-view.ts`, `panel.ts`              | Compose narrow consumers; avoid passing a whole owner to an extracted helper                                     |
 
-Schema changes follow ADR 0005: additive fields need defaults; anything else
-needs a version bump plus one migration function appended to `MIGRATIONS`. Each
-migration advances exactly one version and sets the next `schema_version`.
+`host.rs` owns `DataState`, ingest commit, OS integration, and protocol summary
+conversion. Its `derived()` method lends core storage, pyramids, budget and
+cache location to `DerivedContext`; it does not implement dependency policy.
+API children import dependencies directly from their defining modules.
 
-## Frontend
+Core dependencies are also more specific than the original five-module sketch:
+`store` uses `columns`; `pyramid` uses `store`, `columns`, `bins`, and `paging`;
+`compute` and `line2d` consume signal views; `cache` connects storage and
+pyramids; `snapshot` orchestrates selection and baking. `session` remains an
+independent schema/persistence module. Keep reducers independent of snapshot
+and ingest orchestration. Extracting these modules into separate crates would
+require an API/visibility review; it is not promised to be mechanical.
 
-### Three-directory rule
+## Frontend dependencies and enforcement
 
-| Directory    | Contains                          | May import                         |
-| ------------ | --------------------------------- | ---------------------------------- |
-| `src/app`    | data, caches, policy, pure logic  | `app`, `render` types, `generated` |
-| `src/render` | render models, adapters, GPU host | `app` types, `generated`           |
-| `src/ui`     | DOM construction and events       | everything                         |
+The three directories describe responsibilities, not three strictly isolated
+layers. These are current production-code boundaries:
 
-If a module needs the DOM it belongs in `ui`. If it needs only data it belongs
-in `app`. If it converts a transport response into something a renderer accepts,
-it belongs in `render`.
+| Boundary                                                     | Current evidence / enforcement                                                                                  |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `app` and `render` do not import `ui`                        | Static import/re-export restrictions in `frontend/eslint.config.js`; tested by `./scripts/test.sh architecture` |
+| UI/render do not import concrete `HttpPlane` or `BakedPlane` | Named-import restriction in `frontend/eslint.config.js`                                                         |
+| Application presentation code calls render adapters          | Runtime imports in `line2d-family.ts` and `line-presentation-controller.ts`; this is intentional composition    |
+| Render code uses application data/math                       | Runtime imports in adapters, overlay, and chart host; these are not all type-only                               |
+| Workspace and transport access is concentrated               | `AppShell` owns both; `WorkspaceView` receives `WorkspaceModel`; `ImportWizard` receives `DataPlane`            |
+| Frontend packages have no declared runtime dependencies      | `check-runtime-deps.mjs`; this checks package fields, not internal import direction                             |
+| Generated files match schemas                                | `pnpm codegen:check` through the frontend script gate                                                           |
 
-### UI construction patterns
+Do not widen the existing runtime crossings into arbitrary `app` ↔ `render`
+imports. Domain/data helpers must not acquire GPU or UI dependencies. Renderer
+hosts must not acquire workspace, ingest, persistence, or concrete transport
+dependencies. The presentation composition modules may connect preparation and
+adapters. Type-only imports still create schema coupling; they do not justify
+sharing a mutable owner.
 
-Five patterns are in use. Pick the one that matches; do not invent a sixth.
+DOM control construction belongs in `ui`. Canvas/device lifecycle and theme
+measurement belong in `render`, even though they use browser APIs. `app` is
+not entirely pure: transport, download helpers, and scheduling already use
+browser APIs. Classify a new module by the behavior it owns, not by whether it
+mentions `window`.
 
-1. **Markup string plus slot lookup** — for fixed chrome. `panelShellMarkup()`
-   emits `data-panel-slot` attributes and `requiredSlot()` resolves them.
-   Throwing on a missing slot turns a template typo into a startup failure
-   rather than a silent null.
-2. **Imperative element building** — for repeated rows built from data (legend
-   rows, menu items, stat cells).
-3. **Host port** — a module that needs to read and commit state declares a
-   narrow interface and receives it. `LegendRailHost` is the model: the rail
-   module never sees `PanelView`, only the seven members it actually reads and
-   commits. **This is the pattern that makes a module reusable by a future
-   panel type.**
-4. **Controller object** — owns behavior over an element plus callbacks:
-   `PlotInteractionController`, `LinePresentationController`, `OverlayRenderer`,
-   `ChartHost`.
-5. **Callback interface** — views never mutate the workspace. `PanelCallbacks`
-   and `PanelShellCallbacks` route intent upward to the composition root.
+`./scripts/test.sh architecture` checks forbidden and intentional imports
+against the effective ESLint configuration and runs in the frontend CI gate.
+These static-import checks are distinct from package-dependency checks; they
+do not establish general runtime isolation or inspect computed dynamic imports.
 
-### Panel composition
+## Transactions, requests, and resource lifetime
 
-```mermaid
-graph TD
-  AS["AppShell — composition root"] --> WV["WorkspaceView"]
-  WV --> PV["PanelView"]
-  PV --> PS["PanelShell<br/>chrome · drag/drop · title · status"]
-  PV --> LR["legend-rail<br/>via LegendRailHost port"]
-  PV --> LS["legend-stats"]
-  PV --> PA["PanelAnnotationState"]
-  PV --> PI["PlotInteractionController"]
-  PV --> OR["OverlayRenderer"]
-  PV --> CH["ChartHost"]
+For changes to these paths, name the owner, publication point, invalidation
+event, and failure behavior in the implementation plan.
 
-  style PS fill:none,stroke-dasharray:4
-  style LR fill:none,stroke-dasharray:4
-```
+| Path                   | Ownership and publication                                                                                   | Failure / lifetime                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Ingest                 | Workers decode and prepare pyramids; `ServerCommitSink::commit` locks state and publishes a complete source | Failed files leave no partial source; committed siblings survive batch failure/cancellation (ADR 0026)        |
+| Live paired query      | API clones signal handles under the lock; reduction and encoding happen after release                       | Handle lifetime protects readable input; frontend generation checks reject obsolete results                   |
+| Time-tile/sample query | Handlers clone signal and immutable pyramid handles under the mutex, then query and encode after release    | Signal handles retain weakly referenced pyramid inputs; reset/removal cannot revoke active readers            |
+| Presentation refresh   | Controller plans density, queries panels, prepares replacements, then swaps the response maps               | Old covering data remains drawable; obsolete generations cannot publish; per-panel query errors remain scoped |
+| Response retention     | Each family cache retains an overview and latest detail for a binding identity                              | Binding changes, panel eviction, and workspace replacement must invalidate affected entries                   |
+| GPU presentation       | `PanelView` owns `ChartHost`; host owns ChartGPU registration/publication/disposal                          | Keep one host per plot; test late initialization and disposal when changing lifecycle                         |
+| Restore/save           | Server restore gate protects autosave; shell applies the restored session and refreshes presentation        | Validate supported versions first; restore finalization must settle on success and failure                    |
 
-Dashed modules are family-agnostic: a future scatter or histogram panel composes
-them unchanged. `PanelShell` deliberately knows nothing about signals, axes,
-statistics, or ChartGPU.
+The refresh token prevents stale publication, including for transports that
+ignore cancellation. Query methods also accept an optional `AbortSignal`:
+`HttpPlane` cancels fetch and `BakedPlane` checks before preparation. The
+controller's `clear()` cancels scheduled work and invalidates retained state;
+`dispose()` additionally prevents reuse. Non-persisted page teardown stops
+presentation and releases chart hosts before the GPU device. Fetch cancellation
+does **not** cancel a Rust blocking task that has already started.
 
-### Presentation pipeline
+Derived spills use unique files whose ownership is shared by cloned page
+handles. Removal/reset releases the store's ownership; the last reader deletes
+the file. Persistent ingest caches do not use this temporary-file policy.
+Fallible derived value preparation precedes replacement, preserving an old
+definition when spill IO fails.
 
-```mermaid
-sequenceDiagram
-  participant C as LinePresentationController
-  participant B as presentation-budget
-  participant K as WindowResponseCache
-  participant D as DataPlane
-  participant F as line2dFamily
-  participant H as ChartHost
+Budgeting must cover more than retained tiles: source-window materialization,
+concurrent requests, temporary reduction buffers, prepared feeds, and GPU
+publication can overlap. Explicit-X timebase comparison can scan complete
+columns when timebase IDs differ, even for a small viewport. Its padded window
+limits the selected range, not a fixed number of samples or bytes. Benchmark
+large windows and gap-heavy data before adding caching or concurrency.
 
-  C->>B: planPresentationDensity(demands)
-  B-->>C: one global density plan
-  C->>K: covering response for window?
-  alt cached coverage
-    K-->>C: retained overview or detail
-  else
-    C->>D: queryTiles / queryLine2D
-    D-->>C: response
-    C->>K: admit, evict by policy
-  end
-  C->>F: line2dFamily(data).prepare(context)
-  F-->>C: PreparedPlot + makeInput
-  C->>H: render(Line2DRenderInput)
-  Note over C,H: stale covering data stays visible<br/>until an atomic replacement is ready
-```
+## Contracts and compatibility
 
-Two seams carry the polymorphism:
+Schema sources are `protocol/schema/scope-{protocol,session,preferences}.json`.
+Run `pnpm codegen`; never edit generated Rust or TypeScript. Choose `object`
+for independent fields, `enum` for a closed set, and `tagged_union` for
+correlated variants such as `XAxisSource`.
 
-- **`PreparedPlot`** (`app/plot-capabilities.ts`) — auto-ranges, cursor, hit
-  testing, annotation resolution, statistics. Panel code calls the interface.
-- **`Line2DRenderInput`** (`render/line2d.ts`) — the renderer-owned model.
-  `ChartHost` accepts only this; it does not know about tiles or timebases.
+Generated types protect typed construction, not arbitrary input. Rust Serde,
+binary decoders, `parseBakedSession`, and preferences parsing own runtime
+checks. A TypeScript cast does not validate JSON. A tagged union eliminates
+one structural ambiguity; it does not prove referenced signals exist, ranges
+are valid, or X/Y timebases agree.
 
-## Adding a plot family
+| Contract                      | Version / compatibility owner                                     | Required evidence when changed                                                               |
+| ----------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| HTTP JSON and binary payloads | Protocol schema, envelope and frame codecs (ADR 0004, 0036, 0052) | Additive defaults or explicit version compatibility; Rust/TS codec and malformed-input tests |
+| Durable sessions              | `session::from_json`, ordered `MIGRATIONS` (ADR 0005)             | Each supported old version advances to current; unsupported versions fail before restore     |
+| Baked sessions                | `app/baked-session.ts`, shipped with matching snapshot runtime    | Current-version validation; no duplicate frontend migration ladder                           |
+| User preferences              | Rust and TS preferences parsers (ADR 0023)                        | Preferences migration/default tests; preserve unreadable future files                        |
+| Snapshot payload              | Manifest schema plus Rust bake and `BakedPlane` readers           | Captured bindings, range/fidelity, offline zoom limits, size and injection checks            |
 
-```mermaid
-flowchart TD
-  A["1. ADR: reduction invariant,<br/>interaction, snapshot payload"] --> B["2. Schema: typed request/response<br/>+ tagged union if state is correlated"]
-  B --> C["3. Rust reducer<br/>own module, own invariant"]
-  C --> D["4. Typed endpoint<br/>never a universal payload"]
-  D --> E["5. DataPlane method<br/>HttpPlane and BakedPlane"]
-  E --> F["6. WindowResponseCache subclass<br/>+ budget cost per unit"]
-  F --> G["7. PreparedPlot implementation"]
-  G --> H["8. Render adapter to a render model"]
-  H --> I["9. Register in the family dispatch"]
-  I --> J["10. Snapshot bake + session migration"]
-```
+These are separate version domains. A protocol change does not go in the
+session migration table. A release version is separate again; an existing
+synchronized PR bump is not repeated for documentation follow-ups.
 
-Rules that fall out of ADR 0052 and are easy to get wrong:
+## Adding behavior
 
-- Reduction invariants belong to the family. Transport machinery (framing,
-  cancellation, pixel-width quality, stale retention, atomic publication) is
-  shared. Do not merge the two.
-- A new family gets its **own endpoint**. Never widen an existing response into
-  a loosely typed universal payload.
-- The offline path is not optional. A family that cannot be baked into a
-  snapshot is not finished.
-- Cartesian families may reuse `Line2DRenderInput`. Raster/grid and 3D content
-  need their own render model; they share `PanelShell` and the resource
-  lifecycle, not a forced Cartesian abstraction.
-- Budget: expect roughly two thousand lines of Rust for a genuinely new
-  reducer, transport, endpoint, and snapshot path. The presentation layers are
-  cheap; the data layers are not.
+Start with one concrete use case and an observable acceptance criterion. Trace
+it through the owners above before choosing new interfaces. Use the
+[ADR template](adr/template.md) for a durable boundary, compatibility,
+reduction, or resource-policy decision; ordinary local changes need only a
+short implementation plan.
 
-## Shared primitives
+### Endpoint or data-plane capability
 
-Before writing a helper, check this table.
+1. Classify it as a presentation read or an optional live operation.
+2. Define types and defaults in the appropriate schema; regenerate outputs.
+3. Put data semantics in core and HTTP validation/framing in the matching
+   `api/*` module; register the route in server `lib.rs`.
+4. Presentation reads used by captured plots need `HttpPlane` and `BakedPlane`
+   semantics. Define what unavailable or uncaptured data means offline.
+5. Ingest, native save, restore, preferences, and native export use nullable
+   ports. `BakedPlane` intentionally exposes these as `null`; do not add fake
+   implementations or host detection to satisfy a blanket parity rule.
+6. Test the owning behavior and the boundary that can disagree: codecs,
+   live/baked reads, failure publication, or persistence compatibility.
 
-| Need                                     | Use                                                |
-| ---------------------------------------- | -------------------------------------------------- |
-| Resolve a required DOM node              | `ui/dom.ts` → `required`, `requiredSlot`           |
-| Pointer-capture drag                     | `ui/dom.ts` → `bindPointerDrag`                    |
-| Panel chrome, drag/drop, status states   | `ui/panel-shell.ts`                                |
-| Legend rail geometry and docking         | `ui/legend-rail.ts` via `LegendRailHost`           |
-| Statistic cells, spans, CSV, download    | `ui/legend-stats.ts`                               |
-| Windowed response retention              | `app/tile-window-cache.ts` → `WindowResponseCache` |
-| Density and memory planning              | `app/presentation-budget.ts`                       |
-| Plot picking, cursors, stats             | `app/plot-capabilities.ts` → `PreparedPlot`        |
-| Family dispatch                          | `app/line2d-family.ts`                             |
-| Render-model construction, strokes, axes | `render/line2d-adapter.ts`                         |
-| Interleaved feed caching                 | `render/line2d-adapter.ts` → `createFeedCache`     |
-| Range math, clamping                     | `app/plot-math.ts`                                 |
-| Series color slot                        | `render/plot-theme.ts` → `hueIndex`                |
+### Another plot or data family
 
-## Module size budget
+Plot content, reduction family, and renderer family are different choices.
+Time envelopes and paired explicit-X data already share Line2D rendering.
+A future compute producer may also feed that model without being a new
+renderer. A raster or 3D scene must not be forced into Cartesian line types.
 
-Soft budget **600 lines** per module; **1,000 lines triggers a split** before new
-behavior is added. Rust files are measured on implementation lines, excluding
-the inline `#[cfg(test)]` module.
+Before implementation, decide the coordinate/interaction semantics, reduction
+invariant, typed payload, durable state, snapshot range/fidelity, and resource
+cost. Reuse an existing contract only if those meanings match. Otherwise add
+the typed family endpoint and payload per ADR 0052. Do not use a universal
+untyped `queryPlotData` response.
 
-Current state, measured after the first ADR 0053 burn-down pass:
+`PreparedPlot` currently describes Cartesian line interactions; it is not a
+promise that every future plot implements that interface. `WindowResponseCache`
+is private to its module and shared by the two current cache implementations;
+reuse requires matching coverage, quality, and retention semantics, not merely
+adding a subclass. `PanelShell` is a reuse candidate for chrome. Legend geometry
+is reusable where its interaction contract fits, not guaranteed unchanged for
+every plot.
 
-| File                                  | Lines | Impl | Status                                 |
-| ------------------------------------- | ----- | ---- | -------------------------------------- |
-| `frontend/src/ui/app-shell.ts`        | 3,547 | —    | mount staged; command registry remains |
-| `frontend/src/ui/panel.ts`            | 3,452 | —    | legend and menu extractions remain     |
-| `frontend/src/styles/app.css`         | 3,244 | —    | split remains                          |
-| `core/scope-core/src/snapshot.rs`     | 1,406 | 672  | selector engine extracted              |
-| `frontend/src/app/workspace.ts`       | 1,266 | —    | cohesive data model; do not split      |
-| `core/scope-core/src/cache.rs`        | 1,180 | 745  | byte-layout codec extracted            |
-| `core/scope-core/src/ingest/batch.rs` | 1,127 | 23   | test-only; not a violation             |
-| `server/scope-server/src/api/*.rs`    | ≤521  | —    | split by endpoint concern              |
-| `core/scope-core/src/pyramid/*.rs`    | ≤568  | —    | split into build/query/synthesis       |
-| `core/scope-core/src/expr/*.rs`       | ≤471  | —    | split into lex/parse/eval              |
+Add a panel-content session union only with the second concrete content type.
+Build one vertical slice through live data, presentation, persistence, and bake
+before extracting a generalized family registry. Estimate cost from required
+algorithms and validation; historical lines of code are not an engineering
+budget.
 
-The split plan and the duplication inventory are recorded in
-[ADR 0053](adr/0053-module-boundaries-and-shared-primitives.md).
+## Shared primitives and extraction
 
-## Test map
+Before adding a helper, inspect these owners and their tests.
 
-| Layer                                                  | Tool       | Lives in                      |
-| ------------------------------------------------------ | ---------- | ----------------------------- |
-| ingest, time, pyramids, protocol, session, expressions | Rust tests | inline `#[cfg(test)]`         |
-| application, renderer, snapshot behavior               | Vitest     | `*.test.ts` beside the module |
-| desktop interaction, layout, export boundaries         | Playwright | `frontend/tests/e2e`          |
+| Need                                        | Existing implementation                                                          |
+| ------------------------------------------- | -------------------------------------------------------------------------------- |
+| Required DOM slots, pointer capture         | `ui/dom.ts`: `required`, `requiredSlot`, `bindPointerDrag`                       |
+| Panel chrome and status                     | `ui/panel-shell.ts`                                                              |
+| Legend geometry and docking                 | `ui/legend-rail.ts` via `LegendRailHost`                                         |
+| Statistic cells, spans, CSV/download        | `ui/legend-stats.ts`                                                             |
+| Series property inspector                   | `ui/series-inspector.ts`; value inputs and close/mute/patch callbacks            |
+| Panel configuration menu lifecycle          | `ui/panel-menu.ts`; keyboard navigation, dismissal and teardown                  |
+| Shell command metadata                      | `app/shell-commands.ts`; composition supplies live actions and capability checks |
+| Window retention                            | `app/tile-window-cache.ts`                                                       |
+| Density and memory estimates                | `app/presentation-budget.ts`                                                     |
+| Picking, cursor, annotation, stats          | `app/plot-capabilities.ts`                                                       |
+| Current Line2D preparation/adapter dispatch | `app/line2d-family.ts`                                                           |
+| Render axes, strokes, immutable feed cache  | `render/line2d-adapter.ts`                                                       |
+| Range math and clamping                     | `app/plot-math.ts`                                                               |
+| Series color slot                           | `render/plot-theme.ts`: `hueIndex`                                               |
+| Sorted numeric search                       | `app/binary-search.ts`                                                           |
+| Padded slice window                         | `scope-core::time_window`                                                        |
+| Paged column window                         | `scope-server::host::windowed_slice` (fallible; not the slice helper)            |
+| Snapshot selectors                          | `scope-core::selector`; recipe globs have different path semantics               |
 
-Behavior changes need behavior tests. When code moves between modules, its tests
-move with it — a refactor that drops coverage is not a refactor.
+Extract around an invariant, independently testable behavior, or resource
+lifetime. A single-consumer module can be useful for any of those reasons.
+Moving methods into another file while passing the entire owner or importing
+all dependencies through the parent leaves the coupling intact. Prefer direct
+imports from defining modules; keep parent facades for deliberate public APIs.
 
-Run the narrowest affected suite first, then a gate proportional to the change.
-`./scripts/ci.sh all` is for cross-layer work. See AGENTS.md for the script API.
+Use existing UI patterns: fixed markup with required slots, imperative rows,
+narrow host ports, controllers, and callbacks for upward intent. A new pattern
+needs a concrete reason, not a blanket prohibition or a speculative framework.
+Move behavior tests with their owner; integration tests may stay at the
+composition root. Shared fixtures should expose meaningful variations and keep
+each test's behavioral inputs visible.
+
+ADR 0053 sets a soft 600-line budget and requires a split before adding behavior
+to modules above 1,000 implementation lines (excluding Rust inline tests).
+This is a review trigger, not proof of cohesion. `workspace.ts` is not exempt.
+The current partial extractions leave `panel.ts` and `app-shell.ts` above the
+limit: they remain restricted. Further work must either extract the behavior
+into a cohesive owner or explicitly amend the ADR with a bounded exception.
+Documentation/bug fixes do not require an unrelated repository-wide split.
+
+## Validation and handoff
+
+| Changed behavior                            | First evidence                                                                    |
+| ------------------------------------------- | --------------------------------------------------------------------------------- |
+| Ingest, storage, reduction, expressions     | `./scripts/test.sh core [filter]`                                                 |
+| HTTP, host state, native persistence        | `./scripts/test.sh server [filter]`                                               |
+| Application, adapters, publication          | `./scripts/test.sh unit [file]`                                                   |
+| Schema/codegen or snapshot contract         | `./scripts/test.sh frontend` plus affected Rust tests                             |
+| Desktop interaction, layout, offline export | Playwright via `./scripts/test.sh e2e`, after implementation                      |
+| Resource or reduction policy                | Relevant `./scripts/test.sh bench` mode, with corpus and measured bounds reported |
+
+After narrow tests, use a proportional gate; cross-layer implementation uses
+`./scripts/ci.sh all`. Documentation-only work needs formatting, reference
+checks, and `./scripts/version.sh check`, not GUI or reducer tests. Report
+actual commands and limitations. `version.sh check` proves version agreement,
+not whether a release is semantically breaking.
+
+The roadmap owns pending work and completion criteria. When a seam moves,
+update this guide and that entry. ADRs retain the decision and its tradeoffs;
+do not keep separate rolling line-count inventories in all three places.

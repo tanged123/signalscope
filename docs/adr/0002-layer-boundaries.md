@@ -3,6 +3,14 @@
 - Status: Accepted
 - Date: 2026-07-23
 
+Current guidance: [ADR 0038](0038-browser-only-host.md) and
+[ADR 0049](0049-electron-distribution-shell.md) replace the Tauri host below.
+[ADR 0053](0053-module-boundaries-and-shared-primitives.md) and
+[ADR 0054](0054-evidence-backed-architecture-guidance.md) amend module guidance;
+the current dependency/ownership map is in [architecture.md](../architecture.md).
+In particular, the historical claim that crate extraction is mechanical is
+replaced by an explicit API/visibility review.
+
 ## Decision
 
 The Cargo workspace separates `scope-core` (modules `store`, `ingest`, `pyramid`, `compute`, `session`) and `scope-protocol`, the only shape shared with the frontend. The Tauri shell performs window, dialog, and IPC wiring only.

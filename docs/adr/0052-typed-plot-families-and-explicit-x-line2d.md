@@ -4,6 +4,11 @@
 - Date: 2026-09-03
 - Amends: ADRs 0043 and 0045
 
+Guidance clarified by [ADR 0054](0054-evidence-backed-architecture-guidance.md):
+current capability/cache interfaces are reuse candidates, not mandatory
+contracts for every future family. The historical implementation line count
+below is context, not a required cost or scope estimate.
+
 ## Context
 
 ADR 0043 deliberately removed the mode stack and left SignalScope with one

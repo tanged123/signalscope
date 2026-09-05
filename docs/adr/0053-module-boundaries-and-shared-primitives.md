@@ -4,6 +4,12 @@
 - Date: 2026-09-04
 - Amends: ADR 0002
 
+Amended by [ADR 0054](0054-evidence-backed-architecture-guidance.md): partial
+splits do not clear the size restriction; a single-consumer extraction can own
+a useful invariant or lifecycle. The inventory below records this decision's
+original survey and first pass, not rolling implementation status. Pending work
+and completion criteria live in [the roadmap](../implementation-roadmap.md).
+
 ## Context
 
 ADR 0052 established typed plot-family seams and ADR 0002 established layer
@@ -39,8 +45,8 @@ methods form clusters that share no state with each other.
 
 ### Named seams
 
-The following splits are accepted. They are staged, not yet performed, and each
-is independently landable. Line counts are measured on this branch.
+The following splits were accepted as independently landable work. Some have
+since landed as noted below. Line counts are historical survey measurements.
 
 ### Implementation status
 
@@ -159,19 +165,19 @@ largely because of this.
 No split changes public behavior, schema, or the protocol. If a split appears to
 require a behavior change, that is a separate ADR.
 
-Module count is not a goal. Extracting a helper used once, or splitting a
-cohesive data model to hit a line target, is a worse outcome than the large
-file. The budget exists to force the question, not to answer it.
+Module count is not a goal. Extracting a helper solely to hit a line target
+does not establish a boundary. A single-consumer module is justified when it
+owns a coherent behavior, invariant, or resource lifetime (ADR 0054).
 
 ## Consequences
 
-- New behavior cannot be added to a module over 1,000 lines until it is split.
-  Existing modules over the limit are recorded in
-  [architecture.md](../architecture.md) and burn down individually.
+- New behavior cannot be added to a module over 1,000 lines until the relevant
+  behavior is extracted into a cohesive owner. The roadmap records pending
+  seams. A bounded exception requires an explicit amendment per ADR 0054.
 - `panel.ts` lands near 2,100 lines and `app-shell.ts` near 1,800 after the
-  named seams. Both remain above the soft budget; further splitting waits for a
-  second concrete panel type to show where the boundary belongs, consistent with
-  ADR 0052's rule that the second implementation drives the abstraction.
+  named seams. Both remain above the hard review trigger and remain restricted.
+  Do not wait for a second panel to address existing ownership concentrations;
+  only generalization across plot families waits for that consumer.
 - Binary search and slice-backed padded-window bounds each have one shared
   implementation. The selector comparison makes the remaining glob semantic
   inconsistency explicit instead of silently choosing one behavior.

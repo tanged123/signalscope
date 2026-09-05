@@ -63,15 +63,44 @@ Prioritize measured, user-visible work in this order:
    interaction, and snapshot payload before implementation. Do not revive the
    withdrawn mode stack or its historical plans as an implementation shortcut.
    Use the generated tagged-union schema construct for variant-specific state.
-   Budget native reducer, transport, API, and snapshot work per family; the
-   explicit-X Line2D path required roughly two thousand Rust lines.
+   Estimate reducer, transport, API, and snapshot work from required semantics
+   and validation, not historical source-line counts.
 6. Burn down the module-size violations recorded in
    [ADR 0053](adr/0053-module-boundaries-and-shared-primitives.md), starting
-   with the legend console in `panel.ts` and `registerCommands`/`mount` in
-   `app-shell.ts`. Land each named seam independently and move its tests with
-   it.
+   with the legend console in `panel.ts` and `registerCommands` in
+   `app-shell.ts`. Mount has already been staged. Land each cohesive seam
+   independently and preserve its behavior tests; partial extractions do not
+   exempt the remaining oversized modules (ADR 0054).
 7. Consider remote/live sources only after the local `DataPlane` contract and
    snapshot parity remain stable.
+
+## Architecture follow-through
+
+Implemented in this PR, per [ADR 0055](adr/0055-core-policy-and-query-lifetimes.md):
+
+- Tested ESLint import boundaries and a focused architecture test wrapper.
+- Core-owned derived dependency/bundle policy, with HTTP conversion at the API.
+- Off-lock sample/tile queries and reader-owned temporary spill lifetimes.
+- Abortable frontend queries, scheduled-work cleanup and presentation teardown.
+- Shared Rust/TypeScript runtime-parser cases and correlated X-axis validation.
+- Extracted command metadata, series inspector and keyboard-accessible panel menus.
+
+Remaining work:
+
+- Measure complete explicit-X request cost: unequal timebase IDs, wide windows,
+  gaps, concurrent panels and obsolete work. Report peak in-flight memory and
+  latency/lock contention before selecting server admission or cache changes.
+- Extract the remaining legend console and shell action composition using
+  narrow inputs and behavior tests. Both parent modules remain above the size
+  limit; partial extraction does not exempt them.
+- Split interleaved styles only with preserved cascade order and corresponding
+  layout tests. Continue consolidating fixtures when their consumer needs
+  justify it; do not add a universal fixture framework.
+
+The selector, cache-codec, API-handler, expression, pyramid and staged-mount
+extractions already landed; do not repeat them. `workspace.ts` has no permanent
+size-policy exemption. Smaller snapshot/cache seams should be extracted when
+their invariant or consumer needs justify the move.
 
 Use the smallest relevant script for local iteration, then `./scripts/ci.sh all`
 for cross-layer changes. Add a new ADR for a protocol, session, or architectural
