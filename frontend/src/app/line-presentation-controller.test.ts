@@ -292,7 +292,7 @@ describe("LinePresentationController", () => {
       },
       ys: [
         {
-          signalId: `y-${id}`,
+          signalId: String(Number(id) + 1),
           signalPath: `y-${id}`,
           unit: null,
           values: new Float64Array([3, 4]),
@@ -301,12 +301,12 @@ describe("LinePresentationController", () => {
     });
     const second = deferred<Line2DResponse>();
     probe.queryLine2D
-      .mockResolvedValueOnce(line("one"))
+      .mockResolvedValueOnce(line("1"))
       .mockReturnValueOnce(second.promise);
     const refresh = probe.controller.refresh();
     await vi.waitFor(() => expect(probe.queryLine2D).toHaveBeenCalledTimes(2));
     expect([...probe.controller.responses()]).toEqual([]);
-    second.resolve(line("two"));
+    second.resolve(line("3"));
     await refresh;
     const data = [...probe.controller.responses()][0];
     expect(data?.kind).toBe("signal");

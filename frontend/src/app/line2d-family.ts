@@ -1,3 +1,5 @@
+import { resolveColorScale } from "./color-scale";
+import type { ColorAxis } from "../generated/session";
 import type { AxisStyle } from "../generated/session";
 import { line2DFromSignalX } from "../render/signal-x-adapter";
 import { line2DFromTimeTiles } from "../render/time-adapter";
@@ -23,6 +25,7 @@ interface FamilyContext {
   axisStyle: AxisStyle;
   xLabel: string | null;
   yLabel: string | null;
+  colorAxis?: ColorAxis | null;
 }
 
 interface PreparedLine2DFamily {
@@ -94,6 +97,7 @@ function signalXFamily(
       return {
         plotted: shown,
         plot: prepareLine2DPlot({
+          linkedTime: data.response.timeX,
           anchor: data.response.anchor,
           x: data.response.x.values,
           series: shown.map((column) => ({
@@ -112,6 +116,20 @@ function signalXFamily(
             { ...data.response, ys: shown },
             {
               window: context.window,
+              colorScale:
+                context.colorAxis == null
+                  ? undefined
+                  : resolveColorScale(
+                      { ...data.response, ys: shown },
+                      context.colorAxis,
+                      context.window,
+                      signalAxisLabel(
+                        shown.flatMap((column) =>
+                          column.color === undefined ? [] : [column.color],
+                        ),
+                        "C signals",
+                      ),
+                    ),
               xRange: ranges.x,
               yRange: [ranges.y.min, ranges.y.max],
               xLabel:

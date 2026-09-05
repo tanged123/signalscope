@@ -307,18 +307,25 @@ const line2DResponseAdapter: WindowResponseAdapter<Line2DResponse> = {
         visibleCount: (_response: Line2DResponse, visible: WindowBounds) =>
           countVisibleAnchors(anchor, visible),
       })),
-      resourceUnits: [
-        ...new Set([
-          response.anchor,
-          response.x.values,
-          ...response.ys.flatMap((column) => [
-            column.values,
-            ...(column.coordinates === undefined
-              ? []
-              : [column.coordinates.anchor, column.coordinates.x.values]),
+      resourceUnits:
+        [
+          ...new Set([
+            response.anchor,
+            response.x.values,
+            ...response.ys.flatMap((column) => [
+              column.values,
+              ...(column.color === undefined ? [] : [column.color.values]),
+              ...(column.coordinates === undefined
+                ? []
+                : [column.coordinates.anchor, column.coordinates.x.values]),
+            ]),
           ]),
-        ]),
-      ].reduce((count, values) => count + values.length, 0),
+        ].reduce((count, values) => count + values.length, 0) +
+        response.ys.reduce(
+          (count, column) =>
+            count + (column.color === undefined ? 0 : column.values.length * 4),
+          0,
+        ),
     };
   },
 };

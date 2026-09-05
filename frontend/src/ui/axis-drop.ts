@@ -1,5 +1,9 @@
 import type { Catalog } from "../app/catalog";
-import type { NamedSet, SeriesRef, XAxisSource } from "../generated/session";
+import type {
+  NamedSet,
+  SeriesRef,
+  SampleAxisSource,
+} from "../generated/session";
 import { parseSelector, seriesMatches } from "../app/selector";
 import {
   SIGNAL_DRAG_TYPE,
@@ -14,7 +18,8 @@ export function bindAxisDrop(
   panel: HTMLElement,
   catalog: () => Catalog,
   sets: () => readonly NamedSet[],
-  select: (axis: XAxisSource) => void,
+  select: (axis: SampleAxisSource) => void,
+  selectColor?: (axis: SampleAxisSource) => void,
 ): () => void {
   const abort = new AbortController();
   const options = { capture: true, signal: abort.signal };
@@ -58,8 +63,10 @@ export function bindAxisDrop(
       const isX =
         target?.closest(".xy-drop-strip, .panel-x-axis") !== null &&
         target !== null;
+      const isColor = target?.closest(".panel-c-axis") != null;
       reset();
-      if (!isX) return;
+      if (!isX && !isColor) return;
+      const choose = isColor ? selectColor : select;
       event.preventDefault();
       event.stopPropagation();
       const current = catalog();
@@ -95,8 +102,8 @@ export function bindAxisDrop(
         ...new Map(refs.map((ref) => [current.refKey(ref), ref])).values(),
       ];
       if (refs.length === 1)
-        select({ kind: "signal", ref: refs[0] as SeriesRef });
-      else if (refs.length > 1) select({ kind: "bundle", refs });
+        choose?.({ kind: "signal", ref: refs[0] as SeriesRef });
+      else if (refs.length > 1) choose?.({ kind: "bundle", refs });
     },
     options,
   );

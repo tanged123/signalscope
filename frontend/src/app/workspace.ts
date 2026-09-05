@@ -20,12 +20,12 @@ import type {
   NamedSet,
   SourceRecord,
   WorkspaceTab,
-  XAxisSource,
+  SampleAxisSource,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
-import { setXAxis } from "./line-bindings";
+import { setXAxis, setColorAxis } from "./line-bindings";
 
 const MIN_FRACTION = 0.1;
 
@@ -503,10 +503,21 @@ export class WorkspaceModel {
     this.touch(true);
   }
 
-  setPanelXAxis(panelId: string, xAxis: XAxisSource): void {
+  setPanelXAxis(panelId: string, xAxis: SampleAxisSource): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
     if (setXAxis(panel, xAxis)) this.touch(true);
+  }
+
+  setPanelColorAxis(
+    panelId: string,
+    axis: PanelState["color_axis"],
+  ): ReturnType<typeof setColorAxis> {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return false;
+    const change = setColorAxis(panel, axis);
+    if (change !== false) this.touch(change === "binding");
+    return change;
   }
 
   setSeriesOverride(
@@ -1169,6 +1180,7 @@ export class WorkspaceModel {
       legend_dock: null,
       legend_hint_dismissed: false,
       x_axis: { kind: "time" },
+      color_axis: null,
       y_range: null,
       x_range: null,
       x_label: null,

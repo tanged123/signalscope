@@ -12,11 +12,13 @@ export interface Line2DColumn {
 }
 
 export interface Line2DResponse {
+  readonly timeX?: boolean | undefined;
   readonly requestId: string;
   readonly level: number;
   readonly anchor: Float64Array;
   readonly x: Line2DColumn;
   readonly ys: readonly (Line2DColumn & {
+    readonly color?: Line2DColumn | undefined;
     readonly coordinates?: {
       anchor: Float64Array;
       x: Line2DColumn;

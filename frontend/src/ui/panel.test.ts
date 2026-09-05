@@ -161,6 +161,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     legend_dock: null,
     legend_hint_dismissed: false,
     x_axis: { kind: "time" },
+    color_axis: null,
     bindings: [],
     overrides: [],
     focus: [],

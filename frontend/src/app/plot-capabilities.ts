@@ -143,6 +143,7 @@ interface Line2DPlotSeries {
  * rows are never joined by their plotted X values.
  */
 export interface Line2DPlotInput {
+  linkedTime?: boolean | undefined;
   anchor: Float64Array;
   x: Float64Array;
   series: readonly Line2DPlotSeries[];
@@ -325,7 +326,7 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       : resolved(annotation, row.x, row.y, series.colorIndex);
   };
   return {
-    interaction: LINE2D_POLICY,
+    interaction: input.linkedTime === true ? TIME_POLICY : LINE2D_POLICY,
     hitAdapter: {
       seriesAt(layout, x, y, threshold) {
         let best: SeriesHit | null = null;
@@ -385,6 +386,32 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       };
     },
     cursorAt(layout, point) {
+      if (input.linkedTime === true) {
+        const x = invertX(layout, point.x);
+        const rows = visibleSeries().flatMap((series) => {
+          let best: XYPoint | null = null;
+          for (let index = 0; index < series.values.length; index += 1) {
+            const row = rowFor(series, index);
+            if (
+              row !== null &&
+              (best === null || Math.abs(row.x - x) < Math.abs(best.x - x))
+            )
+              best = row;
+          }
+          return best === null
+            ? []
+            : [
+                reading(
+                  series.path,
+                  best.y,
+                  series.unit,
+                  series.colorIndex,
+                  series.label ?? series.path,
+                ),
+              ];
+        });
+        return cursor(x, `t = ${formatValue(x)} s`, rows, "time");
+      }
       let nearestX: number | null = null;
       let nearestDistance = Number.POSITIVE_INFINITY;
       let nearestIndex = -1;

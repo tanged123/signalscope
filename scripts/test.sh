@@ -12,13 +12,14 @@ fi
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|server|desktop|unit|architecture|frontend|e2e|bench|full]
+Usage: ./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|architecture|frontend|e2e|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
   server    Test the browser host server, optionally filtered.
   desktop   Test the Electron shell; pass package to smoke-test a built package.
   unit      Run frontend unit tests, optionally filtered.
+  chartgpu  Typecheck and test the ChartGPU fork.
   architecture  Check frontend import-boundary rules against allowed/forbidden examples.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
@@ -174,6 +175,10 @@ desktop)
 unit)
   shift || true
   test_unit "$@"
+  ;;
+chartgpu)
+  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
+  test_unit vendor/chartgpu/src
   ;;
 architecture)
   node --test frontend/scripts/check-architecture.mjs

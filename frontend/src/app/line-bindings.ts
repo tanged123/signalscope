@@ -1,7 +1,12 @@
 import type { Catalog } from "./catalog";
-import type { PanelState, SeriesRef, XAxisSource } from "../generated/session";
+import type {
+  ColorAxis,
+  PanelState,
+  SeriesRef,
+  SampleAxisSource,
+} from "../generated/session";
 
-export function axisRefs(axis: XAxisSource): readonly SeriesRef[] {
+export function axisRefs(axis: SampleAxisSource): readonly SeriesRef[] {
   return axis.kind === "time"
     ? []
     : axis.kind === "signal"
@@ -9,7 +14,7 @@ export function axisRefs(axis: XAxisSource): readonly SeriesRef[] {
       : axis.refs;
 }
 
-export function setXAxis(panel: PanelState, axis: XAxisSource): boolean {
+export function setXAxis(panel: PanelState, axis: SampleAxisSource): boolean {
   if (JSON.stringify(panel.x_axis) === JSON.stringify(axis)) return false;
   panel.x_axis = structuredClone(axis);
   panel.x_range = null;
@@ -21,17 +26,42 @@ export function setXAxis(panel: PanelState, axis: XAxisSource): boolean {
   return true;
 }
 
+export function setColorAxis(
+  panel: PanelState,
+  axis: ColorAxis | null,
+): "binding" | "scale" | false {
+  if (JSON.stringify(panel.color_axis) === JSON.stringify(axis)) return false;
+  if (
+    axis?.range != null &&
+    (!axis.range.every(Number.isFinite) || axis.range[0] >= axis.range[1])
+  )
+    throw new Error("Color limits must be finite and increasing.");
+  const bindingChanged =
+    JSON.stringify(panel.color_axis?.source) !== JSON.stringify(axis?.source);
+  panel.color_axis = structuredClone(axis);
+  return bindingChanged ? "binding" : "scale";
+}
+
+export interface LineGroup {
+  xId: string;
+  ids: string[];
+  colorIds?: Record<string, string>;
+  timeX?: boolean;
+  timeColor?: boolean;
+}
+
 export interface LineBindings {
   ids: string[];
   xId: string | null;
-  groups?: { xId: string; ids: string[] }[];
+  groups?: LineGroup[];
   missing: string[];
 }
 
 export function resolveLineBindings(
-  axis: XAxisSource,
+  axis: SampleAxisSource,
   ys: readonly { ref: SeriesRef; path: string }[],
   catalog: Catalog,
+  color: ColorAxis | null = null,
 ): LineBindings {
   const result: LineBindings = { ids: [], xId: null, missing: [] };
   const groups = new Map<string, string[]>();
@@ -72,6 +102,60 @@ export function resolveLineBindings(
       result.missing.length > 0
         ? []
         : [...groups].map(([xId, ids]) => ({ xId, ids }));
+    result.xId = result.groups[0]?.xId ?? null;
+  }
+  if (color !== null) {
+    const colorRefs = axisRefs(color.source);
+    const units = new Set<string | null>();
+    const coloredGroups = new Map<string, LineGroup>();
+    const baseGroups =
+      axis.kind === "time"
+        ? result.ids.map((id) => ({ xId: id, ids: [id] }))
+        : (result.groups ?? []);
+    for (const group of baseGroups) {
+      const colorIds: Record<string, string> = {};
+      const next: LineGroup = {
+        ...group,
+        ids: [...group.ids],
+        colorIds,
+        timeX: axis.kind === "time",
+        timeColor: color.source.kind === "time",
+      };
+      for (const id of group.ids) {
+        const y = ys.find(
+          (entry) => catalog.get(entry.ref)?.summary.signal_id === id,
+        );
+        if (y === undefined) continue;
+        if (color.source.kind === "time") {
+          units.add("s");
+          continue;
+        }
+        const candidates =
+          color.source.kind === "signal"
+            ? colorRefs
+            : colorRefs.filter((ref) => ref.source_key === y.ref.source_key);
+        if (candidates.length !== 1) {
+          result.missing.push(
+            `${y.path}: ${candidates.length === 0 ? "no" : "ambiguous"} C member for source ${y.ref.source_key}`,
+          );
+          continue;
+        }
+        const c = catalog.get(candidates[0] as SeriesRef);
+        if (c === undefined) {
+          result.missing.push(`${y.path}: C signal unavailable`);
+          continue;
+        }
+        units.add(c.summary.unit);
+        colorIds[id] = c.summary.signal_id;
+      }
+      coloredGroups.set(group.xId, next);
+    }
+    if (units.size > 1)
+      result.missing.push(
+        "C signals must use the same unit; convert units with a derived signal.",
+      );
+    result.groups =
+      result.missing.length > 0 ? [] : [...coloredGroups.values()];
     result.xId = result.groups[0]?.xId ?? null;
   }
   return result;

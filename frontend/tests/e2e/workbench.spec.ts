@@ -339,6 +339,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
         legend_dock: null,
         legend_hint_dismissed: false,
         x_axis: { kind: "time" },
+        color_axis: null,
         y_range: null,
         x_range: null,
         x_label: null,

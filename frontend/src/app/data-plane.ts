@@ -482,11 +482,13 @@ export class BakedPlane implements DataPlane {
   ): Promise<Line2DResponse> {
     return Promise.resolve().then(() => {
       signal?.throwIfAborted();
-      const line = (this.payload.line2d ?? []).find(
-        (candidate) =>
-          candidate.x_signal_id === request.x_signal_id &&
-          sameSignalSet(candidate.y_signal_ids, request.y_signal_ids),
-      );
+      const line = (this.payload.line2d ?? [])
+        .filter(
+          (candidate) =>
+            candidate.x_signal_id === request.x_signal_id &&
+            containsSignalSet(candidate.y_signal_ids, request.y_signal_ids),
+        )
+        .sort((a, b) => a.y_signal_ids.length - b.y_signal_ids.length)[0];
       if (line === undefined) {
         throw new Error(
           `no baked Line2D data for X ${request.x_signal_id} and Y ${request.y_signal_ids.join(",")}`,
@@ -647,12 +649,11 @@ export class BakedPlane implements DataPlane {
   }
 }
 
-function sameSignalSet(
+function containsSignalSet(
   left: readonly string[],
   right: readonly string[],
 ): boolean {
   return (
-    left.length === right.length &&
     new Set(left).size === left.length &&
     new Set(right).size === right.length &&
     right.every((id) => left.includes(id))

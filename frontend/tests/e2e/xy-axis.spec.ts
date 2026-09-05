@@ -1,12 +1,16 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { WorkspaceModel } from "../../src/app/workspace";
+import type { Session } from "../../src/generated/session";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   PROTOCOL_VERSION,
   type BatchJob,
   type BatchStatus,
+  type SourceSummary,
 } from "../../src/generated/protocol";
 import type { Envelope } from "../../src/app/envelope";
 import { expect, test } from "./fixtures";
@@ -15,7 +19,59 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
   page,
   request,
 }, testInfo) => {
-  test.setTimeout(90_000);
+  test.setTimeout(180_000);
+  await page.addInitScript({
+    content: `
+    const configure = GPUCanvasContext.prototype.configure;
+    const currentTexture = GPUCanvasContext.prototype.getCurrentTexture;
+    let device, texture, busy = false;
+    GPUCanvasContext.prototype.configure = function(config) {
+      device = config.device;
+      device.addEventListener("uncapturederror", event => {
+        document.documentElement.dataset.gpuError = event.error.message;
+      });
+      return configure.call(this, {...config, usage: (config.usage ?? 16) | 1});
+    };
+    GPUCanvasContext.prototype.getCurrentTexture = function() {
+      texture = currentTexture.call(this);
+      return texture;
+    };
+    const submit = GPUQueue.prototype.submit;
+    GPUQueue.prototype.submit = function(commands) {
+      submit.call(this, commands);
+      if (busy || !texture || !document.querySelector(".colorbar-canvas:not([hidden])")) return;
+      busy = true;
+      const width = texture.width, height = texture.height;
+      const bytesPerRow = Math.ceil(width * 4 / 256) * 256;
+      const buffer = device.createBuffer({size: bytesPerRow * height, usage: 9});
+      const encoder = device.createCommandEncoder();
+      encoder.copyTextureToBuffer({texture}, {buffer, bytesPerRow}, {width, height});
+      submit.call(this, [encoder.finish()]);
+      buffer.mapAsync(1).then(() => {
+        const pixels = new Uint8Array(buffer.getMappedRange());
+        let colored = 0;
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+          const i = y * bytesPerRow + x * 4;
+          if (Math.max(pixels[i], pixels[i+1], pixels[i+2]) - Math.min(pixels[i], pixels[i+1], pixels[i+2]) > 40) colored++;
+        }
+        document.documentElement.dataset.gpuColoredPixels = String(colored);
+        buffer.unmap();
+        buffer.destroy();
+        busy = false;
+      });
+    };
+  `,
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (
+      (message.type() === "error" &&
+        !message.location().url.endsWith("favicon.ico")) ||
+      /validation|shader|pipeline/i.test(message.text())
+    )
+      errors.push(message.text());
+  });
   const directory = mkdtempSync(join(tmpdir(), "signalscope-xy-"));
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const url = "http://127.0.0.1:43119";
@@ -36,7 +92,10 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       .toBe(true);
     const paths = ["one", "two"].map((name, index) => {
       const path = join(directory, `${name}.csv`);
-      writeFileSync(path, `time,x,y\n0,${String(index + 1)},3\n1,8,4\n2,2,6\n`);
+      writeFileSync(
+        path,
+        `time,x,y,temperature\n0,${String(index + 1)},3,0\n1,8,4,50\n2,2,6,100\n`,
+      );
       return path;
     });
     const jobResponse = await request.post(`${url}/api/ingest_batch`, {
@@ -52,9 +111,31 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
         return ((await result.json()) as Envelope<BatchStatus>).payload.state;
       })
       .toBe("done");
+    const sourceResponse = await request.post(`${url}/api/list_sources`);
+    expect(sourceResponse.ok()).toBe(true);
+    const sources = ((await sourceResponse.json()) as Envelope<SourceSummary[]>)
+      .payload;
+    const workspace = new WorkspaceModel();
+    workspace.addPanelRow();
+    workspace.setLinkedWindow(0, 2);
+    for (const source of sources)
+      workspace.addSource({
+        key: source.source_key,
+        path: source.path,
+        prefix: source.prefix,
+        provider_id: null,
+        decode_provenance: null,
+        recipe_id: null,
+        recipe_digest: null,
+      });
+    writeFileSync(
+      join(directory, "session.autosave.json"),
+      JSON.stringify(workspace.snapshot()),
+    );
     await page.goto(url);
     await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
     const panel = page.locator(".panel").first();
+    await expect(panel).toBeVisible();
     await panel.locator(".panel-y-axis").click();
     let search = panel.locator(".axis-picker input");
     await search.fill("y · bundle");
@@ -78,11 +159,109 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       /mismatch|unknown|unavailable/i,
     );
     await panel.screenshot({ path: testInfo.outputPath("xy-bundle.png") });
+    await panel.locator(".panel-c-axis").click();
+    await panel.locator(".axis-picker input").fill("temperature · bundle");
+    await panel.locator(".axis-picker input").press("Enter");
+    await expect(panel.locator(".panel-c-axis")).toContainText(
+      "temperature · 2 runs",
+    );
+    const colorbar = panel.locator(".colorbar-canvas");
+    await expect(colorbar).toBeVisible();
+    await expect(colorbar).toHaveAttribute("aria-label", /0 to 100/);
+    await panel.locator(".panel-color-limits").click();
+    await panel.getByLabel("Minimum", { exact: true }).fill("20");
+    await panel.getByLabel("Maximum", { exact: true }).fill("10");
+    await panel.getByRole("button", { name: "Apply fixed limits" }).click();
+    await expect(panel.getByRole("alert")).toContainText("minimum less");
+    await panel.getByLabel("Maximum", { exact: true }).fill("80");
+    await panel.getByRole("button", { name: "Apply fixed limits" }).click();
+    await expect(colorbar).toHaveAttribute("aria-label", /20 to 80/);
+    await expect(panel.locator('[data-panel-slot="status"]')).not.toContainText(
+      /mismatch|unknown|unavailable|failed/i,
+    );
+    await panel.screenshot({
+      path: testInfo.outputPath("xy-color-bundle.png"),
+    });
+    await page.waitForTimeout(1000);
+    await panel.screenshot({
+      path: testInfo.outputPath("xy-color-settled.png"),
+    });
+    expect(errors).toEqual([]);
+    expect(
+      await page.locator("html").getAttribute("data-gpu-error"),
+    ).toBeNull();
+    await expect
+      .poll(() =>
+        page
+          .locator("html")
+          .getAttribute("data-gpu-colored-pixels")
+          .then(Number),
+      )
+      .toBeGreaterThan(100);
+    const workspacePath = join(directory, "session.autosave.json");
+    await expect
+      .poll(() => {
+        try {
+          return (
+            JSON.parse(
+              readFileSync(pathToFileURL(workspacePath), "utf8"),
+            ) as Session
+          ).tabs[0]?.panels[0]?.color_axis?.range;
+        } catch {
+          return null;
+        }
+      })
+      .toEqual([20, 80]);
+    const snapshotPath = testInfo.outputPath("xy-color.html");
+    await promisify(execFile)(
+      join(root, "scripts/export.sh"),
+      [
+        "--no-build",
+        ...paths.flatMap((path) => ["--data", path]),
+        "--workspace",
+        workspacePath,
+        "--range",
+        "all",
+        "--fidelity",
+        "full",
+        "--out",
+        snapshotPath,
+      ],
+      { cwd: root },
+    );
+
     await panel.locator(".panel-x-axis").click();
     await panel.locator(".axis-picker input").fill("two/time");
     await panel.locator(".axis-picker input").press("Enter");
     await expect(panel.locator(".panel-x-axis")).toContainText("two/time");
     await expect(panel.locator(".panel-y-axis")).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    const offlineRequests: string[] = [];
+    page.on("request", (request) => {
+      if (/^https?:/.test(request.url())) offlineRequests.push(request.url());
+    });
+    await page.goto(pathToFileURL(snapshotPath).href);
+    await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+    await expect(page.locator(".colorbar-canvas")).toBeVisible();
+    await expect(page.locator(".colorbar-canvas")).toHaveAttribute(
+      "aria-label",
+      /20 to 80/,
+    );
+    await expect(page.locator('[data-panel-slot="status"]')).not.toContainText(
+      /mismatch|unknown|unavailable|failed/i,
+    );
+    expect(offlineRequests).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("xy-color-offline.png"),
+    });
+    await page.locator(".panel-c-axis").click();
+    await page.locator(".axis-picker input").fill("none");
+    await page.locator(".axis-picker input").press("Enter");
+    await expect(page.locator(".colorbar-canvas")).toBeHidden();
+    await expect(page.locator('[data-panel-slot="status"]')).not.toContainText(
+      /mismatch|unknown|unavailable|failed/i,
+    );
+    expect(errors).toEqual([]);
   } finally {
     if (server.exitCode === null) {
       const exited = new Promise<void>((resolve) => {

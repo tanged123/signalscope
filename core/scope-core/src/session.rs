@@ -82,19 +82,38 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     // with deny_unknown_fields. Preserve the time/signal correlation here.
     for tab in current["tabs"].as_array().into_iter().flatten() {
         for panel in tab["panels"].as_array().into_iter().flatten() {
-            let axis = &panel["x_axis"];
-            if axis["kind"] == "time" && (axis.get("ref").is_some() || axis.get("refs").is_some()) {
-                return Err(SessionError::Json(serde::de::Error::custom(
-                    "time X axis cannot carry a signal reference",
-                )));
+            for axis in [&panel["x_axis"], &panel["color_axis"]["source"]] {
+                if axis["kind"] == "time"
+                    && (axis.get("ref").is_some() || axis.get("refs").is_some())
+                {
+                    return Err(SessionError::Json(serde::de::Error::custom(
+                        "time X axis cannot carry a signal reference",
+                    )));
+                }
             }
         }
     }
     let session: Session = serde_json::from_value(current)?;
     for panel in session.tabs.iter().flat_map(|tab| &tab.panels) {
-        if matches!(&panel.x_axis, XAxisSource::Bundle { refs } if refs.is_empty()) {
+        if matches!(&panel.x_axis, SampleAxisSource::Bundle { refs } if refs.is_empty()) {
             return Err(SessionError::Json(serde::de::Error::custom(
                 "X bundle cannot be empty",
+            )));
+        }
+    }
+    for axis in session
+        .tabs
+        .iter()
+        .flat_map(|tab| &tab.panels)
+        .filter_map(|panel| panel.color_axis.as_ref())
+    {
+        if matches!(&axis.source, SampleAxisSource::Bundle { refs } if refs.is_empty())
+            || axis
+                .range
+                .is_some_and(|[min, max]| !min.is_finite() || !max.is_finite() || min >= max)
+        {
+            return Err(SessionError::Json(serde::de::Error::custom(
+                "invalid color axis",
             )));
         }
     }
@@ -112,9 +131,23 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (27, migrate_v27),
     (28, migrate_v28),
     (29, migrate_v29),
+    (30, migrate_v30),
 ];
 
 fn migrate_v29(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = 30.into();
+    value
+}
+
+fn migrate_v30(mut value: serde_json::Value) -> serde_json::Value {
+    for panel in value["tabs"]
+        .as_array_mut()
+        .into_iter()
+        .flatten()
+        .flat_map(|tab| tab["panels"].as_array_mut().into_iter().flatten())
+    {
+        panel["color_axis"] = serde_json::Value::Null;
+    }
     value["schema_version"] = SESSION_SCHEMA_VERSION.into();
     value
 }
@@ -563,7 +596,8 @@ mod tests {
                     legend_anchor: None,
                     legend_dock: None,
                     legend_hint_dismissed: false,
-                    x_axis: XAxisSource::Time,
+                    x_axis: SampleAxisSource::Time,
+                    color_axis: None,
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -796,7 +830,7 @@ mod tests {
         assert!((panel.annotations[0].offset[1] + 10.0).abs() < f64::EPSILON);
         assert!((panel.annotations[0].pinned_value - 3.25).abs() < f64::EPSILON);
         assert_eq!(panel.legend_dock, None);
-        assert_eq!(panel.x_axis, XAxisSource::Time);
+        assert_eq!(panel.x_axis, SampleAxisSource::Time);
 
         let mut v26 = serde_json::to_value(restored).expect("serializes migrated session");
         v26["schema_version"] = 26.into();
@@ -810,6 +844,24 @@ mod tests {
             docked.tabs[0].panels[0].legend_dock,
             Some(LegendDock::Right)
         );
+    }
+
+    #[test]
+    fn v30_sessions_disable_color_and_reject_invalid_current_limits() {
+        let mut value = serde_json::to_value(Session::default()).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/testdata/session-parser-cases.json"
+        ))
+        .unwrap();
+        value["tabs"][0]["panels"] = serde_json::json!([fixture["panel"]]);
+        value["tabs"][0]["panels"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("color_axis");
+        value["schema_version"] = 30.into();
+        let migrated = from_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, SESSION_SCHEMA_VERSION);
+        assert!(migrated.tabs[0].panels[0].color_axis.is_none());
     }
 
     #[test]
@@ -837,13 +889,16 @@ mod tests {
 
         let restored = from_json(&value.to_string()).expect("v27 migrates");
         let panel = &restored.tabs[0].panels[0];
-        assert_eq!(panel.x_axis, XAxisSource::Time);
+        assert_eq!(panel.x_axis, SampleAxisSource::Time);
 
         let mut v28 = serde_json::to_value(&restored).expect("serializes migrated session");
         v28["schema_version"] = 28.into();
         v28["tabs"][0]["panels"][0]["x_axis"]["ref"] = serde_json::Value::Null;
         let migrated_v28 = from_json(&v28.to_string()).expect("v28 migrates");
-        assert_eq!(migrated_v28.tabs[0].panels[0].x_axis, XAxisSource::Time);
+        assert_eq!(
+            migrated_v28.tabs[0].panels[0].x_axis,
+            SampleAxisSource::Time
+        );
 
         for invalid_ref in [
             serde_json::json!({"source_key": "source", "channel": "x"}),
@@ -862,7 +917,7 @@ mod tests {
             .remove("ref");
         assert_eq!(
             from_json(&v28.to_string()).unwrap().tabs[0].panels[0].x_axis,
-            XAxisSource::Time
+            SampleAxisSource::Time
         );
 
         value["schema_version"] = SESSION_SCHEMA_VERSION.into();
@@ -879,7 +934,7 @@ mod tests {
         let signal_axis = from_json(&value.to_string()).expect("signal axis source");
         assert_eq!(
             signal_axis.tabs[0].panels[0].x_axis,
-            XAxisSource::Signal {
+            SampleAxisSource::Signal {
                 r#ref: SeriesRef {
                     source_key: "source".into(),
                     channel: "x".into(),

@@ -9,7 +9,7 @@ import { WorkspaceModel } from "../app/workspace";
 import { parseBakedSession } from "../app/baked-session";
 import type { DataPlane } from "../app/data-plane";
 import type { Line2DResponse } from "../app/line-binary";
-import type { XAxisSource } from "../generated/session";
+import type { SampleAxisSource } from "../generated/session";
 import { showAxisPicker } from "./axis-picker";
 import { bindAxisDrop } from "./axis-drop";
 import { SIGNAL_DRAG_TYPE } from "./panel-shell";
@@ -38,7 +38,7 @@ const ys = ["two", "one"].map((source) => ({
   ref: ref(source, "y"),
   path: `${source}/y`,
 }));
-const bundle: XAxisSource = {
+const bundle: SampleAxisSource = {
   kind: "bundle",
   refs: [ref("one", "x"), ref("two", "x")],
 };
@@ -275,4 +275,102 @@ test("the X drop strip accepts a bundle without forwarding it as Y and cleans up
   expect(yDrop).not.toHaveBeenCalled();
   close();
   expect(panel.querySelector(".xy-drop-strip")).toBeNull();
+});
+
+test("C bundles match independently of X, reject missing/ambiguous members, and allow C=Y", () => {
+  const color = {
+    source: {
+      kind: "bundle" as const,
+      refs: [ref("one", "y"), ref("two", "y")],
+    },
+    range: null,
+    label: null,
+  };
+  expect(resolveLineBindings(bundle, ys, catalog, color)).toMatchObject({
+    missing: [],
+    groups: [
+      { xId: "two-x", colorIds: { "two-y": "two-y" } },
+      { xId: "one-x", colorIds: { "one-y": "one-y" } },
+    ],
+  });
+  for (const refs of [
+    [ref("one", "time")],
+    [ref("one", "x"), ref("one", "time"), ref("two", "x")],
+  ]) {
+    expect(
+      resolveLineBindings(bundle, ys, catalog, {
+        ...color,
+        source: { kind: "bundle", refs },
+      }),
+    ).toMatchObject({ xId: null, groups: [] });
+  }
+  const shared = resolveLineBindings(bundle, ys, catalog, {
+    ...color,
+    source: { kind: "signal", ref: ref("one", "time") },
+  });
+  expect(
+    shared.groups?.map((group) => Object.values(group.colorIds ?? {})),
+  ).toEqual([["one-time"], ["one-time"]]);
+  const timed = resolveLineBindings({ kind: "time" }, ys, catalog, {
+    ...color,
+    source: { kind: "time" },
+  });
+  expect(timed.groups?.every((group) => group.timeX && group.timeColor)).toBe(
+    true,
+  );
+});
+
+test("C columns are reduced with geometry and remain attributes instead of additional traces", async () => {
+  const data = response("one", [3, 1, 2], [5, 6, 7]);
+  const c = {
+    ...data.x,
+    signalId: "c",
+    values: Float64Array.from([10, 99, 20]),
+  };
+  const query = vi
+    .fn<DataPlane["queryLine2D"]>()
+    .mockResolvedValue({ ...data, ys: [...data.ys, c] });
+  const result = await queryLineGroups(
+    { queryLine2D: query } as unknown as DataPlane,
+    [{ xId: "one-x", ids: ["one-y"], colorIds: { "one-y": "c" } }],
+    { t0: 0, t1: 2 },
+    10,
+    new AbortController().signal,
+  );
+  expect(query.mock.calls[0]?.[0].y_signal_ids).toEqual(["one-y", "c"]);
+  expect(result.ys).toHaveLength(1);
+  expect(result.ys[0]?.color?.values).toBe(c.values);
+  expect(result.ys[0]?.values).toBe(data.ys[0]?.values);
+  const time = await queryLineGroups(
+    { queryLine2D: query } as unknown as DataPlane,
+    [{ xId: "one-x", ids: ["one-y"], timeX: true, timeColor: true }],
+    { t0: 0, t1: 2 },
+    10,
+    new AbortController().signal,
+  );
+  expect(time.x.values).toBe(data.anchor);
+  expect(time.ys[0]?.color?.values).toBe(data.anchor);
+});
+
+test("C attributes survive save and clear without changing the categorical palette", () => {
+  const workspace = new WorkspaceModel();
+  const panel = workspace.addPanelRow();
+  workspace.setPanelColorAxis(panel.id, {
+    source: bundle,
+    range: [0, 100],
+    label: "temperature (K)",
+  });
+  const restored = parseBakedSession(JSON.stringify(workspace.snapshot()));
+  expect(restored.tabs[0]?.panels[0]?.color_axis).toEqual(panel.color_axis);
+  expect(() =>
+    workspace.setPanelColorAxis(panel.id, {
+      source: bundle,
+      range: [1, 1],
+      label: null,
+    }),
+  ).toThrow(/limits/);
+  const categorical = panel.color_by;
+  workspace.setPanelColorAxis(panel.id, null);
+  expect(panel.color_axis).toBeNull();
+  expect(panel.color_by).toBe(categorical);
 });

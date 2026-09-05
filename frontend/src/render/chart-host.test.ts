@@ -546,3 +546,47 @@ describe("ChartHost", () => {
     expect(chart?.dispose).toHaveBeenCalledOnce();
   });
 });
+
+it("keeps continuous color attributes across viewport updates and restores categorical colors", async () => {
+  const getContext = vi
+    .spyOn(HTMLCanvasElement.prototype, "getContext")
+    .mockReturnValue(null);
+  const host = await hostFixture();
+  try {
+    const base = request();
+    const pointColors = new Float32Array(
+      base.series[0]?.data.length === undefined
+        ? 0
+        : base.series[0].data.length * 2,
+    );
+    const colored = {
+      ...base,
+      colorScale: { label: "temperature (K)", range: [10, 20] as const },
+      series: base.series.map((series) => ({ ...series, pointColors })),
+    };
+    host.render(colored);
+    const chart = state.charts.at(-1);
+    expect(chart?.options.grid).toEqual({ ...CHART_GRID, right: 64 });
+    expect(
+      (chart?.options.series as { pointColors: Float32Array }[])[0]
+        ?.pointColors,
+    ).toBe(pointColors);
+    const calls = chart?.setOption.mock.calls.length;
+    host.render({ ...colored, xRange: { min: 10.5, max: 11.5 } });
+    expect(chart?.setOption.mock.calls.length).toBe(calls);
+    expect(chart?.setViewRange).toHaveBeenCalled();
+    host.render(base);
+    expect(chart?.options.grid).toEqual(CHART_GRID);
+    expect(
+      (
+        chart?.options.series as { pointColors?: Float32Array; color: string }[]
+      )[0]?.pointColors,
+    ).toBeUndefined();
+    expect((chart?.options.series as { color: string }[])[0]?.color).toBe(
+      palette.series[0],
+    );
+  } finally {
+    host.dispose();
+    getContext.mockRestore();
+  }
+});

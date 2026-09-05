@@ -11,6 +11,13 @@ X strip also assigns X. One X signal can serve multiple Y signals; bundle
 members match by source, with missing or ambiguous matches reported explicitly.
 Pairs must share an exact sample timebase; no interpolation is performed.
 
+Use **c:** to color each line along its length by another signal, a source-matched
+bundle, or time. The separate colorbar shares one scale across the panel;
+**c limits:** switches between automatic and fixed limits and edits its label.
+C members must share units and the paired sample timebase. Choose **none** to
+restore the saved categorical line colors. Color bindings and limits persist
+in sessions, PNG capture, and offline HTML snapshots.
+
 CSV time columns stay available as ordinary signals. A recognized finite time
 header supplies the linked-time anchor; otherwise imports use row index instead
 of guessing from increasing measurements. Recipe time datasets and MCAP

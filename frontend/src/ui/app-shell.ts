@@ -1,3 +1,4 @@
+import { axisActions } from "./axis-actions";
 import { resolveLineBindings } from "../app/line-bindings";
 import { shellCommand } from "../app/shell-commands";
 import {
@@ -64,7 +65,6 @@ import type {
   PanelState,
   SeriesRef,
   Session,
-  XAxisSource,
 } from "../generated/session";
 import type { Preferences } from "../generated/preferences";
 import {
@@ -645,16 +645,20 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           void this.refreshTiles();
         },
-        onSetXAxis: (id, xAxis: XAxisSource) => {
-          this.workspace.setPanelXAxis(id, xAxis);
-          this.commitHistory();
-          this.workspaceView?.refreshPanelStates();
-          this.workspaceView?.clearCursors();
-          this.workspaceView?.setCursor(this.workspace.linkedTime().cursorT);
-          this.presentation.invalidate(id);
-          this.renderTiles();
-          void this.refreshTiles();
-        },
+        ...axisActions({
+          workspace: this.workspace,
+          commit: () => this.commitHistory(),
+          refreshStates: () => this.workspaceView?.refreshPanelStates(),
+          resetCursor: () => {
+            this.workspaceView?.clearCursors();
+            this.workspaceView?.setCursor(this.workspace.linkedTime().cursorT);
+          },
+          invalidate: (id) => this.presentation.invalidate(id),
+          render: () => this.renderTiles(),
+          refresh: () => {
+            void this.refreshTiles();
+          },
+        }),
         onLayoutChanged: () => {
           this.commitHistory();
           void this.refreshTiles();
@@ -2595,6 +2599,7 @@ export class AppShell {
       panel.x_axis,
       this.resolvedFor(panel),
       this.catalog,
+      panel.color_axis,
     );
   }
 

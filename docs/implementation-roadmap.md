@@ -17,8 +17,10 @@ are recorded in [ADRs](adr/README.md).
   renderer code do not branch on host identity.
 - Line2D is an XY chart with independent searchable X/Y controls. X can be
   linked time, any signal, or a bundle paired to Y members by source key.
-  Each X/Y pair requires an exact shared timebase. CSV retains the time column
-  and uses row index when no recognized finite time header is present.
+  Each X/Y pair requires an exact shared timebase.
+  Optional C binds a signal, source-matched bundle, or time to a separate
+  continuous colorbar with shared automatic or fixed limits (ADR 0057).
+  CSV retains the time column and uses row index when no recognized finite time header is present.
   Recipe time datasets and MCAP log timestamps are also available as signals. ChartGPU is the Line2D plotter behind the SignalScope-owned
   renderer boundary. Family dispatch owns preparation and render-input
   construction; the two Line2D adapters share options, defaults, axes, and feed

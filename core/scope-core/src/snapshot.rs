@@ -563,8 +563,8 @@ mod tests {
     use super::*;
     use crate::pyramid::Pyramid;
     use crate::session::{
-        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SeriesRef, Session,
-        XAxisSource,
+        AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SampleAxisSource,
+        SeriesRef, Session,
     };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
@@ -619,7 +619,8 @@ mod tests {
             legend_anchor: None,
             legend_dock: None,
             legend_hint_dismissed: false,
-            x_axis: XAxisSource::Time,
+            x_axis: SampleAxisSource::Time,
+            color_axis: None,
             y_range: None,
             x_range: None,
             x_label: None,
@@ -675,7 +676,7 @@ mod tests {
     fn visible_signal_x_export_bakes_shared_paired_levels() {
         let (store, pyramids) = store_with(&[("x", 64), ("y", 64)]);
         let mut panel = panel("panel-1", &["y"]);
-        panel.x_axis = XAxisSource::Signal {
+        panel.x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "x".to_owned(),
@@ -714,7 +715,7 @@ mod tests {
     #[test]
     fn signal_x_snapshot_deduplicates_reordered_y_bindings() {
         let (store, pyramids) = store_with(&[("x", 64), ("a", 64), ("b", 64)]);
-        let x_axis = XAxisSource::Signal {
+        let x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "x".to_owned(),
@@ -749,14 +750,14 @@ mod tests {
     fn signal_x_snapshot_skips_unresolved_and_captures_a_signal_against_itself() {
         let (store, pyramids) = store_with(&[("y", 64)]);
         let mut unresolved = panel("unresolved", &["y"]);
-        unresolved.x_axis = XAxisSource::Signal {
+        unresolved.x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "missing".to_owned(),
             },
         };
         let mut only_x = panel("only-x", &["y"]);
-        only_x.x_axis = XAxisSource::Signal {
+        only_x.x_axis = SampleAxisSource::Signal {
             r#ref: SeriesRef {
                 source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
                 channel: "y".to_owned(),

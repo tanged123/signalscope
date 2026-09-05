@@ -1,10 +1,14 @@
 import type { Catalog, CatalogSeries } from "../app/catalog";
 import { axisRefs } from "../app/line-bindings";
 import { parseSelector, seriesMatches } from "../app/selector";
-import type { NamedSet, SeriesRef, XAxisSource } from "../generated/session";
+import type {
+  NamedSet,
+  SeriesRef,
+  SampleAxisSource,
+} from "../generated/session";
 import { showPanelMenu, type MenuOption } from "./panel-menu";
 
-export function xAxisLabel(axis: XAxisSource, catalog: Catalog): string {
+export function xAxisLabel(axis: SampleAxisSource, catalog: Catalog): string {
   if (axis.kind === "time") return "time";
   if (axis.kind === "signal")
     return (
@@ -18,12 +22,14 @@ export function xAxisLabel(axis: XAxisSource, catalog: Catalog): string {
 export function showAxisPicker(
   container: HTMLElement,
   anchor: HTMLElement,
-  axis: "x" | "y",
-  current: XAxisSource,
+  axis: "x" | "y" | "c",
+  current: SampleAxisSource,
   catalog: Catalog,
   sets: readonly NamedSet[],
-  selectX: (axis: XAxisSource) => void,
+  selectX: (axis: SampleAxisSource) => void,
   addY: (paths: string[]) => void,
+  clearColor?: () => void,
+  colorActive = false,
 ): () => void {
   const refFor = (series: CatalogSeries): SeriesRef => ({
     source_key: series.sourceKey,
@@ -47,15 +53,21 @@ export function showAxisPicker(
     }
   };
   const options: MenuOption[] =
-    axis === "x"
+    axis !== "y"
       ? [
           {
-            label: "time · linked",
-            active: current.kind === "time",
+            label: axis === "c" ? "time · source anchor" : "time · linked",
+            active: current.kind === "time" && (axis !== "c" || colorActive),
             run: () => selectX({ kind: "time" }),
           },
         ]
       : [];
+  if (axis === "c")
+    options.unshift({
+      label: "none · categorical line colors",
+      active: !colorActive,
+      run: () => clearColor?.(),
+    });
   const all = catalog.allSeries();
   const activeRefs = new Set(
     axisRefs(current).map((ref) => catalog.refKey(ref)),
@@ -69,7 +81,7 @@ export function showAxisPicker(
     options.push({
       label: `${channel.name} · bundle · ${String(refs.length)} runs`,
       active:
-        axis === "x" &&
+        axis !== "y" &&
         current.kind === "bundle" &&
         JSON.stringify(current.refs) === JSON.stringify(refs),
       run: () => choose(refs),
@@ -96,14 +108,16 @@ export function showAxisPicker(
     const ref = refFor(series);
     options.push({
       label: series.path,
-      active: axis === "x" && activeRefs.has(catalog.refKey(ref)),
+      active: axis !== "y" && activeRefs.has(catalog.refKey(ref)),
       run: () => choose([ref]),
     });
   }
   return showPanelMenu(
     container,
     anchor,
-    axis === "x" ? "X AXIS · bundles pair by source" : "ADD Y SIGNALS",
+    axis === "y"
+      ? "ADD Y SIGNALS"
+      : `${axis.toUpperCase()} AXIS · bundles pair by source`,
     options,
     true,
   );

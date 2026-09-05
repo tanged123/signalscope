@@ -1,5 +1,4 @@
-import { bindAxisDrop } from "./axis-drop";
-import { showAxisPicker, xAxisLabel as axisLabel } from "./axis-picker";
+import { PanelAxes, axisControlsMarkup } from "./panel-axes";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
@@ -24,7 +23,7 @@ import type {
   SeriesOverride,
   StyleDimension,
   StatColumn,
-  XAxisSource,
+  SampleAxisSource,
 } from "../generated/session";
 import {
   clamp,
@@ -207,7 +206,8 @@ export interface PanelCallbacks {
     },
   ): void;
   onRemoveSeries(id: string, ref: SeriesRef): void;
-  onSetXAxis?(id: string, xAxis: XAxisSource): void;
+  onSetXAxis?(id: string, xAxis: SampleAxisSource): void;
+  onSetColorAxis?(id: string, axis: PanelState["color_axis"]): void;
 }
 
 export interface RenderSeries {
@@ -450,7 +450,7 @@ export class PanelView {
     return (this.annotationState ??= new PanelAnnotationState());
   }
 
-  private readonly axisDropCleanup: () => void;
+  private readonly axes: PanelAxes;
 
   constructor(
     private readonly id: string,
@@ -481,12 +481,14 @@ export class PanelView {
     this.shell.appendContent(this.overlay);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
-    this.axisDropCleanup = bindAxisDrop(
-      this.element,
-      () => callbacks.catalog(),
-      () => callbacks.namedSets(),
-      (axis) => callbacks.onSetXAxis?.(this.id, axis),
-    );
+    this.axes = new PanelAxes(this.element, {
+      catalog: () => callbacks.catalog(),
+      namedSets: () => callbacks.namedSets(),
+      selectX: (axis) => callbacks.onSetXAxis?.(this.id, axis),
+      selectColor: (axis) => callbacks.onSetColorAxis?.(this.id, axis),
+      addY: (paths) => callbacks.onDropSignals(this.id, paths),
+      beforeOpen: () => this.closePanelConfig(),
+    });
     this.interactions = new PlotInteractionController(this.overlay, {
       layout: () => this.activeLayout(),
       applyXRange: (min, max) => {
@@ -657,29 +659,6 @@ export class PanelView {
       "click",
       () => {
         this.callbacks.onToggleAxisStyle(this.id);
-      },
-    );
-    required(this.element, ".panel-y-axis").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null)
-          this.openAxisPicker(
-            "y",
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-      },
-    );
-    required(this.element, ".panel-x-axis").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null) {
-          this.openAxisPicker(
-            "x",
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-        }
       },
     );
     required(this.element, ".panel-line-width").addEventListener(
@@ -884,15 +863,7 @@ export class PanelView {
     axisToggle.textContent = `axes: ${rendered.axis_style}`;
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
     axisToggle.hidden = false;
-    const xAxis = required<HTMLButtonElement>(this.element, ".panel-x-axis");
-    const xAxisLabel = axisLabel(rendered.x_axis, this.callbacks.catalog());
-    xAxis.textContent = `x: ${xAxisLabel} ▾`;
-    xAxis.title =
-      rendered.x_axis.kind === "time"
-        ? "Choose a resolved signal for the X axis"
-        : `X axis signal: ${xAxisLabel}`;
-    xAxis.setAttribute("aria-label", `X axis: ${xAxisLabel}`);
-    xAxis.hidden = false;
+    this.axes.update(state);
     required<HTMLElement>(this.element, ".panel-line-width-value").textContent =
       formatToolbarNumber(rendered.line_width);
     required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
@@ -1032,6 +1003,7 @@ export class PanelView {
       axisStyle: state.axis_style,
       xLabel: state.x_label,
       yLabel: state.y_label,
+      colorAxis: state.color_axis,
     });
     const { plotted } = family;
     this.preparedPlot = family.plot;
@@ -1168,7 +1140,7 @@ export class PanelView {
 
   dispose(): void {
     this.disposed = true;
-    this.axisDropCleanup();
+    this.axes.dispose();
     this.closePanelConfig();
     this.releaseGpu();
     this.interactions.dispose();
@@ -3072,24 +3044,6 @@ export class PanelView {
     );
   }
 
-  private openAxisPicker(
-    axis: "x" | "y",
-    state: RenderPanelState,
-    anchor: HTMLElement,
-  ): void {
-    this.closePanelConfig();
-    this.panelConfigCleanup = showAxisPicker(
-      this.element,
-      anchor,
-      axis,
-      state.x_axis,
-      this.callbacks.catalog(),
-      this.callbacks.namedSets(),
-      (xAxis) => this.callbacks.onSetXAxis?.(this.id, xAxis),
-      (paths) => this.callbacks.onDropSignals(this.id, paths),
-    );
-  }
-
   private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
     this.openPanelMenu(anchor, `TIPS · ${String(state.annotations.length)}`, [
       ...(["labels", "markers", "hidden"] as const).map((mode) => ({
@@ -3257,8 +3211,7 @@ function seriesColor(series: Pick<RenderSeries, "hue">): string {
 function lineToolbarMarkup(): string {
   return `<span class="panel-toolbar-group panel-toolbar-axes">
       <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
-      <button class="panel-toolbar-control panel-y-axis" type="button" title="Add Y signals or bundles" aria-label="Add Y signals or bundles">y: + add ▾</button>
-      <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
+      ${axisControlsMarkup()}
     </span>
     <span class="panel-toolbar-separator" aria-hidden="true"></span>
     <span class="panel-toolbar-group panel-toolbar-render">
