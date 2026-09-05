@@ -11,17 +11,28 @@ changes and inspect before editing.
   and `SignalScope Final Spec.dc.html` in that directory. The Final Spec owns
   visuals and interaction. The reference prototype is behavioral context, not
   production code.
-- For architecture or data work, read `docs/adr/README.md`, the relevant
+- For architecture or data work, read `docs/architecture.md` for module
+  placement and shared primitives, then `docs/adr/README.md`, the relevant
   accepted ADRs, and `docs/implementation-roadmap.md`. Superseded ADRs and
   historical design explorations are not requirements.
 - If requirements are ambiguous, state a small proposal before expanding
   scope. Record architectural changes in a new or amended ADR.
+- For boundary changes, name the state/invariant owner, dependencies,
+  publication and cleanup points, compatibility impact, and validating test
+  or measurement before choosing an abstraction. Use `docs/adr/template.md`;
+  ordinary local changes do not need an ADR. Distinguish current code,
+  accepted policy, and pending work (ADR 0054).
 
 ## Working rules
 
 Prefer deletion and the shortest correct implementation. Do not add
 speculative abstractions, wrappers, defensive scaffolding, or comments that
-restate code. Keep commands and logs quiet. Use `apply_patch` for edits. Never
+restate code. Modules have a soft budget of 600 lines; a module over 1,000
+lines is split before new behavior is added to it, per ADR 0053. Check the
+shared-primitives table in `docs/architecture.md` before writing a helper.
+Extract around behavior, invariants, or resource lifetime; passing the whole
+previous owner into a new file does not establish a boundary. Keep commands
+and logs quiet. Use `apply_patch` for edits. Never
 reset, overwrite, or stage unrelated work; review staged and unstaged diffs
 separately.
 
@@ -56,9 +67,10 @@ builds until implementation is complete. Report what actually ran.
 
 ## Product and architecture boundaries
 
-- SignalScope currently supports time-series plots. That is a present
-  capability, not a permanent architecture boundary; future plot types require
-  deliberate schema and design work. Touch and mobile remain out of scope.
+- SignalScope supports Cartesian2D Line2D plots with linked-time or explicit
+  signal-X bindings ([ADR 0052](docs/adr/0052-typed-plot-families-and-explicit-x-line2d.md)).
+  Future plot types require deliberate schema and design work. Touch and mobile
+  remain out of scope.
 - The Electron app is a thin lifecycle and presentation wrapper around
   `scope-server`. It adds no native data API. Frontend code always uses
   `HttpPlane` and must not detect Electron.
@@ -86,7 +98,7 @@ builds until implementation is complete. Report what actually ran.
 - Protocol, session, and preference schemas are APIs. Additive fields need
   defaults; breaking changes need a version and migration. Unknown future and
   unsupported old versions fail clearly without partial restore.
-- The current session model is time-only. Do not restore panel modes,
+- Sessions retain time anchors even with explicit signal-X plots. Do not restore panel modes,
   annotation domains, facet splits, reconciliation markers, or pre-migration
   alias rewriting removed by ADR 0050. Source identity is the source key plus
   local channel.

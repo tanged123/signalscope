@@ -1,8 +1,12 @@
 import { expect, test } from "vitest";
 import { binColumnsFromWire } from "./bin-columns";
 import type { Annotation } from "../generated/session";
-import type { PlotLayout } from "./plot-math";
-import { prepareTimePlot } from "./plot-capabilities";
+import { projectX, projectY, type PlotLayout } from "./plot-math";
+import {
+  prepareLine2DPlot,
+  prepareTimePlot,
+  type Line2DPlotInput,
+} from "./plot-capabilities";
 
 const layout: PlotLayout = {
   plot: { x: 0, y: 0, width: 100, height: 100 },
@@ -19,6 +23,7 @@ function annotation(
     id: String(anchor),
     series_path: path,
     anchor,
+    pinned_x: null,
     pinned_value: pinnedValue,
     label: "",
     offset: [10, -10],
@@ -67,5 +72,202 @@ test("time capabilities link cursors and expose raw visible statistics", () => {
     { label: "mean", value: 3, unit: null },
     { label: "rms", value: Math.sqrt(10), unit: null },
     { label: "n", value: 2, unit: null },
+  ]);
+});
+
+function lineInput(overrides: Partial<Line2DPlotInput> = {}): Line2DPlotInput {
+  return {
+    anchor: new Float64Array([0, 1, 2, 3]),
+    x: new Float64Array([1, 3, 2, 4]),
+    series: [
+      {
+        path: "demo/y",
+        label: "Y",
+        unit: "V",
+        colorIndex: 0,
+        values: new Float64Array([2, 6, 4, 8]),
+      },
+    ],
+    window: { t0: 0, t1: 3 },
+    ...overrides,
+  };
+}
+
+function lineAnnotation(
+  anchor: number,
+  pinnedValue: number,
+  path = "demo/y",
+): Annotation {
+  return annotation(anchor, pinnedValue, path);
+}
+
+test("Line2D uses finite paired rows for local automatic ranges", () => {
+  const plot = prepareLine2DPlot(lineInput());
+
+  expect(plot.interaction).toMatchObject({
+    xAxis: "local",
+    cursorLink: "local",
+  });
+  const ranges = plot.autoRanges();
+  expect(ranges.x?.[0]).toBeCloseTo(0.82);
+  expect(ranges.x?.[1]).toBeCloseTo(4.18);
+  expect(ranges.y?.[0]).toBeCloseTo(1.64);
+  expect(ranges.y?.[1]).toBeCloseTo(8.36);
+});
+
+test("Line2D cursor scans non-monotonic X and returns paired markers", () => {
+  const plot = prepareLine2DPlot(lineInput());
+  const xPixel = projectX(layout, 2);
+  const cursor = plot.cursorAt(
+    layout,
+    {
+      x: xPixel,
+      y: projectY(layout, 4),
+    },
+    40,
+  );
+
+  expect(cursor).toMatchObject({
+    x: 2,
+    heading: "x = 2.0000",
+    link: "local",
+  });
+  expect(cursor?.rows).toEqual([
+    { path: "demo/y", label: "Y", value: 4, unit: "V", colorIndex: 0 },
+  ]);
+  expect(cursor?.markers).toEqual([{ x: 2, y: 4, colorIndex: 0 }]);
+});
+
+test("Line2D cursor uses screen distance to disambiguate duplicate X values", () => {
+  const plot = prepareLine2DPlot(
+    lineInput({
+      x: new Float64Array([2, 2, 4, 5]),
+      series: [
+        {
+          path: "demo/y",
+          unit: null,
+          colorIndex: 0,
+          values: new Float64Array([1, 9, 4, 5]),
+        },
+      ],
+    }),
+  );
+  const cursor = plot.cursorAt(
+    layout,
+    {
+      x: projectX(layout, 2),
+      y: projectY(layout, 9),
+    },
+    40,
+  );
+
+  expect(cursor?.x).toBe(2);
+  expect(cursor?.rows[0]?.value).toBe(9);
+  expect(cursor?.markers).toEqual([{ x: 2, y: 9, colorIndex: 0 }]);
+});
+
+test("Line2D picks non-monotonic segments and vertices in screen space", () => {
+  const plot = prepareLine2DPlot(lineInput());
+  const first = {
+    x: projectX(layout, 3),
+    y: projectY(layout, 6),
+  };
+  const second = {
+    x: projectX(layout, 2),
+    y: projectY(layout, 4),
+  };
+  const lineHit = plot.hitAdapter.seriesAt(
+    layout,
+    (first.x + second.x) / 2,
+    (first.y + second.y) / 2,
+    1,
+  );
+  expect(lineHit).toMatchObject({ path: "demo/y", distance: 0 });
+
+  const vertex = plot.annotationAt(layout, { x: second.x, y: second.y }, 1);
+  expect(vertex).toEqual({
+    path: "demo/y",
+    anchor: 2,
+    x: 2,
+    pinnedValue: 4,
+  });
+});
+
+test("Line2D gaps and nonfinite values break strokes and picks", () => {
+  const plot = prepareLine2DPlot(
+    lineInput({
+      x: new Float64Array([0, 1, Number.NaN, 3, 4]),
+      anchor: new Float64Array([0, 1, 2, 3, 4]),
+      series: [
+        {
+          path: "demo/y",
+          unit: null,
+          colorIndex: 0,
+          values: new Float64Array([0, 1, 2, 3, 4]),
+        },
+      ],
+      window: { t0: 0, t1: 4 },
+    }),
+  );
+  const midpoint = {
+    x: projectX(layout, 2),
+    y: projectY(layout, 2),
+  };
+
+  expect(
+    plot.hitAdapter.seriesAt(layout, midpoint.x, midpoint.y, 2),
+  ).toBeNull();
+  expect(plot.annotationAt(layout, midpoint, 2)).toBeNull();
+  const yGapPlot = prepareLine2DPlot(
+    lineInput({
+      anchor: new Float64Array([0, 1, 2, 3, 4]),
+      x: new Float64Array([0, 1, 2, 3, 4]),
+      series: [
+        {
+          path: "demo/y",
+          unit: null,
+          colorIndex: 0,
+          values: new Float64Array([0, 1, Number.NaN, 3, 4]),
+        },
+      ],
+      window: { t0: 0, t1: 4 },
+    }),
+  );
+  expect(
+    yGapPlot.hitAdapter.seriesAt(layout, midpoint.x, midpoint.y, 2),
+  ).toBeNull();
+  expect(yGapPlot.annotationAt(layout, midpoint, 2)).toBeNull();
+  const ranges = plot.autoRanges();
+  expect(ranges.x?.[0]).toBeCloseTo(-0.24);
+  expect(ranges.x?.[1]).toBeCloseTo(4.24);
+  expect(ranges.y?.[0]).toBeCloseTo(-0.24);
+  expect(ranges.y?.[1]).toBeCloseTo(4.24);
+});
+
+test("Line2D resolves annotations by source anchor to current plotted values", () => {
+  const plot = prepareLine2DPlot(lineInput());
+
+  expect(plot.resolveAnnotation(lineAnnotation(2, 100))).toMatchObject({
+    x: 2,
+    y: 4,
+    colorIndex: 0,
+    summary: "2.0000 · 4.0000",
+  });
+  expect(plot.resolveAnnotation(lineAnnotation(9, 100))).toMatchObject({
+    x: 4,
+    y: 8,
+    summary: "4.0000 · 8.0000",
+  });
+});
+
+test("Line2D reports exact reduced extrema but no raw aggregate statistics", () => {
+  const plot = prepareLine2DPlot(lineInput());
+
+  expect(plot.stats()[0]?.items).toEqual([
+    { label: "min", value: 2, unit: null },
+    { label: "max", value: 8, unit: null },
+    { label: "mean", value: null, unit: null },
+    { label: "rms", value: null, unit: null },
+    { label: "n", value: null, unit: null },
   ]);
 });

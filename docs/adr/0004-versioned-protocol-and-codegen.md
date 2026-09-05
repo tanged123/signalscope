@@ -25,3 +25,11 @@ framing behind the same envelope, not a redesign.
 ## Consequences
 
 Rust and TypeScript cannot drift silently. The deliberately small Phase 0 generator supports the schema constructs currently used; adding a construct requires extending and testing the generator before extending the schema.
+
+## Amendment (2026-09-04, tagged unions)
+
+The generator supports internally tagged unions with a required discriminator
+and variant-specific required fields. Rust emits a Serde-tagged enum and
+TypeScript emits a discriminated union. Schema authors use this construct for
+correlated shapes instead of pairing a string enum with nullable fields and
+handwritten validation.

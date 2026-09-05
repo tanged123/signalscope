@@ -17,6 +17,16 @@ pub struct PageHandle {
     len: Option<usize>,
     memory: Option<Arc<[f64]>>,
     cache: Option<PageCache>,
+    temporary_file: Option<Arc<TemporaryPageFile>>,
+}
+
+#[derive(Debug)]
+struct TemporaryPageFile(PathBuf);
+
+impl Drop for TemporaryPageFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 impl PageHandle {
@@ -28,6 +38,7 @@ impl PageHandle {
             len: None,
             memory: None,
             cache: None,
+            temporary_file: None,
         }
     }
 
@@ -39,6 +50,7 @@ impl PageHandle {
             len: Some(len),
             memory: None,
             cache: None,
+            temporary_file: None,
         }
     }
 
@@ -50,6 +62,7 @@ impl PageHandle {
             len: Some(values.len().saturating_mul(size_of::<f64>())),
             memory: Some(values),
             cache: None,
+            temporary_file: None,
         }
     }
 
@@ -61,7 +74,13 @@ impl PageHandle {
             len: Some(len),
             memory: None,
             cache: Some(cache),
+            temporary_file: None,
         }
+    }
+
+    pub(crate) fn delete_on_drop(mut self) -> Self {
+        self.temporary_file = Some(Arc::new(TemporaryPageFile(self.path.clone())));
+        self
     }
 
     #[must_use]

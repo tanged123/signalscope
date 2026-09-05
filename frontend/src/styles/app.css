@@ -634,6 +634,10 @@ button {
   background: var(--border);
 }
 
+.panel-toolbar-slot {
+  display: contents;
+}
+
 .panel-toolbar-control {
   display: inline-flex;
   align-items: center;

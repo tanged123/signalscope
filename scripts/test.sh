@@ -12,13 +12,14 @@ fi
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|server|desktop|unit|frontend|e2e|bench|full]
+Usage: ./scripts/test.sh [quick|core|server|desktop|unit|architecture|frontend|e2e|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
   server    Test the browser host server, optionally filtered.
   desktop   Test the Electron shell; pass package to smoke-test a built package.
   unit      Run frontend unit tests, optionally filtered.
+  architecture  Check frontend import-boundary rules against allowed/forbidden examples.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
   e2e       Run Playwright desktop and mobile-review smoke tests.
@@ -90,7 +91,7 @@ test_desktop() {
 }
 
 test_unit() {
-  pnpm --filter @signalscope/frontend test -- "$@"
+  pnpm --filter @signalscope/frontend exec vitest run "$@"
 }
 
 test_frontend() {
@@ -173,6 +174,9 @@ desktop)
 unit)
   shift || true
   test_unit "$@"
+  ;;
+architecture)
+  node --test frontend/scripts/check-architecture.mjs
   ;;
 frontend)
   test_frontend

@@ -1,7 +1,85 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EnvelopeBin, SignalSummary } from "../generated/protocol";
+import type {
+  BakedLine2DLevel,
+  EnvelopeBin,
+  SignalSummary,
+} from "../generated/protocol";
 import { BakedPlane, HttpPlane } from "./data-plane";
 import { seal, type Envelope } from "./envelope";
+
+it("forwards query cancellation to the HTTP fetch", async () => {
+  const fetcher = vi.fn<typeof fetch>(
+    (_url, options) =>
+      new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      }),
+  );
+  const plane = new HttpPlane(fetcher);
+  const controller = new AbortController();
+  const tiles = plane.queryTiles(
+    {
+      request_id: "tiles",
+      signal_ids: [],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  const line = plane.queryLine2D(
+    {
+      request_id: "line",
+      x_signal_id: "1",
+      y_signal_ids: ["2"],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  const results = Promise.allSettled([tiles, line]);
+  controller.abort();
+  expect((await results).map((result) => result.status)).toEqual([
+    "rejected",
+    "rejected",
+  ]);
+  expect(
+    fetcher.mock.calls.every(
+      ([, options]) => options?.signal === controller.signal,
+    ),
+  ).toBe(true);
+});
+
+it("rejects baked reads aborted before their queued preparation", async () => {
+  const plane = new BakedPlane(seal({ session_json: "", signals: [] }));
+  const controller = new AbortController();
+  const tiles = plane.queryTiles(
+    {
+      request_id: "tiles",
+      signal_ids: [],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  const line = plane.queryLine2D(
+    {
+      request_id: "line",
+      x_signal_id: "1",
+      y_signal_ids: ["2"],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  controller.abort();
+  await expect(tiles).rejects.toMatchObject({ name: "AbortError" });
+  await expect(line).rejects.toMatchObject({ name: "AbortError" });
+});
 
 function bin(time: number, value: number | null): EnvelopeBin {
   return {
@@ -227,6 +305,84 @@ describe("BakedPlane.querySamples", () => {
     expect(signals.every((signal) => Number.isFinite(signal.last_value))).toBe(
       true,
     );
+  });
+});
+
+describe("BakedPlane.queryLine2D", () => {
+  it("returns paired columns in the baked X and Y order", async () => {
+    const summary = (signalId: string, path: string): SignalSummary => ({
+      signal_id: signalId,
+      source_id: "3",
+      source_key: "00000000-0000-0000-0000-000000000003",
+      local_path: path,
+      path: `vehicle/${path}`,
+      unit: "m/s",
+      point_count: "4",
+      t_min: 0,
+      t_max: 3,
+      last_value: null,
+    });
+    const level: BakedLine2DLevel = {
+      level: 0,
+      anchor: [0, 1, 2, 3],
+      x: [10, 11, null, 13],
+      ys: [
+        [100, 101, 102, 103],
+        [200, 201, 202, 203],
+      ],
+    };
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [
+          { summary: summary("11", "position"), levels: [] },
+          { summary: summary("7", "speed"), levels: [] },
+          { summary: summary("8", "rpm"), levels: [] },
+        ],
+        line2d: [
+          { x_signal_id: "11", y_signal_ids: ["8", "7"], levels: [level] },
+        ],
+      }),
+    );
+
+    const response = await plane.queryLine2D({
+      request_id: "line-1",
+      x_signal_id: "11",
+      y_signal_ids: ["7", "8"],
+      window: { t0: 1, t1: 2 },
+      pixel_width: 100,
+    });
+
+    expect(response.requestId).toBe("line-1");
+    expect(response.level).toBe(0);
+    expect(Array.from(response.anchor)).toEqual([0, 1, 2, 3]);
+    expect(Array.from(response.x.values)).toEqual([10, 11, NaN, 13]);
+    expect(response.ys.map((series) => series.signalId)).toEqual(["7", "8"]);
+    expect(Array.from(response.ys[0]?.values ?? [])).toEqual([
+      200, 201, 202, 203,
+    ]);
+    expect(Array.from(response.ys[1]?.values ?? [])).toEqual([
+      100, 101, 102, 103,
+    ]);
+  });
+
+  it("rejects a combination absent from an old or time-only manifest", async () => {
+    const plane = new BakedPlane(
+      seal({
+        session_json: "",
+        signals: [],
+      }),
+    );
+
+    await expect(
+      plane.queryLine2D({
+        request_id: "line-missing",
+        x_signal_id: "11",
+        y_signal_ids: ["7"],
+        window: { t0: 0, t1: 1 },
+        pixel_width: 10,
+      }),
+    ).rejects.toThrow("no baked Line2D data");
   });
 });
 

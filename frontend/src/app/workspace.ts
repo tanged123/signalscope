@@ -20,6 +20,7 @@ import type {
   NamedSet,
   SourceRecord,
   WorkspaceTab,
+  XAxisSource,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
@@ -282,7 +283,7 @@ export class WorkspaceModel {
       .filter((set) => set.kind !== "pick" || set.refs.length > 0);
     for (const tab of this.session.tabs) {
       for (const panel of tab.panels) {
-        this.removeSeriesRef(panel.id, ref, path);
+        this.removeSeriesRef(panel.id, ref, path, true);
       }
     }
     this.touch(true);
@@ -453,7 +454,12 @@ export class WorkspaceModel {
     );
   }
 
-  removeSeriesRef(panelId: string, ref: SeriesRef, path?: string): void {
+  removeSeriesRef(
+    panelId: string,
+    ref: SeriesRef,
+    path?: string,
+    deletingSignal = false,
+  ): void {
     const panel = this.session.tabs
       .flatMap((tab) => tab.panels)
       .find((entry) => entry.id === panelId);
@@ -474,11 +480,50 @@ export class WorkspaceModel {
     panel.focus = panel.focus.filter(
       (entry) => entry.ref === null || !sameRef(entry.ref, ref),
     );
+    if (
+      deletingSignal &&
+      panel.x_axis.kind === "signal" &&
+      sameRef(panel.x_axis.ref, ref)
+    ) {
+      panel.x_axis = { kind: "time" };
+      panel.x_range = null;
+      panel.x_label = null;
+      panel.annotations = panel.annotations.map((annotation) => ({
+        ...annotation,
+        pinned_x: null,
+      }));
+    }
     if (path !== undefined) {
       panel.annotations = panel.annotations.filter(
         (annotation) => annotation.series_path !== path,
       );
     }
+    this.touch(true);
+  }
+
+  setPanelXAxis(panelId: string, xAxis: XAxisSource): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    let next: XAxisSource;
+    if (xAxis.kind === "time") {
+      next = { kind: "time" };
+    } else {
+      next = { kind: "signal", ref: { ...xAxis.ref } };
+    }
+    if (
+      next.kind === panel.x_axis.kind &&
+      (next.kind === "time" ||
+        (panel.x_axis.kind === "signal" && sameRef(next.ref, panel.x_axis.ref)))
+    ) {
+      return;
+    }
+    panel.x_axis = next;
+    panel.x_range = null;
+    panel.x_label = null;
+    panel.annotations = panel.annotations.map((annotation) => ({
+      ...annotation,
+      pinned_x: null,
+    }));
     this.touch(true);
   }
 
@@ -1141,6 +1186,7 @@ export class WorkspaceModel {
       legend_anchor: null,
       legend_dock: null,
       legend_hint_dismissed: false,
+      x_axis: { kind: "time" },
       y_range: null,
       x_range: null,
       x_label: null,

@@ -18,6 +18,8 @@
 //! Any structural mismatch is a cache miss (`Ok(None)`), never an error:
 //! the caller rebuilds and rewrites.
 
+mod codec;
+
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -28,7 +30,6 @@ use std::{
 
 use scope_protocol::IngestStage;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
@@ -44,6 +45,9 @@ use crate::{
     pyramid::{CachedBinLevel, PagedBinLevel, Pyramid},
     store::{Signal, SignalId, SignalStore, SourceKey, StoreError},
 };
+use codec::{CacheSection, append_section, digest_bytes, encode_bins, encode_column, pad_to_8};
+#[cfg(test)]
+use codec::{decode_bins, section_bytes};
 
 pub const CACHE_VERSION: u32 = 4;
 const MAGIC: [u8; 8] = *b"\x89SSPYR\r\n";
@@ -179,13 +183,6 @@ struct CacheSignal {
     levels: Vec<CacheSection>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-struct CacheSection {
-    offset: u64,
-    len: u64,
-    crc32: u32,
-}
-
 #[derive(Debug, Error)]
 pub enum CacheError {
     #[error(transparent)]
@@ -216,21 +213,16 @@ pub fn spill_columns(
     time: &[f64],
     values: &[f64],
 ) -> Result<PageHandle, CacheError> {
-    let mut hash = Sha256::new();
-    hash.update(timebase_id.0.to_le_bytes());
-    for column in [time, values] {
-        for value in column {
-            hash.update(value.to_le_bytes());
-        }
-    }
     let directory = root.directory().join("derived");
     fs::create_dir_all(&directory)?;
-    let target = directory.join(format!("{:x}.sscol", hash.finalize()));
+    let target = directory.join(format!("{}.sscol", uuid::Uuid::new_v4()));
     let value_offset = SPILL_HEADER_LEN + size_of_val(time);
     let value_bytes = size_of_val(values);
-    if !target.exists() {
-        let temporary = target.with_extension("sscol.tmp");
-        let mut file = File::create(&temporary)?;
+    let cache = PageCache::new(&directory, value_bytes.max(1));
+    let mut file = File::options().write(true).create_new(true).open(&target)?;
+    let handle =
+        PageHandle::cached(cache, &target, value_offset as u64, value_bytes).delete_on_drop();
+    let result = (|| -> Result<(), std::io::Error> {
         file.write_all(&SPILL_MAGIC)?;
         file.write_all(&1_u32.to_le_bytes())?;
         file.write_all(&0_u32.to_le_bytes())?;
@@ -239,15 +231,11 @@ pub fn spill_columns(
         file.write_all(&encode_column(time))?;
         file.write_all(&encode_column(values))?;
         file.sync_all()?;
-        fs::rename(temporary, &target)?;
-    }
-    let cache = PageCache::new(&directory, value_bytes.max(1));
-    Ok(PageHandle::cached(
-        cache,
-        target,
-        value_offset as u64,
-        value_bytes,
-    ))
+        Ok(())
+    })();
+    drop(file);
+    result?;
+    Ok(handle)
 }
 
 pub struct LoadedCache {
@@ -656,17 +644,6 @@ struct DecodedSignal {
     merged: Vec<CachedBinLevel>,
 }
 
-fn digest_bytes(digest: &str) -> Option<[u8; 32]> {
-    if digest.len() != 64 {
-        return None;
-    }
-    let mut bytes = [0; 32];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16).ok()?;
-    }
-    Some(bytes)
-}
-
 fn decode_paged_signal(
     path: &Path,
     payload_base: u64,
@@ -749,71 +726,6 @@ fn valid_time(handle: &PageHandle) -> bool {
         }
     }
     true
-}
-
-#[cfg(test)]
-fn section_bytes(payload: &[u8], section: CacheSection) -> Option<&[u8]> {
-    let start = usize::try_from(section.offset).ok()?;
-    let len = usize::try_from(section.len).ok()?;
-    let bytes = payload.get(start..start.checked_add(len)?)?;
-    (crc32fast::hash(bytes) == section.crc32).then_some(bytes)
-}
-
-fn append_section(payload: &mut Vec<u8>, bytes: &[u8]) -> CacheSection {
-    pad_to_8(payload);
-    let section = CacheSection {
-        offset: payload.len() as u64,
-        len: bytes.len() as u64,
-        crc32: crc32fast::hash(bytes),
-    };
-    payload.extend_from_slice(bytes);
-    section
-}
-
-fn encode_column(values: &[f64]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(values.len() * 8);
-    for value in values {
-        out.extend_from_slice(&value.to_le_bytes());
-    }
-    out
-}
-
-fn encode_bins(bins: &BinLevel) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8 + bins.len() * BinLevel::BYTES_PER_BIN);
-    out.extend_from_slice(&(bins.len() as u64).to_le_bytes());
-    for values in [
-        bins.t0_column(),
-        bins.t1_column(),
-        bins.first_column(),
-        bins.last_column(),
-        bins.min_column(),
-        bins.max_column(),
-        bins.sum_column(),
-        bins.sum_sq_column(),
-    ] {
-        for value in values {
-            out.extend_from_slice(&value.to_le_bytes());
-        }
-    }
-    for values in [bins.sample_count_column(), bins.finite_count_column()] {
-        for value in values {
-            out.extend_from_slice(&value.to_le_bytes());
-        }
-    }
-    out.extend_from_slice(bins.flags_column());
-    pad_to_8(&mut out);
-    out
-}
-
-#[cfg(test)]
-fn decode_bins(bytes: &[u8]) -> Option<BinLevel> {
-    BinLevel::decode_cache(bytes)
-}
-
-fn pad_to_8(bytes: &mut Vec<u8>) {
-    while bytes.len() % 8 != 0 {
-        bytes.push(0);
-    }
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -1086,6 +998,20 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(&digest[..16])
         );
+    }
+
+    #[test]
+    fn malformed_digest_is_rejected_before_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = CacheRoot::app_owned(directory.path());
+        let unicode = format!("aé{}", "a".repeat(61));
+        assert_eq!(unicode.len(), 64);
+        for digest in [unicode, "g".repeat(64), "a".repeat(63)] {
+            let error = write_at(&root, &digest, 0, &[], &mut |_| {}).unwrap_err();
+            assert!(matches!(error, CacheError::InvalidProvenance(_)));
+        }
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        assert_eq!(digest_bytes(&"aF".repeat(32)), Some([0xaf; 32]));
     }
 
     #[test]

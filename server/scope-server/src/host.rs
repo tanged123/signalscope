@@ -9,37 +9,28 @@ use std::{
 };
 
 use scope_core::{
-    cache::{self, CacheRoot},
-    columns::Column,
-    expr,
     ingest::{
         self, DecodedSource, IngestError, IngestSummary,
-        admission::{BudgetConfig, MemoryBudget, ResidentCharge},
+        admission::{BudgetConfig, MemoryBudget},
         batch::CommitSink,
         container::ContainerReader,
         registry::ProviderRegistry,
     },
-    paging::PageHandle,
     pyramid::Pyramid,
     session,
     sources::{SourceRecord, SourceRegistry},
-    store::{Signal, SignalId, SignalStore, Source, SourceId, SourceKey},
+    store::{Signal, SignalId, SignalStore, Source, SourceKey},
 };
 use scope_protocol::{
     BatchFailure, BatchState, BatchStatus, ContainerOutline, DatasetOutline, DatasetOutlineKind,
-    DerivedBundleResponse, DerivedRequest, Envelope, FormatCount, FormatDescriptor,
-    ScanSourcesResponse, SignalSummary, SkippedMemberSummary, SourceSummary,
+    Envelope, FormatCount, FormatDescriptor, ScanSourcesResponse, SignalSummary, SourceSummary,
 };
 
 pub struct DataState {
     pub(crate) store: SignalStore,
     pub(crate) pyramids: BTreeMap<SignalId, Pyramid>,
     pub(crate) registry: SourceRegistry,
-    pub(crate) derived_source: Option<SourceId>,
-    derived_references: BTreeMap<String, Vec<String>>,
-    derived_bundles: BTreeMap<String, String>,
-    derived_spills: BTreeMap<String, PageHandle>,
-    derived_charges: BTreeMap<String, ResidentCharge>,
+    derived: scope_core::derived::DerivedSignals,
     pub(crate) cache_root: PathBuf,
     pub(crate) budget: MemoryBudget,
 }
@@ -50,11 +41,7 @@ impl Default for DataState {
             store: SignalStore::default(),
             pyramids: BTreeMap::new(),
             registry: SourceRegistry::default(),
-            derived_source: None,
-            derived_references: BTreeMap::new(),
-            derived_bundles: BTreeMap::new(),
-            derived_spills: BTreeMap::new(),
-            derived_charges: BTreeMap::new(),
+            derived: scope_core::derived::DerivedSignals::default(),
             cache_root: std::env::temp_dir().join("signalscope/cache"),
             budget: MemoryBudget::new(BudgetConfig::from_available(8 * 1024 * 1024 * 1024)),
         }
@@ -496,17 +483,8 @@ pub(crate) fn windowed_slice(
     Ok((time, values))
 }
 
-const DERIVED_PREFIX: &str = "derived/";
-type BundleInputs = (
-    BTreeSet<String>,
-    BTreeMap<SourceKey, (String, BTreeSet<String>)>,
-);
-
 impl DataState {
     pub(crate) fn reset(&mut self) {
-        for handle in self.derived_spills.values() {
-            let _ = std::fs::remove_file(handle.path());
-        }
         let cache_root = self.cache_root.clone();
         let budget = self.budget.clone();
         *self = Self {
@@ -516,347 +494,14 @@ impl DataState {
         };
     }
 
-    fn dependents(&self, path: &str) -> Vec<&str> {
-        self.derived_references
-            .iter()
-            .filter(|(derived, references)| {
-                derived.as_str() != path && references.iter().any(|reference| reference == path)
-            })
-            .map(|(derived, _)| derived.as_str())
-            .collect()
-    }
-
-    fn ensure_owned_derived(&self, path: &str) -> Result<(), String> {
-        let Some(signal) = self.store.signal_by_path(path) else {
-            return Ok(());
-        };
-        if Some(signal.source_id) != self.derived_source {
-            return Err(format!("signal path belongs to an ingested source: {path}"));
+    pub(crate) fn derived(&mut self) -> scope_core::derived::DerivedContext<'_> {
+        scope_core::derived::DerivedContext {
+            state: &mut self.derived,
+            store: &mut self.store,
+            pyramids: &mut self.pyramids,
+            budget: &self.budget,
+            cache_root: &self.cache_root,
         }
-        Ok(())
-    }
-
-    fn ensure_without_dependents(&self, path: &str, action: &str) -> Result<(), String> {
-        let dependents = self.dependents(path);
-        if dependents.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "cannot {action} {path}; dependent derived signals: {}",
-                dependents.join(", ")
-            ))
-        }
-    }
-
-    fn remove_spill(&mut self, path: &str) {
-        let Some(handle) = self.derived_spills.remove(path) else {
-            return;
-        };
-        if !self
-            .derived_spills
-            .values()
-            .any(|other| other.path() == handle.path())
-        {
-            let _ = std::fs::remove_file(handle.path());
-        }
-    }
-
-    fn bundle_inputs(&self) -> BundleInputs {
-        let full_paths = self
-            .store
-            .signals()
-            .map(|signal| signal.path.clone())
-            .collect();
-        let mut locals = BTreeMap::new();
-        for source in self
-            .store
-            .sources()
-            .filter(|source| Some(source.id) != self.derived_source)
-        {
-            locals.insert(
-                source.key,
-                (
-                    source.prefix.clone(),
-                    self.store
-                        .signals_of(source.id)
-                        .map(|signal| signal.local_path.clone())
-                        .collect(),
-                ),
-            );
-        }
-        (full_paths, locals)
-    }
-
-    fn materialize_derived(
-        &mut self,
-        path: String,
-        source_id: SourceId,
-        evaluated: expr::Evaluated,
-        references: Vec<String>,
-    ) -> Result<SignalSummary, String> {
-        let bytes = evaluated.values.len().saturating_mul(size_of::<f64>());
-        let charge = self
-            .budget
-            .acquire_working(bytes)
-            .and_then(scope_core::ingest::admission::Ticket::transfer_to_resident)
-            .ok();
-        let (values, spill) = if charge.is_some() {
-            (Column::from(evaluated.values), None)
-        } else {
-            let timebase_id = references
-                .first()
-                .and_then(|reference| self.store.signal_by_path(reference))
-                .map(Signal::timebase_id)
-                .ok_or_else(|| "derived expression has no timebase".to_owned())?;
-            let handle = cache::spill_columns(
-                &CacheRoot::app_owned(&self.cache_root),
-                timebase_id,
-                &evaluated.time,
-                &evaluated.values,
-            )
-            .map_err(|error| error.to_string())?;
-            (Column::paged(handle.clone()), Some(handle))
-        };
-        let signal_id = self
-            .store
-            .insert_signal(source_id, path, None, evaluated.time, values)
-            .map_err(|error| error.to_string())?;
-        let signal = self
-            .store
-            .signal(signal_id)
-            .ok_or_else(|| "derived signal vanished after insertion".to_owned())?;
-        let source_key = self
-            .store
-            .sources()
-            .find(|source| source.id == source_id)
-            .expect("derived source")
-            .key;
-        let pyramid = Pyramid::from_signal(signal);
-        let summary = signal_summary(signal, source_key, pyramid.last_finite_value());
-        self.pyramids.insert(signal_id, pyramid);
-        self.derived_references
-            .insert(summary.path.clone(), references);
-        if let Some(handle) = spill {
-            self.derived_spills.insert(summary.path.clone(), handle);
-        }
-        if let Some(charge) = charge {
-            self.derived_charges.insert(summary.path.clone(), charge);
-        }
-        Ok(summary)
-    }
-
-    pub(crate) fn create_derived_signal(
-        &mut self,
-        request: DerivedRequest,
-    ) -> Result<SignalSummary, String> {
-        let path = if request.path.starts_with(DERIVED_PREFIX) {
-            request.path
-        } else {
-            format!("{DERIVED_PREFIX}{}", request.path)
-        };
-        self.ensure_owned_derived(&path)?;
-        if self.store.signal_by_path(&path).is_some() {
-            self.ensure_without_dependents(&path, "replace")?;
-        }
-        let parsed = expr::parse(&request.expr).map_err(|error| error.to_string())?;
-        let references = expr::references(&parsed);
-        let evaluated = expr::evaluate(&parsed, &self.store).map_err(|error| error.to_string())?;
-        let source_id = if let Some(id) = self.derived_source {
-            id
-        } else {
-            let id = self
-                .store
-                .register_source(
-                    DERIVED_PREFIX,
-                    SourceKey(uuid::Uuid::new_v4()),
-                    DERIVED_PREFIX.trim_end_matches('/'),
-                )
-                .map_err(|error| error.to_string())?;
-            self.derived_source = Some(id);
-            id
-        };
-        if let Some(previous) = self.store.remove_signal(&path) {
-            self.pyramids.remove(&previous);
-        }
-        self.remove_spill(&path);
-        self.derived_charges.remove(&path);
-        self.materialize_derived(
-            path.trim_start_matches(DERIVED_PREFIX).to_owned(),
-            source_id,
-            evaluated,
-            references,
-        )
-    }
-
-    pub(crate) fn create_derived_bundle(
-        &mut self,
-        request: scope_protocol::CreateDerivedBundleRequest,
-    ) -> Result<DerivedBundleResponse, String> {
-        let name = request
-            .name
-            .strip_prefix(DERIVED_PREFIX)
-            .unwrap_or(&request.name)
-            .to_owned();
-        if name.is_empty() {
-            return Err("derived bundle name is empty".into());
-        }
-        if name.contains('/') {
-            return Err("derived bundle names are a single segment".into());
-        }
-        if self.derived_bundles.contains_key(&name) {
-            return Err(format!("derived bundle already exists: {name}"));
-        }
-        let (full_paths, locals) = self.bundle_inputs();
-        let expansion = scope_core::derived_bundle::expand(&request.expr, &full_paths, &locals)
-            .map_err(|error| error.to_string())?;
-        let mut skipped: Vec<SkippedMemberSummary> = expansion
-            .skipped
-            .into_iter()
-            .map(|member| SkippedMemberSummary {
-                prefix: member.prefix,
-                missing: member.missing,
-            })
-            .collect();
-        let local_path = format!("{DERIVED_PREFIX}{name}");
-        let mut created = Vec::new();
-        for member in expansion.members {
-            let Some(source_id) = self
-                .store
-                .sources()
-                .find(|source| source.key == member.source_key)
-                .map(|source| source.id)
-            else {
-                continue;
-            };
-            let parsed = match expr::parse(&member.expr) {
-                Ok(parsed) => parsed,
-                Err(error) => {
-                    skipped.push(SkippedMemberSummary {
-                        prefix: member.prefix,
-                        missing: vec![error.to_string()],
-                    });
-                    continue;
-                }
-            };
-            let references = expr::references(&parsed);
-            let evaluated = match expr::evaluate(&parsed, &self.store) {
-                Ok(evaluated) => evaluated,
-                Err(error) => {
-                    skipped.push(SkippedMemberSummary {
-                        prefix: member.prefix,
-                        missing: vec![error.to_string()],
-                    });
-                    continue;
-                }
-            };
-            match self.materialize_derived(local_path.clone(), source_id, evaluated, references) {
-                Ok(summary) => created.push(summary),
-                Err(error) => skipped.push(SkippedMemberSummary {
-                    prefix: member.prefix,
-                    missing: vec![error],
-                }),
-            }
-        }
-        skipped.sort_by(|left, right| left.prefix.cmp(&right.prefix));
-        self.derived_bundles.insert(name, request.expr);
-        Ok(DerivedBundleResponse {
-            local_path,
-            created,
-            skipped,
-        })
-    }
-
-    pub(crate) fn reexpand_derived_bundles(&mut self) {
-        let definitions: Vec<(String, String)> = self
-            .derived_bundles
-            .iter()
-            .map(|(name, expr)| (name.clone(), expr.clone()))
-            .collect();
-        for (name, expression) in definitions {
-            let (full_paths, locals) = self.bundle_inputs();
-            let Ok(expansion) =
-                scope_core::derived_bundle::expand(&expression, &full_paths, &locals)
-            else {
-                continue;
-            };
-            for member in expansion.members {
-                let Some(source_id) = self
-                    .store
-                    .sources()
-                    .find(|source| source.key == member.source_key)
-                    .map(|source| source.id)
-                else {
-                    continue;
-                };
-                let display_path = format!("{}/{}{}", member.prefix, DERIVED_PREFIX, name);
-                if self.store.signal_by_path(&display_path).is_some() {
-                    continue;
-                }
-                let Ok(parsed) = expr::parse(&member.expr) else {
-                    continue;
-                };
-                let references = expr::references(&parsed);
-                let Ok(evaluated) = expr::evaluate(&parsed, &self.store) else {
-                    continue;
-                };
-                let _ = self.materialize_derived(
-                    format!("{DERIVED_PREFIX}{name}"),
-                    source_id,
-                    evaluated,
-                    references,
-                );
-            }
-        }
-    }
-
-    pub(crate) fn remove_derived_bundle(
-        &mut self,
-        request: &scope_protocol::RemoveDerivedBundleRequest,
-    ) -> Result<(), String> {
-        let name = request
-            .name
-            .strip_prefix(DERIVED_PREFIX)
-            .unwrap_or(&request.name);
-        let local_path = format!("{DERIVED_PREFIX}{name}");
-        let paths: Vec<String> = self
-            .store
-            .signals()
-            .filter(|signal| signal.local_path == local_path)
-            .map(|signal| signal.path.clone())
-            .collect();
-        for path in &paths {
-            self.ensure_without_dependents(path, "remove")?;
-        }
-        for path in paths {
-            if let Some(id) = self.store.remove_signal(&path) {
-                self.pyramids.remove(&id);
-            }
-            self.remove_spill(&path);
-            self.derived_charges.remove(&path);
-            self.derived_references.remove(&path);
-        }
-        self.derived_bundles.remove(name);
-        Ok(())
-    }
-
-    pub(crate) fn remove_derived_signal(&mut self, path: &str) -> Result<(), String> {
-        if !path.starts_with(DERIVED_PREFIX) {
-            return Err(format!(
-                "only derived signals can be removed individually: {path}"
-            ));
-        }
-        self.ensure_owned_derived(path)?;
-        if self.store.signal_by_path(path).is_none() {
-            return Ok(());
-        }
-        self.ensure_without_dependents(path, "remove")?;
-        if let Some(id) = self.store.remove_signal(path) {
-            self.pyramids.remove(&id);
-        }
-        self.remove_spill(path);
-        self.derived_charges.remove(path);
-        self.derived_references.remove(path);
-        Ok(())
     }
 }
 

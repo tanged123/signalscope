@@ -7,6 +7,7 @@ import {
   type BinColumns,
 } from "../app/bin-columns";
 import type { ColumnarTileResponse } from "../app/bin-columns";
+import { createFeedCache } from "./line2d-adapter";
 
 /**
  * Interleaved `[x0, y0, x1, y1, ...]` in single precision: the layout
@@ -143,14 +144,12 @@ function vertexCount(columns: BinColumns): number {
   return count;
 }
 
-const feedCache = new WeakMap<BinColumns, { tRef: number; feed: SeriesFeed }>();
+const feed = createFeedCache<BinColumns, number, SeriesFeed>(
+  (left, right) => left === right,
+);
 
 export function cachedFeed(columns: BinColumns, tRef: number): SeriesFeed {
-  const cached = feedCache.get(columns);
-  if (cached !== undefined && cached.tRef === tRef) return cached.feed;
-  const feed = m4Feed(columns, tRef);
-  feedCache.set(columns, { tRef, feed });
-  return feed;
+  return feed(columns, tRef, () => m4Feed(columns, tRef));
 }
 
 export function responseTimeReference(response: ColumnarTileResponse): number {

@@ -388,6 +388,30 @@ mod tests {
         super::super::parse_recipe(source).unwrap()
     }
 
+    #[test]
+    fn snapshot_and_recipe_glob_semantics_are_documented() {
+        let cases = [
+            ("*", "a/b", true, false),
+            ("**", "a/b", true, true),
+            ("run_*", "run_one", true, false),
+            ("*/tail", "a/b/tail", true, false),
+            ("a/*", "a/b", true, true),
+            ("", "", true, true),
+        ];
+        for (pattern, path, snapshot, recipe) in cases {
+            assert_eq!(
+                crate::selector::glob_pattern_matches(pattern, path),
+                Some(snapshot),
+                "snapshot glob {pattern:?} against {path:?}",
+            );
+            assert_eq!(
+                glob_matches(pattern, path),
+                recipe,
+                "recipe glob {pattern:?} against {path:?}",
+            );
+        }
+    }
+
     const SHARED_TIME: &str = r#"
 id = "shared"
 container = "hdf5"

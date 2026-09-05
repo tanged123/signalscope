@@ -4,10 +4,20 @@ ADRs are the durable architecture record. A later ADR amends or supersedes an
 earlier decision; the historical file stays in place so old sessions and
 implementation choices remain explainable.
 
+ADRs record _why_. For _where code goes_ and _what to reuse_, read
+[architecture.md](../architecture.md).
+
+Use the [short ADR template](template.md) for changes to boundaries,
+compatibility, reduction semantics, or resource policy. Local implementation
+details do not need a separate record. [ADR 0054](0054-evidence-backed-architecture-guidance.md)
+defines how to distinguish current implementation, accepted decisions, and
+pending work. The [roadmap](../implementation-roadmap.md) owns implementation
+progress; amend earlier records with explicit links when their guidance changes.
+
 ## Current decisions
 
 1. [Product shape and two-host frontend](0001-product-shape-and-two-host-frontend.md)
-2. [Layer boundaries](0002-layer-boundaries.md)
+2. [Layer boundaries](0002-layer-boundaries.md) (host updated by 0038/0049; module guidance amended by 0053/0054)
 3. [Min/max tile pyramid](0003-min-max-tile-pyramid.md)
 4. [Versioned protocol and code generation](0004-versioned-protocol-and-codegen.md)
 5. [Session schema versioning](0005-session-schema-versioning.md)
@@ -40,7 +50,7 @@ implementation choices remain explainable.
 32. [ChartGPU submodule delivery](0040-chartgpu-submodule-delivery.md)
 33. [Full-resolution presentation baseline](0041-full-resolution-presentation-baseline.md) (amended by 0044)
 34. [Padded render feed and windowed presentation math](0042-padded-render-feed.md)
-35. [Time-only presentation and a single plotter](0043-time-only-presentation.md)
+35. [Time-only presentation and a single plotter](0043-time-only-presentation.md) (explicit-X and typed families added by 0052)
 36. [Adaptive-resolution presentation](0044-adaptive-resolution-presentation.md)
 37. [Constant-work ChartGPU viewport updates](0045-constant-work-chart-viewport.md)
 38. [Uniform presentation admission](0046-uniform-presentation-admission.md)
@@ -49,6 +59,10 @@ implementation choices remain explainable.
 41. [Electron distribution shell](0049-electron-distribution-shell.md)
 42. [Retire obsolete compatibility seams](0050-retire-obsolete-compatibility-seams.md)
 43. [Style cascade, legend analysis, and inspection state](0051-style-cascade-and-legend-statistics.md)
+44. [Typed plot families and the explicit-X Line2D foundation](0052-typed-plot-families-and-explicit-x-line2d.md)
+45. [Module boundaries and shared primitives](0053-module-boundaries-and-shared-primitives.md) (extraction and size-policy interpretation clarified by 0054)
+46. [Evidence-backed architecture guidance](0054-evidence-backed-architecture-guidance.md)
+47. [Core policy and query lifetimes](0055-core-policy-and-query-lifetimes.md)
 
 ## Superseded decisions
 

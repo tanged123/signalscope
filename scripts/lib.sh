@@ -23,6 +23,7 @@ ensure_dev_shell() {
 # vite build); every gate that runs frontend_checks also runs artifact_checks.
 frontend_checks() {
   pnpm lint
+  node --test frontend/scripts/check-architecture.mjs
   pnpm codegen:check
   pnpm test
 }

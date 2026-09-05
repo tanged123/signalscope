@@ -69,17 +69,42 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     if head.app != "signalscope" {
         return Err(SessionError::WrongApplication(head.app));
     }
-    let current = match head.schema_version {
-        SESSION_SCHEMA_VERSION => value,
-        26 => migrate_v26(value),
-        25 => migrate_v26(migrate_v25(value)),
-        24 => migrate_v26(migrate_v25(migrate_v24(value))),
-        23 => migrate_v26(migrate_v25(migrate_v24(migrate_v23(value)))),
-        22 => migrate_v26(migrate_v25(migrate_v24(migrate_v23(migrate_v22(value))))),
-        version => return Err(SessionError::UnsupportedVersion(version)),
-    };
-    Ok(serde_json::from_value(current)?)
+    if !(22..=SESSION_SCHEMA_VERSION).contains(&head.schema_version) {
+        return Err(SessionError::UnsupportedVersion(head.schema_version));
+    }
+    let mut current = value;
+    for (source_version, migrate) in MIGRATIONS {
+        if head.schema_version <= *source_version {
+            current = migrate(current);
+        }
+    }
+    // Serde accepts extra fields on an internally tagged unit variant even
+    // with deny_unknown_fields. Preserve the time/signal correlation here.
+    for tab in current["tabs"].as_array().into_iter().flatten() {
+        for panel in tab["panels"].as_array().into_iter().flatten() {
+            let axis = &panel["x_axis"];
+            if axis["kind"] == "time" && axis.get("ref").is_some() {
+                return Err(SessionError::Json(serde::de::Error::custom(
+                    "time X axis cannot carry a signal reference",
+                )));
+            }
+        }
+    }
+    let session: Session = serde_json::from_value(current)?;
+    Ok(session)
 }
+
+type Migration = fn(serde_json::Value) -> serde_json::Value;
+
+const MIGRATIONS: &[(u32, Migration)] = &[
+    (22, migrate_v22),
+    (23, migrate_v23),
+    (24, migrate_v24),
+    (25, migrate_v25),
+    (26, migrate_v26),
+    (27, migrate_v27),
+    (28, migrate_v28),
+];
 
 fn migrate_v22(mut value: serde_json::Value) -> serde_json::Value {
     value["schema_version"] = 23.into();
@@ -216,7 +241,7 @@ fn migrate_v25(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 fn migrate_v26(mut value: serde_json::Value) -> serde_json::Value {
-    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["schema_version"] = 27.into();
     if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
         for tab in tabs {
             let Some(panels) = tab
@@ -236,6 +261,57 @@ fn migrate_v26(mut value: serde_json::Value) -> serde_json::Value {
                         serde_json::Value::Null
                     };
                 panel.entry("legend_dock").or_insert(dock);
+            }
+        }
+    }
+    value
+}
+
+fn migrate_v27(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = 28.into();
+    if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
+        for tab in tabs {
+            let Some(panels) = tab
+                .get_mut("panels")
+                .and_then(|panels| panels.as_array_mut())
+            else {
+                continue;
+            };
+            for panel in panels {
+                let Some(panel) = panel.as_object_mut() else {
+                    continue;
+                };
+                panel
+                    .entry("x_axis")
+                    .or_insert_with(|| serde_json::json!({"kind": "time", "ref": null}));
+            }
+        }
+    }
+    value
+}
+
+fn migrate_v28(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
+        for tab in tabs {
+            let Some(panels) = tab
+                .get_mut("panels")
+                .and_then(|panels| panels.as_array_mut())
+            else {
+                continue;
+            };
+            for panel in panels {
+                let Some(x_axis) = panel
+                    .get_mut("x_axis")
+                    .and_then(|axis| axis.as_object_mut())
+                else {
+                    continue;
+                };
+                if x_axis.get("kind").and_then(|kind| kind.as_str()) == Some("time")
+                    && x_axis.get("ref").is_some_and(serde_json::Value::is_null)
+                {
+                    x_axis.remove("ref");
+                }
             }
         }
     }
@@ -302,6 +378,45 @@ mod tests {
             decode_provenance: None,
             recipe_id: None,
             recipe_digest: None,
+        }
+    }
+
+    #[test]
+    fn shared_runtime_parser_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/testdata/session-parser-cases.json"
+        ))
+        .unwrap();
+        let base: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/testdata/session-conformance.json"
+        ))
+        .unwrap();
+        for case in fixture["cases"].as_array().unwrap() {
+            let mut input = base.clone();
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(case["session"].as_object().unwrap().clone());
+            let mut panel = fixture["panel"].clone();
+            panel
+                .as_object_mut()
+                .unwrap()
+                .extend(case["panel"].as_object().unwrap().clone());
+            input["tabs"][0]["panels"] = serde_json::json!([panel]);
+            let result = from_json(&input.to_string());
+            assert_eq!(
+                result.is_ok(),
+                case["valid"].as_bool().unwrap(),
+                "{}: {result:?}",
+                case["name"]
+            );
+            if let Ok(session) = result {
+                let json = serde_json::to_string(&session).unwrap();
+                assert_eq!(from_json(&json).unwrap(), session);
+                for annotation in &session.tabs[0].panels[0].annotations {
+                    assert_eq!(annotation.pinned_x, None);
+                }
+            }
         }
     }
 
@@ -435,6 +550,7 @@ mod tests {
                     legend_anchor: None,
                     legend_dock: None,
                     legend_hint_dismissed: false,
+                    x_axis: XAxisSource::Time,
                     y_range: None,
                     x_range: None,
                     x_label: None,
@@ -667,6 +783,7 @@ mod tests {
         assert!((panel.annotations[0].offset[1] + 10.0).abs() < f64::EPSILON);
         assert!((panel.annotations[0].pinned_value - 3.25).abs() < f64::EPSILON);
         assert_eq!(panel.legend_dock, None);
+        assert_eq!(panel.x_axis, XAxisSource::Time);
 
         let mut v26 = serde_json::to_value(restored).expect("serializes migrated session");
         v26["schema_version"] = 26.into();
@@ -679,6 +796,73 @@ mod tests {
         assert_eq!(
             docked.tabs[0].panels[0].legend_dock,
             Some(LegendDock::Right)
+        );
+    }
+
+    #[test]
+    fn v27_panels_migrate_to_time_x_axis() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/testdata/session-parser-cases.json"
+        ))
+        .expect("valid shared panel fixture");
+        let mut value = serde_json::to_value(Session::default()).expect("serializes session");
+        value["tabs"][0]["panels"] = serde_json::json!([fixture["panel"]]);
+        value["schema_version"] = 27.into();
+        value["tabs"][0]["panels"][0]
+            .as_object_mut()
+            .expect("panel object")
+            .remove("x_axis");
+
+        let restored = from_json(&value.to_string()).expect("v27 migrates");
+        let panel = &restored.tabs[0].panels[0];
+        assert_eq!(panel.x_axis, XAxisSource::Time);
+
+        let mut v28 = serde_json::to_value(&restored).expect("serializes migrated session");
+        v28["schema_version"] = 28.into();
+        v28["tabs"][0]["panels"][0]["x_axis"]["ref"] = serde_json::Value::Null;
+        let migrated_v28 = from_json(&v28.to_string()).expect("v28 migrates");
+        assert_eq!(migrated_v28.tabs[0].panels[0].x_axis, XAxisSource::Time);
+
+        for invalid_ref in [
+            serde_json::json!({"source_key": "source", "channel": "x"}),
+            serde_json::json!("x"),
+            serde_json::json!(false),
+        ] {
+            v28["tabs"][0]["panels"][0]["x_axis"]["ref"] = invalid_ref;
+            assert!(matches!(
+                from_json(&v28.to_string()),
+                Err(SessionError::Json(_))
+            ));
+        }
+        v28["tabs"][0]["panels"][0]["x_axis"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ref");
+        assert_eq!(
+            from_json(&v28.to_string()).unwrap().tabs[0].panels[0].x_axis,
+            XAxisSource::Time
+        );
+
+        value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+        value["tabs"][0]["panels"][0]["x_axis"] = serde_json::json!({
+            "kind": "signal"
+        });
+        let error = from_json(&value.to_string()).expect_err("invalid axis source");
+        assert!(matches!(error, SessionError::Json(_)));
+
+        value["tabs"][0]["panels"][0]["x_axis"] = serde_json::json!({
+            "kind": "signal",
+            "ref": {"source_key": "source", "channel": "x"}
+        });
+        let signal_axis = from_json(&value.to_string()).expect("signal axis source");
+        assert_eq!(
+            signal_axis.tabs[0].panels[0].x_axis,
+            XAxisSource::Signal {
+                r#ref: SeriesRef {
+                    source_key: "source".into(),
+                    channel: "x".into(),
+                },
+            }
         );
     }
 }

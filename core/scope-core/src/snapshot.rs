@@ -5,12 +5,14 @@ use std::{
     io::Write,
 };
 
+use crate::line2d::{Line2dError, LinePyramid};
 use crate::pyramid::Pyramid;
 use crate::series_ref::path_from_ref;
 use crate::session::{BindingKind, LinkedTime, NamedSetKind, PanelState, SeriesRef, Session};
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use scope_protocol::{
-    BakedSignal, ExportFidelity, ExportRange, ExportSelection, SignalSummary, SnapshotManifest,
+    BakedLine2D, BakedLine2DLevel, BakedSignal, ExportFidelity, ExportRange, ExportSelection,
+    SignalSummary, SnapshotManifest,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -38,6 +40,19 @@ pub struct SignalPlan<'a> {
     pub levels: Vec<LevelPlan>,
 }
 
+pub struct LineLevelPlan {
+    pub index: usize,
+    pub point_count: usize,
+}
+
+pub struct LinePlan<'a> {
+    pub x_signal: &'a Signal,
+    pub y_signals: Vec<&'a Signal>,
+    pub pyramid: LinePyramid,
+    pub window: Option<(f64, f64)>,
+    pub levels: Vec<LineLevelPlan>,
+}
+
 impl SignalPlan<'_> {
     #[must_use]
     pub fn finest_level(&self) -> usize {
@@ -47,6 +62,7 @@ impl SignalPlan<'_> {
 
 pub struct ExportPlan<'a> {
     pub signals: Vec<SignalPlan<'a>>,
+    pub lines: Vec<LinePlan<'a>>,
     pub series_total: u64,
     pub series_decimated: u64,
     pub series_full_rate: u64,
@@ -65,6 +81,16 @@ pub enum SnapshotError {
     MissingSource(SignalId),
     #[error("signal {signal:?} level {level} window is unavailable")]
     MissingLevel { signal: SignalId, level: usize },
+    #[error("Line2D X signal {0:?} is missing")]
+    MissingLineXSignal(SignalId),
+    #[error("Line2D X signal reference {0} is missing")]
+    MissingLineXReference(String),
+    #[error("Line2D panel has no Y signals")]
+    EmptyLineYSignals,
+    #[error("Line2D signals do not share an exact timebase")]
+    LineTimebaseMismatch,
+    #[error("Line2D signal {0:?} could not be read")]
+    LineColumnRead(SignalId),
     #[error("manifest serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
     #[error("manifest output is not UTF-8: {0}")]
@@ -86,10 +112,22 @@ fn panel_signal_ids(
     store: &SignalStore,
     panel: &PanelState,
 ) -> BTreeSet<SignalId> {
-    let mut ids = BTreeSet::new();
+    let mut ids = panel_y_signal_ids(session, store, panel)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if let crate::session::XAxisSource::Signal { r#ref } = &panel.x_axis {
+        if let Some(signal) = signal_from_ref(session, store, r#ref) {
+            ids.insert(signal.id);
+        }
+    }
+    ids
+}
+
+fn panel_y_signal_ids(session: &Session, store: &SignalStore, panel: &PanelState) -> Vec<SignalId> {
+    let mut ids = Vec::new();
     for binding in &panel.bindings {
         match binding.kind {
-            BindingKind::Pick => insert_refs(&mut ids, session, store, &binding.refs),
+            BindingKind::Pick => append_refs(&mut ids, session, store, &binding.refs),
             BindingKind::Query => {
                 if let Some(selector) = &binding.selector {
                     if let Some(signals) = matching_signals(store, selector) {
@@ -106,7 +144,7 @@ fn panel_signal_ids(
                     continue;
                 };
                 match set.kind {
-                    NamedSetKind::Pick => insert_refs(&mut ids, session, store, &set.refs),
+                    NamedSetKind::Pick => append_refs(&mut ids, session, store, &set.refs),
                     NamedSetKind::Query => {
                         if let Some(selector) = &set.selector {
                             if let Some(signals) = matching_signals(store, selector) {
@@ -118,11 +156,12 @@ fn panel_signal_ids(
             }
         }
     }
-    ids
+    let mut seen = BTreeSet::new();
+    ids.into_iter().filter(|id| seen.insert(*id)).collect()
 }
 
-fn insert_refs(
-    ids: &mut BTreeSet<SignalId>,
+fn append_refs(
+    ids: &mut Vec<SignalId>,
     session: &Session,
     store: &SignalStore,
     refs: &[SeriesRef],
@@ -156,192 +195,7 @@ fn matching_signals<'a>(
     store: &'a SignalStore,
     selector: &'a str,
 ) -> Option<impl Iterator<Item = &'a Signal>> {
-    let selector = parse_selector(selector)?;
-    Some(
-        store
-            .signals()
-            .filter(move |signal| selector_matches(signal, &selector)),
-    )
-}
-
-struct ParsedSelector<'a> {
-    channel: ParsedGlob,
-    source: Option<ParsedGlob>,
-    attrs: Vec<(&'a str, &'a str)>,
-}
-
-struct ParsedGlob {
-    branches: Vec<Vec<char>>,
-}
-
-fn parse_selector(selector: &str) -> Option<ParsedSelector<'_>> {
-    let mut tokens = selector.split_whitespace();
-    let channel = parse_glob(tokens.next()?)?;
-    let mut source = None;
-    let mut attrs = Vec::new();
-    while let Some(token) = tokens.next() {
-        if token == "@" || token.starts_with('@') {
-            if source.is_some() {
-                return None;
-            }
-            let pattern = if token == "@" {
-                tokens.next()
-            } else {
-                token.get(1..)
-            }?;
-            if pattern.is_empty() {
-                return None;
-            }
-            source = Some(parse_glob(pattern)?);
-        } else {
-            let (key, value) = token.split_once(':')?;
-            if value.is_empty() || !matches!(key, "unit" | "kind") {
-                return None;
-            }
-            if key == "kind" && !matches!(value, "derived" | "signal") {
-                return None;
-            }
-            attrs.push((key, value));
-        }
-    }
-    Some(ParsedSelector {
-        channel,
-        source,
-        attrs,
-    })
-}
-
-fn parse_glob(pattern: &str) -> Option<ParsedGlob> {
-    let branches = pattern
-        .split('|')
-        .map(|branch| {
-            let branch = branch.chars().collect::<Vec<_>>();
-            let mut index = 0;
-            while index < branch.len() {
-                if branch[index] != '[' {
-                    index += 1;
-                    continue;
-                }
-                let end = branch[index + 1..]
-                    .iter()
-                    .position(|character| *character == ']')
-                    .map(|offset| index + 1 + offset)?;
-                let body = &branch[index + 1..end];
-                let valid = body.len() == 1 && body[0].is_ascii_alphanumeric()
-                    || body.len() == 3
-                        && body[0].is_ascii_alphanumeric()
-                        && body[1] == '-'
-                        && body[2].is_ascii_alphanumeric();
-                if !valid {
-                    return None;
-                }
-                index = end + 1;
-            }
-            Some(branch)
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some(ParsedGlob { branches })
-}
-
-fn selector_matches(signal: &Signal, selector: &ParsedSelector<'_>) -> bool {
-    let channel = signal
-        .path
-        .strip_prefix("derived/")
-        .unwrap_or(&signal.local_path);
-    if !glob_matches(&selector.channel, channel) {
-        return false;
-    }
-
-    if let Some(pattern) = &selector.source {
-        let source_name = signal
-            .path
-            .split_once('/')
-            .map_or("derived", |(source, _)| source);
-        if !glob_matches(pattern, source_name) {
-            return false;
-        }
-    }
-    selector.attrs.iter().all(|(key, value)| match *key {
-        "unit" => signal.unit.as_deref() == Some(value),
-        "kind" => match *value {
-            "derived" => signal.path.starts_with("derived/"),
-            "signal" => !signal.path.starts_with("derived/"),
-            _ => false,
-        },
-        _ => false,
-    })
-}
-
-fn glob_matches(pattern: &ParsedGlob, value: &str) -> bool {
-    let value = value.chars().collect::<Vec<_>>();
-    pattern
-        .branches
-        .iter()
-        .any(|branch| glob_branch_matches(branch, &value))
-}
-
-fn glob_branch_matches(pattern: &[char], value: &[char]) -> bool {
-    fn matches_at(
-        pattern: &[char],
-        value: &[char],
-        pattern_at: usize,
-        value_at: usize,
-        memo: &mut [Vec<Option<bool>>],
-    ) -> bool {
-        if let Some(matched) = memo[pattern_at][value_at] {
-            return matched;
-        }
-        let matched = if pattern_at == pattern.len() {
-            value_at == value.len()
-        } else {
-            match pattern[pattern_at] {
-                '*' => {
-                    matches_at(pattern, value, pattern_at + 1, value_at, memo)
-                        || (value_at < value.len()
-                            && matches_at(pattern, value, pattern_at, value_at + 1, memo))
-                }
-                '?' => {
-                    value_at < value.len()
-                        && matches_at(pattern, value, pattern_at + 1, value_at + 1, memo)
-                }
-                '[' => {
-                    let Some(end) = pattern[pattern_at + 1..]
-                        .iter()
-                        .position(|character| *character == ']')
-                        .map(|offset| pattern_at + 1 + offset)
-                    else {
-                        memo[pattern_at][value_at] = Some(false);
-                        return false;
-                    };
-                    let body = &pattern[pattern_at + 1..end];
-                    let valid = body.len() == 1 && body[0].is_ascii_alphanumeric()
-                        || body.len() == 3
-                            && body[0].is_ascii_alphanumeric()
-                            && body[1] == '-'
-                            && body[2].is_ascii_alphanumeric();
-                    if !valid || value_at == value.len() {
-                        false
-                    } else {
-                        let class_matches = if body.len() == 1 {
-                            value[value_at] == body[0]
-                        } else {
-                            (body[0]..=body[2]).contains(&value[value_at])
-                        };
-                        class_matches && matches_at(pattern, value, end + 1, value_at + 1, memo)
-                    }
-                }
-                character => {
-                    value.get(value_at) == Some(&character)
-                        && matches_at(pattern, value, pattern_at + 1, value_at + 1, memo)
-                }
-            }
-        };
-        memo[pattern_at][value_at] = Some(matched);
-        matched
-    }
-
-    let mut memo = vec![vec![None; value.len() + 1]; pattern.len() + 1];
-    matches_at(pattern, value, 0, 0, &mut memo)
+    crate::selector::matching_signals(store, selector)
 }
 
 fn signal_plan<'a>(
@@ -380,7 +234,77 @@ fn signal_plan<'a>(
     }
 }
 
-fn export_plan(signals: Vec<SignalPlan<'_>>) -> ExportPlan<'_> {
+fn line_combinations(session: &Session, store: &SignalStore) -> Vec<(SignalId, Vec<SignalId>)> {
+    let mut combinations = BTreeSet::new();
+    for tab in &session.tabs {
+        for panel in &tab.panels {
+            let crate::session::XAxisSource::Signal { r#ref } = &panel.x_axis else {
+                continue;
+            };
+            let Some(x_signal) = signal_from_ref(session, store, r#ref) else {
+                continue;
+            };
+            let mut y_signals = panel_y_signal_ids(session, store, panel)
+                .into_iter()
+                .filter(|id| *id != x_signal.id)
+                .collect::<Vec<_>>();
+            if y_signals.is_empty() {
+                continue;
+            }
+            y_signals.sort_unstable();
+            combinations.insert((x_signal.id, y_signals));
+        }
+    }
+    combinations.into_iter().collect()
+}
+
+fn line_plan<'a>(
+    x_signal: &'a Signal,
+    y_signals: Vec<&'a Signal>,
+    window: Option<(f64, f64)>,
+    fidelity: ExportFidelity,
+) -> Result<LinePlan<'a>, SnapshotError> {
+    if y_signals.is_empty() {
+        return Err(SnapshotError::EmptyLineYSignals);
+    }
+    let effective_window = window.unwrap_or_else(|| x_signal.time_bounds());
+    let pyramid = match window {
+        Some((t0, t1)) => LinePyramid::from_signals_window(x_signal, &y_signals, t0, t1),
+        None => LinePyramid::from_signals(x_signal, &y_signals),
+    }
+    .map_err(|error| match error {
+        Line2dError::EmptyYSignals => SnapshotError::EmptyLineYSignals,
+        Line2dError::TimebaseMismatch => SnapshotError::LineTimebaseMismatch,
+        Line2dError::ColumnRead => SnapshotError::LineColumnRead(x_signal.id),
+    })?;
+    let finest = match ceiling(fidelity) {
+        None => 0,
+        Some(limit) => (0..pyramid.level_count())
+            .find(|index| {
+                pyramid
+                    .level_window_count(*index, effective_window.0, effective_window.1)
+                    .is_some_and(|count| count <= limit)
+            })
+            .unwrap_or_else(|| pyramid.level_count().saturating_sub(1)),
+    };
+    let levels = (finest..pyramid.level_count())
+        .map(|index| LineLevelPlan {
+            index,
+            point_count: pyramid
+                .level_window_count(index, effective_window.0, effective_window.1)
+                .expect("planned Line2D level exists"),
+        })
+        .collect();
+    Ok(LinePlan {
+        x_signal,
+        y_signals,
+        pyramid,
+        window,
+        levels,
+    })
+}
+
+fn export_plan<'a>(signals: Vec<SignalPlan<'a>>, lines: Vec<LinePlan<'a>>) -> ExportPlan<'a> {
     let series_total = signals.len() as u64;
     let series_decimated = signals
         .iter()
@@ -398,6 +322,7 @@ fn export_plan(signals: Vec<SignalPlan<'_>>) -> ExportPlan<'_> {
         .unwrap_or(1);
     ExportPlan {
         signals,
+        lines,
         series_total,
         series_decimated,
         series_full_rate: series_total - series_decimated,
@@ -441,27 +366,27 @@ pub fn plan_selected<'a>(
 ) -> Result<ExportPlan<'a>, SnapshotError> {
     let selected_sources = selection.source_keys.iter().collect::<BTreeSet<_>>();
     if range == ExportRange::All {
-        let plan = export_plan(
-            store
-                .signals()
-                .filter(|signal| {
-                    source_key(store, signal)
-                        .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
-                })
-                .map(|signal| {
-                    let pyramid = pyramids
-                        .get(&signal.id)
-                        .ok_or(SnapshotError::MissingPyramid(signal.id))?;
-                    Ok(signal_plan(
-                        signal,
-                        source_key(store, signal)?,
-                        pyramid,
-                        None,
-                        fidelity,
-                    ))
-                })
-                .collect::<Result<_, SnapshotError>>()?,
-        );
+        let signals = store
+            .signals()
+            .filter(|signal| {
+                source_key(store, signal)
+                    .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
+            })
+            .map(|signal| {
+                let pyramid = pyramids
+                    .get(&signal.id)
+                    .ok_or(SnapshotError::MissingPyramid(signal.id))?;
+                Ok(signal_plan(
+                    signal,
+                    source_key(store, signal)?,
+                    pyramid,
+                    None,
+                    fidelity,
+                ))
+            })
+            .collect::<Result<_, SnapshotError>>()?;
+        let lines = line_plans(session, store, &selected_sources, None, fidelity)?;
+        let plan = export_plan(signals, lines);
         return Ok(plan);
     }
 
@@ -479,29 +404,59 @@ pub fn plan_selected<'a>(
     }
     let (t0, t1) = window.unwrap_or((session.linked_time.t0, session.linked_time.t1));
 
-    let plan = export_plan(
-        wanted
-            .into_iter()
-            .filter(|id| {
+    let signals = wanted
+        .into_iter()
+        .filter(|id| {
+            store.signal(*id).is_some_and(|signal| {
+                source_key(store, signal)
+                    .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
+            })
+        })
+        .map(|id| {
+            let signal = store.signal(id).ok_or(SnapshotError::MissingSignal(id))?;
+            let pyramid = pyramids.get(&id).ok_or(SnapshotError::MissingPyramid(id))?;
+            Ok(signal_plan(
+                signal,
+                source_key(store, signal)?,
+                pyramid,
+                Some((t0, t1)),
+                fidelity,
+            ))
+        })
+        .collect::<Result<_, SnapshotError>>()?;
+    let lines = line_plans(session, store, &selected_sources, Some((t0, t1)), fidelity)?;
+    let plan = export_plan(signals, lines);
+    Ok(plan)
+}
+
+fn line_plans<'a>(
+    session: &Session,
+    store: &'a SignalStore,
+    selected_sources: &BTreeSet<&String>,
+    window: Option<(f64, f64)>,
+    fidelity: ExportFidelity,
+) -> Result<Vec<LinePlan<'a>>, SnapshotError> {
+    line_combinations(session, store)
+        .into_iter()
+        .filter(|(x_id, y_ids)| {
+            std::iter::once(x_id).chain(y_ids.iter()).all(|id| {
                 store.signal(*id).is_some_and(|signal| {
                     source_key(store, signal)
                         .is_ok_and(|key| selected_sources.contains(&key.0.to_string()))
                 })
             })
-            .map(|id| {
-                let signal = store.signal(id).ok_or(SnapshotError::MissingSignal(id))?;
-                let pyramid = pyramids.get(&id).ok_or(SnapshotError::MissingPyramid(id))?;
-                Ok(signal_plan(
-                    signal,
-                    source_key(store, signal)?,
-                    pyramid,
-                    Some((t0, t1)),
-                    fidelity,
-                ))
-            })
-            .collect::<Result<_, SnapshotError>>()?,
-    );
-    Ok(plan)
+        })
+        .map(|(x_id, y_ids)| {
+            let x_signal = store
+                .signal(x_id)
+                .ok_or(SnapshotError::MissingLineXSignal(x_id))?;
+            let y_signals = y_ids
+                .into_iter()
+                .map(|id| store.signal(id).ok_or(SnapshotError::MissingSignal(id)))
+                .collect::<Result<Vec<_>, _>>()?;
+            line_plan(x_signal, y_signals, window, fidelity)
+        })
+        .collect()
 }
 
 fn source_key(store: &SignalStore, signal: &Signal) -> Result<SourceKey, SnapshotError> {
@@ -571,9 +526,70 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
     }
     signals.sort_by_key(|signal| signal.summary.signal_id);
 
+    let mut line2d = plan
+        .lines
+        .iter()
+        .map(|entry| {
+            let effective_window = entry.window.unwrap_or_else(|| entry.x_signal.time_bounds());
+            let levels = entry
+                .levels
+                .iter()
+                .map(|level| {
+                    let query = entry
+                        .pyramid
+                        .level_window(level.index, effective_window.0, effective_window.1)
+                        .ok_or(SnapshotError::MissingLevel {
+                            signal: entry.x_signal.id,
+                            level: level.index,
+                        })?;
+                    let mut ys =
+                        vec![Vec::with_capacity(query.points.len()); entry.y_signals.len()];
+                    let anchor = query
+                        .points
+                        .iter()
+                        .map(|point| point.anchor)
+                        .collect::<Vec<_>>();
+                    let x = query.points.iter().map(|point| point.x).collect::<Vec<_>>();
+                    for point in query.points {
+                        for (values, value) in ys.iter_mut().zip(point.ys) {
+                            values.push(value);
+                        }
+                    }
+                    Ok(BakedLine2DLevel {
+                        level: u32::try_from(level.index).unwrap_or(u32::MAX),
+                        anchor,
+                        x: x.into_iter()
+                            .map(|value| value.is_finite().then_some(value))
+                            .collect(),
+                        ys: ys
+                            .into_iter()
+                            .map(|values| {
+                                values
+                                    .into_iter()
+                                    .map(|value| value.is_finite().then_some(value))
+                                    .collect()
+                            })
+                            .collect(),
+                    })
+                })
+                .collect::<Result<Vec<_>, SnapshotError>>()?;
+            Ok(BakedLine2D {
+                x_signal_id: entry.x_signal.id.0,
+                y_signal_ids: entry.y_signals.iter().map(|signal| signal.id.0).collect(),
+                levels,
+            })
+        })
+        .collect::<Result<Vec<_>, SnapshotError>>()?;
+    line2d.sort_by(|left, right| {
+        left.x_signal_id
+            .cmp(&right.x_signal_id)
+            .then_with(|| left.y_signal_ids.cmp(&right.y_signal_ids))
+    });
+
     Ok(SnapshotManifest {
         session_json: serde_json::to_string(&baked_session)?,
         signals,
+        line2d: Some(line2d),
     })
 }
 
@@ -628,12 +644,30 @@ const BYTES_PER_BIN: u64 = 200;
 /// Estimates serialized data bytes from planned level metadata.
 #[must_use]
 pub fn estimated_bytes(plan: &ExportPlan) -> u64 {
-    plan.signals
+    let signal_bytes = plan
+        .signals
         .iter()
         .flat_map(|signal| &signal.levels)
         .map(|level| level.bin_count as u64)
         .sum::<u64>()
-        * BYTES_PER_BIN
+        * BYTES_PER_BIN;
+    let line_bytes = plan
+        .lines
+        .iter()
+        .map(|line| {
+            line.levels
+                .iter()
+                .map(|level| {
+                    (level.point_count as u64)
+                        .saturating_mul(
+                            u64::try_from(16 + 8 * (line.y_signals.len() + 1)).unwrap_or(u64::MAX),
+                        )
+                        .saturating_add(128)
+                })
+                .sum::<u64>()
+        })
+        .sum::<u64>();
+    signal_bytes.saturating_add(line_bytes)
 }
 
 #[cfg(test)]
@@ -644,6 +678,7 @@ mod tests {
     use crate::pyramid::Pyramid;
     use crate::session::{
         AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SeriesRef, Session,
+        XAxisSource,
     };
     use crate::store::{SignalId, SignalStore, SourceKey};
     use scope_protocol::{ExportFidelity, ExportRange};
@@ -698,6 +733,7 @@ mod tests {
             legend_anchor: None,
             legend_dock: None,
             legend_hint_dismissed: false,
+            x_axis: XAxisSource::Time,
             y_range: None,
             x_range: None,
             x_label: None,
@@ -750,6 +786,110 @@ mod tests {
     }
 
     #[test]
+    fn visible_signal_x_export_bakes_shared_paired_levels() {
+        let (store, pyramids) = store_with(&[("x", 64), ("y", 64)]);
+        let mut panel = panel("panel-1", &["x", "y"]);
+        panel.x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "x".to_owned(),
+            },
+        };
+        let session = session_with(vec![panel]);
+        let export = plan(
+            &session,
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Full,
+        )
+        .expect("plan");
+        assert_eq!(
+            export
+                .signals
+                .iter()
+                .map(|signal| signal.signal.id)
+                .collect::<Vec<_>>(),
+            vec![SignalId(1), SignalId(2)]
+        );
+        assert_eq!(export.lines.len(), 1);
+        assert_eq!(export.lines[0].x_signal.id, SignalId(1));
+        assert_eq!(export.lines[0].y_signals[0].id, SignalId(2));
+        let manifest = bake(&export, &session).expect("bake");
+        let line = &manifest.line2d.expect("line payload")[0];
+        assert_eq!(line.x_signal_id, 1);
+        assert_eq!(line.y_signal_ids, vec![2]);
+        assert_eq!(line.levels[0].level, 0);
+        assert_eq!(line.levels[0].anchor.len(), line.levels[0].ys[0].len());
+        assert_eq!(line.levels[0].x[2], Some(1.0));
+        assert_eq!(line.levels[0].ys[0][2], Some(1.0));
+    }
+
+    #[test]
+    fn signal_x_snapshot_deduplicates_reordered_y_bindings() {
+        let (store, pyramids) = store_with(&[("x", 64), ("a", 64), ("b", 64)]);
+        let x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "x".to_owned(),
+            },
+        };
+        let mut first = panel("panel-1", &["x", "a", "b"]);
+        first.x_axis = x_axis.clone();
+        let mut second = panel("panel-2", &["b", "a", "x"]);
+        second.x_axis = x_axis;
+
+        let export = plan(
+            &session_with(vec![first, second]),
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Full,
+        )
+        .expect("plan");
+
+        assert_eq!(export.lines.len(), 1);
+        assert_eq!(
+            export.lines[0]
+                .y_signals
+                .iter()
+                .map(|signal| signal.id)
+                .collect::<Vec<_>>(),
+            vec![SignalId(2), SignalId(3)]
+        );
+    }
+
+    #[test]
+    fn signal_x_snapshot_skips_unresolved_and_empty_line_panels() {
+        let (store, pyramids) = store_with(&[("y", 64)]);
+        let mut unresolved = panel("unresolved", &["y"]);
+        unresolved.x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "missing".to_owned(),
+            },
+        };
+        let mut only_x = panel("only-x", &["y"]);
+        only_x.x_axis = XAxisSource::Signal {
+            r#ref: SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "y".to_owned(),
+            },
+        };
+
+        let export = plan(
+            &session_with(vec![unresolved, only_x]),
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Full,
+        )
+        .expect("unresolved line panels are skipped");
+
+        assert!(export.lines.is_empty());
+    }
+
+    #[test]
     fn all_full_matches_the_pre_fidelity_manifest_bytes() {
         let (store, pyramids) = store_with(&[("a", 32)]);
         let session = Session::default();
@@ -776,6 +916,7 @@ mod tests {
                     .map(|level| pyramid.level(level).expect("level"))
                     .collect(),
             }],
+            line2d: Some(Vec::new()),
         };
         assert_eq!(
             actual,
@@ -1259,6 +1400,7 @@ mod tests {
         scope_protocol::SnapshotManifest {
             session_json: "{}".to_owned(),
             signals: Vec::new(),
+            line2d: None,
         }
     }
 }

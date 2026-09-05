@@ -338,6 +338,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
         legend_anchor: null,
         legend_dock: null,
         legend_hint_dismissed: false,
+        x_axis: { kind: "time" },
         y_range: null,
         x_range: null,
         x_label: null,
@@ -348,6 +349,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
             id: "tip-1",
             series_path: "run_01/temp",
             anchor: 5.12,
+            pinned_x: null,
             pinned_value: 1.0565,
             label: "",
             offset: [10, -10] as [number, number],
@@ -356,6 +358,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
             id: "tip-2",
             series_path: "run_02/temp",
             anchor: 4.33,
+            pinned_x: null,
             pinned_value: 1.1528,
             label: "",
             offset: [10, -10] as [number, number],
@@ -364,6 +367,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
             id: "tip-3",
             series_path: "run_03/temp",
             anchor: 3.43,
+            pinned_x: null,
             pinned_value: 1.1482,
             label: "",
             offset: [10, -10] as [number, number],
@@ -1128,30 +1132,29 @@ test("legend console replaces the strip and supports workspace-wide states", asy
   const rail = panel.locator(".plot-series-legend");
   const railResize = rail.locator(".plot-legend-resize-left");
   await expect(railResize).toBeVisible();
-  const [railBox, railResizeBox] = await Promise.all([
-    rail.boundingBox(),
-    railResize.boundingBox(),
-  ]);
-  if (railBox === null || railResizeBox === null)
-    throw new Error("Legend rail seam is not laid out");
-  await page.mouse.move(
-    railResizeBox.x + railResizeBox.width / 2,
-    railResizeBox.y + railResizeBox.height / 2,
-  );
+  const railBox = await rail.boundingBox();
+  if (railBox === null) throw new Error("Legend rail seam is not laid out");
+  await page.mouse.move(railBox.x + 2, railBox.y + railBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(railBox.x + railBox.width - 2, railResizeBox.y);
+  await page.mouse.move(
+    railBox.x + railBox.width - 2,
+    railBox.y + railBox.height / 2,
+  );
   await page.mouse.up();
   await expect(wrap).toHaveClass(/legend-rail-collapsed/);
   await expect(rail).toHaveAttribute("data-collapsed", "true");
-  const collapsedResizeBox = await railResize.boundingBox();
-  if (collapsedResizeBox === null)
+  const collapsedRailBox = await rail.boundingBox();
+  if (collapsedRailBox === null)
     throw new Error("Collapsed legend rail seam is not laid out");
   await page.mouse.move(
-    collapsedResizeBox.x + collapsedResizeBox.width / 2,
-    collapsedResizeBox.y + collapsedResizeBox.height / 2,
+    collapsedRailBox.x + 2,
+    collapsedRailBox.y + collapsedRailBox.height / 2,
   );
   await page.mouse.down();
-  await page.mouse.move(collapsedResizeBox.x - 180, collapsedResizeBox.y);
+  await page.mouse.move(
+    collapsedRailBox.x - 180,
+    collapsedRailBox.y + collapsedRailBox.height / 2,
+  );
   await page.mouse.up();
   await expect(wrap).not.toHaveClass(/legend-rail-collapsed/);
   await panel.locator(".plot-legend-undock").click();

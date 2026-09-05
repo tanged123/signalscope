@@ -168,35 +168,6 @@ test.describe("desktop plot interactions", () => {
     await expect(button).toHaveAttribute("aria-pressed", "true");
   });
 
-  test("directional zoom and double-click fit round-trip the window", async ({
-    page,
-  }) => {
-    const readout = page.locator(".window-readout");
-    const fitted = await readout.textContent();
-    const overlay = page.locator(".panel").first().locator(".overlay-canvas");
-    const box = await overlay.boundingBox();
-    if (box === null) throw new Error("overlay not laid out");
-    await overlay.hover({ position: { x: 220, y: 50 } });
-    await page.mouse.down();
-    await overlay.hover({ position: { x: 225, y: 190 } });
-    await page.mouse.up();
-    await expect(readout).toHaveText(fitted ?? "");
-
-    await overlay.hover({
-      position: { x: box.width * 0.25, y: box.height * 0.55 },
-    });
-    await page.mouse.down();
-    await overlay.hover({
-      position: { x: box.width * 0.55, y: box.height * 0.56 },
-    });
-    await expect(page.locator(".gesture-hint")).toHaveText("drag: zoom X");
-    await page.mouse.up();
-    await expect(page.locator(".gesture-hint")).toBeEmpty();
-    await expect(readout).not.toHaveText(fitted ?? "");
-    await overlay.dblclick({ position: { x: 300, y: 120 } });
-    await expect(readout).toHaveText(fitted ?? "");
-  });
-
   test("title editing, inline axes and line properties are keyboard reachable", async ({
     page,
   }) => {

@@ -111,7 +111,7 @@ const rustForms = {
 };
 
 const typeScriptForms = {
-  array: (value) => `${value}[]`,
+  array: (value) => (value.includes(" | ") ? `(${value})[]` : `${value}[]`),
   optional: (value) => `${value} | null`,
   pair: (value) => `[${value}, ${value}]`,
 };
@@ -209,9 +209,15 @@ for (const job of jobs) {
     await readFile(resolve(repositoryRoot, job.schema), "utf8"),
   );
 
-  const fieldTypes = Object.values(schema.types)
-    .filter((definition) => definition.kind === "object")
-    .flatMap((definition) => Object.values(definition.fields));
+  const fieldTypes = Object.values(schema.types).flatMap((definition) => {
+    if (definition.kind === "object") return Object.values(definition.fields);
+    if (definition.kind === "tagged_union") {
+      return Object.values(definition.variants).flatMap((variant) =>
+        Object.values(variant.fields ?? {}),
+      );
+    }
+    return [];
+  });
   const usesU64 = fieldTypes.includes("u64");
   const usesU64Vector = fieldTypes.includes("u64[]");
   const usesOptionalU64 = fieldTypes.includes("u64?");
@@ -240,6 +246,8 @@ for (const job of jobs) {
       emitEnum(rust, typeScript, name, definition);
     } else if (definition.kind === "object") {
       emitObject(rust, typeScript, name, definition);
+    } else if (definition.kind === "tagged_union") {
+      emitTaggedUnion(rust, typeScript, name, definition);
     } else {
       throw new Error(`Unsupported schema kind: ${definition.kind}`);
     }
@@ -281,33 +289,84 @@ function emitObject(rust, typeScript, name, definition) {
   rust.push(`pub struct ${name} {`);
   typeScript.push(`export interface ${name} {`);
   for (const [field, type] of Object.entries(definition.fields)) {
-    const rustField = rustIdentifier(field);
-    if (
-      type.includes("u64") &&
-      type !== "u64" &&
-      type !== "u64[]" &&
-      type !== "u64?"
-    ) {
-      throw new Error(`${name}.${field}: unsupported u64 form "${type}"`);
-    }
-    if (type.endsWith("?")) rust.push("    #[serde(default)]");
-    if (type === "u64") {
-      rust.push('    #[serde(with = "u64_string")]');
-    } else if (type === "u64[]") {
-      rust.push('    #[serde(with = "u64_vec_string")]');
-    } else if (type === "u64?") {
-      rust.push('    #[serde(with = "optional_u64_string")]');
-    }
-    if (rustField !== field) rust.push(`    #[serde(rename = "${field}")]`);
-    rust.push(
-      `    pub ${rustField}: ${convertType(type, primitiveRust, rustForms)},`,
-    );
+    emitRustField(rust, name, field, type);
     typeScript.push(
       `  ${field}: ${convertType(type, primitiveTypeScript, typeScriptForms)};`,
     );
   }
   rust.push("}", "");
   typeScript.push("}", "");
+}
+
+function emitTaggedUnion(rust, typeScript, name, definition) {
+  const tag = definition.tag;
+  if (typeof tag !== "string" || tag === "") {
+    throw new Error(`${name}: tagged union requires a tag`);
+  }
+  rust.push("#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]");
+  rust.push(
+    `#[serde(tag = "${tag}", rename_all = "snake_case", deny_unknown_fields)]`,
+  );
+  rust.push(`pub enum ${name} {`);
+  const variants = Object.entries(definition.variants);
+  for (const [variantName, variant] of variants) {
+    const fields = Object.entries(variant.fields ?? {});
+    if (fields.length === 0) {
+      rust.push(`    ${pascalCase(variantName)},`);
+      continue;
+    }
+    rust.push(`    ${pascalCase(variantName)} {`);
+    for (const [field, type] of fields) {
+      emitRustField(rust, name, field, type, "        ", "");
+    }
+    rust.push("    },");
+  }
+  rust.push("}", "");
+
+  typeScript.push(`export type ${name} =`);
+  for (const [index, [variantName, variant]] of variants.entries()) {
+    typeScript.push(`${index === 0 ? "  " : "  | "}{`);
+    typeScript.push(`    ${tag}: "${variantName}";`);
+    for (const [field, type] of Object.entries(variant.fields ?? {})) {
+      typeScript.push(
+        `    ${field}: ${convertType(type, primitiveTypeScript, typeScriptForms)};`,
+      );
+    }
+    typeScript.push("  }");
+  }
+  typeScript[typeScript.length - 1] += ";";
+  typeScript.push("");
+}
+
+function emitRustField(
+  rust,
+  owner,
+  field,
+  type,
+  indent = "    ",
+  visibility = "pub ",
+) {
+  const rustField = rustIdentifier(field);
+  if (
+    type.includes("u64") &&
+    type !== "u64" &&
+    type !== "u64[]" &&
+    type !== "u64?"
+  ) {
+    throw new Error(`${owner}.${field}: unsupported u64 form "${type}"`);
+  }
+  if (type.endsWith("?")) rust.push(`${indent}#[serde(default)]`);
+  if (type === "u64") {
+    rust.push(`${indent}#[serde(with = "u64_string")]`);
+  } else if (type === "u64[]") {
+    rust.push(`${indent}#[serde(with = "u64_vec_string")]`);
+  } else if (type === "u64?") {
+    rust.push(`${indent}#[serde(with = "optional_u64_string")]`);
+  }
+  if (rustField !== field) rust.push(`${indent}#[serde(rename = "${field}")]`);
+  rust.push(
+    `${indent}${visibility}${rustField}: ${convertType(type, primitiveRust, rustForms)},`,
+  );
 }
 
 function rustIdentifier(field) {

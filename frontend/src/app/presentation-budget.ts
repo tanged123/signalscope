@@ -1,6 +1,8 @@
 const TARGET_BINS_PER_PIXEL = 2 as const;
 export const CPU_BYTES_PER_BIN = 121;
 export const GPU_BYTES_PER_BIN = 96;
+export const CPU_BYTES_PER_LINE2D_VALUE = 8;
+export const GPU_BYTES_PER_LINE2D_VALUE = 4;
 export const MIB = 1024 * 1024;
 
 const MIN_CPU_BUDGET = 512 * MIB;
@@ -18,6 +20,12 @@ export interface PanelDemand {
   physicalPixels: number;
   paddingRatio: number;
   visibleSeries: number;
+  /** Worst-case response rows emitted for one reducer bin. */
+  reductionExpansion: number;
+  /** CPU bytes charged for each family-specific resource unit. */
+  cpuBytesPerUnit?: number;
+  /** GPU bytes charged for each family-specific resource unit. */
+  gpuBytesPerUnit?: number;
 }
 
 export interface DensityPlan {
@@ -75,16 +83,22 @@ export function planPresentationDensity(input: {
 
   const evaluate = (density: number): EvaluatedDensity => {
     const requests = new Map<string, number>();
-    let bins = 0;
+    let estimatedCpuBytes = retainedCpuBytes;
+    let estimatedGpuBytes = retainedGpuBytes;
     for (const demand of demands) {
       const request = requestPixels(demand, density);
       requests.set(demand.panelId, request);
-      bins += 2 * request * demand.visibleSeries;
+      const resourceUnits =
+        2 * request * demand.visibleSeries * demand.reductionExpansion;
+      estimatedCpuBytes +=
+        resourceUnits * (demand.cpuBytesPerUnit ?? CPU_BYTES_PER_BIN);
+      estimatedGpuBytes +=
+        resourceUnits * (demand.gpuBytesPerUnit ?? GPU_BYTES_PER_BIN);
     }
     return {
       requests,
-      estimatedCpuBytes: retainedCpuBytes + bins * CPU_BYTES_PER_BIN,
-      estimatedGpuBytes: retainedGpuBytes + bins * GPU_BYTES_PER_BIN,
+      estimatedCpuBytes,
+      estimatedGpuBytes,
     };
   };
   const fits = (evaluated: EvaluatedDensity): boolean =>
@@ -158,6 +172,9 @@ function normalizeDemand(demand: PanelDemand): PanelDemand {
       0,
       Math.ceil(nonNegativeFinite(demand.visibleSeries)),
     ),
+    reductionExpansion: positiveOr(demand.reductionExpansion, 1),
+    cpuBytesPerUnit: positiveOr(demand.cpuBytesPerUnit, CPU_BYTES_PER_BIN),
+    gpuBytesPerUnit: positiveOr(demand.gpuBytesPerUnit, GPU_BYTES_PER_BIN),
   };
 }
 

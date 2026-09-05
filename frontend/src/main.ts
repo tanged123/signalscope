@@ -13,6 +13,7 @@ async function boot(): Promise<void> {
   const planePromise = selectDataPlane();
   const gpuPromise = acquireGpuContext();
   let recoveryPromise: Promise<void> | null = null;
+  let app: AppShell | null = null;
   const lifecycle = { stopped: false };
   const isStopped = (): boolean => lifecycle.stopped;
   const recoverGpu = (): void => {
@@ -25,7 +26,7 @@ async function boot(): Promise<void> {
             gpu.dispose();
             return;
           }
-          app.setGpu(gpu);
+          app?.setGpu(gpu);
           return;
         }
         await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
@@ -34,12 +35,23 @@ async function boot(): Promise<void> {
       recoveryPromise = null;
     });
   };
-  window.addEventListener("pagehide", () => {
+  window.addEventListener("pagehide", (event) => {
+    if (event.persisted) return;
     lifecycle.stopped = true;
+    app?.stopPresentation();
   });
-  const app = new AppShell(root, await planePromise, null, recoverGpu);
+  const plane = await planePromise;
+  if (isStopped()) {
+    (await gpuPromise)?.dispose();
+    return;
+  }
+  app = new AppShell(root, plane, null, recoverGpu);
   await app.mount();
   const gpu = await gpuPromise;
+  if (isStopped()) {
+    gpu?.dispose();
+    return;
+  }
   if (gpu === null) recoverGpu();
   else app.setGpu(gpu);
 }

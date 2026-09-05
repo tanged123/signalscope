@@ -15,7 +15,7 @@ completed by the previous prefix and competed with pointer input.
 ## Decision
 
 SignalScope pins the public `tanged123/ChartGPU` fork at revision
-`9f4b3b06047cb99c743d22e83653b23a526a087a`. The fork exposes
+`fb788fad8664652a3c16c6711a4366cef1ac13c4`. The fork exposes
 `setViewRange`, which updates resolved x and primary-y domains, invalidates only
 axis and scale state, and requests a frame without resolving or traversing
 resident series.
@@ -33,3 +33,12 @@ control path. A genuine data replacement can still take time, but it cannot
 continue rebuilding increasingly large prefixes behind an active gesture. The
 fork is now a required source dependency; upstream ChartGPU remains the source
 for future merges.
+
+## Amendment (2026-09-03)
+
+The parent repository's `frontend/vendor/chartgpu` gitlink and checked-out
+submodule identify `fb788fad8664652a3c16c6711a4366cef1ac13c4` as the required
+fork revision (`fix(render): compile dash shader on WebGPU`). The previous
+`9f4b3b06047cb99c743d22e83653b23a526a087a` pin was stale and is corrected here.
+ADR 0052 keeps this host contract behind the SignalScope-owned typed
+render-family boundary.

@@ -3,6 +3,7 @@ import type {
   SampleResponse,
   SampleSeries,
 } from "../generated/protocol";
+import { lowerBound, upperBound } from "./binary-search";
 
 export interface SampleSlice {
   time: number[];
@@ -43,30 +44,6 @@ export function lerpSample(
   const before = values[previous] ?? Number.NaN;
   const after = values[low] ?? Number.NaN;
   return before + (after - before) * alpha;
-}
-
-/** Index of the first entry not less than `value` in a sorted array. */
-function lowerBound(sorted: readonly number[], value: number): number {
-  let low = 0;
-  let high = sorted.length;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if ((sorted[mid] ?? 0) < value) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
-/** Index of the first entry greater than `value` in a sorted array. */
-function upperBound(sorted: readonly number[], value: number): number {
-  let low = 0;
-  let high = sorted.length;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if ((sorted[mid] ?? 0) <= value) low = mid + 1;
-    else high = mid;
-  }
-  return low;
 }
 
 function sampleWindowBounds(

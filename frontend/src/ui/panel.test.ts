@@ -6,6 +6,7 @@ import { Catalog } from "../app/catalog";
 import type { PreparedPlot } from "../app/plot-capabilities";
 import type { PlotLayout } from "../app/plot-math";
 import type { GpuContext } from "../render/gpu-context";
+import { nearestLegendEdge, type LegendRailHost } from "./legend-rail";
 
 import {
   MAX_SERIES_PER_PANEL,
@@ -157,6 +158,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     legend_anchor: null,
     legend_dock: null,
     legend_hint_dismissed: false,
+    x_axis: { kind: "time" },
     bindings: [],
     overrides: [],
     focus: [],
@@ -286,6 +288,7 @@ describe("panel series", () => {
       annotationAt: () => ({
         path: series.path,
         anchor: 1,
+        x: 1,
         pinnedValue: 2,
       }),
       resolveAnnotation: () => null,
@@ -481,7 +484,6 @@ describe("panel series", () => {
       plotLegendPosition: { x: number; y: number } | null;
       plotLegendSize: { width: number; height: number } | null;
       plotLegendAnchor: null;
-      nearestPlotLegendEdge(legend: HTMLElement, threshold?: number): string;
       updatePlotLegend(current: RenderPanelState): void;
     };
     view.callbacks = {
@@ -520,8 +522,18 @@ describe("panel series", () => {
     view.updatePlotLegend(state);
     expect(legend.querySelectorAll(".plot-legend-roster-row")).toHaveLength(8);
     expect(legend.querySelector(".plot-legend-focus-rows")).toBeNull();
-    expect(view.nearestPlotLegendEdge(legend, 56)).toBe("right");
-    expect(view.nearestPlotLegendEdge(legend, 20)).toBe("right");
+    const railHost: LegendRailHost = {
+      id: "panel",
+      root: view.element,
+      position: view.plotLegendPosition,
+      size: view.plotLegendSize,
+      anchor: view.plotLegendAnchor,
+      dock: null,
+      commit: vi.fn(),
+      refresh: vi.fn(),
+    };
+    expect(nearestLegendEdge(railHost, legend, 56)).toBe("right");
+    expect(nearestLegendEdge(railHost, legend, 20)).toBe("right");
     legend
       .querySelector<HTMLButtonElement>(".plot-legend-resize-bottom")
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
