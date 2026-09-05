@@ -1,10 +1,18 @@
-use super::{
-    ApiError, AppContext, Arc, BatchDetail, BatchDetailRequest, BatchJob, Envelope,
-    IngestBatchRequest, IntoResponse, IntrospectRequest, JobId, Json, Path, RecipeDestination,
-    RestoreFinalizeRequest, RestoreFinalizeResponse, RestoreSourcesRequest, SaveRecipeRequest,
-    SaveRecipeResponse, ScanSourcesRequest, State, err, host, load_preferences_value,
-    recipe_directory, session,
+use super::preferences_api::{load_preferences_value, recipe_directory};
+use super::{ApiError, err};
+use crate::{AppContext, host};
+use axum::Json;
+use axum::extract::State;
+use axum::response::IntoResponse;
+use scope_core::ingest::batch::JobId;
+use scope_core::session;
+use scope_protocol::{
+    BatchDetail, BatchDetailRequest, BatchJob, Envelope, IngestBatchRequest, IntrospectRequest,
+    RecipeDestination, RestoreFinalizeRequest, RestoreFinalizeResponse, RestoreSourcesRequest,
+    SaveRecipeRequest, SaveRecipeResponse, ScanSourcesRequest,
 };
+use std::path::Path;
+use std::sync::Arc;
 
 pub async fn scan_sources(
     Json(request): Json<Envelope<ScanSourcesRequest>>,

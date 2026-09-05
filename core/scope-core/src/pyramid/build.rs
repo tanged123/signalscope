@@ -116,7 +116,7 @@ impl Pyramid {
             columns,
             sample_count: time.len(),
             first_stored_level,
-            merged,
+            merged: merged.into(),
             column_cache: Arc::new(OnceLock::new()),
             synthesized_level: Arc::new(OnceLock::new()),
         }
@@ -165,7 +165,7 @@ impl Pyramid {
             },
             sample_count: signal.len(),
             first_stored_level: FINEST_STORED_LEVEL,
-            merged,
+            merged: merged.into(),
             column_cache: Arc::new(OnceLock::new()),
             synthesized_level: Arc::new(OnceLock::new()),
         }

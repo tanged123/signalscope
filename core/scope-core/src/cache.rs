@@ -30,7 +30,6 @@ use std::{
 
 use scope_protocol::IngestStage;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
@@ -214,21 +213,16 @@ pub fn spill_columns(
     time: &[f64],
     values: &[f64],
 ) -> Result<PageHandle, CacheError> {
-    let mut hash = Sha256::new();
-    hash.update(timebase_id.0.to_le_bytes());
-    for column in [time, values] {
-        for value in column {
-            hash.update(value.to_le_bytes());
-        }
-    }
     let directory = root.directory().join("derived");
     fs::create_dir_all(&directory)?;
-    let target = directory.join(format!("{:x}.sscol", hash.finalize()));
+    let target = directory.join(format!("{}.sscol", uuid::Uuid::new_v4()));
     let value_offset = SPILL_HEADER_LEN + size_of_val(time);
     let value_bytes = size_of_val(values);
-    if !target.exists() {
-        let temporary = target.with_extension("sscol.tmp");
-        let mut file = File::create(&temporary)?;
+    let cache = PageCache::new(&directory, value_bytes.max(1));
+    let mut file = File::options().write(true).create_new(true).open(&target)?;
+    let handle =
+        PageHandle::cached(cache, &target, value_offset as u64, value_bytes).delete_on_drop();
+    let result = (|| -> Result<(), std::io::Error> {
         file.write_all(&SPILL_MAGIC)?;
         file.write_all(&1_u32.to_le_bytes())?;
         file.write_all(&0_u32.to_le_bytes())?;
@@ -237,15 +231,11 @@ pub fn spill_columns(
         file.write_all(&encode_column(time))?;
         file.write_all(&encode_column(values))?;
         file.sync_all()?;
-        fs::rename(temporary, &target)?;
-    }
-    let cache = PageCache::new(&directory, value_bytes.max(1));
-    Ok(PageHandle::cached(
-        cache,
-        target,
-        value_offset as u64,
-        value_bytes,
-    ))
+        Ok(())
+    })();
+    drop(file);
+    result?;
+    Ok(handle)
 }
 
 pub struct LoadedCache {

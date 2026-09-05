@@ -1,7 +1,11 @@
-use super::{
-    ApiError, AppContext, Envelope, IntoResponse, Json, LoadSessionRequest, LoadedSession, PathBuf,
-    SaveSessionRequest, State, err, session,
-};
+use super::{ApiError, err};
+use crate::AppContext;
+use axum::Json;
+use axum::extract::State;
+use axum::response::IntoResponse;
+use scope_core::session;
+use scope_protocol::{Envelope, LoadSessionRequest, LoadedSession, SaveSessionRequest};
+use std::path::PathBuf;
 
 const AUTOSAVE_FILE: &str = "session.autosave.json";
 

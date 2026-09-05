@@ -1,31 +1,8 @@
 #![allow(clippy::missing_errors_doc)]
 
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-
-use axum::{
-    Json,
-    extract::State,
-    http::{StatusCode, header},
-    response::IntoResponse,
-};
-use base64::Engine;
-use scope_core::{compute, ingest::batch::JobId, preferences, session, snapshot, store::SignalId};
-use scope_protocol::{
-    BatchDetail, BatchDetailRequest, BatchJob, CreateDerivedBundleRequest, DerivedRequest,
-    Envelope, ExportEstimate, ExportEstimateRequest, ExportFileKind, ExportRange,
-    ExportWriteRequest, IngestBatchRequest, IntrospectRequest, Line2DRequest, LoadSessionRequest,
-    LoadedSession, PickSessionRequest, RecipeDestination, RemoveDerivedBundleRequest,
-    RemoveSignalRequest, RestoreFinalizeRequest, RestoreFinalizeResponse, RestoreSourcesRequest,
-    SampleRequest, SampleResponse, SampleSeries, SaveExportFileRequest,
-    SaveExportFileToDirectoryRequest, SaveRecipeRequest, SaveRecipeResponse, SaveSessionRequest,
-    ScanSourcesRequest, TileRequest,
-};
-
 use crate::{AppContext, host};
+use axum::http::StatusCode;
+use std::sync::Arc;
 
 pub(crate) type ApiError = (StatusCode, String);
 
@@ -69,7 +46,6 @@ pub use session_api::*;
 
 #[cfg(test)]
 use export::write_export_file;
-use preferences_api::{load_preferences_value, recipe_directory};
 
 #[cfg(test)]
 mod tests {
@@ -78,7 +54,14 @@ mod tests {
     use scope_protocol::FormatDescriptor;
     use tower::ServiceExt;
 
-    use super::*;
+    use super::{load_preferences, pick_sources, save_preferences};
+    use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+    use base64::Engine;
+    use scope_protocol::{
+        Envelope, ExportFileKind, Line2DRequest, SampleRequest, SampleResponse,
+        SaveExportFileToDirectoryRequest, TileRequest,
+    };
+    use std::{path::PathBuf, sync::Arc};
 
     #[tokio::test]
     async fn list_formats_round_trips_envelope() {

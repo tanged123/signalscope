@@ -23,7 +23,7 @@ pub struct Pyramid {
     columns: PyramidColumns,
     sample_count: usize,
     first_stored_level: usize,
-    merged: Vec<CachedBinLevel>,
+    merged: Arc<[CachedBinLevel]>,
     column_cache: Arc<OnceLock<Option<ColumnPair>>>,
     synthesized_level: Arc<OnceLock<Option<BinLevel>>>,
 }

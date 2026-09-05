@@ -8,6 +8,7 @@ pub mod bins;
 pub mod cache;
 pub mod columns;
 pub mod compute;
+pub mod derived;
 pub mod derived_bundle;
 pub mod expr;
 pub mod ingest;
