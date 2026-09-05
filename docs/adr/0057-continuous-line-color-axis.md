@@ -63,7 +63,9 @@ The colorbar is one renderer-owned horizontal canvas. `ui/legend-color-scale.ts`
 creates its legend mount and replaces the categorical color control while C is
 active; the scale opens the C picker. The panel supplies the mount explicitly
 to ChartHost after legend layout. Colorbar owns reparenting and drawing; legend
-resize/placement refreshes it without republishing GPU series. Floating keys
+resize/placement refreshes it without republishing GPU series. Legend refreshes
+preserve keyboard focus on the scale button and resize handles, including
+asynchronous data publication. Floating keys
 and rosters stack the scale above their controls; horizontal rails put the scale
 beside those controls. Badge, hidden, and collapsed-rail layouts use a compact
 plot inset, without a dedicated gutter. ChartHost disposes the canvas and clears

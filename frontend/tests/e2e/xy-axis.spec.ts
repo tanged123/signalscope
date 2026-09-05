@@ -56,6 +56,11 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
         }
         document.documentElement.dataset.gpuColoredPixels = String(colored);
         buffer.unmap();
+      }).catch(error => {
+        if (error.name !== "AbortError") {
+          document.documentElement.dataset.gpuError = error.message;
+        }
+      }).finally(() => {
         buffer.destroy();
         busy = false;
       });

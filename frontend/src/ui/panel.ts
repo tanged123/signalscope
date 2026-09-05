@@ -75,7 +75,7 @@ import {
   floatLegend,
   legendResizeHandle,
   positionLegend,
-  refreshLegendWithResizeFocus,
+  refreshLegendWithControlFocus,
   type LegendRailHost,
 } from "./legend-rail";
 import {
@@ -1529,7 +1529,7 @@ export class PanelView {
   }
 
   private updatePlotLegend(state: RenderPanelState): void {
-    refreshLegendWithResizeFocus(this.element, () =>
+    refreshLegendWithControlFocus(this.element, () =>
       this.renderPlotLegend(state),
     );
   }

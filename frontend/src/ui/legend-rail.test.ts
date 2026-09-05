@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   legendResizeHandle,
   positionLegend,
-  refreshLegendWithResizeFocus,
+  refreshLegendWithControlFocus,
   type LegendRailHost,
 } from "./legend-rail";
 
@@ -39,7 +39,7 @@ it("keeps keyboard focus through rail collapse and expansion without triggering 
     refresh: vi.fn(),
   };
   const refresh = () =>
-    refreshLegendWithResizeFocus(root, () => {
+    refreshLegendWithControlFocus(root, () => {
       legend.replaceChildren(legendResizeHandle(host, "left", legend));
       positionLegend(host);
     });
@@ -59,4 +59,18 @@ it("keeps keyboard focus through rail collapse and expansion without triggering 
   refresh();
   expect(document.activeElement).toBe(seam());
   expect(shortcut).not.toHaveBeenCalled();
+});
+
+it("preserves color axis keyboard focus when refreshed data replaces its scale", () => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const render = () => {
+    const scale = document.createElement("button");
+    scale.className = "legend-color-scale";
+    root.replaceChildren(scale);
+  };
+  render();
+  required<HTMLButtonElement>(root, "button").focus();
+  refreshLegendWithControlFocus(root, render);
+  expect(document.activeElement).toBe(root.firstChild);
 });

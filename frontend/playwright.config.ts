@@ -31,10 +31,14 @@ export default defineConfig({
     headless: true,
     trace: "retain-on-failure",
     launchOptions: {
+      // Keep ANGLE, the compositor and WebGPU on the same software Vulkan
+      // backend; headless runners have no native Vulkan presentation surface.
       args: [
         "--enable-unsafe-webgpu",
         "--enable-features=Vulkan",
-        "--use-angle=swiftshader",
+        "--use-angle=vulkan",
+        "--use-vulkan=swiftshader",
+        "--disable-vulkan-surface",
         "--use-webgpu-adapter=swiftshader",
         "--use-gpu-in-tests",
       ],
