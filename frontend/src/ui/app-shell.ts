@@ -647,7 +647,10 @@ export class AppShell {
         },
         ...axisActions({
           workspace: this.workspace,
-          commit: () => this.commitHistory(),
+          commit: () => {
+            this.commitHistory();
+            this.scheduleAutosave();
+          },
           refreshStates: () => this.workspaceView?.refreshPanelStates(),
           resetCursor: () => {
             this.workspaceView?.clearCursors();
