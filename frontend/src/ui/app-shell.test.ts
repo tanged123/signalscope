@@ -50,6 +50,29 @@ describe("presentation status", () => {
 });
 
 describe("GPU failure handling", () => {
+  it("stops presentation work and releases hosts before the device", () => {
+    const disposePresentation = vi.fn();
+    const releaseGpu = vi.fn();
+    const disposeGpu = vi.fn();
+    const shell = Object.create(AppShell.prototype) as {
+      presentation: { dispose(): void };
+      workspaceView: { releaseGpu(): void };
+      gpu: { dispose(): void } | null;
+      stopPresentation(): void;
+    };
+    shell.presentation = { dispose: disposePresentation };
+    shell.workspaceView = { releaseGpu };
+    shell.gpu = { dispose: disposeGpu };
+    shell.stopPresentation();
+    expect(disposePresentation).toHaveBeenCalledOnce();
+    expect(releaseGpu).toHaveBeenCalledOnce();
+    expect(disposeGpu).toHaveBeenCalledOnce();
+    expect(releaseGpu.mock.invocationCallOrder[0]).toBeLessThan(
+      disposeGpu.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(shell.gpu).toBeNull();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });

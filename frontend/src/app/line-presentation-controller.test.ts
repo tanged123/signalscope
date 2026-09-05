@@ -167,6 +167,7 @@ describe("LinePresentationController", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -181,6 +182,80 @@ describe("LinePresentationController", () => {
 
     expect(probe.querySamples).not.toHaveBeenCalled();
     expect(probe.queryTiles).toHaveBeenCalledOnce();
+  });
+
+  it("aborts an obsolete fetch and publishes the queued refresh", async () => {
+    const response = tileResponse();
+    const probe = controllerProbe(
+      (_request, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        }),
+    );
+    const first = probe.controller.refresh();
+    const obsoleteSignal = probe.queryTiles.mock.calls[0]?.[1];
+    probe.queryTiles.mockResolvedValue(response);
+    const second = probe.controller.refresh();
+    await Promise.all([first, second]);
+
+    expect(obsoleteSignal?.aborted).toBe(true);
+    expect(probe.queryTiles).toHaveBeenCalledTimes(2);
+    expect(probe.render).toHaveBeenCalledOnce();
+    expect([...probe.controller.responses()]).toEqual([
+      { kind: "time", response },
+    ]);
+    expect(probe.onError).not.toHaveBeenCalled();
+  });
+
+  it("clears scheduled work and remains reusable", async () => {
+    vi.useFakeTimers();
+    const cancelFrame = vi.fn();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 7),
+    );
+    vi.stubGlobal("cancelAnimationFrame", cancelFrame);
+    const probe = controllerProbe(() => Promise.resolve(tileResponse()));
+    probe.controller.resized();
+    probe.controller.clear();
+    await vi.runAllTimersAsync();
+    expect(cancelFrame).toHaveBeenCalledWith(7);
+    expect(probe.queryTiles).not.toHaveBeenCalled();
+    expect(probe.render).not.toHaveBeenCalled();
+    await probe.controller.refresh();
+    expect(probe.render).toHaveBeenCalledOnce();
+  });
+
+  it("disposes without publishing a late completion or scheduling new work", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 9),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const pending = deferred<ColumnarTileResponse>();
+    const probe = controllerProbe(() => pending.promise);
+    const refresh = probe.controller.refresh();
+    const signal = probe.queryTiles.mock.calls[0]?.[1];
+    probe.controller.resized();
+    probe.controller.dispose();
+    probe.controller.dispose();
+    pending.resolve(tileResponse());
+    await refresh;
+    probe.controller.resized();
+    probe.controller.render();
+    await probe.controller.refresh();
+    await vi.runAllTimersAsync();
+    expect(signal?.aborted).toBe(true);
+    expect(probe.queryTiles).toHaveBeenCalledOnce();
+    expect(probe.render).not.toHaveBeenCalled();
+    expect([...probe.controller.responses()]).toEqual([]);
   });
 
   it("routes an explicit signal X through the paired Line2D endpoint", async () => {
@@ -224,6 +299,7 @@ describe("LinePresentationController", () => {
     expect(probe.queryTiles).not.toHaveBeenCalled();
     expect(probe.queryLine2D).toHaveBeenCalledWith(
       expect.objectContaining({ x_signal_id: "1", y_signal_ids: ["2", "3"] }),
+      expect.any(AbortSignal),
     );
     expect([...probe.controller.responses()]).toEqual([
       { kind: "signal", response },
@@ -237,6 +313,7 @@ describe("LinePresentationController", () => {
     await probe.controller.refresh();
     expect(probe.queryLine2D).toHaveBeenLastCalledWith(
       expect.objectContaining({ y_signal_ids: ["3", "2"] }),
+      expect.any(AbortSignal),
     );
     expect(probe.queryLine2D).toHaveBeenCalledTimes(2);
   });

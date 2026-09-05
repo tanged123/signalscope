@@ -50,6 +50,8 @@ import {
 } from "../render/plot-theme";
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
+import { seriesInspector, formatToolbarNumber } from "./series-inspector";
+import { showPanelMenu } from "./panel-menu";
 
 const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 5_000;
 // A newly acquired device can outlive its first canvas configuration attempt.
@@ -3119,53 +3121,12 @@ export class PanelView {
     }[],
   ): void {
     this.closePanelConfig();
-    const popover = document.createElement("div");
-    popover.className = "panel-config-popover";
-    popover.setAttribute("role", "menu");
-    popover.setAttribute("aria-label", label);
-    const title = document.createElement("div");
-    title.className = "panel-config-title";
-    title.textContent = label;
-    popover.append(title);
-    for (const option of options) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.setAttribute(
-        "role",
-        option.action === true ? "menuitem" : "menuitemradio",
-      );
-      if (option.action !== true)
-        button.setAttribute("aria-checked", String(option.active));
-      button.textContent = `${option.active ? "✓ " : option.action === true ? "" : "  "}${option.label}`;
-      button.addEventListener("click", () => {
-        option.run();
-        this.closePanelConfig();
-      });
-      popover.append(button);
-    }
-    this.element.append(popover);
-    const panelRect = this.element.getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
-    popover.style.left = `${String(
-      clamp(
-        anchorRect.right - panelRect.left - 190,
-        4,
-        Math.max(4, panelRect.width - 194),
-      ),
-    )}px`;
-    popover.style.top = `${String(anchorRect.bottom - panelRect.top + 4)}px`;
-    const onPointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && popover.contains(event.target))
-        return;
-      this.closePanelConfig();
-    };
-    document.addEventListener("pointerdown", onPointer, { capture: true });
-    this.panelConfigCleanup = () => {
-      document.removeEventListener("pointerdown", onPointer, {
-        capture: true,
-      });
-      popover.remove();
-    };
+    this.panelConfigCleanup = showPanelMenu(
+      this.element,
+      anchor,
+      label,
+      options,
+    );
   }
 
   private closePanelConfig(): void {
@@ -3217,149 +3178,12 @@ export class PanelView {
     state: RenderPanelState,
     series: RenderSeries,
   ): HTMLElement {
-    const inspector = document.createElement("div");
-    inspector.className = "plot-row-inspector";
-    inspector.setAttribute("role", "group");
-    inspector.setAttribute("aria-label", `${series.path} line properties`);
-    const heading = document.createElement("div");
-    heading.className = "plot-row-inspector-heading";
-    const sample = document.createElement("span");
-    sample.className = "plot-legend-swatch";
-    sample.style.background = seriesColor(series);
-    sample.style.height = `${String(Math.max(1, series.width))}px`;
-    const path = document.createElement("span");
-    path.textContent = series.path;
-    const close = document.createElement("button");
-    close.type = "button";
-    close.textContent = "✕";
-    close.title = "Close line inspector";
-    close.addEventListener("click", () =>
-      this.toggleInlineInspector(state, series.path),
-    );
-    heading.append(sample, path, close);
-
-    const color = document.createElement("div");
-    color.className = "plot-row-inspector-field";
-    color.classList.toggle("overridden", series.overrideFields.color);
-    const colorLabel = document.createElement("span");
-    colorLabel.textContent = "color";
-    const slots = document.createElement("span");
-    slots.className = "plot-row-color-slots";
-    for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
-      const swatch = document.createElement("button");
-      swatch.type = "button";
-      swatch.style.background = `var(--series-${String(slot)})`;
-      swatch.classList.toggle(
-        "active",
-        colorIndexForHue(series.hue) + 1 === slot,
-      );
-      swatch.setAttribute("aria-label", `Color slot ${String(slot)}`);
-      swatch.addEventListener("click", () => {
-        this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
-          color_slot: slot,
-        });
-      });
-      slots.append(swatch);
-    }
-    color.append(
-      colorLabel,
-      slots,
-      this.inspectorProvenance(
-        series.overrideFields.color,
-        `← ${state.color_by ?? "flat"}`,
-        () =>
-          this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
-            color_slot: null,
-          }),
-      ),
-    );
-
-    const line = document.createElement("div");
-    line.className = "plot-row-inspector-field";
-    line.classList.toggle(
-      "overridden",
-      series.overrideFields.dash || series.overrideFields.width,
-    );
-    const lineLabel = document.createElement("span");
-    lineLabel.textContent = "line";
-    const dashes = document.createElement("span");
-    dashes.className = "plot-row-dashes";
-    for (const dash of ["solid", "dash", "dot"] as const) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = dash;
-      button.classList.toggle("active", series.dash === dash);
-      button.addEventListener("click", () => {
-        this.callbacks.onPatchSeriesStyle(this.id, series.ref, { dash });
-      });
-      dashes.append(button);
-    }
-    const width = document.createElement("input");
-    width.type = "range";
-    width.min = "0.5";
-    width.max = "4";
-    width.step = "0.25";
-    width.value = String(series.width);
-    width.setAttribute("aria-label", "Line width");
-    const widthValue = document.createElement("span");
-    widthValue.textContent = formatToolbarNumber(series.width);
-    width.addEventListener("input", () => {
-      widthValue.textContent = formatToolbarNumber(Number(width.value));
+    return seriesInspector(state, series, seriesColor(series), {
+      close: () => this.toggleInlineInspector(state, series.path),
+      mute: () => this.callbacks.onMuteSeries(this.id, series.ref),
+      patch: (style) =>
+        this.callbacks.onPatchSeriesStyle(this.id, series.ref, style),
     });
-    width.addEventListener("change", () => {
-      this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
-        width: Number(width.value),
-      });
-    });
-    line.append(
-      lineLabel,
-      dashes,
-      width,
-      widthValue,
-      this.inspectorProvenance(
-        series.overrideFields.dash || series.overrideFields.width,
-        `← ${state.dash_by ?? "flat"} · ${state.width_by ?? "flat"}`,
-        () =>
-          this.callbacks.onPatchSeriesStyle(this.id, series.ref, {
-            dash: null,
-            width: null,
-          }),
-      ),
-    );
-
-    const footer = document.createElement("div");
-    footer.className = "plot-row-inspector-footer";
-    const count = Object.values(series.overrideFields).filter(Boolean).length;
-    const summary = document.createElement("span");
-    summary.textContent =
-      count === 0 ? "no overrides" : `${String(count)} overrides`;
-    summary.classList.toggle("active", count > 0);
-    const mute = document.createElement("button");
-    mute.type = "button";
-    mute.textContent = series.visible ? "⌫ mute" : "restore";
-    mute.addEventListener("click", () =>
-      this.callbacks.onMuteSeries(this.id, series.ref),
-    );
-    footer.append(summary, mute);
-    inspector.append(heading, color, line, footer);
-    return inspector;
-  }
-
-  private inspectorProvenance(
-    overridden: boolean,
-    inherited: string,
-    revert: () => void,
-  ): HTMLElement {
-    const control = document.createElement("button");
-    control.type = "button";
-    control.className = "plot-row-provenance";
-    control.textContent = overridden ? "⟲" : inherited;
-    control.disabled = !overridden;
-    control.title = overridden
-      ? "Revert field to its encoding rule"
-      : inherited;
-    if (overridden) control.addEventListener("click", revert);
-    return control;
   }
 }
 
@@ -3404,10 +3228,6 @@ function axisEditZone(
   if (px < plot.x - 20) return "y";
   if (py > plot.y + plot.height + 14) return "x";
   return null;
-}
-
-function formatToolbarNumber(value: number): string {
-  return Number.isInteger(value) ? value.toFixed(1) : String(value);
 }
 
 function encodingValueCount(

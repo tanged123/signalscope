@@ -129,8 +129,14 @@ export interface DataPlane {
   readonly bakedSessionJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
-  queryTiles(request: TileRequest): Promise<ColumnarTileResponse>;
-  queryLine2D(request: Line2DRequest): Promise<Line2DResponse>;
+  queryTiles(
+    request: TileRequest,
+    signal?: AbortSignal,
+  ): Promise<ColumnarTileResponse>;
+  queryLine2D(
+    request: Line2DRequest,
+    signal?: AbortSignal,
+  ): Promise<Line2DResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
 }
 
@@ -292,16 +298,22 @@ export class HttpPlane implements DataPlane {
     return this.post<SourceSummary[]>("list_sources");
   }
 
-  async queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
+  async queryTiles(
+    request: TileRequest,
+    signal?: AbortSignal,
+  ): Promise<ColumnarTileResponse> {
     return decodeTileResponse(
-      await this.postBinary("query_tiles_bin", request),
+      await this.postBinary("query_tiles_bin", request, signal),
       request.request_id,
     );
   }
 
-  async queryLine2D(request: Line2DRequest): Promise<Line2DResponse> {
+  async queryLine2D(
+    request: Line2DRequest,
+    signal?: AbortSignal,
+  ): Promise<Line2DResponse> {
     return decodeLineResponse(
-      await this.postBinary("query_line2d_bin", request),
+      await this.postBinary("query_line2d_bin", request, signal),
       request.request_id,
     );
   }
@@ -338,11 +350,13 @@ export class HttpPlane implements DataPlane {
   private async postBinary(
     path: string,
     payload: unknown,
+    signal?: AbortSignal,
   ): Promise<ArrayBuffer> {
     const response = await this.fetcher(`/api/${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(seal(payload)),
+      signal: signal ?? null,
     });
     if (!response.ok) {
       throw new Error(await response.text());
@@ -419,8 +433,12 @@ export class BakedPlane implements DataPlane {
     ]);
   }
 
-  queryTiles(request: TileRequest): Promise<ColumnarTileResponse> {
+  queryTiles(
+    request: TileRequest,
+    signal?: AbortSignal,
+  ): Promise<ColumnarTileResponse> {
     return Promise.resolve().then(() => {
+      signal?.throwIfAborted();
       const signals = new Map(
         this.payload.signals.map((signal) => [
           signal.summary.signal_id,
@@ -458,8 +476,12 @@ export class BakedPlane implements DataPlane {
     });
   }
 
-  queryLine2D(request: Line2DRequest): Promise<Line2DResponse> {
+  queryLine2D(
+    request: Line2DRequest,
+    signal?: AbortSignal,
+  ): Promise<Line2DResponse> {
     return Promise.resolve().then(() => {
+      signal?.throwIfAborted();
       const line = (this.payload.line2d ?? []).find(
         (candidate) =>
           candidate.x_signal_id === request.x_signal_id &&

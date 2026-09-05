@@ -53,8 +53,10 @@ export class LinePresentationController {
   private refreshToken = 0;
   private refreshPromise: Promise<void> | null = null;
   private refreshQueued = false;
-  private renderScheduled = false;
+  private renderFrame: number | null = null;
   private refreshTimer: number | null = null;
+  private refreshAbort: AbortController | null = null;
+  private disposed = false;
 
   constructor(
     private readonly plane: DataPlane,
@@ -62,16 +64,20 @@ export class LinePresentationController {
   ) {}
 
   refresh(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     this.refreshQueued = true;
     this.refreshToken += 1;
+    this.refreshAbort?.abort();
     if (this.refreshPromise !== null) return this.refreshPromise;
     this.refreshPromise = (async () => {
       try {
         while (this.refreshQueued) {
           this.refreshQueued = false;
-          await this.refreshPass(this.refreshToken);
+          this.refreshAbort = new AbortController();
+          await this.refreshPass(this.refreshToken, this.refreshAbort.signal);
         }
       } finally {
+        this.refreshAbort = null;
         this.refreshPromise = null;
       }
     })();
@@ -79,6 +85,7 @@ export class LinePresentationController {
   }
 
   render(): void {
+    if (this.disposed) return;
     try {
       const panels = new Map(
         this.callbacks.panels().map((panel) => [panel.id, panel]),
@@ -101,15 +108,15 @@ export class LinePresentationController {
   }
 
   scheduleRender(): void {
-    if (this.renderScheduled) return;
-    this.renderScheduled = true;
-    requestAnimationFrame(() => {
-      this.renderScheduled = false;
+    if (this.disposed || this.renderFrame !== null) return;
+    this.renderFrame = requestAnimationFrame(() => {
+      this.renderFrame = null;
       this.render();
     });
   }
 
   scheduleRefresh(delay = 50): void {
+    if (this.disposed) return;
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => {
       this.refreshTimer = null;
@@ -146,6 +153,7 @@ export class LinePresentationController {
 
   invalidate(panelId?: string): void {
     this.refreshToken += 1;
+    this.refreshAbort?.abort();
     this.cache.invalidate(panelId);
     this.signalXCache.invalidate(panelId);
     if (panelId === undefined) {
@@ -160,20 +168,27 @@ export class LinePresentationController {
   }
 
   clear(): void {
-    this.refreshToken += 1;
     this.refreshQueued = false;
-    this.cache.invalidate();
-    this.signalXCache.invalidate();
-    this.responsesByPanel.clear();
-    this.missingByPanel.clear();
-    this.errorsByPanel.clear();
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    if (this.renderFrame !== null) cancelAnimationFrame(this.renderFrame);
+    this.refreshTimer = null;
+    this.renderFrame = null;
+    this.invalidate();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.clear();
   }
 
   responses(): Iterable<PanelLineResponse> {
     return this.responsesByPanel.values();
   }
 
-  private async refreshPass(refreshToken: number): Promise<void> {
+  private async refreshPass(
+    refreshToken: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     const panels = this.callbacks.panels();
     const fallbackWidth = Math.max(
       1,
@@ -291,22 +306,28 @@ export class LinePresentationController {
           const data: PanelLineResponse = signalX
             ? {
                 kind: "signal",
-                response: await this.plane.queryLine2D({
-                  request_id: crypto.randomUUID(),
-                  x_signal_id: signals.xId as string,
-                  y_signal_ids: ids,
-                  window: paddedWindow,
-                  pixel_width: requestedDevicePixels,
-                }),
+                response: await this.plane.queryLine2D(
+                  {
+                    request_id: crypto.randomUUID(),
+                    x_signal_id: signals.xId as string,
+                    y_signal_ids: ids,
+                    window: paddedWindow,
+                    pixel_width: requestedDevicePixels,
+                  },
+                  signal,
+                ),
               }
             : {
                 kind: "time",
-                response: await this.plane.queryTiles({
-                  request_id: crypto.randomUUID(),
-                  signal_ids: ids,
-                  window: paddedWindow,
-                  pixel_width: requestedDevicePixels,
-                }),
+                response: await this.plane.queryTiles(
+                  {
+                    request_id: crypto.randomUUID(),
+                    signal_ids: ids,
+                    window: paddedWindow,
+                    pixel_width: requestedDevicePixels,
+                  },
+                  signal,
+                ),
               };
           if (refreshToken !== this.refreshToken) return;
           replacements.set(panel.id, {

@@ -7,6 +7,80 @@ import type {
 import { BakedPlane, HttpPlane } from "./data-plane";
 import { seal, type Envelope } from "./envelope";
 
+it("forwards query cancellation to the HTTP fetch", async () => {
+  const fetcher = vi.fn<typeof fetch>(
+    (_url, options) =>
+      new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      }),
+  );
+  const plane = new HttpPlane(fetcher);
+  const controller = new AbortController();
+  const tiles = plane.queryTiles(
+    {
+      request_id: "tiles",
+      signal_ids: [],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  const line = plane.queryLine2D(
+    {
+      request_id: "line",
+      x_signal_id: "1",
+      y_signal_ids: ["2"],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  const results = Promise.allSettled([tiles, line]);
+  controller.abort();
+  expect((await results).map((result) => result.status)).toEqual([
+    "rejected",
+    "rejected",
+  ]);
+  expect(
+    fetcher.mock.calls.every(
+      ([, options]) => options?.signal === controller.signal,
+    ),
+  ).toBe(true);
+});
+
+it("rejects baked reads aborted before their queued preparation", async () => {
+  const plane = new BakedPlane(seal({ session_json: "", signals: [] }));
+  const controller = new AbortController();
+  const tiles = plane.queryTiles(
+    {
+      request_id: "tiles",
+      signal_ids: [],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  const line = plane.queryLine2D(
+    {
+      request_id: "line",
+      x_signal_id: "1",
+      y_signal_ids: ["2"],
+      window: { t0: 0, t1: 1 },
+      pixel_width: 100,
+    },
+    controller.signal,
+  );
+  controller.abort();
+  await expect(tiles).rejects.toMatchObject({ name: "AbortError" });
+  await expect(line).rejects.toMatchObject({ name: "AbortError" });
+});
+
 function bin(time: number, value: number | null): EnvelopeBin {
   return {
     t0: time,

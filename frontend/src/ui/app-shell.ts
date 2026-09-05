@@ -1,3 +1,4 @@
+import { shellCommand } from "../app/shell-commands";
 import {
   CommandRegistry,
   formatCombo,
@@ -248,6 +249,14 @@ export class AppShell {
     if (warning !== null) warning.hidden = true;
     this.workspaceView?.setGpu(gpu, this.signals.length > 0);
     void this.refreshTiles();
+  }
+
+  stopPresentation(): void {
+    this.presentation.dispose();
+    const gpu = this.gpu;
+    this.gpu = null;
+    this.workspaceView?.releaseGpu();
+    gpu?.dispose();
   }
 
   private handleGpuFailure(failure: GpuFailure): void {
@@ -777,40 +786,26 @@ export class AppShell {
         this.applyTimeWindow(id, range.min + delta, range.max + delta);
       }
     };
-    const undoCommand: Command = {
-      id: "undo",
-      title: "Undo",
-      keys: "mod+z",
-      section: "workspace",
-      group: "history",
+    const undoCommand: Command = shellCommand("undo", {
       enabled: () => this.history.canUndo(),
       run: () => {
         this.applyHistory(this.history.undo());
       },
-    };
-    const redoCommand: Command = {
-      id: "redo",
-      title: "Redo",
-      keys: "mod+shift+z",
-      altKeys: ["mod+y"],
-      section: "workspace",
-      group: "history",
+    });
+    const redoCommand: Command = shellCommand("redo", {
       enabled: () => this.history.canRedo(),
       run: () => {
         this.applyHistory(this.history.redo());
       },
-    };
+    });
     this.commands.register(undoCommand);
     this.commands.register(redoCommand);
-    this.commands.register({
-      id: "save-selection-as-set",
-      title: "Save selected signals as set",
-      keys: "f",
-      section: "workspace",
-      group: "sets",
-      enabled: () => this.selection.size() > 0,
-      run: () => this.saveSelectedAsSet(),
-    });
+    this.commands.register(
+      shellCommand("save-selection-as-set", {
+        enabled: () => this.selection.size() > 0,
+        run: () => this.saveSelectedAsSet(),
+      }),
+    );
     setEditingReservedCombos(
       [
         undoCommand.keys,
@@ -818,97 +813,84 @@ export class AppShell {
         ...(redoCommand.altKeys ?? []),
       ].filter((keys): keys is string => keys !== undefined),
     );
-    this.commands.register({
-      id: "open-sources",
-      title: "Open…",
-      keys: "o",
-      section: "file",
-      group: "open",
-      enabled: () => this.plane.ingest !== null,
-      run: () => {
-        this.openSources();
-      },
-    });
-    this.commands.register({
-      id: "open-folder",
-      title: "Open folder…",
-      keys: "mod+alt+o",
-      section: "file",
-      group: "open",
-      enabled: () => this.plane.ingest !== null,
-      run: () => {
-        this.openFolder();
-      },
-    });
-    this.commands.register({
-      id: "new-workspace-tab",
-      title: "New workspace tab",
-      section: "workspace",
-      group: "new",
-      run: () => {
-        this.workspace.addTab();
-        this.afterLayoutChange();
-      },
-    });
-    this.commands.register({
-      id: "close-workspace-tab",
-      title: "Close active workspace tab",
-      enabled: () => this.workspace.tabs().length > 1,
-      run: () => {
-        this.workspace.closeTab(this.workspace.activeTabId());
-        this.afterLayoutChange();
-      },
-    });
-    this.commands.register({
-      id: "split-panel-down",
-      title: "New panel",
-      keys: "n",
-      section: "workspace",
-      group: "new",
-      run: () => {
-        const id = this.workspace.focusedPanelId();
-        if (id === null) {
-          this.workspace.addPanelRow();
-        } else {
-          this.workspace.splitPanelDown(id);
-        }
-        this.afterLayoutChange();
-      },
-    });
+    this.commands.register(
+      shellCommand("open-sources", {
+        enabled: () => this.plane.ingest !== null,
+        run: () => {
+          this.openSources();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("open-folder", {
+        enabled: () => this.plane.ingest !== null,
+        run: () => {
+          this.openFolder();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("new-workspace-tab", {
+        run: () => {
+          this.workspace.addTab();
+          this.afterLayoutChange();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("close-workspace-tab", {
+        enabled: () => this.workspace.tabs().length > 1,
+        run: () => {
+          this.workspace.closeTab(this.workspace.activeTabId());
+          this.afterLayoutChange();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("split-panel-down", {
+        run: () => {
+          const id = this.workspace.focusedPanelId();
+          if (id === null) {
+            this.workspace.addPanelRow();
+          } else {
+            this.workspace.splitPanelDown(id);
+          }
+          this.afterLayoutChange();
+        },
+      }),
+    );
     this.registerFocusedPanelCommand(
       "split-panel-right",
       "Split current panel right",
       (id) => void this.workspace.splitPanelRight(id),
     );
-    this.commands.register({
-      id: "cycle-cursor-mode",
-      title: "Cursor: cycle none/track/measure",
-      keys: "c",
-      run: () => {
-        this.cycleCursorMode();
-      },
-    });
-    this.commands.register({
-      id: "toggle-all-stats",
-      title: "Toggle statistics on every panel",
-      section: "view",
-      group: "display",
-      checked: () =>
-        this.workspace.panels().length > 0 &&
-        this.workspace.panels().every((panel) => panel.show_stats),
-      run: () => {
-        // Any panel still hiding stats turns them all on; otherwise all off.
-        const target = this.workspace
-          .panels()
-          .some((panel) => !panel.show_stats);
-        for (const panel of this.workspace.panels()) {
-          if (panel.show_stats !== target) this.workspace.toggleStats(panel.id);
-        }
-        this.commitHistory();
-        this.workspaceView?.refreshPanelStates();
-        this.renderTiles();
-      },
-    });
+    this.commands.register(
+      shellCommand("cycle-cursor-mode", {
+        run: () => {
+          this.cycleCursorMode();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("toggle-all-stats", {
+        checked: () =>
+          this.workspace.panels().length > 0 &&
+          this.workspace.panels().every((panel) => panel.show_stats),
+        run: () => {
+          // Any panel still hiding stats turns them all on; otherwise all off.
+          const target = this.workspace
+            .panels()
+            .some((panel) => !panel.show_stats);
+          for (const panel of this.workspace.panels()) {
+            if (panel.show_stats !== target)
+              this.workspace.toggleStats(panel.id);
+          }
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
+      }),
+    );
     this.registerFocusedPanelCommand("zoom-in-time", "Panel: zoom in", () => {
       zoomFocusedPanel(0.8);
     });
@@ -978,258 +960,208 @@ export class AppShell {
         this.workspace.toggleMaximize(id);
       },
     );
-    this.commands.register({
-      id: "restore-panel-grid",
-      title: "Restore panel grid",
-      enabled: () => this.workspace.maximizedPanelId() !== null,
-      run: () => {
-        this.workspace.restoreGrid();
-        this.afterLayoutChange();
-      },
-    });
-    this.commands.register({
-      id: "focus-filter",
-      title: "Filter signals",
-      keys: "/",
-      run: () => {
-        required<HTMLInputElement>(this.root, ".signal-search").focus();
-      },
-    });
-    this.commands.register({
-      id: "toggle-signal-tree",
-      title: "Toggle signal tree",
-      section: "view",
-      group: "docks",
-      checked: () =>
-        !required(this.root, ".workbench").classList.contains("tree-collapsed"),
-      enabled: () => window.innerWidth > 820,
-      run: () => {
-        this.toggleSignalTree();
-      },
-    });
-    this.commands.register({
-      id: "toggle-linked",
-      title: "Toggle linked time",
-      keys: "l",
-      run: () => {
-        this.toggleLinked();
-      },
-    });
-    this.commands.register({
-      id: "toggle-theme",
-      title: "Toggle theme",
-      keys: "t",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.toggleTheme();
-      },
-    });
-    this.commands.register({
-      id: "increase-plot-font",
-      title: "Plot font size: increase",
-      keys: "mod+=",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({
-          plot_font_size: this.prefs.plot_font_size + PLOT_FONT_SIZE.step,
-        });
-      },
-    });
-    this.commands.register({
-      id: "decrease-plot-font",
-      title: "Plot font size: decrease",
-      keys: "mod+-",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({
-          plot_font_size: this.prefs.plot_font_size - PLOT_FONT_SIZE.step,
-        });
-      },
-    });
-    this.commands.register({
-      id: "reset-plot-font",
-      title: "Plot font size: reset",
-      keys: "mod+0",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({ plot_font_size: PLOT_FONT_SIZE.default });
-      },
-    });
-    this.commands.register({
-      id: "increase-plot-line-width",
-      title: "Plot line width: increase",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({
-          plot_line_width_scale:
-            this.prefs.plot_line_width_scale + PLOT_LINE_WIDTH_SCALE.step,
-        });
-      },
-    });
-    this.commands.register({
-      id: "decrease-plot-line-width",
-      title: "Plot line width: decrease",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({
-          plot_line_width_scale:
-            this.prefs.plot_line_width_scale - PLOT_LINE_WIDTH_SCALE.step,
-        });
-      },
-    });
-    this.commands.register({
-      id: "reset-plot-line-width",
-      title: "Plot line width: reset",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.updatePreferences({
-          plot_line_width_scale: PLOT_LINE_WIDTH_SCALE.default,
-        });
-      },
-    });
-    this.commands.register({
-      id: "toggle-formula",
-      title: "Toggle derived formula editor",
-      keys: "e",
-      section: "view",
-      group: "docks",
-      checked: () =>
-        !required(this.root, ".workbench").classList.contains(
-          "formula-collapsed",
-        ),
-      run: () => {
-        this.toggleFormula();
-      },
-    });
-    this.commands.register({
-      id: "command-palette",
-      title: "Command list",
-      keys: "mod+shift+p",
-      section: "help",
-      group: "commands",
-      run: () => {
-        this.palette?.open("commands");
-      },
-    });
-    this.commands.register({
-      id: "open-settings",
-      title: "Settings…",
-      keys: "mod+,",
-      section: "view",
-      group: "display",
-      run: () => {
-        this.palette?.open("settings");
-      },
-    });
-    this.commands.register({
-      id: "go-to-signal",
-      title: "Go to signal",
-      keys: "mod+p",
-      run: () => {
-        this.palette?.open("signals");
-      },
-    });
-    this.commands.register({
-      id: "help",
-      title: "Keyboard help",
-      keys: "?",
-      run: () => {
-        this.palette?.open("commands");
-      },
-    });
-    this.commands.register({
-      id: "about-signalscope",
-      title: "About SignalScope",
-      section: "help",
-      group: "about",
-      run: () => {
-        this.showModeHelp("SignalScope 2.2.0");
-      },
-    });
-    this.commands.register({
-      id: "new-workspace",
-      title: "New Workspace",
-      keys: "mod+n",
-      section: "file",
-      group: "workspace",
-      enabled: () => this.plane.session !== null,
-      run: () => {
-        void this.newWorkspace();
-      },
-    });
-    this.commands.register({
-      id: "open-workspace",
-      title: "Open Workspace…",
-      keys: "mod+o",
-      section: "file",
-      group: "workspace",
-      enabled: () => this.plane.session !== null,
-      run: () => {
-        void this.pickAndLoadWorkspace();
-      },
-    });
-    this.commands.register({
-      id: "save-workspace",
-      title: "Save Workspace",
-      keys: "mod+s",
-      section: "file",
-      group: "workspace",
-      enabled: () => this.plane.session !== null,
-      run: () => {
-        void this.saveWorkspace(false);
-      },
-    });
-    this.commands.register({
-      id: "save-workspace-as",
-      title: "Save Workspace As…",
-      section: "file",
-      group: "workspace",
-      enabled: () => this.plane.session !== null,
-      run: () => {
-        void this.saveWorkspace(true);
-      },
-    });
-    this.commands.register({
-      id: "export-html",
-      title: "Export ▸ HTML Snapshot…",
-      section: "file",
-      group: "export",
-      enabled: () => this.plane.exporter !== null,
-      run: () => {
-        this.openExportDialog("html");
-      },
-    });
-    this.commands.register({
-      id: "export-png",
-      title: "Export ▸ PNG…",
-      section: "file",
-      group: "export",
-      enabled: () =>
-        this.plane.exporter !== null &&
-        this.workspace.focusedPanelId() !== null,
-      run: () => {
-        this.openExportDialog("png");
-      },
-    });
-    this.commands.register({
-      id: "export-csv",
-      title: "Export ▸ Visible CSV…",
-      section: "file",
-      group: "export",
-      enabled: () =>
-        this.plane.exporter !== null &&
-        this.workspace.focusedPanelId() !== null,
-      run: () => {
-        this.openExportDialog("csv");
-      },
-    });
+    this.commands.register(
+      shellCommand("restore-panel-grid", {
+        enabled: () => this.workspace.maximizedPanelId() !== null,
+        run: () => {
+          this.workspace.restoreGrid();
+          this.afterLayoutChange();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("focus-filter", {
+        run: () => {
+          required<HTMLInputElement>(this.root, ".signal-search").focus();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("toggle-signal-tree", {
+        checked: () =>
+          !required(this.root, ".workbench").classList.contains(
+            "tree-collapsed",
+          ),
+        enabled: () => window.innerWidth > 820,
+        run: () => {
+          this.toggleSignalTree();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("toggle-linked", {
+        run: () => {
+          this.toggleLinked();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("toggle-theme", {
+        run: () => {
+          this.toggleTheme();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("increase-plot-font", {
+        run: () => {
+          this.updatePreferences({
+            plot_font_size: this.prefs.plot_font_size + PLOT_FONT_SIZE.step,
+          });
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("decrease-plot-font", {
+        run: () => {
+          this.updatePreferences({
+            plot_font_size: this.prefs.plot_font_size - PLOT_FONT_SIZE.step,
+          });
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("reset-plot-font", {
+        run: () => {
+          this.updatePreferences({ plot_font_size: PLOT_FONT_SIZE.default });
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("increase-plot-line-width", {
+        run: () => {
+          this.updatePreferences({
+            plot_line_width_scale:
+              this.prefs.plot_line_width_scale + PLOT_LINE_WIDTH_SCALE.step,
+          });
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("decrease-plot-line-width", {
+        run: () => {
+          this.updatePreferences({
+            plot_line_width_scale:
+              this.prefs.plot_line_width_scale - PLOT_LINE_WIDTH_SCALE.step,
+          });
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("reset-plot-line-width", {
+        run: () => {
+          this.updatePreferences({
+            plot_line_width_scale: PLOT_LINE_WIDTH_SCALE.default,
+          });
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("toggle-formula", {
+        checked: () =>
+          !required(this.root, ".workbench").classList.contains(
+            "formula-collapsed",
+          ),
+        run: () => {
+          this.toggleFormula();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("command-palette", {
+        run: () => {
+          this.palette?.open("commands");
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("open-settings", {
+        run: () => {
+          this.palette?.open("settings");
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("go-to-signal", {
+        run: () => {
+          this.palette?.open("signals");
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("help", {
+        run: () => {
+          this.palette?.open("commands");
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("about-signalscope", {
+        run: () => {
+          this.showModeHelp("SignalScope 2.2.0");
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("new-workspace", {
+        enabled: () => this.plane.session !== null,
+        run: () => {
+          void this.newWorkspace();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("open-workspace", {
+        enabled: () => this.plane.session !== null,
+        run: () => {
+          void this.pickAndLoadWorkspace();
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("save-workspace", {
+        enabled: () => this.plane.session !== null,
+        run: () => {
+          void this.saveWorkspace(false);
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("save-workspace-as", {
+        enabled: () => this.plane.session !== null,
+        run: () => {
+          void this.saveWorkspace(true);
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("export-html", {
+        enabled: () => this.plane.exporter !== null,
+        run: () => {
+          this.openExportDialog("html");
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("export-png", {
+        enabled: () =>
+          this.plane.exporter !== null &&
+          this.workspace.focusedPanelId() !== null,
+        run: () => {
+          this.openExportDialog("png");
+        },
+      }),
+    );
+    this.commands.register(
+      shellCommand("export-csv", {
+        enabled: () =>
+          this.plane.exporter !== null &&
+          this.workspace.focusedPanelId() !== null,
+        run: () => {
+          this.openExportDialog("csv");
+        },
+      }),
+    );
     for (const planned of [
       ["open-recent", "Open Recent ▸", "file", "open"],
       ["axes-default", "Axes default ▸", "view", "display"],
