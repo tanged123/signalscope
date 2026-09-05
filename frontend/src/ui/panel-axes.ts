@@ -7,6 +7,7 @@ import type {
 import { bindAxisDrop } from "./axis-drop";
 import { showAxisPicker, xAxisLabel } from "./axis-picker";
 import { required } from "./dom";
+import { showAxisLimits, type AxisLimits } from "./axis-limits";
 
 export interface PanelAxisActions {
   catalog(): Catalog;
@@ -14,6 +15,8 @@ export interface PanelAxisActions {
   selectX(axis: SampleAxisSource): void;
   selectColor(axis: PanelState["color_axis"]): void;
   addY(paths: string[]): void;
+  limits(values: AxisLimits): void;
+  visibleRanges(): { x: [number, number] | null; y: [number, number] | null };
   beforeOpen(): void;
 }
 
@@ -35,7 +38,7 @@ export class PanelAxes {
         { signal: this.abort.signal },
       );
     }
-    required(element, ".panel-color-limits").addEventListener(
+    required(element, ".panel-axis-limits").addEventListener(
       "click",
       () => this.openLimits(),
       { signal: this.abort.signal },
@@ -65,15 +68,6 @@ export class PanelAxes {
     c.textContent = `c: ${cLabel} ▾`;
     c.title = `Color axis: ${cLabel}`;
     c.setAttribute("aria-label", `Color axis: ${cLabel}`);
-    const limits = required<HTMLButtonElement>(
-      this.element,
-      ".panel-color-limits",
-    );
-    limits.hidden = state.color_axis == null;
-    limits.textContent =
-      state.color_axis?.range == null
-        ? "c limits: auto ▾"
-        : "c limits: fixed ▾";
   }
 
   close(): void {
@@ -111,92 +105,16 @@ export class PanelAxes {
   }
 
   private openLimits(): void {
-    const axis = this.state?.color_axis;
-    if (axis == null) return;
+    if (this.state === null) return;
     this.close();
     this.actions.beforeOpen();
-    const form = document.createElement("form");
-    form.className = "color-axis-editor";
-    form.setAttribute("aria-label", "Color axis limits");
-    const title = document.createElement("strong");
-    title.textContent = "COLOR AXIS";
-    form.append(title);
-    const input = (
-      name: string,
-      value: string,
-      type: string,
-    ): HTMLInputElement => {
-      const label = document.createElement("label");
-      label.textContent = name;
-      const field = document.createElement("input");
-      field.type = type;
-      field.value = value;
-      if (type === "number") field.step = "any";
-      label.append(field);
-      form.append(label);
-      return field;
-    };
-    const min = input("Minimum", axis.range?.[0].toString() ?? "", "number");
-    const max = input("Maximum", axis.range?.[1].toString() ?? "", "number");
-    const label = input(
-      "Label (blank = signal name)",
-      axis.label ?? "",
-      "text",
+    this.closeMenu = showAxisLimits(
+      this.element,
+      required(this.element, ".panel-axis-limits"),
+      this.state,
+      this.actions.visibleRanges(),
+      (values) => this.actions.limits(values),
     );
-    const error = document.createElement("span");
-    error.setAttribute("role", "alert");
-    form.append(error);
-    const button = (text: string, run?: () => void): void => {
-      const button = document.createElement("button");
-      button.textContent = text;
-      button.type = run === undefined ? "submit" : "button";
-      if (run !== undefined) button.addEventListener("click", run);
-      form.append(button);
-    };
-    const save = (range: [number, number] | null): void => {
-      this.actions.selectColor({
-        ...axis,
-        range,
-        label: label.value.trim() || null,
-      });
-      this.close();
-    };
-    button("Apply fixed limits");
-    button("Use automatic limits", () => save(null));
-    button("Cancel", () => this.close());
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const lo = min.valueAsNumber;
-      const hi = max.valueAsNumber;
-      if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo >= hi) {
-        error.textContent =
-          "Enter finite limits with minimum less than maximum.";
-        return;
-      }
-      save([lo, hi]);
-    });
-    const abort = new AbortController();
-    document.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (event.target instanceof Node && !form.contains(event.target))
-          this.close();
-      },
-      { capture: true, signal: abort.signal },
-    );
-    form.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        this.close();
-      }
-    });
-    this.closeMenu = () => {
-      abort.abort();
-      form.remove();
-      required<HTMLElement>(this.element, ".panel-color-limits").focus();
-    };
-    this.element.append(form);
-    min.focus();
   }
 }
 
@@ -204,5 +122,5 @@ export function axisControlsMarkup(): string {
   return `<button class="panel-toolbar-control panel-y-axis" type="button" title="Add Y signals or bundles" aria-label="Add Y signals or bundles">y: + add ▾</button>
     <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
     <button class="panel-toolbar-control panel-c-axis" type="button" title="Choose color axis">c: none ▾</button>
-    <button class="panel-toolbar-control panel-color-limits" type="button" aria-label="Color axis limits" hidden>c limits: auto ▾</button>`;
+    <button class="panel-toolbar-control panel-axis-limits" type="button" aria-label="Axis limits">limits ▾</button>`;
 }

@@ -13,7 +13,9 @@ Pairs must share an exact sample timebase; no interpolation is performed.
 
 Use **c:** to color each line along its length by another signal, a source-matched
 bundle, or time. The separate colorbar shares one scale across the panel;
-**c limits:** switches between automatic and fixed limits and edits its label.
+The shared **limits** dropdown edits X, Y, and C ranges and labels together,
+with automatic or fixed limits per axis. For time X, **Fit data** fits the
+source-time extent and fixed limits follow the panel's linked-time setting.
 C members must share units and the paired sample timebase. Choose **none** to
 restore the saved categorical line colors. Color bindings and limits persist
 in sessions, PNG capture, and offline HTML snapshots.

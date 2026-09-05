@@ -51,7 +51,13 @@ non-streaming line data so renderer sampling cannot lose attribute alignment.
 One plot still has one ChartGPU host and one atomic options publication.
 Viewport-only changes retain attribute buffers and use `setViewRange`.
 
-The C picker and range editor are keyboard accessible. The colorbar is a
+The C picker and shared X/Y/C limits editor are keyboard accessible. One
+draft validates all ranges before a single publication; labels and ranges use
+the existing panel fields. Time-X edits use the existing linked or local time
+window, with Fit data restoring its extent. Automatic Y resets the sticky
+extent. `ui/axis-limits.ts` owns the form and its listeners; `ui/panel-menu.ts`
+owns shared trigger-relative positioning. Every edit schedules persistence.
+The colorbar is a
 renderer-owned canvas so image capture and offline snapshots include it.
 Categorical choices remain saved and become effective again when C is cleared;
 legend text, dash, focus, and picking continue to identify traces.

@@ -33,37 +33,95 @@
   font: 10px var(--font-mono);
 }
 
-.color-axis-editor {
-  position: absolute;
-  top: 56px;
-  right: 4px;
-  z-index: 30;
-  display: grid;
-  gap: 8px;
-  width: min(280px, calc(100% - 8px));
-  max-height: calc(100% - 60px);
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  background: var(--surface-2);
-  color: var(--fg-1);
-  font: 11px var(--font-ui);
+.panel-config-popover.axis-limits-editor {
+  width: min(270px, calc(100% - 8px));
+  max-height: min(440px, 70vh, var(--panel-popover-space));
+  overflow-y: auto;
 }
 
-.color-axis-editor label {
+.axis-limits-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 8px;
+  padding: 4px;
+}
+
+.axis-limits-editor fieldset {
+  margin: 0 0 6px;
+  padding: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.axis-limits-editor legend {
+  float: left;
+  width: 28px;
+  padding: 4px;
+  color: var(--fg-2);
+}
+
+.axis-limits-editor select {
+  width: calc(100% - 36px);
+  margin: 0 4px 2px;
+}
+
+.axis-limits-editor input:disabled,
+.axis-limits-note {
+  color: var(--fg-4);
+}
+
+.axis-limits-note {
+  padding: 4px;
+}
+
+.axis-limits-editor label {
   display: grid;
   gap: 3px;
+  color: var(--fg-3);
 }
 
-.color-axis-editor input,
-.color-axis-editor button {
-  padding: 5px;
+.axis-limits-labels {
+  border-top: 1px solid var(--border-subtle);
+  padding: 4px;
+  color: var(--fg-3);
+}
+
+.axis-limits-labels summary {
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.axis-limits-labels label {
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  margin-top: 4px;
+}
+
+.axis-limits-editor input,
+.axis-limits-editor select {
+  min-width: 0;
+  padding: 4px;
   border: 1px solid var(--border);
   border-radius: 2px;
   color: var(--fg-1);
   background: var(--surface-0);
-  font: 11px var(--font-mono);
+  font: inherit;
+}
+
+.axis-limits-editor input {
+  width: 100%;
+}
+
+.axis-limits-actions {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.axis-limits-editor [role="alert"]:not(:empty) {
+  display: block;
+  padding: 4px;
+  color: var(--fg-2);
 }
 
 .panel-c-axis {

@@ -7,6 +7,22 @@ export interface MenuOption {
   run(): void;
 }
 
+export function positionPanelPopover(
+  container: HTMLElement,
+  anchor: HTMLElement,
+  popover: HTMLElement,
+): void {
+  const panelRect = container.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  const width = popover.getBoundingClientRect().width;
+  popover.style.left = `${String(clamp(anchorRect.right - panelRect.left - container.clientLeft - width, 4, Math.max(4, container.clientWidth - width - 4)))}px`;
+  popover.style.top = `${String(anchorRect.bottom - panelRect.top - container.clientTop + 4)}px`;
+  popover.style.setProperty(
+    "--panel-popover-space",
+    `${String(Math.max(48, panelRect.bottom - anchorRect.bottom - 8))}px`,
+  );
+}
+
 /** Owns one anchored menu and its document listeners; returns its teardown. */
 export function showPanelMenu(
   container: HTMLElement,
@@ -130,11 +146,7 @@ export function showPanelMenu(
     buttons[next]?.focus();
   });
   container.append(popover);
-  const panelRect = container.getBoundingClientRect();
-  const anchorRect = anchor.getBoundingClientRect();
-  const width = searchable ? 360 : 190;
-  popover.style.left = `${String(clamp(anchorRect.right - panelRect.left - width, 4, Math.max(4, panelRect.width - width - 4)))}px`;
-  popover.style.top = `${String(anchorRect.bottom - panelRect.top + 4)}px`;
+  positionPanelPopover(container, anchor, popover);
   anchor.setAttribute("aria-haspopup", "menu");
   anchor.setAttribute("aria-expanded", "true");
   document.addEventListener("pointerdown", onPointer, true);

@@ -647,6 +647,23 @@ export class AppShell {
         },
         ...axisActions({
           workspace: this.workspace,
+          resetY: (id) => this.workspaceView?.resetYAxis(id),
+          timeLimits: (id, range) => {
+            const panel = this.workspace.panel(id);
+            if (panel === undefined) return;
+            const next =
+              range === null
+                ? this.timeExtent(
+                    this.resolvedFor(panel).map((series) => series.path),
+                  )
+                : { t0: range[0], t1: range[1] };
+            const current = this.effectiveWindow(panel);
+            if (
+              next !== null &&
+              (next.t0 !== current.t0 || next.t1 !== current.t1)
+            )
+              this.applyTimeWindow(id, next.t0, next.t1);
+          },
           commit: () => {
             this.commitHistory();
             this.scheduleAutosave();

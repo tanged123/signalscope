@@ -159,6 +159,37 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       /mismatch|unknown|unavailable/i,
     );
     await panel.screenshot({ path: testInfo.outputPath("xy-bundle.png") });
+    const limitsButton = panel.locator(".panel-axis-limits");
+    await limitsButton.click();
+    const editor = panel.getByRole("dialog", {
+      name: "Axis limits",
+      exact: true,
+    });
+    await expect(editor).toHaveClass(/panel-config-popover/);
+    await expect(editor.getByLabel("C limits mode")).toHaveCount(0);
+    const triggerRect = await limitsButton.boundingBox();
+    const editorRect = await editor.boundingBox();
+    expect(triggerRect).not.toBeNull();
+    expect(editorRect).not.toBeNull();
+    if (triggerRect !== null && editorRect !== null) {
+      expect(
+        Math.abs(editorRect.y - triggerRect.y - triggerRect.height - 4),
+      ).toBeLessThan(2);
+      expect(
+        Math.abs(
+          editorRect.x + editorRect.width - triggerRect.x - triggerRect.width,
+        ),
+      ).toBeLessThan(2);
+    }
+    await editor.getByLabel("X limits mode").selectOption("fixed");
+    await editor.getByLabel("X minimum", { exact: true }).fill("0");
+    await editor.getByLabel("X maximum", { exact: true }).fill("10");
+    await editor.getByLabel("Y limits mode").selectOption("fixed");
+    await editor.getByLabel("Y minimum", { exact: true }).fill("1");
+    await editor.getByLabel("Y maximum", { exact: true }).fill("8");
+    await editor.getByRole("button", { name: "Apply limits" }).click();
+    await expect(editor).toBeHidden();
+    await expect(limitsButton).toBeFocused();
     await panel.locator(".panel-c-axis").click();
     await panel.locator(".axis-picker input").fill("temperature · bundle");
     await panel.locator(".axis-picker input").press("Enter");
@@ -168,13 +199,15 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     const colorbar = panel.locator(".colorbar-canvas");
     await expect(colorbar).toBeVisible();
     await expect(colorbar).toHaveAttribute("aria-label", /0 to 100/);
-    await panel.locator(".panel-color-limits").click();
-    await panel.getByLabel("Minimum", { exact: true }).fill("20");
-    await panel.getByLabel("Maximum", { exact: true }).fill("10");
-    await panel.getByRole("button", { name: "Apply fixed limits" }).click();
+    await panel.locator(".panel-axis-limits").click();
+    await panel.getByLabel("C limits mode").selectOption("fixed");
+    await panel.getByLabel("C minimum", { exact: true }).fill("20");
+    await panel.getByLabel("C maximum", { exact: true }).fill("10");
+    await panel.getByRole("button", { name: "Apply limits" }).click();
     await expect(panel.getByRole("alert")).toContainText("minimum less");
-    await panel.getByLabel("Maximum", { exact: true }).fill("80");
-    await panel.getByRole("button", { name: "Apply fixed limits" }).click();
+    await panel.getByLabel("C maximum", { exact: true }).fill("80");
+    await editor.screenshot({ path: testInfo.outputPath("axis-limits.png") });
+    await panel.getByRole("button", { name: "Apply limits" }).click();
     await expect(colorbar).toHaveAttribute("aria-label", /20 to 80/);
     await expect(panel.locator('[data-panel-slot="status"]')).not.toContainText(
       /mismatch|unknown|unavailable|failed/i,
@@ -215,6 +248,11 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
         { timeout: 20_000 },
       )
       .toEqual([20, 80]);
+    const saved = JSON.parse(
+      readFileSync(pathToFileURL(workspacePath), "utf8"),
+    ) as Session;
+    expect(saved.tabs[0]?.panels[0]?.x_range).toEqual([0, 10]);
+    expect(saved.tabs[0]?.panels[0]?.y_range).toEqual([1, 8]);
     const snapshotPath = testInfo.outputPath("xy-color.html");
     await promisify(execFile)(
       join(root, "scripts/export.sh"),

@@ -1,4 +1,5 @@
 import { PanelAxes, axisControlsMarkup } from "./panel-axes";
+import type { AxisLimits } from "./axis-limits";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
@@ -166,6 +167,7 @@ export interface PanelCallbacks {
   onTimeWindow(id: string, t0: number, t1: number): void;
   onYRange(id: string, range: readonly [number, number]): void;
   onXRange(id: string, range: readonly [number, number]): void;
+  onSetAxisLimits?(id: string, limits: AxisLimits): void;
   onPinAnnotation(id: string, hit: AnnotationAnchor): void;
   onRemoveAnnotation(id: string, annotationId: string): void;
   onClearAnnotations?(id: string): void;
@@ -486,6 +488,14 @@ export class PanelView {
       namedSets: () => callbacks.namedSets(),
       selectX: (axis) => callbacks.onSetXAxis?.(this.id, axis),
       selectColor: (axis) => callbacks.onSetColorAxis?.(this.id, axis),
+      limits: (values) => callbacks.onSetAxisLimits?.(this.id, values),
+      visibleRanges: () => {
+        const layout = this.activeLayout();
+        return {
+          x: layout === null ? null : [layout.xRange.min, layout.xRange.max],
+          y: layout === null ? null : [layout.yRange.min, layout.yRange.max],
+        };
+      },
       addY: (paths) => callbacks.onDropSignals(this.id, paths),
       beforeOpen: () => this.closePanelConfig(),
     });
