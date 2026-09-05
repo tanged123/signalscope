@@ -64,6 +64,8 @@ progress; amend earlier records with explicit links when their guidance changes.
 46. [Evidence-backed architecture guidance](0054-evidence-backed-architecture-guidance.md)
 47. [Core policy and query lifetimes](0055-core-policy-and-query-lifetimes.md)
 
+48. [XY axis and bundle bindings](0056-xy-axis-and-bundle-bindings.md)
+
 ## Superseded decisions
 
 These records are retained for history and are not implementation guidance:

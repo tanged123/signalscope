@@ -258,6 +258,62 @@ describe("LinePresentationController", () => {
     expect([...probe.controller.responses()]).toEqual([]);
   });
 
+  it("publishes a bundle only after every paired group is ready", async () => {
+    const probe = controllerProbe(() =>
+      Promise.resolve({ requestId: "unused", series: [] }),
+    );
+    const panel = probe.panels[0];
+    if (panel === undefined) throw new Error("missing panel");
+    panel.x_axis = {
+      kind: "bundle",
+      refs: [
+        { source_key: "one", channel: "x" },
+        { source_key: "two", channel: "x" },
+      ],
+    };
+    probe.panelSignalIds.mockReturnValue({
+      ids: ["2", "4"],
+      xId: "1",
+      missing: [],
+      groups: [
+        { xId: "1", ids: ["2"] },
+        { xId: "3", ids: ["4"] },
+      ],
+    });
+    const line = (id: string): Line2DResponse => ({
+      requestId: id,
+      level: 0,
+      anchor: new Float64Array([0, 1]),
+      x: {
+        signalId: id,
+        signalPath: id,
+        unit: null,
+        values: new Float64Array([1, 2]),
+      },
+      ys: [
+        {
+          signalId: `y-${id}`,
+          signalPath: `y-${id}`,
+          unit: null,
+          values: new Float64Array([3, 4]),
+        },
+      ],
+    });
+    const second = deferred<Line2DResponse>();
+    probe.queryLine2D
+      .mockResolvedValueOnce(line("one"))
+      .mockReturnValueOnce(second.promise);
+    const refresh = probe.controller.refresh();
+    await vi.waitFor(() => expect(probe.queryLine2D).toHaveBeenCalledTimes(2));
+    expect([...probe.controller.responses()]).toEqual([]);
+    second.resolve(line("two"));
+    await refresh;
+    const data = [...probe.controller.responses()][0];
+    expect(data?.kind).toBe("signal");
+    if (data?.kind === "signal") expect(data.response.ys).toHaveLength(2);
+    probe.controller.dispose();
+  });
+
   it("routes an explicit signal X through the paired Line2D endpoint", async () => {
     const probe = controllerProbe(() =>
       Promise.resolve({ requestId: "unused", series: [] }),

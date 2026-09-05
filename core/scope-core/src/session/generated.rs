@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 29;
+pub const SESSION_SCHEMA_VERSION: u32 = 30;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -80,6 +80,9 @@ pub enum XAxisSource {
     Signal {
         #[serde(rename = "ref")]
         r#ref: SeriesRef,
+    },
+    Bundle {
+        refs: Vec<SeriesRef>,
     },
 }
 

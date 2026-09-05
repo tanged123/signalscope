@@ -22,7 +22,7 @@ Usage: ./scripts/test.sh [quick|core|server|desktop|unit|architecture|frontend|e
   architecture  Check frontend import-boundary rules against allowed/forbidden examples.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
-  e2e       Run Playwright desktop and mobile-review smoke tests.
+  e2e       Run Playwright desktop smoke tests, optionally filtered.
   bench     Run corpus, core, and Playwright performance benchmarks.
   full      Run quick checks, test the browser host, then run e2e.
 EOF
@@ -182,10 +182,11 @@ frontend)
   test_frontend
   ;;
 e2e)
+  shift || true
   bake_roundtrip_artifact
   bake_bench_smoke_artifact
   build_e2e_server
-  pnpm e2e
+  pnpm e2e "$@"
   "$signalscope_scripts_dir/server-smoke.sh"
   ;;
 bench)

@@ -83,7 +83,7 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     for tab in current["tabs"].as_array().into_iter().flatten() {
         for panel in tab["panels"].as_array().into_iter().flatten() {
             let axis = &panel["x_axis"];
-            if axis["kind"] == "time" && axis.get("ref").is_some() {
+            if axis["kind"] == "time" && (axis.get("ref").is_some() || axis.get("refs").is_some()) {
                 return Err(SessionError::Json(serde::de::Error::custom(
                     "time X axis cannot carry a signal reference",
                 )));
@@ -91,6 +91,13 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
         }
     }
     let session: Session = serde_json::from_value(current)?;
+    for panel in session.tabs.iter().flat_map(|tab| &tab.panels) {
+        if matches!(&panel.x_axis, XAxisSource::Bundle { refs } if refs.is_empty()) {
+            return Err(SessionError::Json(serde::de::Error::custom(
+                "X bundle cannot be empty",
+            )));
+        }
+    }
     Ok(session)
 }
 
@@ -104,7 +111,13 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (26, migrate_v26),
     (27, migrate_v27),
     (28, migrate_v28),
+    (29, migrate_v29),
 ];
+
+fn migrate_v29(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value
+}
 
 fn migrate_v22(mut value: serde_json::Value) -> serde_json::Value {
     value["schema_version"] = 23.into();
@@ -291,7 +304,7 @@ fn migrate_v27(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 fn migrate_v28(mut value: serde_json::Value) -> serde_json::Value {
-    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["schema_version"] = 29.into();
     if let Some(tabs) = value.get_mut("tabs").and_then(|tabs| tabs.as_array_mut()) {
         for tab in tabs {
             let Some(panels) = tab
@@ -797,6 +810,15 @@ mod tests {
             docked.tabs[0].panels[0].legend_dock,
             Some(LegendDock::Right)
         );
+    }
+
+    #[test]
+    fn v29_sessions_keep_their_axes_and_advance_to_current() {
+        let mut value = serde_json::to_value(Session::default()).unwrap();
+        value["schema_version"] = 29.into();
+        let migrated = from_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(migrated.linked_time, LinkedTime::default());
     }
 
     #[test]

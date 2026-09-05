@@ -1,0 +1,34 @@
+.panel-config-popover.axis-picker {
+  width: min(360px, calc(100% - 8px));
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+}
+
+.axis-picker input {
+  width: 100%;
+  padding: 6px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-0);
+  color: var(--fg-1);
+  font: inherit;
+}
+
+.axis-picker button {
+  overflow-wrap: anywhere;
+}
+
+.xy-drop-strip {
+  position: absolute;
+  inset: auto 0 0;
+  height: 36px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px dashed var(--amber-7);
+  background: var(--surface-1);
+  color: var(--amber-7);
+  font: 10px var(--font-mono);
+}

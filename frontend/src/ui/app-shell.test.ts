@@ -292,7 +292,7 @@ it("keeps a signal-X cursor local instead of broadcasting linked time", () => {
   expect(renderCursorTime).toHaveBeenCalledWith(cursor.heading);
 });
 
-it("routes the X signal separately from the Y signal ids", () => {
+it("routes X groups while allowing the X signal as a plotted Y", () => {
   const xRef = { source_key: "run-01", channel: "position" };
   const yRef = { source_key: "run-01", channel: "speed" };
   const summaries = [
@@ -329,8 +329,14 @@ it("routes the X signal separately from the Y signal ids", () => {
   ]);
 
   expect(shell.panelSignalIds(panel)).toEqual({
-    ids: [ySummary.signal_id],
+    ids: [xSummary.signal_id, ySummary.signal_id],
     xId: xSummary.signal_id,
+    groups: [
+      {
+        xId: xSummary.signal_id,
+        ids: [xSummary.signal_id, ySummary.signal_id],
+      },
+    ],
     missing: [],
   });
 });

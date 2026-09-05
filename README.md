@@ -1,8 +1,21 @@
 # SignalScope
 
-Local workbench for exploring large engineering time-series logs. SignalScope
+Local workbench for exploring large engineering datasets as XY charts. SignalScope
 streams CSV, MCAP, HDF5/MAT v7.3, and Parquet data through a Rust data plane and
 renders it in a WebGPU-capable Chromium browser.
+
+Use each panel's **x:** control to search every loaded signal, or select a
+channel bundle to pair each run's Y with that run's X. **y: + add** adds a
+signal, channel bundle, or named set. Dragging a signal or bundle to the bottom
+X strip also assigns X. One X signal can serve multiple Y signals; bundle
+members match by source, with missing or ambiguous matches reported explicitly.
+Pairs must share an exact sample timebase; no interpolation is performed.
+
+CSV time columns stay available as ordinary signals. A recognized finite time
+header supplies the linked-time anchor; otherwise imports use row index instead
+of guessing from increasing measurements. Recipe time datasets and MCAP
+log timestamps (in seconds) also appear in the signal catalog. Axis bindings
+persist in sessions and captured bundle curves work in offline HTML exports.
 
 ## Interactive demo
 

@@ -16,7 +16,13 @@ export interface Line2DResponse {
   readonly level: number;
   readonly anchor: Float64Array;
   readonly x: Line2DColumn;
-  readonly ys: readonly Line2DColumn[];
+  readonly ys: readonly (Line2DColumn & {
+    readonly coordinates?: {
+      anchor: Float64Array;
+      x: Line2DColumn;
+      level: number;
+    };
+  })[];
 }
 
 const MAGIC = 0x324c5353;

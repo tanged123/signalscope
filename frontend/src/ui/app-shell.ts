@@ -1,3 +1,4 @@
+import { resolveLineBindings } from "../app/line-bindings";
 import { shellCommand } from "../app/shell-commands";
 import {
   CommandRegistry,
@@ -93,10 +94,6 @@ export function formatPresentationStatus(
   if (!plan.limited) return "";
   if (!plan.fits) return "resolution constrained by presentation memory";
   return `resolution ${plan.density.toFixed(2)}/${plan.targetDensity.toFixed(0)} bins/px`;
-}
-
-function sameSeriesRef(left: SeriesRef, right: SeriesRef): boolean {
-  return left.source_key === right.source_key && left.channel === right.channel;
 }
 
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
@@ -767,7 +764,7 @@ export class AppShell {
       if (range === null) return;
       const pivot = (range.min + range.max) / 2;
       const next = zoomRange(range, factor, pivot);
-      if (panel.x_axis.kind === "signal") {
+      if (panel.x_axis.kind !== "time") {
         this.applyXRange(id, [next.min, next.max]);
       } else {
         this.applyTimeWindow(id, next.min, next.max);
@@ -780,7 +777,7 @@ export class AppShell {
       const range = this.navigationXRange(panel, id);
       if (range === null) return;
       const delta = (range.max - range.min) * 0.1 * direction;
-      if (panel.x_axis.kind === "signal") {
+      if (panel.x_axis.kind !== "time") {
         this.applyXRange(id, [range.min + delta, range.max + delta]);
       } else {
         this.applyTimeWindow(id, range.min + delta, range.max + delta);
@@ -1098,7 +1095,7 @@ export class AppShell {
     this.commands.register(
       shellCommand("about-signalscope", {
         run: () => {
-          this.showModeHelp("SignalScope 2.2.0");
+          this.showModeHelp("SignalScope 2.3.0");
         },
       }),
     );
@@ -2593,34 +2590,12 @@ export class AppShell {
   }
 
   /** Signal ids a panel needs for its plotted series. */
-  private panelSignalIds(panel: PanelState): {
-    ids: string[];
-    xId: string | null;
-    missing: string[];
-  } {
-    const resolved = this.resolvedFor(panel);
-    const xRef = panel.x_axis.kind === "signal" ? panel.x_axis.ref : null;
-    const xSeries = xRef === null ? undefined : this.catalog.get(xRef);
-    const paths = resolved
-      .filter((series) => xRef === null || !sameSeriesRef(series.ref, xRef))
-      .map((series) => series.path);
-    const ids: string[] = [];
-    const missing: string[] = [];
-    if (panel.x_axis.kind === "signal" && xSeries === undefined) {
-      missing.push(
-        xRef === null ? "X axis source" : `${xRef.source_key}/${xRef.channel}`,
-      );
-    }
-    for (const path of new Set(paths)) {
-      const id = this.signalsByPath.get(path)?.signal_id;
-      if (id === undefined) missing.push(path);
-      else ids.push(id);
-    }
-    return {
-      ids,
-      xId: xSeries?.summary.signal_id ?? null,
-      missing,
-    };
+  private panelSignalIds(panel: PanelState) {
+    return resolveLineBindings(
+      panel.x_axis,
+      this.resolvedFor(panel),
+      this.catalog,
+    );
   }
 
   private resolvedFor(panel: PanelState): ResolvedSeries[] {
@@ -2642,12 +2617,7 @@ export class AppShell {
       for (const panel of tab.panels) {
         counts.set(
           panel.id,
-          this.resolvedFor(panel).filter(
-            (series) =>
-              series.visible &&
-              (panel.x_axis.kind !== "signal" ||
-                !sameSeriesRef(series.ref, panel.x_axis.ref)),
-          ).length,
+          this.resolvedFor(panel).filter((series) => series.visible).length,
         );
       }
     }
@@ -2718,7 +2688,7 @@ export class AppShell {
     panel: PanelState,
     panelId: string,
   ): { min: number; max: number } | null {
-    if (panel.x_axis.kind === "signal") {
+    if (panel.x_axis.kind !== "time") {
       return this.workspaceView?.panelXRange(panelId) ?? null;
     }
     const window = this.effectiveWindow(panel);
@@ -2734,7 +2704,7 @@ export class AppShell {
     if (panel === undefined) return;
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
-    if (panel.x_axis.kind === "signal") {
+    if (panel.x_axis.kind !== "time") {
       this.workspace.clearPanelXRange(panelId);
       this.commitHistory();
       this.renderTiles();
@@ -2760,7 +2730,8 @@ export class AppShell {
   ): void {
     const mode = this.workspace.cursorMode();
     if (mode === "none") cursor = null;
-    const local = this.workspace.panel(panelId)?.x_axis.kind === "signal";
+    const axis = this.workspace.panel(panelId)?.x_axis;
+    const local = axis !== undefined && axis.kind !== "time";
     if (local) {
       this.workspace.setCursorT(null);
       this.workspaceView?.clearCursors();

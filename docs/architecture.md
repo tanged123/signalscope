@@ -6,7 +6,16 @@ decisions and alternatives; [the roadmap](implementation-roadmap.md) records
 unfinished work. [AGENTS.md](../AGENTS.md) is the short execution guide.
 
 The implementation decisions are recorded in
-[ADR 0055](adr/0055-core-policy-and-query-lifetimes.md).
+[ADR 0055](adr/0055-core-policy-and-query-lifetimes.md) and
+[ADR 0056](adr/0056-xy-axis-and-bundle-bindings.md).
+
+`app/line-bindings.ts` owns X binding transitions and source-matched bundle
+resolution. `ui/axis-picker.ts` owns searchable axis choices; `ui/axis-drop.ts`
+owns drag listeners and their teardown. `app/line-query.ts` queries paired
+groups sequentially within each panel and assembles one response without
+copying coordinate columns. `snapshot/bindings.rs` owns native capture binding
+resolution. Per-series coordinate views keep group-local anchors, X values and
+resolution; the existing panel cache charges all retained arrays.
 
 ## System boundaries
 

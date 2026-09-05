@@ -28,6 +28,8 @@ declare module "node:path" {
 
 declare module "node:child_process" {
   export interface ChildProcess {
+    exitCode: number | null;
+    once(event: "exit", listener: () => void): this;
     kill(signal?: string): boolean;
   }
   type Stdio = "ignore" | "inherit";

@@ -1,3 +1,5 @@
+import { bindAxisDrop } from "./axis-drop";
+import { showAxisPicker, xAxisLabel as axisLabel } from "./axis-picker";
 import {
   columnsValueAtTime,
   type ColumnarTileResponse,
@@ -376,10 +378,6 @@ function focusMatches(entry: FocusEntry, ref: SeriesRef): boolean {
     : entry.channel === ref.channel;
 }
 
-function sameSeriesRef(left: SeriesRef, right: SeriesRef): boolean {
-  return left.source_key === right.source_key && left.channel === right.channel;
-}
-
 function renderState(
   state: PanelState,
   callbacks: Pick<PanelCallbacks, "resolveSeries">,
@@ -452,6 +450,8 @@ export class PanelView {
     return (this.annotationState ??= new PanelAnnotationState());
   }
 
+  private readonly axisDropCleanup: () => void;
+
   constructor(
     private readonly id: string,
     private readonly callbacks: PanelCallbacks,
@@ -481,6 +481,12 @@ export class PanelView {
     this.shell.appendContent(this.overlay);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
+    this.axisDropCleanup = bindAxisDrop(
+      this.element,
+      () => callbacks.catalog(),
+      () => callbacks.namedSets(),
+      (axis) => callbacks.onSetXAxis?.(this.id, axis),
+    );
     this.interactions = new PlotInteractionController(this.overlay, {
       layout: () => this.activeLayout(),
       applyXRange: (min, max) => {
@@ -653,11 +659,23 @@ export class PanelView {
         this.callbacks.onToggleAxisStyle(this.id);
       },
     );
+    required(this.element, ".panel-y-axis").addEventListener(
+      "click",
+      (event) => {
+        if (this.lastState !== null)
+          this.openAxisPicker(
+            "y",
+            this.lastState,
+            event.currentTarget as HTMLElement,
+          );
+      },
+    );
     required(this.element, ".panel-x-axis").addEventListener(
       "click",
       (event) => {
         if (this.lastState !== null) {
-          this.openXAxisMenu(
+          this.openAxisPicker(
+            "x",
             this.lastState,
             event.currentTarget as HTMLElement,
           );
@@ -867,7 +885,7 @@ export class PanelView {
     axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
     axisToggle.hidden = false;
     const xAxis = required<HTMLButtonElement>(this.element, ".panel-x-axis");
-    const xAxisLabel = this.xAxisLabel(rendered);
+    const xAxisLabel = axisLabel(rendered.x_axis, this.callbacks.catalog());
     xAxis.textContent = `x: ${xAxisLabel} ▾`;
     xAxis.title =
       rendered.x_axis.kind === "time"
@@ -1000,15 +1018,7 @@ export class PanelView {
     }
     if (data === null) {
       this.chartHostElement.hidden = true;
-      const xRef = state.x_axis.kind === "signal" ? state.x_axis.ref : null;
-      const hasSignalY =
-        xRef === null ||
-        state.series.some((series) => !sameSeriesRef(series.ref, xRef));
-      this.shell.setStatus(
-        hasSignalY
-          ? { kind: "loading", message: "Loading plot data…" }
-          : { kind: "empty", message: "Choose at least one Y signal." },
-      );
+      this.shell.setStatus({ kind: "loading", message: "Loading plot data…" });
       return 0;
     }
     this.chartHostElement.hidden = false;
@@ -1158,6 +1168,8 @@ export class PanelView {
 
   dispose(): void {
     this.disposed = true;
+    this.axisDropCleanup();
+    this.closePanelConfig();
     this.releaseGpu();
     this.interactions.dispose();
     this.shell.dispose();
@@ -3060,33 +3072,22 @@ export class PanelView {
     );
   }
 
-  private xAxisLabel(state: RenderPanelState): string {
-    if (state.x_axis.kind === "time") return "time";
-    return (
-      this.callbacks.pathForRef(state.x_axis.ref) ??
-      `${state.x_axis.ref.source_key}/${state.x_axis.ref.channel}`
+  private openAxisPicker(
+    axis: "x" | "y",
+    state: RenderPanelState,
+    anchor: HTMLElement,
+  ): void {
+    this.closePanelConfig();
+    this.panelConfigCleanup = showAxisPicker(
+      this.element,
+      anchor,
+      axis,
+      state.x_axis,
+      this.callbacks.catalog(),
+      this.callbacks.namedSets(),
+      (xAxis) => this.callbacks.onSetXAxis?.(this.id, xAxis),
+      (paths) => this.callbacks.onDropSignals(this.id, paths),
     );
-  }
-
-  private openXAxisMenu(state: RenderPanelState, anchor: HTMLElement): void {
-    const current = state.x_axis;
-    this.openPanelMenu(anchor, "X AXIS", [
-      {
-        label: "time · linked",
-        active: current.kind === "time",
-        run: () => this.callbacks.onSetXAxis?.(this.id, { kind: "time" }),
-      },
-      ...state.series.map((series) => ({
-        label: series.path,
-        active:
-          current.kind === "signal" && sameSeriesRef(current.ref, series.ref),
-        run: () =>
-          this.callbacks.onSetXAxis?.(this.id, {
-            kind: "signal",
-            ref: { ...series.ref },
-          }),
-      })),
-    ]);
   }
 
   private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
@@ -3256,6 +3257,7 @@ function seriesColor(series: Pick<RenderSeries, "hue">): string {
 function lineToolbarMarkup(): string {
   return `<span class="panel-toolbar-group panel-toolbar-axes">
       <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
+      <button class="panel-toolbar-control panel-y-axis" type="button" title="Add Y signals or bundles" aria-label="Add Y signals or bundles">y: + add ▾</button>
       <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
     </span>
     <span class="panel-toolbar-separator" aria-hidden="true"></span>

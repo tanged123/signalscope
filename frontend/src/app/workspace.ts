@@ -25,6 +25,8 @@ import type {
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
+import { setXAxis } from "./line-bindings";
+
 const MIN_FRACTION = 0.1;
 
 export interface WorkspaceViewState {
@@ -504,27 +506,7 @@ export class WorkspaceModel {
   setPanelXAxis(panelId: string, xAxis: XAxisSource): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    let next: XAxisSource;
-    if (xAxis.kind === "time") {
-      next = { kind: "time" };
-    } else {
-      next = { kind: "signal", ref: { ...xAxis.ref } };
-    }
-    if (
-      next.kind === panel.x_axis.kind &&
-      (next.kind === "time" ||
-        (panel.x_axis.kind === "signal" && sameRef(next.ref, panel.x_axis.ref)))
-    ) {
-      return;
-    }
-    panel.x_axis = next;
-    panel.x_range = null;
-    panel.x_label = null;
-    panel.annotations = panel.annotations.map((annotation) => ({
-      ...annotation,
-      pinned_x: null,
-    }));
-    this.touch(true);
+    if (setXAxis(panel, xAxis)) this.touch(true);
   }
 
   setSeriesOverride(

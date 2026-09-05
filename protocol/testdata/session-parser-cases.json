@@ -32,6 +32,32 @@
     "stats_sort_descending": false
   },
   "cases": [
+    {
+      "name": "bundle X",
+      "session": {},
+      "panel": {
+        "x_axis": {
+          "kind": "bundle",
+          "refs": [
+            { "source_key": "one", "channel": "x" },
+            { "source_key": "two", "channel": "x" }
+          ]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "empty bundle X",
+      "session": {},
+      "panel": { "x_axis": { "kind": "bundle", "refs": [] } },
+      "valid": false
+    },
+    {
+      "name": "time cannot carry bundle refs",
+      "session": {},
+      "panel": { "x_axis": { "kind": "time", "refs": [] } },
+      "valid": false
+    },
     { "name": "current time panel", "session": {}, "panel": {}, "valid": true },
     {
       "name": "explicit signal X",

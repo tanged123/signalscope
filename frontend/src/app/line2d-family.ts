@@ -70,8 +70,7 @@ function timeFamily(
               xRange: ranges.x,
               yRange: [ranges.y.min, ranges.y.max],
               xLabel: context.xLabel ?? "time (s)",
-              yLabel:
-                context.yLabel ?? valueLabel(shown.map((item) => item.unit)),
+              yLabel: context.yLabel ?? signalAxisLabel(shown, "Y signals"),
               styles,
               axisStyle: context.axisStyle,
             },
@@ -103,6 +102,8 @@ function signalXFamily(
             unit: column.unit,
             colorIndex: colorIndex(byPath.get(column.signalPath)?.hue),
             values: column.values,
+            anchor: column.coordinates?.anchor ?? data.response.anchor,
+            x: column.coordinates?.x.values ?? data.response.x.values,
           })),
           window: context.window,
         }),
@@ -115,9 +116,13 @@ function signalXFamily(
               yRange: [ranges.y.min, ranges.y.max],
               xLabel:
                 context.xLabel ??
-                axisLabel(data.response.x.signalPath, data.response.x.unit),
-              yLabel:
-                context.yLabel ?? valueLabel(shown.map((item) => item.unit)),
+                signalAxisLabel(
+                  shown.map(
+                    (column) => column.coordinates?.x ?? data.response.x,
+                  ),
+                  "X signals",
+                ),
+              yLabel: context.yLabel ?? signalAxisLabel(shown, "Y signals"),
               styles,
               axisStyle: context.axisStyle,
             },
@@ -131,16 +136,23 @@ function colorIndex(hue: number | null | undefined): number {
   return hue === null || hue === undefined ? 0 : hueIndex(hue);
 }
 
-function valueLabel(units: readonly (string | null)[]): string {
-  const distinct = new Set(
-    units.filter((unit): unit is string => unit !== null),
-  );
-  const [only] = distinct;
-  return distinct.size === 1 && only !== undefined
-    ? `value (${only})`
-    : "value";
-}
-
-function axisLabel(path: string, unit: string | null): string {
-  return unit === null ? path : `${path} (${unit})`;
+function signalAxisLabel(
+  columns: readonly { signalPath: string; unit: string | null }[],
+  fallback: string,
+): string {
+  const paths = [...new Set(columns.map((column) => column.signalPath))];
+  const channels = [
+    ...new Set(paths.map((path) => path.slice(path.indexOf("/") + 1))),
+  ];
+  const name =
+    paths.length === 1
+      ? paths[0]
+      : channels.length === 1
+        ? channels[0]
+        : fallback;
+  const units = [...new Set(columns.map((column) => column.unit))];
+  const unit = units.length === 1 ? units[0] : null;
+  return unit === null || unit === undefined
+    ? (name ?? fallback)
+    : `${name ?? fallback} (${unit})`;
 }

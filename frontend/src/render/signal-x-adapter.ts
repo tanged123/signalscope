@@ -20,8 +20,8 @@ export function line2DFromSignalX(
     xOrigin,
     series: response.ys.map((column, index) => {
       const data = cachedSignalXFeed(
-        response.anchor,
-        response.x.values,
+        column.coordinates?.anchor ?? response.anchor,
+        column.coordinates?.x.values ?? response.x.values,
         column.values,
         xOrigin,
         options.window,
@@ -46,8 +46,8 @@ export function prepareSignalXLine(
   const xOrigin = signalXReference(response.x.values);
   for (const column of response.ys) {
     cachedSignalXFeed(
-      response.anchor,
-      response.x.values,
+      column.coordinates?.anchor ?? response.anchor,
+      column.coordinates?.x.values ?? response.x.values,
       column.values,
       xOrigin,
       window,

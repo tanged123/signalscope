@@ -83,8 +83,16 @@ function isSeriesRef(value: unknown): boolean {
 
 function isXAxisSource(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  if (value.kind === "time") return !("ref" in value);
-  if (value.kind === "signal") return isSeriesRef(value.ref);
+  if (value.kind === "time") return !("ref" in value) && !("refs" in value);
+  if (value.kind === "signal")
+    return isSeriesRef(value.ref) && !("refs" in value);
+  if (value.kind === "bundle")
+    return (
+      !("ref" in value) &&
+      Array.isArray(value.refs) &&
+      value.refs.length > 0 &&
+      value.refs.every(isSeriesRef)
+    );
   return false;
 }
 
