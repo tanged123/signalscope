@@ -75,6 +75,7 @@ import {
   floatLegend,
   legendResizeHandle,
   positionLegend,
+  refreshLegendWithResizeFocus,
   type LegendRailHost,
 } from "./legend-rail";
 import {
@@ -892,7 +893,7 @@ export class PanelView {
       ".panel-stats-toggle",
     ).setAttribute("aria-pressed", String(rendered.show_stats));
     this.updateBindings(rendered);
-    this.updateLegend(rendered);
+    this.updatePlotLegend(rendered);
     this.pruneAnnotationUiState(rendered);
     const annotations = this.resolvedAnnotations(rendered);
     this.drawOverlay(annotations);
@@ -1527,11 +1528,13 @@ export class PanelView {
     input.select();
   }
 
-  private updateLegend(state: RenderPanelState): void {
-    this.updatePlotLegend(state);
+  private updatePlotLegend(state: RenderPanelState): void {
+    refreshLegendWithResizeFocus(this.element, () =>
+      this.renderPlotLegend(state),
+    );
   }
 
-  private updatePlotLegend(state: RenderPanelState): void {
+  private renderPlotLegend(state: RenderPanelState): void {
     if (state.focus.length === 0) this.focusOnly = false;
     const legend = required<HTMLElement>(this.element, ".plot-series-legend");
     const wrap = required<HTMLElement>(this.element, ".plot-wrap");

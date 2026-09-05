@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   legendResizeHandle,
   positionLegend,
+  refreshLegendWithResizeFocus,
   type LegendRailHost,
 } from "./legend-rail";
 
@@ -33,11 +34,15 @@ it("keeps keyboard focus through rail collapse and expansion without triggering 
     commit: (layout) => {
       if (layout.size == null) throw new Error("missing committed size");
       host.size = { width: layout.size[0], height: layout.size[1] };
-      legend.replaceChildren(legendResizeHandle(host, "left", legend));
-      positionLegend(host);
+      refresh();
     },
     refresh: vi.fn(),
   };
+  const refresh = () =>
+    refreshLegendWithResizeFocus(root, () => {
+      legend.replaceChildren(legendResizeHandle(host, "left", legend));
+      positionLegend(host);
+    });
   legend.append(legendResizeHandle(host, "left", legend));
   positionLegend(host);
   const seam = () => required<HTMLButtonElement>(legend, "button");
@@ -51,6 +56,7 @@ it("keeps keyboard focus through rail collapse and expansion without triggering 
     new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
   );
   expect(legend.dataset.collapsed).toBe("false");
+  refresh();
   expect(document.activeElement).toBe(seam());
   expect(shortcut).not.toHaveBeenCalled();
 });

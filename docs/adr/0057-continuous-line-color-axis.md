@@ -69,6 +69,8 @@ beside those controls. Badge, hidden, and collapsed-rail layouts use a compact
 plot inset, without a dedicated gutter. ChartHost disposes the canvas and clears
 its target reference. Plot PNGs retain a labeled inset even when the canvas is
 mounted outside the chart; offline snapshots use the same presentation.
+Legend refreshes preserve a focused resize handle so collapse, expansion, and
+asynchronous data updates retain the keyboard path.
 No schema or renderer attribute contract changes are needed.
 Categorical choices remain saved and become effective again when C is cleared;
 legend text, dash, focus, and picking continue to identify traces.

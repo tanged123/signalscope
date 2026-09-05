@@ -427,7 +427,7 @@ describe("panel series", () => {
       plotLegendPosition: { x: number; y: number } | null;
       plotLegendSize: { width: number; height: number } | null;
       plotLegendAnchor: null;
-      updateLegend(current: RenderPanelState): void;
+      updatePlotLegend(current: RenderPanelState): void;
     };
     view.callbacks = {
       catalog: () => catalog,
@@ -445,7 +445,7 @@ describe("panel series", () => {
     view.element = document.createElement("article");
     view.element.innerHTML =
       '<div class="plot-wrap"><div class="plot-series-legend"></div></div>';
-    view.updateLegend(state);
+    view.updatePlotLegend(state);
     expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
     expect(
       view.element.querySelector(".plot-legend-roster-row")?.textContent,
