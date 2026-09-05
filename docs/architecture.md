@@ -280,6 +280,12 @@ Documentation/bug fixes do not require an unrelated repository-wide split.
 | Desktop interaction, layout, offline export | Playwright via `./scripts/test.sh e2e`, after implementation                      |
 | Resource or reduction policy                | Relevant `./scripts/test.sh bench` mode, with corpus and measured bounds reported |
 
+Browser tests enable Chromium’s headless GPU presentation and share the
+SwiftShader ANGLE Vulkan context with the compositor. A separate GL/software
+presentation path can lose WebGPU canvas devices even after initialization
+succeeds. CI stops after the first test exhausts its retries and uploads failed
+browser traces for diagnosis.
+
 After narrow tests, use a proportional gate; cross-layer implementation uses
 `./scripts/ci.sh all`. Documentation-only work needs formatting, reference
 checks, and `./scripts/version.sh check`, not GUI or reducer tests. Report
