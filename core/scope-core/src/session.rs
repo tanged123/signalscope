@@ -78,6 +78,18 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
             current = migrate(current);
         }
     }
+    // Serde accepts extra fields on an internally tagged unit variant even
+    // with deny_unknown_fields. Preserve the time/signal correlation here.
+    for tab in current["tabs"].as_array().into_iter().flatten() {
+        for panel in tab["panels"].as_array().into_iter().flatten() {
+            let axis = &panel["x_axis"];
+            if axis["kind"] == "time" && axis.get("ref").is_some() {
+                return Err(SessionError::Json(serde::de::Error::custom(
+                    "time X axis cannot carry a signal reference",
+                )));
+            }
+        }
+    }
     let session: Session = serde_json::from_value(current)?;
     Ok(session)
 }
@@ -364,6 +376,45 @@ mod tests {
             decode_provenance: None,
             recipe_id: None,
             recipe_digest: None,
+        }
+    }
+
+    #[test]
+    fn shared_runtime_parser_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/testdata/session-parser-cases.json"
+        ))
+        .unwrap();
+        let base: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/testdata/session-conformance.json"
+        ))
+        .unwrap();
+        for case in fixture["cases"].as_array().unwrap() {
+            let mut input = base.clone();
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(case["session"].as_object().unwrap().clone());
+            let mut panel = fixture["panel"].clone();
+            panel
+                .as_object_mut()
+                .unwrap()
+                .extend(case["panel"].as_object().unwrap().clone());
+            input["tabs"][0]["panels"] = serde_json::json!([panel]);
+            let result = from_json(&input.to_string());
+            assert_eq!(
+                result.is_ok(),
+                case["valid"].as_bool().unwrap(),
+                "{}: {result:?}",
+                case["name"]
+            );
+            if let Ok(session) = result {
+                let json = serde_json::to_string(&session).unwrap();
+                assert_eq!(from_json(&json).unwrap(), session);
+                for annotation in &session.tabs[0].panels[0].annotations {
+                    assert_eq!(annotation.pinned_x, None);
+                }
+            }
         }
     }
 
