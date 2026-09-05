@@ -7,7 +7,9 @@ test("time panels use ChartGPU with WebGPU enabled", async ({ page }) => {
   await expect(page.locator(".gpu-warning")).toBeHidden();
   const chart = page.locator(".chart-host").first();
   await expect(chart).toBeVisible();
-  await expect(chart.locator("canvas").first()).toBeVisible({
+  await expect(
+    chart.locator("canvas:not(.colorbar-canvas)").first(),
+  ).toBeVisible({
     timeout: 20_000,
   });
   const before = (await chart.screenshot()) as unknown as Uint8Array;
