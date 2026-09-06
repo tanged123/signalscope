@@ -29,6 +29,6 @@ it("publishes existing estimates and exposes constraints without calling a profi
     "Memory constrained",
   );
   expect(root.querySelector(".performance-density")?.textContent).toBe(
-    "2.00 / 2 bins per device pixel",
+    "2.00/2",
   );
 });

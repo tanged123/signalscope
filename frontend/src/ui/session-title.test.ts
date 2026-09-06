@@ -23,9 +23,9 @@ describe("session title", () => {
     let name = "Untitled";
     const commit = vi.fn((title: string) => {
       name = title;
-      renderSessionTitle(button, name, true);
+      renderSessionTitle(button, name);
     });
-    renderSessionTitle(button, name, false);
+    renderSessionTitle(button, name);
     bindSessionTitle(button, () => name, commit);
     const edit = (value: string, key?: string): void => {
       button.click();
@@ -47,7 +47,7 @@ describe("session title", () => {
     expect(commit).toHaveBeenCalledOnce();
     edit("Final");
     expect(commit).toHaveBeenCalledTimes(2);
-    expect(button.textContent).toBe("Final •");
+    expect(button.textContent).toBe("Final");
     document.body.replaceChildren();
   });
 });

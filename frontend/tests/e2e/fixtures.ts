@@ -1,21 +1,4 @@
-import {
-  devices,
-  expect,
-  test as base,
-  type Page,
-  type Locator,
-} from "@playwright/test";
-
-export async function openPlotSettings(panel: Locator): Promise<void> {
-  const settings = panel.locator(".plot-settings");
-  if (
-    !(await settings.evaluate(
-      (element) => (element as HTMLDetailsElement).open,
-    ))
-  ) {
-    await settings.locator("summary").click();
-  }
-}
+import { devices, expect, test as base, type Page } from "@playwright/test";
 
 const testBase = base.extend({
   page: async ({ playwright }, use, testInfo) => {

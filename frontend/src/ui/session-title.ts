@@ -10,9 +10,8 @@ export function sessionDisplayTitle(
 export function renderSessionTitle(
   button: HTMLButtonElement,
   name: string,
-  dirty: boolean,
 ): void {
-  button.textContent = dirty ? `${name} •` : name;
+  button.textContent = name;
   button.title = `Rename session: ${name}`;
 }
 

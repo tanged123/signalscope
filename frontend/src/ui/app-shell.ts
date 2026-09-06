@@ -3,7 +3,6 @@ import {
   renderPresentationStatus,
   statusAggregate,
 } from "./shell-status";
-import { bindDisclosure } from "./disclosure";
 import {
   bindSessionTitle,
   renderSessionTitle,
@@ -706,10 +705,6 @@ export class AppShell {
         this.renderWorkspaceName();
       },
     );
-    const disposePerformance = bindDisclosure(
-      required(this.root, ".performance-details"),
-    );
-    window.addEventListener("pagehide", disposePerformance, { once: true });
     required(this.root, ".help-button").addEventListener("click", () =>
       showHelp(this.root, this.commands),
     );
@@ -2447,8 +2442,9 @@ export class AppShell {
     renderSessionTitle(
       required(this.root, ".workspace-name"),
       sessionDisplayTitle(this.workspace.snapshot().title, this.workspacePath),
-      this.dirty,
     );
+    required<HTMLElement>(this.root, ".session-save-status").hidden =
+      !this.dirty;
   }
 
   /**

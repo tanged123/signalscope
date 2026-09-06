@@ -1,4 +1,3 @@
-import { openPlotSettings } from "./fixtures";
 import { expect, gotoApp, test } from "./fixtures";
 
 test("recovers when the GPU is lost before the application subscribes", async ({
@@ -74,7 +73,7 @@ test("line style changes submit valid WebGPU command buffers", async ({
   await gotoApp(page);
 
   const panel = page.locator(".panel").first();
-  await openPlotSettings(panel);
+
   await panel.locator(".panel-stats-toggle").click();
   await panel
     .locator(".plot-stat-row .plot-row-inspector-toggle")

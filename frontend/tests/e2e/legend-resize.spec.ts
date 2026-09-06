@@ -5,11 +5,6 @@ test("legend rail follows the pointer without reverting between frames", async (
 }) => {
   await page.route("**/api/health", (route) => route.fulfill({ status: 503 }));
   await gotoApp(page);
-  await page
-    .locator(".panel")
-    .first()
-    .locator(".plot-settings > summary")
-    .click();
   await page.locator(".panel").first().locator(".panel-legend-state").click();
   await page.getByRole("menuitemradio", { name: "rail", exact: false }).click();
   const panel = page.locator(".panel").first();

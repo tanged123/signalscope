@@ -1,4 +1,4 @@
-import { expect, gotoApp, openPlotSettings, test } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 
 test("session title edits inline with keyboard, cancellation, and undo", async ({
   page,
@@ -59,23 +59,31 @@ test("Help opens from the menu, traps focus, and closes by Escape or button", as
   await expect(help).toHaveCount(0);
 });
 
-test("performance details and plot settings stay out of the way and dismiss", async ({
+test("plot controls and chart metrics are visible inline at desktop sizes", async ({
   page,
 }) => {
   await gotoApp(page);
-  const performance = page.locator(".performance-details");
-  await expect(performance.locator(".performance-popover")).toBeHidden();
-  await performance.locator("summary").focus();
-  await page.keyboard.press("Enter");
-  await expect(performance.locator(".performance-popover")).toBeVisible();
-  await expect(performance).toContainText("Estimated GPU memory");
-  await page.keyboard.press("Escape");
-  await expect(performance.locator(".performance-popover")).toBeHidden();
+  const performance = page.getByRole("group", { name: "Chart performance" });
+  for (const selector of [
+    ".render-ms",
+    ".performance-cpu",
+    ".performance-gpu",
+    ".performance-density",
+  ]) {
+    await expect(performance.locator(selector)).toBeVisible();
+  }
   const panel = page.locator(".panel").first();
-  await expect(panel.locator(".panel-line-width")).toBeHidden();
-  await expect(panel.locator(".panel-x-axis")).toBeVisible();
-  await openPlotSettings(panel);
-  await expect(panel.locator(".panel-line-width")).toBeVisible();
+  for (const selector of [
+    ".panel-axis-toggle",
+    ".panel-x-axis",
+    ".panel-line-width",
+    ".panel-ghost-opacity",
+    ".panel-legend-state",
+    ".panel-stats-toggle",
+    ".panel-tips",
+  ]) {
+    await expect(panel.locator(selector)).toBeVisible();
+  }
   await panel.locator(".panel-legend-state").click();
   await panel
     .getByRole("menuitemradio", { name: "badge", exact: false })
@@ -84,16 +92,104 @@ test("performance details and plot settings stay out of the way and dismiss", as
     "data-state",
     "badge",
   );
-  await expect(panel.locator(".plot-settings > summary")).toBeFocused();
-  await openPlotSettings(panel);
-  await panel.locator(".plot-settings > summary").focus();
+  await expect(panel.locator(".panel-legend-state")).toBeFocused();
+  await panel.locator(".panel-line-width").focus();
+  await page.keyboard.press("Enter");
+  await expect(panel.locator(".panel-config-popover")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(panel.locator(".panel-line-width")).toBeHidden();
-  await page.setViewportSize({ width: 1100, height: 800 });
-  const bounds = await page
-    .locator(".status-bar")
-    .evaluate((bar) => ({ width: bar.clientWidth, scroll: bar.scrollWidth }));
-  expect(bounds.scroll).toBeLessThanOrEqual(bounds.width);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.screenshot({ path: "../build/review/chrome.png" });
+  await expect(panel.locator(".panel-line-width")).toBeFocused();
+  for (const width of [1100, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const fits = await page
+      .locator(".status-bar")
+      .evaluate((bar) => bar.scrollWidth <= bar.clientWidth);
+    expect(fits).toBe(true);
+  }
+  await page.keyboard.press("n");
+  for (const header of await page.locator(".panel-header").all()) {
+    expect(
+      await header.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+  }
+});
+
+test("UI fonts and sizes apply consistently to controls, muted text, and the signal tree", async ({
+  page,
+}) => {
+  await gotoApp(page);
+  const selectors = [
+    ".workspace-name",
+    ".signal-search",
+    ".tree-empty",
+    ".signal-outline-label",
+    ".panel-line-width",
+  ];
+  for (const selector of selectors) {
+    await expect(page.locator(selector).first()).toHaveCSS(
+      "font-family",
+      /^Inter,/,
+    );
+  }
+  await expect(page.locator(".signal-search")).toHaveCSS("font-size", "11px");
+  await expect(page.locator(".tree-empty").first()).toHaveCSS(
+    "font-size",
+    "11px",
+  );
+  await page.keyboard.press("Control+Comma");
+  await expect(page.locator(".palette-hint").first()).toHaveCSS(
+    "font-family",
+    /^Inter,/,
+  );
+  await page
+    .locator(".palette-row", { hasText: /^UI font/ })
+    .first()
+    .click();
+  await page.keyboard.press("Escape");
+  for (const selector of selectors) {
+    await expect(page.locator(selector).first()).toHaveCSS(
+      "font-family",
+      /^"DejaVu Sans",/,
+    );
+  }
+  await page.keyboard.press("Control+Comma");
+  const paletteInput = page.locator(".palette-input");
+  await paletteInput.press("ArrowDown");
+  await paletteInput.press("ArrowDown");
+  await paletteInput.press("ArrowDown");
+  await paletteInput.press("ArrowRight");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(":root")).toHaveCSS("font-size", "14px");
+  for (const selector of [
+    ".signal-search",
+    ".tree-empty",
+    ".signal-outline-label",
+  ]) {
+    const size = await page
+      .locator(selector)
+      .first()
+      .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+    expect(size).toBeCloseTo((11 * 14) / 13, 3);
+  }
+  await page.locator(".panel-line-width").first().click();
+  for (const selector of [
+    ".panel-config-title",
+    ".panel-config-popover button",
+  ]) {
+    await expect(page.locator(selector).first()).toHaveCSS(
+      "font-family",
+      /^"DejaVu Sans",/,
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.locator(".menu-button").click();
+  await expect(page.locator(".app-menu-item").first()).toHaveCSS(
+    "font-family",
+    /^"DejaVu Sans",/,
+  );
+  await expect(page.locator(".app-menu-heading").first()).toHaveCSS(
+    "font-family",
+    /^"DejaVu Sans",/,
+  );
 });

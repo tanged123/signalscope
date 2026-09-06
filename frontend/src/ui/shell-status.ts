@@ -42,19 +42,15 @@ export function renderPresentationStatus(
     plan.estimatedGpuBytes,
   );
   required(root, ".performance-density").textContent =
-    `${plan.density.toFixed(2)} / ${String(plan.targetDensity)} bins per device pixel`;
+    `${plan.density.toFixed(2)}/${String(plan.targetDensity)}`;
 }
 
 export function performanceMarkup(): string {
-  return `<details class="performance-details">
-    <summary title="Chart performance details">Chart update <span class="render-ms">— ms</span><span class="presentation-status" hidden></span></summary>
-    <div class="performance-popover">
-      <strong>Active workspace charts</strong>
-      <p>Last CPU chart update, excluding data queries and GPU execution.</p>
-      <dl><dt>Estimated CPU memory</dt><dd class="performance-cpu">—</dd>
-        <dt>Estimated GPU memory</dt><dd class="performance-gpu">—</dd>
-        <dt>Resolution / target</dt><dd class="performance-density">—</dd></dl>
-      <p>Memory estimates include retained data and the planned update. They are not total process memory or CPU/GPU utilization.</p>
-    </div>
-  </details>`;
+  return `<span class="performance-metrics" role="group" aria-label="Chart performance">
+    <span title="Last CPU chart update, excluding data queries and GPU execution.">Chart update <span class="render-ms">— ms</span></span>
+    <span title="Estimated CPU memory for active workspace charts, including retained data and the planned update. Not total process memory or utilization.">CPU est. <span class="performance-cpu">—</span></span>
+    <span title="Estimated GPU memory for active workspace charts, including the planned update. Not total GPU memory or utilization.">GPU est. <span class="performance-gpu">—</span></span>
+    <span title="Resolution / target, in bins per physical device pixel.">Res. <span class="performance-density">—</span></span>
+    <span class="presentation-status" hidden></span>
+  </span>`;
 }

@@ -56,6 +56,11 @@ test("the browser selects HttpPlane when scope-server is live", async ({
   );
   await name.press("Enter");
   await saved;
+  await expect(page.locator(".workspace-name")).toHaveText(
+    "Live thermal review",
+  );
+  await expect(page.locator(".session-save-status")).toHaveText("Unsaved");
+  await expect(page.locator(".session-save-status")).toBeVisible();
   await page.reload();
   await expect(page.locator(".workspace-name")).toContainText(
     "Live thermal review",

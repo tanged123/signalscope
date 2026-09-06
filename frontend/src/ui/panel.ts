@@ -1,4 +1,4 @@
-import { lineToolbarMarkup, bindLineToolbar } from "./line-toolbar";
+import { lineToolbarMarkup } from "./line-toolbar";
 import { PanelAxes } from "./panel-axes";
 import { legendColorControls, legendColorTarget } from "./legend-color-scale";
 import type { AxisLimits } from "./axis-limits";
@@ -445,7 +445,6 @@ export class PanelView {
   private overrideDrawer = false;
   private statsColumnsDrawer = false;
   private bindingCleanup: (() => void) | null = null;
-  private readonly toolbarCleanup: () => void;
   private panelConfigCleanup: (() => void) | null = null;
   private plotLegendPosition: { x: number; y: number } | null = null;
   private plotLegendSize: { width: number; height: number } | null = null;
@@ -478,7 +477,6 @@ export class PanelView {
     });
     this.element = this.shell.element;
     this.shell.slots.controls.innerHTML = lineToolbarMarkup();
-    this.toolbarCleanup = bindLineToolbar(this.shell.slots.controls);
     this.chartHostElement = document.createElement("div");
     this.chartHostElement.className = "chart-host";
     this.chartHostElement.hidden = true;
@@ -1157,7 +1155,6 @@ export class PanelView {
   }
 
   dispose(): void {
-    this.toolbarCleanup();
     this.disposed = true;
     this.axes.dispose();
     this.closePanelConfig();

@@ -79,6 +79,7 @@ export function shellMarkup(): string {
         <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
       </span>
       ${performanceMarkup()}
+      <span class="session-save-status" title="Changes since the last explicit session save; autosave is separate." hidden>Unsaved</span>
       <span class="status-spacer"></span>
       <span class="gesture-hint"></span>
       <span class="cursor-mode"></span>

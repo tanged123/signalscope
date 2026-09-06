@@ -26,10 +26,14 @@ that are not settled by the current code or ADRs.
 
 The approved September 6 chrome cleanup is recorded in
 [ADR 0058](../../adr/0058-session-title-and-contextual-chrome.md): dataset
-totals have one home in the bottom bar; the title is editable; per-plot settings
-group appearance/readouts; performance details and Help open on demand. The
+totals have one home in the bottom bar; the title is editable; per-plot
+appearance/readout controls and chart metrics stay inline; Help opens on demand. The
 global legend menu, repeated metadata, and inactive Follow control are removed.
 The visual tokens and complete per-plot axis requirements below still apply.
+UI labels, muted prose, menus, and signal-tree labels use the selected UI font;
+caption/text/body/heading tokens scale with the UI size preference. Numeric and
+code readouts retain monospace, and plots retain their independent font setting.
+Panel headers and the status bar wrap when needed to keep controls accessible.
 App shell rows: menu bar 28px · toolbar 34px · [tree 262px | panel grid] · formula bar 30px (grid column only, collapsible) · status bar 24px.
 - **One workspace.** No tabs. Named layout presets (grid + modes + signals) in a toolbar dropdown, serialized in exports.
 - **Signal tree:** search-first (`/`), ★ favorites with live values, virtualized tree (10k+ signals), live value at cursor per plotted leaf (4 decimals), `derived/` group with amber ƒx marks, sources footer (status dot + pt counts).

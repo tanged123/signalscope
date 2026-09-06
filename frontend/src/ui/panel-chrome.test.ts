@@ -276,7 +276,7 @@ describe("PanelView chrome", () => {
     ).toEqual(["color ← source", "dash ← flat", "width ← flat · 1.4"]);
     expect(view.element.querySelector(".panel-config-toggle")).toBeNull();
     expect(view.element.querySelector(".panel-line-width")?.textContent).toBe(
-      "line width 1.4 ▾",
+      "1.4 ▾",
     );
     expect(
       view.element.querySelector(".panel-ghost-opacity")?.textContent,

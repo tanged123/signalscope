@@ -9,7 +9,7 @@ export function showHelp(root: HTMLElement, registry: CommandRegistry): void {
   dialog.setAttribute("aria-label", "SignalScope help");
   dialog.innerHTML = `<header><strong>SignalScope help</strong><button type="button" aria-label="Close help">✕</button></header>
     <div class="help-content"><h2>Plot gestures</h2><dl></dl><h2>Keyboard shortcuts</h2><div class="help-shortcuts"></div>
-    <p>Click the session title to rename it. X/Y/C bindings stay in each plot header; appearance controls are in Plot settings.</p></div>`;
+    <p>Click the session title to rename it. Each plot header contains its X/Y/C bindings, appearance controls, and readouts.</p></div>`;
   const gestures = required(dialog, "dl");
   for (const [key, description] of [
     ["Drag", "Box zoom"],
