@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasHttpResources } from "./snapshot-http-policy.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const snapshotPath = resolve(scriptDirectory, "../dist/snapshot-template.html");
@@ -16,7 +17,7 @@ if (!snapshot.includes('id="signalscope-baked-data"')) {
 if (/<(?:script|img|link)\b[^>]*(?:src|href)=/i.test(snapshot)) {
   failures.push("external resource attributes remain");
 }
-if (/\bhttps?:\/\//i.test(snapshot)) {
+if (hasHttpResources(snapshot)) {
   failures.push("an HTTP URL remains");
 }
 if (details.size > maximumBytes) {

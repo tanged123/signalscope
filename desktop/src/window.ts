@@ -1,4 +1,9 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
+
+const projectLinks = new Set([
+  "https://github.com/tanged123/signalscope#readme",
+  "https://github.com/tanged123/signalscope/issues",
+]);
 
 export function createWindow(launchUrl: string): BrowserWindow {
   const origin = new URL(launchUrl).origin;
@@ -20,7 +25,14 @@ export function createWindow(launchUrl: string): BrowserWindow {
   window.webContents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== origin) event.preventDefault();
   });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (projectLinks.has(url)) {
+      void shell.openExternal(url).catch((error: unknown) => {
+        console.error("Could not open the project link", error);
+      });
+    }
+    return { action: "deny" };
+  });
   window.webContents.session.on("will-download", (event) => {
     event.preventDefault();
   });

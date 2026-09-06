@@ -12,7 +12,7 @@ fi
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|architecture|frontend|e2e|bench|full]
+Usage: ./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|architecture|frontend|artifacts|e2e|bench|full]
 
   quick     Core Rust tests plus the shared frontend checks (default).
   core      Test Rust data-plane crates, optionally filtered.
@@ -23,6 +23,7 @@ Usage: ./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|architecture|f
   architecture  Check frontend import-boundary rules against allowed/forbidden examples.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
+  artifacts Build the web frontend and check the self-contained snapshot.
   e2e       Run Playwright desktop smoke tests, optionally filtered.
   bench     Run corpus, core, and Playwright performance benchmarks.
             Modes: all (default), corpus, core, e2e, line2d (CPU), line-gpu.
@@ -183,6 +184,9 @@ chartgpu)
   ;;
 architecture)
   node --test frontend/scripts/check-architecture.mjs
+  ;;
+artifacts)
+  artifact_checks
   ;;
 frontend)
   test_frontend

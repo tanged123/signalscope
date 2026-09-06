@@ -9,6 +9,7 @@ import {
   sessionDisplayTitle,
 } from "./session-title";
 import { showHelp } from "./help-dialog";
+import { showAbout } from "./about-dialog";
 import { shellMarkup } from "./shell-markup";
 import { axisActions } from "./axis-actions";
 import { resolveLineBindings } from "../app/line-bindings";
@@ -1088,7 +1089,7 @@ export class AppShell {
     this.commands.register(
       shellCommand("about-signalscope", {
         run: () => {
-          this.showModeHelp("SignalScope 2.4.0");
+          showAbout(this.root);
         },
       }),
     );

@@ -10,11 +10,7 @@ const releaseFiles = {
   lock: resolve(repositoryRoot, "Cargo.lock"),
   frontend: resolve(repositoryRoot, "frontend/package.json"),
   desktop: resolve(repositoryRoot, "desktop/package.json"),
-  about: resolve(repositoryRoot, "frontend/src/ui/app-shell.ts"),
 };
-
-/** The version the About command shows; nothing else checks this literal. */
-const aboutPattern = /(showModeHelp\("SignalScope )(\d+\.\d+\.\d+)("\))/;
 
 async function workspacePackageNames() {
   const cargo = await readFile(releaseFiles.cargo, "utf8");
@@ -110,24 +106,14 @@ function lockVersions(text, packageNames) {
   return versions;
 }
 
-function aboutVersion(text) {
-  const match = aboutPattern.exec(text);
-  if (!match) {
-    throw new Error("frontend/src/ui/app-shell.ts has no About version string");
-  }
-  return match[2];
-}
-
 async function readReleaseState(packageNames) {
-  const [cargoText, lockText, frontendText, desktopText, aboutText] =
-    await Promise.all(
-      Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
-    );
+  const [cargoText, lockText, frontendText, desktopText] = await Promise.all(
+    Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
+  );
   const versions = new Map([
     ["Cargo.toml [workspace.package]", cargoWorkspaceVersion(cargoText)],
     ["frontend/package.json", JSON.parse(frontendText).version],
     ["desktop/package.json", JSON.parse(desktopText).version],
-    ["frontend/src/ui/app-shell.ts About", aboutVersion(aboutText)],
   ]);
   for (const [name, version] of workspaceDependencyVersions(
     cargoText,
@@ -216,22 +202,11 @@ function setLockVersions(text, version, packageNames) {
   return lines.join("\n");
 }
 
-function setAboutVersion(text, version) {
-  const updated = text.replace(aboutPattern, `$1${version}$3`);
-  if (updated === text) {
-    throw new Error(
-      "frontend/src/ui/app-shell.ts About version was not updated",
-    );
-  }
-  return updated;
-}
-
 async function setVersion(version, packageNames) {
   parseVersion(version);
-  const [cargoText, lockText, frontendText, desktopText, aboutText] =
-    await Promise.all(
-      Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
-    );
+  const [cargoText, lockText, frontendText, desktopText] = await Promise.all(
+    Object.values(releaseFiles).map((file) => readFile(file, "utf8")),
+  );
   await Promise.all([
     writeFile(
       releaseFiles.cargo,
@@ -249,7 +224,6 @@ async function setVersion(version, packageNames) {
       releaseFiles.desktop,
       setJsonVersion(desktopText, version, "desktop/package.json"),
     ),
-    writeFile(releaseFiles.about, setAboutVersion(aboutText, version)),
   ]);
   console.log(`SignalScope version set to ${version}`);
 }

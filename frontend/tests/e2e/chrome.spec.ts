@@ -1,4 +1,72 @@
 import { expect, gotoApp, test } from "./fixtures";
+import manifest from "../../package.json" with { type: "json" };
+
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/health", (route) => route.fulfill({ status: 503 }));
+});
+
+test("About opens useful release information from the menu and command palette", async ({
+  page,
+}) => {
+  await gotoApp(page);
+  const menu = page.getByRole("button", {
+    name: "Application menu",
+    exact: true,
+  });
+  const about = page.getByRole("dialog", {
+    name: "About SignalScope",
+    exact: true,
+  });
+  const close = page.getByRole("button", { name: "Close about", exact: true });
+  await menu.click();
+  await page
+    .getByRole("menuitem", { name: "About SignalScope", exact: true })
+    .click();
+  await expect(about).toBeVisible();
+  await expect(page.locator(".app-menu")).toBeHidden();
+  await expect(about).toContainText(`Version ${manifest.version}`);
+  await expect(about).toContainText("engineering telemetry");
+  await expect(about).toContainText("MIT License");
+  await expect(about).toHaveCSS("font-family", /^Inter,/);
+  await expect(close).toBeFocused();
+  const docs = about.getByRole("link", { name: "Documentation" });
+  const issues = about.getByRole("link", { name: "Report an issue" });
+  await expect(docs).toHaveAttribute(
+    "href",
+    "https://github.com/tanged123/signalscope#readme",
+  );
+  await expect(issues).toHaveAttribute(
+    "href",
+    "https://github.com/tanged123/signalscope/issues",
+  );
+  await page.keyboard.press("Tab");
+  await expect(docs).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(issues).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(issues).toBeFocused();
+  await page.keyboard.press("t");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.keyboard.press("Escape");
+  await expect(about).toHaveCount(0);
+  await expect(menu).toBeFocused();
+  await page.keyboard.press("Control+Shift+P");
+  await page.locator(".palette-input").fill("About SignalScope");
+  await page.locator(".palette-input").press("Enter");
+  await expect(about).toBeVisible();
+  await close.click();
+  await expect(about).toHaveCount(0);
+  await expect(menu).toBeFocused();
+  await menu.click();
+  await page
+    .getByRole("menuitem", { name: "About SignalScope", exact: true })
+    .click();
+  await page.mouse.click(2, 2);
+  await expect(about).toHaveCount(0);
+  await expect(menu).toBeFocused();
+});
 
 test("session title edits inline with keyboard, cancellation, and undo", async ({
   page,

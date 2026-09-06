@@ -59,17 +59,17 @@
   color: var(--fg-2);
 }
 
-.help-content dl {
+.info-content dl {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 8px 16px;
 }
 
-.help-content dd {
+.info-content dd {
   margin: 0;
 }
 
-.help-dialog {
+.info-dialog {
   width: min(640px, calc(100vw - 40px));
   max-height: calc(100vh - 40px);
   padding: 0;
@@ -80,11 +80,11 @@
   font: var(--ui-body-size) var(--font-ui);
 }
 
-.help-dialog::backdrop {
+.info-dialog::backdrop {
   background: var(--surface-overlay);
 }
 
-.help-dialog header {
+.info-dialog header {
   position: sticky;
   top: 0;
   display: flex;
@@ -95,21 +95,21 @@
   background: var(--surface-2);
 }
 
-.help-dialog header button {
+.info-dialog header button {
   padding: 4px 8px;
 }
 
-.help-content {
+.info-content {
   padding: 4px 16px 12px;
 }
 
-.help-content h2 {
+.info-content h2 {
   margin-top: 18px;
   font-size: var(--ui-body-size);
   color: var(--fg-1);
 }
 
-.help-content kbd {
+.info-content kbd {
   font-family: var(--font-mono);
 }
 
@@ -127,4 +127,31 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+}
+
+.about-dialog {
+  width: min(440px, calc(100vw - 40px));
+}
+
+.about-version {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.info-content nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 0;
+}
+
+.info-content a {
+  color: var(--fg-2);
+  text-underline-offset: 3px;
+}
+
+.info-content a:hover,
+.info-content a:focus-visible {
+  color: var(--amber-7);
 }

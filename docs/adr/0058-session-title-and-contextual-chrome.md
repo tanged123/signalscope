@@ -33,8 +33,24 @@ versions retain their existing rejection behavior.
 `ui/session-title.ts` owns the temporary text input and commit/cancel lifecycle.
 `ui/shell-markup.ts` owns shell structure; `ui/shell-status.ts` consumes existing
 presentation callbacks. `ui/line-toolbar.ts` owns appearance-control grouping.
-`ui/help-dialog.ts` owns its dialog and restores focus when it closes. The
+`ui/help-dialog.ts` and `ui/about-dialog.ts` supply informational content;
+`ui/info-dialog.ts` owns their modal focus, keyboard containment, dismissal,
+and removal on close, then restores the invoking control's focus. Both depend
+only on the DOM; About reads the frontend package version at build time, so
+there is no separate version literal or runtime request. It includes the
+project description, MIT license credit, documentation, and issue links.
+There is no session or protocol compatibility change. Playwright validates
+menu/palette entry, focus cycling, and all dismissal paths. The
 application menu closes before executing commands so newly opened UI owns focus.
+The Electron window owns an exact allowlist for the two About project links
+and opens them through the system browser when a new-window request arrives.
+It continues to deny new Electron windows and off-origin navigation. The
+handler belongs to the window lifetime; no IPC or host detection is added.
+Desktop window tests validate allowed links and rejected URLs (ADR 0049).
+Snapshot and demo artifact guards allow these two URLs only in anchor hrefs;
+HTTP resource URLs, including the same URLs in fetch calls, still fail. Opening
+About requires no external request. The shared script policy has regression
+tests and runs in the existing artifact gates.
 The oversized shell and panel remain composition roots; their new behavior is
 implemented in these focused modules, not in further inline control logic.
 

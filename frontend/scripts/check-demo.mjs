@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasHttpResources } from "./snapshot-http-policy.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const demoDirectory = resolve(scriptDirectory, "../../build/demo");
@@ -21,7 +22,7 @@ if (html !== undefined) {
   if (/<(?:script|img|link)\b[^>]*(?:src|href)=/i.test(html)) {
     failures.push("external resource attributes remain");
   }
-  if (/\bhttps?:\/\//i.test(html)) {
+  if (hasHttpResources(html)) {
     failures.push("an HTTP URL remains");
   }
 }
