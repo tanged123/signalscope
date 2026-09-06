@@ -25,6 +25,7 @@ Usage: ./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|architecture|f
             snapshot artifact checks.
   e2e       Run Playwright desktop smoke tests, optionally filtered.
   bench     Run corpus, core, and Playwright performance benchmarks.
+            Modes: all (default), corpus, core, e2e, line2d (CPU), line-gpu.
   full      Run quick checks, test the browser host, then run e2e.
 EOF
 }
@@ -203,6 +204,12 @@ bench)
     ;;
   core)
     cargo test --release -p scope-core -- --ignored --show-output --test-threads=1 bench_
+    ;;
+  line2d)
+    pnpm --filter @signalscope/frontend exec vitest bench --run src/app/plot-capabilities.bench.ts
+    ;;
+  line-gpu)
+    SIGNALSCOPE_LINE_GPU_BENCH=1 pnpm --filter @signalscope/frontend exec playwright test --project=desktop line-strip.spec.ts --workers=1
     ;;
   e2e)
     bench_e2e

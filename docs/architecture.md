@@ -286,6 +286,17 @@ presentation path can lose WebGPU canvas devices even after initialization
 succeeds. CI stops after the first test exhausts its retries and uploads failed
 browser traces for diagnosis.
 
+Viewport updates change ChartHost's domains and layout immediately; the shared
+`GpuContext` frame loop draws the latest state once per animation frame.
+Capture explicitly flushes pending work. Line2D preparation caches only the
+finite paired extents, with one WeakMap entry per immutable Y column keyed by
+X/anchor identities and source-time window. Replacing any input invalidates the
+entry; releasing the Y column makes it collectible. No extra sample or GPU
+buffers are allocated. The ChartGPU fork draws each standard line segment as
+an independent four-vertex strip with the same two triangles and source rows.
+See [rendering performance](rendering-performance.md) for measurements and
+pixel-equivalence coverage.
+
 After narrow tests, use a proportional gate; cross-layer implementation uses
 `./scripts/ci.sh all`. Documentation-only work needs formatting, reference
 checks, and `./scripts/version.sh check`, not GUI or reducer tests. Report

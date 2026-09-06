@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Line renderer GPU fixture</title>
+  </head>
+  <body>
+    <script type="module">
+      window.runLineStrip = async (measure) => {
+        const { default: shader } =
+          await import("/vendor/chartgpu/src/shaders/line.wgsl?raw");
+        const referenceShader = shader.replace(
+          "    default: { return vec2<f32>(1.0, 1.0); }",
+          "    case 3u: { return vec2<f32>(0.0, 1.0); }\n    case 4u: { return vec2<f32>(1.0, 0.0); }\n    default: { return vec2<f32>(1.0, 1.0); }",
+        );
+        if (referenceShader === shader)
+          throw new Error("reference quad mapping was not installed");
+        if (navigator.gpu === undefined) throw new Error("WebGPU unavailable");
+        const adapter = await navigator.gpu.requestAdapter();
+        if (adapter === null) throw new Error("WebGPU adapter unavailable");
+        const device = await adapter.requestDevice();
+        device.pushErrorScope("validation");
+        const width = 384;
+        const height = 256;
+        const format = "rgba8unorm";
+        const resources = [];
+        const buffer = (values, usage) => {
+          const target = device.createBuffer({
+            size: values.byteLength,
+            usage,
+            mappedAtCreation: true,
+          });
+          new Float32Array(target.getMappedRange()).set(values);
+          target.unmap();
+          resources.push(target);
+          return target;
+        };
+        const target = device.createTexture({
+          size: [width, height],
+          format,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        });
+        resources.push(target);
+        const readback = device.createBuffer({
+          size: width * height * 4,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        resources.push(readback);
+        const timings = [];
+        let comparisons = 0;
+        let changedBytes = 0;
+        let paintedPixels = 0;
+        try {
+          for (const sampleCount of [1, 4]) {
+            const multisample =
+              sampleCount === 1
+                ? null
+                : device.createTexture({
+                    size: [width, height],
+                    format,
+                    sampleCount,
+                    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+                  });
+            if (multisample !== null) resources.push(multisample);
+            const pipelines = [referenceShader, shader].map((code, variant) => {
+              const module = device.createShaderModule({ code });
+              return device.createRenderPipeline({
+                layout: "auto",
+                vertex: { module, entryPoint: "vsMain" },
+                fragment: {
+                  module,
+                  entryPoint: "fsMain",
+                  targets: [
+                    {
+                      format,
+                      blend: {
+                        color: {
+                          srcFactor: "src-alpha",
+                          dstFactor: "one-minus-src-alpha",
+                        },
+                        alpha: {
+                          srcFactor: "one",
+                          dstFactor: "one-minus-src-alpha",
+                        },
+                      },
+                    },
+                  ],
+                },
+                primitive: {
+                  topology: variant === 0 ? "triangle-list" : "triangle-strip",
+                  cullMode: "none",
+                },
+                multisample: { count: sampleCount },
+              });
+            });
+            for (const colored of [false, true]) {
+              const count = measure ? 100_000 : 16;
+              const points = new Float32Array(count * 2);
+              const colors = new Float32Array(colored ? count * 4 : 4);
+              for (let i = 0; i < count; i += 1) {
+                points[i * 2] = Math.sin(i * 0.8) * 0.9;
+                points[i * 2 + 1] = Math.cos(i * 0.55) * 0.9;
+                if (colored)
+                  colors.set(
+                    [i % 2, 0.7, (i + 1) % 2, i % 7 === 0 ? -1 : 1],
+                    i * 4,
+                  );
+              }
+              points[4] = NaN;
+              points[15] = NaN;
+              // Repeated coordinates must not create a bridge or a spurious quad.
+              points[20] = points[18];
+              points[21] = points[19];
+              const vs = new Float32Array(28);
+              vs[0] = 0.8;
+              vs[5] = 0.8;
+              vs[10] = 1;
+              vs[15] = 1;
+              vs[16] = width;
+              vs[17] = height;
+              vs[18] = 2;
+              vs[19] = 2.5;
+              new Uint32Array(vs.buffer)[25] = 1;
+              new Uint32Array(vs.buffer)[26] = count - 1;
+              const fs = new Float32Array([0.5, 0.6, 0.7, 0.7, 0, 0, 0, 0]);
+              const buffers = [
+                buffer(vs, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
+                buffer(fs, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
+                buffer(points, GPUBufferUsage.STORAGE),
+                buffer(colors, GPUBufferUsage.STORAGE),
+              ];
+              const groups = pipelines.map((pipeline) =>
+                device.createBindGroup({
+                  layout: pipeline.getBindGroupLayout(0),
+                  entries: buffers.map((value, binding) => ({
+                    binding,
+                    resource: { buffer: value },
+                  })),
+                }),
+              );
+              const draw = (variant, copy = false) => {
+                const encoder = device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                  colorAttachments: [
+                    {
+                      view: (multisample ?? target).createView(),
+                      ...(multisample === null
+                        ? {}
+                        : { resolveTarget: target.createView() }),
+                      clearValue: [0, 0, 0, 1],
+                      loadOp: "clear",
+                      storeOp: "store",
+                    },
+                  ],
+                });
+                pass.setPipeline(pipelines[variant]);
+                pass.setBindGroup(0, groups[variant]);
+                pass.draw(variant === 0 ? 6 : 4, count - 1);
+                pass.end();
+                if (copy)
+                  encoder.copyTextureToBuffer(
+                    { texture: target },
+                    { buffer: readback, bytesPerRow: width * 4 },
+                    [width, height],
+                  );
+                device.queue.submit([encoder.finish()]);
+              };
+              if (measure) {
+                const elapsed = [[], []];
+                // Alternate variants and exclude warmup; timings include submission and GPU completion.
+                for (let trial = 0; trial < 7; trial += 1) {
+                  for (const variant of trial % 2 === 0 ? [0, 1] : [1, 0]) {
+                    const started = performance.now();
+                    draw(variant);
+                    await device.queue.onSubmittedWorkDone();
+                    if (trial > 0)
+                      elapsed[variant].push(performance.now() - started);
+                  }
+                }
+                const median = (values) =>
+                  values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+                timings.push({
+                  sampleCount,
+                  colored,
+                  referenceMs: median(elapsed[0]),
+                  stripMs: median(elapsed[1]),
+                });
+              } else {
+                for (const dash of [0, 1, 2]) {
+                  new Uint32Array(fs.buffer)[4] = dash;
+                  device.queue.writeBuffer(buffers[1], 0, fs);
+                  // Exercise both the full view and a zoomed/panned view without changing data.
+                  for (const zoom of [0.8, 1.7]) {
+                    vs[0] = zoom;
+                    vs[5] = zoom;
+                    vs[12] = 0.1;
+                    vs[13] = -0.15;
+                    device.queue.writeBuffer(buffers[0], 0, vs);
+                    const images = [];
+                    for (const variant of [0, 1]) {
+                      draw(variant, true);
+                      await readback.mapAsync(GPUMapMode.READ);
+                      images.push(
+                        new Uint8Array(readback.getMappedRange()).slice(),
+                      );
+                      readback.unmap();
+                    }
+                    comparisons += 1;
+                    const before = images[0];
+                    const after = images[1];
+                    for (let i = 0; i < before.length; i += 1) {
+                      if (before[i] !== after[i]) changedBytes += 1;
+                      if (i % 4 === 0 && after[i] > 0) paintedPixels += 1;
+                    }
+                  }
+                }
+              }
+              for (const value of buffers) value.destroy();
+            }
+          }
+          const error = await device.popErrorScope();
+          if (error !== null) throw new Error(error.message);
+          return {
+            comparisons,
+            changedBytes,
+            paintedPixels,
+            timings,
+            adapter: {
+              vendor: adapter.info.vendor,
+              architecture: adapter.info.architecture,
+              description: adapter.info.description,
+            },
+          };
+        } finally {
+          for (const resource of resources) resource.destroy();
+          device.destroy();
+        }
+      };
+    </script>
+  </body>
+</html>

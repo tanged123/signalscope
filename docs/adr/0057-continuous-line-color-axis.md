@@ -77,6 +77,12 @@ No schema or renderer attribute contract changes are needed.
 Categorical choices remain saved and become effective again when C is cleared;
 legend text, dash, focus, and picking continue to identify traces.
 
+Continuous attributes do not exempt a trace from the legend's Dim policy.
+The existing null-hue background classification controls density attenuation
+and draw order with C enabled too; the attributes retain their measured colors.
+Hover restores the inspected trace's opacity and draws it last. Focused traces
+retain their foreground classification and wider stroke from ADR 0051.
+
 Deleting a signal prunes its explicit X and C bundle references, preserving
 unaffected members. Exhausted X bindings reset to time with coordinate cleanup;
 exhausted C bindings clear the scale. The existing line-binding state owner

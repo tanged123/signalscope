@@ -101,6 +101,66 @@ function lineAnnotation(
   return annotation(anchor, pinnedValue, path);
 }
 
+test("Line2D reuses immutable extents across preparations and invalidates every coordinate input", () => {
+  const input = lineInput();
+  let reads = 0;
+  const original = input.series[0];
+  if (original === undefined) throw new Error("missing test column");
+  const values = new Proxy(original.values, {
+    get(target, property) {
+      if (typeof property === "string" && /^\d+$/.test(property)) reads += 1;
+      return Reflect.get(target, property, target) as unknown;
+    },
+  });
+  const source = { ...input, series: [{ ...original, values }] };
+  const ranges = prepareLine2DPlot(source).autoRanges();
+  expect(reads).toBe(values.length);
+  reads = 0;
+  expect(
+    prepareLine2DPlot({
+      ...source,
+      series: [{ ...original, values, colorIndex: 7 }],
+    }).autoRanges(),
+  ).toEqual(ranges);
+  expect(reads).toBe(0);
+
+  for (const changed of [
+    { ...source, window: { t0: 1, t1: 2 } },
+    { ...source, x: new Float64Array([9, 8, 7, 6]) },
+    { ...source, anchor: new Float64Array([4, 5, 6, 7]) },
+    {
+      ...source,
+      series: [
+        {
+          ...original,
+          values,
+          x: new Float64Array([4, 3, 2, 1]),
+          anchor: new Float64Array([0, 1, 2, 8]),
+        },
+      ],
+    },
+  ]) {
+    reads = 0;
+    const actual = prepareLine2DPlot(changed).autoRanges();
+    expect(reads).toBe(values.length);
+    const uncached = {
+      ...changed,
+      series: changed.series.map((series) => ({
+        ...series,
+        values: original.values.slice(),
+      })),
+    };
+    expect(actual).toEqual(prepareLine2DPlot(uncached).autoRanges());
+    // Alternating panels/windows replace the entry instead of accumulating it.
+    expect(prepareLine2DPlot(source).autoRanges()).toEqual(ranges);
+  }
+  const replaced = {
+    ...source,
+    series: [{ ...original, values: new Float64Array([9, 8, 7, 6]) }],
+  };
+  expect(prepareLine2DPlot(replaced).autoRanges()).not.toEqual(ranges);
+});
+
 test("Line2D uses finite paired rows for local automatic ranges", () => {
   const plot = prepareLine2DPlot(lineInput());
 

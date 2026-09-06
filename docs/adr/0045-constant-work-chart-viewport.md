@@ -42,3 +42,17 @@ fork revision (`fix(render): compile dash shader on WebGPU`). The previous
 `9f4b3b06047cb99c743d22e83653b23a526a087a` pin was stale and is corrected here.
 ADR 0052 keeps this host contract behind the SignalScope-owned typed
 render-family boundary.
+
+## Amendment (2026-09-06)
+
+ChartHost updates ranges and interaction layout synchronously, but leaves
+drawing to the existing shared `GpuContext` animation-frame loop. Separate
+X/Y updates and multiple pointer events before that frame therefore draw only
+the latest viewport. `setViewRange` marks ChartGPU dirty; the registered host
+publishes it when the frame driver calls `renderFrame`. Capture still flushes
+explicitly. Unregister, device loss, and disposal retain their existing cleanup
+owners. This adds no queue, sample buffer, or renderer-specific scheduling API.
+
+The host test verifies that consecutive viewport updates produce no immediate
+draw, preserve data identity, update layout immediately, and render once through
+the shared driver. GPU failure reporting remains on that driver's render path.

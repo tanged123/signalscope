@@ -22,3 +22,4 @@
 /refs/
 *.html
 !docs/**
+!frontend/tests/e2e/fixtures/line-strip.html

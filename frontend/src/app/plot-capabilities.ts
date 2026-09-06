@@ -371,14 +371,11 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       let yMin = Number.POSITIVE_INFINITY;
       let yMax = Number.NEGATIVE_INFINITY;
       for (const series of input.series) {
-        for (let index = 0; index < series.values.length; index += 1) {
-          const row = rowFor(series, index);
-          if (row === null) continue;
-          xMin = Math.min(xMin, row.x);
-          xMax = Math.max(xMax, row.x);
-          yMin = Math.min(yMin, row.y);
-          yMax = Math.max(yMax, row.y);
-        }
+        const extent = line2DExtent(input, series);
+        xMin = Math.min(xMin, extent.xMin);
+        xMax = Math.max(xMax, extent.xMax);
+        yMin = Math.min(yMin, extent.yMin);
+        yMax = Math.max(yMax, extent.yMax);
       }
       return {
         x: paddedExtent(xMin, xMax),
@@ -514,6 +511,65 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
 interface XYPoint {
   x: number;
   y: number;
+}
+
+interface Line2DExtent {
+  anchor: Float64Array;
+  x: Float64Array;
+  t0: number;
+  t1: number;
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+}
+
+// Retain one extent per immutable Y column across viewport/style preparations.
+const line2DExtents = new WeakMap<Float64Array, Line2DExtent>();
+
+function line2DExtent(
+  input: Line2DPlotInput,
+  series: Line2DPlotSeries,
+): Line2DExtent {
+  const anchor = series.anchor ?? input.anchor;
+  const x = series.x ?? input.x;
+  const { t0, t1 } = input.window;
+  const cached = line2DExtents.get(series.values);
+  if (
+    cached?.anchor === anchor &&
+    cached.x === x &&
+    cached.t0 === t0 &&
+    cached.t1 === t1
+  )
+    return cached;
+  const extent = {
+    anchor,
+    x,
+    t0,
+    t1,
+    xMin: Infinity,
+    xMax: -Infinity,
+    yMin: Infinity,
+    yMax: -Infinity,
+  };
+  for (let index = 0; index < series.values.length; index += 1) {
+    const t = anchor[index] as number;
+    const xv = x[index] as number;
+    const yv = series.values[index] as number;
+    if (
+      !(t >= t0 && t <= t1) ||
+      !Number.isFinite(t) ||
+      !Number.isFinite(xv) ||
+      !Number.isFinite(yv)
+    )
+      continue;
+    extent.xMin = Math.min(extent.xMin, xv);
+    extent.xMax = Math.max(extent.xMax, xv);
+    extent.yMin = Math.min(extent.yMin, yv);
+    extent.yMax = Math.max(extent.yMax, yv);
+  }
+  line2DExtents.set(series.values, extent);
+  return extent;
 }
 
 interface ScreenXYPoint {

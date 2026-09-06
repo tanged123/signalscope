@@ -145,7 +145,9 @@ export class ChartHost {
       const opacity =
         emphasisActive && !isEmphasized && !ghost
           ? 0.25
-          : Math.min(1, baseOpacity + (isEmphasized ? 0.4 : 0));
+          : isEmphasized
+            ? Math.min(1, style.alpha + 0.4)
+            : baseOpacity;
       const width =
         (style.width + (isEmphasized ? 0.4 : 0)) *
         request.palette.lineWidthScale;
@@ -196,8 +198,13 @@ export class ChartHost {
       .map((element, index) => ({
         element,
         ghost: isGhost(request.series[index]),
+        emphasized: emphasis.has(index),
       }))
-      .sort((left, right) => Number(right.ghost) - Number(left.ghost))
+      .sort(
+        (left, right) =>
+          Number(left.emphasized) - Number(right.emphasized) ||
+          Number(right.ghost) - Number(left.ghost),
+      )
       .map(({ element }) => element);
     const options = this.makeOptions(request, orderedSeries);
     this.options = options;
@@ -230,7 +237,6 @@ export class ChartHost {
       x: { min: xRange.min - xOrigin, max: xRange.max - xOrigin },
       y: { min: yRange[0], max: yRange[1] },
     });
-    this.renderPendingFrame();
     this.lastLayout = this.makeLayout(xRange, yRange);
   }
 
@@ -434,5 +440,5 @@ function sameStyle(left: SeriesStroke, right: SeriesStroke): boolean {
 function isGhost(
   line: Line2DRenderRequest["series"][number] | undefined,
 ): boolean {
-  return line?.style.hue === null && line.pointColors === undefined;
+  return line?.style.hue === null;
 }

@@ -22,6 +22,9 @@ source-time extent and fixed limits follow the panel's linked-time setting.
 C members must share units and the paired sample timebase. Choose **none** to
 restore the saved categorical line colors. Color bindings and limits persist
 in sessions, PNG capture, and offline HTML snapshots.
+The legend's **Dim** control also applies with C enabled: background traces
+fade as the ensemble grows, focused traces draw above them, and hover brings
+the inspected trace to the front without changing its C values.
 
 CSV time columns stay available as ordinary signals. A recognized finite time
 header supplies the linked-time anchor; otherwise imports use row index instead
@@ -75,5 +78,7 @@ examples/   sample data and workspaces
 
 See [AGENTS.md](AGENTS.md) for contributor commands and
 [docs/adr](docs/adr/README.md) for architecture decisions.
+See [rendering performance](docs/rendering-performance.md) for repeatable
+CPU/GPU measurements and the remaining large-ensemble bottlenecks.
 
 MIT licensed.

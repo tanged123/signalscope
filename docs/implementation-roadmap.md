@@ -53,6 +53,13 @@ Prioritize measured, user-visible work in this order:
 1. Keep the adaptive tile path within its interaction and memory budgets as
    source and series counts grow; use the benchmark suite before changing
    reduction or GPU policy.
+   Repeated signal-X extent scans and immediate per-axis GPU draws are removed;
+   standard strokes use four vertices per segment with unchanged pixels and
+   retained rows. [Rendering performance](rendering-performance.md) records
+   the measurements. Next, measure live time/explicit-X/C at equal retained
+   row counts, including CPU picking, group-query latency, options publication,
+   uploads and GPU completion. A bounded picking index, stable-resource style
+   updates, and batched uniforms/draws need evidence before implementation.
 2. Improve ingest and snapshot boundary coverage (large/corrupt inputs,
    cache reuse, session round trips, no-network and size-budget checks).
 3. Keep the reusable panel shell, SignalScope-owned Line2D render model,
