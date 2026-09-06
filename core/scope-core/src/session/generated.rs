@@ -340,6 +340,8 @@ pub struct SourceRecord {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Session {
     pub app: String,
+    #[serde(default)]
+    pub title: Option<String>,
     pub schema_version: u32,
     pub theme: Theme,
     pub linked_time: LinkedTime,

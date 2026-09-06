@@ -1,3 +1,4 @@
+import { openPlotSettings } from "./fixtures";
 import { WorkspaceModel } from "../../src/app/workspace";
 import type { Session } from "../../src/generated/session";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
@@ -262,6 +263,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect(panel.locator(".axis-picker input")).toBeFocused();
     await page.keyboard.press("Escape");
     const setLegend = async (mode: string): Promise<void> => {
+      await openPlotSettings(panel);
       await panel.locator(".panel-legend-state").click();
       await panel
         .getByRole("menuitemradio", { name: mode, exact: false })
@@ -271,6 +273,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await setLegend("badge");
     await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
     await expect(colorbar).toHaveAttribute("data-placement", "plot");
+    await openPlotSettings(panel);
     const axisStyle = panel.locator(".panel-axis-toggle");
     if ((await axisStyle.textContent())?.includes("gutter"))
       await axisStyle.click();

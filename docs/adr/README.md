@@ -66,6 +66,7 @@ progress; amend earlier records with explicit links when their guidance changes.
 
 48. [XY axis and bundle bindings](0056-xy-axis-and-bundle-bindings.md)
 49. [Continuous line color axis](0057-continuous-line-color-axis.md)
+50. [Session display title and contextual chrome](0058-session-title-and-contextual-chrome.md)
 
 ## Superseded decisions
 

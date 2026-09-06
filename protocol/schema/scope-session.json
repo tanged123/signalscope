@@ -232,6 +232,7 @@
       "kind": "object",
       "fields": {
         "app": "string",
+        "title": "string?",
         "schema_version": "u32",
         "theme": "Theme",
         "linked_time": "LinkedTime",

@@ -1,3 +1,16 @@
+import {
+  renderDockFooter,
+  renderPresentationStatus,
+  statusAggregate,
+} from "./shell-status";
+import { bindDisclosure } from "./disclosure";
+import {
+  bindSessionTitle,
+  renderSessionTitle,
+  sessionDisplayTitle,
+} from "./session-title";
+import { showHelp } from "./help-dialog";
+import { shellMarkup } from "./shell-markup";
 import { axisActions } from "./axis-actions";
 import { resolveLineBindings } from "../app/line-bindings";
 import { shellCommand } from "../app/shell-commands";
@@ -12,7 +25,6 @@ import {
 import { parseBakedSession } from "../app/baked-session";
 import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
-import type { DensityPlan } from "../app/presentation-budget";
 import { columnsValueAtTime } from "../app/bin-columns";
 import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
@@ -54,14 +66,11 @@ import {
   type ExportFidelity,
   type ExportRange,
   type ExportSelection,
-  type FormatDescriptor,
   type SampleSeries,
   type SignalSummary,
-  type SourceSummary,
 } from "../generated/protocol";
 import type {
   CursorMode,
-  LegendState,
   PanelState,
   SeriesRef,
   Session,
@@ -73,7 +82,7 @@ import {
   type PaletteMode,
 } from "./command-palette";
 import { basename, bindPointerDrag, required } from "./dom";
-import { FormulaBar, formulaBarMarkup } from "./formula-bar";
+import { FormulaBar } from "./formula-bar";
 import { ImportWizard } from "./import-wizard";
 import {
   ExportDialog,
@@ -88,14 +97,6 @@ import { WorkspaceView } from "./workspace-view";
 import { AppMenu } from "./app-menu";
 import type { GpuContext, GpuFailure } from "../render/gpu-context";
 
-export function formatPresentationStatus(
-  plan: Pick<DensityPlan, "density" | "targetDensity" | "limited" | "fits">,
-): string {
-  if (!plan.limited) return "";
-  if (!plan.fits) return "resolution constrained by presentation memory";
-  return `resolution ${plan.density.toFixed(2)}/${plan.targetDensity.toFixed(0)} bins/px`;
-}
-
 const TREE_WIDTH = { default: 262, collapse: 120, min: 180, max: 480 } as const;
 const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
@@ -104,14 +105,6 @@ const DERIVED_PREFIX = "derived/";
 export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
   if (count <= 0) return "none";
   return count <= 4 ? "focus" : "ghost";
-}
-
-export function statusAggregate(
-  sourceCount: number,
-  signalCount: number,
-  pointCount: number,
-): string {
-  return `${sourceCount.toLocaleString()} sources · ${signalCount.toLocaleString()} signals · ${pointCount.toLocaleString()} pts`;
 }
 
 export function bundleCompletionEntries(
@@ -195,7 +188,6 @@ export class AppShell {
   private recipeDirectory: string | null = null;
   private workspacePath: string | null = null;
   private dirty = false;
-  private supportedFormatHint = "—";
   private restoringHistory = false;
   private historyGestureKey: string | null = null;
   private historyDirty: string | null = null;
@@ -226,7 +218,7 @@ export class AppShell {
           missingFor,
           errorFor,
         ) ?? 0,
-      onPlan: (plan) => this.renderPresentationStatus(plan),
+      onPlan: (plan) => renderPresentationStatus(this.root, plan),
       onRender: (elapsed) => {
         required(this.root, ".render-ms").textContent =
           `${elapsed.toFixed(1)} ms`;
@@ -285,43 +277,6 @@ export class AppShell {
     });
   }
 
-  private bindLegendLayoutMenu(): void {
-    const trigger = required<HTMLButtonElement>(this.root, ".layout-slot");
-    const menu = required<HTMLElement>(this.root, ".legend-layout-menu");
-    const close = (): void => {
-      menu.hidden = true;
-      trigger.setAttribute("aria-expanded", "false");
-    };
-    trigger.addEventListener("click", () => {
-      menu.hidden = !menu.hidden;
-      trigger.setAttribute("aria-expanded", String(!menu.hidden));
-    });
-    for (const button of menu.querySelectorAll<HTMLButtonElement>(
-      "[data-legend-state]",
-    )) {
-      button.addEventListener("click", () => {
-        this.workspace.setAllLegendStates(
-          button.dataset.legendState as LegendState,
-        );
-        this.commitHistory();
-        this.workspaceView?.refreshPanelStates();
-        close();
-      });
-    }
-    document.addEventListener("pointerdown", (event) => {
-      if (
-        event.target instanceof Node &&
-        (menu.contains(event.target) || trigger.contains(event.target))
-      ) {
-        return;
-      }
-      close();
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") close();
-    });
-  }
-
   async mount(): Promise<void> {
     await this.prepareMount();
     this.mountWorkspaceViews();
@@ -343,7 +298,6 @@ export class AppShell {
         warning.hidden = true;
       });
     }
-    await this.loadFormatHint();
     await this.loadPreferences();
     await this.restoreSession();
     this.history.reset(historySnapshot(this.workspace.snapshot()));
@@ -738,7 +692,27 @@ export class AppShell {
         },
       },
     );
-    this.bindLegendLayoutMenu();
+    bindSessionTitle(
+      required(this.root, ".workspace-name"),
+      () =>
+        sessionDisplayTitle(
+          this.workspace.snapshot().title,
+          this.workspacePath,
+        ),
+      (title) => {
+        this.workspace.replace({ ...this.workspace.snapshot(), title });
+        this.commitHistory();
+        this.scheduleAutosave();
+        this.renderWorkspaceName();
+      },
+    );
+    const disposePerformance = bindDisclosure(
+      required(this.root, ".performance-details"),
+    );
+    window.addEventListener("pagehide", disposePerformance, { once: true });
+    required(this.root, ".help-button").addEventListener("click", () =>
+      showHelp(this.root, this.commands),
+    );
     this.selection.onChange(() => {
       this.syncSelectionActions();
     });
@@ -1112,14 +1086,14 @@ export class AppShell {
     this.commands.register(
       shellCommand("help", {
         run: () => {
-          this.palette?.open("commands");
+          showHelp(this.root, this.commands);
         },
       }),
     );
     this.commands.register(
       shellCommand("about-signalscope", {
         run: () => {
-          this.showModeHelp("SignalScope 2.3.0");
+          this.showModeHelp("SignalScope 2.4.0");
         },
       }),
     );
@@ -1191,7 +1165,6 @@ export class AppShell {
       ["save-layout-preset", "Save Layout As Preset…", "workspace", "layout"],
       ["apply-layout-preset", "Apply Preset ▸", "workspace", "layout"],
       ["reset-layout", "Reset Layout", "workspace", "layout"],
-      ["keymap", "Keymap", "help", "commands"],
     ] as const) {
       this.commands.register({
         id: planned[0],
@@ -2000,6 +1973,7 @@ export class AppShell {
     this.syncCursorMode();
     void this.refreshTiles();
     this.scheduleAutosave();
+    this.renderWorkspaceName();
   }
 
   /** Coalesces rapid state changes into one write. */
@@ -2469,12 +2443,12 @@ export class AppShell {
     }
   }
 
-  /** Shows the open workspace's file name and whether it has unsaved edits. */
   private renderWorkspaceName(): void {
-    const element = required<HTMLElement>(this.root, ".workspace-name");
-    const name =
-      this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
-    element.textContent = this.dirty ? `${name} •` : name;
+    renderSessionTitle(
+      required(this.root, ".workspace-name"),
+      sessionDisplayTitle(this.workspace.snapshot().title, this.workspacePath),
+      this.dirty,
+    );
   }
 
   /**
@@ -2921,14 +2895,6 @@ export class AppShell {
     void this.updateSources(pointCount);
   }
 
-  private renderPresentationStatus(plan: DensityPlan): void {
-    const status = this.root.querySelector<HTMLElement>(".presentation-status");
-    if (status === null) return;
-    const text = formatPresentationStatus(plan);
-    status.textContent = text.length > 0 ? ` · ${text}` : "";
-    status.hidden = text.length === 0;
-  }
-
   private async updateSources(pointCount: number): Promise<void> {
     const sources = await this.plane.listSources();
     for (const source of sources) {
@@ -2949,11 +2915,6 @@ export class AppShell {
         recipe_digest: null,
       });
     }
-    const sessionName =
-      this.workspacePath === null ? "Untitled" : basename(this.workspacePath);
-    this.root
-      .querySelector<HTMLElement>(".source-name")
-      ?.replaceChildren(document.createTextNode(sessionName));
     this.root
       .querySelector<HTMLElement>(".status-aggregate")
       ?.replaceChildren(
@@ -2961,27 +2922,9 @@ export class AppShell {
           statusAggregate(sources.length, this.signals.length, pointCount),
         ),
       );
-    required(this.root, ".session-identity").textContent =
-      `— ${sources.length.toLocaleString()} sources · ${this.signals.length.toLocaleString()} signals`;
     const dockFooter = this.root.querySelector<HTMLElement>(".dock-footer");
     if (dockFooter !== null) {
-      renderDockFooter(
-        dockFooter,
-        sources,
-        this.signals.length,
-        () => this.openSources(),
-        this.supportedFormatHint,
-      );
-    }
-  }
-
-  private async loadFormatHint(): Promise<void> {
-    const ingest = this.plane.ingest;
-    if (ingest === null) return;
-    try {
-      this.supportedFormatHint = formatHint(await ingest.listFormats());
-    } catch {
-      this.supportedFormatHint = "—";
+      renderDockFooter(dockFooter, () => this.openSources());
     }
   }
 
@@ -3218,60 +3161,6 @@ export function renderBatchProgress(
   progress.replaceChildren(...children);
 }
 
-export function renderDockFooter(
-  container: HTMLElement,
-  sources: readonly SourceSummary[],
-  signalCount: number,
-  onAddSource: () => void,
-  supportedFormats = "—",
-): void {
-  const totalPoints = sources.reduce(
-    (total, source) => total + Number(source.point_count),
-    0,
-  );
-  const aggregate = document.createElement("div");
-  aggregate.className = "dock-aggregate";
-  const count = document.createElement("span");
-  count.textContent = `${String(sources.length)} sources · ${String(signalCount)} signals`;
-  const points = document.createElement("span");
-  points.className = "dock-points";
-  points.textContent = `${totalPoints.toLocaleString()} pts`;
-  aggregate.append(count, points);
-
-  const load = document.createElement("div");
-  load.className = "dock-load-row";
-  const add = document.createElement("button");
-  add.className = "dock-add-source";
-  add.type = "button";
-  add.textContent = "+ source";
-  add.addEventListener("click", onAddSource);
-  const formats = document.createElement("span");
-  formats.className = "dock-formats";
-  formats.textContent =
-    sources.length === 0 ? supportedFormats : loadedSourceFormats(sources);
-  load.append(add, formats);
-  container.replaceChildren(aggregate, load);
-}
-
-export function formatHint(formats: readonly FormatDescriptor[]): string {
-  const extensions = new Set<string>();
-  for (const format of formats) {
-    for (const extension of format.extensions) {
-      extensions.add(extension.toUpperCase());
-    }
-  }
-  return [...extensions].sort().join(" · ") || "—";
-}
-
-function loadedSourceFormats(sources: readonly SourceSummary[]): string {
-  const formats = new Set<string>();
-  for (const source of sources) {
-    const match = /\.([^./]+)$/.exec(source.path);
-    if (match?.[1] !== undefined) formats.add(match[1].toUpperCase());
-  }
-  return [...formats].sort().join(" · ") || "—";
-}
-
 /** Explains why a listed command cannot run, or nothing when it can. */
 function unavailableReason(command: Command): { unavailable?: string } {
   if (command.status === "planned") {
@@ -3280,111 +3169,6 @@ function unavailableReason(command: Command): { unavailable?: string } {
   return (command.enabled?.() ?? true)
     ? {}
     : { unavailable: "unavailable in this context" };
-}
-
-export function shellMarkup(): string {
-  return `<main class="workbench formula-collapsed">
-    <div class="title-bar">
-      <button class="menu-button" aria-label="Application menu" aria-haspopup="menu" aria-expanded="false">≡</button>
-      <span class="brand">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        SIGNALSCOPE
-      </span>
-      <span class="workspace-name">Untitled</span>
-      <span class="session-identity"></span>
-    </div>
-    <div class="gpu-warning" hidden role="status">
-      <span class="gpu-warning-message">WebGPU unavailable — time-series panels disabled</span>
-      <button class="gpu-warning-dismiss" type="button" aria-label="Dismiss WebGPU warning">✕</button>
-      <button class="gpu-warning-reload" type="button" aria-label="Reload SignalScope" hidden>Reload</button>
-    </div>
-
-    <div class="workspace-strip">
-      <nav class="workspace-tabs" aria-label="Workspace tabs" role="tablist"></nav>
-      <button class="layout-slot" aria-haspopup="menu" aria-expanded="false">layout ▾</button>
-      <div class="legend-layout-menu" role="menu" hidden>
-        <span>LEGEND TYPE</span>
-        <button type="button" role="menuitem" data-legend-state="badge">badge</button>
-        <button type="button" role="menuitem" data-legend-state="keys">keys</button>
-        <button type="button" role="menuitem" data-legend-state="roster">roster</button>
-        <button type="button" role="menuitem" data-legend-state="rail">rail</button>
-      </div>
-    </div>
-
-    <aside class="signal-tree" id="signal-tree" aria-label="Signals">
-      <div class="search-wrap">
-        <div class="search-filter-row">
-          <span class="search-filter-prefix">/</span>
-          <input class="signal-search" aria-label="Search signals" placeholder="Search signals…" spellcheck="false" />
-        </div>
-        <div class="search-count"></div>
-      </div>
-      <div class="tree-heading sets-heading">
-        <span>SETS</span>
-        <button
-          class="sets-save-selection"
-          type="button"
-          title="Save selected signals as set"
-          disabled
-        >
-          ★+
-        </button>
-      </div>
-      <div class="set-name-row tree-row tree-set-draft" hidden>
-        <span class="tree-set-draft-mark">★</span>
-        <input class="set-name-input" placeholder="set name" spellcheck="false" aria-label="Set name" />
-        <button class="set-name-save" type="button" title="Save set" aria-label="Save set">✓</button>
-        <button class="set-name-cancel" type="button" title="Cancel" aria-label="Cancel">✕</button>
-      </div>
-      <div class="tree-sets"></div>
-      <div class="tree-heading signals-heading">SIGNALS</div>
-      <div class="outline-scroll"></div>
-      <div class="source-footer">
-        <div class="ingest-progress" hidden></div>
-        <div class="dock-footer">
-          <div class="dock-load-row">
-            <button class="dock-add-source" type="button">+ source</button>
-            <span class="dock-formats"></span>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <div class="tree-resize-handle dock-resize-handle" role="separator" aria-label="Resize signal tree" aria-orientation="vertical" aria-valuemin="0" tabindex="0"></div>
-
-    <section class="workspace" aria-label="Panel workspace"></section>
-
-    <div class="mode-help" role="status" hidden></div>
-
-    ${formulaBarMarkup()}
-    <div class="plot-tip" hidden></div>
-
-    <footer class="status-bar">
-      <span class="dock-toggles">
-        <button class="status-button active tree-toggle" title="Hide signal tree" aria-controls="signal-tree" aria-expanded="true">▤</button>
-        <button class="status-button formula-toggle" title="Toggle derived formula editor (E)" aria-controls="formula-editor" aria-expanded="false"><span class="formula-symbol">ƒx</span></button>
-        <button class="status-button cursor-toggle" title="Cursor mode: none — cycle (C)" aria-pressed="false">┼</button>
-      </span>
-      <span class="status-separator"></span>
-      <span class="source-truth">
-        <span class="status-aggregate">0 sources · 0 signals · 0 pts</span>
-        <span class="render-stat"> · render <span class="render-ms">— ms</span></span>
-        <span class="presentation-status" hidden></span>
-      </span>
-      <span class="status-spacer"></span>
-      <span class="gesture-hint"></span>
-      <span class="cursor-mode"></span>
-      <span class="status-separator"></span>
-      <span class="time-cluster">
-        <button class="status-button active linked-toggle">⇄ linked</button>
-        <span class="cursor-time">t —</span>
-        <span class="window-readout"></span>
-        <button class="follow-slot planned" aria-disabled="true" title="${PLANNED_TITLE}">‖ FOLLOW</button>
-      </span>
-      <span class="status-separator"></span>
-      <span class="palette-hints"><span>${formatCombo("mod+p")} <i>signals</i></span><span>${formatCombo("mod+shift+p")} <i>commands</i></span></span>
-    </footer>
-  </main>`;
 }
 
 function tooltipHeader(text: string): HTMLElement {

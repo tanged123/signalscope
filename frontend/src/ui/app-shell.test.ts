@@ -1,3 +1,9 @@
+import { shellMarkup } from "./shell-markup";
+import {
+  renderDockFooter,
+  formatPresentationStatus,
+  statusAggregate,
+} from "./shell-status";
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,13 +25,8 @@ import {
   bundleCompletionEntries,
   clearIngestProgress,
   exportSourceOptions,
-  formatPresentationStatus,
   groupCursorRows,
   renderBatchProgress,
-  renderDockFooter,
-  formatHint,
-  shellMarkup,
-  statusAggregate,
 } from "./app-shell";
 
 describe("presentation status", () => {
@@ -45,7 +46,7 @@ describe("presentation status", () => {
         limited: true,
         fits: true,
       }),
-    ).toBe("resolution 1.25/2 bins/px");
+    ).toBe("Reduced resolution");
   });
 });
 
@@ -750,16 +751,9 @@ interface SelectionProbe {
 }
 
 describe("selection actions", () => {
-  it("offers all legend types from the global layout menu", () => {
-    const root = document.createElement("div");
-    root.innerHTML = shellMarkup();
-    const menu = root.querySelector<HTMLElement>(".legend-layout-menu");
-    expect(menu?.querySelector("span")?.textContent).toBe("LEGEND TYPE");
-    expect(
-      [...(menu?.querySelectorAll("[data-legend-state]") ?? [])].map((button) =>
-        button.getAttribute("data-legend-state"),
-      ),
-    ).toEqual(["badge", "keys", "roster", "rail"]);
+  it("keeps legend layout on each plot", () => {
+    expect(shellMarkup()).not.toContain("legend-layout-menu");
+    expect(shellMarkup()).not.toContain("layout-slot");
   });
 
   it("renders the SETS save-selection button", () => {
@@ -843,7 +837,7 @@ interface SourcesProbe {
   workspace: WorkspaceModel;
   signals: SignalSummary[];
   workspacePath: string | null;
-  updateSources(): Promise<void>;
+  updateSources(pointCount: number): Promise<void>;
 }
 
 function sourceSummary(sourceKey: string): SourceSummary {
@@ -857,13 +851,10 @@ function sourceSummary(sourceKey: string): SourceSummary {
 }
 
 describe("workspace identity", () => {
-  it("aggregates source and signal counts in the title identity", async () => {
+  it("keeps dataset counts in the bottom status bar", async () => {
     const shell = Object.create(AppShell.prototype) as SourcesProbe;
     shell.root = document.createElement("div");
-    shell.root.innerHTML = `
-      <span class="source-name"></span>
-      <span class="session-identity"></span>
-    `;
+    shell.root.innerHTML = `<span class="status-aggregate"></span>`;
     shell.workspace = new WorkspaceModel();
     shell.workspacePath = null;
     shell.signals = [
@@ -876,13 +867,10 @@ describe("workspace identity", () => {
         .mockResolvedValue([sourceSummary("run-01"), sourceSummary("run-02")]),
     };
 
-    await shell.updateSources();
+    await shell.updateSources(20);
 
-    expect(shell.root.querySelector(".source-name")?.textContent).toBe(
-      "Untitled",
-    );
-    expect(shell.root.querySelector(".session-identity")?.textContent).toBe(
-      "— 2 sources · 2 signals",
+    expect(shell.root.querySelector(".status-aggregate")?.textContent).toBe(
+      "2 sources · 2 signals · 20 points",
     );
   });
 
@@ -898,18 +886,9 @@ describe("workspace identity", () => {
 });
 
 describe("source dock rail", () => {
-  it("derives the empty-state format hint from registered extensions", () => {
-    expect(
-      formatHint([
-        { id: "parquet", label: "Parquet", extensions: ["parquet", "pq"] },
-        { id: "csv", label: "CSV", extensions: ["csv"] },
-      ]),
-    ).toBe("CSV · PARQUET · PQ");
-  });
-
   it("formats the status identity as one aggregate readout", () => {
     expect(statusAggregate(2, 17, 2_000)).toBe(
-      "2 sources · 17 signals · 2,000 pts",
+      "2 sources · 17 signals · 2K points",
     );
   });
 
@@ -920,37 +899,13 @@ describe("source dock rail", () => {
     expect(markup).not.toContain('class="channel-suggestions"');
   });
 
-  it("shows aggregate counts, loaded formats, and a load action", () => {
+  it("keeps the source action without repeating dataset metadata", () => {
     const element = document.createElement("div");
-    const onAddSource = vi.fn();
-    renderDockFooter(
-      element,
-      [
-        sourceSummary("run-01"),
-        { ...sourceSummary("run-02"), path: "/data/run-02.mcap" },
-      ],
-      17,
-      onAddSource,
-    );
-
-    expect(element.querySelector(".dock-aggregate")?.textContent).toContain(
-      "2 sources · 17 signals",
-    );
-    expect(element.querySelector(".dock-points")?.textContent).toBe("20 pts");
-    expect(element.querySelector(".dock-formats")?.textContent).toBe(
-      "CSV · MCAP",
-    );
-    element.querySelector<HTMLButtonElement>(".dock-add-source")?.click();
-    expect(onAddSource).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows the supported-format hint only for an empty workspace", () => {
-    const element = document.createElement("div");
-    renderDockFooter(element, [], 0, vi.fn());
-    expect(element.querySelector(".dock-formats")?.textContent).toBe("—");
-    expect(element.querySelector(".dock-add-source")?.textContent).toBe(
-      "+ source",
-    );
+    const add = vi.fn();
+    renderDockFooter(element, add);
+    expect(element.textContent).toBe("+ source");
+    element.querySelector<HTMLButtonElement>("button")?.click();
+    expect(add).toHaveBeenCalledOnce();
   });
 });
 

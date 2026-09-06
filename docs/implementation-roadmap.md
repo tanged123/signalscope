@@ -6,6 +6,13 @@ are recorded in [ADRs](adr/README.md).
 
 ## Current product
 
+- Chrome keeps dataset totals in the status bar and appearance controls in
+  per-plot settings. Click the title to rename a session; Enter or blur saves,
+  Escape cancels. Display titles persist separately from file paths. Help opens
+  keyboard and gesture guidance with Escape, outside-click, and close-button
+  dismissal. Chart performance details expose CPU update time and existing
+  memory/density estimates without adding profiling work (ADR 0058).
+
 - `scope-server` is the native data plane and loopback HTTP host. Electron is
   a thin distribution shell around it.
 - Rust provides streaming ingest, transactional registration, out-of-core

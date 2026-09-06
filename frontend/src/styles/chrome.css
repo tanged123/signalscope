@@ -1,0 +1,197 @@
+.workspace-name,
+.session-title-input {
+  min-width: 0;
+  max-width: min(50vw, 480px);
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 2px;
+  font: 0.8462rem var(--font-mono);
+}
+
+.workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-name:hover,
+.workspace-name:focus-visible {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.session-title-input {
+  width: 320px;
+  background: var(--surface-0);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-1);
+}
+
+.source-truth {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.status-aggregate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.performance-details {
+  position: relative;
+  flex: none;
+}
+
+.performance-details > summary,
+.plot-settings > summary {
+  padding: 3px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.performance-details > summary:hover,
+.performance-details[open] > summary,
+.plot-settings[open] > summary {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.presentation-status {
+  margin-left: 8px;
+  border-left: 1px solid var(--border-strong);
+  padding-left: 8px;
+}
+
+.performance-popover,
+.plot-settings-content {
+  position: absolute;
+  z-index: 5;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+  color: var(--fg-2);
+  white-space: normal;
+}
+
+.performance-popover {
+  bottom: calc(100% + 5px);
+  left: 0;
+  width: min(360px, 70vw);
+  font: 11px var(--font-ui);
+}
+
+.performance-popover p {
+  color: var(--fg-3);
+  line-height: 1.5;
+}
+
+.performance-popover dl,
+.help-content dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+}
+
+.performance-popover dd,
+.help-content dd {
+  margin: 0;
+}
+
+.performance-popover dd {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.plot-settings {
+  margin-left: auto;
+  flex: none;
+}
+
+.panel-toolbar-slot:has(.plot-settings) + .panel-actions {
+  margin-left: 0;
+}
+
+.plot-settings-content {
+  top: 28px;
+  right: 4px;
+  width: min(200px, calc(100% - 8px));
+  max-height: calc(100% - 36px);
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.plot-settings-content > button {
+  display: flex;
+  width: 100%;
+  height: 28px;
+  padding: 4px;
+  font: 10px var(--font-mono);
+  text-align: left;
+}
+
+.panel-config-popover {
+  z-index: 6;
+}
+
+.help-dialog {
+  width: min(640px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-1);
+  color: var(--fg-2);
+  font: 12px var(--font-ui);
+}
+
+.help-dialog::backdrop {
+  background: var(--surface-overlay);
+}
+
+.help-dialog header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.help-dialog header button {
+  padding: 4px 8px;
+}
+
+.help-content {
+  padding: 4px 16px 12px;
+}
+
+.help-content h2 {
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--fg-1);
+}
+
+.help-content dt,
+.help-content kbd {
+  font-family: var(--font-mono);
+}
+
+.help-shortcuts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+@media (max-width: 1100px) {
+  .window-readout {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}

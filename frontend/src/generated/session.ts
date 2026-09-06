@@ -183,6 +183,7 @@ export interface SourceRecord {
 
 export interface Session {
   app: string;
+  title: string | null;
   schema_version: number;
   theme: Theme;
   linked_time: LinkedTime;

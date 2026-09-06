@@ -1,3 +1,4 @@
+import { openPlotSettings } from "./fixtures";
 import { expect, gotoApp, test } from "./fixtures";
 import type { PanelView as PanelViewClass } from "../../src/ui/panel";
 import type { FormulaBar as FormulaBarClass } from "../../src/ui/formula-bar";
@@ -426,6 +427,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     ".panel-tips",
     ".panel-legend-state",
   ]) {
+    await openPlotSettings(panel);
     await panel.locator(selector).click();
     const menu = panel.locator(".panel-config-popover");
     await expect(menu).toBeVisible();
@@ -455,6 +457,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
   }
+  await openPlotSettings(panel);
   await panel.locator(".panel-tips").click();
   await panel.getByRole("menuitem", { name: "clear all" }).click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(
@@ -484,7 +487,9 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
   await expect(signalsToggle).toHaveAttribute("aria-expanded", "false");
   await signalsToggle.click();
   await expect(plotLegend.locator(".plot-legend-roster-rows")).toBeVisible();
-  await plotLegend.locator(".plot-legend-tips-heading button").first().click();
+  await expect(
+    plotLegend.locator(".plot-legend-tips-heading button").first(),
+  ).toHaveAttribute("aria-expanded", "true");
   await expect(plotLegend.locator(".plot-tip-reading").nth(1)).toHaveText(
     "5.1200 · 1.0565",
   );
@@ -1072,15 +1077,22 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await expect(page.locator(".panel .binding-chip")).toHaveCount(0);
 });
 
-test("legend console replaces the strip and supports workspace-wide states", async ({
+test("legend console replaces the strip and supports per-plot states", async ({
   page,
 }) => {
   await gotoApp(page);
   const panel = page.locator(".panel").first();
   await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
   await expect(panel.locator(".plot-series-legend")).toBeVisible();
-  await page.locator(".layout-slot").click();
-  await page.locator('[data-legend-state="badge"]').click();
+  await page
+    .locator(".panel")
+    .first()
+    .locator(".plot-settings > summary")
+    .click();
+  await page.locator(".panel").first().locator(".panel-legend-state").click();
+  await page
+    .getByRole("menuitemradio", { name: "badge", exact: false })
+    .click();
   await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
     "data-state",
     "badge",

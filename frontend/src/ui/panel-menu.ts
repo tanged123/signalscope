@@ -48,7 +48,12 @@ export function showPanelMenu(
     document.removeEventListener("pointerdown", onPointer, true);
     popover.remove();
     anchor.setAttribute("aria-expanded", "false");
-    if (returnFocus) anchor.focus();
+    if (returnFocus) {
+      const disclosure = anchor.closest("details");
+      if (disclosure !== null && !disclosure.open)
+        disclosure.querySelector("summary")?.focus();
+      else anchor.focus();
+    }
   };
   const onPointer = (event: PointerEvent): void => {
     if (event.target instanceof Node && popover.contains(event.target)) return;

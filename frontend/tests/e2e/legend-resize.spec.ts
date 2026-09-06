@@ -5,15 +5,28 @@ test("legend rail follows the pointer without reverting between frames", async (
 }) => {
   await page.route("**/api/health", (route) => route.fulfill({ status: 503 }));
   await gotoApp(page);
-  await page.locator(".layout-slot").click();
-  await page.locator('[data-legend-state="rail"]').click();
+  await page
+    .locator(".panel")
+    .first()
+    .locator(".plot-settings > summary")
+    .click();
+  await page.locator(".panel").first().locator(".panel-legend-state").click();
+  await page.getByRole("menuitemradio", { name: "rail", exact: false }).click();
   const panel = page.locator(".panel").first();
   const rail = panel.locator(".plot-series-legend");
   const seam = rail.locator(".plot-legend-resize-left");
   await expect(seam).toBeVisible();
-  const box = await rail.boundingBox();
-  const handle = await seam.boundingBox();
-  if (box === null || handle === null) throw new Error("Rail seam is missing");
+  const { box, handle } = await rail.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const seam = element
+      .querySelector(".plot-legend-resize-left")
+      ?.getBoundingClientRect();
+    if (seam === undefined) throw new Error("Rail seam is missing");
+    return {
+      box: { width: bounds.width },
+      handle: { x: seam.x, y: seam.y, width: seam.width, height: seam.height },
+    };
+  });
   const x = handle.x + handle.width / 2;
   const y = handle.y + handle.height / 2;
   await page.mouse.move(x, y);

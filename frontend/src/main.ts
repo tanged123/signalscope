@@ -1,4 +1,5 @@
 import "./styles/app.css";
+import "./styles/chrome.css";
 
 import { selectDataPlane } from "./app/data-plane";
 import { acquireGpuContext } from "./render/gpu-context";

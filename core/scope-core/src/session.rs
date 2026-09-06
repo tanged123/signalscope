@@ -17,6 +17,7 @@ impl Default for Session {
     fn default() -> Self {
         Self {
             app: "signalscope".into(),
+            title: None,
             schema_version: SESSION_SCHEMA_VERSION,
             theme: Theme::Dark,
             linked_time: LinkedTime::default(),
@@ -471,6 +472,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn session_title_is_optional_and_round_trips() {
+        let session = Session {
+            title: Some("Thermal review".into()),
+            ..Session::default()
+        };
+        let mut value = serde_json::to_value(&session).unwrap();
+        assert_eq!(from_json(&value.to_string()).unwrap(), session);
+        value.as_object_mut().unwrap().remove("title");
+        assert_eq!(from_json(&value.to_string()).unwrap().title, None);
+        value["title"] = 42.into();
+        assert!(from_json(&value.to_string()).is_err());
     }
 
     #[test]

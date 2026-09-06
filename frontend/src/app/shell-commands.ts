@@ -113,7 +113,12 @@ const definitions = {
     group: "display",
   },
   "go-to-signal": { title: "Go to signal", keys: "mod+p" },
-  help: { title: "Keyboard help", keys: "?" },
+  help: {
+    title: "Keyboard and gesture help",
+    keys: "?",
+    section: "help",
+    group: "commands",
+  },
   "about-signalscope": {
     title: "About SignalScope",
     section: "help",

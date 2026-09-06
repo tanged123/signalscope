@@ -8,6 +8,18 @@ import { parseBakedSession } from "./baked-session";
 import { emptySession, WorkspaceModel } from "./workspace";
 
 describe("parseBakedSession", () => {
+  it("restores display titles, defaults absent titles, and rejects invalid titles", () => {
+    const session = { ...emptySession(), title: "Thermal review" };
+    expect(parseBakedSession(JSON.stringify(session)).title).toBe(
+      "Thermal review",
+    );
+    const old: Record<string, unknown> = { ...session };
+    delete old.title;
+    expect(parseBakedSession(JSON.stringify(old)).title).toBeNull();
+    expect(() =>
+      parseBakedSession(JSON.stringify({ ...session, title: 42 })),
+    ).toThrow("invalid structure");
+  });
   it("accepts a current-version session", () => {
     const json = JSON.stringify(emptySession());
     expect(parseBakedSession(json).schema_version).toBe(SESSION_SCHEMA_VERSION);

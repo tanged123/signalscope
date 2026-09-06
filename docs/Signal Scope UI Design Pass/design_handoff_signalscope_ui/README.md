@@ -23,6 +23,13 @@ that are not settled by the current code or ADRs.
 - Motion: 80/140/240ms, cubic-bezier(0.2,0.8,0.2,1), no bounce/scale. Hover = surface one step up.
 
 ## Structure (final)
+
+The approved September 6 chrome cleanup is recorded in
+[ADR 0058](../../adr/0058-session-title-and-contextual-chrome.md): dataset
+totals have one home in the bottom bar; the title is editable; per-plot settings
+group appearance/readouts; performance details and Help open on demand. The
+global legend menu, repeated metadata, and inactive Follow control are removed.
+The visual tokens and complete per-plot axis requirements below still apply.
 App shell rows: menu bar 28px · toolbar 34px · [tree 262px | panel grid] · formula bar 30px (grid column only, collapsible) · status bar 24px.
 - **One workspace.** No tabs. Named layout presets (grid + modes + signals) in a toolbar dropdown, serialized in exports.
 - **Signal tree:** search-first (`/`), ★ favorites with live values, virtualized tree (10k+ signals), live value at cursor per plotted leaf (4 decimals), `derived/` group with amber ƒx marks, sources footer (status dot + pt counts).
