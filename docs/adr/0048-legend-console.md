@@ -25,6 +25,10 @@ reopen affordance. Position, size, state, snapped corner, and dismissal of the
 initial empty-focus hint are serialized per panel in session schema version 23.
 Version 22 sessions migrate to the default top-left keys state.
 
+Pointer gestures retain their temporary geometry across legend/data refreshes
+and commit on release. Reapplying unchanged serialized layout must not reset an
+active drag; changed serialized layout still takes effect.
+
 ## Consequences
 
 - Every panel returns 26 pixels to its plot and retains a bounded series

@@ -29,6 +29,24 @@ export interface LegendRailHost {
 
 type Edge = "left" | "right" | "top" | "bottom" | "corner";
 
+export function refreshLegendWithControlFocus(
+  root: HTMLElement,
+  render: () => void,
+): void {
+  const active = document.activeElement;
+  const control =
+    active !== null && root.contains(active)
+      ? [...active.classList].find((name) =>
+          /^(legend-color-scale|plot-legend-resize-(left|right|top|bottom|corner))$/.test(
+            name,
+          ),
+        )
+      : undefined;
+  render();
+  if (control !== undefined)
+    root.querySelector<HTMLButtonElement>(`.${control}`)?.focus();
+}
+
 export function legendResizeHandle(
   host: LegendRailHost,
   edge: Edge,
@@ -116,6 +134,7 @@ function bindLegendResize(
     const direction = directions[event.key];
     if (direction === undefined) return;
     event.preventDefault();
+    event.stopPropagation();
     const box = legend.getBoundingClientRect();
     const expandKey =
       dock === "right"

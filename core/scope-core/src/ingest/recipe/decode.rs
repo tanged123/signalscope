@@ -62,7 +62,9 @@ pub fn provider(
         ContainerKind::Parquet => (format!("Recipe: {}", recipe.id), vec!["parquet", "pq"]),
     };
     let sniff_container = recipe.container.clone();
-    let cache_abi = u32::from_str_radix(&digest[..8.min(digest.len())], 16).unwrap_or(1);
+    let cache_abi = u32::from_str_radix(&digest[..8.min(digest.len())], 16)
+        .unwrap_or(1)
+        .wrapping_add(1);
     let decoder_recipe = recipe;
     super::super::registry::FormatProvider::new(
         provider_id,
@@ -103,6 +105,8 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
 ) -> Result<DecodedSource, IngestError> {
     let mut timebases = HashMap::<String, Timebase>::new();
     let mut names = HashSet::new();
+    let mut selected_datasets = HashSet::new();
+    let mut time_signals = std::collections::BTreeMap::new();
     let mut signals = Vec::new();
 
     for selection in &recipe.selections {
@@ -116,6 +120,7 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
             return Err(RecipeError::NoMatches(selection.datasets.clone()).into());
         }
         for entry in matches {
+            selected_datasets.insert(entry.path.trim_start_matches('/').to_owned());
             context.check()?;
             let values = container
                 .read_f64(&entry.path)
@@ -129,6 +134,14 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
                 timebases.insert(key, timebase.clone());
                 timebase
             };
+            if !matches!(selection.time, TimeSource::Index(_)) {
+                let key = timebase_key(selection, &entry.path, values.len());
+                if let Some((_, path)) = key.split_once(':') {
+                    time_signals
+                        .entry(path.trim_start_matches('/').to_owned())
+                        .or_insert_with(|| Arc::clone(&timebase.values));
+                }
+            }
             if values.len() != timebase.values.len() {
                 return Err(RecipeError::LengthMismatch {
                     dataset: entry.path.clone(),
@@ -145,26 +158,7 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
             if !names.insert(name.clone()) {
                 return Err(RecipeError::DuplicateName(name).into());
             }
-            let unit = selection
-                .unit
-                .clone()
-                .or_else(|| {
-                    selection
-                        .unit_attribute
-                        .as_deref()
-                        .and_then(|attribute| container.attribute(&entry.path, attribute))
-                })
-                .map(|unit| {
-                    (unit.len() <= MAX_TEXT_BYTES)
-                        .then_some(unit)
-                        .ok_or_else(|| {
-                            RecipeError::Invalid(format!(
-                                "unit exceeds the {} KiB limit",
-                                MAX_TEXT_BYTES / 1024
-                            ))
-                        })
-                })
-                .transpose()?;
+            let unit = signal_unit(container, selection, &entry.path)?;
             signals.push(DecodedSignal {
                 local_path: name,
                 unit,
@@ -176,6 +170,21 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
     if signals.is_empty() {
         return Err(IngestError::NoDataRows);
     }
+    for (path, time) in time_signals {
+        if selected_datasets.contains(&path) {
+            continue;
+        }
+        let name = signal_name(&NameRule::Keep, &path, signals.len())?;
+        if !names.insert(name.clone()) {
+            return Err(RecipeError::DuplicateName(name).into());
+        }
+        signals.push(DecodedSignal {
+            local_path: name,
+            unit: None,
+            time: Arc::clone(&time).into(),
+            values: time.into(),
+        });
+    }
     let row_count = signals
         .iter()
         .map(|signal| signal.values.len())
@@ -185,6 +194,34 @@ pub fn decode_with<R: ContainerReader + ?Sized>(
         return Err(IngestError::NoDataRows);
     }
     Ok(DecodedSource { row_count, signals })
+}
+
+fn signal_unit<R: ContainerReader + ?Sized>(
+    container: &R,
+    selection: &Selection,
+    dataset: &str,
+) -> Result<Option<String>, IngestError> {
+    selection
+        .unit
+        .clone()
+        .or_else(|| {
+            selection
+                .unit_attribute
+                .as_deref()
+                .and_then(|attribute| container.attribute(dataset, attribute))
+        })
+        .map(|unit| {
+            (unit.len() <= MAX_TEXT_BYTES)
+                .then_some(unit)
+                .ok_or_else(|| {
+                    RecipeError::Invalid(format!(
+                        "unit exceeds the {} KiB limit",
+                        MAX_TEXT_BYTES / 1024
+                    ))
+                })
+        })
+        .transpose()
+        .map_err(Into::into)
 }
 
 #[derive(Clone)]
@@ -423,6 +460,20 @@ kind = "dataset"
 path = "run/time"
 "#;
 
+    #[test]
+    fn slash_prefixed_selected_time_is_not_registered_twice() {
+        let mut container = fake_container(&[("/run/time", vec![0.0, 1.0])]);
+        container.columns.insert("run/time".into(), vec![0.0, 1.0]);
+        let recipe = recipe(
+            &SHARED_TIME
+                .replace("run/telemetry/*", "**/time")
+                .replace("strip:run/", "keep"),
+        );
+        let decoded = decode_with(&container, &recipe, &mut context()).unwrap();
+        assert_eq!(decoded.signals.len(), 1);
+        assert_eq!(decoded.signals[0].local_path, "run/time");
+    }
+
     const INDEX_TIME: &str = r#"
 id = "index"
 container = "hdf5"
@@ -468,8 +519,13 @@ t0 = 0.0
         ]);
         let decoded = decode_with(&container, &recipe(SHARED_TIME), &mut context()).unwrap();
         assert_eq!(decoded.row_count, 3);
-        assert_eq!(decoded.signals.len(), 2);
+        assert_eq!(decoded.signals.len(), 3);
         assert_eq!(decoded.signals[0].local_path, "telemetry/ax");
+        assert_eq!(decoded.signals[2].local_path, "run/time");
+        assert_eq!(
+            decoded.signals[2].values.as_slice().as_ref(),
+            &[0.0, 1.0, 2.0]
+        );
         let Column::Owned(first) = &decoded.signals[0].time else {
             panic!("expected owned time column");
         };
@@ -495,7 +551,7 @@ t0 = 0.0
             ("b/v", vec![3.0, 4.0]),
         ]);
         let decoded = decode_with(&container, &recipe(SIBLING_TIME), &mut context()).unwrap();
-        assert_eq!(decoded.signals.len(), 2);
+        assert_eq!(decoded.signals.len(), 4);
         assert_eq!(decoded.signals[1].time.as_slice().as_ref(), &[0.0, 2.0]);
     }
 

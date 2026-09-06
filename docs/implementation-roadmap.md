@@ -15,8 +15,13 @@ are recorded in [ADRs](adr/README.md).
 - The frontend consumes the versioned `DataPlane` contract. `HttpPlane` serves
   live workspaces; `BakedPlane` serves self-contained snapshots. UI and
   renderer code do not branch on host identity.
-- Line2D presentation supports linked time or an explicit signal X on an exact
-  shared timebase. ChartGPU is the Line2D plotter behind the SignalScope-owned
+- Line2D is an XY chart with independent searchable X/Y controls. X can be
+  linked time, any signal, or a bundle paired to Y members by source key.
+  Each X/Y pair requires an exact shared timebase.
+  Optional C binds a signal, source-matched bundle, or time to a separate
+  continuous colorbar with shared automatic or fixed limits (ADR 0057).
+  CSV retains the time column and uses row index when no recognized finite time header is present.
+  Recipe time datasets and MCAP log timestamps are also available as signals. ChartGPU is the Line2D plotter behind the SignalScope-owned
   renderer boundary. Family dispatch owns preparation and render-input
   construction; the two Line2D adapters share options, defaults, axes, and feed
   caching. Per-panel axes, derived signals, named sets, and a serialized legend
@@ -48,6 +53,13 @@ Prioritize measured, user-visible work in this order:
 1. Keep the adaptive tile path within its interaction and memory budgets as
    source and series counts grow; use the benchmark suite before changing
    reduction or GPU policy.
+   Repeated signal-X extent scans and immediate per-axis GPU draws are removed;
+   standard strokes use four vertices per segment with unchanged pixels and
+   retained rows. [Rendering performance](rendering-performance.md) records
+   the measurements. Next, measure live time/explicit-X/C at equal retained
+   row counts, including CPU picking, group-query latency, options publication,
+   uploads and GPU completion. A bounded picking index, stable-resource style
+   updates, and batched uniforms/draws need evidence before implementation.
 2. Improve ingest and snapshot boundary coverage (large/corrupt inputs,
    cache reuse, session round trips, no-network and size-budget checks).
 3. Keep the reusable panel shell, SignalScope-owned Line2D render model,

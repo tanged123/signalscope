@@ -74,6 +74,7 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
     const failureListeners = new Set<(failure: GpuFailure) => void>();
     let frame: number | null = null;
     let lost = false;
+    let deviceFailure: GpuFailure | null = null;
     let disposed = false;
     const page = typeof window === "undefined" ? null : window;
 
@@ -101,17 +102,18 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
     page?.addEventListener("pagehide", dispose);
 
     void deviceEvents.lost.then((info) => {
-      if (info.reason === "destroyed" || lost) return;
+      if (lost) return;
       lost = true;
       hosts.clear();
       if (frame !== null) {
         cancelAnimationFrame(frame);
         frame = null;
       }
-      notifyFailure({
+      deviceFailure = {
         kind: "device-lost",
         message: info.message || "WebGPU device lost",
-      });
+      };
+      notifyFailure(deviceFailure);
     });
 
     deviceEvents.addEventListener("uncapturederror", (event) => {
@@ -162,6 +164,12 @@ export async function acquireGpuContext(): Promise<GpuContext | null> {
       },
       onFailure(callback) {
         failureListeners.add(callback);
+        const failure = deviceFailure;
+        if (failure !== null) {
+          queueMicrotask(() => {
+            if (failureListeners.has(callback)) callback(failure);
+          });
+        }
         return () => {
           failureListeners.delete(callback);
         };

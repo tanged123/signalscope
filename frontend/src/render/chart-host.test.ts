@@ -8,6 +8,7 @@ import type { GpuContext } from "./gpu-context";
 import { line2DFromTimeTiles } from "./time-adapter";
 
 const state = vi.hoisted(() => ({
+  drivers: [] as Array<{ needsRender(): boolean; renderFrame(): void }>,
   charts: [] as Array<{
     options: Record<string, unknown>;
     setOption: ReturnType<typeof vi.fn>;
@@ -27,9 +28,11 @@ vi.mock("@chartgpu/chartgpu", () => ({
         canvas.width = 320;
         canvas.height = 180;
         container.appendChild(canvas);
+        let dirty = false;
         const chart = {
           options,
           setOption: vi.fn((next: Record<string, unknown>) => {
+            dirty = true;
             chart.options = next;
           }),
           setViewRange: vi.fn(
@@ -37,6 +40,7 @@ vi.mock("@chartgpu/chartgpu", () => ({
               x: { min: number; max: number };
               y: { min: number; max: number };
             }) => {
+              dirty = true;
               chart.options = {
                 ...chart.options,
                 xAxis: { min: range.x.min, max: range.x.max },
@@ -44,10 +48,13 @@ vi.mock("@chartgpu/chartgpu", () => ({
               };
             },
           ),
-          renderFrame: vi.fn(() => true),
+          renderFrame: vi.fn(() => {
+            dirty = false;
+            return true;
+          }),
           resize: vi.fn(),
           dispose: vi.fn(),
-          needsRender: vi.fn(() => false),
+          needsRender: vi.fn(() => dirty),
         };
         state.charts.push(chart);
         return Promise.resolve(chart);
@@ -144,7 +151,12 @@ async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
     adapter: {},
     device: {},
     pipelineCache: {},
-    register: vi.fn(() => vi.fn()),
+    register: vi.fn(
+      (driver: { needsRender(): boolean; renderFrame(): void }) => {
+        state.drivers.push(driver);
+        return vi.fn();
+      },
+    ),
     reportFailure,
   } as unknown as GpuContext;
   return ChartHost.create(container, gpu);
@@ -287,19 +299,20 @@ describe("ChartHost", () => {
     const host = await hostFixture();
     const data = response(["signal-1", "signal-2"]);
     const styles = [stroke(0), stroke(1)];
-    const opacityOf = (index: number) =>
+    const opacityOf = (name: string) =>
       (
         (state.charts.at(-1)?.options ?? {}).series as Array<{
+          name: string;
           lineStyle: { opacity: number };
         }>
-      )[index]?.lineStyle.opacity;
+      ).find((series) => series.name === name)?.lineStyle.opacity;
 
     host.render(request(data, styles, [0]));
-    expect(opacityOf(0)).toBeCloseTo(1);
-    expect(opacityOf(1)).toBeCloseTo(0.25);
+    expect(opacityOf("signal_0")).toBeCloseTo(1);
+    expect(opacityOf("signal_1")).toBeCloseTo(0.25);
 
     host.render(request(data, styles, []));
-    expect(opacityOf(1)).toBeCloseTo(1);
+    expect(opacityOf("signal_1")).toBeCloseTo(1);
   });
 
   it("maps hue to the same palette slot as the plot renderer", async () => {
@@ -425,13 +438,14 @@ describe("ChartHost", () => {
     expect(series.at(-1)?.lineStyle.opacity).toBe(1);
   });
 
-  it("updates ranges without rebuilding series and refreshes the text layer", async () => {
+  it("coalesces viewport changes through the shared frame driver while updating layout immediately", async () => {
     const host = await hostFixture();
     host.render(request());
     const chart = state.charts.at(-1);
     const series = chart?.options.series;
     chart?.setOption.mockClear();
 
+    host.setRangesOnly({ min: 10.5, max: 12.5 }, [0, 4]);
     host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
 
     expect(chart?.setOption).not.toHaveBeenCalled();
@@ -440,12 +454,18 @@ describe("ChartHost", () => {
       y: { min: -1, max: 5 },
     });
     expect(chart?.options.series).toBe(series);
-    expect(chart?.renderFrame).toHaveBeenCalled();
+    expect(chart?.renderFrame).not.toHaveBeenCalled();
     expect(host.layout()).toEqual({
       plot: { x: 60, y: 8, width: 328, height: 258 },
       xRange: { min: 11, max: 12 },
       yRange: { min: -1, max: 5 },
     });
+    const driver = state.drivers.at(-1);
+    if (driver === undefined) throw new Error("missing frame driver");
+    expect(driver.needsRender()).toBe(true);
+    driver.renderFrame();
+    expect(chart?.renderFrame).toHaveBeenCalledOnce();
+    expect(driver.needsRender()).toBe(false);
   });
 
   it("reports a pending frame that ChartGPU cannot render", async () => {
@@ -455,6 +475,7 @@ describe("ChartHost", () => {
     state.charts.at(-1)?.renderFrame.mockReturnValueOnce(false);
 
     host.setRangesOnly({ min: 11, max: 12 }, [-1, 5]);
+    state.drivers.at(-1)?.renderFrame();
 
     expect(reportFailure).toHaveBeenCalledWith({
       kind: "render-failed",
@@ -545,4 +566,95 @@ describe("ChartHost", () => {
 
     expect(chart?.dispose).toHaveBeenCalledOnce();
   });
+});
+
+it("keeps continuous color attributes across viewport updates and restores categorical colors", async () => {
+  const getContext = vi
+    .spyOn(HTMLCanvasElement.prototype, "getContext")
+    .mockReturnValue(null);
+  const host = await hostFixture();
+  try {
+    const base = request();
+    const pointColors = new Float32Array(
+      base.series[0]?.data.length === undefined
+        ? 0
+        : base.series[0].data.length * 2,
+    );
+    const colored = {
+      ...base,
+      colorScale: { label: "temperature (K)", range: [10, 20] as const },
+      series: base.series.map((series) => ({ ...series, pointColors })),
+    };
+    host.render(colored);
+    const chart = state.charts.at(-1);
+    expect(chart?.options.grid).toEqual(CHART_GRID);
+    expect(
+      (chart?.options.series as { pointColors: Float32Array }[])[0]
+        ?.pointColors,
+    ).toBe(pointColors);
+    const calls = chart?.setOption.mock.calls.length;
+    host.setColorbarTarget(document.createElement("button"));
+    host.setColorbarTarget(null);
+    expect(chart?.setOption.mock.calls.length).toBe(calls);
+    host.render({ ...colored, xRange: { min: 10.5, max: 11.5 } });
+    expect(chart?.setOption.mock.calls.length).toBe(calls);
+    expect(chart?.setViewRange).toHaveBeenCalled();
+    host.render(base);
+    expect(chart?.options.grid).toEqual(CHART_GRID);
+    expect(
+      (
+        chart?.options.series as { pointColors?: Float32Array; color: string }[]
+      )[0]?.pointColors,
+    ).toBeUndefined();
+    expect((chart?.options.series as { color: string }[])[0]?.color).toBe(
+      palette.series[0],
+    );
+  } finally {
+    host.dispose();
+    getContext.mockRestore();
+  }
+});
+
+it("dims dense continuous-color backgrounds and draws focused and hovered traces above them", async () => {
+  const host = await hostFixture();
+  const base = request(
+    response(Array.from({ length: 1_000 }, (_, i) => String(i))),
+    Array.from({ length: 1_000 }, (_, i) =>
+      i === 0 ? stroke(0) : { ...stroke(null), alpha: 0.5 },
+    ),
+  );
+  const colored = {
+    ...base,
+    series: base.series.map((line) => ({
+      ...line,
+      pointColors: new Float32Array(line.data.length * 2),
+    })),
+  };
+  type Published = {
+    name: string;
+    data: Float32Array;
+    pointColors: Float32Array;
+    lineStyle: { opacity: number };
+  };
+  try {
+    host.render(colored);
+    const series = state.charts.at(-1)?.options.series as Published[];
+    expect(series.at(-1)?.name).toBe("signal_0");
+    expect(series.at(-1)?.lineStyle.opacity).toBe(1);
+    expect(series[0]?.lineStyle.opacity).toBeCloseTo(0.5 * Math.sqrt(16 / 999));
+
+    host.render({ ...colored, emphasisIndices: [1] });
+    const hovered = (state.charts.at(-1)?.options.series as Published[]).at(-1);
+    expect(hovered?.name).toBe("signal_1");
+    expect(hovered?.lineStyle.opacity).toBeCloseTo(0.9);
+    expect(hovered?.data).toBe(colored.series[1]?.data);
+    expect(hovered?.pointColors).toBe(colored.series[1]?.pointColors);
+
+    host.render(colored);
+    const restored = state.charts.at(-1)?.options.series as Published[];
+    expect(restored.at(-1)?.name).toBe("signal_0");
+    expect(restored[0]?.lineStyle.opacity).toBe(series[0]?.lineStyle.opacity);
+  } finally {
+    host.dispose();
+  }
 });

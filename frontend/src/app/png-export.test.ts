@@ -24,6 +24,7 @@ function panel(id: string, title: string): PanelState {
     legend_dock: null,
     legend_hint_dismissed: false,
     x_axis: { kind: "time" },
+    color_axis: null,
     y_range: null,
     x_range: null,
     x_label: null,

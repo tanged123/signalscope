@@ -1,3 +1,5 @@
+import { resolveColorScale } from "./color-scale";
+import type { ColorAxis } from "../generated/session";
 import type { AxisStyle } from "../generated/session";
 import { line2DFromSignalX } from "../render/signal-x-adapter";
 import { line2DFromTimeTiles } from "../render/time-adapter";
@@ -23,6 +25,7 @@ interface FamilyContext {
   axisStyle: AxisStyle;
   xLabel: string | null;
   yLabel: string | null;
+  colorAxis?: ColorAxis | null;
 }
 
 interface PreparedLine2DFamily {
@@ -70,8 +73,7 @@ function timeFamily(
               xRange: ranges.x,
               yRange: [ranges.y.min, ranges.y.max],
               xLabel: context.xLabel ?? "time (s)",
-              yLabel:
-                context.yLabel ?? valueLabel(shown.map((item) => item.unit)),
+              yLabel: context.yLabel ?? signalAxisLabel(shown, "Y signals"),
               styles,
               axisStyle: context.axisStyle,
             },
@@ -95,6 +97,7 @@ function signalXFamily(
       return {
         plotted: shown,
         plot: prepareLine2DPlot({
+          linkedTime: data.response.timeX,
           anchor: data.response.anchor,
           x: data.response.x.values,
           series: shown.map((column) => ({
@@ -103,6 +106,8 @@ function signalXFamily(
             unit: column.unit,
             colorIndex: colorIndex(byPath.get(column.signalPath)?.hue),
             values: column.values,
+            anchor: column.coordinates?.anchor ?? data.response.anchor,
+            x: column.coordinates?.x.values ?? data.response.x.values,
           })),
           window: context.window,
         }),
@@ -111,13 +116,31 @@ function signalXFamily(
             { ...data.response, ys: shown },
             {
               window: context.window,
+              colorScale:
+                context.colorAxis == null
+                  ? undefined
+                  : resolveColorScale(
+                      { ...data.response, ys: shown },
+                      context.colorAxis,
+                      context.window,
+                      signalAxisLabel(
+                        shown.flatMap((column) =>
+                          column.color === undefined ? [] : [column.color],
+                        ),
+                        "C signals",
+                      ),
+                    ),
               xRange: ranges.x,
               yRange: [ranges.y.min, ranges.y.max],
               xLabel:
                 context.xLabel ??
-                axisLabel(data.response.x.signalPath, data.response.x.unit),
-              yLabel:
-                context.yLabel ?? valueLabel(shown.map((item) => item.unit)),
+                signalAxisLabel(
+                  shown.map(
+                    (column) => column.coordinates?.x ?? data.response.x,
+                  ),
+                  "X signals",
+                ),
+              yLabel: context.yLabel ?? signalAxisLabel(shown, "Y signals"),
               styles,
               axisStyle: context.axisStyle,
             },
@@ -131,16 +154,23 @@ function colorIndex(hue: number | null | undefined): number {
   return hue === null || hue === undefined ? 0 : hueIndex(hue);
 }
 
-function valueLabel(units: readonly (string | null)[]): string {
-  const distinct = new Set(
-    units.filter((unit): unit is string => unit !== null),
-  );
-  const [only] = distinct;
-  return distinct.size === 1 && only !== undefined
-    ? `value (${only})`
-    : "value";
-}
-
-function axisLabel(path: string, unit: string | null): string {
-  return unit === null ? path : `${path} (${unit})`;
+function signalAxisLabel(
+  columns: readonly { signalPath: string; unit: string | null }[],
+  fallback: string,
+): string {
+  const paths = [...new Set(columns.map((column) => column.signalPath))];
+  const channels = [
+    ...new Set(paths.map((path) => path.slice(path.indexOf("/") + 1))),
+  ];
+  const name =
+    paths.length === 1
+      ? paths[0]
+      : channels.length === 1
+        ? channels[0]
+        : fallback;
+  const units = [...new Set(columns.map((column) => column.unit))];
+  const unit = units.length === 1 ? units[0] : null;
+  return unit === null || unit === undefined
+    ? (name ?? fallback)
+    : `${name ?? fallback} (${unit})`;
 }

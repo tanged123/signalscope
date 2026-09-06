@@ -1,8 +1,36 @@
 # SignalScope
 
-Local workbench for exploring large engineering time-series logs. SignalScope
+Local workbench for exploring large engineering datasets as XY charts. SignalScope
 streams CSV, MCAP, HDF5/MAT v7.3, and Parquet data through a Rust data plane and
 renders it in a WebGPU-capable Chromium browser.
+
+Use each panel's **x:** control to search every loaded signal, or select a
+channel bundle to pair each run's Y with that run's X. **y: + add** adds a
+signal, channel bundle, or named set. Dragging a signal or bundle to the bottom
+X strip also assigns X. One X signal can serve multiple Y signals; bundle
+members match by source, with missing or ambiguous matches reported explicitly.
+Pairs must share an exact sample timebase; no interpolation is performed.
+The same signal can occupy both X and Y, producing the identity line `y = x`.
+
+Use **c:** to color each line along its length by another signal, a source-matched
+bundle, or time. The labeled horizontal scale lives in the legend and shares
+one range across the panel. When the legend is collapsed it remains visible
+as a compact plot inset; neither placement adds a plot gutter.
+The shared **limits** dropdown edits X, Y, and C ranges and labels together,
+with automatic or fixed limits per axis. For time X, **Fit data** fits the
+source-time extent and fixed limits follow the panel's linked-time setting.
+C members must share units and the paired sample timebase. Choose **none** to
+restore the saved categorical line colors. Color bindings and limits persist
+in sessions, PNG capture, and offline HTML snapshots.
+The legend's **Dim** control also applies with C enabled: background traces
+fade as the ensemble grows, focused traces draw above them, and hover brings
+the inspected trace to the front without changing its C values.
+
+CSV time columns stay available as ordinary signals. A recognized finite time
+header supplies the linked-time anchor; otherwise imports use row index instead
+of guessing from increasing measurements. Recipe time datasets and MCAP
+log timestamps (in seconds) also appear in the signal catalog. Axis bindings
+persist in sessions and captured bundle curves work in offline HTML exports.
 
 ## Interactive demo
 
@@ -50,5 +78,7 @@ examples/   sample data and workspaces
 
 See [AGENTS.md](AGENTS.md) for contributor commands and
 [docs/adr](docs/adr/README.md) for architecture decisions.
+See [rendering performance](docs/rendering-performance.md) for repeatable
+CPU/GPU measurements and the remaining large-ensemble bottlenecks.
 
 MIT licensed.

@@ -25,6 +25,7 @@ declare module "@chartgpu/chartgpu" {
   }
 
   export interface LineSeriesConfig {
+    pointColors?: Float32Array | undefined;
     type: "line";
     name?: string;
     data: XYArraysData | ArrayBufferView;

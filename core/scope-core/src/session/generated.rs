@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 29;
+pub const SESSION_SCHEMA_VERSION: u32 = 31;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -75,12 +75,24 @@ pub struct SeriesRef {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum XAxisSource {
+pub enum SampleAxisSource {
     Time,
     Signal {
         #[serde(rename = "ref")]
         r#ref: SeriesRef,
     },
+    Bundle {
+        refs: Vec<SeriesRef>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ColorAxis {
+    pub source: SampleAxisSource,
+    #[serde(default)]
+    pub range: Option<[f64; 2]>,
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -251,7 +263,9 @@ pub struct PanelState {
     #[serde(default)]
     pub legend_dock: Option<LegendDock>,
     pub legend_hint_dismissed: bool,
-    pub x_axis: XAxisSource,
+    pub x_axis: SampleAxisSource,
+    #[serde(default)]
+    pub color_axis: Option<ColorAxis>,
     #[serde(default)]
     pub y_range: Option<[f64; 2]>,
     #[serde(default)]

@@ -9,6 +9,9 @@ current capability/cache interfaces are reuse candidates, not mandatory
 contracts for every future family. The historical implementation line count
 below is context, not a required cost or scope estimate.
 
+Bundle X bindings and independent axis selection are added by
+[ADR 0056](0056-xy-axis-and-bundle-bindings.md).
+
 ## Context
 
 ADR 0043 deliberately removed the mode stack and left SignalScope with one

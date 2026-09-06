@@ -78,10 +78,27 @@ where
 }
 
 fn run(args: &Args) -> Result<(), String> {
+    let session = match &args.workspace {
+        Some(path) => session::load_from_path(path)
+            .map_err(|error| format!("workspace {}: {error}", path.display()))?,
+        None => session::Session::default(),
+    };
     let mut store = SignalStore::new();
     let mut pyramids = BTreeMap::new();
     let registry = ProviderRegistry::builtin();
     for path in &args.data {
+        let canonical = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+        let saved = session.sources.iter().find(|source| {
+            std::fs::canonicalize(&source.path).is_ok_and(|saved| saved == canonical)
+        });
+        let key = saved.map_or_else(
+            || Ok(uuid::Uuid::new_v4()),
+            |source| uuid::Uuid::parse_str(&source.key).map_err(|error| error.to_string()),
+        )?;
+        let prefix = saved.map_or_else(
+            || naming::default_prefix(path),
+            |source| source.prefix.clone(),
+        );
         let cancel = CancelToken::default();
         let mut progress = |_| {};
         let mut context = DecodeContext {
@@ -92,8 +109,8 @@ fn run(args: &Args) -> Result<(), String> {
             &registry,
             path,
             &mut store,
-            SourceKey(uuid::Uuid::new_v4()),
-            &naming::default_prefix(path),
+            SourceKey(key),
+            &prefix,
             &mut context,
         )
         .map_err(|error| format!("ingest {}: {error}", path.display()))?;
@@ -102,11 +119,6 @@ fn run(args: &Args) -> Result<(), String> {
             pyramids.insert(id, Pyramid::from_signal(signal));
         }
     }
-    let session = match &args.workspace {
-        Some(path) => session::load_from_path(path)
-            .map_err(|error| format!("workspace {}: {error}", path.display()))?,
-        None => session::Session::default(),
-    };
     let template = std::fs::read_to_string(&args.template).map_err(|error| {
         format!(
             "template {}: {error}; run ./scripts/build.sh web first",

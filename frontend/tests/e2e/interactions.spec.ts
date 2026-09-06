@@ -85,7 +85,9 @@ test.describe("desktop plot interactions", () => {
     await gotoApp(page);
     const panel = page.locator(".panel").first();
     await expect(panel).toBeVisible();
-    await expect(panel.locator(".chart-host canvas").first()).toBeVisible({
+    await expect(
+      panel.locator(".chart-host canvas:not(.colorbar-canvas)").first(),
+    ).toBeVisible({
       timeout: 20_000,
     });
     await expect(page.locator(".render-ms").first()).not.toHaveText("— ms");

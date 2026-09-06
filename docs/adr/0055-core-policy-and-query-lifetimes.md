@@ -31,6 +31,13 @@ prevented publication but left fetches and scheduled callbacks running.
   Clearing cancels timers/frames; disposal prevents new work. Page teardown
   releases presentation hosts before the device, except for persisted pages.
   Already-started Rust blocking tasks are not cancelled by aborting fetch.
+- `render/gpu-context.ts` owns terminal device-loss state as well as the shared
+  device and frame loop. Loss before application subscription is retained and
+  delivered in a microtask after subscription setup; unsubscribe or disposal
+  cancels pending delivery. Only owner-initiated disposal suppresses recovery.
+  The existing failure callback and shell recovery path remain the consumers;
+  there is no protocol or session change. Unit tests cover early loss and
+  cancellation, and a browser test injects loss before application startup.
 - Command metadata and series-inspector construction have independent owners
   with values/callbacks, not an `AppShell` or `PanelView` interface. Panel menus
   own document listeners, keyboard navigation, dismissal and focus return.

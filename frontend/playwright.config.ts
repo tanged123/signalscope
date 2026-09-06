@@ -12,6 +12,7 @@ export default defineConfig({
   // SwiftShader can briefly reject a context while the preceding test's GPU
   // device is being released. Retry the isolated test with a fresh context.
   retries: process.env.CI ? 2 : 0,
+  maxFailures: process.env.CI ? 1 : 0,
   metadata: {
     coverage,
   },
@@ -31,12 +32,15 @@ export default defineConfig({
     headless: true,
     trace: "retain-on-failure",
     launchOptions: {
+      // Enable headless GPU presentation and share SwANGLE’s Vulkan context
+      // with the compositor; a separate GL/software path loses WebGPU images.
       args: [
         "--enable-unsafe-webgpu",
-        "--enable-features=Vulkan",
+        "--enable-gpu",
+        "--enable-features=Vulkan,VulkanFromANGLE",
         "--use-angle=swiftshader",
+        "--disable-vulkan-surface",
         "--use-webgpu-adapter=swiftshader",
-        "--use-gpu-in-tests",
       ],
       ...(executablePath === undefined ? {} : { executablePath }),
     },

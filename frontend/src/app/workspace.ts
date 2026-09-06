@@ -20,10 +20,12 @@ import type {
   NamedSet,
   SourceRecord,
   WorkspaceTab,
-  XAxisSource,
+  SampleAxisSource,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
+
+import { setXAxis, setColorAxis, removeAxisRef } from "./line-bindings";
 
 const MIN_FRACTION = 0.1;
 
@@ -480,19 +482,7 @@ export class WorkspaceModel {
     panel.focus = panel.focus.filter(
       (entry) => entry.ref === null || !sameRef(entry.ref, ref),
     );
-    if (
-      deletingSignal &&
-      panel.x_axis.kind === "signal" &&
-      sameRef(panel.x_axis.ref, ref)
-    ) {
-      panel.x_axis = { kind: "time" };
-      panel.x_range = null;
-      panel.x_label = null;
-      panel.annotations = panel.annotations.map((annotation) => ({
-        ...annotation,
-        pinned_x: null,
-      }));
-    }
+    if (deletingSignal) removeAxisRef(panel, ref);
     if (path !== undefined) {
       panel.annotations = panel.annotations.filter(
         (annotation) => annotation.series_path !== path,
@@ -501,30 +491,21 @@ export class WorkspaceModel {
     this.touch(true);
   }
 
-  setPanelXAxis(panelId: string, xAxis: XAxisSource): void {
+  setPanelXAxis(panelId: string, xAxis: SampleAxisSource): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    let next: XAxisSource;
-    if (xAxis.kind === "time") {
-      next = { kind: "time" };
-    } else {
-      next = { kind: "signal", ref: { ...xAxis.ref } };
-    }
-    if (
-      next.kind === panel.x_axis.kind &&
-      (next.kind === "time" ||
-        (panel.x_axis.kind === "signal" && sameRef(next.ref, panel.x_axis.ref)))
-    ) {
-      return;
-    }
-    panel.x_axis = next;
-    panel.x_range = null;
-    panel.x_label = null;
-    panel.annotations = panel.annotations.map((annotation) => ({
-      ...annotation,
-      pinned_x: null,
-    }));
-    this.touch(true);
+    if (setXAxis(panel, xAxis)) this.touch(true);
+  }
+
+  setPanelColorAxis(
+    panelId: string,
+    axis: PanelState["color_axis"],
+  ): ReturnType<typeof setColorAxis> {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return false;
+    const change = setColorAxis(panel, axis);
+    if (change !== false) this.touch(change === "binding");
+    return change;
   }
 
   setSeriesOverride(
@@ -1187,6 +1168,7 @@ export class WorkspaceModel {
       legend_dock: null,
       legend_hint_dismissed: false,
       x_axis: { kind: "time" },
+      color_axis: null,
       y_range: null,
       x_range: null,
       x_label: null,

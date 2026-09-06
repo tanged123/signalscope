@@ -160,6 +160,7 @@ describe("panel X axis", () => {
 
     expect(model.panel(panel.id)).toMatchObject({
       x_axis: { kind: "time" },
+      color_axis: null,
       x_range: null,
       x_label: null,
     });
@@ -1087,6 +1088,7 @@ describe("WorkspaceModel", () => {
       legend_dock: null,
       legend_hint_dismissed: false,
       x_axis: { kind: "time" },
+      color_axis: null,
       y_range: null,
       x_range: null,
       x_label: null,
@@ -1108,4 +1110,49 @@ describe("WorkspaceModel", () => {
     const fresh = model.addPanelRow();
     expect(fresh.id).not.toBe("panel-1");
   });
+});
+
+it("prunes deleted X and C bundle members and clears exhausted axes", () => {
+  const model = new WorkspaceModel();
+  const panel = model.addPanelRow();
+  const first = refForPath("derived/first");
+  const second = refForPath("derived/second");
+  model.setPanelXAxis(panel.id, { kind: "bundle", refs: [first, second] });
+  model.setPanelColorAxis(panel.id, {
+    source: { kind: "bundle", refs: [first, second] },
+    range: [0, 10],
+    label: "C",
+  });
+  model.setPanelXRange(panel.id, [1, 2]);
+  model.removeSeriesRef(panel.id, first);
+  expect(panel.x_axis).toMatchObject({ refs: [first, second] });
+  model.removeSignalRef(first);
+  expect(panel.x_axis).toEqual({ kind: "bundle", refs: [second] });
+  expect(panel.x_range).toBeNull();
+  expect(panel.color_axis).toEqual({
+    source: { kind: "bundle", refs: [second] },
+    range: [0, 10],
+    label: "C",
+  });
+  model.removeSignalRef(second);
+  expect(panel.x_axis).toEqual({ kind: "time" });
+  expect(panel.color_axis).toBeNull();
+});
+
+it("clears a deleted scalar C binding while preserving unrelated X coordinates", () => {
+  const model = new WorkspaceModel();
+  const panel = model.addPanelRow();
+  const x = refForPath("run/x");
+  const c = refForPath("derived/c");
+  model.setPanelXAxis(panel.id, { kind: "signal", ref: x });
+  model.setPanelXRange(panel.id, [1, 2]);
+  model.setPanelColorAxis(panel.id, {
+    source: { kind: "signal", ref: c },
+    range: null,
+    label: null,
+  });
+  model.removeSignalRef(c);
+  expect(panel.color_axis).toBeNull();
+  expect(panel.x_axis).toEqual({ kind: "signal", ref: x });
+  expect(panel.x_range).toEqual([1, 2]);
 });

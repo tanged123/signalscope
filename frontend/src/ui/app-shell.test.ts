@@ -49,6 +49,35 @@ describe("presentation status", () => {
   });
 });
 
+it("schedules autosave for explicit-X navigation and fit", () => {
+  const workspace = new WorkspaceModel();
+  const panel = workspace.addPanelRow();
+  workspace.setPanelXAxis(panel.id, {
+    kind: "signal",
+    ref: { source_key: "run", channel: "x" },
+  });
+  const shell = Object.assign(Object.create(AppShell.prototype), {
+    workspace,
+    workspaceView: { resetYAxis: vi.fn() },
+    markHistoryDirty: vi.fn(),
+    commitHistory: vi.fn(),
+    scheduleAutosave: vi.fn(),
+    scheduleRender: vi.fn(),
+    renderTiles: vi.fn(),
+  }) as {
+    applyXRange(id: string, range: [number, number]): void;
+    fitPanelView(id: string): void;
+    scheduleAutosave: ReturnType<typeof vi.fn>;
+  };
+  shell.applyXRange(panel.id, [10, 20]);
+  expect(panel.x_range).toEqual([10, 20]);
+  expect(shell.scheduleAutosave).toHaveBeenCalledOnce();
+  shell.scheduleAutosave.mockClear();
+  shell.fitPanelView(panel.id);
+  expect(panel.x_range).toBeNull();
+  expect(shell.scheduleAutosave).toHaveBeenCalledOnce();
+});
+
 describe("GPU failure handling", () => {
   it("stops presentation work and releases hosts before the device", () => {
     const disposePresentation = vi.fn();
@@ -292,7 +321,7 @@ it("keeps a signal-X cursor local instead of broadcasting linked time", () => {
   expect(renderCursorTime).toHaveBeenCalledWith(cursor.heading);
 });
 
-it("routes the X signal separately from the Y signal ids", () => {
+it("routes X groups while allowing the X signal as a plotted Y", () => {
   const xRef = { source_key: "run-01", channel: "position" };
   const yRef = { source_key: "run-01", channel: "speed" };
   const summaries = [
@@ -329,8 +358,14 @@ it("routes the X signal separately from the Y signal ids", () => {
   ]);
 
   expect(shell.panelSignalIds(panel)).toEqual({
-    ids: [ySummary.signal_id],
+    ids: [xSummary.signal_id, ySummary.signal_id],
     xId: xSummary.signal_id,
+    groups: [
+      {
+        xId: xSummary.signal_id,
+        ids: [xSummary.signal_id, ySummary.signal_id],
+      },
+    ],
     missing: [],
   });
 });

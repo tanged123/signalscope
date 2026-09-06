@@ -1,3 +1,4 @@
+import { Colorbar } from "./colorbar";
 import {
   ChartGPU,
   type ChartGPUInstance,
@@ -27,6 +28,7 @@ interface SeriesElement {
   id: string;
   name: string;
   data: Float32Array;
+  pointColors: Float32Array | undefined;
   style: SeriesStroke;
   emphasis: boolean;
   /** Opacity depends on whether any series is emphasized, not only this one. */
@@ -38,6 +40,8 @@ interface SeriesElement {
 
 export class ChartHost {
   private readonly chart: ChartGPUInstance;
+  private readonly colorbar: Colorbar;
+  private lastRequest: ChartRenderRequest | null = null;
   private readonly unregister: () => void;
   private xOrigin = 0;
   private seriesIds: string[] = [];
@@ -61,6 +65,7 @@ export class ChartHost {
     private readonly gpu: GpuContext,
   ) {
     this.chart = chart;
+    this.colorbar = new Colorbar(container);
     this.unregister = gpu.register({
       needsRender: () => this.chart.needsRender(),
       renderFrame: () => this.renderPendingFrame(),
@@ -94,6 +99,8 @@ export class ChartHost {
     const started = performance.now();
     const ids = request.series.map((series) => series.id);
     let rebuilt = false;
+    this.lastRequest = request;
+    this.drawColorbar();
     if (!sameStrings(ids, this.seriesIds) || request.xOrigin !== this.xOrigin) {
       this.seriesIds = ids;
       this.xOrigin = request.xOrigin;
@@ -102,9 +109,7 @@ export class ChartHost {
     }
     const emphasis = new Set(request.emphasisIndices);
     const emphasisActive = request.emphasisIndices.length > 0;
-    const ghostCount = request.series.filter(
-      (series) => series.style.hue === null,
-    ).length;
+    const ghostCount = request.series.filter(isGhost).length;
     const ghostOpacityScale = Math.min(
       1,
       Math.sqrt(FULL_OPACITY_GHOST_COUNT / Math.max(1, ghostCount)),
@@ -118,6 +123,7 @@ export class ChartHost {
         previous.id === line.id &&
         previous.name === line.name &&
         previous.data === line.data &&
+        previous.pointColors === line.pointColors &&
         sameStyle(previous.style, style) &&
         previous.emphasis === isEmphasized &&
         previous.emphasisActive === emphasisActive &&
@@ -128,17 +134,20 @@ export class ChartHost {
       }
       rebuilt = true;
       const hue = style.hue;
-      const ghost = hue === null;
-      const color = ghost
-        ? request.palette.fg4
-        : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
+      const ghost = isGhost(line);
+      const color =
+        line.pointColors !== undefined || hue === null
+          ? request.palette.fg4
+          : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
       const baseOpacity = ghost
         ? Math.max(MIN_DENSE_GHOST_OPACITY, style.alpha * ghostOpacityScale)
         : style.alpha;
       const opacity =
         emphasisActive && !isEmphasized && !ghost
           ? 0.25
-          : Math.min(1, baseOpacity + (isEmphasized ? 0.4 : 0));
+          : isEmphasized
+            ? Math.min(1, style.alpha + 0.4)
+            : baseOpacity;
       const width =
         (style.width + (isEmphasized ? 0.4 : 0)) *
         request.palette.lineWidthScale;
@@ -146,6 +155,7 @@ export class ChartHost {
         type: "line",
         name: line.name,
         data: line.data,
+        pointColors: line.pointColors,
         sampling: "none",
         color,
         lineStyle: {
@@ -159,6 +169,7 @@ export class ChartHost {
         id: line.id,
         name: line.name,
         data: line.data,
+        pointColors: line.pointColors,
         style,
         emphasis: isEmphasized,
         emphasisActive,
@@ -186,9 +197,14 @@ export class ChartHost {
     const orderedSeries = series
       .map((element, index) => ({
         element,
-        ghost: request.series[index]?.style.hue === null,
+        ghost: isGhost(request.series[index]),
+        emphasized: emphasis.has(index),
       }))
-      .sort((left, right) => Number(right.ghost) - Number(left.ghost))
+      .sort(
+        (left, right) =>
+          Number(left.emphasized) - Number(right.emphasized) ||
+          Number(right.ghost) - Number(left.ghost),
+      )
       .map(({ element }) => element);
     const options = this.makeOptions(request, orderedSeries);
     this.options = options;
@@ -221,7 +237,6 @@ export class ChartHost {
       x: { min: xRange.min - xOrigin, max: xRange.max - xOrigin },
       y: { min: yRange[0], max: yRange[1] },
     });
-    this.renderPendingFrame();
     this.lastLayout = this.makeLayout(xRange, yRange);
   }
 
@@ -234,7 +249,9 @@ export class ChartHost {
     return new Promise((resolve) => {
       requestAnimationFrame(() => {
         this.renderPendingFrame();
-        const sources = Array.from(this.container.querySelectorAll("canvas"));
+        const sources = Array.from(
+          this.container.querySelectorAll("canvas"),
+        ).filter((canvas) => !canvas.hidden && canvas !== this.colorbar.canvas);
         const target = document.createElement("canvas");
         target.width = sources[0]?.width ?? 1;
         target.height = sources[0]?.height ?? 1;
@@ -242,6 +259,7 @@ export class ChartHost {
         if (context !== null) {
           for (const source of sources) context.drawImage(source, 0, 0);
         }
+        this.colorbar.capture(target, this.colorbarBottom());
         resolve(target);
       });
     });
@@ -249,6 +267,7 @@ export class ChartHost {
 
   resize(): void {
     this.chart.resize();
+    this.drawColorbar();
     if (this.lastLayout !== null) {
       this.lastLayout = this.makeLayout(this.lastLayout.xRange, [
         this.lastLayout.yRange.min,
@@ -259,6 +278,7 @@ export class ChartHost {
 
   dispose(): void {
     this.unregister();
+    this.colorbar.dispose();
     this.chart.dispose();
   }
 
@@ -312,7 +332,7 @@ export class ChartHost {
         request.axes.y.label,
         request.axes.style === "inline",
       ),
-      grid: request.axes.style === "inline" ? INLINE_CHART_GRID : CHART_GRID,
+      grid: this.grid(request.axes.style),
       series,
     };
   }
@@ -351,12 +371,37 @@ export class ChartHost {
     };
   }
 
+  private grid(style: "gutter" | "inline") {
+    return style === "inline" ? INLINE_CHART_GRID : CHART_GRID;
+  }
+
+  setColorbarTarget(target: HTMLElement | null): void {
+    this.colorbar.attach(target);
+    this.drawColorbar();
+  }
+
+  private drawColorbar(): void {
+    if (this.lastRequest === null) return;
+    this.colorbar.render(
+      this.lastRequest.colorScale,
+      this.lastRequest.palette,
+      this.colorbarBottom(),
+    );
+  }
+
+  private colorbarBottom(): number {
+    // Inline ticks and the X title occupy the bottom of the plot.
+    return (
+      this.grid(this.lastAxisStyle).bottom +
+      (this.lastAxisStyle === "inline" ? 40 : 0)
+    );
+  }
+
   private makeLayout(
     xRange: Range,
     yRange: readonly [number, number],
   ): PlotLayout {
-    const grid =
-      this.lastAxisStyle === "inline" ? INLINE_CHART_GRID : CHART_GRID;
+    const grid = this.grid(this.lastAxisStyle);
     return {
       plot: {
         x: grid.left,
@@ -390,4 +435,10 @@ function sameStyle(left: SeriesStroke, right: SeriesStroke): boolean {
     left.width === right.width &&
     left.alpha === right.alpha
   );
+}
+
+function isGhost(
+  line: Line2DRenderRequest["series"][number] | undefined,
+): boolean {
+  return line?.style.hue === null;
 }

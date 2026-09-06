@@ -1,0 +1,51 @@
+.legend-color-controls {
+  flex: none;
+  min-width: 0;
+}
+
+.legend-color-scale {
+  display: block;
+  width: 100%;
+  height: 54px;
+  padding: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  text-align: left;
+}
+
+.legend-color-scale:hover,
+.legend-color-scale:focus-visible {
+  background: var(--surface-3);
+}
+
+.plot-series-legend[data-state="rail"]:is(
+    [data-dock="top"],
+    [data-dock="bottom"]
+  )
+  .legend-color-controls {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+
+.plot-series-legend[data-state="rail"]:is(
+    [data-dock="top"],
+    [data-dock="bottom"]
+  )
+  .legend-color-scale {
+  width: min(280px, 50%);
+  flex: none;
+  border-right: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+.plot-series-legend[data-state="rail"]:is(
+    [data-dock="top"],
+    [data-dock="bottom"]
+  )
+  .legend-color-controls
+  .plot-legend-encoding {
+  flex: 1;
+  border-bottom: 0;
+}

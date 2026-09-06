@@ -63,7 +63,9 @@ describe("panel markup", () => {
     );
     const panel = new PanelView("panel", {} as PanelCallbacks);
     expect(panel.element.querySelectorAll(".mode-pill")).toHaveLength(0);
-    expect(panel.element.querySelector(".xy-drop-strip")).toBeNull();
+    expect(
+      panel.element.querySelector<HTMLElement>(".xy-drop-strip")?.hidden,
+    ).toBe(true);
     vi.unstubAllGlobals();
   });
 
@@ -159,6 +161,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     legend_dock: null,
     legend_hint_dismissed: false,
     x_axis: { kind: "time" },
+    color_axis: null,
     bindings: [],
     overrides: [],
     focus: [],
@@ -424,7 +427,7 @@ describe("panel series", () => {
       plotLegendPosition: { x: number; y: number } | null;
       plotLegendSize: { width: number; height: number } | null;
       plotLegendAnchor: null;
-      updateLegend(current: RenderPanelState): void;
+      updatePlotLegend(current: RenderPanelState): void;
     };
     view.callbacks = {
       catalog: () => catalog,
@@ -442,7 +445,7 @@ describe("panel series", () => {
     view.element = document.createElement("article");
     view.element.innerHTML =
       '<div class="plot-wrap"><div class="plot-series-legend"></div></div>';
-    view.updateLegend(state);
+    view.updatePlotLegend(state);
     expect(view.element.querySelector(".panel-legend-strip")).toBeNull();
     expect(
       view.element.querySelector(".plot-legend-roster-row")?.textContent,
@@ -635,6 +638,27 @@ describe("panel series", () => {
       size: [180, 180],
       anchor: "top_right",
       dock: null,
+    });
+
+    legend
+      .querySelector(".plot-legend-resize-left")
+      ?.dispatchEvent(
+        new MouseEvent("pointerdown", { clientX: 320, button: 0 }),
+      );
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 280 }));
+    expect(legend.style.width).toBe("220px");
+    view.updatePlotLegend({ ...state, legend_size: [180, 240] });
+    expect(legend.style.width).toBe("220px");
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 300 }));
+    view.updatePlotLegend(state);
+    expect(legend.style.width).toBe("200px");
+    document.dispatchEvent(new MouseEvent("pointerup", { clientX: 300 }));
+    expect(onLegendLayout).toHaveBeenLastCalledWith("panel", {
+      state: "rail",
+      position: null,
+      size: [200, 300],
+      anchor: null,
+      dock: "right",
     });
 
     state.legend_size = [0, 300];

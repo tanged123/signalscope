@@ -1,3 +1,5 @@
+import { colorAttributes } from "./color-attributes";
+import type { ColorScale } from "../app/color-scale";
 import type { Line2DResponse } from "../app/line-binary";
 import type { Line2DRenderInput } from "./line2d";
 import {
@@ -9,19 +11,21 @@ import {
 
 export interface SignalXLine2DInputOptions extends Line2DAdapterOptions {
   window: { t0: number; t1: number };
+  colorScale?: ColorScale | undefined;
 }
 
 export function line2DFromSignalX(
   response: Line2DResponse,
   options: SignalXLine2DInputOptions,
 ): Line2DRenderInput {
-  const xOrigin = signalXReference(response.x.values);
+  const xOrigin = signalXReference(response);
   return {
     xOrigin,
+    colorScale: options.colorScale,
     series: response.ys.map((column, index) => {
       const data = cachedSignalXFeed(
-        response.anchor,
-        response.x.values,
+        column.coordinates?.anchor ?? response.anchor,
+        column.coordinates?.x.values ?? response.x.values,
         column.values,
         xOrigin,
         options.window,
@@ -30,6 +34,10 @@ export function line2DFromSignalX(
         id: column.signalId,
         name: column.signalPath,
         data,
+        pointColors:
+          column.color !== undefined && options.colorScale !== undefined
+            ? colorAttributes(column.color.values, options.colorScale)
+            : undefined,
         style: strokeAt(options, index),
       };
     }),
@@ -43,11 +51,11 @@ export function prepareSignalXLine(
   response: Line2DResponse,
   window: { t0: number; t1: number },
 ): void {
-  const xOrigin = signalXReference(response.x.values);
+  const xOrigin = signalXReference(response);
   for (const column of response.ys) {
     cachedSignalXFeed(
-      response.anchor,
-      response.x.values,
+      column.coordinates?.anchor ?? response.anchor,
+      column.coordinates?.x.values ?? response.x.values,
       column.values,
       xOrigin,
       window,
@@ -55,9 +63,11 @@ export function prepareSignalXLine(
   }
 }
 
-function signalXReference(values: Float64Array): number {
-  for (const value of values) {
-    if (Number.isFinite(value)) return value;
+function signalXReference(response: Line2DResponse): number {
+  for (const column of response.ys) {
+    for (const value of column.coordinates?.x.values ?? response.x.values) {
+      if (Number.isFinite(value)) return value;
+    }
   }
   return 0;
 }
