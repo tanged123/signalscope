@@ -10,6 +10,7 @@ import {
   PROTOCOL_VERSION,
   type BatchJob,
   type BatchStatus,
+  type Line2DRequest,
   type SourceSummary,
 } from "../../src/generated/protocol";
 import type { Envelope } from "../../src/app/envelope";
@@ -145,15 +146,52 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     let search = panel.locator(".axis-picker input");
     await search.fill("y · bundle");
     await search.press("Enter");
-    await panel.locator(".panel-x-axis").click();
-    search = panel.locator(".axis-picker input");
-    await expect(search).toBeFocused();
-    await search.fill("x · bundle");
     const replies: number[] = [];
     page.on("response", (response) => {
       if (response.url().includes("query_line2d"))
         replies.push(response.status());
     });
+    const bindings = panel.locator('[data-panel-slot="bindings"]');
+    const yBindings = await bindings.textContent();
+    for (const [axis, path, identity] of [
+      ["c", "one/temperature", true],
+      ["x", "one/x", false],
+      ["x", "one/y", true],
+    ] as const) {
+      const queried = page.waitForResponse((response) => {
+        if (!response.url().includes("query_line2d")) return false;
+        const { payload } = response
+          .request()
+          .postDataJSON() as Envelope<Line2DRequest>;
+        return (
+          payload.y_signal_ids.includes(payload.x_signal_id) === identity &&
+          payload.y_signal_ids.length === (axis === "c" ? 2 : 3)
+        );
+      });
+      const dataTransfer = await page.evaluateHandle((path) => {
+        const transfer = new DataTransfer();
+        transfer.setData(
+          "application/x-signalscope-signal",
+          JSON.stringify({ paths: [path] }),
+        );
+        return transfer;
+      }, path);
+      const target = panel.locator(`.panel-${axis}-axis`);
+      await target.dispatchEvent("dragover", { dataTransfer });
+      await target.dispatchEvent("drop", { dataTransfer });
+      await dataTransfer.dispose();
+      expect((await queried).status()).toBe(200);
+      await expect(target).toContainText(path);
+      await expect(bindings).toHaveText(yBindings ?? "");
+      await expect(panel.locator(".colorbar-canvas")).toBeVisible();
+    }
+    await panel.locator(".panel-c-axis").click();
+    await panel.locator(".axis-picker input").fill("none");
+    await panel.locator(".axis-picker input").press("Enter");
+    await panel.locator(".panel-x-axis").click();
+    search = panel.locator(".axis-picker input");
+    await expect(search).toBeFocused();
+    await search.fill("x · bundle");
     await search.press("Enter");
     await expect(panel.locator(".panel-x-axis")).toContainText("x · 2 runs");
     await expect
@@ -293,6 +331,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       path: testInfo.outputPath("xy-color-settled.png"),
     });
     expect(errors).toEqual([]);
+    expect(replies.every((status) => status === 200)).toBe(true);
     expect(
       await page.locator("html").getAttribute("data-gpu-error"),
     ).toBeNull();

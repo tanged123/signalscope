@@ -251,33 +251,44 @@ test("both axis pickers search all signals and channel bundles with keyboard sel
   close();
 });
 
-test("the X drop strip accepts a bundle without forwarding it as Y and cleans up", () => {
-  const panel = document.createElement("div");
-  document.body.append(panel);
-  const select = vi.fn();
-  const yDrop = vi.fn();
-  const close = bindAxisDrop(
-    panel,
-    () => catalog,
-    () => [],
-    select,
-  );
-  panel.addEventListener("drop", yDrop);
-  const event = new Event("drop", { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "dataTransfer", {
-    value: {
-      getData: (type: string) =>
-        type === SIGNAL_DRAG_TYPE
-          ? JSON.stringify({ paths: ["one/x", "two/x"] })
-          : "",
-    },
-  });
-  panel.querySelector(".xy-drop-strip")?.dispatchEvent(event);
-  expect(select).toHaveBeenCalledWith(bundle);
-  expect(yDrop).not.toHaveBeenCalled();
-  close();
-  expect(panel.querySelector(".xy-drop-strip")).toBeNull();
-});
+test.each([".xy-drop-strip", ".panel-x-axis span", ".panel-c-axis span"])(
+  "%s accepts an axis bundle without forwarding it as Y and cleans up",
+  (target) => {
+    const panel = document.createElement("div");
+    document.body.append(panel);
+    panel.innerHTML =
+      '<button class="panel-x-axis"><span>X</span></button><button class="panel-c-axis"><span>C</span></button>';
+    const select = vi.fn();
+    const selectColor = vi.fn();
+    const yDrop = vi.fn();
+    const close = bindAxisDrop(
+      panel,
+      () => catalog,
+      () => [],
+      select,
+      selectColor,
+    );
+    panel.addEventListener("drop", yDrop);
+    const event = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", {
+      value: {
+        getData: (type: string) =>
+          type === SIGNAL_DRAG_TYPE
+            ? JSON.stringify({ paths: ["one/x", "two/x"] })
+            : "",
+      },
+    });
+    required(panel, target).dispatchEvent(event);
+    const isColor = target.includes("panel-c-axis");
+    expect(isColor ? selectColor : select).toHaveBeenCalledExactlyOnceWith(
+      bundle,
+    );
+    expect(isColor ? select : selectColor).not.toHaveBeenCalled();
+    expect(yDrop).not.toHaveBeenCalled();
+    close();
+    expect(panel.querySelector(".xy-drop-strip")).toBeNull();
+  },
+);
 
 test("C bundles match independently of X, reject missing/ambiguous members, and allow C=Y", () => {
   const color = {

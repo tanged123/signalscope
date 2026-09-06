@@ -10,6 +10,7 @@ signal, channel bundle, or named set. Dragging a signal or bundle to the bottom
 X strip also assigns X. One X signal can serve multiple Y signals; bundle
 members match by source, with missing or ambiguous matches reported explicitly.
 Pairs must share an exact sample timebase; no interpolation is performed.
+The same signal can occupy both X and Y, producing the identity line `y = x`.
 
 Use **c:** to color each line along its length by another signal, a source-matched
 bundle, or time. The labeled horizontal scale lives in the legend and shares

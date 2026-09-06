@@ -54,7 +54,10 @@ cache or interpolation policy is introduced.
 
 CSV tests cover retained time, false monotonic candidates and row alignment.
 Binding tests cover broadcast, source matching, missing/ambiguous members and
-X equal to Y. Presentation tests cover distinct coordinates, atomic failures,
+X equal to Y. HTTP tests allow X in the Y list and preserve identity samples,
+gaps, and auxiliary columns; browser tests cover C on time-X plots and dropping
+plotted or unplotted signals onto X without changing Y membership.
+Presentation tests cover distinct coordinates, atomic failures,
 and retained resource counts. Session and snapshot tests cover migration and
 captured bundle pairs. UI tests cover selecting unplotted X and bundles with
 keyboard/search paths. The cross-layer CI script is the completion gate.

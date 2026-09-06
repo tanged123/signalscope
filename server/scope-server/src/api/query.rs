@@ -137,9 +137,6 @@ pub async fn query_line2d_bin(
     if request.y_signal_ids.is_empty() {
         return Err(err("line plot requires at least one y signal"));
     }
-    if request.y_signal_ids.contains(&request.x_signal_id) {
-        return Err(err("Line2D X signal cannot also be a Y signal"));
-    }
     if request.y_signal_ids.iter().collect::<BTreeSet<_>>().len() != request.y_signal_ids.len() {
         return Err(err("Line2D Y signals must be unique"));
     }

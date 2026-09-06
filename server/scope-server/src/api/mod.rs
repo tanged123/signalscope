@@ -328,8 +328,7 @@ mod tests {
         assert!(detail.sample_count.iter().all(|count| *count == 1));
     }
 
-    #[tokio::test]
-    async fn query_line2d_bin_keeps_x_y_rows_and_metadata_ordered() {
+    fn line2d_query_fixture() -> (crate::AppContext, u64, u64, u64) {
         let ctx = crate::AppContext::for_tests(None);
         let (x_signal_id, y0_signal_id, y1_signal_id) = {
             let mut data = ctx.state.lock().unwrap();
@@ -368,6 +367,12 @@ mod tests {
                 .unwrap();
             (x.0, y0.0, y1.0)
         };
+        (ctx, x_signal_id, y0_signal_id, y1_signal_id)
+    }
+
+    #[tokio::test]
+    async fn query_line2d_bin_keeps_x_y_rows_and_metadata_ordered() {
+        let (ctx, x_signal_id, y0_signal_id, y1_signal_id) = line2d_query_fixture();
         let router = crate::build_router(ctx);
         let request = Envelope::new(Line2DRequest {
             request_id: "line2d".into(),
@@ -407,6 +412,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn query_line2d_bin_allows_x_in_y_with_auxiliary_columns() {
+        let (ctx, x_signal_id, y0_signal_id, _) = line2d_query_fixture();
+        let router = crate::build_router(ctx);
+        for pixel_width in [1, 100] {
+            for y_signal_ids in [vec![x_signal_id], vec![y0_signal_id, x_signal_id]] {
+                let request = Envelope::new(Line2DRequest {
+                    request_id: "identity-and-color".into(),
+                    x_signal_id,
+                    y_signal_ids: y_signal_ids.clone(),
+                    window: scope_protocol::TimeWindow { t0: 0.0, t1: 3.0 },
+                    pixel_width,
+                });
+                let response = router
+                    .clone()
+                    .oneshot(
+                        Request::post("/api/query_line2d_bin")
+                            .header("content-type", "application/json")
+                            .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                let response = scope_protocol::decode_line_response(&body).unwrap();
+                assert_eq!(
+                    response
+                        .ys
+                        .iter()
+                        .map(|column| column.signal_id)
+                        .collect::<Vec<_>>(),
+                    y_signal_ids,
+                );
+                let identity = response.ys.last().unwrap();
+                assert_eq!(identity.signal_path, response.x.signal_path);
+                assert_eq!(identity.unit, response.x.unit);
+                assert_eq!(
+                    identity
+                        .values
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
+                    response
+                        .x
+                        .values
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
+                );
+                assert!(!identity.values.is_empty());
+                assert!(identity.values.iter().any(|value| value.is_nan()));
+                if response.ys.len() > 1 {
+                    assert_eq!(
+                        response.ys[0].values,
+                        response.anchor.iter().map(|t| 20.0 + t).collect::<Vec<_>>(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn query_line2d_bin_rejects_invalid_bindings_and_unknown_ids() {
         let ctx = crate::AppContext::for_tests(None);
         let (x_signal_id, y_signal_id) = {
@@ -441,10 +508,6 @@ mod tests {
         };
         for (request, message) in [
             (request(x_signal_id, Vec::new()), "at least one y signal"),
-            (
-                request(x_signal_id, vec![x_signal_id]),
-                "cannot also be a Y signal",
-            ),
             (
                 request(x_signal_id, vec![y_signal_id, y_signal_id]),
                 "must be unique",
