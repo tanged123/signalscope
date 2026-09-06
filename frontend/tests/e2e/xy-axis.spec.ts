@@ -271,6 +271,30 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await setLegend("badge");
     await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
     await expect(colorbar).toHaveAttribute("data-placement", "plot");
+    const axisStyle = panel.locator(".panel-axis-toggle");
+    if ((await axisStyle.textContent())?.includes("gutter"))
+      await axisStyle.click();
+    await expect(axisStyle).toContainText("inline");
+    const expectClearAxes = async (): Promise<void> => {
+      await expect
+        .poll(() =>
+          panel.evaluate((element) => {
+            const bar = element
+              .querySelector(".colorbar-canvas")
+              ?.getBoundingClientRect();
+            const plot = element
+              .querySelector(".chart-host")
+              ?.getBoundingClientRect();
+            return (
+              bar !== undefined &&
+              plot !== undefined &&
+              plot.bottom - bar.bottom >= 48
+            );
+          }),
+        )
+        .toBe(true);
+    };
+    await expectClearAxes();
     await panel.screenshot({
       path: testInfo.outputPath("color-scale-badge.png"),
     });
@@ -289,6 +313,10 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       await seam.press("ArrowRight");
     await expect(legend).toHaveAttribute("data-collapsed", "true");
     await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
+    await expectClearAxes();
+    await panel.screenshot({
+      path: testInfo.outputPath("color-scale-collapsed-inline.png"),
+    });
     await seam.press("ArrowLeft");
     await expect(legend).toHaveAttribute("data-collapsed", "false");
     await expect(seam).toBeFocused();

@@ -133,6 +133,8 @@ and buffer lifetime, viewport publication, migration and malformed state,
 live/baked correspondence, keyboard controls, layout and offline capture.
 Legend placement coverage checks floating/rail/badge transitions, collapse,
 constant/empty scales, capture after reparenting, and unchanged plot gutters.
+The fallback inset clears inline X ticks and the axis title, both on screen
+and in PNG captures.
 Run the cross-layer CI gate after the complete vertical slice. Large-window
 peak-memory measurements remain a separate roadmap item, not a measured claim.
 

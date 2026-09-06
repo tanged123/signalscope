@@ -253,7 +253,7 @@ export class ChartHost {
         if (context !== null) {
           for (const source of sources) context.drawImage(source, 0, 0);
         }
-        this.colorbar.capture(target, this.grid(this.lastAxisStyle).bottom);
+        this.colorbar.capture(target, this.colorbarBottom());
         resolve(target);
       });
     });
@@ -376,11 +376,18 @@ export class ChartHost {
 
   private drawColorbar(): void {
     if (this.lastRequest === null) return;
-    const grid = this.grid(this.lastRequest.axes.style);
     this.colorbar.render(
       this.lastRequest.colorScale,
       this.lastRequest.palette,
-      grid.bottom,
+      this.colorbarBottom(),
+    );
+  }
+
+  private colorbarBottom(): number {
+    // Inline ticks and the X title occupy the bottom of the plot.
+    return (
+      this.grid(this.lastAxisStyle).bottom +
+      (this.lastAxisStyle === "inline" ? 40 : 0)
     );
   }
 

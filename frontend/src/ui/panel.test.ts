@@ -640,6 +640,27 @@ describe("panel series", () => {
       dock: null,
     });
 
+    legend
+      .querySelector(".plot-legend-resize-left")
+      ?.dispatchEvent(
+        new MouseEvent("pointerdown", { clientX: 320, button: 0 }),
+      );
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 280 }));
+    expect(legend.style.width).toBe("220px");
+    view.updatePlotLegend({ ...state, legend_size: [180, 240] });
+    expect(legend.style.width).toBe("220px");
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 300 }));
+    view.updatePlotLegend(state);
+    expect(legend.style.width).toBe("200px");
+    document.dispatchEvent(new MouseEvent("pointerup", { clientX: 300 }));
+    expect(onLegendLayout).toHaveBeenLastCalledWith("panel", {
+      state: "rail",
+      position: null,
+      size: [200, 300],
+      anchor: null,
+      dock: "right",
+    });
+
     state.legend_size = [0, 300];
     view.updatePlotLegend(state);
     expect(wrap.classList.contains("legend-rail-collapsed")).toBe(true);

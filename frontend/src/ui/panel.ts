@@ -449,6 +449,7 @@ export class PanelView {
   private plotLegendSize: { width: number; height: number } | null = null;
   private plotLegendAnchor: LegendAnchor | null = null;
   private plotLegendDock: LegendDock | null = null;
+  private lastLegendLayoutKey: string | null = null;
 
   private get annotationUi(): PanelAnnotationState {
     return (this.annotationState ??= new PanelAnnotationState());
@@ -1559,16 +1560,26 @@ export class PanelView {
     delete wrap.dataset.legendDockPreview;
     legend.dataset.state = state.legend_state;
     wrap.classList.toggle("legend-rail", state.legend_state === "rail");
-    this.plotLegendPosition =
-      state.legend_position === null
-        ? null
-        : { x: state.legend_position[0], y: state.legend_position[1] };
-    this.plotLegendSize =
-      state.legend_size === null
-        ? null
-        : { width: state.legend_size[0], height: state.legend_size[1] };
-    this.plotLegendAnchor = state.legend_anchor;
-    this.plotLegendDock = state.legend_dock;
+    const layoutKey = JSON.stringify([
+      state.legend_state,
+      state.legend_position,
+      state.legend_size,
+      state.legend_anchor,
+      state.legend_dock,
+    ]);
+    if (layoutKey !== this.lastLegendLayoutKey) {
+      this.lastLegendLayoutKey = layoutKey;
+      this.plotLegendPosition =
+        state.legend_position === null
+          ? null
+          : { x: state.legend_position[0], y: state.legend_position[1] };
+      this.plotLegendSize =
+        state.legend_size === null
+          ? null
+          : { width: state.legend_size[0], height: state.legend_size[1] };
+      this.plotLegendAnchor = state.legend_anchor;
+      this.plotLegendDock = state.legend_dock;
+    }
 
     if (state.legend_state === "badge") {
       const badge = document.createElement("div");
