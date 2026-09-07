@@ -51,6 +51,13 @@ capabilities, never host identity.
 
 ## Ownership and placement
 
+Shell markup, status publication, inline session-title editing, and Help live
+in `ui/shell-markup.ts`, `shell-status.ts`, `session-title.ts`, and `help-dialog.ts`.
+`ui/about-dialog.ts` presents release metadata from the frontend manifest.
+`ui/info-dialog.ts` owns Help/About focus, dismissal, and cleanup.
+`ui/line-toolbar.ts` groups inline per-panel appearance controls. See ADR 0058 for the
+optional session-title contract and the limits of chart performance estimates.
+
 | Concern                                 | Current owner                                                   | Boundary to preserve                                                                                             |
 | --------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Signal identity and registration        | `scope-core::store`, `sources`                                  | No HTTP, DOM, or source-format knowledge in the store                                                            |

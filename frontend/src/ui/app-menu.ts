@@ -124,8 +124,8 @@ export class AppMenu {
     item.append(check, title, keys);
     item.addEventListener("click", () => {
       if (planned || !enabled) return;
-      this.registry.run(command.id);
       this.close(true);
+      this.registry.run(command.id);
     });
     return item;
   }

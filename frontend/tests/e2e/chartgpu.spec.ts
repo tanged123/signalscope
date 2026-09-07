@@ -73,6 +73,7 @@ test("line style changes submit valid WebGPU command buffers", async ({
   await gotoApp(page);
 
   const panel = page.locator(".panel").first();
+
   await panel.locator(".panel-stats-toggle").click();
   await panel
     .locator(".plot-stat-row .plot-row-inspector-toggle")

@@ -38,6 +38,9 @@ test.describe("exported snapshot round trip", () => {
         "Roundtrip",
       );
       const panel = page.locator(".panel");
+      await expect(page.locator(".workspace-name")).toHaveText(
+        "Roundtrip review",
+      );
       await expect(panel).toHaveCount(1);
       await expect(panel.locator(".panel-title")).toHaveText("Alpha & Beta");
       await expect(panel.locator(".binding-chip")).toHaveText([
@@ -45,7 +48,9 @@ test.describe("exported snapshot round trip", () => {
         "beta ×1",
       ]);
       await expect(panel.locator(".panel-annotations")).toHaveCount(0);
-      await panel.locator(".plot-legend-tips-heading button").first().click();
+      await expect(
+        panel.locator(".plot-legend-tips-heading button").first(),
+      ).toHaveAttribute("aria-expanded", "true");
       await expect(panel.locator(".plot-tip-row")).toHaveCount(1);
       const session = JSON.parse(bakedManifest(artifact).session_json) as {
         tabs: Array<{

@@ -19,6 +19,21 @@ test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await expect(page.locator(".workspace-row")).toHaveCount(2);
   await expect(bottomRow.locator(".panel")).toHaveCount(2);
 
+  const overflowingControls = await bottomRow
+    .locator(".panel-header")
+    .evaluateAll((headers) =>
+      headers.flatMap((header) => {
+        const bounds = header.getBoundingClientRect();
+        return [...header.querySelectorAll("button")]
+          .filter((button) => {
+            const control = button.getBoundingClientRect();
+            return control.top < bounds.top || control.bottom > bounds.bottom;
+          })
+          .map((button) => button.className);
+      }),
+    );
+  expect(overflowingControls).toEqual([]);
+
   await page.locator(".panel").last().locator(".panel-close").click();
   await page.locator(".panel").last().locator(".panel-close").click();
   await expect(page.locator(".panel")).toHaveCount(1);
@@ -439,22 +454,23 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
             element.querySelector("button") as HTMLButtonElement,
           );
           return {
-            titleFamily: title.fontFamily.includes("JetBrains Mono"),
+            titleFamily: title.fontFamily.includes("Inter"),
             titleSize: Math.round(Number.parseFloat(title.fontSize)),
-            optionFamily: option.fontFamily.includes("JetBrains Mono"),
+            optionFamily: option.fontFamily.includes("Inter"),
             optionSize: Math.round(Number.parseFloat(option.fontSize)),
           };
         }),
       )
       .toEqual({
         titleFamily: true,
-        titleSize: 9,
+        titleSize: 10,
         optionFamily: true,
         optionSize: 10,
       });
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
   }
+
   await panel.locator(".panel-tips").click();
   await panel.getByRole("menuitem", { name: "clear all" }).click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(
@@ -484,7 +500,9 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
   await expect(signalsToggle).toHaveAttribute("aria-expanded", "false");
   await signalsToggle.click();
   await expect(plotLegend.locator(".plot-legend-roster-rows")).toBeVisible();
-  await plotLegend.locator(".plot-legend-tips-heading button").first().click();
+  await expect(
+    plotLegend.locator(".plot-legend-tips-heading button").first(),
+  ).toHaveAttribute("aria-expanded", "true");
   await expect(plotLegend.locator(".plot-tip-reading").nth(1)).toHaveText(
     "5.1200 · 1.0565",
   );
@@ -1072,15 +1090,17 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await expect(page.locator(".panel .binding-chip")).toHaveCount(0);
 });
 
-test("legend console replaces the strip and supports workspace-wide states", async ({
+test("legend console replaces the strip and supports per-plot states", async ({
   page,
 }) => {
   await gotoApp(page);
   const panel = page.locator(".panel").first();
   await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
   await expect(panel.locator(".plot-series-legend")).toBeVisible();
-  await page.locator(".layout-slot").click();
-  await page.locator('[data-legend-state="badge"]').click();
+  await page.locator(".panel").first().locator(".panel-legend-state").click();
+  await page
+    .getByRole("menuitemradio", { name: "badge", exact: false })
+    .click();
   await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
     "data-state",
     "badge",

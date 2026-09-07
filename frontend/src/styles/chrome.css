@@ -1,0 +1,157 @@
+.workspace-name,
+.session-title-input {
+  min-width: 0;
+  max-width: min(50vw, 480px);
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 2px;
+  font: var(--ui-text-size) var(--font-ui);
+}
+
+.workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-name:hover,
+.workspace-name:focus-visible {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.session-title-input {
+  width: 320px;
+  background: var(--surface-0);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-1);
+}
+
+.source-truth {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.status-aggregate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.performance-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.performance-metrics > span,
+.session-save-status {
+  white-space: nowrap;
+}
+
+.performance-metrics > span > span {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.presentation-status,
+.session-save-status {
+  color: var(--fg-2);
+}
+
+.info-content dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+}
+
+.info-content dd {
+  margin: 0;
+}
+
+.info-dialog {
+  width: min(640px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-1);
+  color: var(--fg-2);
+  font: var(--ui-body-size) var(--font-ui);
+}
+
+.info-dialog::backdrop {
+  background: var(--surface-overlay);
+}
+
+.info-dialog header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.info-dialog header button {
+  padding: 4px 8px;
+}
+
+.info-content {
+  padding: 4px 16px 12px;
+}
+
+.info-content h2 {
+  margin-top: 18px;
+  font-size: var(--ui-body-size);
+  color: var(--fg-1);
+}
+
+.info-content kbd {
+  font-family: var(--font-mono);
+}
+
+.help-shortcuts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+@media (max-width: 1100px) {
+  .window-readout {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.about-dialog {
+  width: min(440px, calc(100vw - 40px));
+}
+
+.about-version {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.info-content nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 0;
+}
+
+.info-content a {
+  color: var(--fg-2);
+  text-underline-offset: 3px;
+}
+
+.info-content a:hover,
+.info-content a:focus-visible {
+  color: var(--amber-7);
+}

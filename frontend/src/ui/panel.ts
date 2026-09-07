@@ -1,4 +1,5 @@
-import { PanelAxes, axisControlsMarkup } from "./panel-axes";
+import { lineToolbarMarkup } from "./line-toolbar";
+import { PanelAxes } from "./panel-axes";
 import { legendColorControls, legendColorTarget } from "./legend-color-scale";
 import type { AxisLimits } from "./axis-limits";
 import {
@@ -894,8 +895,8 @@ export class PanelView {
       ".panel-stats-toggle",
     ).setAttribute("aria-pressed", String(rendered.show_stats));
     this.updateBindings(rendered);
-    this.updatePlotLegend(rendered);
     this.pruneAnnotationUiState(rendered);
+    this.updatePlotLegend(rendered);
     const annotations = this.resolvedAnnotations(rendered);
     this.drawOverlay(annotations);
     if (
@@ -974,8 +975,8 @@ export class PanelView {
     this.interactions.setPolicy(
       (this.preparedPlot as PreparedPlot | null)?.interaction ?? null,
     );
-    this.updatePlotLegend(rendered);
     this.pruneAnnotationUiState(rendered);
+    this.updatePlotLegend(rendered);
     const annotations = this.resolvedAnnotations(rendered);
     this.drawOverlay(annotations);
     if (error !== null) {
@@ -2092,8 +2093,11 @@ export class PanelView {
     heading.className = "plot-legend-tips-heading";
     const toggle = document.createElement("button");
     toggle.type = "button";
-    toggle.textContent = `${this.annotationUi.expanded ? "▾" : "▸"} TIPS`;
-    toggle.setAttribute("aria-expanded", String(this.annotationUi.expanded));
+    toggle.textContent = `${this.annotationUi.expanded && state.annotations.length > 0 ? "▾" : "▸"} TIPS`;
+    toggle.setAttribute(
+      "aria-expanded",
+      String(this.annotationUi.expanded && state.annotations.length > 0),
+    );
     toggle.addEventListener("click", () => {
       this.annotationUi.expanded = !this.annotationUi.expanded;
       this.updatePlotLegend(state);
@@ -2105,6 +2109,7 @@ export class PanelView {
     exportButton.className = "plot-tip-export";
     exportButton.textContent = "⤓ csv";
     exportButton.title = "Export pinned tips as CSV";
+    exportButton.hidden = state.annotations.length === 0;
     exportButton.addEventListener("click", () => this.exportAnnotations(state));
     heading.append(toggle, count, exportButton);
     section.append(heading);
@@ -3243,22 +3248,4 @@ function seriesColor(series: Pick<RenderSeries, "hue">): string {
   return series.hue === null
     ? "var(--fg-4)"
     : `var(--series-${String(colorIndexForHue(series.hue) + 1)})`;
-}
-
-function lineToolbarMarkup(): string {
-  return `<span class="panel-toolbar-group panel-toolbar-axes">
-      <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
-      ${axisControlsMarkup()}
-    </span>
-    <span class="panel-toolbar-separator" aria-hidden="true"></span>
-    <span class="panel-toolbar-group panel-toolbar-render">
-      <button class="panel-toolbar-control panel-line-width" type="button" title="Panel line-width default"><span class="line-width-sample" aria-hidden="true"></span><span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
-      <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-selected series">dim <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
-    </span>
-    <span class="panel-toolbar-separator" aria-hidden="true"></span>
-    <span class="panel-toolbar-group panel-toolbar-readout">
-      <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
-      <button class="panel-toolbar-control panel-tips" type="button" title="Tip density and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
-      <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend type">legend <b class="panel-legend-value">keys</b> <span class="toolbar-caret">▾</span></button>
-    </span>`;
 }

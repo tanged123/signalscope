@@ -271,6 +271,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await setLegend("badge");
     await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
     await expect(colorbar).toHaveAttribute("data-placement", "plot");
+
     const axisStyle = panel.locator(".panel-axis-toggle");
     if ((await axisStyle.textContent())?.includes("gutter"))
       await axisStyle.click();

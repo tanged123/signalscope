@@ -45,4 +45,24 @@ test("the browser selects HttpPlane when scope-server is live", async ({
 
   await expect(page.locator(".formula-toggle")).toBeVisible();
   await expect(page.locator(".gpu-warning")).toBeHidden();
+
+  await page
+    .getByRole("button", { name: "Rename session", exact: true })
+    .click();
+  const name = page.getByRole("textbox", { name: "Session name", exact: true });
+  await name.fill("Live thermal review");
+  const saved = page.waitForResponse(
+    (response) => response.url().includes("save_session") && response.ok(),
+  );
+  await name.press("Enter");
+  await saved;
+  await expect(page.locator(".workspace-name")).toHaveText(
+    "Live thermal review",
+  );
+  await expect(page.locator(".session-save-status")).toHaveText("Unsaved");
+  await expect(page.locator(".session-save-status")).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".workspace-name")).toContainText(
+    "Live thermal review",
+  );
 });

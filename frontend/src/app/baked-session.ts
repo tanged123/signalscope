@@ -14,6 +14,7 @@ export function parseBakedSession(sessionJson: string): Session {
     );
   }
   normalizeOptionalAnnotationFields(parsed);
+  parsed.title ??= null;
   if (!isSession(parsed)) {
     throw new Error("snapshot session has an invalid structure");
   }
@@ -348,6 +349,7 @@ function isTab(value: unknown): boolean {
 
 function isSession(value: JsonObject): value is JsonObject & Session {
   return (
+    (value.title === null || typeof value.title === "string") &&
     (value.theme === "dark" || value.theme === "light") &&
     isLinkedTime(value.linked_time) &&
     typeof value.active_tab_id === "string" &&

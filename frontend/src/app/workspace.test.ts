@@ -744,9 +744,9 @@ describe("WorkspaceModel", () => {
       legend_hint_dismissed: true,
     });
 
-    model.setAllLegendStates("badge");
+    model.setLegendLayout(first.id, { state: "badge" });
     expect(model.panel(first.id)?.legend_state).toBe("badge");
-    expect(model.panel(second.id)?.legend_state).toBe("badge");
+    expect(model.panel(second.id)?.legend_state).toBe("keys");
 
     model.setLegendLayout(first.id, {
       state: "rail",

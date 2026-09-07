@@ -420,9 +420,11 @@ describe("PanelView chrome", () => {
     expect([...((request?.series[0]?.data ?? []) as Float32Array)]).toEqual([
       0, 1, 10, 2,
     ]);
-    view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-tips-heading button")
-      ?.click();
+    expect(
+      view.element
+        .querySelector(".plot-legend-tips-heading button")
+        ?.getAttribute("aria-expanded"),
+    ).toBe("true");
     view.element
       .querySelector<HTMLButtonElement>('[title="Pan to tip"]')
       ?.click();
@@ -574,9 +576,11 @@ describe("PanelView chrome", () => {
     ];
     view.update(panel, false);
 
-    view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-tips-heading button")
-      ?.click();
+    expect(
+      view.element
+        .querySelector(".plot-legend-tips-heading button")
+        ?.getAttribute("aria-expanded"),
+    ).toBe("true");
 
     expect(view.element.querySelector(".plot-tip-reading")?.textContent).toBe(
       "x · value",

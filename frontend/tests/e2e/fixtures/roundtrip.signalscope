@@ -1,5 +1,6 @@
 {
   "app": "signalscope",
+  "title": "Roundtrip review",
   "schema_version": 24,
   "theme": "light",
   "linked_time": {

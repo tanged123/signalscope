@@ -30,7 +30,7 @@
   border-top: 1px dashed var(--amber-7);
   background: var(--surface-1);
   color: var(--amber-7);
-  font: 10px var(--font-mono);
+  font: var(--ui-text-size) var(--font-ui);
 }
 
 .panel-config-popover.axis-limits-editor {

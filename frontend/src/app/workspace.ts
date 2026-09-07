@@ -41,6 +41,7 @@ export interface WorkspaceViewState {
 export function emptySession(): Session {
   return {
     app: "signalscope",
+    title: null,
     schema_version: SESSION_SCHEMA_VERSION,
     theme: "dark",
     linked_time: {
@@ -667,11 +668,6 @@ export class WorkspaceModel {
     if (layout.dock !== undefined) panel.legend_dock = layout.dock;
     if (layout.hintDismissed !== undefined)
       panel.legend_hint_dismissed = layout.hintDismissed;
-    this.touch(true);
-  }
-
-  setAllLegendStates(state: LegendState): void {
-    for (const panel of this.activeTab().panels) panel.legend_state = state;
     this.touch(true);
   }
 

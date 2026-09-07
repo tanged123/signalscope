@@ -33,20 +33,17 @@ test("shared presentation plane renders the demo workspace", async ({
   for (const name of await page.locator(".binding-chip").allTextContents()) {
     expect(name.trim()).not.toBe("");
   }
-  await expect(page.locator(".session-identity")).toHaveText(
-    /— [1-9]\d* sources · [1-9]\d* signals/,
+  await expect(page.locator(".session-identity")).toHaveCount(0);
+  await expect(page.locator(".status-aggregate")).toContainText(
+    /sources? · .* signals/,
   );
+  await expect(page.locator(".layout-slot")).toHaveCount(0);
   await expect(page.locator(".open-files")).toHaveCount(0);
   await expect(page.locator(".cursor-mode")).toBeEmpty();
   await expect(page.locator(".plot-tip")).toBeHidden();
-  // The mod glyph follows the platform running the browser, so the expectation
-  // is derived the same way rather than pinned to a macOS-only "⌘".
-  const mod = await page.evaluate<string>(() =>
-    /mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘" : "Ctrl+",
-  );
-  await expect(page.locator(".palette-hints")).toHaveText(
-    `${mod}P signals${mod}⇧P commands`,
-  );
+  await expect(
+    page.getByRole("button", { name: "? Help", exact: true }),
+  ).toBeVisible();
 });
 
 test("theme is a pure token swap", async ({ page }) => {
@@ -152,7 +149,7 @@ test("tabbing out of the application menu dismisses it", async ({ page }) => {
   // The menu advances focus explicitly because browsers disagree about where
   // Tab lands when its focused item becomes hidden during keydown.
   await expect(page.locator(".menu-button")).not.toBeFocused();
-  await expect(page.locator(".workspace-tab-select")).toBeFocused();
+  await expect(page.locator(".workspace-name")).toBeFocused();
 });
 
 test("export dialog is modal and restores focus after a document Escape", async ({

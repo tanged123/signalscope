@@ -6,6 +6,20 @@ are recorded in [ADRs](adr/README.md).
 
 ## Current product
 
+- Chrome keeps dataset totals and chart metrics in the status bar, with
+  appearance and readout controls inline in each plot header. Both rows wrap
+  when needed, keeping header controls clear of the plot canvas.
+  Click the title to rename a session; Enter or blur saves,
+  Escape cancels. Display titles persist separately from file paths. Help opens
+  keyboard and gesture guidance with Escape, outside-click, and close-button
+  dismissal. Inline chart metrics expose CPU update time and existing
+  memory/density estimates without adding profiling work. Unsaved file changes
+  are labeled in the status bar. UI labels, muted text, menus, and the signal
+  tree share the selected UI font and scalable size tokens (ADR 0058).
+  About opens an accessible dialog with the release version, project summary,
+  license credit, documentation, and issue links. Its version comes from the
+  frontend package manifest and is bundled into offline snapshots.
+
 - `scope-server` is the native data plane and loopback HTTP host. Electron is
   a thin distribution shell around it.
 - Rust provides streaming ingest, transactional registration, out-of-core
