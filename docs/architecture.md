@@ -49,6 +49,11 @@ Both feed the same presentation code. Electron starts and presents the server;
 it provides no second native data API. Bootstrap selects the plane; views use
 capabilities, never host identity.
 
+Electron's native window controls overlay the shared title row. A sandboxed
+preload publishes only theme colors to a WebContents-scoped listener; it
+exposes no API to the page. CSS overlay safe areas and drag regions keep the
+single application-menu button and session editor usable (ADR 0049).
+
 HTML export captures UI/plot fonts, sizes and the global stroke scale through
 `app/preferences.ts`, using versioned `preferences_json` in the manifest.
 `BakedPlane` publishes it beside session JSON; the shell applies it before plot

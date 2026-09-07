@@ -19,6 +19,9 @@ are recorded in [ADRs](adr/README.md).
   About opens an accessible dialog with the release version, project summary,
   license credit, documentation, and issue links. Its version comes from the
   frontend package manifest and is bundled into offline snapshots.
+  Electron's window controls share the themed title row, replacing its native
+  title/menu bars on Windows and Linux. The existing application-menu button
+  remains the single command entry point; window chrome adds no new app controls.
 
 - `scope-server` is the native data plane and loopback HTTP host. Electron is
   a thin distribution shell around it.
