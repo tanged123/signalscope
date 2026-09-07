@@ -28,7 +28,10 @@ The render request carries the flag; the published layout carries adjusted
 ranges for picking, annotations and gestures. PNG capture uses the same view.
 
 Wheel zoom scales both axes about the pointer. Axis-constrained box zoom scales
-the other axis about its center. Panning preserves the equal scale. Resize and
+the other axis about its center. Equal-axis zooms publish both requested ranges
+in one ChartHost update, before either can be padded against an old sibling
+range. Independent-axis zooms retain their separate updates.
+Panning preserves the equal scale. Resize and
 range changes use `setViewRange`, preserving series buffers and the existing
 shared-frame publication and disposal. No additional resource lifetime exists.
 Time-X retains its linked time-window ownership: display padding does not change

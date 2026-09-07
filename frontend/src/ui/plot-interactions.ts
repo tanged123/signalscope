@@ -32,6 +32,7 @@ export interface PlotInteractionHost {
   layout(): PlotLayout | null;
   applyXRange(min: number, max: number): void;
   applyYRange(min: number, max: number): void;
+  applyRanges(x: Range, y: Range): void;
   fitView(): void;
   plotClick(
     x: number,
@@ -95,6 +96,8 @@ export class PlotInteractionController {
           this.host.setGesture(null);
         }, 1000);
         const factor = wheelZoomFactor(event.deltaY);
+        let nextY: Range | null = null;
+        let nextX: Range | null = null;
         if (axes.y) {
           const pivotY = invertY(
             layout,
@@ -104,8 +107,7 @@ export class PlotInteractionController {
               layout.plot.y + layout.plot.height,
             ),
           );
-          const nextY = zoomRange(layout.yRange, factor, pivotY);
-          this.host.applyYRange(nextY.min, nextY.max);
+          nextY = zoomRange(layout.yRange, factor, pivotY);
         }
         if (axes.x) {
           const pivotX = invertX(
@@ -116,14 +118,9 @@ export class PlotInteractionController {
               layout.plot.x + layout.plot.width,
             ),
           );
-          const nextX = zoomScaledRange(
-            layout.xRange,
-            factor,
-            pivotX,
-            layout.xScale,
-          );
-          this.host.applyXRange(nextX.min, nextX.max);
+          nextX = zoomScaledRange(layout.xRange, factor, pivotX, layout.xScale);
         }
+        this.applyZoomRanges(nextX, nextY, layout.axisEqual === true);
       },
       { passive: false },
     );
@@ -292,8 +289,11 @@ export class PlotInteractionController {
           );
         axes.x = axes.y = true;
       }
-      if (axes.y) this.host.applyYRange(y.min, y.max);
-      if (axes.x) this.host.applyXRange(x.min, x.max);
+      this.applyZoomRanges(
+        axes.x ? x : null,
+        axes.y ? y : null,
+        layout.axisEqual === true,
+      );
     };
     const cancel = (): void => {
       cleanup();
@@ -309,6 +309,19 @@ export class PlotInteractionController {
     this.overlay.addEventListener("pointermove", move);
     this.overlay.addEventListener("pointerup", finish);
     this.overlay.addEventListener("pointercancel", cancel);
+  }
+
+  private applyZoomRanges(
+    x: Range | null,
+    y: Range | null,
+    equal: boolean,
+  ): void {
+    if (equal && x !== null && y !== null) {
+      this.host.applyRanges(x, y);
+      return;
+    }
+    if (y !== null) this.host.applyYRange(y.min, y.max);
+    if (x !== null) this.host.applyXRange(x.min, x.max);
   }
 
   private setBox(box: InteractionBox | null): void {

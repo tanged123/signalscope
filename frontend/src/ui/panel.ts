@@ -509,6 +509,10 @@ export class PanelView {
       applyXRange: (min, max) => {
         this.applyXRange(min, max);
       },
+      applyRanges: (x, y) => {
+        this.callbacks.onYRange(this.id, [y.min, y.max]);
+        this.applyXRange(x.min, x.max, y);
+      },
       applyYRange: (min, max) => {
         const layout = this.activeLayout();
         if (layout !== null) {
@@ -1474,13 +1478,13 @@ export class PanelView {
    * Applies an x-axis range: the linked time window in time mode, a
    * panel-local value range everywhere else.
    */
-  private applyXRange(min: number, max: number): void {
-    const layout = this.activeLayout();
-    if (layout !== null) {
-      this.chartHost?.setRangesOnly({ min, max }, [
-        layout.yRange.min,
-        layout.yRange.max,
-      ]);
+  private applyXRange(
+    min: number,
+    max: number,
+    yRange = this.activeLayout()?.yRange,
+  ): void {
+    if (yRange !== undefined) {
+      this.chartHost?.setRangesOnly({ min, max }, [yRange.min, yRange.max]);
     }
     if (this.preparedPlot?.interaction.xAxis === "linked-time") {
       this.callbacks.onTimeWindow(this.id, min, max);

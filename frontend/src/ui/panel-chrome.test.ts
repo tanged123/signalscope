@@ -339,23 +339,26 @@ describe("PanelView chrome", () => {
     const render = vi.fn<ChartHost["render"]>(() => 0);
     const dispose = vi.fn();
     const setRangesOnly = vi.fn();
+    const layout = vi.fn<ChartHost["layout"]>(() => ({
+      plot: { x: 0, y: 0, width: 100, height: 100 },
+      xRange: { min: -5, max: 25 },
+      yRange: { min: 0, max: 3 },
+    }));
     vi.spyOn(ChartHost, "create").mockResolvedValue({
       setColorbarTarget: vi.fn(),
       render,
       resize: vi.fn(),
       dispose,
       setRangesOnly,
-      layout: () => ({
-        plot: { x: 0, y: 0, width: 100, height: 100 },
-        xRange: { min: -5, max: 25 },
-        yRange: { min: 0, max: 3 },
-      }),
+      layout,
     } as unknown as ChartHost);
     const panelCallbacks = callbacks(catalog);
     const onCursor = vi.fn();
     panelCallbacks.onCursor = onCursor;
     const onXRange = vi.fn();
     panelCallbacks.onXRange = onXRange;
+    const onYRange = vi.fn();
+    panelCallbacks.onYRange = onYRange;
     const view = new PanelView("panel", panelCallbacks, {} as GpuContext);
     document.body.appendChild(view.element);
     view.mount();
@@ -444,6 +447,31 @@ describe("PanelView chrome", () => {
       { t0: 0, t1: 1 },
     );
     expect(onCursor).toHaveBeenCalledWith("panel", null, null);
+
+    layout.mockReturnValue({
+      axisEqual: true,
+      plot: { x: 0, y: 0, width: 200, height: 100 },
+      xRange: { min: 0, max: 20 },
+      yRange: { min: 0, max: 10 },
+    });
+    layout.mockClear();
+    setRangesOnly.mockClear();
+    onXRange.mockClear();
+    const wheel = new WheelEvent("wheel", { deltaY: Math.log(0.5) / 0.0016 });
+    Object.defineProperties(wheel, {
+      offsetX: { value: 40 },
+      offsetY: { value: 30 },
+    });
+    const overlay = view.element.querySelector(".overlay-canvas");
+    if (overlay === null) throw new Error("overlay missing");
+    overlay.dispatchEvent(wheel);
+    expect(setRangesOnly).toHaveBeenCalledExactlyOnceWith(
+      { min: 2, max: 12 },
+      [3.5, 8.5],
+    );
+    expect(layout).toHaveBeenCalledOnce();
+    expect(onXRange).toHaveBeenCalledExactlyOnceWith("panel", [2, 12]);
+    expect(onYRange).toHaveBeenCalledWith("panel", [3.5, 8.5]);
 
     view.dispose();
     view.element.remove();
