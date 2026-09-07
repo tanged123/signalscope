@@ -241,6 +241,8 @@ pub struct PanelState {
     pub id: String,
     pub title: String,
     pub axis_style: AxisStyle,
+    #[serde(default)]
+    pub axis_equal: Option<bool>,
     pub bindings: Vec<Binding>,
     #[serde(default)]
     pub color_by: Option<StyleDimension>,

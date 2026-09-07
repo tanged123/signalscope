@@ -36,6 +36,30 @@
   },
   "cases": [
     {
+      "name": "equal axes",
+      "session": {},
+      "panel": { "axis_equal": true },
+      "valid": true
+    },
+    {
+      "name": "independent axes",
+      "session": {},
+      "panel": { "axis_equal": false },
+      "valid": true
+    },
+    {
+      "name": "default axes",
+      "session": {},
+      "panel": { "axis_equal": null },
+      "valid": true
+    },
+    {
+      "name": "invalid equal axes",
+      "session": {},
+      "panel": { "axis_equal": "true" },
+      "valid": false
+    },
+    {
       "name": "bundle X",
       "session": {},
       "panel": {

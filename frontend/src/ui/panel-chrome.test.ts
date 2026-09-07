@@ -32,6 +32,7 @@ function state(): PanelState {
     id: "panel",
     title: "Panel",
     axis_style: "gutter",
+    axis_equal: false,
     bindings: [{ kind: "query", selector: "*", refs: [], set_id: null }],
     color_by: "source",
     dash_by: null,

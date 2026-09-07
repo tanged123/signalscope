@@ -1059,6 +1059,7 @@ export class PanelView {
           );
     const request: ChartRenderRequest = {
       ...family.makeInput(ranges, styles),
+      axisEqual: state.axis_equal === true,
       emphasisIndices,
       palette: resolvePalette(),
     };

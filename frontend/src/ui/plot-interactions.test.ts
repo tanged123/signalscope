@@ -48,7 +48,7 @@ function doubleClick(target: HTMLElement, x: number, y: number): void {
   target.dispatchEvent(event);
 }
 
-function fixture(): {
+function fixture(view: PlotLayout = layout): {
   overlay: HTMLCanvasElement;
   calls: {
     applyXRange: ReturnType<typeof vi.fn>;
@@ -70,7 +70,7 @@ function fixture(): {
     beginAxisEdit: vi.fn(),
   };
   const host: PlotInteractionHost = {
-    layout: vi.fn(() => layout),
+    layout: vi.fn(() => view),
     applyXRange: calls.applyXRange,
     applyYRange: calls.applyYRange,
     fitView: calls.fitView,
@@ -86,6 +86,37 @@ function fixture(): {
 }
 
 describe("PlotInteractionController", () => {
+  it.each([false, true])(
+    "zooms both equal axes with shift=%s around the pointer",
+    (shiftKey) => {
+      vi.useFakeTimers();
+      const { overlay, calls } = fixture({ ...layout, axisEqual: true });
+      const event = new WheelEvent("wheel", { deltaY: -100, shiftKey });
+      Object.defineProperties(event, {
+        offsetX: { value: 50 },
+        offsetY: { value: 50 },
+      });
+      overlay.dispatchEvent(event);
+      const x = calls.applyXRange.mock.calls[0] as [number, number];
+      const y = calls.applyYRange.mock.calls[0] as [number, number];
+      expect(x[1] - x[0]).toBeLessThan(10);
+      expect(x[1] - x[0]).toBeCloseTo(y[1] - y[0]);
+      expect((x[0] + x[1]) / 2).toBe(5);
+      expect((y[0] + y[1]) / 2).toBe(0);
+      vi.runAllTimers();
+      vi.useRealTimers();
+    },
+  );
+
+  it("zooms both equal axes during an axis-constrained box drag", () => {
+    const { overlay, calls } = fixture({ ...layout, axisEqual: true });
+    pointer(overlay, "pointerdown", 20, 50);
+    pointer(overlay, "pointermove", 80, 52);
+    pointer(overlay, "pointerup", 80, 52);
+    expect(calls.applyXRange).toHaveBeenCalledWith(2, 8);
+    expect(calls.applyYRange).toHaveBeenCalledWith(-3, 3);
+  });
+
   beforeEach(() => vi.restoreAllMocks());
 
   it("locks horizontal drags to X and applies the selected range", () => {

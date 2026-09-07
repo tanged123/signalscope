@@ -15,6 +15,7 @@ interface PlotRect {
 export type AxisScale = "linear" | "log";
 
 export interface PlotLayout {
+  axisEqual?: boolean;
   plot: PlotRect;
   xRange: Range;
   yRange: Range;

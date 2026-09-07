@@ -163,6 +163,61 @@ async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
 }
 
 describe("ChartHost", () => {
+  it.each(["gutter", "inline"] as const)(
+    "keeps equal unit scales with %s axes across resize, viewport edits and disabling",
+    async (axisStyle) => {
+      const container = document.createElement("div");
+      let width = 400;
+      Object.defineProperties(container, {
+        clientWidth: { get: () => width },
+        clientHeight: { value: 300 },
+      });
+      const gpu = {
+        adapter: {},
+        device: {},
+        pipelineCache: {},
+        register: () => () => {},
+        reportFailure: vi.fn(),
+      } as unknown as GpuContext;
+      const host = await ChartHost.create(container, gpu);
+      const base = request(undefined, undefined, [], {
+        axisStyle,
+        xRange: { min: 10, max: 12 },
+        yRange: [0, 4],
+      });
+      const equalScale = () => {
+        const layout = host.layout();
+        if (layout === null) throw new Error("missing layout");
+        expect(
+          (layout.xRange.max - layout.xRange.min) / layout.plot.width,
+        ).toBeCloseTo(
+          (layout.yRange.max - layout.yRange.min) / layout.plot.height,
+          12,
+        );
+        return layout;
+      };
+      host.render({ ...base, axisEqual: true });
+      const initial = equalScale();
+      expect(initial.xRange.min).toBeLessThan(10);
+      expect(initial.yRange).toEqual({ min: 0, max: 4 });
+      const chart = state.charts.at(-1);
+      chart?.setOption.mockClear();
+      width = 800;
+      host.resize();
+      expect(equalScale().xRange.min).toBeLessThan(initial.xRange.min);
+      width = 400;
+      host.resize();
+      expect(equalScale()).toEqual(initial);
+      host.setRangesOnly({ min: 20, max: 40 }, [1, 3]);
+      expect(equalScale().yRange.min).toBeLessThan(1);
+      host.render({ ...base, axisEqual: false });
+      expect(host.layout()?.xRange).toEqual(base.xRange);
+      expect(host.layout()?.yRange).toEqual({ min: 0, max: 4 });
+      expect(chart?.setOption).not.toHaveBeenCalled();
+      host.dispose();
+    },
+  );
+
   it("publishes the configured grid margins", () => {
     expect(CHART_GRID).toEqual({ left: 60, right: 12, top: 8, bottom: 34 });
     expect(INLINE_CHART_GRID).toEqual({ left: 8, right: 8, top: 8, bottom: 8 });
@@ -456,6 +511,7 @@ describe("ChartHost", () => {
     expect(chart?.options.series).toBe(series);
     expect(chart?.renderFrame).not.toHaveBeenCalled();
     expect(host.layout()).toEqual({
+      axisEqual: false,
       plot: { x: 60, y: 8, width: 328, height: 258 },
       xRange: { min: 11, max: 12 },
       yRange: { min: -1, max: 5 },

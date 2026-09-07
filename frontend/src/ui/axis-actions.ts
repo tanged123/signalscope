@@ -53,6 +53,7 @@ export function axisActions(host: AxisActionHost) {
       } else host.workspace.setPanelYRange(id, limits.y);
       host.workspace.setAxisLabel(id, "x", limits.xLabel);
       host.workspace.setAxisLabel(id, "y", limits.yLabel);
+      panel.axis_equal = limits.axisEqual;
       if (panel.color_axis != null)
         host.workspace.setPanelColorAxis(id, {
           ...panel.color_axis,

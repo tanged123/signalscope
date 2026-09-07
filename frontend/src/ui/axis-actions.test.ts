@@ -60,6 +60,7 @@ test("one limits edit publishes X/Y/C together and restores automatic ranges", (
   };
   const actions = axisActions(host);
   actions.onSetAxisLimits(panel.id, {
+    axisEqual: true,
     x: [0, 10],
     y: [-5, 5],
     c: [20, 80],
@@ -68,6 +69,7 @@ test("one limits edit publishes X/Y/C together and restores automatic ranges", (
     cLabel: "Time",
   });
   expect(workspace.panel(panel.id)).toMatchObject({
+    axis_equal: true,
     x_range: [0, 10],
     y_range: [-5, 5],
     x_label: "Position",
@@ -77,6 +79,7 @@ test("one limits edit publishes X/Y/C together and restores automatic ranges", (
   expect(host.commit).toHaveBeenCalledOnce();
   expect(host.refresh).not.toHaveBeenCalled();
   const automatic = {
+    axisEqual: false,
     x: null,
     y: null,
     c: null,
@@ -91,6 +94,7 @@ test("one limits edit publishes X/Y/C together and restores automatic ranges", (
   actions.onSetAxisLimits(panel.id, automatic);
   expect(workspace.panel(panel.id)).toMatchObject({
     x_range: null,
+    axis_equal: false,
     y_range: null,
     color_axis: { range: null },
   });

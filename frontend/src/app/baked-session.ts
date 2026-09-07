@@ -24,6 +24,7 @@ export function parseBakedSession(sessionJson: string): Session {
         panel.color_axis.range ??= null;
         panel.color_axis.label ??= null;
       }
+      panel.axis_equal ??= false;
     }
   }
   return parsed;
@@ -258,6 +259,7 @@ function isPanel(value: unknown): boolean {
     typeof value.id === "string" &&
     typeof value.title === "string" &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
+    (value.axis_equal == null || typeof value.axis_equal === "boolean") &&
     Array.isArray(value.bindings) &&
     value.bindings.every(isBinding) &&
     isNullable(value.color_by, isStyleDimension) &&

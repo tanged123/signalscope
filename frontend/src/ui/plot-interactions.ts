@@ -84,6 +84,7 @@ export class PlotInteractionController {
           alt: event.altKey,
         });
         if (!axes.x && !axes.y) return;
+        if (layout.axisEqual === true) axes.x = axes.y = true;
         event.preventDefault();
         this.host.setGesture("wheel: zoom");
         if (this.wheelEndTimer !== null) {
@@ -268,18 +269,31 @@ export class PlotInteractionController {
       if (box === null) return;
       if (axes.x && Math.abs(box.x1 - box.x0) <= 6) return;
       if (axes.y && Math.abs(box.y1 - box.y0) <= 6) return;
-      if (axes.y) {
-        this.host.applyYRange(
-          invertY(layout, Math.max(box.y0, box.y1)),
-          invertY(layout, Math.min(box.y0, box.y1)),
-        );
+      let x = {
+        min: invertX(layout, Math.min(box.x0, box.x1)),
+        max: invertX(layout, Math.max(box.x0, box.x1)),
+      };
+      let y = {
+        min: invertY(layout, Math.max(box.y0, box.y1)),
+        max: invertY(layout, Math.min(box.y0, box.y1)),
+      };
+      if (layout.axisEqual === true && axes.x !== axes.y) {
+        if (axes.x)
+          y = zoomRange(
+            layout.yRange,
+            (x.max - x.min) / (layout.xRange.max - layout.xRange.min),
+            (layout.yRange.min + layout.yRange.max) / 2,
+          );
+        else
+          x = zoomRange(
+            layout.xRange,
+            (y.max - y.min) / (layout.yRange.max - layout.yRange.min),
+            (layout.xRange.min + layout.xRange.max) / 2,
+          );
+        axes.x = axes.y = true;
       }
-      if (axes.x) {
-        this.host.applyXRange(
-          invertX(layout, Math.min(box.x0, box.x1)),
-          invertX(layout, Math.max(box.x0, box.x1)),
-        );
-      }
+      if (axes.y) this.host.applyYRange(y.min, y.max);
+      if (axes.x) this.host.applyXRange(x.min, x.max);
     };
     const cancel = (): void => {
       cleanup();

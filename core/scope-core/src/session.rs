@@ -584,6 +584,7 @@ mod tests {
                     id: "panel-a".into(),
                     title: "Body velocity".into(),
                     axis_style: AxisStyle::Gutter,
+                    axis_equal: None,
                     bindings: vec![Binding {
                         kind: BindingKind::Pick,
                         selector: None,

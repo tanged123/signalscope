@@ -594,6 +594,7 @@ mod tests {
             id: id.to_owned(),
             title: "Panel".to_owned(),
             axis_style: AxisStyle::Gutter,
+            axis_equal: None,
             bindings: vec![Binding {
                 kind: BindingKind::Pick,
                 selector: None,

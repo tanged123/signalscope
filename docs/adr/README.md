@@ -68,6 +68,7 @@ progress; amend earlier records with explicit links when their guidance changes.
 49. [Continuous line color axis](0057-continuous-line-color-axis.md)
 50. [Session display title and contextual chrome](0058-session-title-and-contextual-chrome.md)
 51. [Snapshot appearance and bundle color order](0059-snapshot-appearance-and-bundle-colors.md)
+52. [Equal axis scale](0060-equal-axis-scale.md)
 
 ## Superseded decisions
 

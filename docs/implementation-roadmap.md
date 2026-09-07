@@ -34,6 +34,8 @@ are recorded in [ADRs](adr/README.md).
   renderer code do not branch on host identity.
 - Line2D is an XY chart with independent searchable X/Y controls. X can be
   linked time, any signal, or a bundle paired to Y members by source key.
+  The limits dropdown includes a saved Axis equal checkbox: equal X/Y units per
+  pixel, with symmetric range expansion and coupled wheel zoom (ADR 0060).
   Each X/Y pair requires an exact shared timebase.
   Optional C binds a signal, source-matched bundle, or time to a separate
   continuous colorbar with shared automatic or fixed limits (ADR 0057).
@@ -51,7 +53,8 @@ are recorded in [ADRs](adr/README.md).
   network access. HTML exports also retain UI/plot font settings and global
   line-width scale, excluding machine-specific preferences. Source/focus color
   rules advance their starting palette slot per plotted bundle; literal series
-  overrides still win (ADR 0059).
+  overrides still win (ADR 0059). Merged picked signals recognize each local
+  channel as a bundle, including in existing saved sessions.
 
 ## Deliberate limits
 

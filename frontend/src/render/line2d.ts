@@ -21,6 +21,7 @@ interface Line2DAxisInput {
 }
 
 export interface Line2DRenderInput {
+  axisEqual?: boolean;
   colorScale?: ColorScale | undefined;
   xOrigin: number;
   series: readonly Line2DSeriesInput[];
