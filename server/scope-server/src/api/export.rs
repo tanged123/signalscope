@@ -35,7 +35,7 @@ pub async fn export_write(
         .map_err(|error| err(error.to_string()))?;
     let session =
         session::from_json(&request.session_json).map_err(|error| err(error.to_string()))?;
-    let manifest = {
+    let mut manifest = {
         let data = ctx.state.lock().map_err(|error| err(error.to_string()))?;
         let export = snapshot::plan_selected(
             &session,
@@ -48,6 +48,7 @@ pub async fn export_write(
         .map_err(|error| err(error.to_string()))?;
         snapshot::bake(&export, &session).map_err(|error| err(error.to_string()))?
     };
+    manifest.preferences_json = request.preferences_json;
     let html = snapshot::inject(&template, manifest).map_err(|error| err(error.to_string()))?;
     write_export_file(&path, &html).map_err(|error| err(error.to_string()))?;
     Ok(Json(Envelope::new(Some(path.display().to_string()))))
@@ -219,4 +220,66 @@ fn export_file_path(directory: &Path, file_name: &str, extension: &str) -> Resul
         path.set_extension(extension);
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn html_export_preserves_appearance_and_accepts_older_requests() {
+        let directory = std::env::temp_dir().join(format!("scope-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let slot = "<script id=\"signalscope-baked-data\" type=\"application/json\">";
+        std::fs::write(
+            directory.join("snapshot-template.html"),
+            format!("{slot}null</script>"),
+        )
+        .unwrap();
+        let path = directory.join("review.html");
+        let mut ctx = AppContext::for_tests(None);
+        ctx.frontend_dir = Some(directory.clone());
+        let dialogs = crate::dialogs::Scripted::default();
+        *dialogs.save.lock().unwrap() = Some(path.clone());
+        ctx.dialogs = Arc::new(dialogs);
+        let router = crate::build_router(ctx);
+        let preferences =
+            r#"{"schema_version":6,"plot_line_width_scale":1.75,"plot_font_size":12.5}"#;
+        for appearance in [Some(preferences), None] {
+            let mut payload = serde_json::json!({
+                "session_json": serde_json::to_string(&session::Session::default()).unwrap(),
+                "range": "all", "fidelity": "full", "selection": { "source_keys": [] }
+            });
+            if let Some(json) = appearance {
+                payload["preferences_json"] = json.into();
+            }
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/api/export_write")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            serde_json::to_vec(&Envelope::new(payload)).unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+            let html = std::fs::read_to_string(&path).unwrap();
+            let json = html
+                .strip_prefix(slot)
+                .unwrap()
+                .strip_suffix("</script>")
+                .unwrap();
+            let envelope: Envelope<scope_protocol::SnapshotManifest> =
+                serde_json::from_str(json).unwrap();
+            let manifest = envelope.open().unwrap();
+            assert_eq!(manifest.preferences_json.as_deref(), appearance);
+            session::from_json(&manifest.session_json).unwrap();
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

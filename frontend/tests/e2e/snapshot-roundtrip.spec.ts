@@ -1,8 +1,14 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import type { SnapshotManifest } from "../../src/generated/protocol";
 import { SESSION_SCHEMA_VERSION } from "../../src/generated/session";
 import type { Envelope } from "../../src/app/envelope";
+import { seal } from "../../src/app/envelope";
+import {
+  defaultPreferences,
+  snapshotPreferences,
+} from "../../src/app/preferences";
 import { expect, test } from "./fixtures";
 
 const artifacts = {
@@ -23,6 +29,68 @@ function bakedManifest(artifact: URL): SnapshotManifest {
 }
 
 test.describe("exported snapshot round trip", () => {
+  for (const scale of [0.75, 1.75]) {
+    test(`restores ${String(scale * 100)}% stroke appearance offline`, async ({
+      page,
+    }, testInfo) => {
+      const manifest = bakedManifest(artifacts.full);
+      manifest.preferences_json = snapshotPreferences({
+        ...defaultPreferences(),
+        ui_font_family: "arimo",
+        plot_font_family: "dejavu",
+        ui_font_size: 15,
+        plot_font_size: 12.5,
+        plot_line_width_scale: scale,
+      });
+      const html = readFileSync(artifacts.full, "utf8").replace(
+        /(<script id="signalscope-baked-data"[^>]*>)[\s\S]*?(<\/script>)/,
+        (_match, start: string, end: string) =>
+          start +
+          JSON.stringify(seal(manifest)).replaceAll("<", "\\u003c") +
+          end,
+      );
+      const path = testInfo.outputPath("appearance.html");
+      writeFileSync(path, html);
+      const requests: string[] = [];
+      page.on("request", (request) => {
+        if (/^https?:/.test(request.url())) requests.push(request.url());
+      });
+      await page.goto(pathToFileURL(path).href);
+      await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+      await expect(
+        page.locator(".chart-host canvas:not(.colorbar-canvas)").first(),
+      ).toBeVisible();
+      await expect(page.locator(".gpu-warning")).toBeHidden();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+      expect(
+        await page.evaluate(() => {
+          const style = getComputedStyle(document.documentElement);
+          return {
+            scale: style.getPropertyValue("--plot-line-width-scale"),
+            plotSize: style.getPropertyValue("--plot-font-size"),
+            uiSize: style.fontSize,
+            uiFont: style.getPropertyValue("--font-ui"),
+            plotFont: style.getPropertyValue("--font-plot"),
+          };
+        }),
+      ).toEqual({
+        scale: String(scale),
+        plotSize: "12.5",
+        uiSize: "15px",
+        uiFont: expect.stringContaining("Arimo"),
+        plotFont: expect.stringContaining("DejaVu Sans"),
+      });
+      await page
+        .locator(".plot-stat-row .plot-row-inspector-toggle")
+        .first()
+        .click();
+      await expect(
+        page.getByRole("slider", { name: "Line width", exact: true }),
+      ).toHaveValue("1.5");
+      expect(requests).toEqual([]);
+    });
+  }
+
   for (const [fidelity, artifact] of Object.entries(artifacts)) {
     test(`${fidelity} restores session state and data by value`, async ({
       page,

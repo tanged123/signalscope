@@ -103,6 +103,7 @@ export interface ExportPort {
     range: ExportRange,
     fidelity: ExportFidelity,
     selection: ExportSelection,
+    preferencesJson?: string,
   ): Promise<string | null>;
   saveFile(
     fileName: string,
@@ -127,6 +128,7 @@ export interface DataPlane {
   readonly preferences: PreferencesPort | null;
   readonly exporter: ExportPort | null;
   readonly bakedSessionJson?: string;
+  readonly bakedPreferencesJson?: string;
   listSignals(): Promise<SignalSummary[]>;
   listSources(): Promise<SourceSummary[]>;
   queryTiles(
@@ -142,7 +144,8 @@ export interface DataPlane {
 
 type BakedManifest = Envelope<SnapshotManifest>;
 type BakedManifestInput = Envelope<
-  Omit<SnapshotManifest, "line2d"> & Partial<Pick<SnapshotManifest, "line2d">>
+  Omit<SnapshotManifest, "line2d" | "preferences_json"> &
+    Partial<Pick<SnapshotManifest, "line2d" | "preferences_json">>
 >;
 
 export class HttpPlane implements DataPlane {
@@ -256,12 +259,14 @@ export class HttpPlane implements DataPlane {
         range: ExportRange,
         fidelity: ExportFidelity,
         selection: ExportSelection,
+        preferencesJson?: string,
       ) =>
         this.post<string | null>("export_write", {
           session_json: sessionJson,
           range,
           fidelity,
           selection,
+          preferences_json: preferencesJson ?? null,
         }),
       saveFile: async (
         fileName: string,
@@ -380,6 +385,7 @@ export class BakedPlane implements DataPlane {
   readonly exporter = null;
 
   readonly bakedSessionJson: string;
+  readonly bakedPreferencesJson?: string;
 
   private readonly payload: BakedManifest["payload"];
 
@@ -398,6 +404,9 @@ export class BakedPlane implements DataPlane {
   constructor(manifest: BakedManifestInput) {
     this.payload = open(manifest) as BakedManifest["payload"];
     this.bakedSessionJson = this.payload.session_json;
+    if (this.payload.preferences_json != null) {
+      this.bakedPreferencesJson = this.payload.preferences_json;
+    }
   }
 
   static fromDocument(documentRoot: Document = document): BakedPlane {
@@ -772,6 +781,7 @@ function createDemoManifest(): BakedManifest {
     },
   ];
   return seal({
+    preferences_json: null,
     session_json: JSON.stringify({
       app: "signalscope",
       schema_version: SESSION_SCHEMA_VERSION,

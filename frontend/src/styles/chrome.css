@@ -1,3 +1,27 @@
+.workbench {
+  --titlebar-height: max(30px, env(titlebar-area-height, 30px));
+}
+
+.title-bar {
+  app-region: drag;
+  padding-left: calc(env(titlebar-area-x, 0px) + 8px);
+  padding-right: max(
+    8px,
+    calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%))
+  );
+}
+
+.title-bar button,
+.title-bar input,
+.title-bar .app-menu {
+  app-region: no-drag;
+}
+
+.title-bar .app-menu {
+  top: 100%;
+  left: calc(env(titlebar-area-x, 0px) + 6px);
+}
+
 .workspace-name,
 .session-title-input {
   min-width: 0;

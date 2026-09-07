@@ -1,10 +1,26 @@
-import { _electron as electron, expect, test } from "@playwright/test";
+import {
+  _electron as electron,
+  expect,
+  test,
+  type JSHandle,
+} from "@playwright/test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION } from "../../src/generated/protocol";
 
-test("the packaged Electron workbench uses authenticated HttpPlane", async () => {
+interface WindowControls {
+  isMenuBarVisible(): boolean;
+  getBackgroundColor(): string;
+  maximize(): void;
+  isMaximized(): boolean;
+  unmaximize(): void;
+  minimize(): void;
+  isMinimized(): boolean;
+  restore(): void;
+}
+
+test("the packaged window integrates chrome and uses authenticated HttpPlane", async () => {
   const executablePath = process.env.SIGNALSCOPE_PACKAGED_BIN;
   if (executablePath === undefined) {
     test.skip(true, "packaged executable is not configured");
@@ -50,6 +66,69 @@ test("the packaged Electron workbench uses authenticated HttpPlane", async () =>
   try {
     const page = await application.firstWindow();
     await expect(page.locator(".formula-toggle")).toBeVisible();
+    const nativeWindow = (await application.browserWindow(
+      page,
+    )) as JSHandle<WindowControls>;
+    if (process.platform !== "darwin") {
+      expect(
+        await nativeWindow.evaluate((window) => window.isMenuBarVisible()),
+      ).toBe(false);
+    }
+    await expect(
+      page.getByRole("button", { name: "Application menu", exact: true }),
+    ).toHaveCount(1);
+    const safeArea = await page.evaluate(() => {
+      const overlay = (
+        navigator as Navigator & {
+          windowControlsOverlay: { getTitlebarAreaRect(): DOMRect };
+        }
+      ).windowControlsOverlay.getTitlebarAreaRect();
+      const menu = document
+        .querySelector(".menu-button")
+        ?.getBoundingClientRect();
+      const title = document
+        .querySelector(".workspace-name")
+        ?.getBoundingClientRect();
+      if (menu === undefined || title === undefined)
+        throw new Error("title row is missing");
+      return {
+        x: overlay.x,
+        right: overlay.right,
+        width: overlay.width,
+        menuLeft: menu.left,
+        titleRight: title.right,
+      };
+    });
+    expect(safeArea.width).toBeGreaterThan(0);
+    expect(safeArea.menuLeft).toBeGreaterThanOrEqual(safeArea.x);
+    expect(safeArea.titleRight).toBeLessThanOrEqual(safeArea.right);
+    await page.locator(".menu-button").focus();
+    await page.keyboard.press("t");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect
+      .poll(() =>
+        nativeWindow.evaluate((window) => window.getBackgroundColor()),
+      )
+      .toMatch(/eff1f4/i);
+    // Linux package CI runs Xvfb without a window manager to handle state changes.
+    if (process.platform !== "linux") {
+      await nativeWindow.evaluate((window) => window.maximize());
+      await expect
+        .poll(() => nativeWindow.evaluate((window) => window.isMaximized()))
+        .toBe(true);
+      await nativeWindow.evaluate((window) => window.unmaximize());
+      await expect
+        .poll(() => nativeWindow.evaluate((window) => window.isMaximized()))
+        .toBe(false);
+      await nativeWindow.evaluate((window) => window.minimize());
+      await expect
+        .poll(() => nativeWindow.evaluate((window) => window.isMinimized()))
+        .toBe(true);
+      await nativeWindow.evaluate((window) => window.restore());
+      await expect
+        .poll(() => nativeWindow.evaluate((window) => window.isMinimized()))
+        .toBe(false);
+    }
     if (expectWebGpu) await expect(page.locator(".gpu-warning")).toBeHidden();
     else await expect(page.locator(".gpu-warning")).toBeVisible();
     const state = await page.evaluate(

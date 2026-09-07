@@ -49,3 +49,29 @@ each supported operating system. Installer size increases, but no second data
 plane or native frontend API is introduced. ADR 0038 remains authoritative for
 the loopback server, authentication, `HttpPlane`, and snapshot architecture;
 only its no-installer consequence is superseded.
+
+## 2026-09-07 amendment: integrated window chrome
+
+The desktop window hides its native title text and removes the Windows/Linux
+menu bar. Native window controls overlay SignalScope's existing title row;
+the single application-menu button remains the command entry point. No new
+toolbar actions are added. macOS retains its system-level application menu.
+
+`desktop/src/window.ts` owns window buttons, their initial colors, and one
+WebContents-scoped `titlebar-theme` listener. The sandboxed preload observes
+the document's theme/style attributes and sends the existing surface/foreground
+tokens after DOM readiness and theme changes. The listener accepts only hex
+colors from the window's own main frame and loopback origin. It has no data or
+window-action commands, and nothing is exposed in the page's JavaScript world.
+The observer disconnects on final page teardown; WebContents owns IPC cleanup.
+
+Shared CSS uses the Window Controls Overlay safe-area variables to reserve
+space on either side, marks the title row draggable, and excludes the menu,
+buttons and title editor from dragging. Browsers and snapshots use the normal
+30px row through CSS fallbacks, without host detection or schema changes.
+
+Desktop tests cover menu removal, sandbox/preload options, theme publication
+and validation. Browser tests retain keyboard/menu/title editing coverage; the
+packaged Electron test checks safe-area layout, theme updates and
+minimize/maximize/restore behavior. Windows snapping and macOS traffic lights
+remain owned by Electron and the OS.

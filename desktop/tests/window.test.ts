@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const webContents = {
+    ipc: { on: vi.fn() },
+    mainFrame: { url: "http://127.0.0.1:43817/" },
     on: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     session: {
@@ -14,6 +16,9 @@ const mocks = vi.hoisted(() => {
     once: vi.fn(),
     loadURL: vi.fn(),
     show: vi.fn(),
+    removeMenu: vi.fn(),
+    setBackgroundColor: vi.fn(),
+    setTitleBarOverlay: vi.fn(),
   };
   return {
     webContents,
@@ -64,7 +69,14 @@ describe("secure Electron window", () => {
     expect(mocks.BrowserWindow).toHaveBeenCalledWith(
       expect.objectContaining({
         show: false,
+        titleBarStyle: "hidden",
+        titleBarOverlay: {
+          color: "#151920",
+          symbolColor: "#e6e8ec",
+          height: 30,
+        },
         webPreferences: {
+          preload: expect.stringMatching(/[/\\]preload\.js$/),
           nodeIntegration: false,
           contextIsolation: true,
           sandbox: true,
@@ -74,6 +86,7 @@ describe("secure Electron window", () => {
         },
       }),
     );
+    expect(mocks.window.removeMenu).toHaveBeenCalledOnce();
     expect(mocks.window.loadURL).toHaveBeenCalledWith(url);
     const navigation = mocks.webContents.on.mock.calls.find(
       ([name]) => name === "will-navigate",
@@ -81,5 +94,32 @@ describe("secure Electron window", () => {
     const event = { preventDefault: vi.fn() };
     navigation(event, "https://example.com");
     expect(event.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("matches native controls to the document theme and rejects other frames or malformed colors", () => {
+    createWindow("http://127.0.0.1:43817/");
+    const theme = mocks.webContents.ipc.on.mock.calls[0]?.[1] as (
+      event: { senderFrame: { url: string } | null },
+      colors: unknown,
+    ) => void;
+    const colors = { color: "#eff1f4", symbolColor: "#1a1e26" };
+    theme({ senderFrame: mocks.webContents.mainFrame }, colors);
+    expect(mocks.window.setBackgroundColor).toHaveBeenCalledWith(colors.color);
+    if (process.platform !== "darwin") {
+      expect(mocks.window.setTitleBarOverlay).toHaveBeenCalledWith(colors);
+    }
+    mocks.window.setBackgroundColor.mockClear();
+    theme({ senderFrame: null }, colors);
+    theme({ senderFrame: { ...mocks.webContents.mainFrame } }, colors);
+    for (const invalid of [
+      null,
+      "dark",
+      {},
+      { ...colors, color: "red" },
+      { ...colors, symbolColor: 123 },
+    ]) {
+      theme({ senderFrame: mocks.webContents.mainFrame }, invalid);
+    }
+    expect(mocks.window.setBackgroundColor).not.toHaveBeenCalled();
   });
 });

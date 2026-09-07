@@ -474,6 +474,7 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
 
     Ok(SnapshotManifest {
         session_json: serde_json::to_string(&baked_session)?,
+        preferences_json: None,
         signals,
         line2d: Some(line2d),
     })
@@ -793,6 +794,7 @@ mod tests {
         let signal = store.signal_by_path("a").expect("signal");
         let pyramid = pyramids.get(&signal.id).expect("pyramid");
         let expected = SnapshotManifest {
+            preferences_json: None,
             session_json: serde_json::to_string(&session).expect("session"),
             signals: vec![BakedSignal {
                 summary: signal_summary(
@@ -1156,7 +1158,8 @@ mod tests {
             ExportFidelity::Full,
         )
         .expect("plan");
-        let manifest = bake(&export, &session).expect("bake");
+        let mut manifest = bake(&export, &session).expect("bake");
+        manifest.preferences_json = Some(r#"{"plot_font_family":"</SCRIPT>"}"#.to_owned());
         let html = inject(
             "<script id=\"signalscope-baked-data\">null</script>",
             manifest,
@@ -1286,6 +1289,7 @@ mod tests {
 
     fn empty_manifest() -> scope_protocol::SnapshotManifest {
         scope_protocol::SnapshotManifest {
+            preferences_json: None,
             session_json: "{}".to_owned(),
             signals: Vec::new(),
             line2d: None,

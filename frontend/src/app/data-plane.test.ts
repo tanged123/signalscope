@@ -661,6 +661,16 @@ describe("HttpPlane", () => {
       reset_session: seal({ session_json: "{}", path: null }),
       load_preferences: seal(null),
       export_estimate: seal({ entries: [] }),
+      export_write: (payload) => {
+        expect(payload).toEqual({
+          session_json: "{}",
+          range: "visible",
+          fidelity: "full",
+          selection: { source_keys: [] },
+          preferences_json: '{"schema_version":6,"plot_line_width_scale":1.75}',
+        });
+        return seal("snapshot.html");
+      },
     });
 
     expect(await plane.restore.start("{}")).toBe("9");
@@ -673,6 +683,15 @@ describe("HttpPlane", () => {
     expect(
       (await plane.exporter.estimate("{}", { source_keys: [] })).entries,
     ).toEqual([]);
+    expect(
+      await plane.exporter.writeHtml(
+        "{}",
+        "visible",
+        "full",
+        { source_keys: [] },
+        '{"schema_version":6,"plot_line_width_scale":1.75}',
+      ),
+    ).toBe("snapshot.html");
   });
 
   it("rejects an invalid protocol version", async () => {
@@ -691,6 +710,7 @@ describe("snapshot capabilities", () => {
     const plane = new BakedPlane(
       seal({
         session_json: '{"app":"signalscope"}',
+        preferences_json: '{"schema_version":6,"plot_line_width_scale":1.75}',
         signals: [],
       }),
     );
@@ -698,5 +718,8 @@ describe("snapshot capabilities", () => {
     expect(plane.derived).toBeNull();
     expect(plane.exporter).toBeNull();
     expect(plane.bakedSessionJson).toBe('{"app":"signalscope"}');
+    expect(plane.bakedPreferencesJson).toBe(
+      '{"schema_version":6,"plot_line_width_scale":1.75}',
+    );
   });
 });

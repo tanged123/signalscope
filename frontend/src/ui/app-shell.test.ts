@@ -604,6 +604,12 @@ it("stores the first series as real focus when large additions enter ghost mode"
       channel: "response",
     },
   ]);
+  const nextRefs = refs.map((ref) => ({ ...ref, channel: "velocity" }));
+  shell.afterSeriesAdded(panel.id, nextRefs);
+  shell.afterSeriesAdded(panel.id, nextRefs);
+  expect(
+    shell.workspace.focusEntries(panel.id).map((entry) => entry.ref),
+  ).toEqual([refs[0], nextRefs[0]]);
 });
 
 interface DockProbe {
@@ -655,6 +661,43 @@ function bulkSummary(source: string, channel: string): SignalSummary {
     last_value: 1,
   };
 }
+
+it("exports the current appearance beside unchanged session widths", async () => {
+  const writeHtml = vi.fn(() => Promise.resolve(null));
+  const shell = Object.create(AppShell.prototype) as {
+    workspace: WorkspaceModel;
+    prefs: ReturnType<typeof defaultPreferences>;
+    plane: { exporter: { writeHtml: typeof writeHtml } };
+    runExport(
+      format: "html",
+      range: "all",
+      fidelity: "full",
+      pngScope: "focused",
+      png: null,
+      csv: undefined,
+      keys: readonly string[],
+    ): Promise<void>;
+  };
+  shell.workspace = new WorkspaceModel();
+  const panel = shell.workspace.addPanelRow();
+  shell.workspace.setPanelLineWidth(panel.id, 3);
+  shell.prefs = { ...defaultPreferences(), plot_line_width_scale: 1.75 };
+  shell.plane = { exporter: { writeHtml } };
+  const before = shell.workspace.snapshot();
+
+  await shell.runExport("html", "all", "full", "focused", null, undefined, [
+    "run",
+  ]);
+
+  expect(writeHtml).toHaveBeenCalledWith(
+    JSON.stringify(before),
+    "all",
+    "full",
+    { source_keys: ["run"] },
+    expect.stringContaining('"plot_line_width_scale":1.75'),
+  );
+  expect(shell.workspace.snapshot()).toEqual(before);
+});
 
 it("collapses export choices to one label per source", () => {
   expect(
@@ -1046,6 +1089,34 @@ describe("workspace theme persistence", () => {
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(shell.presentation.clear).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    undefined,
+    '{"schema_version":6,"plot_line_width_scale":1.75,"plot_font_size":12.5}',
+  ])(
+    "loads snapshot appearance with defaults for older HTML",
+    async (bakedPreferencesJson) => {
+      const shell = Object.create(AppShell.prototype) as {
+        plane: { preferences: null; bakedPreferencesJson: string | undefined };
+        prefs: ReturnType<typeof defaultPreferences>;
+        loadPreferences(): Promise<void>;
+      };
+      shell.plane = { preferences: null, bakedPreferencesJson };
+      shell.prefs = defaultPreferences();
+      await shell.loadPreferences();
+      expect(shell.prefs.plot_line_width_scale).toBe(
+        bakedPreferencesJson === undefined ? 1 : 1.75,
+      );
+      expect(
+        document.documentElement.style.getPropertyValue(
+          "--plot-line-width-scale",
+        ),
+      ).toBe(bakedPreferencesJson === undefined ? "1" : "1.75");
+      expect(shell.prefs.plot_font_size).toBe(
+        bakedPreferencesJson === undefined ? 9 : 12.5,
+      );
+    },
+  );
 
   it("uses the serialized theme for a baked plane without preferences", () => {
     const shell = Object.create(AppShell.prototype) as {
