@@ -571,7 +571,7 @@ button {
 
 .panel-toolbar-separator {
   width: 1px;
-  height: 100%;
+  align-self: stretch;
   flex: none;
   background: var(--border);
 }
@@ -589,7 +589,7 @@ button {
 }
 
 .panel-toolbar-control {
-  height: 100%;
+  min-height: 26px;
 }
 
 .panel-toolbar-control:hover,

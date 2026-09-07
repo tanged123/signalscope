@@ -19,6 +19,21 @@ test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await expect(page.locator(".workspace-row")).toHaveCount(2);
   await expect(bottomRow.locator(".panel")).toHaveCount(2);
 
+  const overflowingControls = await bottomRow
+    .locator(".panel-header")
+    .evaluateAll((headers) =>
+      headers.flatMap((header) => {
+        const bounds = header.getBoundingClientRect();
+        return [...header.querySelectorAll("button")]
+          .filter((button) => {
+            const control = button.getBoundingClientRect();
+            return control.top < bounds.top || control.bottom > bounds.bottom;
+          })
+          .map((button) => button.className);
+      }),
+    );
+  expect(overflowingControls).toEqual([]);
+
   await page.locator(".panel").last().locator(".panel-close").click();
   await page.locator(".panel").last().locator(".panel-close").click();
   await expect(page.locator(".panel")).toHaveCount(1);

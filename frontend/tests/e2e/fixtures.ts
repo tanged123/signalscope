@@ -59,6 +59,7 @@ export const test = testBase.extend<CoverageFixtures>({
 });
 
 export async function gotoApp(page: Page): Promise<void> {
+  await page.route("**/api/health", (route) => route.fulfill({ status: 503 }));
   await page.goto("/");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true", {
     timeout: 20_000,

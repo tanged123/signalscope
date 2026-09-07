@@ -1,10 +1,6 @@
 import { expect, gotoApp, test } from "./fixtures";
 import manifest from "../../package.json" with { type: "json" };
 
-test.beforeEach(async ({ page }) => {
-  await page.route("**/api/health", (route) => route.fulfill({ status: 503 }));
-});
-
 test("About opens useful release information from the menu and command palette", async ({
   page,
 }) => {

@@ -11,12 +11,14 @@ export function showInfoDialog(
   const dialog = document.createElement("dialog");
   dialog.className = `info-dialog ${kind}-dialog`;
   dialog.setAttribute("aria-label", title);
-  dialog.innerHTML = `<header><strong></strong><button type="button" aria-label="Close ${kind}">✕</button></header>`;
+  dialog.innerHTML =
+    '<header><strong></strong><button type="button">✕</button></header>';
   required(dialog, "strong").textContent = title;
   content.classList.add("info-content");
   dialog.append(content);
   const close = (): void => dialog.close();
   const closeButton = required<HTMLButtonElement>(dialog, "button");
+  closeButton.setAttribute("aria-label", `Close ${kind}`);
   closeButton.addEventListener("click", close);
   dialog.addEventListener("click", (event) => {
     if (event.target !== dialog) return;
