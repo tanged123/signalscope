@@ -42,6 +42,8 @@ export class ChartHost {
   private readonly chart: ChartGPUInstance;
   private readonly colorbar: Colorbar;
   private lastRequest: ChartRenderRequest | null = null;
+  private requestedRanges: { x: Range; y: readonly [number, number] } | null =
+    null;
   private readonly unregister: () => void;
   private xOrigin = 0;
   private seriesIds: string[] = [];
@@ -97,9 +99,14 @@ export class ChartHost {
 
   render(request: ChartRenderRequest): number {
     const started = performance.now();
+    this.lastRequest = request;
+    this.requestedRanges = { x: request.xRange, y: request.yRange };
+    request = {
+      ...request,
+      ...this.viewRanges(request.xRange, request.yRange),
+    };
     const ids = request.series.map((series) => series.id);
     let rebuilt = false;
-    this.lastRequest = request;
     this.drawColorbar();
     if (!sameStrings(ids, this.seriesIds) || request.xOrigin !== this.xOrigin) {
       this.seriesIds = ids;
@@ -186,7 +193,11 @@ export class ChartHost {
       this.lastLabels.y !== request.axes.y.label ||
       this.lastAxisStyle !== request.axes.style;
     if (!rebuilt && !labelsChanged && this.options !== null) {
-      this.setRangesOnly(request.xRange, request.yRange, request.xOrigin);
+      this.setRangesOnly(
+        this.requestedRanges.x,
+        this.requestedRanges.y,
+        request.xOrigin,
+      );
       return performance.now() - started;
     }
     this.lastLabels = {
@@ -219,6 +230,8 @@ export class ChartHost {
     xOrigin = this.xOrigin,
   ): void {
     if (this.options === null) return;
+    this.requestedRanges = { x: xRange, y: yRange };
+    ({ xRange, yRange } = this.viewRanges(xRange, yRange));
     this.xOrigin = xOrigin;
     this.options = {
       ...this.options,
@@ -268,12 +281,8 @@ export class ChartHost {
   resize(): void {
     this.chart.resize();
     this.drawColorbar();
-    if (this.lastLayout !== null) {
-      this.lastLayout = this.makeLayout(this.lastLayout.xRange, [
-        this.lastLayout.yRange.min,
-        this.lastLayout.yRange.max,
-      ]);
-    }
+    if (this.requestedRanges !== null)
+      this.setRangesOnly(this.requestedRanges.x, this.requestedRanges.y);
   }
 
   dispose(): void {
@@ -403,6 +412,7 @@ export class ChartHost {
   ): PlotLayout {
     const grid = this.grid(this.lastAxisStyle);
     return {
+      axisEqual: this.lastRequest?.axisEqual === true,
       plot: {
         x: grid.left,
         y: grid.top,
@@ -414,6 +424,28 @@ export class ChartHost {
       },
       xRange,
       yRange: { min: yRange[0], max: yRange[1] },
+    };
+  }
+
+  private viewRanges(xRange: Range, yRange: readonly [number, number]) {
+    if (this.lastRequest?.axisEqual !== true) return { xRange, yRange };
+    const grid = this.grid(this.lastRequest.axes.style);
+    const width = Math.max(
+      1,
+      this.container.clientWidth - grid.left - grid.right,
+    );
+    const height = Math.max(
+      1,
+      this.container.clientHeight - grid.top - grid.bottom,
+    );
+    const xSpan = xRange.max - xRange.min;
+    const ySpan = yRange[1] - yRange[0];
+    const scale = Math.max(xSpan / width, ySpan / height);
+    const xPadding = Math.max(0, (scale * width - xSpan) / 2);
+    const yPadding = Math.max(0, (scale * height - ySpan) / 2);
+    return {
+      xRange: { min: xRange.min - xPadding, max: xRange.max + xPadding },
+      yRange: [yRange[0] - yPadding, yRange[1] + yPadding] as const,
     };
   }
 }

@@ -48,11 +48,12 @@ function doubleClick(target: HTMLElement, x: number, y: number): void {
   target.dispatchEvent(event);
 }
 
-function fixture(): {
+function fixture(view: PlotLayout = layout): {
   overlay: HTMLCanvasElement;
   calls: {
     applyXRange: ReturnType<typeof vi.fn>;
     applyYRange: ReturnType<typeof vi.fn>;
+    applyRanges: ReturnType<typeof vi.fn>;
     fitView: ReturnType<typeof vi.fn>;
     setGesture: ReturnType<typeof vi.fn>;
     setBox: ReturnType<typeof vi.fn>;
@@ -64,15 +65,17 @@ function fixture(): {
   const calls = {
     applyXRange: vi.fn(),
     applyYRange: vi.fn(),
+    applyRanges: vi.fn(),
     fitView: vi.fn(),
     setGesture: vi.fn(),
     setBox: vi.fn(),
     beginAxisEdit: vi.fn(),
   };
   const host: PlotInteractionHost = {
-    layout: vi.fn(() => layout),
+    layout: vi.fn(() => view),
     applyXRange: calls.applyXRange,
     applyYRange: calls.applyYRange,
+    applyRanges: calls.applyRanges,
     fitView: calls.fitView,
     plotClick: vi.fn(),
     setGesture: calls.setGesture,
@@ -86,6 +89,75 @@ function fixture(): {
 }
 
 describe("PlotInteractionController", () => {
+  it.each([false, true])(
+    "zooms both equal axes with shift=%s around the pointer",
+    (shiftKey) => {
+      vi.useFakeTimers();
+      const { overlay, calls } = fixture({ ...layout, axisEqual: true });
+      const event = new WheelEvent("wheel", { deltaY: -100, shiftKey });
+      Object.defineProperties(event, {
+        offsetX: { value: 50 },
+        offsetY: { value: 50 },
+      });
+      overlay.dispatchEvent(event);
+      expect(calls.applyRanges).toHaveBeenCalledOnce();
+      expect(calls.applyXRange).not.toHaveBeenCalled();
+      expect(calls.applyYRange).not.toHaveBeenCalled();
+      const [x, y] = calls.applyRanges.mock.calls[0] as [
+        PlotLayout["xRange"],
+        PlotLayout["yRange"],
+      ];
+      expect(x.max - x.min).toBeLessThan(10);
+      expect(x.max - x.min).toBeCloseTo(y.max - y.min);
+      expect((x.min + x.max) / 2).toBe(5);
+      expect((y.min + y.max) / 2).toBe(0);
+      vi.runAllTimers();
+      vi.useRealTimers();
+    },
+  );
+
+  it("zooms both equal axes during an axis-constrained box drag", () => {
+    const { overlay, calls } = fixture({ ...layout, axisEqual: true });
+    pointer(overlay, "pointerdown", 20, 50);
+    pointer(overlay, "pointermove", 80, 52);
+    pointer(overlay, "pointerup", 80, 52);
+    expect(calls.applyRanges).toHaveBeenCalledExactlyOnceWith(
+      { min: 2, max: 8 },
+      { min: -3, max: 3 },
+    );
+    expect(calls.applyXRange).not.toHaveBeenCalled();
+    expect(calls.applyYRange).not.toHaveBeenCalled();
+  });
+
+  it("publishes a two-axis box in one equal-axis update", () => {
+    const { overlay, calls } = fixture({ ...layout, axisEqual: true });
+    pointer(overlay, "pointerdown", 20, 30);
+    pointer(overlay, "pointermove", 70, 60);
+    pointer(overlay, "pointerup", 70, 60);
+    expect(calls.applyRanges).toHaveBeenCalledExactlyOnceWith(
+      { min: 2, max: 7 },
+      { min: -1, max: 2 },
+    );
+    expect(calls.applyXRange).not.toHaveBeenCalled();
+    expect(calls.applyYRange).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "keeps independent wheel zoom with shift=%s",
+    (shiftKey) => {
+      vi.useFakeTimers();
+      const { overlay, calls } = fixture();
+      overlay.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -100, shiftKey }),
+      );
+      expect(calls.applyRanges).not.toHaveBeenCalled();
+      expect(calls.applyXRange).toHaveBeenCalledTimes(shiftKey ? 0 : 1);
+      expect(calls.applyYRange).toHaveBeenCalledOnce();
+      vi.runAllTimers();
+      vi.useRealTimers();
+    },
+  );
+
   beforeEach(() => vi.restoreAllMocks());
 
   it("locks horizontal drags to X and applies the selected range", () => {

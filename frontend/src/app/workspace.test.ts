@@ -1072,6 +1072,7 @@ describe("WorkspaceModel", () => {
       id: "panel-1",
       title: "Panel 1",
       axis_style: "gutter",
+      axis_equal: false,
       bindings: [],
       color_by: "source",
       dash_by: null,

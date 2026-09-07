@@ -111,6 +111,7 @@ export interface PanelState {
   id: string;
   title: string;
   axis_style: AxisStyle;
+  axis_equal: boolean | null;
   bindings: Binding[];
   color_by: StyleDimension | null;
   dash_by: StyleDimension | null;

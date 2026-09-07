@@ -211,7 +211,10 @@ function assignHues(
   if (panel.color_by === null) return refs.map(() => 1);
   const dimension = panel.color_by;
   const shiftByBundle = dimension === "source" || dimension === "focus";
-  const bindings = new Map<number, Map<string, number>>();
+  const bindings = new Map<
+    string,
+    { offset: number; slots: Map<string, number> }
+  >();
   const values = new Map<string, number>();
   const hues: number[] = [];
   refs.forEach(({ ref, series, bindingIndex }, index) => {
@@ -223,14 +226,18 @@ function assignHues(
       bindingIndex,
       focused[index] ?? false,
     );
-    if (shiftByBundle && !bindings.has(bindingIndex)) {
-      bindings.set(bindingIndex, new Map());
+    const bundleKey = JSON.stringify([
+      bindingIndex,
+      panel.bindings[bindingIndex]?.kind === "pick" ? ref.channel : null,
+    ]);
+    if (shiftByBundle && !bindings.has(bundleKey)) {
+      bindings.set(bundleKey, { offset: bindings.size, slots: new Map() });
     }
-    const slots =
-      (shiftByBundle ? bindings.get(bindingIndex) : undefined) ?? values;
+    const bundle = shiftByBundle ? bindings.get(bundleKey) : undefined;
+    const slots = bundle?.slots ?? values;
     let hue = slots.get(value);
     if (hue === undefined) {
-      hue = (slots.size % 8) + 1 + (shiftByBundle ? bindings.size - 1 : 0);
+      hue = hueForSlot(slots.size + 1 + (bundle?.offset ?? 0));
       slots.set(value, hue);
     }
     hues.push(hue);

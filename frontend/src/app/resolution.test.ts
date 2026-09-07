@@ -7,6 +7,8 @@ import type {
   SeriesOverride,
 } from "../generated/session";
 import { Catalog } from "./catalog";
+import { WorkspaceModel } from "./workspace";
+import { parseBakedSession } from "./baked-session";
 import {
   appliedOverrides,
   dimensionCounts,
@@ -34,6 +36,7 @@ function panel(): PanelState {
     id: "panel-1",
     title: "Panel 1",
     axis_style: "gutter",
+    axis_equal: false,
     bindings: [],
     color_by: "source",
     dash_by: null,
@@ -233,6 +236,64 @@ describe("resolvePanel", () => {
         .map((entry) => entry.hue),
     ).toEqual([1, 2, 1, 2, 1, 2]);
   });
+
+  it.each(["source", "focus"] as const)(
+    "shifts merged picked channel bundles with %s coloring, including restored sessions",
+    (dimension) => {
+      const catalog = Catalog.build(
+        ["a", "b", "c"].flatMap((source) =>
+          ["temp", "speed", "pressure"].map((channel) =>
+            signal(source, channel),
+          ),
+        ),
+      );
+      const workspace = new WorkspaceModel();
+      const state = workspace.addPanelRow();
+      state.color_by = dimension;
+      for (const source_key of ["a", "b", "c"]) {
+        workspace.addSeriesRefs(
+          state.id,
+          ["speed", "temp", "pressure"].map((channel) => ({
+            source_key,
+            channel,
+          })),
+        );
+      }
+      expect(state.bindings).toHaveLength(1);
+      expect(
+        resolvePanel(catalog, state, []).map((entry) => entry.hue),
+      ).toEqual([1, 2, 3, 2, 3, 4, 3, 4, 5]);
+      state.focus = ["speed", "temp", "pressure"].map((channel) => ({
+        kind: "series",
+        ref: { source_key: "a", channel },
+        source_key: null,
+        channel: null,
+      }));
+      state.ghost_mode = "ghost";
+      const restored = parseBakedSession(JSON.stringify(workspace.snapshot()))
+        .tabs[0]?.panels[0];
+      if (restored === undefined) throw new Error("missing panel");
+      const resolved = resolvePanel(catalog, restored, []);
+      expect(
+        resolved.filter((entry) => entry.focused).map((entry) => entry.hue),
+      ).toEqual([1, 2, 3]);
+      expect(
+        resolved
+          .filter((entry) => !entry.focused)
+          .every((entry) => entry.hue === null),
+      ).toBe(true);
+      workspace.patchSeriesOverride(
+        state.id,
+        { source_key: "a", channel: "temp" },
+        { color_slot: 6 },
+      );
+      expect(
+        resolvePanel(catalog, state, []).find(
+          (entry) => entry.path === "a/temp",
+        )?.hue,
+      ).toBe(6);
+    },
+  );
 
   it.each(["source", "focus"] as const)(
     "shifts %s colors per bundle in plotting order, including focused representatives",

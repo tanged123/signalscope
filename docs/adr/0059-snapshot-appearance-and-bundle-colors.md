@@ -36,8 +36,12 @@ or protocol-version increment. New snapshots embed the matching runtime.
 
 `app/resolution.ts` owns bundle color allocation. Source and focus color rules
 start one palette step later for each subsequent nonempty binding in plotting
-order. Each bundle retains its own first-appearance sequence. Explicit overrides
-still win; flat, channel, set, and attribute rules retain their meanings.
+order. Each bundle retains its own first-appearance sequence.
+Within a merged pick binding, each local channel is a bundle with
+its own stable starting offset; this covers tree and axis-picker additions and
+previously saved merged picks. Query and named-set bindings retain their binding
+boundaries. Interleaved members reuse the offset assigned at first appearance.
+Explicit overrides still win; flat, channel, set, and attribute rules retain their meanings.
 Each large bundle arrival focuses its first member unless a member is already
 focused; prior bundles keep their focus. Ghost members remain gray.
 Existing serialized binding order reproduces the

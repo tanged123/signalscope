@@ -146,6 +146,7 @@
         "id": "string",
         "title": "string",
         "axis_style": "AxisStyle",
+        "axis_equal": "bool?",
         "bindings": "Binding[]",
         "color_by": "StyleDimension?",
         "dash_by": "StyleDimension?",

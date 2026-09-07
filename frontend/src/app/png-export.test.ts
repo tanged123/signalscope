@@ -8,6 +8,7 @@ function panel(id: string, title: string): PanelState {
     id,
     title,
     axis_style: "gutter",
+    axis_equal: false,
     bindings: [],
     color_by: "source",
     dash_by: null,

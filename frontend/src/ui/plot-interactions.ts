@@ -32,6 +32,7 @@ export interface PlotInteractionHost {
   layout(): PlotLayout | null;
   applyXRange(min: number, max: number): void;
   applyYRange(min: number, max: number): void;
+  applyRanges(x: Range, y: Range): void;
   fitView(): void;
   plotClick(
     x: number,
@@ -84,6 +85,7 @@ export class PlotInteractionController {
           alt: event.altKey,
         });
         if (!axes.x && !axes.y) return;
+        if (layout.axisEqual === true) axes.x = axes.y = true;
         event.preventDefault();
         this.host.setGesture("wheel: zoom");
         if (this.wheelEndTimer !== null) {
@@ -94,6 +96,8 @@ export class PlotInteractionController {
           this.host.setGesture(null);
         }, 1000);
         const factor = wheelZoomFactor(event.deltaY);
+        let nextY: Range | null = null;
+        let nextX: Range | null = null;
         if (axes.y) {
           const pivotY = invertY(
             layout,
@@ -103,8 +107,7 @@ export class PlotInteractionController {
               layout.plot.y + layout.plot.height,
             ),
           );
-          const nextY = zoomRange(layout.yRange, factor, pivotY);
-          this.host.applyYRange(nextY.min, nextY.max);
+          nextY = zoomRange(layout.yRange, factor, pivotY);
         }
         if (axes.x) {
           const pivotX = invertX(
@@ -115,14 +118,9 @@ export class PlotInteractionController {
               layout.plot.x + layout.plot.width,
             ),
           );
-          const nextX = zoomScaledRange(
-            layout.xRange,
-            factor,
-            pivotX,
-            layout.xScale,
-          );
-          this.host.applyXRange(nextX.min, nextX.max);
+          nextX = zoomScaledRange(layout.xRange, factor, pivotX, layout.xScale);
         }
+        this.applyZoomRanges(nextX, nextY, layout.axisEqual === true);
       },
       { passive: false },
     );
@@ -268,18 +266,34 @@ export class PlotInteractionController {
       if (box === null) return;
       if (axes.x && Math.abs(box.x1 - box.x0) <= 6) return;
       if (axes.y && Math.abs(box.y1 - box.y0) <= 6) return;
-      if (axes.y) {
-        this.host.applyYRange(
-          invertY(layout, Math.max(box.y0, box.y1)),
-          invertY(layout, Math.min(box.y0, box.y1)),
-        );
+      let x = {
+        min: invertX(layout, Math.min(box.x0, box.x1)),
+        max: invertX(layout, Math.max(box.x0, box.x1)),
+      };
+      let y = {
+        min: invertY(layout, Math.max(box.y0, box.y1)),
+        max: invertY(layout, Math.min(box.y0, box.y1)),
+      };
+      if (layout.axisEqual === true && axes.x !== axes.y) {
+        if (axes.x)
+          y = zoomRange(
+            layout.yRange,
+            (x.max - x.min) / (layout.xRange.max - layout.xRange.min),
+            (layout.yRange.min + layout.yRange.max) / 2,
+          );
+        else
+          x = zoomRange(
+            layout.xRange,
+            (y.max - y.min) / (layout.yRange.max - layout.yRange.min),
+            (layout.xRange.min + layout.xRange.max) / 2,
+          );
+        axes.x = axes.y = true;
       }
-      if (axes.x) {
-        this.host.applyXRange(
-          invertX(layout, Math.min(box.x0, box.x1)),
-          invertX(layout, Math.max(box.x0, box.x1)),
-        );
-      }
+      this.applyZoomRanges(
+        axes.x ? x : null,
+        axes.y ? y : null,
+        layout.axisEqual === true,
+      );
     };
     const cancel = (): void => {
       cleanup();
@@ -295,6 +309,19 @@ export class PlotInteractionController {
     this.overlay.addEventListener("pointermove", move);
     this.overlay.addEventListener("pointerup", finish);
     this.overlay.addEventListener("pointercancel", cancel);
+  }
+
+  private applyZoomRanges(
+    x: Range | null,
+    y: Range | null,
+    equal: boolean,
+  ): void {
+    if (equal && x !== null && y !== null) {
+      this.host.applyRanges(x, y);
+      return;
+    }
+    if (y !== null) this.host.applyYRange(y.min, y.max);
+    if (x !== null) this.host.applyXRange(x.min, x.max);
   }
 
   private setBox(box: InteractionBox | null): void {

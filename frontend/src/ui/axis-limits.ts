@@ -3,6 +3,7 @@ import { positionPanelPopover } from "./panel-menu";
 
 type Limits = [number, number] | null;
 export interface AxisLimits {
+  axisEqual: boolean;
   x: Limits;
   y: Limits;
   c: Limits;
@@ -111,7 +112,17 @@ export function showAxisLimits(
     fieldset.append(fields);
     form.append(fieldset);
   }
-  form.append(labels);
+  const equalLabel = document.createElement("label");
+  equalLabel.className = "axis-limits-equal";
+  const equal = document.createElement("input");
+  equal.type = "checkbox";
+  equal.checked = state.axis_equal === true;
+  equalLabel.append(equal, "Axis equal");
+  form.append(equalLabel);
+  const equalNote = document.createElement("div");
+  equalNote.className = "axis-limits-note";
+  equalNote.textContent = "Equal X/Y units per pixel; expands limits to fit.";
+  form.append(equalNote, labels);
   if (state.x_axis.kind === "time") {
     const note = document.createElement("div");
     note.className = "axis-limits-note";
@@ -141,6 +152,7 @@ export function showAxisLimits(
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const draft: AxisLimits = {
+      axisEqual: equal.checked,
       x: null,
       y: null,
       c: null,

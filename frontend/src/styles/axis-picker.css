@@ -118,6 +118,19 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+.axis-limits-editor .axis-limits-equal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  color: var(--fg-2);
+}
+
+.axis-limits-equal input {
+  width: auto;
+  accent-color: var(--fg-2);
+}
+
 .axis-limits-editor [role="alert"]:not(:empty) {
   display: block;
   padding: 4px;

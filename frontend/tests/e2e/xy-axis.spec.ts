@@ -232,6 +232,14 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await editor.getByLabel("Y limits mode").selectOption("fixed");
     await editor.getByLabel("Y minimum", { exact: true }).fill("1");
     await editor.getByLabel("Y maximum", { exact: true }).fill("8");
+    const equal = editor.getByRole("checkbox", {
+      name: "Axis equal",
+      exact: true,
+    });
+    await expect(equal).not.toBeChecked();
+    await equal.focus();
+    await page.keyboard.press("Space");
+    await expect(equal).toBeChecked();
     await editor.getByRole("button", { name: "Apply limits" }).click();
     await expect(editor).toBeHidden();
     await expect(limitsButton).toBeFocused();
@@ -245,6 +253,9 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect(colorbar).toBeVisible();
     await expect(colorbar).toHaveAttribute("aria-label", /0 to 100/);
     await panel.locator(".panel-axis-limits").click();
+    await expect(
+      panel.getByRole("checkbox", { name: "Axis equal", exact: true }),
+    ).toBeChecked();
     await panel.getByLabel("C limits mode").selectOption("fixed");
     await panel.getByLabel("C minimum", { exact: true }).fill("20");
     await panel.getByLabel("C maximum", { exact: true }).fill("10");
@@ -393,6 +404,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       readFileSync(pathToFileURL(workspacePath), "utf8"),
     ) as Session;
     expect(saved.tabs[0]?.panels[0]?.x_range).toEqual([0, 10]);
+    expect(saved.tabs[0]?.panels[0]?.axis_equal).toBe(true);
     expect(saved.tabs[0]?.panels[0]?.y_range).toEqual([1, 8]);
     const snapshotPath = testInfo.outputPath("xy-color.html");
     await promisify(execFile)(
@@ -433,6 +445,11 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       /mismatch|unknown|unavailable|failed/i,
     );
     expect(offlineRequests).toEqual([]);
+    await page.locator(".panel-axis-limits").click();
+    await expect(
+      page.getByRole("checkbox", { name: "Axis equal", exact: true }),
+    ).toBeChecked();
+    await page.keyboard.press("Escape");
     await page.screenshot({
       path: testInfo.outputPath("xy-color-offline.png"),
     });

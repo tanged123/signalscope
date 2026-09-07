@@ -27,6 +27,10 @@ collapsed legends use a plot inset. Placement never adds a chart gutter or
 republishes GPU series. Plot PNGs include an inset independently of the DOM mount.
 `ui/panel-axes.ts` owns axis controls and their lifetime; `ui/axis-actions.ts`
 coordinates binding changes and scale-only updates through narrow callbacks.
+The limits action also persists the per-panel equal-axis flag. ChartHost expands
+display ranges to equal units per pixel using the plot rectangle and publishes
+those ranges to interactions and overlays; requested limits remain separate for
+resize and disabling. See [ADR 0060](adr/0060-equal-axis-scale.md).
 
 ## System boundaries
 
