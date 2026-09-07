@@ -48,6 +48,7 @@ import {
   FONT_FAMILIES,
   fontLabel,
   parsePreferences,
+  snapshotPreferences,
   PLOT_FONT_SIZE,
   PLOT_LINE_WIDTH_SCALE,
   UI_FONT_SIZE,
@@ -55,7 +56,11 @@ import {
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { LinePresentationController } from "../app/line-presentation-controller";
 import { Catalog } from "../app/catalog";
-import { resolvePanel, type ResolvedSeries } from "../app/resolution";
+import {
+  matchesAnyFocus,
+  resolvePanel,
+  type ResolvedSeries,
+} from "../app/resolution";
 import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
 import { WorkspaceModel } from "../app/workspace";
@@ -1687,7 +1692,8 @@ export class AppShell {
   }
 
   private focusFirstSeries(panelId: string, refs: readonly SeriesRef[]): void {
-    if (this.workspace.focusEntries(panelId).length > 0) return;
+    const focus = this.workspace.focusEntries(panelId);
+    if (refs.some((ref) => matchesAnyFocus(focus, ref))) return;
     const first = refs[0];
     if (first === undefined) return;
     this.workspace.toggleFocus(panelId, {
@@ -1992,6 +1998,10 @@ export class AppShell {
    * touching the stored file (it is only written on a user change). */
   private async loadPreferences(): Promise<void> {
     const port = this.plane.preferences;
+    const baked = this.plane.bakedPreferencesJson;
+    if (baked !== undefined) {
+      this.prefs = parsePreferences(baked) ?? defaultPreferences();
+    }
     if (port !== null) {
       try {
         const json = await port.load();
@@ -2173,6 +2183,7 @@ export class AppShell {
         range,
         fidelity,
         this.exportSelection(setKeys),
+        snapshotPreferences(this.prefs),
       );
     } else if (format === "png") {
       if (pngScope === "all") {

@@ -234,6 +234,62 @@ describe("resolvePanel", () => {
     ).toEqual([1, 2, 1, 2, 1, 2]);
   });
 
+  it.each(["source", "focus"] as const)(
+    "shifts %s colors per bundle in plotting order, including focused representatives",
+    (dimension) => {
+      const bundledCatalog = Catalog.build(
+        ["a", "b", "c"].flatMap((source) =>
+          ["temp", "speed", "pressure"].map((channel) =>
+            signal(source, channel),
+          ),
+        ),
+      );
+      const state = panel();
+      state.color_by = dimension;
+      state.bindings = ["speed", "temp", "pressure"].map((selector) => ({
+        kind: "query",
+        selector,
+        refs: [],
+        set_id: null,
+      }));
+      expect(
+        resolvePanel(bundledCatalog, state, []).map((entry) => entry.hue),
+      ).toEqual([1, 2, 3, 2, 3, 4, 3, 4, 5]);
+      state.focus = ["speed", "temp", "pressure"].map((channel) => ({
+        kind: "series",
+        ref: { source_key: "a", channel },
+        source_key: null,
+        channel: null,
+      }));
+      state.ghost_mode = "ghost";
+      const resolved = resolvePanel(bundledCatalog, state, []);
+      expect(
+        resolved.filter((entry) => entry.focused).map((entry) => entry.hue),
+      ).toEqual([1, 2, 3]);
+      expect(
+        resolved
+          .filter((entry) => !entry.focused)
+          .every((entry) => entry.hue === null),
+      ).toBe(true);
+      state.overrides = [
+        {
+          target_ref: { source_key: "a", channel: "temp" },
+          target_selector: null,
+          color_slot: 6,
+          dash: null,
+          width: null,
+          opacity: null,
+          visible: null,
+        },
+      ];
+      expect(
+        resolvePanel(bundledCatalog, state, []).find(
+          (entry) => entry.path === "a/temp",
+        )?.hue,
+      ).toBe(6);
+    },
+  );
+
   it("assigns focus hues in focus-set order", () => {
     const state = panel();
     state.color_by = "focus";
