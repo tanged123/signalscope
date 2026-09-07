@@ -210,6 +210,8 @@ function assignHues(
 ): number[] {
   if (panel.color_by === null) return refs.map(() => 1);
   const dimension = panel.color_by;
+  const shiftByBundle = dimension === "source" || dimension === "focus";
+  const bindings = new Map<number, Map<string, number>>();
   const values = new Map<string, number>();
   const hues: number[] = [];
   refs.forEach(({ ref, series, bindingIndex }, index) => {
@@ -221,10 +223,15 @@ function assignHues(
       bindingIndex,
       focused[index] ?? false,
     );
-    let hue = values.get(value);
+    if (shiftByBundle && !bindings.has(bindingIndex)) {
+      bindings.set(bindingIndex, new Map());
+    }
+    const slots =
+      (shiftByBundle ? bindings.get(bindingIndex) : undefined) ?? values;
+    let hue = slots.get(value);
     if (hue === undefined) {
-      hue = (values.size % 8) + 1;
-      values.set(value, hue);
+      hue = (slots.size % 8) + 1 + (shiftByBundle ? bindings.size - 1 : 0);
+      slots.set(value, hue);
     }
     hues.push(hue);
   });
@@ -345,7 +352,7 @@ function sameRef(left: SeriesRef, right: SeriesRef): boolean {
   return left.source_key === right.source_key && left.channel === right.channel;
 }
 
-function matchesAnyFocus(
+export function matchesAnyFocus(
   entries: readonly FocusEntry[],
   ref: SeriesRef,
 ): boolean {

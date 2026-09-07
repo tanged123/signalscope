@@ -45,7 +45,10 @@ are recorded in [ADRs](adr/README.md).
 - Live queries use adaptive pyramid resolution and retained overview/detail
   responses. The renderer remains deterministic from tiles, viewport, and
   design tokens. Snapshots embed selected tile data and session state without
-  network access.
+  network access. HTML exports also retain UI/plot font settings and global
+  line-width scale, excluding machine-specific preferences. Source/focus color
+  rules advance their starting palette slot per plotted bundle; literal series
+  overrides still win (ADR 0059).
 
 ## Deliberate limits
 

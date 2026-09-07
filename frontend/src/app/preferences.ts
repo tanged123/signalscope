@@ -70,6 +70,17 @@ export function defaultPreferences(): Preferences {
   };
 }
 
+export function snapshotPreferences(prefs: Preferences): string {
+  return JSON.stringify({
+    schema_version: prefs.schema_version,
+    ui_font_family: prefs.ui_font_family,
+    plot_font_family: prefs.plot_font_family,
+    ui_font_size: prefs.ui_font_size,
+    plot_font_size: prefs.plot_font_size,
+    plot_line_width_scale: prefs.plot_line_width_scale,
+  });
+}
+
 export function clampUiFontSize(value: number): number {
   const clamped = Math.min(UI_FONT_SIZE.max, Math.max(UI_FONT_SIZE.min, value));
   return Math.round(clamped);

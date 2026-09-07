@@ -49,6 +49,11 @@ Both feed the same presentation code. Electron starts and presents the server;
 it provides no second native data API. Bootstrap selects the plane; views use
 capabilities, never host identity.
 
+HTML export captures UI/plot fonts, sizes and the global stroke scale through
+`app/preferences.ts`, using versioned `preferences_json` in the manifest.
+`BakedPlane` publishes it beside session JSON; the shell applies it before plot
+mount. Missing appearance retains defaults. See [ADR 0059](adr/0059-snapshot-appearance-and-bundle-colors.md).
+
 ## Ownership and placement
 
 Shell markup, status publication, inline session-title editing, and Help live

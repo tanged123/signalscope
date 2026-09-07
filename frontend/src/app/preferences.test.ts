@@ -9,6 +9,7 @@ import {
   defaultPreferences,
   fontStack,
   parsePreferences,
+  snapshotPreferences,
   PLOT_FONT_SIZE,
   UI_FONT_SIZE,
 } from "./preferences";
@@ -38,6 +39,28 @@ describe("preferences", () => {
   it("parses a round-tripped document", () => {
     const prefs = { ...defaultPreferences(), plot_font_size: 11.5 };
     expect(parsePreferences(JSON.stringify(prefs))).toEqual(prefs);
+  });
+
+  it("captures appearance without local paths or resource settings", () => {
+    const appearance = {
+      ui_font_family: "arimo" as const,
+      plot_font_family: "dejavu" as const,
+      ui_font_size: 15,
+      plot_font_size: 12.5,
+      plot_line_width_scale: 1.75,
+    };
+    const json = snapshotPreferences({
+      ...defaultPreferences(),
+      ...appearance,
+      cache_root: "/private/cache",
+      recipe_directory: "/private/recipes",
+      ingest_working_bytes: "1234",
+    });
+    expect(JSON.parse(json)).toEqual({ schema_version: 6, ...appearance });
+    expect(parsePreferences(json)).toEqual({
+      ...defaultPreferences(),
+      ...appearance,
+    });
   });
 
   it("migrates schema 1 with default budgets", () => {

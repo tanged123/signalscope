@@ -294,6 +294,7 @@ export interface ExportWriteRequest {
   range: ExportRange;
   fidelity: ExportFidelity;
   selection: ExportSelection;
+  preferences_json: string | null;
 }
 
 export type ExportFileKind = "png" | "csv";
@@ -331,6 +332,7 @@ export interface BakedLine2D {
 
 export interface SnapshotManifest {
   session_json: string;
+  preferences_json: string | null;
   signals: BakedSignal[];
   line2d: BakedLine2D[] | null;
 }

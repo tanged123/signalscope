@@ -400,7 +400,8 @@
         "session_json": "string",
         "range": "ExportRange",
         "fidelity": "ExportFidelity",
-        "selection": "ExportSelection"
+        "selection": "ExportSelection",
+        "preferences_json": "string?"
       }
     },
     "ExportFileKind": {
@@ -452,6 +453,7 @@
       "kind": "object",
       "fields": {
         "session_json": "string",
+        "preferences_json": "string?",
         "signals": "BakedSignal[]",
         "line2d": "BakedLine2D[]?"
       }

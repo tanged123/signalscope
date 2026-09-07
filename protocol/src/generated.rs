@@ -484,6 +484,8 @@ pub struct ExportWriteRequest {
     pub range: ExportRange,
     pub fidelity: ExportFidelity,
     pub selection: ExportSelection,
+    #[serde(default)]
+    pub preferences_json: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -534,6 +536,8 @@ pub struct BakedLine2D {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SnapshotManifest {
     pub session_json: String,
+    #[serde(default)]
+    pub preferences_json: Option<String>,
     pub signals: Vec<BakedSignal>,
     #[serde(default)]
     pub line2d: Option<Vec<BakedLine2D>>,

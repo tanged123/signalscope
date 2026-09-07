@@ -75,3 +75,9 @@ Schema 6 makes the former 200% series-stroke appearance the new 100% baseline.
 The stored range remains 0.5-2 in quarter steps. Loading a schema 1-5 document
 resets `plot_line_width_scale` to 1 once; schema 6 documents preserve their
 saved value. Axes, grids, markers, annotations, and chrome remain unaffected.
+
+## 2026-09-07 amendment: snapshot appearance
+
+[ADR 0059](0059-snapshot-appearance-and-bundle-colors.md) replaces offline
+defaults with captured fonts, sizes and stroke scale when present. Snapshots
+retain defaults for absent fields and exclude machine-specific preferences.
