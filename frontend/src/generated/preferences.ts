@@ -2,7 +2,7 @@
 
 export const PREFERENCES_SCHEMA_VERSION = 7 as const;
 
-export type ColorPalette = "matlab" | "tol_bright" | "tol_vibrant" | "tol_contrast" | "custom";
+export type ColorPalette = "matlab" | "tol_bright" | "tol_vibrant" | "tol_contrast" | "okabe_ito" | "tableau10" | "brewer_dark2" | "brewer_set1" | "brewer_set2" | "brewer_set3" | "brewer_paired" | "custom";
 
 export type ContourPalette = "viridis" | "plasma" | "inferno" | "magma" | "batlow" | "vik" | "gray" | "custom";
 

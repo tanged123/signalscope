@@ -200,7 +200,8 @@ export function applyPreferences(
   target.dataset.theme = prefs.theme;
   const colors = discreteColors(prefs);
   target.style.setProperty("--plot-color-count", String(colors.length));
-  for (let index = 0; index < 8; index += 1)
+  target.style.setProperty("--plot-color-palette", JSON.stringify(colors));
+  for (let index = 0; index < Math.max(8, colors.length); index += 1)
     target.style.setProperty(
       `--series-${String(index + 1)}`,
       colors[index % colors.length] as string,

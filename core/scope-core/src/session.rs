@@ -133,10 +133,16 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (28, migrate_v28),
     (29, migrate_v29),
     (30, migrate_v30),
+    (31, migrate_v31),
 ];
 
 fn migrate_v29(mut value: serde_json::Value) -> serde_json::Value {
     value["schema_version"] = 30.into();
+    value
+}
+
+fn migrate_v31(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
     value
 }
 
@@ -156,7 +162,7 @@ fn migrate_v30(mut value: serde_json::Value) -> serde_json::Value {
     {
         panel.insert("color_axis".into(), serde_json::Value::Null);
     }
-    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["schema_version"] = 31.into();
     value
 }
 
@@ -489,6 +495,17 @@ mod tests {
     }
 
     #[test]
+    fn v31_migrates_without_changing_session_state() {
+        let expected = from_json(include_str!(
+            "../../../protocol/testdata/session-conformance.json"
+        ))
+        .unwrap();
+        let mut value = serde_json::to_value(&expected).unwrap();
+        value["schema_version"] = 31.into();
+        assert_eq!(from_json(&value.to_string()).unwrap(), expected);
+    }
+
+    #[test]
     fn session_conformance_fixture_matches_rust() {
         let session = Session {
             derived: vec![DerivedSignal {
@@ -605,7 +622,7 @@ mod tests {
                             channel: "velocity_body/x".into(),
                         }),
                         target_selector: None,
-                        color_slot: Some(1),
+                        color_slot: Some(300),
                         dash: Some(DashStyle::Solid),
                         width: Some(1.5),
                         opacity: None,

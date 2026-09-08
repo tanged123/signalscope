@@ -1,5 +1,5 @@
 {
-  "schema_version": 31,
+  "schema_version": 32,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -69,7 +69,7 @@
       "fields": {
         "target_ref": "SeriesRef?",
         "target_selector": "string?",
-        "color_slot": "u8?",
+        "color_slot": "u32?",
         "dash": "DashStyle?",
         "width": "f32?",
         "opacity": "f32?",

@@ -236,6 +236,19 @@ mod tests {
 
     #[test]
     fn palette_preferences_migrate_repair_and_roundtrip() {
+        let large = serde_json::json!({
+            "schema_version": 7,
+            "color_palette": "custom",
+            "custom_color_palette": vec!["#123456"; 300],
+            "contour_palette": "custom",
+            "custom_contour_palette": (0..256).map(|index| serde_json::json!({
+                "position": f64::from(index) / 255.0,
+                "color": "#abcdef"
+            })).collect::<Vec<_>>()
+        });
+        let large = from_json(&large.to_string()).unwrap();
+        assert_eq!(large.custom_color_palette.len(), 300);
+        assert_eq!(large.custom_contour_palette.len(), 256);
         let old = from_json(r#"{"schema_version":6,"plot_line_width_scale":1.75}"#).unwrap();
         assert_eq!(old.color_palette, ColorPalette::Matlab);
         assert!((old.plot_line_width_scale - 1.75).abs() < f64::EPSILON);

@@ -29,7 +29,7 @@ fn hex(color: &str) -> bool {
 
 pub(super) fn colors(value: Option<&serde_json::Value>) -> Option<Vec<String>> {
     let colors: Vec<String> = serde_json::from_value(value?.clone()).ok()?;
-    if !(1..=8).contains(&colors.len()) || !colors.iter().all(|color| hex(color)) {
+    if colors.is_empty() || !colors.iter().all(|color| hex(color)) {
         return None;
     }
     Some(
@@ -40,9 +40,11 @@ pub(super) fn colors(value: Option<&serde_json::Value>) -> Option<Vec<String>> {
     )
 }
 
+// Endpoints are exact normalized anchors, not approximate measurements.
+#[allow(clippy::float_cmp)]
 pub(super) fn stops(value: Option<&serde_json::Value>) -> Option<Vec<ContourStop>> {
     let mut stops: Vec<ContourStop> = serde_json::from_value(value?.clone()).ok()?;
-    if !(2..=32).contains(&stops.len())
+    if stops.len() < 2
         || stops.first()?.position != 0.0
         || stops.last()?.position != 1.0
         || stops.iter().any(|stop| {

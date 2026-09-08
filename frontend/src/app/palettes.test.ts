@@ -68,14 +68,7 @@ test("sampling preserves irregular stops, clamps and reverses without changing s
 
 test("custom validation rejects malformed colors and ambiguous stops", () => {
   expect(validColors(["#ABCDEF"])).toBe(true);
-  for (const colors of [
-    [],
-    ["red"],
-    ["#abc"],
-    ["#12345678"],
-    Array(9).fill("#000000"),
-    [null],
-  ]) {
+  for (const colors of [[], ["red"], ["#abc"], ["#12345678"], [null]]) {
     expect(validColors(colors)).toBe(false);
   }
   const stops = [
@@ -92,6 +85,37 @@ test("custom validation rejects malformed colors and ambiguous stops", () => {
     [stops[0], { position: 1, color: "red" }],
   ])
     expect(validStops(invalid)).toBe(false);
+});
+
+test("large custom palettes and full contour tables survive preferences and reach the renderer", () => {
+  const colors = Array.from(
+    { length: 300 },
+    (_, index) => "#" + index.toString(16).padStart(6, "0"),
+  );
+  const prefs = {
+    ...defaultPreferences(),
+    color_palette: "custom" as const,
+    custom_color_palette: colors,
+    contour_palette: "custom" as const,
+    custom_contour_palette: CONTOUR_PALETTES.viridis.stops,
+  };
+  expect(validColors(colors)).toBe(true);
+  expect(validStops(prefs.custom_contour_palette)).toBe(true);
+  expect(parsePreferences(snapshotPreferences(prefs))).toEqual(prefs);
+  applyPreferences(prefs, document.documentElement);
+  invalidatePalette();
+  expect(resolvePalette().series).toEqual(colors);
+  expect(hueIndex(300, resolvePalette().series.length)).toBe(299);
+  expect(document.documentElement.style.getPropertyValue("--series-300")).toBe(
+    colors[299],
+  );
+  applyPreferences(
+    { ...prefs, color_palette: "brewer_paired" },
+    document.documentElement,
+  );
+  invalidatePalette();
+  expect(resolvePalette().series).toEqual(COLOR_PALETTES.brewer_paired.colors);
+  expect(resolvePalette().series).toHaveLength(12);
 });
 
 test("migration keeps v6 stroke sizes, repairs fields independently and exports custom appearance", () => {

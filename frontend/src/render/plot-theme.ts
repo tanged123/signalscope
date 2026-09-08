@@ -92,6 +92,7 @@ export function invalidatePalette(): void {
 export function resolvePalette(): Palette {
   if (cached !== null) return cached;
   const styles = getComputedStyle(document.documentElement);
+  const discrete = styles.getPropertyValue("--plot-color-palette").trim();
   const contour = styles.getPropertyValue("--plot-contour-palette").trim();
   if (contour !== contourKey) {
     cachedContour =
@@ -109,10 +110,12 @@ export function resolvePalette(): Palette {
     fg3: styles.getPropertyValue("--fg-3").trim(),
     fg4: styles.getPropertyValue("--fg-4").trim(),
     grid: styles.getPropertyValue("--grid").trim(),
-    series: SERIES_TOKENS.slice(
-      0,
-      Number(styles.getPropertyValue("--plot-color-count")) || COLOR_SLOTS,
-    ).map((token) => styles.getPropertyValue(token).trim()),
+    series:
+      discrete === ""
+        ? SERIES_TOKENS.slice(0, COLOR_SLOTS).map((token) =>
+            styles.getPropertyValue(token).trim(),
+          )
+        : (JSON.parse(discrete) as string[]),
     contour: cachedContour,
     fontPlot:
       styles.getPropertyValue("--font-plot").trim() ||

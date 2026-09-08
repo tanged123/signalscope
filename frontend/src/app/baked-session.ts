@@ -145,9 +145,9 @@ function isOverride(value: unknown): boolean {
       value.color_slot,
       (item): item is number =>
         typeof item === "number" &&
-        Number.isFinite(item) &&
+        Number.isInteger(item) &&
         item >= 1 &&
-        item <= 8,
+        item <= 0xffff_ffff,
     ) &&
     isNullable(
       value.dash,

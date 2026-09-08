@@ -8,6 +8,13 @@
         "tol_bright",
         "tol_vibrant",
         "tol_contrast",
+        "okabe_ito",
+        "tableau10",
+        "brewer_dark2",
+        "brewer_set1",
+        "brewer_set2",
+        "brewer_set3",
+        "brewer_paired",
         "custom"
       ],
       "default": "matlab"

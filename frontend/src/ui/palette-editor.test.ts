@@ -144,3 +144,59 @@ test("settings still adjusts plot line width in quarter steps", () => {
   entry?.adjust?.(-1);
   expect(prefs.plot_line_width_scale).toBe(1);
 });
+
+test("the editors can grow beyond eight colors and 32 contour stops", () => {
+  const prefs = defaultPreferences();
+  prefs.custom_color_palette = Array<string>(8).fill("#123456");
+  const apply = vi.fn();
+  showPaletteEditor(document.body, "color", prefs, apply);
+  select("custom");
+  click("Add color");
+  expect(document.querySelectorAll(".palette-color-row")).toHaveLength(9);
+  submit().click();
+  expect(apply.mock.calls[0]?.[0]).toHaveProperty("custom_color_palette", [
+    ...prefs.custom_color_palette,
+    "#808080",
+  ]);
+  prefs.custom_contour_palette = Array.from({ length: 32 }, (_, index) => ({
+    position: index / 31,
+    color: "#123456",
+  }));
+  showPaletteEditor(document.body, "contour", prefs, apply);
+  select("custom");
+  click("Add stop");
+  expect(document.querySelectorAll(".palette-color-row")).toHaveLength(33);
+  submit().click();
+  expect(apply.mock.calls[1]?.[0]).toHaveProperty(
+    "custom_contour_palette.length",
+    33,
+  );
+});
+
+test("applying a preset retains saved custom colors when the abandoned draft is invalid", () => {
+  const prefs = defaultPreferences();
+  prefs.custom_color_palette = ["#123456", "#abcdef"];
+  prefs.custom_contour_palette = [
+    { position: 0, color: "#123456" },
+    { position: 1, color: "#abcdef" },
+  ];
+  const apply = vi.fn();
+  showPaletteEditor(document.body, "color", prefs, apply);
+  select("custom");
+  input("Color 1 hex", "invalid");
+  select("tableau10");
+  submit().click();
+  expect(apply.mock.calls[0]?.[0]).toMatchObject({
+    color_palette: "tableau10",
+    custom_color_palette: prefs.custom_color_palette,
+  });
+  showPaletteEditor(document.body, "contour", prefs, apply);
+  select("custom");
+  input("Stop 1 hex", "invalid");
+  select("viridis");
+  submit().click();
+  expect(apply.mock.calls[1]?.[0]).toMatchObject({
+    contour_palette: "viridis",
+    custom_contour_palette: prefs.custom_contour_palette,
+  });
+});

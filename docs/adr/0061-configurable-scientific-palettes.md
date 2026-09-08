@@ -32,12 +32,12 @@ families can consume the same colors and sampler without another palette API.
 No future plot family, normalization mode, or renderer is introduced here.
 `app/color-scale.ts` retains numeric domain ownership.
 
-Discrete sets contain 1–8 arbitrary #RRGGBB colors, preserving the existing
-eight serialized per-series override slots. Automatic hues retain their
+Discrete sets contain any nonempty list of arbitrary #RRGGBB colors.
+Automatic hues retain their
 ordinal; rendering wraps once using the active palette length. Existing
 overrides remain slot identities across palette changes. Labels, dashes,
 focus and picking continue to identify traces when colors repeat.
-Custom continuous sets contain 2–32 finite strictly increasing stops, with
+Custom continuous sets contain at least two finite strictly increasing stops, with
 endpoints exactly 0 and 1. Reversal transforms stop positions and order without
 altering saved custom data. Presets retain all 256 upstream samples.
 
@@ -54,8 +54,11 @@ Preference schema 7 adds defaults and accepts versions 1–6. Version 6 keeps
 its stroke scale; older stroke migration remains intact. Invalid custom sets
 repair independently to MATLAB colors or black/white stops; unknown presets
 repair to MATLAB or Viridis, and future versions still fail without rewrite.
-Rust and TypeScript repair the same fields. Session and data protocols do not
-change. The snapshot appearance whitelist includes all five palette fields,
+Rust and TypeScript repair the same fields. Session schema 32 widens color
+slots from u8 to u32; the v31 migration preserves existing slot values and
+advances the version. Earlier supported sessions still migrate through the
+existing ladder, and older applications reject the newer version clearly.
+The JSON shape and data protocol remain unchanged. The snapshot appearance whitelist includes all five palette fields,
 so offline snapshots retain custom colors and reversal. About includes bundled
 source and license notices, including in exported HTML.
 
@@ -67,8 +70,12 @@ dependency for a small static dataset. A large palette browser and multiple
 named custom collections add persistence and UI complexity without a current
 need. One retained custom palette of each kind keeps editing small.
 
-The eight-slot cap avoids expanding the current session override contract.
-Changing that contract is the review trigger for larger discrete sets.
+The initial eight-color and 32-stop editor caps were removed at the user's
+request. Neither is a rendering limit. Palette size follows the actual list,
+including for CSS tokens, inspector choices, and renderer indexing.
+Presets include MATLAB, Tol, Okabe–Ito, Tableau and ColorBrewer discrete sets,
+plus the Matplotlib and Scientific colour maps continuous tables. Color
+pickers wrap or scroll rather than imposing a palette-size limit.
 Custom colors make no claim of perceptual uniformity or color-vision safety.
 Sequential and diverging preset labels describe intended uses; a diverging
 map's middle is the numeric range midpoint, not an automatic zero-centered

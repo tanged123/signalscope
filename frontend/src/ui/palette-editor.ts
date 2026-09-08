@@ -2,8 +2,6 @@ import {
   COLOR_PALETTES,
   CONTOUR_PALETTES,
   HEX_COLOR,
-  MAX_COLORS,
-  MAX_CONTOUR_STOPS,
   discreteColors,
   contourStops,
   palettePreferences,
@@ -76,8 +74,8 @@ export function showPaletteEditor(
   rows.className = "palette-color-rows";
   const help = document.createElement("p");
   help.textContent = continuous
-    ? "Choose 2–32 colors with increasing positions from 0% to 100%. Colors interpolate between stops."
-    : "Choose 1–8 colors. Use hex values or color pickers; arrows change the order.";
+    ? "Add colors with increasing positions from 0% to 100%. Colors interpolate between stops."
+    : "Add colors using hex values or color pickers; arrows change the order.";
   const error = document.createElement("p");
   error.className = "palette-error";
   error.setAttribute("role", "alert");
@@ -132,11 +130,7 @@ export function showPaletteEditor(
       : continuous
         ? "Use #RRGGBB colors and strictly increasing positions between 0% and 100%."
         : "Use a six-digit hex color: #RRGGBB.";
-    add.disabled =
-      !valid ||
-      (continuous
-        ? draft.custom_contour_palette.length >= MAX_CONTOUR_STOPS
-        : draft.custom_color_palette.length >= MAX_COLORS);
+    add.disabled = !valid;
     if (!valid) return;
     preview.replaceChildren();
     preview.style.background = "";
@@ -263,6 +257,10 @@ export function showPaletteEditor(
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     if (submit.disabled) return;
+    if (!validColors(draft.custom_color_palette))
+      draft.custom_color_palette = preferences.custom_color_palette;
+    if (!validStops(draft.custom_contour_palette))
+      draft.custom_contour_palette = preferences.custom_contour_palette;
     apply(palettePreferences(draft));
     dialog.close();
   });

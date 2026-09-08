@@ -54,10 +54,11 @@
   height: 24px;
   margin: 16px 0;
   border: 1px solid var(--border-strong);
+  overflow-x: auto;
 }
 
 .palette-preview span {
-  flex: 1;
+  flex: 1 0 8px;
 }
 
 .palette-color-row {

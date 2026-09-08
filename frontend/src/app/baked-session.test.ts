@@ -8,6 +8,29 @@ import { parseBakedSession } from "./baked-session";
 import { emptySession, WorkspaceModel } from "./workspace";
 
 describe("parseBakedSession", () => {
+  it("restores color overrides beyond the old eight slots and byte range", () => {
+    const model = new WorkspaceModel();
+    const panel = model.addPanelRow();
+    panel.overrides = [
+      {
+        target_ref: null,
+        target_selector: "*",
+        color_slot: 300,
+        dash: null,
+        width: null,
+        opacity: null,
+        visible: null,
+      },
+    ];
+    expect(
+      parseBakedSession(JSON.stringify(model.snapshot())).tabs[0]?.panels[0]
+        ?.overrides[0]?.color_slot,
+    ).toBe(300);
+    Object.assign(panel.overrides[0] ?? {}, { color_slot: 1.5 });
+    expect(() => parseBakedSession(JSON.stringify(model.snapshot()))).toThrow(
+      "invalid structure",
+    );
+  });
   it("restores display titles, defaults absent titles, and rejects invalid titles", () => {
     const session = { ...emptySession(), title: "Thermal review" };
     expect(parseBakedSession(JSON.stringify(session)).title).toBe(
@@ -177,7 +200,7 @@ describe("parseBakedSession", () => {
 
   it.each([
     ["color_slot", 0],
-    ["color_slot", 9],
+    ["color_slot", 0x1_0000_0000],
     ["width", -1],
     ["width", 5],
     ["opacity", -0.1],

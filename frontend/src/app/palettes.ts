@@ -4,7 +4,8 @@ import type {
   ContourStop,
   Preferences,
 } from "../generated/preferences";
-import data from "./contour-presets.json";
+import data from "./contour-presets.json" with { type: "json" };
+import discrete from "./discrete-presets.json" with { type: "json" };
 import { upperBound } from "./binary-search";
 
 export const COLOR_PALETTES: Record<
@@ -51,6 +52,25 @@ export const COLOR_PALETTES: Record<
     label: "Tol · High contrast",
     colors: ["#004488", "#ddaa33", "#bb5566"],
   },
+  okabe_ito: {
+    label: "Okabe–Ito",
+    colors: [
+      "#000000",
+      "#e69f00",
+      "#56b4e9",
+      "#009e73",
+      "#f0e442",
+      "#0072b2",
+      "#d55e00",
+      "#cc79a7",
+    ],
+  },
+  tableau10: { label: "Tableau · 10", colors: discrete.Tableau10 },
+  brewer_dark2: { label: "ColorBrewer · Dark2", colors: discrete.Dark2 },
+  brewer_set1: { label: "ColorBrewer · Set1", colors: discrete.Set1 },
+  brewer_set2: { label: "ColorBrewer · Set2", colors: discrete.Set2 },
+  brewer_set3: { label: "ColorBrewer · Set3", colors: discrete.Set3 },
+  brewer_paired: { label: "ColorBrewer · Paired", colors: discrete.Paired },
 };
 
 export const CONTOUR_PALETTES: Record<
@@ -72,8 +92,6 @@ export const CONTOUR_PALETTES: Record<
   },
 };
 
-export const MAX_COLORS = 8;
-export const MAX_CONTOUR_STOPS = 32;
 export const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 function unpack(hex: string): ContourStop[] {
@@ -88,7 +106,6 @@ export function validColors(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
     value.length >= 1 &&
-    value.length <= MAX_COLORS &&
     value.every(
       (color: unknown) => typeof color === "string" && HEX_COLOR.test(color),
     )
@@ -96,12 +113,7 @@ export function validColors(value: unknown): value is string[] {
 }
 
 export function validStops(value: unknown): value is ContourStop[] {
-  if (
-    !Array.isArray(value) ||
-    value.length < 2 ||
-    value.length > MAX_CONTOUR_STOPS
-  )
-    return false;
+  if (!Array.isArray(value) || value.length < 2) return false;
   let previous = -1;
   for (const item of value as unknown[]) {
     if (item === null || typeof item !== "object") return false;

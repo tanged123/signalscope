@@ -57,6 +57,13 @@ pub enum ColorPalette {
     TolBright,
     TolVibrant,
     TolContrast,
+    OkabeIto,
+    Tableau10,
+    BrewerDark2,
+    BrewerSet1,
+    BrewerSet2,
+    BrewerSet3,
+    BrewerPaired,
     Custom,
 }
 
