@@ -1,9 +1,16 @@
 {
-  "schema_version": 31,
+  "schema_version": 32,
   "types": {
     "Theme": {
       "kind": "enum",
-      "variants": ["dark", "light"],
+      "variants": [
+        "dark",
+        "light",
+        "graphite",
+        "paper",
+        "contrast_dark",
+        "contrast_light"
+      ],
       "default": "dark"
     },
     "TimeMode": {
@@ -69,7 +76,7 @@
       "fields": {
         "target_ref": "SeriesRef?",
         "target_selector": "string?",
-        "color_slot": "u8?",
+        "color_slot": "u32?",
         "dash": "DashStyle?",
         "width": "f32?",
         "opacity": "f32?",

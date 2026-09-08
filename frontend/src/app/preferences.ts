@@ -3,6 +3,8 @@ import {
   type FontFamily,
   type Preferences,
 } from "../generated/preferences";
+import { palettePreferences, discreteColors, contourStops } from "./palettes";
+import { isTheme, THEMES } from "./themes";
 
 export const UI_FONT_SIZE = { min: 10, max: 20, default: 13, step: 1 } as const;
 export const PLOT_FONT_SIZE = {
@@ -62,6 +64,7 @@ export function defaultPreferences(): Preferences {
     ui_font_size: UI_FONT_SIZE.default,
     plot_font_size: PLOT_FONT_SIZE.default,
     plot_line_width_scale: PLOT_LINE_WIDTH_SCALE.default,
+    ...palettePreferences({}),
     cache_root: null,
     cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
     ingest_working_bytes: null,
@@ -78,6 +81,7 @@ export function snapshotPreferences(prefs: Preferences): string {
     ui_font_size: prefs.ui_font_size,
     plot_font_size: prefs.plot_font_size,
     plot_line_width_scale: prefs.plot_line_width_scale,
+    ...palettePreferences(prefs),
   });
 }
 
@@ -125,7 +129,8 @@ export function parsePreferences(json: string): Preferences | null {
     value.schema_version !== 3 &&
     value.schema_version !== 4 &&
     value.schema_version !== 5 &&
-    value.schema_version !== 6
+    value.schema_version !== 6 &&
+    value.schema_version !== 7
   )
     return null;
   const defaults = defaultPreferences();
@@ -143,7 +148,8 @@ export function parsePreferences(json: string): Preferences | null {
       : fallback;
   return {
     schema_version: PREFERENCES_SCHEMA_VERSION,
-    theme: value.theme === "light" ? "light" : defaults.theme,
+    ...palettePreferences(value),
+    theme: isTheme(value.theme) ? value.theme : defaults.theme,
     ui_font_family: family(value.ui_font_family, defaults.ui_font_family),
     plot_font_family: family(value.plot_font_family, defaults.plot_font_family),
     ui_font_size: clampUiFontSize(
@@ -153,7 +159,7 @@ export function parsePreferences(json: string): Preferences | null {
       size(value.plot_font_size, defaults.plot_font_size),
     ),
     plot_line_width_scale: clampPlotLineWidthScale(
-      value.schema_version === PREFERENCES_SCHEMA_VERSION
+      value.schema_version >= 6
         ? size(value.plot_line_width_scale, defaults.plot_line_width_scale)
         : defaults.plot_line_width_scale,
     ),
@@ -193,6 +199,19 @@ export function applyPreferences(
   target: PreferencesTarget,
 ): void {
   target.dataset.theme = prefs.theme;
+  target.dataset.colorScheme = THEMES[prefs.theme].scheme;
+  const colors = discreteColors(prefs);
+  target.style.setProperty("--plot-color-count", String(colors.length));
+  target.style.setProperty("--plot-color-palette", JSON.stringify(colors));
+  for (let index = 0; index < Math.max(8, colors.length); index += 1)
+    target.style.setProperty(
+      `--series-${String(index + 1)}`,
+      colors[index % colors.length] as string,
+    );
+  target.style.setProperty(
+    "--plot-contour-palette",
+    JSON.stringify(contourStops(prefs)),
+  );
   target.style.setProperty("--font-ui", fontStack(prefs.ui_font_family));
   target.style.setProperty("--font-plot", fontStack(prefs.plot_font_family));
   target.style.setProperty("--plot-font-size", String(prefs.plot_font_size));

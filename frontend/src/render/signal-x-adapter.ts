@@ -1,5 +1,6 @@
 import { colorAttributes } from "./color-attributes";
 import type { ColorScale } from "../app/color-scale";
+import type { CompiledContour } from "../app/palettes";
 import type { Line2DResponse } from "../app/line-binary";
 import type { Line2DRenderInput } from "./line2d";
 import {
@@ -12,6 +13,7 @@ import {
 export interface SignalXLine2DInputOptions extends Line2DAdapterOptions {
   window: { t0: number; t1: number };
   colorScale?: ColorScale | undefined;
+  contour?: CompiledContour | undefined;
 }
 
 export function line2DFromSignalX(
@@ -36,7 +38,11 @@ export function line2DFromSignalX(
         data,
         pointColors:
           column.color !== undefined && options.colorScale !== undefined
-            ? colorAttributes(column.color.values, options.colorScale)
+            ? colorAttributes(
+                column.color.values,
+                options.colorScale,
+                options.contour,
+              )
             : undefined,
         style: strokeAt(options, index),
       };

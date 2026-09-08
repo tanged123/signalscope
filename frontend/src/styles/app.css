@@ -1,5 +1,7 @@
 @import "./legend-color-scale.css";
+@import "./palette-editor.css";
 @import "./tokens.css";
+@import "./themes.css";
 @import "./axis-picker.css";
 
 * {
@@ -1222,11 +1224,16 @@ button {
 }
 
 .plot-encoding-palette {
-  display: grid;
+  display: flex;
   height: 12px;
-  grid-template-columns: repeat(8, 1fr);
   gap: 2px;
   margin-top: 6px;
+  overflow-x: auto;
+}
+
+.plot-encoding-palette > span {
+  flex: 1;
+  min-width: 2px;
 }
 
 .plot-encoding-note {
@@ -2015,6 +2022,10 @@ button {
 .plot-row-color-slots button {
   width: 12px;
   height: 12px;
+}
+
+.plot-row-color-slots {
+  flex-wrap: wrap;
 }
 
 .plot-row-color-slots button.active {

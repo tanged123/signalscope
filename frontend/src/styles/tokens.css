@@ -46,7 +46,8 @@
   src: url("/fonts/arimo-latin-700-normal.woff2") format("woff2");
 }
 
-:root {
+:root,
+.theme-preview {
   font-size: 13px;
   color-scheme: dark;
   --surface-void: #07090c;
@@ -97,7 +98,9 @@
   --elev-3: 0 0 0 1px var(--border-strong), 0 8px 32px rgb(0 0 0 / 60%);
 }
 
-:root[data-theme="light"] {
+:root[data-theme="light"],
+:root[data-color-scheme="light"],
+.theme-preview[data-color-scheme="light"] {
   color-scheme: light;
   --surface-void: #e3e6eb;
   --surface-0: #f7f8fa;

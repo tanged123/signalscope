@@ -2,14 +2,18 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 31;
+pub const SESSION_SCHEMA_VERSION: u32 = 32;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Theme {
     #[default]
     Dark,
     Light,
+    Graphite,
+    Paper,
+    ContrastDark,
+    ContrastLight,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -120,7 +124,7 @@ pub struct SeriesOverride {
     #[serde(default)]
     pub target_selector: Option<String>,
     #[serde(default)]
-    pub color_slot: Option<u8>,
+    pub color_slot: Option<u32>,
     #[serde(default)]
     pub dash: Option<DashStyle>,
     #[serde(default)]

@@ -2,11 +2,71 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { Colorbar } from "./colorbar";
 import type { Palette } from "./plot-theme";
+import { compileContour } from "../app/palettes";
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
+});
+
+test("display and PNG capture use the selected contour and repaint when it changes", () => {
+  const painted: string[] = [];
+  const context = {
+    fillStyle: "",
+    fillRect: (_x: number, y: number) => {
+      if (y === 23) painted.push(context.fillStyle);
+    },
+    strokeRect: vi.fn(),
+    fillText: vi.fn(),
+    scale: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+    context as unknown as CanvasRenderingContext2D,
+  );
+  const plot = document.createElement("div");
+  Object.defineProperty(plot, "clientWidth", { value: 300 });
+  const bar = new Colorbar(plot);
+  const palette = {
+    background: "#000000",
+    border: "#333333",
+    fg2: "#cccccc",
+    fg3: "#aaaaaa",
+    fg4: "#888888",
+    fontPlot: "monospace",
+    contour: compileContour([
+      { position: 0, color: "#ff0000" },
+      { position: 1, color: "#0000ff" },
+    ]),
+  } as Palette;
+  bar.render({ label: "C", range: [0, 10] }, palette, 0);
+  expect(painted[0]).toBe("rgb(255,0,0)");
+  expect(painted.at(-1)).toBe("rgb(0,0,255)");
+  const output = document.createElement("canvas");
+  output.width = 300;
+  output.height = 200;
+  painted.length = 0;
+  bar.capture(output, 0);
+  expect(painted[0]).toBe("rgb(255,0,0)");
+  expect(painted.at(-1)).toBe("rgb(0,0,255)");
+  painted.length = 0;
+  bar.render(
+    { label: "C", range: [0, 10] },
+    {
+      ...palette,
+      contour: compileContour([
+        { position: 0, color: "#000000" },
+        { position: 1, color: "#ffffff" },
+      ]),
+    },
+    0,
+  );
+  expect(painted[0]).toBe("rgb(0,0,0)");
+  expect(painted.at(-1)).toBe("rgb(255,255,255)");
+  bar.dispose();
 });
 
 test("one scale moves between legend and inset, retains pixels across unchanged renders, and exports outside its mount", () => {

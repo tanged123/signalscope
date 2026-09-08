@@ -1,4 +1,5 @@
-import { viridis, type ColorScale } from "../app/color-scale";
+import type { ColorScale } from "../app/color-scale";
+import { DEFAULT_CONTOUR, sampleContour } from "../app/palettes";
 import type { Palette } from "./plot-theme";
 
 const HEIGHT = 54;
@@ -33,6 +34,8 @@ export class Colorbar {
     palette: Palette,
     bottom: number,
   ): void {
+    const previousContour = this.palette?.contour;
+    const { contour, ...appearance } = palette;
     this.scale = scale;
     this.palette = palette;
     this.canvas.hidden = scale === undefined;
@@ -48,13 +51,13 @@ export class Colorbar {
     this.canvas.dataset.placement = embedded ? "legend" : "plot";
     const signature = JSON.stringify([
       scale,
-      palette,
+      appearance,
       width,
       dpr,
       embedded,
       bottom,
     ]);
-    if (signature === this.signature) return;
+    if (signature === this.signature && contour === previousContour) return;
     this.signature = signature;
     this.canvas.style.cssText = embedded
       ? "display:block;pointer-events:none"
@@ -127,7 +130,8 @@ function paint(
   );
   const range = scale.range;
   for (let column = 0; column < barWidth; column += 1) {
-    const [r, g, b] = viridis(
+    const [r, g, b] = sampleContour(
+      palette.contour ?? DEFAULT_CONTOUR,
       range?.[0] === range?.[1] ? 0.5 : column / Math.max(1, barWidth - 1),
     );
     context.fillStyle =

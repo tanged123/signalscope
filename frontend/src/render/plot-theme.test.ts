@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 import {
   COLOR_SLOTS,
-  SERIES_TOKENS,
   formatTicks,
   hueIndex,
   invalidatePalette,
@@ -41,10 +40,10 @@ describe("plot theme", () => {
     expect(formatTicks([0.0005], { min: 0, max: 0.001 })).toEqual(["5.0e-4"]);
   });
 
-  it("resolves a palette with one entry per series token and caches it", () => {
+  it("resolves the default color cycle and caches it", () => {
     invalidatePalette();
     const first = resolvePalette();
-    expect(first.series).toHaveLength(SERIES_TOKENS.length);
+    expect(first.series).toHaveLength(COLOR_SLOTS);
     expect(resolvePalette()).toBe(first);
     invalidatePalette();
     expect(resolvePalette()).not.toBe(first);

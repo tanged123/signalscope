@@ -69,6 +69,8 @@ progress; amend earlier records with explicit links when their guidance changes.
 50. [Session display title and contextual chrome](0058-session-title-and-contextual-chrome.md)
 51. [Snapshot appearance and bundle color order](0059-snapshot-appearance-and-bundle-colors.md)
 52. [Equal axis scale](0060-equal-axis-scale.md)
+53. [Configurable scientific palettes](0061-configurable-scientific-palettes.md)
+54. [Named workbench themes](0062-named-workbench-themes.md)
 
 ## Superseded decisions
 

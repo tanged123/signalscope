@@ -2,7 +2,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import type { SnapshotManifest } from "../../src/generated/protocol";
-import { SESSION_SCHEMA_VERSION } from "../../src/generated/session";
+import {
+  SESSION_SCHEMA_VERSION,
+  type Session,
+} from "../../src/generated/session";
 import type { Envelope } from "../../src/app/envelope";
 import { seal } from "../../src/app/envelope";
 import {
@@ -34,6 +37,10 @@ test.describe("exported snapshot round trip", () => {
       page,
     }, testInfo) => {
       const manifest = bakedManifest(artifacts.full);
+      const theme = scale === 0.75 ? "light" : "contrast_dark";
+      const session = JSON.parse(manifest.session_json) as Session;
+      session.theme = theme;
+      manifest.session_json = JSON.stringify(session);
       manifest.preferences_json = snapshotPreferences({
         ...defaultPreferences(),
         ui_font_family: "arimo",
@@ -41,6 +48,15 @@ test.describe("exported snapshot round trip", () => {
         ui_font_size: 15,
         plot_font_size: 12.5,
         plot_line_width_scale: scale,
+        color_palette: "custom",
+        custom_color_palette: ["#123456", "#abcdef"],
+        contour_palette: "custom",
+        custom_contour_palette: [
+          { position: 0, color: "#102030" },
+          { position: 0.3, color: "#abcdef" },
+          { position: 1, color: "#fedcba" },
+        ],
+        contour_reversed: true,
       });
       const html = readFileSync(artifacts.full, "utf8").replace(
         /(<script id="signalscope-baked-data"[^>]*>)[\s\S]*?(<\/script>)/,
@@ -61,7 +77,7 @@ test.describe("exported snapshot round trip", () => {
         page.locator(".chart-host canvas:not(.colorbar-canvas)").first(),
       ).toBeVisible();
       await expect(page.locator(".gpu-warning")).toBeHidden();
-      await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       expect(
         await page.evaluate(() => {
           const style = getComputedStyle(document.documentElement);
@@ -71,6 +87,11 @@ test.describe("exported snapshot round trip", () => {
             uiSize: style.fontSize,
             uiFont: style.getPropertyValue("--font-ui"),
             plotFont: style.getPropertyValue("--font-plot"),
+            firstColor: style.getPropertyValue("--series-1").trim(),
+            colorCount: style.getPropertyValue("--plot-color-count").trim(),
+            contour: JSON.parse(
+              style.getPropertyValue("--plot-contour-palette"),
+            ) as unknown,
           };
         }),
       ).toEqual({
@@ -79,6 +100,13 @@ test.describe("exported snapshot round trip", () => {
         uiSize: "15px",
         uiFont: expect.stringContaining("Arimo"),
         plotFont: expect.stringContaining("DejaVu Sans"),
+        firstColor: "#123456",
+        colorCount: "2",
+        contour: [
+          { position: 0, color: "#fedcba" },
+          { position: 0.7, color: "#abcdef" },
+          { position: 1, color: "#102030" },
+        ],
       });
       await page
         .locator(".plot-stat-row .plot-row-inspector-toggle")

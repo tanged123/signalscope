@@ -8,7 +8,6 @@ import {
 } from "../app/bin-columns";
 import type { Catalog } from "../app/catalog";
 import { appliedOverrides, type ResolvedSeries } from "../app/resolution";
-import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import { virtualSlice } from "../app/outline-model";
 import { compileGlob, evaluateSelector } from "../app/selector";
 import type {
@@ -44,13 +43,11 @@ import {
   type SeriesHitAdapter,
 } from "../app/plot-capabilities";
 import type { PanelLineResponse } from "../app/line-presentation-controller";
-import { line2dFamily } from "../app/line2d-family";
+import { preparePanelRender } from "./panel-render";
 import {
-  COLOR_SLOTS,
   hueIndex,
   invalidatePalette,
   resolvePalette,
-  type SeriesStroke,
 } from "../render/plot-theme";
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
@@ -121,7 +118,7 @@ interface ResolvedAnnotations {
 
 function colorIndexForHue(hue: number | null): number {
   if (hue === null) return 0;
-  return hueIndex(hue);
+  return hueIndex(hue, resolvePalette().series.length);
 }
 
 export type EncodingProperty = "color" | "dash" | "width";
@@ -1014,17 +1011,7 @@ export class PanelView {
     }
     this.chartHostElement.hidden = false;
     this.mount();
-    const bySeries = new Map(
-      state.series.map((series) => [series.path, series]),
-    );
-    const family = line2dFamily(data).prepare({
-      series: state.series,
-      window,
-      axisStyle: state.axis_style,
-      xLabel: state.x_label,
-      yLabel: state.y_label,
-      colorAxis: state.color_axis,
-    });
+    const family = preparePanelRender(state, data, window, this.emphasizePaths);
     const { plotted } = family;
     this.preparedPlot = family.plot;
     if (plotted.length === 0) {
@@ -1044,29 +1031,7 @@ export class PanelView {
       seriesKey,
     );
     if (ranges === null) return 0;
-    const styles: SeriesStroke[] = plotted.map((item) => {
-      const series = bySeries.get(item.signalPath);
-      return {
-        hue: series?.hue ?? null,
-        dash: series?.dash ?? "solid",
-        width:
-          (series?.width ?? DEFAULT_PANEL_LINE_WIDTH) +
-          (series?.focused === true ? 1 : 0),
-        alpha: series?.opacity ?? 1,
-      };
-    });
-    const emphasisIndices =
-      this.emphasizePaths === null
-        ? []
-        : plotted.flatMap((item, index) =>
-            this.emphasizePaths?.has(item.signalPath) ? [index] : [],
-          );
-    const request: ChartRenderRequest = {
-      ...family.makeInput(ranges, styles),
-      axisEqual: state.axis_equal === true,
-      emphasisIndices,
-      palette: resolvePalette(),
-    };
+    const request = family.makeRequest(ranges);
     if (this.chartHost === null) {
       this.pendingChartRender = request;
       return 0;
@@ -1819,7 +1784,8 @@ export class PanelView {
     if (property === "color") {
       const palette = document.createElement("div");
       palette.className = "plot-encoding-palette";
-      for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
+      const colorCount = resolvePalette().series.length;
+      for (let slot = 1; slot <= colorCount; slot += 1) {
         const swatch = document.createElement("span");
         swatch.style.background = `var(--series-${String(slot)})`;
         palette.append(swatch);
@@ -1830,7 +1796,7 @@ export class PanelView {
           : encodingValueCount(state, active, this.callbacks.catalog());
       const note = document.createElement("div");
       note.className = "plot-encoding-note";
-      note.textContent = `${String(count)} ${count === 1 ? "value" : "values"} → ${String(COLOR_SLOTS)} slots${count > COLOR_SLOTS ? " · repeats disclosed" : ""}`;
+      note.textContent = `${String(count)} ${count === 1 ? "value" : "values"} → ${String(colorCount)} slots${count > colorCount ? " · repeats disclosed" : ""}`;
       drawer.append(palette, note);
     }
     return drawer;

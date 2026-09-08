@@ -2,6 +2,7 @@
 //! persist across sessions, unlike the per-workspace session file.
 
 mod generated;
+mod palettes;
 
 pub use generated::*;
 
@@ -27,6 +28,11 @@ impl Default for Preferences {
             ui_font_size: 13.0,
             plot_font_size: 9.0,
             plot_line_width_scale: 1.0,
+            color_palette: ColorPalette::default(),
+            contour_palette: ContourPalette::default(),
+            custom_color_palette: palettes::default_colors(),
+            custom_contour_palette: palettes::default_stops(),
+            contour_reversed: false,
             cache_root: None,
             cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
             ingest_working_bytes: None,
@@ -125,11 +131,11 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
     from_json(&std::fs::read_to_string(path)?)
 }
 
-/// Migration ladder (ADR 0005 pattern): v6 is current; each future bump adds
+/// Migration ladder (ADR 0005 pattern): v7 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
     match version {
-        PREFERENCES_SCHEMA_VERSION => Ok(repair_current(value)),
+        6 | PREFERENCES_SCHEMA_VERSION => Ok(repair_current(value)),
         1..=5 => {
             let mut preferences = repair_current(value);
             preferences.plot_line_width_scale = Preferences::default().plot_line_width_scale;
@@ -159,10 +165,26 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
     };
     Preferences {
         schema_version: PREFERENCES_SCHEMA_VERSION,
-        theme: match value.get("theme").and_then(serde_json::Value::as_str) {
-            Some("light") => Theme::Light,
-            _ => defaults.theme,
-        },
+        color_palette: value
+            .get("color_palette")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or_default(),
+        contour_palette: value
+            .get("contour_palette")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or_default(),
+        custom_color_palette: palettes::colors(value.get("custom_color_palette"))
+            .unwrap_or(defaults.custom_color_palette),
+        custom_contour_palette: palettes::stops(value.get("custom_contour_palette"))
+            .unwrap_or(defaults.custom_contour_palette),
+        contour_reversed: value
+            .get("contour_reversed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        theme: value
+            .get("theme")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or(defaults.theme),
         ui_font_family: family("ui_font_family", defaults.ui_font_family),
         plot_font_family: family("plot_font_family", defaults.plot_font_family),
         ui_font_size: size("ui_font_size", defaults.ui_font_size, 10.0, 20.0, 1.0),
@@ -211,6 +233,54 @@ pub enum PreferencesError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_preferences_migrate_repair_and_roundtrip() {
+        let large = serde_json::json!({
+            "schema_version": 7,
+            "color_palette": "custom",
+            "custom_color_palette": vec!["#123456"; 300],
+            "contour_palette": "custom",
+            "custom_contour_palette": (0..256).map(|index| serde_json::json!({
+                "position": f64::from(index) / 255.0,
+                "color": "#abcdef"
+            })).collect::<Vec<_>>()
+        });
+        let large = from_json(&large.to_string()).unwrap();
+        assert_eq!(large.custom_color_palette.len(), 300);
+        assert_eq!(large.custom_contour_palette.len(), 256);
+        let old = from_json(r#"{"schema_version":6,"plot_line_width_scale":1.75}"#).unwrap();
+        assert_eq!(old.color_palette, ColorPalette::Matlab);
+        assert!((old.plot_line_width_scale - 1.75).abs() < f64::EPSILON);
+        let prefs = from_json(r##"{
+            "schema_version":7, "color_palette":"custom", "custom_color_palette":["#ABCDEF","#012345"],
+            "contour_palette":"custom", "contour_reversed":true,
+            "custom_contour_palette":[{"position":0,"color":"#000000"},{"position":0.25,"color":"#FF0000"},{"position":1,"color":"#ffffff"}]
+        }"##).unwrap();
+        assert_eq!(prefs.custom_color_palette, ["#abcdef", "#012345"]);
+        assert_eq!(prefs.custom_contour_palette[1].color, "#ff0000");
+        assert!(prefs.contour_reversed);
+        assert_eq!(
+            from_json(&serde_json::to_string(&prefs).unwrap()).unwrap(),
+            prefs
+        );
+        let bad = from_json(r##"{
+            "schema_version":7, "color_palette":"custom", "custom_color_palette":["red"],
+            "contour_palette":"future", "contour_reversed":true,
+            "custom_contour_palette":[{"position":0,"color":"#000000"},{"position":0,"color":"#ff0000"},{"position":1,"color":"#ffffff"}]
+        }"##).unwrap();
+        assert_eq!(bad.color_palette, ColorPalette::Custom);
+        assert_eq!(
+            bad.custom_color_palette,
+            Preferences::default().custom_color_palette
+        );
+        assert_eq!(
+            bad.custom_contour_palette,
+            Preferences::default().custom_contour_palette
+        );
+        assert_eq!(bad.contour_palette, ContourPalette::Viridis);
+        assert!(bad.contour_reversed);
+    }
 
     const FIXTURE_PATH: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),

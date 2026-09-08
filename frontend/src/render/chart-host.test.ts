@@ -381,6 +381,14 @@ describe("ChartHost", () => {
     }>;
     expect(series[0]?.color).toBe(palette.series[0]);
     expect(series[1]?.color).toBe(palette.series[1]);
+    host.render({
+      ...request(data, [stroke(4), stroke(9)]),
+      palette: { ...palette, series: ["#004488", "#ddaa33", "#bb5566"] },
+    });
+    const recolored = state.charts.at(-1)?.options.series as Array<{
+      color: string;
+    }>;
+    expect(recolored.map((item) => item.color)).toEqual(["#004488", "#bb5566"]);
   });
 
   it("passes configured stroke widths through without a hidden minimum", async () => {

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: u32 = 6;
+pub const PREFERENCES_SCHEMA_VERSION: u32 = 7;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -50,6 +50,44 @@ mod optional_u64_string {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorPalette {
+    #[default]
+    Matlab,
+    TolBright,
+    TolVibrant,
+    TolContrast,
+    OkabeIto,
+    Tableau10,
+    BrewerDark2,
+    BrewerSet1,
+    BrewerSet2,
+    BrewerSet3,
+    BrewerPaired,
+    Custom,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContourPalette {
+    #[default]
+    Viridis,
+    Plasma,
+    Inferno,
+    Magma,
+    Batlow,
+    Vik,
+    Gray,
+    Custom,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ContourStop {
+    pub position: f64,
+    pub color: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FontFamily {
     #[default]
@@ -60,11 +98,15 @@ pub enum FontFamily {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Theme {
     #[default]
     Dark,
     Light,
+    Graphite,
+    Paper,
+    ContrastDark,
+    ContrastLight,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -76,6 +118,11 @@ pub struct Preferences {
     pub ui_font_size: f64,
     pub plot_font_size: f64,
     pub plot_line_width_scale: f64,
+    pub color_palette: ColorPalette,
+    pub contour_palette: ContourPalette,
+    pub custom_color_palette: Vec<String>,
+    pub custom_contour_palette: Vec<ContourStop>,
+    pub contour_reversed: bool,
     #[serde(default)]
     pub cache_root: Option<String>,
     #[serde(with = "u64_string")]

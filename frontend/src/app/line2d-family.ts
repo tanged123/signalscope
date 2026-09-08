@@ -1,4 +1,5 @@
 import { resolveColorScale } from "./color-scale";
+import type { CompiledContour } from "./palettes";
 import type { ColorAxis } from "../generated/session";
 import type { AxisStyle } from "../generated/session";
 import { line2DFromSignalX } from "../render/signal-x-adapter";
@@ -26,6 +27,8 @@ interface FamilyContext {
   xLabel: string | null;
   yLabel: string | null;
   colorAxis?: ColorAxis | null;
+  colorCount?: number;
+  contour?: CompiledContour | undefined;
 }
 
 interface PreparedLine2DFamily {
@@ -61,7 +64,10 @@ function timeFamily(
         plot: prepareTimePlot({
           series: shown.map((tile) => ({
             path: tile.signalPath,
-            colorIndex: colorIndex(byPath.get(tile.signalPath)?.hue),
+            colorIndex: colorIndex(
+              byPath.get(tile.signalPath)?.hue,
+              context.colorCount,
+            ),
             bins: tile.bins,
           })),
           window: context.window,
@@ -104,7 +110,10 @@ function signalXFamily(
             path: column.signalPath,
             label: column.signalPath,
             unit: column.unit,
-            colorIndex: colorIndex(byPath.get(column.signalPath)?.hue),
+            colorIndex: colorIndex(
+              byPath.get(column.signalPath)?.hue,
+              context.colorCount,
+            ),
             values: column.values,
             anchor: column.coordinates?.anchor ?? data.response.anchor,
             x: column.coordinates?.x.values ?? data.response.x.values,
@@ -116,6 +125,7 @@ function signalXFamily(
             { ...data.response, ys: shown },
             {
               window: context.window,
+              contour: context.contour,
               colorScale:
                 context.colorAxis == null
                   ? undefined
@@ -150,8 +160,8 @@ function signalXFamily(
   };
 }
 
-function colorIndex(hue: number | null | undefined): number {
-  return hue === null || hue === undefined ? 0 : hueIndex(hue);
+function colorIndex(hue: number | null | undefined, count?: number): number {
+  return hue === null || hue === undefined ? 0 : hueIndex(hue, count);
 }
 
 function signalAxisLabel(

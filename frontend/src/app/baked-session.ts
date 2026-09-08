@@ -1,4 +1,5 @@
 import { SESSION_SCHEMA_VERSION, type Session } from "../generated/session";
+import { isTheme } from "./themes";
 
 export function parseBakedSession(sessionJson: string): Session {
   const parsed: unknown = JSON.parse(sessionJson);
@@ -145,9 +146,9 @@ function isOverride(value: unknown): boolean {
       value.color_slot,
       (item): item is number =>
         typeof item === "number" &&
-        Number.isFinite(item) &&
+        Number.isInteger(item) &&
         item >= 1 &&
-        item <= 8,
+        item <= 0xffff_ffff,
     ) &&
     isNullable(
       value.dash,
@@ -352,7 +353,7 @@ function isTab(value: unknown): boolean {
 function isSession(value: JsonObject): value is JsonObject & Session {
   return (
     (value.title === null || typeof value.title === "string") &&
-    (value.theme === "dark" || value.theme === "light") &&
+    isTheme(value.theme) &&
     isLinkedTime(value.linked_time) &&
     typeof value.active_tab_id === "string" &&
     Array.isArray(value.tabs) &&

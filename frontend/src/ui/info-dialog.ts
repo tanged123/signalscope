@@ -2,7 +2,7 @@ import { required } from "./dom";
 
 export function showInfoDialog(
   root: HTMLElement,
-  kind: "help" | "about",
+  kind: "help" | "about" | "theme",
   title: string,
   content: HTMLElement,
 ): void {

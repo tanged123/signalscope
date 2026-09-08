@@ -39,7 +39,7 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
   await page.keyboard.press("Control+Comma");
   const palette = page.locator(".palette");
   await expect(palette).toBeVisible();
-  await expect(palette.locator(".palette-row")).toHaveCount(7);
+  await expect(palette.locator(".palette-row")).toHaveCount(9);
 
   const plotFont = palette
     .locator(".palette-row", { hasText: "Plot font" })
@@ -48,6 +48,8 @@ test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
 
   const uiSize = palette.locator(".palette-row", { hasText: "UI font size" });
   await expect(uiSize.locator(".palette-hint")).toHaveText("13px");
+  await page.locator(".palette-input").press("ArrowDown");
+  await page.locator(".palette-input").press("ArrowDown");
   await page.locator(".palette-input").press("ArrowDown");
   await page.locator(".palette-input").press("ArrowDown");
   await page.locator(".palette-input").press("ArrowDown");

@@ -1,4 +1,9 @@
 import type { DashStyle } from "../generated/session";
+import {
+  compileContour,
+  DEFAULT_CONTOUR,
+  type CompiledContour,
+} from "../app/palettes";
 
 export interface Palette {
   background: string;
@@ -8,6 +13,7 @@ export interface Palette {
   fg4: string;
   grid: string;
   series: string[];
+  contour?: CompiledContour;
   fontPlot: string;
   fontSize: number;
   lineWidthScale: number;
@@ -39,6 +45,8 @@ const FALLBACK_MONO = '"JetBrains Mono", monospace';
 const DEFAULT_TICK_COUNT = 5;
 const MAX_TICK_FRACTION_DIGITS = 8;
 let cached: Palette | null = null;
+let contourKey = "";
+let cachedContour = DEFAULT_CONTOUR;
 
 export interface TickRange {
   min: number;
@@ -47,8 +55,8 @@ export interface TickRange {
 
 export type TickFormatter = (value: number) => string;
 
-export function hueIndex(hue: number): number {
-  return (Math.max(1, Math.trunc(hue)) - 1) % COLOR_SLOTS;
+export function hueIndex(hue: number, count = COLOR_SLOTS): number {
+  return (Math.max(1, Math.trunc(hue)) - 1) % count;
 }
 
 function plotFontSize(styles: CSSStyleDeclaration): number {
@@ -84,6 +92,17 @@ export function invalidatePalette(): void {
 export function resolvePalette(): Palette {
   if (cached !== null) return cached;
   const styles = getComputedStyle(document.documentElement);
+  const discrete = styles.getPropertyValue("--plot-color-palette").trim();
+  const contour = styles.getPropertyValue("--plot-contour-palette").trim();
+  if (contour !== contourKey) {
+    cachedContour =
+      contour === ""
+        ? DEFAULT_CONTOUR
+        : compileContour(
+            JSON.parse(contour) as Parameters<typeof compileContour>[0],
+          );
+    contourKey = contour;
+  }
   cached = {
     background: styles.getPropertyValue("--surface-0").trim(),
     border: styles.getPropertyValue("--border-strong").trim(),
@@ -91,7 +110,13 @@ export function resolvePalette(): Palette {
     fg3: styles.getPropertyValue("--fg-3").trim(),
     fg4: styles.getPropertyValue("--fg-4").trim(),
     grid: styles.getPropertyValue("--grid").trim(),
-    series: SERIES_TOKENS.map((token) => styles.getPropertyValue(token).trim()),
+    series:
+      discrete === ""
+        ? SERIES_TOKENS.slice(0, COLOR_SLOTS).map((token) =>
+            styles.getPropertyValue(token).trim(),
+          )
+        : (JSON.parse(discrete) as string[]),
+    contour: cachedContour,
     fontPlot:
       styles.getPropertyValue("--font-plot").trim() ||
       styles.getPropertyValue("--font-mono").trim() ||

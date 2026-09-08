@@ -1,11 +1,27 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "theme": "dark",
   "ui_font_family": "inter",
   "plot_font_family": "jetbrains",
   "ui_font_size": 13.0,
   "plot_font_size": 9.0,
   "plot_line_width_scale": 1.0,
+  "color_palette": "matlab",
+  "contour_palette": "viridis",
+  "custom_color_palette": [
+    "#0072bd",
+    "#d95319",
+    "#edb120",
+    "#7e2f8e",
+    "#77ac30",
+    "#4dbeee",
+    "#a2142f"
+  ],
+  "custom_contour_palette": [
+    { "position": 0.0, "color": "#000000" },
+    { "position": 1.0, "color": "#ffffff" }
+  ],
+  "contour_reversed": false,
   "cache_root": null,
   "cache_max_bytes": "21474836480",
   "ingest_working_bytes": null,
