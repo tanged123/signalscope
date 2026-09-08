@@ -1,6 +1,6 @@
 import type { ResolvedSeries } from "../app/resolution";
 import type { PanelState, SeriesOverride } from "../generated/session";
-import { COLOR_SLOTS, hueIndex } from "../render/plot-theme";
+import { resolvePalette, hueIndex } from "../render/plot-theme";
 
 interface InspectorActions {
   close(): void;
@@ -45,13 +45,14 @@ export function seriesInspector(
   colorLabel.textContent = "color";
   const slots = document.createElement("span");
   slots.className = "plot-row-color-slots";
-  for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
+  const colorCount = resolvePalette().series.length;
+  for (let slot = 1; slot <= colorCount; slot += 1) {
     const swatch = document.createElement("button");
     swatch.type = "button";
     swatch.style.background = `var(--series-${String(slot)})`;
     swatch.classList.toggle(
       "active",
-      (series.hue === null ? 0 : hueIndex(series.hue)) + 1 === slot,
+      (series.hue === null ? 0 : hueIndex(series.hue, colorCount)) + 1 === slot,
     );
     swatch.setAttribute("aria-label", `Color slot ${String(slot)}`);
     swatch.addEventListener("click", () => {

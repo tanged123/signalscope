@@ -18,8 +18,13 @@ copying coordinate columns. `snapshot/bindings.rs` owns native capture binding
 resolution. Per-series coordinate views keep group-local anchors, X values and
 resolution; the existing panel cache charges all retained arrays.
 
-`app/color-scale.ts` owns shared continuous limits and the viridis mapping,
-separate from categorical theme colors. `render/color-attributes.ts` caches
+`app/color-scale.ts` owns shared continuous limits. `app/palettes.ts` owns
+discrete sets, continuous maps, custom validation and sampling independently
+of plot families. Global preferences select them; `ui/settings.ts` supplies
+appearance entries and `ui/palette-editor.ts` owns draft editing and modal
+cleanup. `render/plot-theme.ts` resolves their cached rendering representation.
+See [ADR 0061](adr/0061-configurable-scientific-palettes.md).
+`render/color-attributes.ts` caches
 aligned RGBA feeds; the ChartGPU fork owns their GPU buffers and interpolation.
 `render/colorbar.ts` owns one horizontal scale canvas for both display and
 capture. `ui/legend-color-scale.ts` supplies its legend mount through ChartHost;
@@ -58,7 +63,7 @@ preload publishes only theme colors to a WebContents-scoped listener; it
 exposes no API to the page. CSS overlay safe areas and drag regions keep the
 single application-menu button and session editor usable (ADR 0049).
 
-HTML export captures UI/plot fonts, sizes and the global stroke scale through
+HTML export captures UI/plot fonts, sizes, palettes and the global stroke scale through
 `app/preferences.ts`, using versioned `preferences_json` in the manifest.
 `BakedPlane` publishes it beside session JSON; the shell applies it before plot
 mount. Missing appearance retains defaults. See [ADR 0059](adr/0059-snapshot-appearance-and-bundle-colors.md).

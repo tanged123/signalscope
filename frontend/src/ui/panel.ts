@@ -46,7 +46,6 @@ import {
 import type { PanelLineResponse } from "../app/line-presentation-controller";
 import { line2dFamily } from "../app/line2d-family";
 import {
-  COLOR_SLOTS,
   hueIndex,
   invalidatePalette,
   resolvePalette,
@@ -121,7 +120,7 @@ interface ResolvedAnnotations {
 
 function colorIndexForHue(hue: number | null): number {
   if (hue === null) return 0;
-  return hueIndex(hue);
+  return hueIndex(hue, resolvePalette().series.length);
 }
 
 export type EncodingProperty = "color" | "dash" | "width";
@@ -1017,7 +1016,10 @@ export class PanelView {
     const bySeries = new Map(
       state.series.map((series) => [series.path, series]),
     );
+    const palette = resolvePalette();
     const family = line2dFamily(data).prepare({
+      colorCount: palette.series.length,
+      contour: palette.contour,
       series: state.series,
       window,
       axisStyle: state.axis_style,
@@ -1065,7 +1067,7 @@ export class PanelView {
       ...family.makeInput(ranges, styles),
       axisEqual: state.axis_equal === true,
       emphasisIndices,
-      palette: resolvePalette(),
+      palette,
     };
     if (this.chartHost === null) {
       this.pendingChartRender = request;
@@ -1819,7 +1821,8 @@ export class PanelView {
     if (property === "color") {
       const palette = document.createElement("div");
       palette.className = "plot-encoding-palette";
-      for (let slot = 1; slot <= COLOR_SLOTS; slot += 1) {
+      const colorCount = resolvePalette().series.length;
+      for (let slot = 1; slot <= colorCount; slot += 1) {
         const swatch = document.createElement("span");
         swatch.style.background = `var(--series-${String(slot)})`;
         palette.append(swatch);
@@ -1830,7 +1833,7 @@ export class PanelView {
           : encodingValueCount(state, active, this.callbacks.catalog());
       const note = document.createElement("div");
       note.className = "plot-encoding-note";
-      note.textContent = `${String(count)} ${count === 1 ? "value" : "values"} → ${String(COLOR_SLOTS)} slots${count > COLOR_SLOTS ? " · repeats disclosed" : ""}`;
+      note.textContent = `${String(count)} ${count === 1 ? "value" : "values"} → ${String(colorCount)} slots${count > colorCount ? " · repeats disclosed" : ""}`;
       drawer.append(palette, note);
     }
     return drawer;

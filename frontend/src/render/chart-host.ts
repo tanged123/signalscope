@@ -145,7 +145,9 @@ export class ChartHost {
       const color =
         line.pointColors !== undefined || hue === null
           ? request.palette.fg4
-          : (request.palette.series[hueIndex(hue)] ?? request.palette.fg4);
+          : (request.palette.series[
+              hueIndex(hue, request.palette.series.length)
+            ] ?? request.palette.fg4);
       const baseOpacity = ghost
         ? Math.max(MIN_DENSE_GHOST_OPACITY, style.alpha * ghostOpacityScale)
         : style.alpha;

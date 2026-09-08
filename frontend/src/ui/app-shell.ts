@@ -1,3 +1,5 @@
+import { settingsEntries } from "./settings";
+import { showPaletteEditor } from "./palette-editor";
 import {
   renderDockFooter,
   renderPresentationStatus,
@@ -45,13 +47,10 @@ import {
   clampPlotFontSize,
   clampUiFontSize,
   defaultPreferences,
-  FONT_FAMILIES,
-  fontLabel,
   parsePreferences,
   snapshotPreferences,
   PLOT_FONT_SIZE,
   PLOT_LINE_WIDTH_SCALE,
-  UI_FONT_SIZE,
 } from "../app/preferences";
 import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { LinePresentationController } from "../app/line-presentation-controller";
@@ -1246,97 +1245,22 @@ export class AppShell {
     return entries;
   }
 
-  private settingsEntries(): PaletteEntry[] {
-    const cycleFont = (key: "ui_font_family" | "plot_font_family"): void => {
-      const index = FONT_FAMILIES.indexOf(this.prefs[key]);
-      const next = FONT_FAMILIES[(index + 1) % FONT_FAMILIES.length] ?? "inter";
-      this.updatePreferences({ [key]: next });
-    };
-    const sizeEntry = (
-      title: string,
-      key: "ui_font_size" | "plot_font_size",
-      step: number,
-    ): PaletteEntry => ({
-      title,
-      hint: `${String(this.prefs[key])}px`,
-      keepOpen: true,
-      run: () => {
-        this.updatePreferences({ [key]: this.prefs[key] + step });
-      },
-      adjust: (direction) => {
-        this.updatePreferences({ [key]: this.prefs[key] + direction * step });
-      },
-    });
-    return [
-      {
-        title: "Theme",
-        hint: this.prefs.theme,
-        keepOpen: true,
-        run: () => {
-          this.toggleTheme();
-        },
-      },
-      ...this.recipeDirectoryEntries(),
-      {
-        title: "UI font",
-        hint: fontLabel(this.prefs.ui_font_family),
-        keepOpen: true,
-        run: () => {
-          cycleFont("ui_font_family");
-        },
-      },
-      {
-        title: "Plot font",
-        hint: fontLabel(this.prefs.plot_font_family),
-        keepOpen: true,
-        run: () => {
-          cycleFont("plot_font_family");
-        },
-      },
-      sizeEntry("UI font size", "ui_font_size", UI_FONT_SIZE.step),
-      sizeEntry("Plot font size", "plot_font_size", PLOT_FONT_SIZE.step),
-      {
-        title: "Plot line width",
-        hint: `${String(Math.round(this.prefs.plot_line_width_scale * 100))}%`,
-        keepOpen: true,
-        run: () => {
-          this.updatePreferences({
-            plot_line_width_scale:
-              this.prefs.plot_line_width_scale + PLOT_LINE_WIDTH_SCALE.step,
-          });
-        },
-        adjust: (direction) => {
-          this.updatePreferences({
-            plot_line_width_scale:
-              this.prefs.plot_line_width_scale +
-              direction * PLOT_LINE_WIDTH_SCALE.step,
-          });
-        },
-      },
-      {
-        title: "Reset appearance to defaults",
-        hint: "",
-        keepOpen: true,
-        run: () => {
-          const defaults = defaultPreferences();
-          this.updatePreferences({
-            ui_font_family: defaults.ui_font_family,
-            plot_font_family: defaults.plot_font_family,
-            ui_font_size: defaults.ui_font_size,
-            plot_font_size: defaults.plot_font_size,
-            plot_line_width_scale: defaults.plot_line_width_scale,
-          });
-        },
-      },
-    ];
-  }
-
   private paletteEntries(
     mode: PaletteMode,
     query = "",
     limit = Number.POSITIVE_INFINITY,
   ): PaletteEntry[] {
-    if (mode === "settings") return this.settingsEntries();
+    if (mode === "settings")
+      return settingsEntries(
+        this.prefs,
+        (patch) => this.updatePreferences(patch),
+        () => this.toggleTheme(),
+        this.recipeDirectoryEntries(),
+        (kind) =>
+          showPaletteEditor(this.root, kind, this.prefs, (patch) =>
+            this.updatePreferences(patch),
+          ),
+      );
     if (mode === "signals") return this.signalPaletteEntries(query, limit);
     // Planned and momentarily unavailable commands both stay listed so the
     // palette matches the menu, but each says why it will not run.

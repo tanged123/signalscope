@@ -41,6 +41,15 @@ test.describe("exported snapshot round trip", () => {
         ui_font_size: 15,
         plot_font_size: 12.5,
         plot_line_width_scale: scale,
+        color_palette: "custom",
+        custom_color_palette: ["#123456", "#abcdef"],
+        contour_palette: "custom",
+        custom_contour_palette: [
+          { position: 0, color: "#102030" },
+          { position: 0.3, color: "#abcdef" },
+          { position: 1, color: "#fedcba" },
+        ],
+        contour_reversed: true,
       });
       const html = readFileSync(artifacts.full, "utf8").replace(
         /(<script id="signalscope-baked-data"[^>]*>)[\s\S]*?(<\/script>)/,
@@ -71,6 +80,11 @@ test.describe("exported snapshot round trip", () => {
             uiSize: style.fontSize,
             uiFont: style.getPropertyValue("--font-ui"),
             plotFont: style.getPropertyValue("--font-plot"),
+            firstColor: style.getPropertyValue("--series-1").trim(),
+            colorCount: style.getPropertyValue("--plot-color-count").trim(),
+            contour: JSON.parse(
+              style.getPropertyValue("--plot-contour-palette"),
+            ) as unknown,
           };
         }),
       ).toEqual({
@@ -79,6 +93,13 @@ test.describe("exported snapshot round trip", () => {
         uiSize: "15px",
         uiFont: expect.stringContaining("Arimo"),
         plotFont: expect.stringContaining("DejaVu Sans"),
+        firstColor: "#123456",
+        colorCount: "2",
+        contour: [
+          { position: 0, color: "#fedcba" },
+          { position: 0.7, color: "#abcdef" },
+          { position: 1, color: "#102030" },
+        ],
       });
       await page
         .locator(".plot-stat-row .plot-row-inspector-toggle")

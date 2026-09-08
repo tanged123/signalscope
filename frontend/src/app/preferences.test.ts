@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
+import { palettePreferences } from "./palettes";
 
 import {
   applyPreferences,
@@ -17,7 +18,7 @@ import {
 describe("preferences", () => {
   it("defaults match the spec", () => {
     const prefs = defaultPreferences();
-    expect(prefs.schema_version).toBe(6);
+    expect(prefs.schema_version).toBe(7);
     expect(prefs.theme).toBe("dark");
     expect(prefs.ui_font_family).toBe("inter");
     expect(prefs.plot_font_family).toBe("jetbrains");
@@ -56,7 +57,11 @@ describe("preferences", () => {
       recipe_directory: "/private/recipes",
       ingest_working_bytes: "1234",
     });
-    expect(JSON.parse(json)).toEqual({ schema_version: 6, ...appearance });
+    expect(JSON.parse(json)).toEqual({
+      schema_version: 7,
+      ...appearance,
+      ...palettePreferences({}),
+    });
     expect(parsePreferences(json)).toEqual({
       ...defaultPreferences(),
       ...appearance,

@@ -1,5 +1,11 @@
 import { expect, test } from "vitest";
-import { colorFraction, resolveColorScale, viridis } from "./color-scale";
+import { colorFraction, resolveColorScale } from "./color-scale";
+import {
+  DEFAULT_CONTOUR,
+  sampleContour,
+  compileContour,
+  CONTOUR_PALETTES,
+} from "./palettes";
 import { colorAttributes } from "../render/color-attributes";
 import { line2DFromSignalX } from "../render/signal-x-adapter";
 import { line2dFamily } from "./line2d-family";
@@ -65,8 +71,12 @@ test("fixed limits clamp, constants use the midpoint, and missing samples use ne
   const values = data.ys[0]?.color?.values ?? new Float64Array();
   const colors = colorAttributes(values, scale);
   expect(colors[3]).toBe(-1);
-  expect([...colors.slice(4, 8)]).toEqual([...Float32Array.from(viridis(0))]);
-  expect([...colors.slice(12, 16)]).toEqual([...Float32Array.from(viridis(1))]);
+  expect([...colors.slice(4, 8)]).toEqual([
+    ...Float32Array.from(sampleContour(DEFAULT_CONTOUR, 0)),
+  ]);
+  expect([...colors.slice(12, 16)]).toEqual([
+    ...Float32Array.from(sampleContour(DEFAULT_CONTOUR, 1)),
+  ]);
   expect(colors[19]).toBe(-1);
   expect(colorAttributes(values, { ...scale })).toBe(colors);
   expect(colorFraction(9, [9, 9])).toBe(0.5);
@@ -101,6 +111,18 @@ test("colored feeds preserve XY geometry and attribute identity during viewport 
   expect(second.series[0]?.data).toBe(first.series[0]?.data);
   expect(second.series[0]?.pointColors).toBe(first.series[0]?.pointColors);
   expect(first.series).toHaveLength(1);
+  const contour = compileContour(CONTOUR_PALETTES.gray.stops);
+  const recolored = line2DFromSignalX(data, { ...options, contour });
+  expect(recolored.series[0]?.data).toBe(first.series[0]?.data);
+  expect(recolored.series[0]?.pointColors).not.toBe(
+    first.series[0]?.pointColors,
+  );
+  expect([...(recolored.series[0]?.pointColors?.slice(0, 4) ?? [])]).toEqual([
+    0, 0, 0, 1,
+  ]);
+  expect(
+    line2DFromSignalX(data, { ...options, contour }).series[0]?.pointColors,
+  ).toBe(recolored.series[0]?.pointColors);
   expect(first.series[0]?.pointColors).toHaveLength(20);
 });
 

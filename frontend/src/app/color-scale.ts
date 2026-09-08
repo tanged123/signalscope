@@ -6,23 +6,6 @@ export interface ColorScale {
   range: readonly [number, number] | null;
 }
 
-// Viridis samples are independent of the theme's categorical palette.
-const STOPS = [
-  0x440154, 0x482475, 0x414487, 0x355f8d, 0x2a788e, 0x21918c, 0x22a884,
-  0x44bf70, 0x7ad151, 0xbddf26, 0xfde725,
-];
-
-export function viridis(t: number): readonly [number, number, number, number] {
-  const position = Math.min(1, Math.max(0, t)) * (STOPS.length - 1);
-  const index = Math.min(STOPS.length - 2, Math.floor(position));
-  const a = STOPS[index] as number;
-  const b = STOPS[index + 1] as number;
-  const f = position - index;
-  const channel = (shift: number): number =>
-    (((a >> shift) & 255) * (1 - f) + ((b >> shift) & 255) * f) / 255;
-  return [channel(16), channel(8), channel(0), 1];
-}
-
 export function colorFraction(
   value: number,
   [min, max]: readonly [number, number],

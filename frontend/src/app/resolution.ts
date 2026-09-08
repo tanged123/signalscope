@@ -352,7 +352,7 @@ function matchesOverride(
 }
 
 function hueForSlot(slot: number): number {
-  return ((Math.max(1, Math.trunc(slot)) - 1) % 8) + 1;
+  return Math.max(1, Math.trunc(slot));
 }
 
 function sameRef(left: SeriesRef, right: SeriesRef): boolean {
