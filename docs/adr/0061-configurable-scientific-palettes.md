@@ -62,6 +62,18 @@ The JSON shape and data protocol remain unchanged. The snapshot appearance white
 so offline snapshots retain custom colors and reversal. About includes bundled
 source and license notices, including in exported HTML.
 
+`ui/panel-render.ts` owns preparation of a panel's palette, strokes, emphasis
+indices and render request. It accepts only appearance/series state, a line
+response, a window and emphasized paths. It captures one resolved palette for
+both family preparation and the final request; the panel retains range
+selection and ChartHost publication. No resource or asynchronous lifetime
+moves across this boundary. Existing panel behavior tests validate rendering;
+the extraction does not exempt the remaining oversized panel from ADR 0053.
+
+Snapshot artifact checks exempt only the complete bundled license notice
+literal from HTTP detection. Standalone URLs, including multiline fetch
+arguments, remain rejected; the snapshot policy regression tests cover both.
+
 ## Alternatives and tradeoffs
 
 Keeping all colors in CSS cannot express arbitrary positioned stops or

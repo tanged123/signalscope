@@ -1,3 +1,11 @@
+import { readFileSync } from "node:fs";
+
+const notices = readFileSync(
+  new URL("../src/app/palette-notices.txt", import.meta.url),
+  "utf8",
+);
+const noticeTemplate = "`" + notices.replace(/\\|`|\$\{/g, "\\$&") + "`";
+
 export function hasHttpResources(html) {
   // About links navigate only after a click; they do not load resources.
   const resources = html
@@ -5,9 +13,8 @@ export function hasHttpResources(html) {
       /(<a\b[^>]*\bhref=")https:\/\/github\.com\/tanged123\/signalscope(?:#readme|\/issues)(")/g,
       "$1$2",
     )
-    .replace(
-      /((?:\\n|\n)[ \t]*)http:\/\/www\.apache\.org\/licenses\/(?:LICENSE-2\.0)?(?=\\n|\n)/g,
-      "$1",
-    );
+    // Only the complete bundled notice literal is exempt, never a URL alone.
+    .replaceAll(JSON.stringify(notices), '""')
+    .replaceAll(noticeTemplate, "``");
   return /\bhttps?:\/\//i.test(resources);
 }

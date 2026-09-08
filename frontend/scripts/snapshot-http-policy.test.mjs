@@ -1,15 +1,34 @@
 import { expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { hasHttpResources } from "./snapshot-http-policy.mjs";
 
-it("permits Apache license references as inert notice text, never resource attributes or fetch calls", () => {
+it("permits only the complete bundled notice literal", () => {
+  const notices = readFileSync(
+    new URL("../src/app/palette-notices.txt", import.meta.url),
+    "utf8",
+  );
+  for (const literal of [JSON.stringify(notices), "`" + notices + "`"]) {
+    expect(hasHttpResources(`<script>const notices=${literal};</script>`)).toBe(
+      false,
+    );
+  }
+});
+
+it("rejects Apache resource URLs, including whitespace normalized by URL parsing", () => {
   for (const url of [
     "http://www.apache.org/licenses/",
     "http://www.apache.org/licenses/LICENSE-2.0",
   ]) {
-    expect(hasHttpResources("\\n    " + url + "\\n")).toBe(false);
-    expect(hasHttpResources("\n    " + url + "\n")).toBe(false);
     expect(hasHttpResources(`<img src="${url}">`)).toBe(true);
     expect(hasHttpResources(`fetch("${url}")`)).toBe(true);
+    expect(new URL(`\n  ${url}\n`).href).toBe(url);
+    for (const newline of ["\n", "\\n"]) {
+      expect(
+        hasHttpResources(
+          `<script>fetch(\`${newline}  ${url}${newline}\`)</script>`,
+        ),
+      ).toBe(true);
+    }
   }
 });
 

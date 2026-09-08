@@ -23,6 +23,9 @@ discrete sets, continuous maps, custom validation and sampling independently
 of plot families. Global preferences select them; `ui/settings.ts` supplies
 appearance entries and `ui/palette-editor.ts` owns draft editing and modal
 cleanup. `render/plot-theme.ts` resolves their cached rendering representation.
+`ui/panel-render.ts` captures one palette for family preparation and render
+request construction, including strokes and emphasis; the panel publishes the
+request after resolving ranges.
 See [ADR 0061](adr/0061-configurable-scientific-palettes.md).
 `app/themes.ts` owns named theme metadata, validation and cycling; CSS owns
 the semantic chrome tokens. `ui/theme-picker.ts` presents the same tokens
