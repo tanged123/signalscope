@@ -1,4 +1,6 @@
 import { settingsEntries } from "./settings";
+import { nextTheme } from "../app/themes";
+import { showThemePicker } from "./theme-picker";
 import { showPaletteEditor } from "./palette-editor";
 import {
   renderDockFooter,
@@ -993,7 +995,7 @@ export class AppShell {
     this.commands.register(
       shellCommand("toggle-theme", {
         run: () => {
-          this.toggleTheme();
+          this.setTheme(nextTheme(this.prefs.theme));
         },
       }),
     );
@@ -1254,7 +1256,10 @@ export class AppShell {
       return settingsEntries(
         this.prefs,
         (patch) => this.updatePreferences(patch),
-        () => this.toggleTheme(),
+        () =>
+          showThemePicker(this.root, this.prefs, (theme) =>
+            this.setTheme(theme),
+          ),
         this.recipeDirectoryEntries(),
         (kind) =>
           showPaletteEditor(this.root, kind, this.prefs, (patch) =>
@@ -2874,8 +2879,7 @@ export class AppShell {
     void this.refreshTiles();
   }
 
-  private toggleTheme(): void {
-    const theme = this.prefs.theme === "light" ? "dark" : "light";
+  private setTheme(theme: Preferences["theme"]): void {
     // Preferences are authoritative for the running app; the session keeps a
     // copy so an exported snapshot bakes the theme it was exported with. That
     // copy has to reach disk too, or a session saved after a theme change and

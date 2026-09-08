@@ -1,6 +1,7 @@
 @import "./legend-color-scale.css";
 @import "./palette-editor.css";
 @import "./tokens.css";
+@import "./themes.css";
 @import "./axis-picker.css";
 
 * {

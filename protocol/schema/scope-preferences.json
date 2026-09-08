@@ -44,7 +44,14 @@
     },
     "Theme": {
       "kind": "enum",
-      "variants": ["dark", "light"],
+      "variants": [
+        "dark",
+        "light",
+        "graphite",
+        "paper",
+        "contrast_dark",
+        "contrast_light"
+      ],
       "default": "dark"
     },
     "Preferences": {

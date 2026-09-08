@@ -2,7 +2,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import type { SnapshotManifest } from "../../src/generated/protocol";
-import { SESSION_SCHEMA_VERSION } from "../../src/generated/session";
+import {
+  SESSION_SCHEMA_VERSION,
+  type Session,
+} from "../../src/generated/session";
 import type { Envelope } from "../../src/app/envelope";
 import { seal } from "../../src/app/envelope";
 import {
@@ -34,6 +37,10 @@ test.describe("exported snapshot round trip", () => {
       page,
     }, testInfo) => {
       const manifest = bakedManifest(artifacts.full);
+      const theme = scale === 0.75 ? "light" : "contrast_dark";
+      const session = JSON.parse(manifest.session_json) as Session;
+      session.theme = theme;
+      manifest.session_json = JSON.stringify(session);
       manifest.preferences_json = snapshotPreferences({
         ...defaultPreferences(),
         ui_font_family: "arimo",
@@ -70,7 +77,7 @@ test.describe("exported snapshot round trip", () => {
         page.locator(".chart-host canvas:not(.colorbar-canvas)").first(),
       ).toBeVisible();
       await expect(page.locator(".gpu-warning")).toBeHidden();
-      await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       expect(
         await page.evaluate(() => {
           const style = getComputedStyle(document.documentElement);

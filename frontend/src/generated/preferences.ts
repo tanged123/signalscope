@@ -13,7 +13,7 @@ export interface ContourStop {
 
 export type FontFamily = "inter" | "dejavu" | "arimo" | "jetbrains";
 
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "graphite" | "paper" | "contrast_dark" | "contrast_light";
 
 export interface Preferences {
   schema_version: number;

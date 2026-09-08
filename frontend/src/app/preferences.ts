@@ -4,6 +4,7 @@ import {
   type Preferences,
 } from "../generated/preferences";
 import { palettePreferences, discreteColors, contourStops } from "./palettes";
+import { isTheme, THEMES } from "./themes";
 
 export const UI_FONT_SIZE = { min: 10, max: 20, default: 13, step: 1 } as const;
 export const PLOT_FONT_SIZE = {
@@ -148,7 +149,7 @@ export function parsePreferences(json: string): Preferences | null {
   return {
     schema_version: PREFERENCES_SCHEMA_VERSION,
     ...palettePreferences(value),
-    theme: value.theme === "light" ? "light" : defaults.theme,
+    theme: isTheme(value.theme) ? value.theme : defaults.theme,
     ui_font_family: family(value.ui_font_family, defaults.ui_font_family),
     plot_font_family: family(value.plot_font_family, defaults.plot_font_family),
     ui_font_size: clampUiFontSize(
@@ -198,6 +199,7 @@ export function applyPreferences(
   target: PreferencesTarget,
 ): void {
   target.dataset.theme = prefs.theme;
+  target.dataset.colorScheme = THEMES[prefs.theme].scheme;
   const colors = discreteColors(prefs);
   target.style.setProperty("--plot-color-count", String(colors.length));
   target.style.setProperty("--plot-color-palette", JSON.stringify(colors));

@@ -98,11 +98,15 @@ pub enum FontFamily {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Theme {
     #[default]
     Dark,
     Light,
+    Graphite,
+    Paper,
+    ContrastDark,
+    ContrastLight,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

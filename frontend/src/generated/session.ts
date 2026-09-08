@@ -2,7 +2,7 @@
 
 export const SESSION_SCHEMA_VERSION = 32 as const;
 
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "graphite" | "paper" | "contrast_dark" | "contrast_light";
 
 export type TimeMode = "fixed" | "follow";
 

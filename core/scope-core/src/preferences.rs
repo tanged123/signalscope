@@ -181,10 +181,10 @@ fn repair_current(value: &serde_json::Value) -> Preferences {
             .get("contour_reversed")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
-        theme: match value.get("theme").and_then(serde_json::Value::as_str) {
-            Some("light") => Theme::Light,
-            _ => defaults.theme,
-        },
+        theme: value
+            .get("theme")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or(defaults.theme),
         ui_font_family: family("ui_font_family", defaults.ui_font_family),
         plot_font_family: family("plot_font_family", defaults.plot_font_family),
         ui_font_size: size("ui_font_size", defaults.ui_font_size, 10.0, 20.0, 1.0),

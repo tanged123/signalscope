@@ -13,11 +13,12 @@ import {
 } from "../app/palettes";
 import type { Preferences } from "../generated/preferences";
 import type { PaletteEntry } from "./command-palette";
+import { THEMES } from "../app/themes";
 
 export function settingsEntries(
   prefs: Preferences,
   update: (patch: Partial<Preferences>) => void,
-  toggleTheme: () => void,
+  openThemes: () => void,
   recipeEntries: PaletteEntry[],
   openPalette: (kind: "color" | "contour") => void,
 ): PaletteEntry[] {
@@ -44,11 +45,8 @@ export function settingsEntries(
   return [
     {
       title: "Theme",
-      hint: prefs.theme,
-      keepOpen: true,
-      run: () => {
-        toggleTheme();
-      },
+      hint: THEMES[prefs.theme].label,
+      run: openThemes,
     },
     ...recipeEntries,
     {

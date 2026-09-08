@@ -56,7 +56,7 @@ const definitions = {
   },
   "toggle-linked": { title: "Toggle linked time", keys: "l" },
   "toggle-theme": {
-    title: "Toggle theme",
+    title: "Cycle theme",
     keys: "t",
     section: "view",
     group: "display",

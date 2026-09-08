@@ -219,9 +219,7 @@ test("UI fonts and sizes apply consistently to controls, muted text, and the sig
   }
   await page.keyboard.press("Control+Comma");
   const paletteInput = page.locator(".palette-input");
-  await paletteInput.press("ArrowDown");
-  await paletteInput.press("ArrowDown");
-  await paletteInput.press("ArrowDown");
+  await paletteInput.fill("UI font size");
   await paletteInput.press("ArrowRight");
   await page.keyboard.press("Escape");
   await expect(page.locator(":root")).toHaveCSS("font-size", "14px");
