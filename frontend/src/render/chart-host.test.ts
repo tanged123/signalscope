@@ -163,6 +163,50 @@ async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
 }
 
 describe("ChartHost", () => {
+  it("uses log display coordinates while exposing original ranges and avoiding data republication on zoom", async () => {
+    const host = await hostFixture();
+    const base = request();
+    const log = {
+      ...base,
+      xOrigin: 0,
+      xRange: { min: 1, max: 100 },
+      yRange: [1, 1000] as const,
+      axisEqual: true,
+      axes: {
+        ...base.axes,
+        x: { label: "X", scale: "log" as const },
+        y: { label: "Y", scale: "log" as const },
+      },
+    };
+    host.render(log);
+    const chart = state.charts.at(-1)!;
+    const options = chart.options as {
+      xAxis: { min: number; max: number; tickFormatter(value: number): string };
+      yAxis: { min: number; max: number; tickFormatter(value: number): string };
+    };
+    expect(options.xAxis.min).toBe(0);
+    expect(options.xAxis.max).toBe(2);
+    expect(options.yAxis.max).toBe(3);
+    expect(Number(options.yAxis.tickFormatter(2))).toBe(100);
+    expect(host.layout()).toMatchObject({
+      axisEqual: false,
+      xScale: "log",
+      yScale: "log",
+      xRange: { min: 1, max: 100 },
+      yRange: { min: 1, max: 1000 },
+    });
+    chart.setOption.mockClear();
+    host.render({ ...log, xRange: { min: 10, max: 100 }, yRange: [10, 100] });
+    expect(chart.setOption).not.toHaveBeenCalled();
+    expect(chart.setViewRange).toHaveBeenLastCalledWith({
+      x: { min: 1, max: 2 },
+      y: { min: 1, max: 2 },
+    });
+    host.render(base);
+    expect(chart.setOption).toHaveBeenCalledOnce();
+    expect(host.layout()?.xScale).toBeUndefined();
+    host.dispose();
+  });
   it.each(["gutter", "inline"] as const)(
     "keeps equal unit scales with %s axes across resize, viewport edits and disabling",
     async (axisStyle) => {

@@ -259,6 +259,7 @@ mod tests {
             set_id: None,
         }];
         panel.color_axis = Some(crate::session::ColorAxis {
+            scale: None,
             source: SampleAxisSource::Bundle { refs: cs.clone() },
             range: None,
             label: None,

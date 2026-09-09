@@ -12,7 +12,41 @@ import { line2dFamily } from "./line2d-family";
 import type { Line2DResponse } from "./line-binary";
 import type { ColorAxis } from "../generated/session";
 
-const axis: ColorAxis = { source: { kind: "time" }, range: null, label: null };
+const axis: ColorAxis = {
+  source: { kind: "time" },
+  range: null,
+  label: null,
+  scale: null,
+};
+
+test("log C uses positive domains, geometric spacing, and separate cached colors", () => {
+  const data = response([-1, 0, 1, 10, 100]);
+  const window = { t0: -1, t1: 3 };
+  const linear = resolveColorScale(data, axis, window, "C");
+  const log = resolveColorScale(data, { ...axis, scale: "log" }, window, "C");
+  expect(linear.range).toEqual([-1, 100]);
+  expect(log.range).toEqual([1, 100]);
+  expect(colorFraction(10, [1, 100], "log")).toBeCloseTo(0.5);
+  const values = Float64Array.from([-1, 0, 1, 10, 100]);
+  const colors = colorAttributes(values, log);
+  expect(colors[3]).toBe(-1);
+  expect(colors[7]).toBe(-1);
+  expect(Array.from(colors.slice(12, 16))).toEqual(
+    Array.from(Float32Array.from(sampleContour(DEFAULT_CONTOUR, 0.5))),
+  );
+  const changed = colorAttributes(values, { ...log, scale: "linear" });
+  expect(changed).not.toBe(colors);
+  expect(colorAttributes(values, { ...log, scale: "linear" })).toBe(changed);
+  expect(resolveColorScale(data, axis, window, "C").range).toEqual([-1, 100]);
+  expect(
+    resolveColorScale(
+      response([-1, 0, -1, 0, NaN]),
+      { ...axis, scale: "log" },
+      window,
+      "C",
+    ).range,
+  ).toBeNull();
+});
 function response(colors: number[]): Line2DResponse {
   return {
     requestId: "r",

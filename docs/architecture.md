@@ -258,6 +258,12 @@ budget.
 
 ## Shared primitives and extraction
 
+Logarithmic X/Y/C scales are presentation state, per
+[ADR 0063](adr/0063-logarithmic-axis-scales.md). `plot-math.ts` owns scale math,
+the line adapters pack transformed feeds, and `ui/panel-ranges.ts` resolves
+saved limits against linked time and sticky autoscale. Data queries remain in
+source coordinates for live and baked data alike.
+
 Before adding a helper, inspect these owners and their tests.
 
 | Need                                        | Existing implementation                                                          |

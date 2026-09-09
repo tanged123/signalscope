@@ -49,7 +49,8 @@ export class PanelAxes {
       () => actions.catalog(),
       () => actions.namedSets(),
       (source) => actions.selectX(source),
-      (source) => actions.selectColor({ source, range: null, label: null }),
+      (source) =>
+        actions.selectColor({ source, range: null, label: null, scale: null }),
     );
   }
 
@@ -100,7 +101,12 @@ export class PanelAxes {
       this.actions.namedSets(),
       (source) =>
         axis === "c"
-          ? this.actions.selectColor({ source, range: null, label: null })
+          ? this.actions.selectColor({
+              source,
+              range: null,
+              label: null,
+              scale: null,
+            })
           : this.actions.selectX(source),
       (paths) => this.actions.addY(paths),
       () => this.actions.selectColor(null),

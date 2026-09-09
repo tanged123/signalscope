@@ -1,9 +1,12 @@
-import type { PanelState } from "../generated/session";
+import type { AxisScale, PanelState } from "../generated/session";
 import { positionPanelPopover } from "./panel-menu";
 
 type Limits = [number, number] | null;
 export interface AxisLimits {
   axisEqual: boolean;
+  xScale?: AxisScale;
+  yScale?: AxisScale;
+  cScale?: AxisScale;
   x: Limits;
   y: Limits;
   c: Limits;
@@ -37,6 +40,7 @@ export function showAxisLimits(
     string,
     {
       mode: HTMLSelectElement;
+      scale: HTMLSelectElement;
       min: HTMLInputElement;
       max: HTMLInputElement;
       label: HTMLInputElement;
@@ -70,6 +74,22 @@ export function showAxisLimits(
     }
     mode.value = fixed === null ? "auto" : "fixed";
     fieldset.append(mode);
+    const scale = document.createElement("select");
+    scale.setAttribute("aria-label", `${name} scale`);
+    for (const [value, text] of [
+      ["linear", "Linear"],
+      ["log", "Logarithmic (base 10)"],
+    ]) {
+      const option = document.createElement("option");
+      option.value = value ?? "";
+      option.textContent = text ?? "";
+      scale.append(option);
+    }
+    scale.value =
+      (dimension === "c"
+        ? state.color_axis?.scale
+        : state[`${dimension}_scale`]) ?? "linear";
+    fieldset.append(scale);
     const fields = document.createElement("div");
     fields.className = "axis-limits-fields";
     const input = (
@@ -107,8 +127,12 @@ export function showAxisLimits(
       min.disabled = max.disabled = mode.value === "auto";
     };
     mode.addEventListener("change", update);
+    scale.addEventListener("change", () => {
+      if (scale.value === "log" && min.valueAsNumber <= 0) mode.value = "auto";
+      update();
+    });
     update();
-    controls.set(dimension, { mode, min, max, label });
+    controls.set(dimension, { mode, scale, min, max, label });
     fieldset.append(fields);
     form.append(fieldset);
   }
@@ -121,8 +145,23 @@ export function showAxisLimits(
   form.append(equalLabel);
   const equalNote = document.createElement("div");
   equalNote.className = "axis-limits-note";
-  equalNote.textContent = "Equal X/Y units per pixel; expands limits to fit.";
+  const updateEqual = (): void => {
+    equal.disabled =
+      controls.get("x")?.scale.value === "log" ||
+      controls.get("y")?.scale.value === "log";
+    if (equal.disabled) equal.checked = false;
+    equalNote.textContent = equal.disabled
+      ? "Axis equal requires linear X and Y scales."
+      : "Equal X/Y units per pixel; expands limits to fit.";
+  };
+  form.addEventListener("change", updateEqual);
+  updateEqual();
   form.append(equalNote, labels);
+  const logNote = document.createElement("div");
+  logNote.className = "axis-limits-note";
+  logNote.textContent =
+    "Log scales use positive values. Non-positive X/Y values break lines; non-positive C values use a neutral color.";
+  form.append(logNote);
   if (state.x_axis.kind === "time") {
     const note = document.createElement("div");
     note.className = "axis-limits-note";
@@ -163,11 +202,18 @@ export function showAxisLimits(
     for (const dimension of ["x", "y", "c"] as const) {
       const fields = controls.get(dimension);
       if (fields === undefined) continue;
+      draft[`${dimension}Scale`] =
+        fields.scale.value === "log" ? "log" : "linear";
       if (fields.mode.value === "fixed") {
         const lo = fields.min.valueAsNumber;
         const hi = fields.max.valueAsNumber;
         if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo >= hi) {
           error.textContent = `${dimension.toUpperCase()}: enter finite limits with minimum less than maximum.`;
+          fields.min.focus();
+          return;
+        }
+        if (fields.scale.value === "log" && lo <= 0) {
+          error.textContent = `${dimension.toUpperCase()}: logarithmic limits must be positive.`;
           fields.min.focus();
           return;
         }

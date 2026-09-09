@@ -36,6 +36,66 @@
   },
   "cases": [
     {
+      "name": "log X Y and C restore positive limits",
+      "session": {},
+      "panel": {
+        "x_scale": "log",
+        "y_scale": "log",
+        "x_range": [1, 100],
+        "y_range": [0.1, 10],
+        "color_axis": {
+          "source": { "kind": "time" },
+          "scale": "log",
+          "range": [1, 100]
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "unknown X scale",
+      "session": {},
+      "panel": { "x_scale": "symlog" },
+      "valid": false
+    },
+    {
+      "name": "unknown Y scale",
+      "session": {},
+      "panel": { "y_scale": "symlog" },
+      "valid": false
+    },
+    {
+      "name": "non-positive log X limits",
+      "session": {},
+      "panel": { "x_scale": "log", "x_range": [0, 100] },
+      "valid": false
+    },
+    {
+      "name": "negative log Y limits",
+      "session": {},
+      "panel": { "y_scale": "log", "y_range": [-10, -1] },
+      "valid": false
+    },
+    {
+      "name": "non-positive log C limits",
+      "session": {},
+      "panel": {
+        "color_axis": {
+          "source": { "kind": "time" },
+          "scale": "log",
+          "range": [0, 100]
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown C scale",
+      "session": {},
+      "panel": {
+        "color_axis": { "source": { "kind": "time" }, "scale": "symlog" }
+      },
+      "valid": false
+    },
+    {
       "name": "equal axes",
       "session": {},
       "panel": { "axis_equal": true },

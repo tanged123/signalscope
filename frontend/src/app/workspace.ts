@@ -1149,6 +1149,8 @@ export class WorkspaceModel {
       title: `Panel ${String(this.nextPanelNumber)}`,
       axis_style: "inline",
       axis_equal: false,
+      x_scale: null,
+      y_scale: null,
       bindings: [],
       color_by: "source",
       dash_by: null,

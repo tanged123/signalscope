@@ -324,6 +324,8 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
         title: "Many series",
         axis_style: "inline",
         axis_equal: false,
+        x_scale: null,
+        y_scale: null,
         bindings: [
           {
             kind: "pick" as const,

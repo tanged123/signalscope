@@ -37,12 +37,19 @@ export function axisActions(host: AxisActionHost) {
     onSetAxisLimits(id: string, limits: AxisLimits): void {
       const panel = host.workspace.panel(id);
       if (panel === undefined) return;
-      for (const range of [limits.x, limits.y, limits.c]) {
+      for (const dimension of ["x", "y", "c"] as const) {
+        const range = limits[dimension];
         if (
           range !== null &&
           (!range.every(Number.isFinite) || range[0] >= range[1])
         )
           throw new Error("Axis limits must be finite and increasing.");
+        if (
+          range !== null &&
+          limits[`${dimension}Scale`] === "log" &&
+          range[0] <= 0
+        )
+          throw new Error("Logarithmic axis limits must be positive.");
       }
       if (panel.x_axis.kind === "time") host.timeLimits(id, limits.x);
       else if (limits.x === null) host.workspace.clearPanelXRange(id);
@@ -53,12 +60,16 @@ export function axisActions(host: AxisActionHost) {
       } else host.workspace.setPanelYRange(id, limits.y);
       host.workspace.setAxisLabel(id, "x", limits.xLabel);
       host.workspace.setAxisLabel(id, "y", limits.yLabel);
-      panel.axis_equal = limits.axisEqual;
+      panel.x_scale = limits.xScale ?? "linear";
+      panel.y_scale = limits.yScale ?? "linear";
+      panel.axis_equal =
+        limits.axisEqual && panel.x_scale !== "log" && panel.y_scale !== "log";
       if (panel.color_axis != null)
         host.workspace.setPanelColorAxis(id, {
           ...panel.color_axis,
           range: limits.c,
           label: limits.cLabel,
+          scale: limits.cScale ?? "linear",
         });
       publish(id, false);
     },

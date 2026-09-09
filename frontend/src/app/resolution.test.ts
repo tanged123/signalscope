@@ -37,6 +37,8 @@ function panel(): PanelState {
     title: "Panel 1",
     axis_style: "gutter",
     axis_equal: false,
+    x_scale: null,
+    y_scale: null,
     bindings: [],
     color_by: "source",
     dash_by: null,

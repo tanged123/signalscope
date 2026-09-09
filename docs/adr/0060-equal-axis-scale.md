@@ -57,3 +57,5 @@ autosave and offline snapshot restore.
 
 Implemented for the current Cartesian Line2D renderer. Future nonlinear axes
 must define their own equal-scale semantics before reusing this flag.
+[ADR 0063](0063-logarithmic-axis-scales.md) disables equal scale when X or Y
+is logarithmic; linear color scaling is not required.

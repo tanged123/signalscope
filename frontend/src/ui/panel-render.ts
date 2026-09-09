@@ -15,6 +15,8 @@ export function preparePanelRender(
     | "y_label"
     | "color_axis"
     | "axis_equal"
+    | "x_scale"
+    | "y_scale"
   >,
   data: PanelLineResponse,
   window: { t0: number; t1: number },
@@ -30,6 +32,8 @@ export function preparePanelRender(
     xLabel: state.x_label,
     yLabel: state.y_label,
     colorAxis: state.color_axis,
+    xScale: state.x_scale ?? "linear",
+    yScale: state.y_scale ?? "linear",
   });
   const bySeries = new Map(state.series.map((series) => [series.path, series]));
   const styles: SeriesStroke[] = family.plotted.map((item) => {

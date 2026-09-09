@@ -1,5 +1,9 @@
 # Current state and next work
 
+X, Y, and bound C axes now offer linear and logarithmic base-10 scales in
+Limits, with positive-domain validation and saved/offline state. See
+[ADR 0063](adr/0063-logarithmic-axis-scales.md). Broad validation runs in CI.
+
 This is a compact statement of what SignalScope supports today. Historical
 implementation plans are not kept in the working tree; architecture changes
 are recorded in [ADRs](adr/README.md).

@@ -8,6 +8,7 @@ import {
 } from "../app/bin-columns";
 import type { ColumnarTileResponse } from "../app/bin-columns";
 import { createFeedCache } from "./line2d-adapter";
+import { axisCoordinate, type AxisScale } from "../app/plot-math";
 
 /**
  * Interleaved `[x0, y0, x1, y1, ...]` in single precision: the layout
@@ -16,18 +17,26 @@ import { createFeedCache } from "./line2d-adapter";
  */
 export type SeriesFeed = Float32Array;
 
-export function m4Feed(columns: BinColumns, tRef: number): SeriesFeed {
+export function m4Feed(
+  columns: BinColumns,
+  tRef: number,
+  xScale: AxisScale = "linear",
+  yScale: AxisScale = "linear",
+): SeriesFeed {
   const feed = new Float32Array(vertexCount(columns) * 2);
   let length = 0;
   const appendGap = (time: number): void => {
-    feed[length] = time - tRef;
+    feed[length] = Number.isFinite(axisCoordinate(time, xScale))
+      ? axisCoordinate(time, xScale) - tRef
+      : 0;
     feed[length + 1] = Number.NaN;
     length += 2;
   };
   const append = (time: number, value: number): void => {
     if (!Number.isFinite(value)) return;
-    feed[length] = time - tRef;
-    feed[length + 1] = value;
+    const x = axisCoordinate(time, xScale) - tRef;
+    feed[length] = Number.isFinite(x) ? x : 0;
+    feed[length + 1] = Number.isFinite(x) ? axisCoordinate(value, yScale) : NaN;
     length += 2;
   };
 
@@ -144,12 +153,26 @@ function vertexCount(columns: BinColumns): number {
   return count;
 }
 
-const feed = createFeedCache<BinColumns, number, SeriesFeed>(
-  (left, right) => left === right,
+const feed = createFeedCache<
+  BinColumns,
+  { tRef: number; xScale: AxisScale; yScale: AxisScale },
+  SeriesFeed
+>(
+  (left, right) =>
+    left.tRef === right.tRef &&
+    left.xScale === right.xScale &&
+    left.yScale === right.yScale,
 );
 
-export function cachedFeed(columns: BinColumns, tRef: number): SeriesFeed {
-  return feed(columns, tRef, () => m4Feed(columns, tRef));
+export function cachedFeed(
+  columns: BinColumns,
+  tRef: number,
+  xScale: AxisScale = "linear",
+  yScale: AxisScale = "linear",
+): SeriesFeed {
+  return feed(columns, { tRef, xScale, yScale }, () =>
+    m4Feed(columns, tRef, xScale, yScale),
+  );
 }
 
 export function responseTimeReference(response: ColumnarTileResponse): number {

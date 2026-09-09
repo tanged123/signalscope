@@ -36,6 +36,8 @@ export function setColorAxis(
     (!axis.range.every(Number.isFinite) || axis.range[0] >= axis.range[1])
   )
     throw new Error("Color limits must be finite and increasing.");
+  if (axis?.scale === "log" && axis.range != null && axis.range[0] <= 0)
+    throw new Error("Logarithmic color limits must be positive.");
   const bindingChanged =
     JSON.stringify(panel.color_axis?.source) !== JSON.stringify(axis?.source);
   panel.color_axis = structuredClone(axis);

@@ -1,5 +1,5 @@
 import type { ColorScale } from "../app/color-scale";
-import type { Range } from "../app/plot-math";
+import type { AxisScale, Range } from "../app/plot-math";
 import type { Palette, SeriesStroke } from "./plot-theme";
 
 /**
@@ -18,6 +18,7 @@ interface Line2DSeriesInput {
 
 interface Line2DAxisInput {
   label: string;
+  scale?: AxisScale;
 }
 
 export interface Line2DRenderInput {

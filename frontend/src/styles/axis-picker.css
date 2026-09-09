@@ -65,6 +65,10 @@
   margin: 0 4px 2px;
 }
 
+.axis-limits-editor select + select {
+  margin-left: 32px;
+}
+
 .axis-limits-editor input:disabled,
 .axis-limits-note {
   color: var(--fg-4);

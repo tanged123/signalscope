@@ -6,6 +6,7 @@ import {
   type LineSeriesConfig,
 } from "@chartgpu/chartgpu";
 import type { Range, PlotLayout } from "../app/plot-math";
+import { axisCoordinate, axisValue } from "../app/plot-math";
 import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import { createRangeTickFormatter, hueIndex } from "./plot-theme";
 import type { Palette, SeriesStroke, TickFormatter } from "./plot-theme";
@@ -51,6 +52,7 @@ export class ChartHost {
   private options: ChartGPUOptions | null = null;
   private lastLayout: PlotLayout | null = null;
   private lastLabels: { x: string; y: string } | null = null;
+  private lastScales = "";
   private lastAxisStyle: "gutter" | "inline" = "gutter";
   private readonly xTickRange = { min: 0, max: 1 };
   private readonly yTickRange = { min: 0, max: 1 };
@@ -189,7 +191,9 @@ export class ChartHost {
       return element;
     });
     this.elements.length = series.length;
+    const scales = `${request.axes.x.scale ?? "linear"}/${request.axes.y.scale ?? "linear"}`;
     const labelsChanged =
+      this.lastScales !== scales ||
       this.lastLabels === null ||
       this.lastLabels.x !== request.axes.x.label ||
       this.lastLabels.y !== request.axes.y.label ||
@@ -206,6 +210,7 @@ export class ChartHost {
       x: request.axes.x.label,
       y: request.axes.y.label,
     };
+    this.lastScales = scales;
     this.lastAxisStyle = request.axes.style;
     const orderedSeries = series
       .map((element, index) => ({
@@ -249,8 +254,16 @@ export class ChartHost {
       ),
     };
     this.chart.setViewRange({
-      x: { min: xRange.min - xOrigin, max: xRange.max - xOrigin },
-      y: { min: yRange[0], max: yRange[1] },
+      x: {
+        min:
+          axisCoordinate(xRange.min, this.lastRequest?.axes.x.scale) - xOrigin,
+        max:
+          axisCoordinate(xRange.max, this.lastRequest?.axes.x.scale) - xOrigin,
+      },
+      y: {
+        min: axisCoordinate(yRange[0], this.lastRequest?.axes.y.scale),
+        max: axisCoordinate(yRange[1], this.lastRequest?.axes.y.scale),
+      },
     });
     this.lastLayout = this.makeLayout(xRange, yRange);
   }
@@ -353,15 +366,19 @@ export class ChartHost {
     label: string,
     inside = false,
   ): NonNullable<ChartGPUOptions["xAxis"]> {
-    this.xTickRange.min = range.min - this.xOrigin;
-    this.xTickRange.max = range.max - this.xOrigin;
+    const scale = this.lastRequest?.axes.x.scale;
+    this.xTickRange.min =
+      scale === "log" ? range.min : range.min - this.xOrigin;
+    this.xTickRange.max =
+      scale === "log" ? range.max : range.max - this.xOrigin;
     return {
       type: "value",
       name: label,
       inside,
-      min: this.xTickRange.min,
-      max: this.xTickRange.max,
-      tickFormatter: (value) => this.xTickFormatter(value + this.xOrigin),
+      min: axisCoordinate(range.min, scale) - this.xOrigin,
+      max: axisCoordinate(range.max, scale) - this.xOrigin,
+      tickFormatter: (value) =>
+        this.xTickFormatter(axisValue(value + this.xOrigin, scale)),
     };
   }
 
@@ -372,13 +389,14 @@ export class ChartHost {
   ): NonNullable<ChartGPUOptions["yAxis"]> {
     this.yTickRange.min = range[0];
     this.yTickRange.max = range[1];
+    const scale = this.lastRequest?.axes.y.scale;
     return {
       type: "value",
       name: label,
       inside,
-      min: range[0],
-      max: range[1],
-      tickFormatter: (value) => this.yTickFormatter(value),
+      min: axisCoordinate(range[0], scale),
+      max: axisCoordinate(range[1], scale),
+      tickFormatter: (value) => this.yTickFormatter(axisValue(value, scale)),
     };
   }
 
@@ -414,7 +432,13 @@ export class ChartHost {
   ): PlotLayout {
     const grid = this.grid(this.lastAxisStyle);
     return {
-      axisEqual: this.lastRequest?.axisEqual === true,
+      axisEqual: this.equalAxes(),
+      ...(this.lastRequest?.axes.x.scale === "log"
+        ? { xScale: "log" as const }
+        : {}),
+      ...(this.lastRequest?.axes.y.scale === "log"
+        ? { yScale: "log" as const }
+        : {}),
       plot: {
         x: grid.left,
         y: grid.top,
@@ -430,7 +454,8 @@ export class ChartHost {
   }
 
   private viewRanges(xRange: Range, yRange: readonly [number, number]) {
-    if (this.lastRequest?.axisEqual !== true) return { xRange, yRange };
+    if (!this.equalAxes() || this.lastRequest === null)
+      return { xRange, yRange };
     const grid = this.grid(this.lastRequest.axes.style);
     const width = Math.max(
       1,
@@ -449,6 +474,14 @@ export class ChartHost {
       xRange: { min: xRange.min - xPadding, max: xRange.max + xPadding },
       yRange: [yRange[0] - yPadding, yRange[1] + yPadding] as const,
     };
+  }
+
+  private equalAxes(): boolean {
+    return (
+      this.lastRequest?.axisEqual === true &&
+      this.lastRequest.axes.x.scale !== "log" &&
+      this.lastRequest.axes.y.scale !== "log"
+    );
   }
 }
 

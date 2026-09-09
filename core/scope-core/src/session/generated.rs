@@ -42,6 +42,13 @@ pub enum AxisStyle {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum AxisScale {
+    Linear,
+    Log,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DashStyle {
     Solid,
     Dash,
@@ -93,6 +100,8 @@ pub enum SampleAxisSource {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ColorAxis {
     pub source: SampleAxisSource,
+    #[serde(default)]
+    pub scale: Option<AxisScale>,
     #[serde(default)]
     pub range: Option<[f64; 2]>,
     #[serde(default)]
@@ -247,6 +256,10 @@ pub struct PanelState {
     pub axis_style: AxisStyle,
     #[serde(default)]
     pub axis_equal: Option<bool>,
+    #[serde(default)]
+    pub x_scale: Option<AxisScale>,
+    #[serde(default)]
+    pub y_scale: Option<AxisScale>,
     pub bindings: Vec<Binding>,
     #[serde(default)]
     pub color_by: Option<StyleDimension>,

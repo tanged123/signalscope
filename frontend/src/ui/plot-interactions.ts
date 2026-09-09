@@ -11,7 +11,6 @@ import {
   insidePlot,
   invertX,
   invertY,
-  panRange,
   panScaledRange,
   wheelZoomFactor,
   zoomDragMode,
@@ -107,7 +106,7 @@ export class PlotInteractionController {
               layout.plot.y + layout.plot.height,
             ),
           );
-          nextY = zoomRange(layout.yRange, factor, pivotY);
+          nextY = zoomScaledRange(layout.yRange, factor, pivotY, layout.yScale);
         }
         if (axes.x) {
           const pivotX = invertX(
@@ -173,9 +172,10 @@ export class PlotInteractionController {
       this.host.applyXRange(nextX.min, nextX.max);
     }
     if (axes.y) {
-      const nextY = panRange(
+      const nextY = panScaledRange(
         ranges.y,
-        ((to.y - from.y) / layout.plot.height) * (ranges.y.max - ranges.y.min),
+        (to.y - from.y) / layout.plot.height,
+        layout.yScale,
       );
       this.host.applyYRange(nextY.min, nextY.max);
     }

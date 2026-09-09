@@ -14,6 +14,48 @@ const layout: PlotLayout = {
   yRange: { min: 0, max: 10 },
 };
 
+test("log extents exclude non-positive pairs and log picking returns original values", () => {
+  const source: Line2DPlotInput = {
+    anchor: Float64Array.from([0, 1, 2, 3]),
+    x: Float64Array.from([0, 1, 10, 100]),
+    series: [
+      {
+        path: "Y",
+        colorIndex: 0,
+        unit: null,
+        values: Float64Array.from([1000, 1, 10, 100]),
+      },
+    ],
+    window: { t0: 0, t1: 3 },
+    xScale: "log",
+    yScale: "log",
+  };
+  const plot = prepareLine2DPlot(source);
+  expect(plot.autoRanges().x?.[0]).toBeGreaterThan(0);
+  expect(plot.autoRanges().y?.[1]).toBeLessThan(1000);
+  const logLayout: PlotLayout = {
+    ...layout,
+    xRange: { min: 1, max: 100 },
+    yRange: { min: 1, max: 100 },
+    xScale: "log",
+    yScale: "log",
+  };
+  expect(plot.cursorAt(logLayout, { x: 50, y: 50 }, 10)?.rows[0]?.value).toBe(
+    10,
+  );
+  expect(plot.annotationAt(logLayout, { x: 50, y: 50 }, 10)).toMatchObject({
+    x: 10,
+    pinnedValue: 10,
+  });
+  expect(
+    prepareLine2DPlot({
+      ...source,
+      xScale: "linear",
+      yScale: "linear",
+    }).autoRanges().y?.[1],
+  ).toBeGreaterThan(1000);
+});
+
 function annotation(
   anchor: number,
   pinnedValue: number,

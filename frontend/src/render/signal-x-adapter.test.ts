@@ -25,6 +25,42 @@ function response(): Line2DResponse {
 }
 
 describe("signal-X line adapter", () => {
+  it("transforms log coordinates before float32 packing and retains gaps and cache identity", () => {
+    const base = response();
+    const data = {
+      ...base,
+      x: { ...base.x, values: Float64Array.from([1, 10, 100]) },
+      ys: [{ ...base.ys[0]!, values: Float64Array.from([1, 0, 100]) }],
+    };
+    const options = {
+      window: { t0: 0, t1: 2 },
+      xRange: { min: 1, max: 100 },
+      yRange: [1, 100] as const,
+      xLabel: "X",
+      yLabel: "Y",
+      axisStyle: "gutter" as const,
+      xScale: "log" as const,
+      yScale: "log" as const,
+    };
+    const first = line2DFromSignalX(data, options);
+    expect(Array.from(first.series[0]!.data)).toEqual([0, 0, 1, NaN, 2, 2]);
+    expect(line2DFromSignalX(data, options).series[0]!.data).toBe(
+      first.series[0]!.data,
+    );
+    const linear = line2DFromSignalX(data, {
+      ...options,
+      xScale: "linear",
+      yScale: "linear",
+    });
+    expect(Array.from(linear.series[0]!.data)).toEqual([0, 1, 9, 0, 99, 100]);
+    const precise = {
+      ...data,
+      x: { ...data.x, values: Float64Array.from([1e12, 1e12 + 1, 1e12 + 2]) },
+    };
+    const packed = line2DFromSignalX(precise, options).series[0]!.data;
+    expect(packed[2]).toBeGreaterThan(0);
+    expect(packed[4]).toBeGreaterThan(packed[2]!);
+  });
   it("creates a generic Line2D input with local-X precision and gaps", () => {
     const source = response();
     const input = line2DFromSignalX(source, {
@@ -51,8 +87,8 @@ describe("signal-X line adapter", () => {
       5,
     ]);
     expect(input.axes).toEqual({
-      x: { label: "run/x (m)" },
-      y: { label: "value (V)" },
+      x: { label: "run/x (m)", scale: "linear" },
+      y: { label: "value (V)", scale: "linear" },
       style: "inline",
     });
   });

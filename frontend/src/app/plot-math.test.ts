@@ -8,6 +8,7 @@ import {
   panScaledRange,
   panRange,
   projectX,
+  projectY,
   valueAtTime,
   wheelZoomFactor,
   zoomDragMode,
@@ -87,6 +88,24 @@ test("projects and inverts a log x axis", () => {
 test("emits decade ticks for a log range", () => {
   expect(logTicks(0.5, 1200)).toEqual([1, 10, 100, 1000]);
   expect(logTicks(0, -1)).toEqual([]);
+});
+
+test("log Y projection and inversion agree and exclude non-positive coordinates", () => {
+  const logLayout: PlotLayout = {
+    ...layout,
+    xScale: "log",
+    yScale: "log",
+    xRange: { min: 1, max: 1000 },
+    yRange: { min: 1, max: 1000 },
+  };
+  expect(projectY(logLayout, 10)).toBeCloseTo(layout.plot.y + 200);
+  expect(invertY(logLayout, layout.plot.y + 100)).toBeCloseTo(100);
+  expect(projectY(logLayout, 0)).toBeNaN();
+  expect(projectX(logLayout, -1)).toBeNaN();
+  expect(panScaledRange({ min: 1, max: 100 }, 1000, "log")).toEqual({
+    min: 1,
+    max: 100,
+  });
 });
 
 test("zoom drags snap only strongly directional rectangles to one axis", () => {

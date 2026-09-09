@@ -12,7 +12,7 @@ import {
   prepareTimePlot,
   type PreparedPlot,
 } from "./plot-capabilities";
-import type { Range } from "./plot-math";
+import type { AxisScale, Range } from "./plot-math";
 
 interface FamilySeries {
   path: string;
@@ -21,6 +21,8 @@ interface FamilySeries {
 }
 
 interface FamilyContext {
+  xScale?: AxisScale | null;
+  yScale?: AxisScale | null;
   series: readonly FamilySeries[];
   window: { t0: number; t1: number };
   axisStyle: AxisStyle;
@@ -62,6 +64,8 @@ function timeFamily(
       return {
         plotted: shown,
         plot: prepareTimePlot({
+          xScale: context.xScale ?? "linear",
+          yScale: context.yScale ?? "linear",
           series: shown.map((tile) => ({
             path: tile.signalPath,
             colorIndex: colorIndex(
@@ -82,6 +86,8 @@ function timeFamily(
               yLabel: context.yLabel ?? signalAxisLabel(shown, "Y signals"),
               styles,
               axisStyle: context.axisStyle,
+              xScale: context.xScale ?? "linear",
+              yScale: context.yScale ?? "linear",
             },
           ),
       };
@@ -103,6 +109,8 @@ function signalXFamily(
       return {
         plotted: shown,
         plot: prepareLine2DPlot({
+          xScale: context.xScale ?? "linear",
+          yScale: context.yScale ?? "linear",
           linkedTime: data.response.timeX,
           anchor: data.response.anchor,
           x: data.response.x.values,
@@ -153,6 +161,8 @@ function signalXFamily(
               yLabel: context.yLabel ?? signalAxisLabel(shown, "Y signals"),
               styles,
               axisStyle: context.axisStyle,
+              xScale: context.xScale ?? "linear",
+              yScale: context.yScale ?? "linear",
             },
           ),
       };

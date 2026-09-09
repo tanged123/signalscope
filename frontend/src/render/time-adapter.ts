@@ -1,4 +1,5 @@
 import type { ColumnarTileResponse } from "../app/bin-columns";
+import { axisCoordinate } from "../app/plot-math";
 import {
   cachedFeed,
   prepareResponseFeeds,
@@ -18,13 +19,22 @@ export function line2DFromTimeTiles(
   response: ColumnarTileResponse,
   options: TimeLine2DInputOptions,
 ): Line2DRenderInput {
-  const xOrigin = responseTimeReference(response);
+  const origin = axisCoordinate(
+    responseTimeReference(response),
+    options.xScale,
+  );
+  const xOrigin = Number.isFinite(origin) ? origin : 0;
   return {
     xOrigin,
     series: response.series.map((tile, index) => ({
       id: tile.signalId,
       name: tile.signalPath,
-      data: cachedFeed(tile.bins, xOrigin),
+      data: cachedFeed(
+        tile.bins,
+        xOrigin,
+        options.xScale ?? "linear",
+        options.yScale ?? "linear",
+      ),
       style: strokeAt(options, index),
     })),
     xRange: options.xRange,

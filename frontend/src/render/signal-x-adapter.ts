@@ -1,4 +1,5 @@
 import { colorAttributes } from "./color-attributes";
+import { axisCoordinate, type AxisScale } from "../app/plot-math";
 import type { ColorScale } from "../app/color-scale";
 import type { CompiledContour } from "../app/palettes";
 import type { Line2DResponse } from "../app/line-binary";
@@ -20,7 +21,7 @@ export function line2DFromSignalX(
   response: Line2DResponse,
   options: SignalXLine2DInputOptions,
 ): Line2DRenderInput {
-  const xOrigin = signalXReference(response);
+  const xOrigin = signalXReference(response, options.xScale ?? "linear");
   return {
     xOrigin,
     colorScale: options.colorScale,
@@ -31,6 +32,8 @@ export function line2DFromSignalX(
         column.values,
         xOrigin,
         options.window,
+        options.xScale ?? "linear",
+        options.yScale ?? "linear",
       );
       return {
         id: column.signalId,
@@ -69,16 +72,22 @@ export function prepareSignalXLine(
   }
 }
 
-function signalXReference(response: Line2DResponse): number {
+function signalXReference(
+  response: Line2DResponse,
+  scale: AxisScale = "linear",
+): number {
   for (const column of response.ys) {
     for (const value of column.coordinates?.x.values ?? response.x.values) {
-      if (Number.isFinite(value)) return value;
+      const coordinate = axisCoordinate(value, scale);
+      if (Number.isFinite(coordinate)) return coordinate;
     }
   }
   return 0;
 }
 
 interface SignalXFeedDescriptor {
+  xScale: AxisScale;
+  yScale: AxisScale;
   anchor: Float64Array;
   x: Float64Array;
   xOrigin: number;
@@ -91,6 +100,8 @@ const feed = createFeedCache<Float64Array, SignalXFeedDescriptor, Float32Array>(
     left.anchor === right.anchor &&
     left.x === right.x &&
     left.xOrigin === right.xOrigin &&
+    left.xScale === right.xScale &&
+    left.yScale === right.yScale &&
     left.t0 === right.t0 &&
     left.t1 === right.t1,
 );
@@ -101,9 +112,13 @@ function cachedSignalXFeed(
   y: Float64Array,
   xOrigin: number,
   window: { t0: number; t1: number },
+  xScale: AxisScale = "linear",
+  yScale: AxisScale = "linear",
 ): Float32Array {
-  return feed(y, { anchor, x, xOrigin, t0: window.t0, t1: window.t1 }, () =>
-    buildSignalXFeed(anchor, x, y, xOrigin, window),
+  return feed(
+    y,
+    { anchor, x, xOrigin, t0: window.t0, t1: window.t1, xScale, yScale },
+    () => buildSignalXFeed(anchor, x, y, xOrigin, window, xScale, yScale),
   );
 }
 
@@ -113,13 +128,15 @@ function buildSignalXFeed(
   y: Float64Array,
   xOrigin: number,
   window: { t0: number; t1: number },
+  xScale: AxisScale,
+  yScale: AxisScale,
 ): Float32Array {
   const result = new Float32Array(x.length * 2);
   let previousX = 0;
   for (let index = 0; index < x.length; index += 1) {
     const anchorValue = anchor[index] as number;
-    const xValue = x[index] as number;
-    const yValue = y[index] as number;
+    const xValue = axisCoordinate(x[index] as number, xScale);
+    const yValue = axisCoordinate(y[index] as number, yScale);
     const inWindow = anchorValue >= window.t0 && anchorValue <= window.t1;
     if (inWindow && Number.isFinite(xValue)) previousX = xValue - xOrigin;
     result[index * 2] = previousX;

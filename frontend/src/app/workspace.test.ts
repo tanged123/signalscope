@@ -1073,6 +1073,8 @@ describe("WorkspaceModel", () => {
       title: "Panel 1",
       axis_style: "gutter",
       axis_equal: false,
+      x_scale: null,
+      y_scale: null,
       bindings: [],
       color_by: "source",
       dash_by: null,
@@ -1121,6 +1123,7 @@ it("prunes deleted X and C bundle members and clears exhausted axes", () => {
   model.setPanelXAxis(panel.id, { kind: "bundle", refs: [first, second] });
   model.setPanelColorAxis(panel.id, {
     source: { kind: "bundle", refs: [first, second] },
+    scale: null,
     range: [0, 10],
     label: "C",
   });
@@ -1131,6 +1134,7 @@ it("prunes deleted X and C bundle members and clears exhausted axes", () => {
   expect(panel.x_axis).toEqual({ kind: "bundle", refs: [second] });
   expect(panel.x_range).toBeNull();
   expect(panel.color_axis).toEqual({
+    scale: null,
     source: { kind: "bundle", refs: [second] },
     range: [0, 10],
     label: "C",
@@ -1149,6 +1153,7 @@ it("clears a deleted scalar C binding while preserving unrelated X coordinates",
   model.setPanelXRange(panel.id, [1, 2]);
   model.setPanelColorAxis(panel.id, {
     source: { kind: "signal", ref: c },
+    scale: null,
     range: null,
     label: null,
   });

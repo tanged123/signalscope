@@ -17,7 +17,11 @@ bundle, or time. The labeled horizontal scale lives in the legend and shares
 one range across the panel. When the legend is collapsed it remains visible
 as a compact plot inset; neither placement adds a plot gutter.
 The shared **limits** dropdown edits X, Y, and C ranges and labels together,
-with automatic or fixed limits per axis. For time X, **Fit data** fits the
+with automatic or fixed limits and **Linear / Logarithmic (base 10)** scales
+per axis. Log scales use positive values: non-positive X/Y samples break lines,
+and non-positive C samples use a neutral color. **Axis equal** requires linear
+X and Y. Scales persist in sessions and offline snapshots.
+For time X, **Fit data** fits the
 source-time extent and fixed limits follow the panel's linked-time setting.
 C members must share units and the paired sample timebase. Choose **none** to
 restore the saved categorical line colors. Color bindings and limits persist

@@ -149,6 +149,8 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     title: "Time",
     axis_style: "gutter",
     axis_equal: false,
+    x_scale: null,
+    y_scale: null,
     color_by: "source",
     dash_by: null,
     width_by: null,

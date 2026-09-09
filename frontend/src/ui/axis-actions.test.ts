@@ -17,7 +17,12 @@ test("color limits republish style without discarding data or linked cursor", ()
     refresh: vi.fn(),
   };
   const actions = axisActions(host);
-  const axis = { source: { kind: "time" as const }, range: null, label: null };
+  const axis = {
+    source: { kind: "time" as const },
+    range: null,
+    label: null,
+    scale: null,
+  };
   actions.onSetColorAxis(panel.id, axis);
   expect(host.invalidate).toHaveBeenCalledOnce();
   expect(host.refresh).toHaveBeenCalledOnce();
@@ -43,6 +48,7 @@ test("one limits edit publishes X/Y/C together and restores automatic ranges", (
     ref: { source_key: "run", channel: "x" },
   });
   workspace.setPanelColorAxis(panel.id, {
+    scale: null,
     source: { kind: "time" },
     range: null,
     label: null,

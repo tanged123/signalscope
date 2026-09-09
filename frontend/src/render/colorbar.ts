@@ -69,7 +69,7 @@ export class Colorbar {
     this.canvas.style.height = `${String(HEIGHT)}px`;
     this.canvas.setAttribute(
       "aria-label",
-      `C axis: ${scale.label}; ${scale.range === null ? "no finite color data" : `${String(scale.range[0])} to ${String(scale.range[1])}`}`,
+      `C axis: ${scale.label}; ${scale.scale === "log" ? "logarithmic; " : ""}${scale.range === null ? "no finite color data" : `${String(scale.range[0])} to ${String(scale.range[1])}`}`,
     );
     const context = this.canvas.getContext("2d");
     if (context === null) return;
@@ -123,7 +123,7 @@ function paint(
   context.fillStyle = palette.fg2;
   context.textBaseline = "middle";
   context.fillText(
-    `${embedded ? "color ← " : ""}${scale.label}${embedded ? " ▾" : ""}`,
+    `${embedded ? "color ← " : ""}${scale.label}${scale.scale === "log" ? " (log)" : ""}${embedded ? " ▾" : ""}`,
     left,
     11,
     barWidth,
@@ -154,7 +154,10 @@ function paint(
     context.fillRect(x, 31, 1, 3);
     context.textAlign =
       fraction === 0 ? "left" : fraction === 1 ? "right" : "center";
-    const value = min * (1 - fraction) + max * fraction;
+    const value =
+      scale.scale === "log"
+        ? 10 ** (Math.log10(min) * (1 - fraction) + Math.log10(max) * fraction)
+        : min * (1 - fraction) + max * fraction;
     context.fillText(
       Number(value.toPrecision(3)).toString(),
       x,

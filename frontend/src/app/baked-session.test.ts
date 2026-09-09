@@ -236,6 +236,7 @@ it("normalizes omitted C-axis limits and labels to their runtime defaults", () =
       ?.color_axis,
   ).toEqual({
     source: { kind: "time" },
+    scale: null,
     range: null,
     label: null,
   });

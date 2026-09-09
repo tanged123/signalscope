@@ -10,6 +10,8 @@ export type CursorMode = "none" | "track" | "measure";
 
 export type AxisStyle = "gutter" | "inline";
 
+export type AxisScale = "linear" | "log";
+
 export type DashStyle = "solid" | "dash" | "dot";
 
 export type StatColumn = "min" | "max" | "mean" | "rms" | "cursor" | "n";
@@ -43,6 +45,7 @@ export type SampleAxisSource =
 
 export interface ColorAxis {
   source: SampleAxisSource;
+  scale: AxisScale | null;
   range: [number, number] | null;
   label: string | null;
 }
@@ -112,6 +115,8 @@ export interface PanelState {
   title: string;
   axis_style: AxisStyle;
   axis_equal: boolean | null;
+  x_scale: AxisScale | null;
+  y_scale: AxisScale | null;
   bindings: Binding[];
   color_by: StyleDimension | null;
   dash_by: StyleDimension | null;
