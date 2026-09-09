@@ -16,6 +16,7 @@ test("settings palettes support keyboard access, custom editing, cancellation an
     .getByRole("combobox", { name: "Preset" })
     .selectOption("tol_contrast");
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -34,6 +35,7 @@ test("settings palettes support keyboard access, custom editing, cancellation an
     .getByRole("textbox", { name: "Color 1 hex", exact: true })
     .fill("#ff00ff");
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -54,6 +56,7 @@ test("settings palettes support keyboard access, custom editing, cancellation an
   await contour.getByRole("combobox", { name: "Preset" }).selectOption("gray");
   await contour.getByRole("checkbox", { name: "Reverse" }).check();
   await contour.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(contour).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(
