@@ -16,6 +16,31 @@ function policy(
 }
 
 describe("resolveRanges", () => {
+  it.each(["x", "y"] as const)(
+    "publishes an empty view when log %s has no positive pairs",
+    (dimension) => {
+      const ranges = resolveRanges(
+        policy({ xAxis: "local" }),
+        { x: null, y: null },
+        { x: null, y: null },
+        { t0: 0, t1: 10 },
+        { [dimension]: "log" },
+      );
+      expect(ranges).not.toBeNull();
+      expect(ranges?.[dimension]).toEqual({ min: 1, max: 10 });
+    },
+  );
+  it("clips a linked log time window to its positive presentation extent", () => {
+    expect(
+      resolveRanges(
+        TIME_POLICY,
+        { x: null, y: null },
+        { x: [0.1, 100], y: [1, 2] },
+        { t0: -10, t1: 50 },
+        { x: "log" },
+      ),
+    ).toEqual({ x: { min: 0.1, max: 50 }, y: { min: 1, max: 2 } });
+  });
   it("uses the linked window for a linked-time x axis", () => {
     expect(
       resolveRanges(

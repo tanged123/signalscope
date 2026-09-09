@@ -61,7 +61,10 @@ export function paddedExtent(
     const extent = paddedExtent(logSpace(min), logSpace(max));
     return extent === null
       ? null
-      : [10 ** Math.max(-323, extent[0]), 10 ** Math.min(308, extent[1])];
+      : [
+          Math.min(min, Math.max(Number.MIN_VALUE, 10 ** extent[0])),
+          Math.max(max, Math.min(Number.MAX_VALUE, 10 ** extent[1])),
+        ];
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
   if (min === max) return [min - 1, max + 1];

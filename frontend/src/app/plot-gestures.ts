@@ -94,6 +94,10 @@ export function resolveRanges(
   };
   if (scales.x === "log") x = positive(x, automatic.x);
   if (scales.y === "log") y = positive(y, automatic.y);
+  if (scales.x === "log" || scales.y === "log") {
+    x ??= { min: 0, max: 1 };
+    y ??= { min: 0, max: 1 };
+  }
   return x === null || y === null ? null : { x, y };
 }
 

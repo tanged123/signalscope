@@ -7,6 +7,7 @@ import {
   logTicks,
   panScaledRange,
   panRange,
+  paddedExtent,
   projectX,
   projectY,
   valueAtTime,
@@ -70,6 +71,17 @@ test("zooms log axes in decade space", () => {
     max: 1000,
   });
 });
+
+test.each([Number.MIN_VALUE, Number.MAX_VALUE])(
+  "log padding keeps extreme finite value %s inside its extent",
+  (value) => {
+    const range = paddedExtent(value, value, "log");
+    expect(range?.[0]).toBeGreaterThan(0);
+    expect(range?.[0]).toBeLessThanOrEqual(value);
+    expect(range?.[1]).toBeGreaterThanOrEqual(value);
+    expect(Number.isFinite(range?.[1])).toBe(true);
+  },
+);
 
 test("pans log axes in decade space", () => {
   const panned = panScaledRange({ min: 1, max: 100 }, 0.5, "log");

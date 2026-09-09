@@ -89,6 +89,26 @@ function fixture(view: PlotLayout = layout): {
 }
 
 describe("PlotInteractionController", () => {
+  it("wheel zooms log Y around its geometric midpoint", () => {
+    vi.useFakeTimers();
+    const { overlay, calls } = fixture({
+      ...layout,
+      yScale: "log",
+      yRange: { min: 1, max: 10000 },
+    });
+    const event = new WheelEvent("wheel", {
+      deltaY: Math.log(0.5) / 0.0016,
+      shiftKey: true,
+    });
+    Object.defineProperties(event, {
+      offsetX: { value: 50 },
+      offsetY: { value: 50 },
+    });
+    overlay.dispatchEvent(event);
+    expect(calls.applyYRange).toHaveBeenCalledExactlyOnceWith(10, 1000);
+    expect(calls.applyXRange).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
   it.each([false, true])(
     "zooms both equal axes with shift=%s around the pointer",
     (shiftKey) => {
