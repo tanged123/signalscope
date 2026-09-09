@@ -1,0 +1,256 @@
+.plot-legend-tips {
+  display: flex;
+  min-height: 22px;
+  max-height: 75%;
+  flex: 0 0 auto;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--border-faint);
+}
+
+.plot-legend-tips-heading {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 7px;
+  background: var(--surface-2);
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.plot-legend-tips-heading.resizable {
+  cursor: row-resize;
+}
+
+.plot-legend-tips-heading.resizable:focus-visible {
+  outline: 1px solid var(--fg-1);
+  outline-offset: -1px;
+}
+
+.plot-legend-tips-heading button {
+  color: inherit;
+  font: inherit;
+}
+
+.plot-legend-tips-heading > :first-child {
+  color: var(--fg-2);
+}
+
+.plot-tip-export {
+  margin-left: auto;
+}
+
+.plot-tip-columns,
+.plot-tip-row {
+  display: grid;
+  grid-template-columns: 8px minmax(72px, 1fr) 62px 62px 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+}
+
+.plot-tip-columns {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-faint);
+  color: var(--fg-4);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.plot-tip-x,
+.plot-tip-value,
+.plot-tip-reading {
+  text-align: right;
+}
+
+.plot-tip-reading {
+  display: none;
+}
+
+.plot-tip-rows {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.plot-tip-row {
+  min-height: 22px;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.plot-tip-row:hover,
+.plot-tip-row.hovered {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.plot-tip-row.focused:hover,
+.plot-tip-row.focused.hovered {
+  background: var(--amber-3);
+}
+
+.plot-tip-row.selected {
+  outline: 1px solid var(--amber-7);
+  outline-offset: -1px;
+}
+
+.plot-tip-row.ghosted {
+  color: var(--fg-4);
+  opacity: 0.6;
+}
+
+.plot-tip-rule {
+  width: 2px;
+  height: 11px;
+}
+
+.plot-tip-name {
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-tip-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.plot-tip-actions button {
+  padding: 0 2px;
+  color: var(--fg-4);
+  font: inherit;
+}
+
+.plot-series-legend[data-state="rail"] .plot-tip-columns,
+.plot-series-legend[data-state="rail"] .plot-tip-row {
+  grid-template-columns: 8px minmax(0, 1fr) minmax(82px, auto) 34px;
+}
+
+.plot-series-legend[data-state="rail"] :is(.plot-tip-x, .plot-tip-value) {
+  display: none;
+}
+
+.plot-series-legend[data-state="rail"] .plot-tip-reading {
+  display: block;
+}
+
+.plot-row-inspector {
+  margin: 3px 5px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+}
+
+.plot-row-inspector-heading,
+.plot-row-inspector-field,
+.plot-row-inspector-footer {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+}
+
+.plot-row-inspector-heading {
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-1);
+}
+
+.plot-row-inspector-heading > :nth-child(2) {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-row-inspector-heading button,
+.plot-row-inspector-footer button {
+  margin-left: auto;
+  color: var(--fg-3);
+  font: inherit;
+}
+
+.plot-row-inspector-field {
+  position: relative;
+}
+
+.plot-row-inspector-field.overridden {
+  box-shadow: inset 2px 0 var(--amber-7);
+}
+
+.plot-row-inspector-field > :first-child {
+  width: 34px;
+  flex: none;
+  color: var(--fg-4);
+}
+
+.plot-row-color-slots,
+.plot-row-dashes {
+  display: flex;
+  gap: 2px;
+}
+
+.plot-row-color-slots button {
+  width: 12px;
+  height: 12px;
+}
+
+.plot-row-color-slots {
+  flex-wrap: wrap;
+}
+
+.plot-row-color-slots button.active {
+  outline: 1px solid var(--fg-1);
+}
+
+.plot-row-dashes button {
+  padding: 1px 5px;
+  color: var(--fg-3);
+  font: inherit;
+}
+
+.plot-row-dashes button.active {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.plot-row-inspector-field input[type="range"] {
+  min-width: 32px;
+  flex: 1;
+}
+
+.plot-row-provenance {
+  margin-left: auto;
+  color: var(--amber-7);
+  font: inherit;
+}
+
+.plot-row-provenance:disabled {
+  color: var(--fg-4);
+}
+
+.plot-row-inspector-footer {
+  border-top: 1px solid var(--border-faint);
+  color: var(--fg-4);
+}
+
+@container (width < 190px) {
+  .plot-legend-unit {
+    display: none;
+  }
+}
+
+@container (width < 160px) {
+  .plot-legend-value {
+    display: none;
+  }
+}

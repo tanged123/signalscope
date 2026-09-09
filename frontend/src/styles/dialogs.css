@@ -1,0 +1,290 @@
+.import-wizard {
+  position: fixed;
+  z-index: 45;
+  top: 12vh;
+  left: 50%;
+  width: min(620px, calc(100vw - 24px));
+  max-height: 76vh;
+  overflow: auto;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--fg-1);
+  font: var(--ui-text-size) var(--font-ui);
+}
+
+.import-wizard h2,
+.wizard-container {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wizard-container {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+.wizard-dataset {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.import-wizard label,
+.wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.import-wizard select,
+.wizard-actions button {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--fg-1);
+  font: inherit;
+}
+
+.import-wizard select {
+  min-width: 0;
+  flex: 1;
+  padding: 4px 6px;
+  font-family: var(--font-ui);
+}
+
+.wizard-actions button {
+  padding: 4px 7px;
+  cursor: pointer;
+}
+
+.wizard-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wizard-status {
+  min-width: 0;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.palette-overlay {
+  position: fixed;
+  z-index: 10;
+  display: grid;
+  padding-top: 12vh;
+  background: var(--surface-overlay);
+  inset: 0;
+  place-items: start center;
+}
+
+.palette {
+  width: min(560px, 90vw);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  box-shadow: var(--elev-3);
+}
+
+.palette-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  outline: 0;
+  background: var(--surface-2);
+  color: var(--fg-1);
+  font: 1rem var(--font-ui);
+}
+
+.palette-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  color: var(--fg-2);
+  font-size: var(--ui-text-size);
+  text-align: left;
+}
+
+.palette-row.selected,
+.palette-row:hover {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.palette-row:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.palette-hint {
+  color: var(--fg-4);
+  font: var(--ui-caption-size) var(--font-ui);
+}
+
+.export-overlay {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  background: var(--surface-overlay);
+  inset: 0;
+  place-items: center;
+}
+
+.export-dialog {
+  display: grid;
+  width: min(420px, 90vw);
+  max-height: calc(100dvh - 32px);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  gap: 8px;
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+}
+
+.export-title {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-1);
+}
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--fg-2);
+}
+
+.export-row.selected {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--fg-1);
+}
+
+.export-row.disabled,
+.export-controls.disabled,
+.export-options.disabled {
+  opacity: 0.5;
+}
+
+.export-size {
+  margin-left: auto;
+  color: var(--fg-3);
+  font: var(--ui-caption-size) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.export-controls {
+  display: grid;
+  min-height: 0;
+  gap: 7px;
+  overflow-y: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-faint);
+  scrollbar-gutter: stable;
+}
+
+.export-png-scope,
+.export-set-selection {
+  display: grid;
+  gap: 7px;
+}
+
+.export-png-scope[hidden],
+.export-set-selection[hidden] {
+  display: none;
+}
+
+.export-set-options {
+  display: grid;
+  max-height: 180px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 12px;
+  overflow-y: auto;
+  color: var(--fg-2);
+  font: var(--ui-caption-size) var(--font-ui);
+  scrollbar-gutter: stable;
+}
+
+.export-set-options label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-control-title {
+  color: var(--fg-3);
+  font: var(--ui-caption-size) var(--font-ui);
+  letter-spacing: 0.08em;
+}
+
+.export-options,
+.export-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.export-fidelity {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.export-option,
+.export-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+  font: var(--ui-caption-size) var(--font-ui);
+}
+
+.export-fidelity-option {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.export-fidelity-size {
+  color: var(--fg-4);
+  font-size: var(--ui-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.export-fidelity-size.warning {
+  color: var(--status-error);
+}
+
+.export-option.active,
+.export-actions button:hover {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+.export-awareness {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--ui-caption-size) var(--font-ui);
+}
+
+.export-actions {
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.export-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
