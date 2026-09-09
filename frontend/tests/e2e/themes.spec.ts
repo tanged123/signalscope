@@ -136,8 +136,11 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
         ).toBe(true);
       }
       expect(await geometry()).toEqual(bounds);
-      await testInfo.attach(`${theme}-${String(width)}`, {
-        body: await page.screenshot(),
+      const name = `${theme}-${String(width)}`;
+      const path = testInfo.outputPath(`${name}.png`);
+      await page.screenshot({ path });
+      await testInfo.attach(name, {
+        path,
         contentType: "image/png",
       });
       await page.keyboard.press("t");
