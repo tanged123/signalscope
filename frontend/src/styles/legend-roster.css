@@ -38,11 +38,7 @@
 }
 
 .plot-legend-search {
-  font-size: 10px;
-}
-
-.plot-legend-search:focus {
-  outline: none;
+  font-size: var(--ui-caption-size);
 }
 
 .plot-legend-search-meta,
