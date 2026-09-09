@@ -45,6 +45,18 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await page.locator(".panel-split-right").click();
+  const row = page
+    .locator('.signal-outline-row[data-row-kind="series"]')
+    .first();
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await row.dispatchEvent("dragstart", { dataTransfer });
+  const secondPanel = page.locator(".panel").last();
+  await secondPanel.dispatchEvent("drop", { dataTransfer });
+  await row.dispatchEvent("dragend", { dataTransfer });
+  await dataTransfer.dispose();
+  await expect(secondPanel.locator(".binding-chip")).toHaveCount(1);
+  await secondPanel.locator(".panel-stats-toggle").click();
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const plots = page.locator(".plot-wrap");
   const geometry = () =>
     plots.evaluateAll((elements) =>
@@ -98,7 +110,7 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
         ).toBe(true);
       }
       expect(await geometry()).toEqual(bounds);
-      await testInfo.attach(`${theme}-${width}`, {
+      await testInfo.attach(`${theme}-${String(width)}`, {
         body: await page.screenshot(),
         contentType: "image/png",
       });
