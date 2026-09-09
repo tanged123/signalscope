@@ -417,8 +417,8 @@ describe("PanelView chrome", () => {
     const request = render.mock.calls[0]?.[0];
     expect(request?.xRange).toEqual({ min: -5, max: 25 });
     expect(request?.axes).toEqual({
-      x: { label: "distance (m)" },
-      y: { label: "velocity (m/s)" },
+      x: { label: "distance (m)", scale: "linear" },
+      y: { label: "velocity (m/s)", scale: "linear" },
       style: "gutter",
     });
     expect(request?.series).toHaveLength(1);
