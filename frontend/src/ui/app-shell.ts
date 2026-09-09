@@ -66,7 +66,12 @@ import { SelectionModel } from "../app/selection";
 import { evaluateSelector } from "../app/selector";
 import { WorkspaceModel } from "../app/workspace";
 import { persistWorkspace } from "../app/workspace-save";
-import { formatCursorTime, formatValue, zoomRange } from "../app/plot-math";
+import {
+  formatCursorTime,
+  formatValue,
+  zoomCenteredRange,
+  panScaledRange,
+} from "../app/plot-math";
 import {
   type BatchStatus,
   type ExportFidelity,
@@ -762,8 +767,7 @@ export class AppShell {
       if (id === null || panel === undefined) return;
       const range = this.navigationXRange(panel, id);
       if (range === null) return;
-      const pivot = (range.min + range.max) / 2;
-      const next = zoomRange(range, factor, pivot);
+      const next = zoomCenteredRange(range, factor, panel.x_scale ?? "linear");
       if (panel.x_axis.kind !== "time") {
         this.applyXRange(id, [next.min, next.max]);
       } else {
@@ -776,11 +780,15 @@ export class AppShell {
       if (id === null || panel === undefined) return;
       const range = this.navigationXRange(panel, id);
       if (range === null) return;
-      const delta = (range.max - range.min) * 0.1 * direction;
+      const next = panScaledRange(
+        range,
+        0.1 * direction,
+        panel.x_scale ?? "linear",
+      );
       if (panel.x_axis.kind !== "time") {
-        this.applyXRange(id, [range.min + delta, range.max + delta]);
+        this.applyXRange(id, [next.min, next.max]);
       } else {
-        this.applyTimeWindow(id, range.min + delta, range.max + delta);
+        this.applyTimeWindow(id, next.min, next.max);
       }
     };
     const undoCommand: Command = shellCommand("undo", {
@@ -2625,7 +2633,7 @@ export class AppShell {
     panel: PanelState,
     panelId: string,
   ): { min: number; max: number } | null {
-    if (panel.x_axis.kind !== "time") {
+    if (panel.x_axis.kind !== "time" || panel.x_scale === "log") {
       return this.workspaceView?.panelXRange(panelId) ?? null;
     }
     const window = this.effectiveWindow(panel);

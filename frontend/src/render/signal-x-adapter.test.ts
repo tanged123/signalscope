@@ -30,7 +30,10 @@ describe("signal-X line adapter", () => {
     const data = {
       ...base,
       x: { ...base.x, values: Float64Array.from([1, 10, 100]) },
-      ys: [{ ...base.ys[0]!, values: Float64Array.from([1, 0, 100]) }],
+      ys: base.ys.map((column) => ({
+        ...column,
+        values: Float64Array.from([1, 0, 100]),
+      })),
     };
     const options = {
       window: { t0: 0, t1: 2 },
@@ -43,23 +46,33 @@ describe("signal-X line adapter", () => {
       yScale: "log" as const,
     };
     const first = line2DFromSignalX(data, options);
-    expect(Array.from(first.series[0]!.data)).toEqual([0, 0, 1, NaN, 2, 2]);
-    expect(line2DFromSignalX(data, options).series[0]!.data).toBe(
-      first.series[0]!.data,
+    expect(Array.from(first.series[0]?.data ?? [])).toEqual([
+      0,
+      0,
+      1,
+      NaN,
+      2,
+      2,
+    ]);
+    expect(line2DFromSignalX(data, options).series[0]?.data).toBe(
+      first.series[0]?.data,
     );
     const linear = line2DFromSignalX(data, {
       ...options,
       xScale: "linear",
       yScale: "linear",
     });
-    expect(Array.from(linear.series[0]!.data)).toEqual([0, 1, 9, 0, 99, 100]);
+    expect(Array.from(linear.series[0]?.data ?? [])).toEqual([
+      0, 1, 9, 0, 99, 100,
+    ]);
     const precise = {
       ...data,
       x: { ...data.x, values: Float64Array.from([1e12, 1e12 + 1, 1e12 + 2]) },
     };
-    const packed = line2DFromSignalX(precise, options).series[0]!.data;
+    const packed = line2DFromSignalX(precise, options).series[0]?.data;
+    if (packed === undefined) throw new Error("missing feed");
     expect(packed[2]).toBeGreaterThan(0);
-    expect(packed[4]).toBeGreaterThan(packed[2]!);
+    expect(packed[4]).toBeGreaterThan(packed[2] as number);
   });
   it("creates a generic Line2D input with local-X precision and gaps", () => {
     const source = response();

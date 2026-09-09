@@ -45,7 +45,9 @@ is logarithmic. C scaling does not affect that option.
 The existing panel composition remains oversized. This change extracts its
 saved/automatic/linked range policy into `ui/panel-ranges.ts`, with narrow state,
 prepared-plot and YAxisPolicy inputs. The only remaining panel/workspace edits
-are typed delegation and default-field wiring, an explicit limited composition
+are typed delegation and default-field wiring. App-shell keyboard navigation
+also delegates to the existing scale math using the panel's displayed range.
+These are an explicit limited composition
 exception under ADR 0054. It does not exempt future behavior. Session tests
 move to their own module before expanding parser behavior.
 

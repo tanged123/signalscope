@@ -25,9 +25,6 @@ export interface PlotLayout {
   yScale?: AxisScale;
 }
 
-/** Positive floor used so a log axis can survive a zero or negative bound. */
-const LOG_FLOOR = 1e-12;
-
 function logSpace(value: number): number {
   return value > 0 ? Math.log10(value) : NaN;
 }
@@ -108,7 +105,7 @@ export function invertX(layout: PlotLayout, px: number): number {
 /** Decade ticks covering `[min, max]`, empty when the range is unusable. */
 export function logTicks(min: number, max: number): number[] {
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= 0) return [];
-  const low = Math.floor(Math.log10(Math.max(LOG_FLOOR, min)));
+  const low = Math.floor(Math.log10(Math.max(Number.MIN_VALUE, min)));
   const high = Math.ceil(Math.log10(max));
   const values: number[] = [];
   for (let exponent = low; exponent <= high; exponent += 1) {
@@ -174,6 +171,19 @@ export function zoomScaledRange(
     logSpace(pivot),
   );
   return finiteLogRange(next, range);
+}
+
+/** Zooms around the visual midpoint, including on logarithmic axes. */
+export function zoomCenteredRange(
+  range: Range,
+  factor: number,
+  scale: AxisScale = "linear",
+): Range {
+  const pivot = axisValue(
+    (axisCoordinate(range.min, scale) + axisCoordinate(range.max, scale)) / 2,
+    scale,
+  );
+  return zoomScaledRange(range, factor, pivot, scale);
 }
 
 /** Pans by a fraction of the displayed span, preserving log positivity. */

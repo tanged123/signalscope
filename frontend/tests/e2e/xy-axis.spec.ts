@@ -426,7 +426,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect
       .poll(() => {
         const state = JSON.parse(
-          readFileSync(workspacePath, "utf8"),
+          readFileSync(pathToFileURL(workspacePath), "utf8"),
         ) as Session;
         const current = state.tabs[0]?.panels[0];
         return [current?.x_scale, current?.y_scale, current?.color_axis?.scale];

@@ -8,7 +8,11 @@ import {
 import type { Range, PlotLayout } from "../app/plot-math";
 import { axisCoordinate, axisValue } from "../app/plot-math";
 import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
-import { createRangeTickFormatter, hueIndex } from "./plot-theme";
+import {
+  createRangeTickFormatter,
+  formatLogTick,
+  hueIndex,
+} from "./plot-theme";
 import type { Palette, SeriesStroke, TickFormatter } from "./plot-theme";
 import type { GpuContext } from "./gpu-context";
 import type { Line2DRenderRequest } from "./line2d";
@@ -378,7 +382,12 @@ export class ChartHost {
       min: axisCoordinate(range.min, scale) - this.xOrigin,
       max: axisCoordinate(range.max, scale) - this.xOrigin,
       tickFormatter: (value) =>
-        this.xTickFormatter(axisValue(value + this.xOrigin, scale)),
+        scale === "log"
+          ? formatLogTick(
+              axisValue(value + this.xOrigin, scale),
+              this.xTickRange,
+            )
+          : this.xTickFormatter(value + this.xOrigin),
     };
   }
 
@@ -396,7 +405,10 @@ export class ChartHost {
       inside,
       min: axisCoordinate(range[0], scale),
       max: axisCoordinate(range[1], scale),
-      tickFormatter: (value) => this.yTickFormatter(axisValue(value, scale)),
+      tickFormatter: (value) =>
+        scale === "log"
+          ? formatLogTick(axisValue(value, scale), this.yTickRange)
+          : this.yTickFormatter(value),
     };
   }
 

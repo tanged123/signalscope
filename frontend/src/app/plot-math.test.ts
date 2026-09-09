@@ -14,6 +14,7 @@ import {
   zoomDragMode,
   zoomRange,
   zoomScaledRange,
+  zoomCenteredRange,
   type PlotLayout,
 } from "./plot-math";
 
@@ -64,6 +65,10 @@ test("zooms log axes in decade space", () => {
   const zoomed = zoomScaledRange({ min: 1, max: 1000 }, 0.5, 10, "log");
   expect(zoomed.min).toBeCloseTo(Math.sqrt(10));
   expect(zoomed.max).toBeCloseTo(100);
+  expect(zoomCenteredRange({ min: 1, max: 10000 }, 0.5, "log")).toEqual({
+    min: 10,
+    max: 1000,
+  });
 });
 
 test("pans log axes in decade space", () => {

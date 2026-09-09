@@ -179,7 +179,8 @@ describe("ChartHost", () => {
       },
     };
     host.render(log);
-    const chart = state.charts.at(-1)!;
+    const chart = state.charts.at(-1);
+    if (chart === undefined) throw new Error("missing chart");
     const options = chart.options as {
       xAxis: { min: number; max: number; tickFormatter(value: number): string };
       yAxis: { min: number; max: number; tickFormatter(value: number): string };
@@ -188,6 +189,7 @@ describe("ChartHost", () => {
     expect(options.xAxis.max).toBe(2);
     expect(options.yAxis.max).toBe(3);
     expect(Number(options.yAxis.tickFormatter(2))).toBe(100);
+    expect(Number(options.yAxis.tickFormatter(-1))).toBe(0.1);
     expect(host.layout()).toMatchObject({
       axisEqual: false,
       xScale: "log",

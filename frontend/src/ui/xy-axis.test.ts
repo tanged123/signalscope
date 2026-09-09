@@ -292,6 +292,7 @@ test.each([".xy-drop-strip", ".panel-x-axis span", ".panel-c-axis span"])(
 
 test("C bundles match independently of X, reject missing/ambiguous members, and allow C=Y", () => {
   const color = {
+    scale: null,
     source: {
       kind: "bundle" as const,
       refs: [ref("one", "y"), ref("two", "y")],
