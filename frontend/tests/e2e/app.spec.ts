@@ -15,7 +15,7 @@ test("shared presentation plane renders the demo workspace", async ({
 }) => {
   await gotoApp(page);
 
-  await expect(page.getByText("SIGNALSCOPE")).toBeVisible();
+  await expect(page.locator(".brand")).toHaveText("SignalScope");
   await expect(page.locator(".menu-bar")).toHaveCount(0);
   await expect(page.locator(".tool-bar")).toHaveCount(0);
   await expect(page.locator(".title-bar")).toBeVisible();

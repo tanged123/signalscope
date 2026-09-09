@@ -45,6 +45,22 @@ button {
   cursor: pointer;
 }
 
+:where(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 1px solid var(--amber-7);
+  outline-offset: -1px;
+}
+
+::selection {
+  background: var(--surface-4);
+  color: var(--fg-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-quick: 0ms;
+  }
+}
+
 .workbench {
   --tree-width: 262px;
 
@@ -80,9 +96,9 @@ button {
   gap: 7px;
   margin-right: 4px;
   color: var(--fg-1);
-  font-size: var(--ui-caption-size);
+  font-size: var(--ui-text-size);
   font-weight: 650;
-  letter-spacing: 0.08em;
+  letter-spacing: -0.02em;
 }
 
 .brand svg {
@@ -93,7 +109,7 @@ button {
 .menu-button,
 .status-button,
 .panel-action {
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   color: var(--fg-2);
   transition:
     background var(--dur-quick) var(--ease-out),
@@ -127,7 +143,7 @@ button {
 }
 
 .workspace-name {
-  color: var(--fg-3);
+  color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: var(--ui-text-size);
 }
@@ -161,12 +177,12 @@ button {
   max-width: 220px;
   align-items: stretch;
   border-right: 1px solid var(--border);
-  color: var(--fg-3);
+  color: var(--fg-2);
 }
 
 .workspace-tab.active {
   background: var(--surface-0);
-  box-shadow: inset 0 1px 0 var(--border-strong);
+  box-shadow: inset 0 2px 0 var(--fg-2);
   color: var(--fg-1);
 }
 
@@ -226,15 +242,15 @@ button {
   width: 660px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  background: var(--surface-2);
+  border-radius: var(--radius-overlay);
+  background: var(--surface-1);
   box-shadow: var(--elev-2);
 }
 
 .app-menu-section {
   min-width: 0;
   padding: 6px;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--border-faint);
 }
 
 .app-menu-section:last-child {
@@ -243,9 +259,9 @@ button {
 
 .app-menu-heading {
   padding: 3px 6px 5px;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font: 600 var(--ui-caption-size) var(--font-ui);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
 }
 
 .app-menu-item {
@@ -254,7 +270,7 @@ button {
   grid-template-columns: 12px minmax(0, 1fr) auto;
   gap: 4px;
   padding: 4px 5px;
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   color: var(--fg-2);
   font-size: var(--ui-text-size);
   text-align: left;
@@ -275,7 +291,7 @@ button {
 
 .app-menu-check,
 .app-menu-keys {
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-family: var(--font-mono);
 }
 

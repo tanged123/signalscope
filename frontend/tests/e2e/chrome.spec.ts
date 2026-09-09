@@ -141,6 +141,9 @@ test("plot controls and chart metrics are visible inline at desktop sizes", asyn
     ".panel-axis-toggle",
     ".panel-x-axis",
     ".panel-line-width",
+    ".plot-legend-header",
+    ".plot-legend-encoding",
+    ".plot-legend-footer",
     ".panel-ghost-opacity",
     ".panel-legend-state",
     ".panel-stats-toggle",
@@ -189,6 +192,9 @@ test("UI fonts and sizes apply consistently to controls, muted text, and the sig
     ".tree-empty",
     ".signal-outline-label",
     ".panel-line-width",
+    ".plot-legend-header",
+    ".plot-legend-encoding",
+    ".plot-legend-footer",
   ];
   for (const selector of selectors) {
     await expect(page.locator(selector).first()).toHaveCSS(

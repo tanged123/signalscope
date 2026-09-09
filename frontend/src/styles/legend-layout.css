@@ -9,7 +9,7 @@
   position: absolute;
   z-index: 2;
   background: var(--surface-2);
-  border: 1px solid var(--amber-5);
+  border: 1px solid var(--amber-7);
   content: "";
   opacity: 0.72;
   pointer-events: none;
@@ -130,9 +130,9 @@
   flex-direction: column;
   overflow: hidden;
   container-type: inline-size;
-  background: var(--surface-overlay);
+  background: var(--surface-0);
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: var(--radius-overlay);
   font-family: var(--font-plot);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -214,6 +214,8 @@
   min-height: 22px;
   align-items: center;
   border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  font: var(--ui-caption-size) var(--font-ui);
 }
 
 .plot-legend-rail-header {
@@ -238,6 +240,7 @@
 
 .plot-legend-title {
   color: var(--fg-1);
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -264,9 +267,10 @@
   gap: 2px;
   padding: 2px 5px;
   overflow-x: auto;
-  background: var(--surface-1);
-  border-bottom: 1px solid var(--border);
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-faint);
   color: var(--fg-3);
+  font: var(--ui-caption-size) var(--font-ui);
   scrollbar-width: none;
   white-space: nowrap;
 }
@@ -277,8 +281,8 @@
   align-items: center;
   gap: 4px;
   padding: 1px 4px;
-  border-radius: 2px;
-  color: var(--fg-3);
+  border-radius: var(--radius-control);
+  color: var(--fg-2);
   font: inherit;
   white-space: nowrap;
 }
@@ -321,12 +325,13 @@
   padding: 6px 7px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
+  font: var(--ui-caption-size) var(--font-ui);
 }
 
 .plot-legend-drawer-title {
   color: var(--fg-4);
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  font-size: var(--ui-caption-size);
+  letter-spacing: 0.04em;
 }
 
 .plot-encoding-choices {
@@ -368,7 +373,7 @@
 .plot-encoding-note {
   margin-top: 3px;
   color: var(--fg-4);
-  font-size: 9px;
+  font-size: var(--ui-caption-size);
 }
 
 .plot-legend-badge {
@@ -561,7 +566,7 @@
   padding: 2px 7px;
   border-top: 1px solid var(--border-faint);
   color: var(--fg-3);
-  font: inherit;
+  font: var(--ui-caption-size) var(--font-ui);
   text-align: left;
 }
 

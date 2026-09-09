@@ -45,15 +45,15 @@
   height: 26px;
   padding: 5px 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  background: var(--surface-void);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
   color: var(--fg-3);
   font-family: var(--font-ui);
 }
 
 .search-filter-row:focus-within,
 .search-filter-row.has-selector {
-  border-color: var(--amber-5);
+  border-color: var(--amber-7);
 }
 
 .search-filter-prefix {
@@ -69,6 +69,11 @@
   background: transparent;
   color: var(--fg-1);
   font: var(--ui-text-size) var(--font-ui);
+}
+
+.signal-search::placeholder {
+  color: var(--fg-3);
+  opacity: 1;
 }
 
 .search-count {
@@ -116,7 +121,8 @@
   padding: 8px 8px 4px;
   color: var(--fg-3);
   font-size: var(--ui-caption-size);
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .signals-heading {
@@ -173,9 +179,6 @@
 .dock-footer {
   display: grid;
   gap: 3px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-faint);
   font: var(--ui-caption-size) var(--font-ui);
   font-variant-numeric: tabular-nums;
 }
@@ -187,12 +190,16 @@
 }
 
 .dock-add-source {
-  padding: 0;
-  color: var(--amber-7);
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+  color: var(--fg-2);
   font: inherit;
 }
 
 .dock-add-source:hover,
 .dock-add-source:focus-visible {
-  color: var(--amber-9);
+  background: var(--surface-3);
+  color: var(--fg-1);
 }

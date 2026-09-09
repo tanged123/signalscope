@@ -29,7 +29,7 @@
   z-index: 1;
   top: 0;
   padding: 5px 6px;
-  background: var(--surface-2);
+  background: var(--surface-1);
   border-bottom: 1px solid var(--border);
   color: var(--fg-3);
   font-size: var(--ui-caption-size);
@@ -176,7 +176,7 @@
   height: var(--tree-row-height);
   align-items: center;
   gap: 5px;
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   color: var(--fg-2);
   font-size: var(--ui-text-size);
   text-align: left;
@@ -306,7 +306,7 @@
 .ingest-dismiss {
   padding: 1px 5px;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--fg-2);
   font: inherit;

@@ -9,7 +9,7 @@
   padding: 6px;
   margin-bottom: 4px;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   background: var(--surface-0);
   color: var(--fg-1);
   font: inherit;
@@ -50,7 +50,7 @@
   margin: 0 0 6px;
   padding: 4px 0;
   border: 0;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-faint);
 }
 
 .axis-limits-editor legend {
@@ -81,7 +81,7 @@
 }
 
 .axis-limits-labels {
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-faint);
   padding: 4px;
   color: var(--fg-3);
 }
@@ -102,7 +102,7 @@
   min-width: 0;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   color: var(--fg-1);
   background: var(--surface-0);
   font: inherit;
@@ -115,7 +115,7 @@
 .axis-limits-actions {
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-faint);
 }
 
 .axis-limits-editor .axis-limits-equal {

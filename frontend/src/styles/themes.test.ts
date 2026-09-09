@@ -60,8 +60,11 @@ test.each(THEME_ORDER)(
     const tokens = [
       "--surface-0",
       "--surface-1",
+      "--surface-3",
+      "--surface-4",
       "--fg-1",
       "--fg-2",
+      "--fg-3",
       "--border",
       "--grid",
       "--amber-9",
@@ -86,6 +89,24 @@ test.each(THEME_ORDER)(
         root.getPropertyValue("--surface-1").trim(),
       ),
     ).toBeGreaterThanOrEqual(4.5);
+    for (const surface of ["--surface-0", "--surface-1", "--surface-2"]) {
+      expect(
+        contrast(
+          root.getPropertyValue("--fg-3").trim(),
+          root.getPropertyValue(surface).trim(),
+        ),
+        `${theme}: secondary labels on ${surface}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const surface of ["--surface-3", "--surface-4"]) {
+      expect(
+        contrast(
+          root.getPropertyValue("--fg-1").trim(),
+          root.getPropertyValue(surface).trim(),
+        ),
+        `${theme}: hover and selected labels on ${surface}`,
+      ).toBeGreaterThanOrEqual(7);
+    }
     if (theme.startsWith("contrast_"))
       expect(
         contrast(

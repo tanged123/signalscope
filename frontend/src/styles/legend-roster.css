@@ -30,7 +30,7 @@
 
 .plot-legend-hint {
   color: var(--fg-4);
-  font-size: 9px;
+  font-size: var(--ui-caption-size);
 }
 
 .plot-legend-search-wrap {
@@ -48,7 +48,7 @@
 .plot-legend-search-meta,
 .plot-legend-section-title {
   color: var(--fg-4);
-  font-size: 9px;
+  font-size: var(--ui-caption-size);
 }
 
 .plot-legend-search-meta {
@@ -57,7 +57,7 @@
 
 .plot-legend-section-title {
   padding: 3px 7px 2px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
 }
 
 .plot-legend-group {
@@ -77,11 +77,12 @@
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
-  background: var(--surface-2);
+  background: var(--surface-1);
   border-top: 1px solid var(--border-faint);
   border-bottom: 1px solid var(--border-faint);
   color: var(--fg-2);
-  letter-spacing: 0.06em;
+  font: 600 var(--ui-caption-size) var(--font-ui);
+  letter-spacing: 0.04em;
 }
 
 .plot-legend-signals-toggle {
@@ -99,7 +100,7 @@
 .plot-legend-focus-filter {
   margin-left: auto;
   padding: 1px 5px;
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   color: var(--amber-7);
   font: inherit;
   letter-spacing: 0;
@@ -197,11 +198,11 @@
 .plot-stat-header {
   min-height: 22px;
   flex: none;
-  background: var(--surface-2);
+  background: var(--surface-1);
   border-bottom: 1px solid var(--border);
-  color: var(--fg-4);
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  color: var(--fg-3);
+  font: var(--ui-caption-size) var(--font-ui);
+  letter-spacing: 0.04em;
 }
 
 .plot-stat-series-header {
@@ -250,8 +251,8 @@
 .plot-stat-aggregate > :first-child {
   padding: 2px 7px;
   color: var(--fg-4);
-  font-size: 9px;
-  letter-spacing: 0.06em;
+  font-size: var(--ui-caption-size);
+  letter-spacing: 0.04em;
 }
 
 .plot-stat-body {

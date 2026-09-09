@@ -50,21 +50,21 @@
 .theme-preview {
   font-size: 13px;
   color-scheme: dark;
-  --surface-void: #07090c;
-  --surface-0: #0e1116;
-  --surface-1: #151920;
-  --surface-2: #1c2029;
-  --surface-3: #232832;
-  --surface-4: #2e3340;
-  --surface-overlay: rgba(14, 17, 22, 0.88);
-  --fg-1: #e6e8ec;
-  --fg-2: #a9b0bc;
-  --fg-3: #737985;
-  --fg-4: #4a4f5a;
-  --border-strong: #2e3340;
-  --border: #232832;
-  --border-faint: #1c2029;
-  --grid: #1a1d24;
+  --surface-void: #0c0e12;
+  --surface-0: #12151a;
+  --surface-1: #191d23;
+  --surface-2: #20252d;
+  --surface-3: #292f38;
+  --surface-4: #363d48;
+  --surface-overlay: rgba(18, 21, 26, 0.94);
+  --fg-1: #eef0f3;
+  --fg-2: #c0c6cf;
+  --fg-3: #a2abb8;
+  --fg-4: #8993a1;
+  --border-strong: #49525f;
+  --border: #303640;
+  --border-faint: #20252d;
+  --grid: #242930;
   --amber-7: #ffa226;
   --amber-9: #ffb648;
   --amber-3: rgba(255, 162, 38, 0.16);
@@ -92,32 +92,34 @@
   --ui-heading-size: calc(15rem / 13);
   --plot-line-width-scale: 1;
   --tree-row-height: 22px;
+  --radius-control: 4px;
+  --radius-overlay: 4px;
   --dur-quick: 80ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --elev-2: 0 0 0 1px var(--border-strong), 0 4px 16px rgb(0 0 0 / 50%);
-  --elev-3: 0 0 0 1px var(--border-strong), 0 8px 32px rgb(0 0 0 / 60%);
+  --elev-2: 0 4px 16px rgb(0 0 0 / 28%);
+  --elev-3: 0 8px 32px rgb(0 0 0 / 36%);
 }
 
 :root[data-theme="light"],
 :root[data-color-scheme="light"],
 .theme-preview[data-color-scheme="light"] {
   color-scheme: light;
-  --surface-void: #e3e6eb;
-  --surface-0: #f7f8fa;
-  --surface-1: #eff1f4;
-  --surface-2: #e7eaee;
-  --surface-3: #dce0e6;
-  --surface-4: #c9cfd8;
-  --surface-overlay: rgba(240, 242, 245, 0.88);
-  --fg-1: #1a1e26;
-  --fg-2: #4a5160;
-  --fg-3: #7a8290;
-  --fg-4: #a7aebb;
-  --border: #c9cfd8;
-  --border-strong: #aeb6c2;
-  --border-faint: #dce0e6;
-  --grid: #e4e7ec;
-  --amber-7: #c17500;
+  --surface-void: #e9ecf0;
+  --surface-0: #ffffff;
+  --surface-1: #f7f8fa;
+  --surface-2: #eff1f4;
+  --surface-3: #e4e8ee;
+  --surface-4: #d6dce5;
+  --surface-overlay: rgba(247, 248, 250, 0.94);
+  --fg-1: #1c2430;
+  --fg-2: #424e60;
+  --fg-3: #586579;
+  --fg-4: #657286;
+  --border: #cbd2dc;
+  --border-strong: #9faaba;
+  --border-faint: #e4e8ee;
+  --grid: #e9edf2;
+  --amber-7: #a85d00;
   --amber-9: #9e5f00;
   --amber-3: rgba(193, 117, 0, 0.12);
   --focus-ring: rgba(193, 117, 0, 0.55);
@@ -132,4 +134,6 @@
   --status-connected: #007a3d;
   --status-disconnected: #8a9099;
   --status-error: #c42b2b;
+  --elev-2: 0 4px 16px rgb(28 36 48 / 12%);
+  --elev-3: 0 8px 32px rgb(28 36 48 / 18%);
 }
