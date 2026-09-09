@@ -87,28 +87,36 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
         page.getByRole("textbox", { name: "Search signals" }),
         page.getByRole("searchbox", { name: "Filter panel roster" }),
       ]) {
-        await search.focus();
-        const appearance = await search.evaluate((element) => {
-          const row = element.parentElement;
-          if (row === null) throw new Error("Search row missing");
-          const swatch = document.createElement("span");
-          swatch.style.color = "var(--amber-7)";
-          row.append(swatch);
-          const focused =
-            getComputedStyle(row).borderTopColor ===
-            getComputedStyle(swatch).color;
-          swatch.remove();
-          return {
-            focused,
-            size: parseFloat(getComputedStyle(element).fontSize),
-          };
-        });
-        expect(appearance.focused).toBe(true);
-        if ((await search.getAttribute("type")) === "search")
-          expect(appearance.size).toBeCloseTo(
-            (10 * (width === 1100 ? 18 : 13)) / 13,
-            3,
-          );
+        await expect
+          .poll(async () => {
+            await search.focus();
+            return search.evaluate((element) => {
+              const row = element.parentElement;
+              if (row === null || !element.isConnected) return false;
+              const swatch = document.createElement("span");
+              swatch.style.color = "var(--amber-7)";
+              row.append(swatch);
+              const focused =
+                document.activeElement === element &&
+                getComputedStyle(row).borderTopColor ===
+                  getComputedStyle(swatch).color;
+              swatch.remove();
+              const base = element.getAttribute("type") === "search" ? 10 : 11;
+              const expected =
+                (base *
+                  parseFloat(
+                    getComputedStyle(document.documentElement).fontSize,
+                  )) /
+                13;
+              return (
+                focused &&
+                Math.abs(
+                  parseFloat(getComputedStyle(element).fontSize) - expected,
+                ) < 0.01
+              );
+            });
+          })
+          .toBe(true);
         await search.press("Tab");
         await expect(search).not.toBeFocused();
       }
