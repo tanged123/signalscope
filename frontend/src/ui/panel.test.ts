@@ -416,6 +416,9 @@ describe("panel series", () => {
       },
     ];
     state.ghost_mode = "ghost";
+    for (const series of state.series) {
+      if (series.display === "ghost") series.opacity = state.ghost_opacity;
+    }
     const onLegendLayout = vi.fn();
     const view = Object.create(PanelView.prototype) as unknown as {
       callbacks: Pick<
@@ -754,12 +757,12 @@ describe("panel series", () => {
     );
     if (rows === null || viewport === null || search === null)
       throw new Error("Roster is missing");
-    expect(viewport.style.height).toBe("2800px");
+    expect(viewport.style.height).toBe("2600px");
     const initialRows = viewport.children.length;
     Object.defineProperty(rows, "clientHeight", { value: 480 });
     view.refreshPlotLegendRoster();
     expect(viewport.children.length).toBeGreaterThan(initialRows);
-    rows.scrollTop = 2576;
+    rows.scrollTop = 2376;
     rows.dispatchEvent(new Event("scroll"));
     expect(viewport.lastElementChild?.textContent).toContain("run_100");
 

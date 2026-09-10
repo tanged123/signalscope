@@ -259,6 +259,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
           .join(",");
       },
       onClearFocus: () => {},
+      onSeriesAction: () => {},
       onMuteSelector: () => {},
       onMuteSeries: () => {},
       onRemoveBinding: () => {},
@@ -440,7 +441,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
         );
         return {
           plotFamilyApplied: row.fontFamily.includes("JetBrains Mono"),
-          plotSizeApplied: row.fontSize === "11px",
+          plotSizeApplied: row.fontSize === "9px",
         };
       }),
     )

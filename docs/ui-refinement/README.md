@@ -21,6 +21,15 @@ and expose their full names in tooltips. The
 [control inventory and typography details](../../frontend/src/styles/README.md#plot-readability)
 document the changes.
 
+After review, legend signal text now matches the axis tick font size (9px by
+default), with no extra size offset. Expanded floating and docked legends show
+Select all, Dim all, and Hide all directly above the encoding controls. These
+become Clear selection, Undim all, and Show all when applicable. They affect all
+assigned signals, including filtered rows. Hide and Dim preserve selection;
+Undim all restores full opacity and disables the dim-other-traces rule. The
+toolbar labels that separate rule `dim others`. Each bulk action is one undo
+step and uses the existing serialized focus and override fields.
+
 Hidden and dimmed states have separate indicators; focus remains additive and
 does not alter visibility. Narrow legends use hollow/half-circle symbols with
 tooltips. The existing dim-non-focused rule still responds to focus. Compact
@@ -38,18 +47,16 @@ To repeat the baseline capture, serve the base revision on port 4174 and set
 
 ## Validation status
 
-The frontend gate passed all 2,863 tests, lint, generated-schema checks, build,
+The frontend gate passed all 2,866 tests, lint, generated-schema checks, build,
 and snapshot artifact checks. Browser coverage included linked axes, explicit
 signal-X and color bindings, cursor modes, workspace layouts, signal selection,
 and snapshot round trips.
 
-The final two-test legend rerun still failed and needs follow-up before merge:
+The follow-up legend rerun passed both browser tests, including bulk selection,
+hidden and dimmed combinations, keyboard focus, enlarged fonts, virtual rows,
+statistics alignment, and cursor-tip resizing. The font-setting test now waits
+for each preference change to finish; tips retain their requested height instead
+of shrinking under flex layout pressure. These resolve the two failures recorded
+in the first draft.
 
-- The enlarged-font workspace expected a 15px legend but observed 12px. An
-  earlier run passed; the cause of the inconsistent font setting is unresolved.
-- Dragging the cursor-tip divider in a short legend did not increase the tip
-  section's height. Its new flex sizing needs further adjustment.
-
-The captures record the reviewed workspace; they do not establish that these
-remaining interaction checks pass. Validation used the browser application,
-not a packaged Electron build.
+Validation used the browser application, not a packaged Electron build.

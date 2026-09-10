@@ -404,6 +404,18 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
+        onSeriesAction: (id, action) => {
+          const panel = this.workspace.panel(id);
+          if (panel === undefined) return;
+          this.workspace.applySeriesAction(
+            id,
+            this.resolvedFor(panel).map((series) => series.ref),
+            action,
+          );
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          this.renderTiles();
+        },
         onMuteSelector: (id, selector) => {
           this.workspace.addSelectorOverride(id, selector, { visible: false });
           this.commitHistory();

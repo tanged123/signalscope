@@ -221,7 +221,7 @@ export function applyPreferences(
   );
   target.style.setProperty(
     "--legend-row-height",
-    `${String(Math.max(28, Math.ceil((prefs.plot_font_size + 2) * 1.4 + 8)))}px`,
+    `${String(Math.max(26, Math.ceil(prefs.plot_font_size * 1.4 + 8)))}px`,
   );
   target.style.setProperty(
     "--plot-line-width-scale",

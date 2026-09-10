@@ -116,9 +116,22 @@ test("dense workspace readability and independent signal states", async ({
   await page.setViewportSize({ width: 1100, height: 900 });
   await page.keyboard.press("Control+Comma");
   await page.locator(".palette-input").fill("UI font size");
-  for (let step = 0; step < 5; step++) await page.keyboard.press("ArrowRight");
+  const uiSize = page.locator(".palette-row.selected .palette-hint");
+  await expect(page.locator(".palette-row.selected")).toContainText(
+    "UI font size",
+  );
+  for (let step = 0; step < 5; step++) {
+    await page.keyboard.press("ArrowRight");
+    await expect(uiSize).toHaveText(`${String(14 + step)}px`);
+  }
   await page.locator(".palette-input").fill("Plot font size");
-  for (let step = 0; step < 8; step++) await page.keyboard.press("ArrowRight");
+  await expect(page.locator(".palette-row.selected")).toContainText(
+    "Plot font size",
+  );
+  for (let step = 0; step < 8; step++) {
+    await page.keyboard.press("ArrowRight");
+    await expect(uiSize).toHaveText(`${String(9.5 + step * 0.5)}px`);
+  }
   await page.keyboard.press("Escape");
   await page.mouse.move(5, 5);
   await page.screenshot({
@@ -189,7 +202,7 @@ test("dense workspace readability and independent signal states", async ({
     }
     await expect(panel.locator(".plot-series-legend")).toHaveCSS(
       "font-size",
-      "15px",
+      "13px",
     );
     expect(
       await panel
@@ -239,4 +252,36 @@ test("dense workspace readability and independent signal states", async ({
       return Math.abs((heading?.x ?? 0) - (value?.x ?? 1000));
     })
     .toBeLessThan(1);
+  await firstPanel.locator(".panel-stats-toggle").click();
+  const actions = firstPanel.getByRole("group", {
+    name: "All plot signals",
+    exact: true,
+  });
+  await actions
+    .getByRole("button", { name: "Select all", exact: true })
+    .click();
+  await expect(
+    actions.getByRole("button", { name: "Clear selection", exact: true }),
+  ).toBeVisible();
+  await actions.getByRole("button", { name: "Dim all", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    actions.getByRole("button", { name: "Undim all", exact: true }),
+  ).toBeFocused();
+  await expect(row(1)).toHaveClass(/focused/);
+  await expect(row(1)).toHaveAttribute("data-dimmed", "true");
+  await expect(row(2)).toHaveAttribute("data-hidden", "true");
+  await actions.getByRole("button", { name: "Hide all", exact: true }).click();
+  await expect(row(1)).toHaveAttribute("data-hidden", "true");
+  await expect(row(1)).toHaveClass(/focused/);
+  await actions.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(row(2)).toHaveAttribute("data-hidden", "false");
+  await expect(row(2)).toHaveAttribute("data-dimmed", "true");
+  await actions.getByRole("button", { name: "Undim all", exact: true }).click();
+  await expect(row(1)).toHaveAttribute("data-dimmed", "false");
+  await actions
+    .getByRole("button", { name: "Clear selection", exact: true })
+    .click();
+  await expect(row(1)).not.toHaveClass(/focused/);
+  await expect(row(1)).toHaveAttribute("data-hidden", "false");
 });

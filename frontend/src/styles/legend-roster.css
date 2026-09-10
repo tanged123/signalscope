@@ -37,6 +37,26 @@
   padding: 8px;
 }
 
+.plot-legend-bulk-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.plot-legend-bulk-actions button {
+  padding: 2px 0;
+  color: var(--fg-2);
+  font: inherit;
+  white-space: nowrap;
+}
+
+.plot-legend-bulk-actions button:hover {
+  color: var(--fg-1);
+}
+
 .plot-legend-search {
   font-size: var(--ui-caption-size);
 }
@@ -161,7 +181,7 @@
 
 .plot-series-state {
   color: var(--fg-3);
-  font: var(--ui-caption-size) var(--font-ui);
+  font: inherit;
   white-space: nowrap;
 }
 

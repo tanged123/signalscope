@@ -81,6 +81,7 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onFocusAdd: vi.fn(),
     onFocusRange: vi.fn(),
     onClearFocus: vi.fn(),
+    onSeriesAction: vi.fn(),
     onMuteSelector: vi.fn(),
     onMuteSeries: vi.fn(),
     onRemoveBinding: vi.fn(),
@@ -285,7 +286,7 @@ describe("PanelView chrome", () => {
     );
     expect(
       view.element.querySelector(".panel-ghost-opacity")?.textContent,
-    ).toBe("dim none ▾");
+    ).toBe("dim others none ▾");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });

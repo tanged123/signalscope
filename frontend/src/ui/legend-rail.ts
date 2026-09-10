@@ -37,7 +37,7 @@ export function refreshLegendWithControlFocus(
   const control =
     active !== null && root.contains(active)
       ? [...active.classList].find((name) =>
-          /^(legend-color-scale|plot-legend-resize-(left|right|top|bottom|corner))$/.test(
+          /^(legend-color-scale|plot-legend-resize-(left|right|top|bottom|corner)|plot-legend-bulk-[0-2])$/.test(
             name,
           ),
         )

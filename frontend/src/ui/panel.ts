@@ -1,4 +1,6 @@
 import { lineToolbarMarkup } from "./line-toolbar";
+import { legendBulkActions } from "./legend-bulk-actions";
+import type { PanelSeriesAction } from "../app/panel-series-actions";
 import { applySeriesRowState, seriesStateLabel } from "./series-row-state";
 import { PanelAxes } from "./panel-axes";
 import { legendColorControls, legendColorTarget } from "./legend-color-scale";
@@ -136,6 +138,7 @@ export interface PanelCallbacks {
   onFocusAdd(id: string, entry: FocusEntry): void;
   onFocusRange(id: string, entries: readonly FocusEntry[]): void;
   onClearFocus(id: string): void;
+  onSeriesAction(id: string, action: PanelSeriesAction): void;
   onMuteSelector(id: string, selector: string): void;
   onMuteSeries(id: string, ref: SeriesRef): void;
   onRemoveBinding(id: string, index: number): void;
@@ -1537,7 +1540,7 @@ export class PanelView {
       const badge = document.createElement("div");
       badge.className = "plot-legend-badge";
       const ghosts = state.series.filter(
-        (series) => series.visible && series.display === "ghost",
+        (series) => series.visible && series.opacity < 1,
       ).length;
       const drag = document.createElement("button");
       drag.className = "plot-legend-drag plot-legend-badge-drag";
@@ -1585,6 +1588,9 @@ export class PanelView {
       header.append(undock);
       legend.replaceChildren(
         header,
+        legendBulkActions(state.series, (action) =>
+          this.callbacks.onSeriesAction(this.id, action),
+        ),
         legendColorControls(state, this.plotLegendEncodingRow(state), () =>
           this.axes.openColor(),
         ),
@@ -1648,6 +1654,9 @@ export class PanelView {
     const cornerResize = this.legendResizeHandle("corner", legend);
     legend.replaceChildren(
       header,
+      legendBulkActions(state.series, (action) =>
+        this.callbacks.onSeriesAction(this.id, action),
+      ),
       legendColorControls(state, this.plotLegendEncodingRow(state), () =>
         this.axes.openColor(),
       ),
@@ -1804,7 +1813,7 @@ export class PanelView {
       if (event.target === rows) this.callbacks.onClearFocus(this.id);
     });
     const ghosts = state.series.filter(
-      (series) => series.visible && series.display === "ghost",
+      (series) => series.visible && series.opacity < 1,
     ).length;
     const footer = this.plotLegendFooter(state, ghosts, () => {
       this.callbacks.onLegendLayout(this.id, { state: "roster" });
@@ -1962,7 +1971,7 @@ export class PanelView {
           getComputedStyle(this.element).getPropertyValue(
             "--legend-row-height",
           ),
-        ) || 28;
+        ) || 26;
       const all = seriesLegendRows(
         this.callbacks.catalog(),
         state,
@@ -2029,7 +2038,7 @@ export class PanelView {
     rows.append(viewport);
     group.append(groupTitle, rows);
     const ghosts = state.series.filter(
-      (series) => series.visible && series.display === "ghost",
+      (series) => series.visible && series.opacity < 1,
     ).length;
     const footer = this.plotLegendFooter(state, ghosts, () => {
       search.value = "";
@@ -2575,7 +2584,7 @@ export class PanelView {
       }
     }
     const ghosts = state.series.filter(
-      (series) => series.visible && series.display === "ghost",
+      (series) => series.visible && series.opacity < 1,
     ).length;
     content.append(
       header,
